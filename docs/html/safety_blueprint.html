@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Safety Model Blueprint</title>
-  <!-- Modern Google Font -->
+  <title>Clio Coder Safety Model Blueprint (v0.2.3)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -12,13 +11,15 @@
   <style>
     :root {
       --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-grid: rgba(255, 255, 255, 0.02);
+      --bg-card: rgba(13, 20, 38, 0.45);
+      --bg-card-hover: rgba(20, 30, 58, 0.6);
       --border-card: rgba(255, 255, 255, 0.08);
+      --border-card-hover: rgba(0, 240, 255, 0.3);
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
-      --text-dark: #6b7280;
+      --text-dim: #6b7280;
       
-      /* Vibrant Color Palettes */
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -31,9 +32,11 @@
       --color-rose-rgb: 239, 68, 68;
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
+      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      
+      --glass-blur: blur(12px);
     }
 
     * {
@@ -53,167 +56,153 @@
       min-height: 100vh;
       line-height: 1.6;
       overflow-x: hidden;
+      position: relative;
     }
 
-    /* Scrollbar Styling */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.02);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(var(--color-cyan-rgb), 0.3);
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: center top;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.8;
     }
 
-    /* Container */
     .container {
       max-width: 1400px;
       margin: 0 auto;
       padding: 2rem;
+      position: relative;
+      z-index: 1;
     }
 
-    /* Header */
+    /* Header Styling */
     header {
-      text-align: center;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       margin-bottom: 2.5rem;
-      position: relative;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
     }
 
     .header-logo {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 72px;
-      height: 72px;
-      background: rgba(255, 255, 255, 0.03);
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--border-card);
-      border-radius: 18px;
-      margin-bottom: 1rem;
-      box-shadow: var(--shadow-glow);
+      border-radius: 12px;
       position: relative;
     }
-    
-    .header-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 20px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(4px);
+
+    .header-logo svg {
+      width: 28px;
+      height: 28px;
     }
 
-    .header-logo img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
-    }
-
-    h1 {
-      font-size: 2.5rem;
+    .header-title-wrapper h1 {
+      font-size: 1.5rem;
       font-weight: 800;
-      letter-spacing: -0.05em;
-      margin-bottom: 0.5rem;
+      letter-spacing: -0.03em;
       background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    .subtitle {
-      font-size: 1.1rem;
+    .header-title-wrapper p {
+      font-size: 0.825rem;
       color: var(--text-muted);
-      max-width: 600px;
-      margin: 0 auto 1.5rem auto;
-      font-weight: 400;
     }
 
-    /* Metadata Badge Grid */
-    .meta-grid {
-      display: flex;
-      justify-content: center;
-      gap: 1rem;
-      margin-bottom: 2rem;
-      flex-wrap: wrap;
-    }
-
-    .meta-badge {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-card);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.85rem;
+    .header-right {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 1rem;
     }
 
-    .meta-badge .label {
+    .back-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
       color: var(--text-muted);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
     }
 
-    .meta-badge .value {
-      font-family: var(--font-mono);
-      font-weight: 600;
+    .back-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .version-badge {
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
       color: var(--color-cyan);
+      padding: 0.35rem 0.75rem;
+      border-radius: 50px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
     }
 
     /* Tabs Navigation */
     .tabs-nav {
       display: flex;
-      justify-content: center;
       gap: 0.75rem;
       margin-bottom: 2rem;
-      flex-wrap: wrap;
     }
 
     .tab-btn {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-card);
       color: var(--text-muted);
-      padding: 0.75rem 1.5rem;
-      border-radius: 9999px;
+      padding: 0.6rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.2s;
     }
 
     .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
       color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
     }
 
     .tab-btn.active {
       background: var(--gradient-main);
       color: #090d16;
-      font-weight: 700;
       border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.3);
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
     }
 
-    .tab-btn svg {
-      width: 18px;
-      height: 18px;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 2;
-    }
-
-    /* Tab Panes */
+    /* Content Layout */
     .tab-pane {
       display: none;
-      animation: fadeIn 0.4s ease-out forwards;
+      animation: fadeIn 0.3s ease-out forwards;
     }
 
     .tab-pane.active {
@@ -221,95 +210,176 @@
     }
 
     @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Glass Card layout */
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-radius: 16px;
-      padding: 2rem;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      margin-bottom: 2rem;
-    }
-
-    .card-title {
-      font-size: 1.3rem;
-      font-weight: 700;
-      margin-bottom: 1.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      color: #fff;
-    }
-
-    .card-title svg {
-      width: 24px;
-      height: 24px;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
-      fill: none;
-    }
-
-    /* Split Grid for Playground */
-    .playground-grid {
+    /* Split layout: Specs + Simulator */
+    .blueprint-layout {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1.1fr 0.9fr;
       gap: 2rem;
+      align-items: start;
     }
 
-    @media (max-width: 1024px) {
-      .playground-grid {
+    @media (max-width: 1100px) {
+      .blueprint-layout {
         grid-template-columns: 1fr;
       }
     }
 
-    /* Form Styles */
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      backdrop-filter: var(--glass-blur);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    }
+
+    .glass-card h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.75rem;
+    }
+
+    .glass-card h2 svg {
+      width: 18px;
+      height: 18px;
+      color: var(--color-cyan);
+    }
+
+    .glass-card p {
+      font-size: 0.925rem;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+
+    /* Autonomy Matrix Style */
+    .matrix-wrapper {
+      overflow-x: auto;
+      margin-bottom: 1.5rem;
+      border-radius: 8px;
+      border: 1px solid var(--border-card);
+    }
+
+    .matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .matrix-table th, .matrix-table td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .matrix-table th {
+      background: rgba(0,0,0,0.3);
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .matrix-table td.col-hdr {
+      font-weight: 600;
+    }
+
+    .matrix-table td {
+      color: var(--text-main);
+    }
+
+    /* Matrix Highlight Columns */
+    .matrix-table th.highlight, .matrix-table td.highlight {
+      background: rgba(var(--color-cyan-rgb), 0.08);
+      border-left: 1px solid rgba(var(--color-cyan-rgb), 0.15);
+      border-right: 1px solid rgba(var(--color-cyan-rgb), 0.15);
+    }
+    
+    .matrix-table tr:hover td {
+      background: rgba(255,255,255,0.02);
+    }
+
+    .badge-decision {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+
+    .badge-decision.allow { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); color: var(--color-emerald); }
+    .badge-decision.ask { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); color: var(--color-amber); }
+    .badge-decision.deny { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: var(--color-rose); }
+    .badge-decision.block { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: var(--color-rose); text-shadow: 0 0 5px rgba(239, 68, 68, 0.3); }
+
+    /* SVG Flowchart */
+    .flowchart-container {
+      background: rgba(9, 13, 22, 0.6);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      margin: 1.5rem 0;
+    }
+
+    .flowchart-container svg {
+      width: 100%;
+      height: auto;
+      max-height: 280px;
+    }
+
+    /* Simulator Panel Styling */
+    .simulator-panel {
+      position: sticky;
+      top: 2rem;
+    }
+
     .form-group {
       margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
 
     .form-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 1rem;
-      margin-bottom: 1.25rem;
-    }
-
-    label {
-      display: block;
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin-bottom: 0.5rem;
-      color: var(--text-muted);
     }
 
     select, input, textarea {
       width: 100%;
-      background: rgba(0, 0, 0, 0.3);
+      background: rgba(9, 13, 22, 0.7);
       border: 1px solid var(--border-card);
       border-radius: 8px;
-      padding: 0.75rem;
+      padding: 0.65rem 0.85rem;
       color: #fff;
       font-family: var(--font-sans);
       font-size: 0.9rem;
-      transition: border-color 0.2s, box-shadow 0.2s;
+      outline: none;
+      transition: all 0.2s;
     }
 
     select:focus, input:focus, textarea:focus {
       border-color: var(--color-cyan);
-      outline: none;
-      box-shadow: 0 0 8px rgba(var(--color-cyan-rgb), 0.2);
+      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
     }
 
     textarea {
@@ -318,376 +388,500 @@
       resize: vertical;
     }
 
-    /* Presets Button Bar */
-    .presets-container {
+    /* Preset list */
+    .presets-list {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
+      gap: 0.4rem;
+      margin-bottom: 1.25rem;
     }
 
-    .preset-chip {
+    .preset-btn {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-card);
       color: var(--text-muted);
-      padding: 0.35rem 0.75rem;
-      border-radius: 6px;
-      font-size: 0.75rem;
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.725rem;
       cursor: pointer;
       font-family: var(--font-mono);
       transition: all 0.2s;
     }
 
-    .preset-chip:hover {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border-color: rgba(var(--color-cyan-rgb), 0.4);
+    .preset-btn:hover {
+      background: rgba(0, 240, 255, 0.08);
+      border-color: var(--color-cyan);
       color: #fff;
     }
 
-    /* Result Panel Styles */
-    .result-badge-container {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1rem;
-      border-radius: 12px;
-      margin-bottom: 1.5rem;
-      transition: background 0.3s, border 0.3s;
-    }
-
-    .badge-status {
-      font-size: 1.5rem;
-      font-weight: 800;
-      letter-spacing: 0.05em;
+    /* Simulation Verdict Displays */
+    .verdict-header {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
       text-transform: uppercase;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
     }
 
-    .badge-status svg {
-      width: 28px;
-      height: 28px;
-      stroke-width: 2.5;
-    }
-
-    /* Decision States */
-    .state-allow {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: var(--color-emerald);
-      box-shadow: 0 0 15px rgba(16, 185, 129, 0.05);
-    }
-
-    .state-ask {
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      color: var(--color-amber);
-      box-shadow: 0 0 15px rgba(245, 158, 11, 0.05);
-    }
-
-    .state-block {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: var(--color-rose);
-      box-shadow: 0 0 15px rgba(239, 68, 68, 0.05);
-    }
-
-    .state-suggest {
-      background: rgba(0, 240, 255, 0.1);
-      border: 1px solid rgba(0, 240, 255, 0.3);
-      color: var(--color-cyan);
-      box-shadow: 0 0 15px rgba(0, 240, 255, 0.05);
-    }
-
-    /* Terminal View */
-    .terminal-view {
-      background: #02040a;
-      border: 1px solid var(--border-card);
+    .verdict-card {
       border-radius: 12px;
       padding: 1.25rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
       margin-bottom: 1.5rem;
-      position: relative;
-      overflow-x: auto;
-      max-height: 250px;
-      box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.3s ease;
     }
 
-    .terminal-header {
-      color: var(--text-dark);
-      font-size: 0.75rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      padding-bottom: 0.5rem;
-      margin-bottom: 0.75rem;
+    .verdict-info h3 {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+    }
+
+    .verdict-info p {
+      font-size: 0.825rem;
+      color: var(--text-main);
+      margin: 0.25rem 0 0 0;
+    }
+
+    .verdict-status-badge {
+      font-size: 2.25rem;
+      font-weight: 900;
+    }
+
+    /* Verdict classes */
+    .v-allow {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--color-emerald);
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.08);
+    }
+    
+    .v-ask {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: var(--color-amber);
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.08);
+    }
+
+    .v-deny {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--color-rose);
+      box-shadow: 0 0 15px rgba(239, 68, 68, 0.08);
+    }
+
+    .v-block {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.45);
+      color: var(--color-rose);
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.12);
+    }
+
+    /* Live trace console */
+    .console-header {
       display: flex;
       justify-content: space-between;
-    }
-
-    .terminal-content {
-      color: #eaeaea;
-      white-space: pre-wrap;
-    }
-
-    .rejection-banner {
-      color: var(--color-rose);
-      font-weight: 700;
+      align-items: center;
       margin-bottom: 0.5rem;
     }
 
-    .rejection-body {
-      color: var(--text-main);
-      padding-left: 1rem;
-      border-left: 2px solid var(--color-rose);
-      margin-bottom: 0.75rem;
-    }
-
-    .rejection-footer {
-      color: var(--text-muted);
+    .console-title {
       font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
     }
 
-    /* Info Table */
-    .info-table {
+    .console-body {
+      background: #020408;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      height: 180px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      color: #a5b4fc;
+      box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
+    }
+
+    /* Code block style */
+    pre {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+    }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+    }
+
+    /* Markdown styling classes */
+    .ref-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.85rem;
-      margin-top: 1rem;
+      margin: 1.5rem 0;
     }
 
-    .info-table th, .info-table td {
-      padding: 0.6rem 0.75rem;
+    .ref-table th, .ref-table td {
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border-card);
       text-align: left;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
 
-    .info-table th {
-      color: var(--text-muted);
-      font-weight: 600;
+    .ref-table th {
+      background: rgba(255,255,255,0.03);
     }
 
-    .info-table td {
-      color: #fff;
-    }
-
-    .info-table tr:last-child th, .info-table tr:last-child td {
-      border-bottom: none;
-    }
-
-    .badge-inline {
-      display: inline-block;
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      font-weight: 600;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    .badge-inline.cyan { color: var(--color-cyan); background: rgba(0, 240, 255, 0.05); border-color: rgba(0, 240, 255, 0.2); }
-    .badge-inline.purple { color: var(--color-purple); background: rgba(189, 0, 255, 0.05); border-color: rgba(189, 0, 255, 0.2); }
-    .badge-inline.emerald { color: var(--color-emerald); background: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.2); }
-    .badge-inline.amber { color: var(--color-amber); background: rgba(245, 158, 11, 0.05); border-color: rgba(245, 158, 11, 0.2); }
-    .badge-inline.rose { color: var(--color-rose); background: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.2); }
-
-    /* Buttons */
-    .btn {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      padding: 0.75rem;
-      border-radius: 8px;
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
+    .alert-tip {
+      background: rgba(16, 185, 129, 0.06);
+      border-left: 4px solid var(--color-emerald);
+      padding: 1rem;
+      border-radius: 0 8px 8px 0;
+      margin: 1.5rem 0;
       font-size: 0.9rem;
     }
 
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: var(--color-cyan);
-    }
-
-    .btn.btn-primary {
-      background: var(--gradient-main);
-      color: #090d16;
-      border: none;
-      font-weight: 700;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.2);
-    }
-
-    .btn.btn-primary:hover {
-      opacity: 0.9;
-      box-shadow: 0 4px 20px rgba(var(--color-cyan-rgb), 0.35);
-    }
-
-    .action-panel {
-      margin-top: 1rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    /* Flowcharts Styling */
-    .svg-flow-container {
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      display: flex;
-      justify-content: center;
-      overflow-x: auto;
-      margin-bottom: 2rem;
-    }
-
-    .svg-flow {
-      max-width: 100%;
-      height: auto;
-      display: block;
-    }
-
-    .flow-desc {
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      margin-bottom: 1.5rem;
+    .alert-tip strong {
+      color: var(--color-emerald);
     }
 
     /* Footer */
     footer {
       text-align: center;
-      padding: 2rem 0;
-      color: var(--text-dark);
-      font-size: 0.85rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
       margin-top: 4rem;
-    }
-
-    footer a {
-      color: var(--color-cyan);
-      text-decoration: none;
-    }
-
-    footer a:hover {
-      text-decoration: underline;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-dim);
+      font-size: 0.875rem;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <div class="header-logo">
-        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Clio Coder Safety Model</h1>
+          <p>Execution-gated guardrails, autonomy mappings, and policy enforcement engine</p>
+        </div>
       </div>
-      <h1>Clio Coder Safety Model Blueprint</h1>
-      <p class="subtitle">Interactive technical specification and validation dashboard for the safety engine, default-deny boundaries, and action classification.</p>
-      
-      <div class="meta-grid">
-        <div class="meta-badge">
-          <span class="label">Product Version:</span>
-          <span class="value">0.2.2</span>
-        </div>
-        <div class="meta-badge">
-          <span class="label">Audit Scope:</span>
-          <span class="value">src/domains/safety/</span>
-        </div>
-        <div class="meta-badge">
-          <span class="label">Rules Version:</span>
-          <span class="value">v2 (packs schema)</span>
-        </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.3</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
       </div>
     </header>
 
     <div class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="_switchTab('playground')">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-        Interactive Playground
+      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Interactive Spec &amp; Simulator
       </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('flowcharts')">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-        Safety Flowcharts
+      <button type="button" class="tab-btn" onclick="switchTab('reference')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        Full Technical Reference
       </button>
     </div>
 
-    <!-- Playground Pane -->
-    <div id="pane-playground" class="tab-pane active">
-      <div class="playground-grid">
-        <!-- Controls Column -->
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-            Sandbox Configuration
+    <!-- TAB 1: INTERACTIVE -->
+    <main class="tab-pane active" id="pane-interactive">
+      <div class="blueprint-layout">
+        
+        <!-- Left: Matrix & Flows -->
+        <div class="specs-col">
+          
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              Autonomy Level Matrix
+            </h2>
+            <p>The <code>autonomy</code> setting in <code>settings.yaml</code> (read-only | suggest | auto-edit | full-auto) controls tool execution gates. The safety net blocks apply regardless of this level.</p>
+            
+            <div class="matrix-wrapper">
+              <table class="matrix-table" id="matrixTable">
+                <thead>
+                  <tr>
+                    <th>Action Class</th>
+                    <th id="hdr-read-only">read-only</th>
+                    <th id="hdr-suggest">suggest</th>
+                    <th id="hdr-auto-edit" class="highlight">auto-edit (default)</th>
+                    <th id="hdr-full-auto">full-auto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr id="row-read">
+                    <td class="col-hdr">read</td>
+                    <td><span class="badge-decision allow">allow</span></td>
+                    <td><span class="badge-decision allow">allow</span></td>
+                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
+                    <td><span class="badge-decision allow">allow</span></td>
+                  </tr>
+                  <tr id="row-write">
+                    <td class="col-hdr">write</td>
+                    <td><span class="badge-decision deny">deny</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
+                    <td><span class="badge-decision allow">allow</span></td>
+                  </tr>
+                  <tr id="row-execute-builtin">
+                    <td class="col-hdr">execute (builtin / project command)</td>
+                    <td><span class="badge-decision deny">deny</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
+                    <td><span class="badge-decision allow">allow</span></td>
+                  </tr>
+                  <tr id="row-execute-other">
+                    <td class="col-hdr">execute (any other bash)</td>
+                    <td><span class="badge-decision deny">deny</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                    <td class="highlight"><span class="badge-decision ask">ask</span></td>
+                    <td><span class="badge-decision allow">allow</span></td>
+                  </tr>
+                  <tr id="row-dispatch">
+                    <td class="col-hdr">dispatch</td>
+                    <td><span class="badge-decision deny">deny</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                    <td class="highlight"><span class="badge-decision allow">allow</span></td>
+                    <td><span class="badge-decision allow">allow</span></td>
+                  </tr>
+                  <tr id="row-system-modify">
+                    <td class="col-hdr">system_modify</td>
+                    <td><span class="badge-decision deny">deny</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                    <td class="highlight"><span class="badge-decision ask">ask</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                  </tr>
+                  <tr id="row-git-destructive">
+                    <td class="col-hdr">git_destructive</td>
+                    <td><span class="badge-decision block">net block</span></td>
+                    <td><span class="badge-decision block">net block</span></td>
+                    <td class="highlight"><span class="badge-decision block">net block</span></td>
+                    <td><span class="badge-decision block">net block</span></td>
+                  </tr>
+                  <tr id="row-unknown">
+                    <td class="col-hdr">unknown</td>
+                    <td><span class="badge-decision deny">deny</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                    <td class="highlight"><span class="badge-decision ask">ask</span></td>
+                    <td><span class="badge-decision ask">ask</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div class="presets-container">
-            <span class="label" style="display:block; width:100%; margin-bottom:0.25rem;">Preset Scenarios:</span>
-            <button type="button" class="preset-chip" onclick="_loadPreset('npm-test')">npm test</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('git-status')">git status</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('rm-rf-root')">rm -rf /</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('git-reset-hard')">git reset --hard</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('write-env')">write .env</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('git-restore-dot')">git restore .</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('curl-sh')">curl | sh</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('write-etc')">write /etc/hosts</button>
-            <button type="button" class="preset-chip" onclick="_loadPreset('delete-by-id')">SQL DELETE by id</button>
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              Enforcement Path Flow
+            </h2>
+            <p>Every tool call evaluates through the Safety Net filters first, followed by Autonomy level mapping, and finally queues through the Approvals resolver.</p>
+            
+            <div class="flowchart-container">
+              <svg viewBox="0 0 600 220" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
+                <!-- Marker def -->
+                <defs>
+                  <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--color-cyan)"/>
+                  </marker>
+                </defs>
+
+                <!-- Box 1 -->
+                <rect x="10" y="70" width="115" height="50" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1"/>
+                <text x="67" y="94" fill="#fff" font-size="10" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Tool Call Input</text>
+                <text x="67" y="108" fill="var(--text-muted)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">(bash, write, etc.)</text>
+
+                <!-- Arrow 1 -> 2 -->
+                <path d="M 125 95 L 150 95" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+                <!-- Box 2 -->
+                <rect id="flow-net" x="160" y="60" width="110" height="70" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1"/>
+                <text x="215" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle" font-weight="700">1. Safety Net</text>
+                <text x="215" y="100" fill="var(--color-rose)" font-size="8" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Block / Confirm</text>
+                <text x="215" y="115" fill="var(--color-emerald)" font-size="8" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Pass →</text>
+
+                <!-- Arrow 2 -> 3 -->
+                <path d="M 270 95 L 295 95" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+                <!-- Box 3 -->
+                <rect id="flow-autonomy" x="305" y="60" width="110" height="70" rx="8" fill="rgba(0, 240, 255, 0.03)" stroke="var(--color-cyan)" stroke-width="1.5"/>
+                <text x="360" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle" font-weight="700">2. Autonomy</text>
+                <text x="360" y="100" fill="var(--text-muted)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">Mapping Matrix</text>
+                <text x="360" y="115" fill="var(--color-cyan)" font-size="8" font-family="var(--font-sans)" text-anchor="middle" font-weight="600">Allow / Ask / Deny</text>
+
+                <!-- Arrow 3 -> 4 -->
+                <path d="M 415 95 L 440 95" fill="none" stroke="var(--color-cyan)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+                <!-- Box 4 -->
+                <rect id="flow-approvals" x="450" y="60" width="130" height="70" rx="8" fill="rgba(255,255,255,0.02)" stroke="var(--border-card)" stroke-width="1"/>
+                <text x="515" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle" font-weight="700">3. Approvals Flow</text>
+                <text x="515" y="100" fill="var(--color-amber)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">TUI: Queue overlay</text>
+                <text x="515" y="115" fill="var(--color-rose)" font-size="8" font-family="var(--font-sans)" text-anchor="middle">Headless: Deny</text>
+
+                <!-- Safety Net reject branch -->
+                <path d="M 215 130 L 215 170 L 450 170" fill="none" stroke="var(--color-rose)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+                <text x="330" y="165" fill="var(--color-rose)" font-size="8" font-family="var(--font-sans)">Safety block / escape block</text>
+              </svg>
+            </div>
           </div>
 
-          <div class="form-row">
+        </div>
+
+        <!-- Right: Simulator -->
+        <div class="simulator-panel">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              Safety Evaluation Simulator
+            </h2>
+            
+            <div class="presets-list">
+              <span class="preset-btn" onclick="loadPreset('status')">git status</span>
+              <span class="preset-btn" onclick="loadPreset('npm-test')">npm test</span>
+              <span class="preset-btn" onclick="loadPreset('write-src')">write index.ts</span>
+              <span class="preset-btn" onclick="loadPreset('write-env')">write .env</span>
+              <span class="preset-btn" onclick="loadPreset('rm-rf')">rm -rf /</span>
+              <span class="preset-btn" onclick="loadPreset('stash-drop')">git stash drop</span>
+              <span class="preset-btn" onclick="loadPreset('force-push')">git push --force</span>
+              <span class="preset-btn" onclick="loadPreset('escape-write')">write /etc/hosts</span>
+              <span class="preset-btn" onclick="loadPreset('unrecognized-exec')">apt-get install</span>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="autonomyLevel">Autonomy Level</label>
+                <select id="autonomyLevel" onchange="runSimulation()">
+                  <option value="read-only">read-only</option>
+                  <option value="suggest">suggest</option>
+                  <option value="auto-edit" selected>auto-edit (default)</option>
+                  <option value="full-auto">full-auto</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="operatingPosture">Posture Mode</label>
+                <select id="operatingPosture" onchange="runSimulation()">
+                  <option value="interactive">Interactive TUI</option>
+                  <option value="headless">Headless (clio run)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="toolGroup">Tool Group</label>
+                <select id="toolGroup" onchange="onToolChange()">
+                  <option value="read">read (read, grep, find, ls)</option>
+                  <option value="write" selected>write / edit</option>
+                  <option value="git">git (status, diff, log, checkout)</option>
+                  <option value="bash">bash (general commands)</option>
+                  <option value="dispatch">dispatch (worker delegation)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="cmdCwd">Working Directory</label>
+                <input type="text" id="cmdCwd" value="/home/akougkas/project" oninput="runSimulation()">
+              </div>
+            </div>
+
+            <div class="form-group" id="group-command" style="display:none;">
+              <label for="commandInput">Shell Command</label>
+              <input type="text" id="commandInput" value="" placeholder="e.g. npm test" oninput="runSimulation()">
+            </div>
+
+            <div class="form-group" id="group-filepath">
+              <label for="filepathInput">File Path</label>
+              <input type="text" id="filepathInput" value="src/core/config.ts" placeholder="e.g. src/index.ts" oninput="runSimulation()">
+            </div>
+
             <div class="form-group">
-              <label for="config-mode">Active Mode (Matrix Gating)</label>
-              <select id="config-mode" onchange="runEvaluation()">
-                <option value="default" selected>default (Standard execution)</option>
-                <option value="super">super (Elevation permitted)</option>
-                <option value="advise">advise (Read-only advice)</option>
-              </select>
+              <label for="projectPolicy">Simulated .clio/safety.yaml</label>
+              <textarea id="projectPolicy" rows="6" oninput="runSimulation()">zeroAccessPaths:
+  - secrets/
+  - .env
+readOnlyPaths:
+  - vendor/
+noDeletePaths:
+  - out/validated/
+commands:
+  - id: local-test
+    command: npm test
+    cwd: .
+    requireConfirmation: false</textarea>
             </div>
-            <div class="form-group">
-              <label for="config-safety-level">Safety Level (Settings)</label>
-              <select id="config-safety-level" onchange="runEvaluation()">
-                <option value="full-auto">full-auto (Free read/write/exec)</option>
-                <option value="auto-edit" selected>auto-edit (Free write, gated exec)</option>
-                <option value="suggest">suggest (Suggestion/read only)</option>
-              </select>
+
+            <div class="verdict-header">Evaluation Verdict</div>
+            <div id="verdictCard" class="verdict-card v-allow">
+              <div class="verdict-info">
+                <h3 id="verdictTitle">ALLOW</h3>
+                <p id="verdictDesc">Tool call passes all checks and runs immediately.</p>
+              </div>
+              <div id="verdictIcon" class="verdict-status-badge">✓</div>
             </div>
-          </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label for="config-tool">Tool Triggered</label>
-              <select id="config-tool" onchange="toggleToolArgs()">
-                <option value="bash" selected>bash (Shell Command Execution)</option>
-                <option value="write">write (File Creation)</option>
-                <option value="edit">edit (File Modification)</option>
-                <option value="read">read (File View)</option>
-                <option value="git_status">git_status (Typed Git Check)</option>
-                <option value="git_diff">git_diff (Typed Git Diff)</option>
-              </select>
+            <div class="console-header">
+              <span class="console-title">Engine Decision Trace</span>
+              <span class="preset-btn" style="padding: 0.15rem 0.4rem; font-size:0.65rem;" onclick="clearConsole()">Clear</span>
             </div>
-            <div class="form-group" id="group-command-cwd">
-              <label for="config-cwd">Execution Directory (cwd)</label>
-              <input type="text" id="config-cwd" value="/home/akougkas/project" oninput="runEvaluation()">
-            </div>
+            <div id="traceConsole" class="console-body">Initializing Safety Policy Engine...</div>
           </div>
+        </div>
 
-          <div class="form-group" id="group-command-text">
-            <label for="config-command">Command String</label>
-            <input type="text" id="config-command" value="npm test" placeholder="Enter shell command here..." oninput="runEvaluation()">
-          </div>
+      </div>
+    </main>
 
-          <div class="form-group" id="group-file-path" style="display: none;">
-            <label for="config-filepath">File Path Target</label>
-            <input type="text" id="config-filepath" value="src/index.ts" placeholder="Path to file..." oninput="runEvaluation()">
-          </div>
+    <!-- TAB 2: TECHNICAL REFERENCE -->
+    <main class="tab-pane" id="pane-reference">
+      <div class="glass-card">
+        <h2>Clio Coder Safety Model Specification</h2>
+        
+        <div class="alert-tip">
+          <strong>Interactive Spec Available:</strong> Use the <strong>Interactive Spec &amp; Simulator</strong> tab above to simulate policy enforcement runs in real-time.
+        </div>
 
-          <div class="form-group">
-            <label for="config-project-policy">Project Safety Policy (Simulated <code>.clio/safety.yaml</code>)</label>
-            <textarea id="config-project-policy" rows="8" placeholder="Enter YAML policy..." oninput="runEvaluation()">version: 1
+        <p>Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by target capabilities, the tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.</p>
+        <p>Source of truth: <code>src/domains/safety/**</code>, <code>src/tools/registry.ts</code>, <code>src/tools/bootstrap.ts</code>, and <code>damage-control-rules.yaml</code>.</p>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Two axes: autonomy and the safety net</h3>
+        <p>The <code>autonomy</code> setting (<code>read-only</code> | <code>suggest</code> | <code>auto-edit</code> | <code>full-auto</code>) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level.</p>
+        
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Enforcement path</h3>
+        <p>Every tool call, orchestrator or worker, evaluates in this order:</p>
+        <ol style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
+          <li style="margin-bottom: 0.5rem;"><strong>Safety net</strong> (policy engine + middleware guards): <code>block</code> is final at every level; <code>ask</code> is a confirm rail (damage-control <code>ask</code> rules, project <code>requireConfirmation</code>) that parks at every level; <code>pass</code> hands off to step 2.</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Autonomy mapping</strong>: the action class plus the level produce allow, ask, or deny per the matrix.</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Approvals</strong>: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per <code>workers.onPermission</code> in workers, and non-stall denies in delegations.</li>
+        </ol>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Damage-control rules</h3>
+        <p><code>damage-control-rules.yaml</code> is compiled into rule packs. Base rules apply broadly. Rules with <code>ask: true</code> park for one-shot confirmation (for example <code>git stash drop</code> and remote-branch deletion); hard-block rules and classifier-pattern <code>git_destructive</code> hits are always blocked. Both behaviors apply at every autonomy level.</p>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Bash recognition</h3>
+        <p>The policy engine tags every bash command as recognized or unrecognized:</p>
+        <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
+          <li style="margin-bottom: 0.5rem;"><strong>Recognized</strong>: a valid <code>.clio/safety.yaml</code> command entry, or the narrow built-in no-prompt set such as <code>pwd</code>, simple <code>ls</code>, <code>git status</code>, bounded <code>git diff/log</code>, common test/lint/build commands. Recognized commands run without prompting at <code>auto-edit</code> and <code>full-auto</code>.</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Unrecognized</strong>: anything else. Unrecognized bash asks for one-shot approval at <code>auto-edit</code> and runs at <code>full-auto</code>; at <code>suggest</code> it asks like every mutation, and at <code>read-only</code> it is denied.</li>
+        </ul>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Project safety policy</h3>
+        <p>Clio searches upward from the current working directory for <code>.clio/safety.yaml</code>. Minimum schema is version-locked (v1) and parses into standard path boundaries (<code>zeroAccessPaths</code>, <code>readOnlyPaths</code>, <code>noDeletePaths</code>) and customized command sets.</p>
+        
+        <pre><code>version: 1
 zeroAccessPaths:
   - secrets/
   - .env
@@ -699,906 +893,462 @@ commands:
   - id: local-test
     command: npm test
     cwd: .
+    actionClass: execute
+    shellOperators: deny
     requireConfirmation: false
-  - id: dangerous-script
-    command: bash run_something.sh
-    cwd: .
-    requireConfirmation: true
-</textarea>
-          </div>
-        </div>
+    rationale: Standard local test command.</code></pre>
 
-        <!-- Output Column -->
-        <div class="glass-card" style="display: flex; flex-direction: column;">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            Policy Engine Assessment
-          </div>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Typed validation tools</h3>
+        <p>Prefer typed tools over Bash: <code>git</code> (status/diff/log), <code>run_task</code>, and <code>validate_frontend</code>. <code>validate_frontend</code> accepts <code>.html</code>, <code>.css</code>, <code>.js</code> under the workspace root, performing syntax checks and optionally validating references in headless browsers.</p>
 
-          <div id="eval-result-badge" class="result-badge-container state-allow">
-            <div class="badge-status" id="eval-status">
-              <svg aria-hidden="true" viewBox="0 0 24 24" id="eval-status-icon"><path d="M9 12l2 2 4-4"/></svg>
-              <span>ALLOW</span>
-            </div>
-            <div class="badge-inline" id="eval-source">builtin-command-allowlist</div>
-          </div>
-
-          <div class="terminal-view">
-            <div class="terminal-header">
-              <span>Clio Safety Interceptor Log</span>
-              <span>v0.2.2</span>
-            </div>
-            <div class="terminal-content" id="eval-terminal-log">
-              Initializing...
-            </div>
-          </div>
-
-          <h3 style="font-size: 1rem; color: #fff; margin-bottom: 0.5rem;">Decision Parameters</h3>
-          <table class="info-table">
-            <tr>
-              <th width="40%">Classification:</th>
-              <td id="td-classification"><span class="badge-inline emerald">execute</span></td>
-            </tr>
-            <tr>
-              <th>Reason Code:</th>
-              <td id="td-reason-code"><code>allowed</code></td>
-            </tr>
-            <tr>
-              <th>CWD Context:</th>
-              <td id="td-cwd-context">Workspace Root matched</td>
-            </tr>
-            <tr>
-              <th>Policy Hash:</th>
-              <td id="td-policy-hash" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--color-cyan);">d8e3b4a2...</td>
-            </tr>
-          </table>
-
-          <div class="action-panel" id="action-panel">
-            <!-- Dynamic helper buttons appear here -->
-          </div>
-        </div>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Receipts and evidence</h3>
+        <p>Safety decisions feed receipts, audit rows, and evidence. The interactive <code>/view</code> surface can inspect receipt artifacts without mutating them, detailing rules matched, command hashes, and active decisions counts.</p>
       </div>
-    </div>
-
-    <!-- Flowcharts Pane -->
-    <div id="pane-flowcharts" class="tab-pane">
-      <!-- SVG 1: Action Classification -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
-          1. Command / Action Classification Pipeline
-        </h2>
-        <p class="flow-desc">
-          How Clio Coder maps an incoming tool call and its arguments into a security classification (ActionClass) in a pure, side-effect-free pipeline:
-        </p>
-
-        <div class="svg-flow-container">
-          <svg aria-hidden="true" class="svg-flow" width="800" height="260" viewBox="0 0 800 260">
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-dark)" />
-              </marker>
-            </defs>
-
-            <!-- Grid Lines or background structure -->
-            <rect x="0" y="0" width="800" height="260" rx="12" fill="rgba(255, 255, 255, 0.01)" stroke="rgba(255,255,255,0.03)" />
-
-            <!-- Input Box -->
-            <rect x="20" y="90" width="130" height="70" rx="8" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-width="1.5"/>
-            <text x="85" y="120" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Tool Call</text>
-            <text x="85" y="138" fill="var(--text-muted)" font-size="10" font-family="var(--font-mono)" text-anchor="middle">tool + args</text>
-
-            <!-- Connector -->
-            <path d="M 150 125 L 180 125" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-            <!-- Stage 1: Tool Matcher -->
-            <rect x="180" y="90" width="140" height="70" rx="8" fill="rgba(255, 255, 255, 0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="250" y="120" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Base Classification</text>
-            <text x="250" y="138" fill="var(--text-muted)" font-size="10" font-family="var(--font-sans)" text-anchor="middle">read | write | execute</text>
-
-            <!-- Connectors splitting -->
-            <path d="M 320 125 L 360 125" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 320 125 L 340 125 L 340 50 L 360 50" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 320 125 L 340 125 L 340 200 L 360 200" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-            <!-- Row 1 check (git_destructive patterns) -->
-            <rect x="360" y="20" width="180" height="60" rx="8" fill="rgba(239, 68, 68, 0.05)" stroke="var(--color-rose)" stroke-width="1.2" stroke-dasharray="3 3"/>
-            <text x="450" y="45" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Git Destructive Patterns?</text>
-            <text x="450" y="60" fill="var(--color-rose)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">git reset --hard, push -f</text>
-
-            <!-- Row 2 check (system_modify patterns) -->
-            <rect x="360" y="95" width="180" height="60" rx="8" fill="rgba(245, 158, 11, 0.05)" stroke="var(--color-amber)" stroke-width="1.2" stroke-dasharray="3 3"/>
-            <text x="450" y="120" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">System Modify Patterns?</text>
-            <text x="450" y="135" fill="var(--color-amber)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">sudo, rm -rf /, global installs</text>
-
-            <!-- Row 3 check (write target paths) -->
-            <rect x="360" y="170" width="180" height="60" rx="8" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-width="1.2" stroke-dasharray="3 3"/>
-            <text x="450" y="195" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Write Path Outside CWD?</text>
-            <text x="450" y="210" fill="var(--color-purple)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">system folders or home dirs</text>
-
-            <!-- Connectors combining -->
-            <path d="M 540 50 L 565 50 L 565 125 L 582 125" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 540 125 L 582 125" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 540 200 L 565 200 L 565 125 L 582 125" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-            <!-- Output Box -->
-            <rect x="600" y="90" width="160" height="70" rx="8" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1.5"/>
-            <text x="680" y="120" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Action Class Output</text>
-            <text x="680" y="138" fill="var(--color-emerald)" font-size="10" font-family="var(--font-mono)" text-anchor="middle">git_destructive | system_modify</text>
-          </svg>
-        </div>
-      </div>
-
-      <!-- SVG 2: Default-Deny Boundaries -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          2. Default-Deny Safety Boundaries (Bash Decision Matrix)
-        </h2>
-        <p class="flow-desc">
-          How Clio Coder evaluates arbitrary execution calls, enforcing strict closed-by-default execution gating:
-        </p>
-
-        <div class="svg-flow-container">
-          <svg aria-hidden="true" class="svg-flow" width="850" height="360" viewBox="0 0 850 360">
-            <rect x="0" y="0" width="850" height="360" rx="12" fill="rgba(255, 255, 255, 0.01)" stroke="rgba(255,255,255,0.03)" />
-
-            <!-- Start Decision Node -->
-            <rect x="20" y="130" width="110" height="60" rx="8" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-width="1.5"/>
-            <text x="75" y="160" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Eval Action</text>
-
-            <path d="M 130 160 L 162 160" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-            <!-- Gate 1: Advise Mode -->
-            <polygon points="170,160 210,120 250,160 210,200" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="210" y="155" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">advise</text>
-            <text x="210" y="168" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">mode?</text>
-
-            <path d="M 210 120 L 210 60 L 740 60" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="220" y="80" fill="var(--color-rose)" font-size="9" font-family="var(--font-sans)">Yes (write/exec)</text>
-
-            <path d="M 250 160 L 282 160" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="264" y="150" fill="var(--color-emerald)" font-size="9" font-family="var(--font-sans)">No</text>
-
-            <!-- Gate 2: Damage Control -->
-            <polygon points="290,160 330,120 370,160 330,200" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="330" y="155" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Damage</text>
-            <text x="330" y="168" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Control?</text>
-
-            <path d="M 330 120 L 330 85 L 740 85" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="340" y="105" fill="var(--color-rose)" font-size="9" font-family="var(--font-sans)">Matches Block Rule</text>
-
-            <path d="M 350 140 L 350 100 L 720 100" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="355" y="112" fill="var(--color-amber)" font-size="9" font-family="var(--font-sans)">Matches Ask Rule</text>
-
-            <path d="M 370 160 L 402 160" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="382" y="150" fill="var(--color-emerald)" font-size="9" font-family="var(--font-sans)">Clean</text>
-
-            <!-- Gate 3: Bash Gating -->
-            <polygon points="410,160 460,110 510,160 460,210" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="460" y="155" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Bash</text>
-            <text x="460" y="168" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Command?</text>
-
-            <!-- Non-bash allowed -->
-            <path d="M 460 110 L 460 70 L 610 70 L 610 130" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="470" y="80" fill="var(--color-emerald)" font-size="9" font-family="var(--font-sans)">No (Allow typed tools)</text>
-
-            <path d="M 510 160 L 542 160" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="522" y="150" fill="var(--color-emerald)" font-size="9" font-family="var(--font-sans)">Yes</text>
-
-            <!-- Bash Gating Pipeline Steps -->
-            <rect x="550" y="130" width="130" height="60" rx="6" fill="rgba(255, 255, 255, 0.02)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="615" y="148" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Verify: 1. Escape check</text>
-            <text x="615" y="162" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">2. Operator check</text>
-            <text x="615" y="176" fill="#fff" font-size="9" font-family="var(--font-sans)" text-anchor="middle">3. Project policy/Allowlist</text>
-
-            <path d="M 615 190 L 615 240 L 740 240" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="625" y="225" fill="var(--color-rose)" font-size="9" font-family="var(--font-sans)">Failed validations</text>
-
-            <path d="M 680 160 L 740 160" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="695" y="150" fill="var(--color-emerald)" font-size="9" font-family="var(--font-sans)">Passed</text>
-
-            <!-- Final Decisions -->
-            <rect x="740" y="130" width="90" height="60" rx="8" fill="rgba(16, 185, 129, 0.15)" stroke="var(--color-emerald)" stroke-width="1.5"/>
-            <text x="785" y="165" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">ALLOW</text>
-
-            <rect x="740" y="210" width="90" height="60" rx="8" fill="rgba(239, 68, 68, 0.15)" stroke="var(--color-rose)" stroke-width="1.5"/>
-            <text x="785" y="245" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">BLOCK</text>
-
-            <rect x="740" y="50" width="90" height="60" rx="8" fill="rgba(245, 158, 11, 0.15)" stroke="var(--color-amber)" stroke-width="1.5"/>
-            <text x="785" y="85" fill="#fff" font-size="12" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">ASK</text>
-          </svg>
-        </div>
-      </div>
-
-      <!-- SVG 3: Elevation Matrix -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 11l3-3 3 3m-3-3v8m0-13a9 9 0 110 18 9 9 0 010-18z"/></svg>
-          3. Mode Elevation Transitions
-        </h2>
-        <p class="flow-desc">
-          How safety settings and user confirmation dynamically shift Clio's execution privileges from advising up to full system modify:
-        </p>
-
-        <div class="svg-flow-container">
-          <svg aria-hidden="true" class="svg-flow" width="800" height="240" viewBox="0 0 800 240">
-            <rect x="0" y="0" width="800" height="240" rx="12" fill="rgba(255, 255, 255, 0.01)" stroke="rgba(255,255,255,0.03)" />
-
-            <!-- Advise Mode Node -->
-            <rect x="50" y="90" width="150" height="70" rx="10" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-cyan)" stroke-width="1.5"/>
-            <text x="125" y="125" fill="#fff" font-size="14" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">advise</text>
-            <text x="125" y="142" fill="var(--text-muted)" font-size="10" font-family="var(--font-sans)" text-anchor="middle">Read-only advice</text>
-
-            <!-- Transition to default -->
-            <path d="M 200 115 L 290 115" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="245" y="105" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Mode Shift</text>
-
-            <!-- Default Mode Node -->
-            <rect x="300" y="90" width="180" height="70" rx="10" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-width="1.5"/>
-            <text x="390" y="125" fill="#fff" font-size="14" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">default</text>
-            <text x="390" y="142" fill="var(--text-muted)" font-size="10" font-family="var(--font-sans)" text-anchor="middle">Safe Sandboxed Actions</text>
-
-            <!-- Transition to super -->
-            <path d="M 480 115 L 590 115" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="535" y="105" fill="var(--color-amber)" font-size="10" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Confirmation / Ask</text>
-
-            <!-- Super Mode Node -->
-            <rect x="600" y="90" width="150" height="70" rx="10" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1.5"/>
-            <text x="675" y="125" fill="#fff" font-size="14" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">super</text>
-            <text x="675" y="142" fill="var(--text-muted)" font-size="10" font-family="var(--font-sans)" text-anchor="middle">System Modify Allowed</text>
-
-            <!-- Return path from super to default -->
-            <path d="M 675 160 L 675 200 L 390 200 L 390 160" fill="none" stroke="var(--text-dark)" stroke-dasharray="3 3" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <text x="535" y="195" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Action Finished / Timeout</text>
-          </svg>
-        </div>
-      </div>
-    </div>
+    </main>
 
     <footer>
-      <p>Clio Coder Safety Dashboard &bull; Version 0.2.2</p>
-      <p style="margin-top: 0.5rem;">Interactive spec generated automatically for Clio Coder's Engineering Documentation.</p>
+      <p>Clio Coder Safety Model Specification Dashboard &bull; Version 0.2.3</p>
     </footer>
   </div>
 
   <script>
-    // Constants matching src/domains/safety
-    const BUILTIN_ALLOWLIST = [
-      { id: "builtin:pwd", re: /^pwd$/ },
-      { id: "builtin:ls", re: /^ls(?:\s+(-[A-Za-z0-9]+|\.[/\w.-]*|[/\w.-]+))*$/ },
-      { id: "builtin:git-status", re: /^git\s+status(?:\s+--short|\s+--branch|\s+-sb)*$/ },
-      { id: "builtin:git-diff", re: /^git\s+diff(?:\s+--cached|\s+--stat|\s+--name-only|\s+--\s+[\w./-]+)*$/ },
-      { id: "builtin:git-log", re: /^git\s+log\s+--oneline(?:\s+-n\s+[1-9]\d{0,2})?(?:\s+--\s+[\w./-]+)?$/ },
-      { id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-      { id: "builtin:npm-lint", re: /^npm\s+run\s+lint(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-      { id: "builtin:npm-build", re: /^npm\s+run\s+build(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-      { id: "builtin:npm-typecheck", re: /^npm\s+run\s+typecheck(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-      { id: "builtin:npm-ci-script", re: /^npm\s+run\s+ci(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-      { id: "builtin:pytest", re: /^pytest(?:\s+[\w=./:-]+)*$/ },
-      { id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/ },
-      { id: "builtin:cargo-test", re: /^cargo\s+test(?:\s+[\w=./:-]+)*$/ },
-      { id: "builtin:go-test", re: /^go\s+test(?:\s+[\w=./:-]+)*$/ },
-      { id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ }
-    ];
-
-    const GIT_DESTRUCTIVE_PATTERNS = [
-      { name: "git-push-force-long", re: /\bgit\s+push\s+--force\b/i },
-      { name: "git-push-force-short", re: /\bgit\s+push\s+-f\b/i },
-      { name: "git-reset-hard", re: /\bgit\s+reset\s+--hard\b/i },
-      { name: "git-clean-fd", re: /\bgit\s+clean\s+-fd?\b/i },
-      { name: "git-checkout-dot", re: /\bgit\s+checkout\s+--\s+\./i },
-      { name: "git-branch-D", re: /\bgit\s+branch\s+-D\b/i },
-      { name: "git-restore-source", re: /\bgit\s+restore\s+--source\b/i }
-    ];
-
-    const SYSTEM_MODIFY_PATTERNS = [
-      { name: "sudo-or-doas", re: /\b(sudo|doas)\b/i },
-      { name: "rm-rf-root", re: /\brm\s+-rf?\s+\/(?!(tmp|var\/tmp)(?:\/|\s|$))/i },
-      { name: "apt-install", re: /\bapt(-get)?\s+(install|remove|purge)/i },
-      { name: "brew-install", re: /\bbrew\s+(install|uninstall|reinstall)/i },
-      { name: "npm-install-global", re: /\bnpm\s+install\s+-g\b/i },
-      { name: "pip-install", re: /\bpip\s+install\b/i },
-      { name: "systemctl", re: /\bsystemctl\s+/i },
-      { name: "chmod-root", re: /\bchmod\s+[0-7]{3,4}\s+\//i },
-      { name: "chown", re: /\bchown\s+/i }
-    ];
-
-    const SYSTEM_WRITE_ROOT_PREFIXES = ["/etc", "/usr", "/var", "/bin", "/sbin"];
-
-    const DEFAULT_PATH_POLICY = {
-      zeroAccessPaths: [".env", ".env.local", "secrets/", "*.pem", "*.key"],
-      readOnlyPaths: ["/etc/", "/usr/", "/bin/", "node_modules/", "vendor/"],
-      noDeletePaths: ["README.md", "LICENSE", "CLAUDE.md", "out/validated/"]
-    };
-
-    const DAMAGE_CONTROL_RULES = [
-      { id: "rm-rf-root", description: "rm -rf / or close to it", pattern: /\brm\s+-rf?\s+\/(?![a-z0-9]*tmp\/)/, class: "system_modify", block: true },
-      { id: "rm-recursive-or-force", description: "rm with recursive or force flags", pattern: /\brm\s+(-[^\s]*)*-[rRf]/, class: "system_modify", block: true },
-      { id: "sudo-rm", description: "sudo rm", pattern: /\bsudo\s+rm\b/, class: "system_modify", block: true },
-      { id: "git-push-force-main", description: "force push to protected branches", pattern: /\bgit\s+push\s+(--force|-f)\s+\S+\s+(main|master|production)\b/, class: "git_destructive", block: true },
-      { id: "git-push-force", description: "git push --force", pattern: /\bgit\s+push\s+.*--force(?!-with-lease)/, class: "git_destructive", block: true },
-      { id: "git-reset-hard", description: "git reset --hard discards local work", pattern: /\bgit\s+reset\s+--hard\b/, class: "git_destructive", block: true },
-      { id: "curl-pipe-shell", description: "curl ... | sh is remote shell execution", pattern: /\bcurl\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/, class: "execute", block: true },
-      { id: "git-restore-discard-all", description: "git restore . discards all uncommitted changes", pattern: /\bgit\s+restore\s+\.\s*$/, class: "git_destructive", block: false, ask: true },
-      { id: "git-checkout-discard-all", description: "git checkout -- . discards all uncommitted changes", pattern: /\bgit\s+checkout\s+--\s*\.\s*$/, class: "git_destructive", block: false, ask: true },
-      { id: "git-stash-drop", description: "git stash drop permanently deletes a stash", pattern: /\bgit\s+stash\s+drop\b/, class: "git_destructive", block: false, ask: true },
-      { id: "sql-delete-by-id", description: "SQL DELETE by id should be confirmed", pattern: /\bDELETE\s+FROM\s+\w+\s+WHERE\b.*\bid\s*=/, class: "system_modify", block: false, ask: true }
-    ];
-
-    // Helper functions
-    function _switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
-      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
+      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
       
-      document.getElementById(`pane-${tabId}`).classList.add('active');
-      event.currentTarget.classList.add('active');
+      if (tabId === 'interactive') {
+        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+        document.getElementById('pane-interactive').classList.add('active');
+      } else {
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('pane-reference').classList.add('active');
+      }
     }
 
-    function toggleToolArgs() {
-      const tool = document.getElementById('config-tool').value;
-      const cmdGroup = document.getElementById('group-command-text');
-      const cmdCwdGroup = document.getElementById('group-command-cwd');
-      const fileGroup = document.getElementById('group-file-path');
+    // Rules Definitions
+    const DAMAGE_CONTROL_RULES = [
+      { id: "rm-rf-root", pattern: /\brm\s+-rf?\s+\/(?![a-z0-9]*tmp\/)/, class: "system_modify", block: true, reason: "Destructive filesystem operation on root" },
+      { id: "git-push-force", pattern: /\bgit\s+push\s+.*(--force|-f)(?!-with-lease)\b/, class: "git_destructive", block: true, reason: "Force push overwrites branch history" },
+      { id: "curl-pipe-sh", pattern: /\bcurl\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/, class: "execute", block: true, reason: "Remote-script-to-shell installer is prohibited" },
+      { id: "git-stash-drop", pattern: /\bgit\s+stash\s+drop\b/, class: "git_destructive", block: false, ask: true, reason: "Stash drop permanently discards uncommitted code" },
+      { id: "git-restore-dot", pattern: /\bgit\s+restore\s+\.\s*$/, class: "git_destructive", block: false, ask: true, reason: "Git restore discards all local workspace edits" },
+    ];
 
-      if (tool === 'bash') {
+    const BUILTIN_RECOGNIZED = [
+      /^pwd$/,
+      /^ls(?:\s+-[a-zA-Z0-9]+|\s+[\w./-]+)*$/,
+      /^git\s+status$/,
+      /^git\s+diff(?:\s+[\w./-]+)*$/,
+      /^git\s+log(?:\s+-[0-9]+)?$/,
+      /^npm\s+test$/,
+      /^npm\s+run\s+test$/
+    ];
+
+    // Tool Groups Change
+    function onToolChange() {
+      const tool = document.getElementById('toolGroup').value;
+      const cmdGroup = document.getElementById('group-command');
+      const fileGroup = document.getElementById('group-filepath');
+
+      if (tool === 'bash' || tool === 'git') {
         cmdGroup.style.display = 'block';
-        cmdCwdGroup.style.display = 'block';
         fileGroup.style.display = 'none';
+      } else if (tool === 'read' || tool === 'write') {
+        cmdGroup.style.display = 'none';
+        fileGroup.style.display = 'block';
       } else {
         cmdGroup.style.display = 'none';
-        cmdCwdGroup.style.display = 'none';
-        fileGroup.style.display = 'block';
+        fileGroup.style.display = 'none';
       }
-      runEvaluation();
+      runSimulation();
     }
 
-    function _loadPreset(presetId) {
-      const toolEl = document.getElementById('config-tool');
-      const cmdEl = document.getElementById('config-command');
-      const fileEl = document.getElementById('config-filepath');
-      const modeEl = document.getElementById('config-mode');
-      const safetyEl = document.getElementById('config-safety-level');
+    // Load presets
+    function loadPreset(presetId) {
+      const toolGroup = document.getElementById('toolGroup');
+      const commandInput = document.getElementById('commandInput');
+      const filepathInput = document.getElementById('filepathInput');
       
-      toolEl.value = 'bash';
-      modeEl.value = 'default';
-      safetyEl.value = 'auto-edit';
-
       switch(presetId) {
+        case 'status':
+          toolGroup.value = 'git';
+          commandInput.value = 'git status';
+          break;
         case 'npm-test':
-          cmdEl.value = 'npm test';
+          toolGroup.value = 'bash';
+          commandInput.value = 'npm test';
           break;
-        case 'git-status':
-          cmdEl.value = 'git status';
-          break;
-        case 'rm-rf-root':
-          cmdEl.value = 'rm -rf /';
-          break;
-        case 'git-reset-hard':
-          cmdEl.value = 'git reset --hard';
+        case 'write-src':
+          toolGroup.value = 'write';
+          filepathInput.value = 'src/index.ts';
           break;
         case 'write-env':
-          toolEl.value = 'write';
-          fileEl.value = '.env';
+          toolGroup.value = 'write';
+          filepathInput.value = '.env';
           break;
-        case 'git-restore-dot':
-          cmdEl.value = 'git restore .';
+        case 'rm-rf':
+          toolGroup.value = 'bash';
+          commandInput.value = 'rm -rf /';
           break;
-        case 'curl-sh':
-          cmdEl.value = 'curl -fsSL https://deno.land/x/install/install.sh | sh';
+        case 'stash-drop':
+          toolGroup.value = 'git';
+          commandInput.value = 'git stash drop';
           break;
-        case 'write-etc':
-          toolEl.value = 'write';
-          fileEl.value = '/etc/hosts';
+        case 'force-push':
+          toolGroup.value = 'git';
+          commandInput.value = 'git push origin main --force';
           break;
-        case 'delete-by-id':
-          cmdEl.value = 'DELETE FROM users WHERE id = 42;';
+        case 'escape-write':
+          toolGroup.value = 'write';
+          filepathInput.value = '/etc/hosts';
+          break;
+        case 'unrecognized-exec':
+          toolGroup.value = 'bash';
+          commandInput.value = 'sudo apt-get install build-essential';
           break;
       }
+      onToolChange();
+    }
+
+    // Clear console
+    function clearConsole() {
+      document.getElementById('traceConsole').innerHTML = '';
+    }
+
+    // Log to console helper
+    function logTrace(msg, type = 'info') {
+      const consoleEl = document.getElementById('traceConsole');
+      let prefix = '[INFO]';
+      if (type === 'warn') prefix = '[WARN]';
+      if (type === 'error') prefix = '[ERROR]';
+      if (type === 'success') prefix = '[SUCCESS]';
       
-      toggleToolArgs();
+      consoleEl.innerHTML += `\n${prefix} ${msg}`;
+      consoleEl.scrollTop = consoleEl.scrollHeight;
     }
 
-    // Path resolution helper
-    function resolvePath(target, baseCwd) {
-      let resolved = target.trim();
-      if (resolved === '~') return '/home/akougkas';
-      if (resolved.startsWith('~/')) resolved = `/home/akougkas/${resolved.slice(2)}`;
-      if (!resolved.startsWith('/') && baseCwd) {
-        resolved = `${baseCwd.replace(/\/$/, '')}/${resolved}`;
-      }
-      // Collapse dots
-      resolved = resolved.replace(/\/+/g, '/');
-      return resolved;
-    }
+    // Parse simple yaml zeroAccess/readOnly/noDelete paths
+    function parsePathPolicies(yamlText) {
+      const zeroAccess = [];
+      const readOnly = [];
+      const noDelete = [];
 
-    function isSameOrDescendant(candidate, parent) {
-      const c = resolvePath(candidate);
-      const p = resolvePath(parent);
-      if (c === p) return true;
-      return c.startsWith(`${p}/`);
-    }
+      try {
+        const lines = yamlText.split('\n');
+        let currentSection = null;
+        lines.forEach(line => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return;
 
-    // Simplified YAML policy parser
-    function parsePolicyYaml(yamlText) {
-      const lines = yamlText.split('\n');
-      const policy = {
-        valid: true,
-        errors: [],
-        commands: [],
-        zeroAccessPaths: [],
-        readOnlyPaths: [],
-        noDeletePaths: [],
-        disableDefaultPathPolicy: false
-      };
-
-      let currentKey = null;
-      let currentCommand = null;
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-
-        if (line.match(/^zeroAccessPaths:/)) { currentKey = 'zeroAccessPaths'; continue; }
-        if (line.match(/^readOnlyPaths:/)) { currentKey = 'readOnlyPaths'; continue; }
-        if (line.match(/^noDeletePaths:/)) { currentKey = 'noDeletePaths'; continue; }
-        if (line.match(/^commands:/)) { currentKey = 'commands'; continue; }
-        if (line.match(/^disableDefaultPathPolicy:\s*true/)) { policy.disableDefaultPathPolicy = true; continue; }
-
-        if (trimmed.startsWith('-')) {
-          const content = trimmed.replace(/^-\s*/, '').trim();
-          if (currentKey === 'zeroAccessPaths' || currentKey === 'readOnlyPaths' || currentKey === 'noDeletePaths') {
-            policy[currentKey].push(content.replace(/['"]/g, ''));
-          } else if (currentKey === 'commands') {
-            if (currentCommand) policy.commands.push(currentCommand);
-            currentCommand = {};
-            parseCommandProp(content, currentCommand);
+          if (trimmed.startsWith('zeroAccessPaths:')) {
+            currentSection = 'zero';
+          } else if (trimmed.startsWith('readOnlyPaths:')) {
+            currentSection = 'readonly';
+          } else if (trimmed.startsWith('noDeletePaths:')) {
+            currentSection = 'nodelete';
+          } else if (trimmed.startsWith('commands:')) {
+            currentSection = 'commands';
+          } else if (trimmed.startsWith('-') && currentSection) {
+            const val = trimmed.replace(/^-/, '').trim().replace(/['"]/g, '');
+            if (currentSection === 'zero') zeroAccess.push(val);
+            if (currentSection === 'readonly') readOnly.push(val);
+            if (currentSection === 'nodelete') noDelete.push(val);
           }
-        } else if (currentCommand && trimmed.includes(':')) {
-          parseCommandProp(trimmed, currentCommand);
-        }
-      }
-      if (currentCommand) policy.commands.push(currentCommand);
-      return policy;
-    }
-
-    function parseCommandProp(line, cmd) {
-      const parts = line.split(':');
-      const key = parts[0].trim();
-      let val = parts.slice(1).join(':').trim();
-      if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-      if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
-      if (val === 'true') val = true;
-      if (val === 'false') val = false;
-      cmd[key] = val;
-    }
-
-    // Simple shell parser to find targets
-    function extractTargets(command) {
-      const writeTargets = [];
-      const deleteTargets = [];
-
-      // Redirect matches (e.g., > or >>)
-      const redirectMatches = command.matchAll(/>>\s*(["']?)([^"'&\s|;<>]+)\1/g);
-      for (const match of redirectMatches) writeTargets.push(match[2]);
-
-      const singleRedirect = command.matchAll(/(?<!>)(?<!&)>\s*(["']?)([^"'&\s|;<>]+)\1/g);
-      for (const match of singleRedirect) writeTargets.push(match[2]);
-
-      // cp / mv matches
-      const mvCpMatches = command.matchAll(/\b(mv|cp)\s+(?:-[a-zA-Z]+\s+)*["']?([^"'\s;&|<>]+)["']?\s+["']?([^"'\s;&|<>]+)["']?/g);
-      for (const match of mvCpMatches) writeTargets.push(match[3]);
-
-      // rm matches
-      const rmMatches = command.matchAll(/\brm\s+(?:-[a-zA-Z]+\s+)*["']?([^"'\s;&|<>]+)["']?/g);
-      for (const match of rmMatches) {
-        if (!match[1].startsWith('-')) deleteTargets.push(match[1]);
+        });
+      } catch (_) {
+        // fail silently
       }
 
-      return { writeTargets, deleteTargets };
+      return { zeroAccess, readOnly, noDelete };
     }
 
-    function runEvaluation() {
-      const tool = document.getElementById('config-tool').value;
-      const rawCwd = document.getElementById('config-cwd').value.trim();
-      const commandStr = document.getElementById('config-command').value;
-      const filePathStr = document.getElementById('config-filepath').value.trim();
-      const activeMode = document.getElementById('config-mode').value;
-      const safetyLevel = document.getElementById('config-safety-level').value;
-      const yamlPolicyText = document.getElementById('config-project-policy').value;
+    // Main simulator algorithm
+    function runSimulation() {
+      const autonomy = document.getElementById('autonomyLevel').value;
+      const posture = document.getElementById('operatingPosture').value;
+      const tool = document.getElementById('toolGroup').value;
+      const cwd = document.getElementById('cmdCwd').value.trim();
+      const command = document.getElementById('commandInput').value.trim();
+      const filepath = document.getElementById('filepathInput').value.trim();
+      const policyYaml = document.getElementById('projectPolicy').value;
 
-      const workspaceRoot = "/home/akougkas/project";
-      const resolvedCwd = resolvePath(rawCwd, workspaceRoot);
+      clearConsole();
+      logTrace("Evaluating safety request...", 'info');
+      logTrace(`autonomy_level="${autonomy}" posture_mode="${posture}" tool="${tool}"`, 'info');
 
-      // Parse simulated project policy
-      const projectPolicy = parsePolicyYaml(yamlPolicyText);
-      const policyHash = btoa(yamlPolicyText).substring(0, 8);
+      // Highlight active autonomy column in matrix table
+      document.querySelectorAll('#matrixTable th, #matrixTable td').forEach(el => { el.classList.remove('highlight'); });
+      const activeColId = `hdr-${autonomy}`;
+      const colIndex = Array.from(document.querySelectorAll('#matrixTable th')).findIndex(th => th.id === activeColId);
+      if (colIndex !== -1) {
+        document.querySelectorAll(`#matrixTable th:nth-child(${colIndex + 1})`).forEach(el => { el.classList.add('highlight'); });
+        document.querySelectorAll(`#matrixTable td:nth-child(${colIndex + 1})`).forEach(el => { el.classList.add('highlight'); });
+      }
 
-      // 1. Classification
+      // ----------------------------------------------------
+      // STAGE 1: CLASSIFY ACTION CLASS
+      // ----------------------------------------------------
       let actionClass = "unknown";
-      const reasons = [];
-
+      
       if (tool === 'read') {
-        actionClass = 'read';
-      } else if (tool === 'write' || tool === 'edit') {
-        actionClass = 'write';
-        // Check if writing to home dir or system root
-        const targetAbs = resolvePath(filePathStr, resolvedCwd);
-        if (filePathStr.startsWith('~')) {
-          actionClass = 'system_modify';
-          reasons.push(`write-path-home-escape: ${filePathStr}`);
+        actionClass = "read";
+      } else if (tool === 'write') {
+        // Path safety overrides classification
+        if (filepath.startsWith('/etc') || filepath.startsWith('/usr') || filepath.startsWith('/var') || filepath.startsWith('/bin')) {
+          actionClass = "system_modify";
+          logTrace(`Path Escaping: file write path "${filepath}" is a system directory`, 'warn');
+        } else if (filepath.startsWith('..') || filepath.startsWith('/') && !filepath.startsWith(cwd)) {
+          actionClass = "system_modify";
+          logTrace(`Path Escaping: file write path "${filepath}" escapes workspace root`, 'warn');
         } else {
-          let rootEsc = false;
-          for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
-            if (targetAbs === prefix || targetAbs.startsWith(`${prefix}/`)) {
-              actionClass = 'system_modify';
-              reasons.push(`write-path-system-root: ${prefix}`);
-              rootEsc = true;
-              break;
-            }
-          }
-          if (!rootEsc && !isSameOrDescendant(targetAbs, workspaceRoot)) {
-            actionClass = 'system_modify';
-            reasons.push(`write-path-outside-cwd: ${targetAbs}`);
+          actionClass = "write";
+        }
+      } else if (tool === 'git') {
+        // Parse git command
+        let isDestructive = false;
+        for (const rule of DAMAGE_CONTROL_RULES) {
+          if (rule.class === 'git_destructive' && rule.pattern.test(command)) {
+            actionClass = "git_destructive";
+            isDestructive = true;
+            break;
           }
         }
-      } else if (tool === 'git_status' || tool === 'git_diff') {
-        actionClass = 'read';
+        if (!isDestructive) {
+          if (command.startsWith('git diff') || command.startsWith('git status') || command.startsWith('git log')) {
+            actionClass = "read";
+          } else {
+            actionClass = "execute"; // git commit, add, stash, etc.
+          }
+        }
       } else if (tool === 'bash') {
-        actionClass = 'execute';
+        // Classify bash commands
+        let isDestructive = false;
+        let isSysModify = false;
         
-        // Match regexes
-        let gitDestructive = false;
-        for (const p of GIT_DESTRUCTIVE_PATTERNS) {
-          if (p.re.test(commandStr)) {
-            actionClass = 'git_destructive';
-            reasons.push(`pattern:${p.name}`);
-            gitDestructive = true;
+        for (const rule of DAMAGE_CONTROL_RULES) {
+          if (rule.pattern.test(command)) {
+            if (rule.class === 'git_destructive') {
+              actionClass = "git_destructive";
+              isDestructive = true;
+            } else if (rule.class === 'system_modify') {
+              actionClass = "system_modify";
+              isSysModify = true;
+            }
             break;
           }
         }
 
-        if (!gitDestructive) {
-          let sysModify = false;
-          for (const p of SYSTEM_MODIFY_PATTERNS) {
-            if (p.re.test(commandStr)) {
-              actionClass = 'system_modify';
-              reasons.push(`pattern:${p.name}`);
-              sysModify = true;
-              break;
-            }
-          }
-
-          if (!sysModify) {
-            // Parse write / delete targets inside command
-            const cmdTargets = extractTargets(commandStr);
-            let _writeMod = false;
-            for (const target of cmdTargets.writeTargets) {
-              const targetAbs = resolvePath(target, resolvedCwd);
-              if (target.startsWith('~')) {
-                actionClass = 'system_modify';
-                reasons.push(`bash-write-target-home-escape: ${target}`);
-                _writeMod = true;
-                break;
-              }
-              for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
-                if (targetAbs === prefix || targetAbs.startsWith(`${prefix}/`)) {
-                  actionClass = 'system_modify';
-                  reasons.push(`bash-write-target-system-root: ${target}`);
-                  _writeMod = true;
+        if (!isDestructive && !isSysModify) {
+          if (command.includes('sudo') || command.includes('apt-get') || command.includes('npm install -g')) {
+            actionClass = "system_modify";
+          } else {
+            // Check if recognized
+            let recognized = false;
+            const hasSequencing = /&&|\|\||[;|><\n]/.test(command);
+            if (hasSequencing) {
+              logTrace(`Sequencing or redirection operator found. Command is unrecognized.`, 'warn');
+            } else {
+              for (const rx of BUILTIN_RECOGNIZED) {
+                if (rx.test(command)) {
+                  recognized = true;
                   break;
                 }
               }
-              if (!isSameOrDescendant(targetAbs, workspaceRoot)) {
-                actionClass = 'system_modify';
-                reasons.push(`bash-write-target-outside-cwd: ${target}`);
-                _writeMod = true;
-                break;
+              // Check project policy command IDs
+              if (command === 'npm test') {
+                recognized = true; // matches simulated policy
               }
+            }
+
+            if (recognized) {
+              actionClass = "execute"; // Recognized no-prompt set
+              logTrace(`Recognized command match: "${command}" classified as execute (recognized)`, 'success');
+            } else {
+              actionClass = "execute_other"; // Unrecognized bash
+              logTrace(`Unrecognized command: "${command}" classified as execute (any other bash)`, 'warn');
             }
           }
         }
+      } else if (tool === 'dispatch') {
+        actionClass = "dispatch";
       }
 
-      // Update classification display
-      const classTd = document.getElementById('td-classification');
-      let classColor = 'cyan';
-      if (actionClass === 'git_destructive') classColor = 'rose';
-      else if (actionClass === 'system_modify') classColor = 'amber';
-      else if (actionClass === 'write') classColor = 'purple';
-      else if (actionClass === 'read') classColor = 'emerald';
-      classTd.innerHTML = `<span class="badge-inline ${classColor}">${actionClass}</span>`;
-
-      // 2. Decision Logic
-      let decision = "allow";
-      let reasonCode = "allowed";
-      let _matchedRuleId = "";
-      const decisionReasons = [...reasons];
-      let _logHtml = "";
-
-      _logHtml += `[SYSTEM] Classifying tool call: tool=${tool}, actionClass=${actionClass}\n`;
-      if (reasons.length > 0) {
-        _logHtml += `[CLASSIFY] Detections: ${reasons.join(', ')}\n`;
+      // Highlight active row in matrix
+      document.querySelectorAll('#matrixTable tbody tr').forEach(tr => { tr.style.background = 'none'; });
+      let rowEl = null;
+      if (actionClass === 'read') rowEl = document.getElementById('row-read');
+      else if (actionClass === 'write') rowEl = document.getElementById('row-write');
+      else if (actionClass === 'execute') rowEl = document.getElementById('row-execute-builtin');
+      else if (actionClass === 'execute_other') rowEl = document.getElementById('row-execute-other');
+      else if (actionClass === 'dispatch') rowEl = document.getElementById('row-dispatch');
+      else if (actionClass === 'system_modify') rowEl = document.getElementById('row-system-modify');
+      else if (actionClass === 'git_destructive') rowEl = document.getElementById('row-git-destructive');
+      else rowEl = document.getElementById('row-unknown');
+      
+      if (rowEl) {
+        rowEl.style.background = 'rgba(0, 240, 255, 0.04)';
       }
 
-      // Check Mode limitations (Matrix gating)
-      if (activeMode === 'advise') {
-        _logHtml += `[MODE] Mode 'advise' allows only read/search tools.\n`;
-        if (actionClass !== 'read') {
-          decision = 'block';
-          reasonCode = 'advise-mode-readonly';
-          decisionReasons.push("Advise mode is read-only; write and execute tools are blocked.");
+      logTrace(`Resolved Action Class: "${actionClass === 'execute_other' ? 'execute: other bash' : actionClass}"`, 'info');
+
+      // ----------------------------------------------------
+      // STAGE 2: RUN THROUGH SAFETY NET (Damage Control Rules & Path Policies)
+      // ----------------------------------------------------
+      let safetyNetVerdict = "pass";
+      let safetyNetReason = "";
+
+      // Path policies from YAML
+      const policies = parsePathPolicies(policyYaml);
+      const activeScanPath = tool === 'write' ? filepath : command;
+
+      // Check zeroAccessPaths
+      for (const p of policies.zeroAccess) {
+        if (activeScanPath.includes(p)) {
+          safetyNetVerdict = "block";
+          safetyNetReason = `zeroAccessPaths breach: path contains "${p}"`;
+          break;
         }
       }
 
-      // Check Settings Safety Level Guidelines (simulate playground action response)
-      if (decision !== 'block') {
-        if (safetyLevel === 'suggest') {
-          _logHtml += `[SAFETY] Safety level 'suggest' redirects all effectful actions to descriptions.\n`;
-          if (actionClass !== 'read') {
-            decision = 'suggest';
-            reasonCode = 'safety-level-suggest';
-            decisionReasons.push("Safety level 'suggest' is active. Describing action instead of executing.");
-          }
-        } else if (safetyLevel === 'auto-edit') {
-          _logHtml += `[SAFETY] Safety level 'auto-edit' allows writes but gates execute actions.\n`;
-          if (actionClass === 'execute') {
-            decision = 'ask';
-            reasonCode = 'safety-level-auto-edit-gate';
-            decisionReasons.push("Safety level 'auto-edit' gates execute actions. Requires confirmation.");
-          }
+      // Check command substitution confirm rail
+      if (safetyNetVerdict === 'pass' && (tool === 'bash' || tool === 'git')) {
+        const hasSubstitution = /\$\(|`/.test(command);
+        if (hasSubstitution) {
+          safetyNetVerdict = "confirm";
+          safetyNetReason = "Command substitution $(...) or backticks is an always-on Safety Net confirm rail";
         }
       }
 
-      // Check Damage Control Rulepacks
-      if (decision !== 'block' && decision !== 'suggest') {
-        let dcMatch = null;
-        const scan = tool === 'bash' ? commandStr : filePathStr;
-        for (const rule of DAMAGE_CONTROL_RULES) {
-          if (rule.pattern.test(scan)) {
-            dcMatch = rule;
+      // Check readOnlyPaths (for write commands)
+      if (safetyNetVerdict === 'pass' && tool === 'write') {
+        for (const p of policies.readOnly) {
+          if (filepath.includes(p)) {
+            safetyNetVerdict = "block";
+            safetyNetReason = `readOnlyPaths breach: writing to "${p}" is blocked`;
             break;
           }
         }
+      }
 
-        if (dcMatch) {
-          _logHtml += `[DAMAGE-CONTROL] Matched damage-control rule: ${dcMatch.id} (${dcMatch.description})\n`;
-          _matchedRuleId = dcMatch.id;
-          
-          if (dcMatch.block) {
-            decision = 'block';
-            reasonCode = `damage-control:${dcMatch.id}`;
-            decisionReasons.push(`Damage-control rule '${dcMatch.id}' hard-blocked this command.`);
-          } else if (dcMatch.ask) {
-            if (activeMode !== 'super') {
-              decision = 'ask';
-              reasonCode = `damage-control:${dcMatch.id}`;
-              decisionReasons.push(`Damage-control rule '${dcMatch.id}' requires confirmation.`);
-            } else {
-              _logHtml += `[DAMAGE-CONTROL] Rule confirmed via Super mode.\n`;
-              decision = 'allow';
-              reasonCode = `damage-control:${dcMatch.id}`;
-              decisionReasons.push("Damage-control rule confirmed in super mode.");
+      // Check Damage Control rules regexes
+      if (safetyNetVerdict === 'pass') {
+        for (const rule of DAMAGE_CONTROL_RULES) {
+          if (rule.pattern.test(command) || rule.pattern.test(filepath)) {
+            if (rule.block) {
+              safetyNetVerdict = "block";
+              safetyNetReason = `Damage control match: ${rule.reason} (Rule: ${rule.id})`;
+            } else if (rule.ask) {
+              safetyNetVerdict = "confirm";
+              safetyNetReason = `Damage control confirm check: ${rule.reason} (Rule: ${rule.id})`;
             }
+            break;
           }
         }
       }
 
-      // Check Git Destructive actions hard-block
-      if (decision !== 'block' && decision !== 'suggest' && actionClass === 'git_destructive') {
-        // Unless it matched an ask rule, git_destructive is blocked
-        if (!reasonCode.startsWith('damage-control:')) {
-          decision = 'block';
-          reasonCode = 'classification:git_destructive';
-          decisionReasons.push("Git destructive actions are blocked in default mode.");
-        }
-      }
+      logTrace(`[Safety Net Check] Verdict: ${safetyNetVerdict.toUpperCase()} ${safetyNetReason ? `(${safetyNetReason})` : ''}`, safetyNetVerdict === 'block' ? 'error' : (safetyNetVerdict === 'confirm' ? 'warn' : 'success'));
 
-      // Check Path Policies (Merged Default & Project)
-      if (decision !== 'block' && decision !== 'suggest') {
-        const mergedZeroAccess = [...DEFAULT_PATH_POLICY.zeroAccessPaths, ...(projectPolicy.zeroAccessPaths || [])];
-        const mergedReadOnly = [...DEFAULT_PATH_POLICY.readOnlyPaths, ...(projectPolicy.readOnlyPaths || [])];
-        const mergedNoDelete = [...DEFAULT_PATH_POLICY.noDeletePaths, ...(projectPolicy.noDeletePaths || [])];
-
-        const targetPaths = [];
-        if (tool === 'bash') {
-          const cmdTargets = extractTargets(commandStr);
-          for (const t of cmdTargets.writeTargets) targetPaths.push({ op: 'write', path: t });
-          for (const t of cmdTargets.deleteTargets) targetPaths.push({ op: 'delete', path: t });
-        } else if (tool === 'write' || tool === 'edit') {
-          targetPaths.push({ op: 'write', path: filePathStr });
-        } else if (tool === 'read') {
-          targetPaths.push({ op: 'read', path: filePathStr });
-        }
-
-        for (const target of targetPaths) {
-          const resolvedTarget = resolvePath(target.path, resolvedCwd);
-          
-          // Zero Access check
-          for (const p of mergedZeroAccess) {
-            if (isSameOrDescendant(resolvedTarget, resolvePath(p, workspaceRoot))) {
-              decision = 'block';
-              reasonCode = 'path-policy:zeroAccessPaths';
-              decisionReasons.push(`Access denied: path '${target.path}' matches zeroAccessPaths entry '${p}'`);
-              break;
-            }
-          }
-          if (decision === 'block') break;
-
-          // Read Only check
-          if (target.op === 'write' || target.op === 'delete') {
-            for (const p of mergedReadOnly) {
-              if (isSameOrDescendant(resolvedTarget, resolvePath(p, workspaceRoot))) {
-                decision = 'block';
-                reasonCode = 'path-policy:readOnlyPaths';
-                decisionReasons.push(`Write denied: path '${target.path}' matches readOnlyPaths entry '${p}'`);
-                break;
-              }
-            }
-          }
-          if (decision === 'block') break;
-
-          // No Delete check
-          if (target.op === 'delete') {
-            for (const p of mergedNoDelete) {
-              if (isSameOrDescendant(resolvedTarget, resolvePath(p, workspaceRoot))) {
-                decision = 'block';
-                reasonCode = 'path-policy:noDeletePaths';
-                decisionReasons.push(`Delete denied: path '${target.path}' matches noDeletePaths entry '${p}'`);
-                break;
-              }
-            }
-          }
-          if (decision === 'block') break;
-        }
-      }
-
-      // Check Default-Deny Bash validation
-      if (decision !== 'block' && decision !== 'suggest' && tool === 'bash') {
-        if (activeMode === 'super') {
-          _logHtml += `[BASH] Bash allowed in 'super' mode.\n`;
-          decision = 'allow';
-          reasonCode = 'super-allows-bash';
-        } else {
-          // Check matching project command
-          let projMatch = null;
-          for (const cmd of projectPolicy.commands || []) {
-            if (cmd.command === commandStr && isSameOrDescendant(resolvedCwd, resolvePath(cmd.cwd || '.', workspaceRoot))) {
-              projMatch = cmd;
-              break;
-            }
-          }
-
-          if (projMatch) {
-            _logHtml += `[BASH] Matched project safety policy command: '${projMatch.id}'\n`;
-            if (projMatch.requireConfirmation) {
-              decision = 'ask';
-              reasonCode = `project-policy:${projMatch.id}`;
-              decisionReasons.push(`Project policy command '${projMatch.id}' requires confirmation.`);
-            } else {
-              decision = 'allow';
-              reasonCode = `project-policy:${projMatch.id}`;
-              decisionReasons.push(`Allowed by project safety policy command '${projMatch.id}'`);
-            }
-          } else {
-            // Check workspace root escape
-            if (!isSameOrDescendant(resolvedCwd, workspaceRoot)) {
-              decision = 'block';
-              reasonCode = 'bash-cwd-escape';
-              decisionReasons.push(`CWD '${rawCwd}' escapes workspace root '${workspaceRoot}'`);
-            } else {
-              // Check shell operators
-              const shellOperatorsRegex = /(\|\||&&|;|\||>>?|<|`|\$\(|\n|\r)/;
-              if (shellOperatorsRegex.test(commandStr)) {
-                decision = 'block';
-                reasonCode = 'bash-shell-operators-denied';
-                decisionReasons.push("Default mode denies shell operators (&&, ||, ;, pipes, redirects). Use typed tools or project policy command instead.");
-              } else {
-                // Check built-in allowlist
-                let allowMatch = null;
-                for (const allow of BUILTIN_ALLOWLIST) {
-                  if (allow.re.test(commandStr)) {
-                    allowMatch = allow;
-                    break;
-                  }
-                }
-
-                if (allowMatch) {
-                  _logHtml += `[BASH] Matched built-in default-deny command allowlist: ${allowMatch.id}\n`;
-                  decision = 'allow';
-                  reasonCode = allowMatch.id;
-                  decisionReasons.push(`Matched built-in default-deny command allowlist '${allowMatch.id}'`);
-                } else {
-                  decision = 'block';
-                  reasonCode = 'bash-default-deny';
-                  decisionReasons.push("Default mode denies arbitrary Bash commands. Use typed tools, project safety policy, or super mode elevation.");
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Update UI Result Badge
-      const badge = document.getElementById('eval-result-badge');
-      const statusEl = document.getElementById('eval-status');
-      const sourceEl = document.getElementById('eval-source');
-
-      badge.className = 'result-badge-container';
-      badge.classList.add(`state-${decision}`);
+      // ----------------------------------------------------
+      // STAGE 3: AUTONOMY MAPPING
+      // ----------------------------------------------------
+      let autonomyVerdict = "allow";
       
-      let iconSvg = '';
-      if (decision === 'allow') {
-        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4" stroke="currentColor"/></svg>';
-      } else if (decision === 'ask') {
-        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><line x1="12" y1="8" x2="12" y2="12" stroke="currentColor"/><line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor"/></svg>';
-      } else if (decision === 'block') {
-        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><line x1="15" y1="9" x2="9" y2="15" stroke="currentColor"/><line x1="9" y1="9" x2="15" y2="15" stroke="currentColor"/></svg>';
+      if (safetyNetVerdict !== 'block') {
+        // Map matrix
+        if (autonomy === 'read-only') {
+          autonomyVerdict = (actionClass === 'read') ? 'allow' : 'deny';
+        } else if (autonomy === 'suggest') {
+          autonomyVerdict = (actionClass === 'read') ? 'allow' : 'ask';
+        } else if (autonomy === 'auto-edit') {
+          if (actionClass === 'read' || actionClass === 'write' || actionClass === 'execute' || actionClass === 'dispatch') {
+            autonomyVerdict = 'allow';
+          } else {
+            autonomyVerdict = 'ask'; // execute_other, system_modify, unknown
+          }
+        } else if (autonomy === 'full-auto') {
+          if (actionClass === 'system_modify' || actionClass === 'unknown') {
+            autonomyVerdict = 'ask';
+          } else {
+            autonomyVerdict = 'allow';
+          }
+        }
+
+        // git_destructive is net block regardless of autonomy level
+        // EXCEPT when it is overridden by an authored damage-control confirm (ask) rule (e.g. git stash drop)
+        const isAskRule = (safetyNetVerdict === 'confirm');
+        if (actionClass === 'git_destructive' && !isAskRule) {
+          autonomyVerdict = 'block';
+        }
       } else {
-        iconSvg = '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="currentColor"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor"/></svg>';
+        autonomyVerdict = 'block';
       }
 
-      statusEl.innerHTML = `${iconSvg}<span>${decision === 'suggest' ? 'SUGGEST' : decision}</span>`;
-      sourceEl.innerText = reasonCode;
+      logTrace(`[Autonomy Mapping] Matrix result: ${autonomyVerdict.toUpperCase()}`, autonomyVerdict === 'allow' ? 'success' : (autonomyVerdict === 'ask' ? 'warn' : 'error'));
 
-      // Update Terminal logs
-      let logOutput = "";
-      if (decision === 'block') {
-        logOutput += `<div class="rejection-banner">[CLIO SAFETY REJECTION] Action Blocked</div>`;
-        logOutput += `<div class="rejection-body">Reason: ${decisionReasons[decisionReasons.length - 1]}\nReason Code: ${reasonCode}</div>`;
-        logOutput += `<div class="rejection-footer">To bypass this block, configure a reviewed entry in your project's .clio/safety.yaml or elevate the active mode to 'super'.</div>`;
-      } else if (decision === 'ask') {
-        logOutput += `<div style="color: var(--color-amber); font-weight:700;">[CLIO SAFETY PROMPT] Confirmation Required</div>`;
-        logOutput += `Action: ${tool} ${tool==='bash'?commandStr:filePathStr}\nReason Code: ${reasonCode}\n\n`;
-        logOutput += `Do you want to confirm this action and elevate to super mode?`;
-      } else if (decision === 'suggest') {
-        logOutput += `<div style="color: var(--color-cyan); font-weight:700;">[CLIO SAFETY SUGGESTION] Output Redirected</div>`;
-        logOutput += `The safety level is currently set to 'suggest'. In this state, the action is not executed.\n`;
-        logOutput += `Suggestion: Describe how to perform: "${tool} ${tool==='bash'?commandStr:filePathStr}"`;
+      // ----------------------------------------------------
+      // STAGE 4: RESOLVE APPROVALS / POSTURE
+      // ----------------------------------------------------
+      let finalVerdict = "ALLOW";
+      let finalDetails = "Tool call passes all checks and runs immediately.";
+      let cardClass = "v-allow";
+      let icon = "✓";
+
+      // Combine Safety Net + Autonomy Mappings
+      const resolvesToAsk = (safetyNetVerdict === 'confirm' || autonomyVerdict === 'ask');
+      const resolvesToBlock = (safetyNetVerdict === 'block' || autonomyVerdict === 'block');
+      const resolvesToDeny = (autonomyVerdict === 'deny');
+
+      if (resolvesToBlock) {
+        finalVerdict = "BLOCK";
+        finalDetails = `[safety-net] block: ${safetyNetReason || 'Action classified as destructive and hard blocked by rule.'}`;
+        cardClass = "v-block";
+        icon = "🛑";
+        logTrace(`Safety Net blocked execution. Final status: BLOCKED`, 'error');
+      } else if (resolvesToDeny) {
+        finalVerdict = "DENY";
+        finalDetails = `[autonomy] denied: Operating under "${autonomy}" level. Action is denied.`;
+        cardClass = "v-deny";
+        icon = "✕";
+        logTrace(`Autonomy level denied execution. Final status: DENIED`, 'error');
+      } else if (resolvesToAsk) {
+        if (posture === 'headless') {
+          // Headless mode automatically denies asks deterministically
+          finalVerdict = "DENY (HEADLESS)";
+          finalDetails = `clio run cannot confirm permission requests; rerun interactively to approve this action.`;
+          cardClass = "v-block";
+          icon = "✕";
+          logTrace(`Headless mode auto-denied interactive request. Final status: DENIED`, 'error');
+        } else {
+          // Interactive TUI mode parks for overlay approval
+          finalVerdict = "ASK / PARK";
+          const askedBy = (safetyNetVerdict === 'confirm') ? 'Asked by: Safety Net rule' : 'Asked by: Autonomy Mapping Matrix';
+          finalDetails = `[approval] notice: Parked in TUI queue overlay. (${askedBy})`;
+          cardClass = "v-ask";
+          icon = "⏳";
+          logTrace(`Parked in TUI permission overlay queue. Waiting for operator...`, 'warn');
+        }
       } else {
-        logOutput += `<div style="color: var(--color-emerald); font-weight:700;">[CLIO SAFETY ALLOW] Executing Action</div>`;
-        logOutput += `Executing tool '${tool}' under class '${actionClass}'... SUCCESS\n`;
-        logOutput += `Details: ${decisionReasons.join(' -> ')}`;
+        logTrace(`Tool call successfully allowed. Final status: ALLOWED`, 'success');
       }
 
-      document.getElementById('eval-terminal-log').innerHTML = logOutput;
-
-      // Update Details Table
-      document.getElementById('td-reason-code').innerText = reasonCode;
-      document.getElementById('td-cwd-context').innerText = isSameOrDescendant(resolvedCwd, workspaceRoot) ? "Within workspace root" : "Escaped workspace root!";
-      document.getElementById('td-policy-hash').innerText = policyHash;
-
-      // Update Action Panel
-      const actionPanel = document.getElementById('action-panel');
-      actionPanel.innerHTML = '';
-
-      if (decision === 'ask') {
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-primary';
-        btn.innerHTML = `<svg aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg> Confirm & Elevate Mode to Super`;
-        btn.onclick = () => {
-          document.getElementById('config-mode').value = 'super';
-          runEvaluation();
-        };
-        actionPanel.appendChild(btn);
-      }
-
-      if (decision === 'block' && tool === 'bash') {
-        const btn = document.createElement('button');
-        btn.className = 'btn';
-        btn.innerHTML = `<svg aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Add Command to Project Policy`;
-        btn.onclick = () => {
-          const _cleanCmd = commandStr.replace(/'/g, "\\'");
-          const newPolicy = `${yamlPolicyText.trim()}\n  - id: custom-allow-${Math.floor(Math.random()*1000)}\n    command: "${commandStr}"\n    cwd: .\n    requireConfirmation: false`;
-          document.getElementById('config-project-policy').value = newPolicy;
-          runEvaluation();
-        };
-        actionPanel.appendChild(btn);
-      }
+      // Update UI displays
+      document.getElementById('verdictTitle').innerText = finalVerdict;
+      document.getElementById('verdictDesc').innerText = finalDetails;
+      
+      const vCard = document.getElementById('verdictCard');
+      vCard.className = `verdict-card ${cardClass}`;
+      document.getElementById('verdictIcon').innerText = icon;
     }
 
-    // Initial run
-    toggleToolArgs();
+    window.switchTab = switchTab;
+    window.loadPreset = loadPreset;
+    window.clearConsole = clearConsole;
+
+    // Initialize Simulator on load
+    window.onload = () => {
+      onToolChange();
+    };
   </script>
 </body>
 </html>

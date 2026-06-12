@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Observability & Receipt Viewer</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #4b5563;
+      
+      /* Glowing Neon Colors */
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
+
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 10% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 90% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    /* Header styling */
+    header {
+      border-bottom: 1px solid var(--border-card);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .logo-box {
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.1);
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+
+    .version-tag {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .version-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--color-cyan);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--color-cyan);
+    }
+
+    .back-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: color 0.2s;
+    }
+    .back-link:hover {
+      color: var(--color-cyan);
+    }
+
+    /* Split Pane Layout */
+    .split-viewer {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 1.5rem;
+      flex: 1;
+      min-height: 550px;
+    }
+
+    .left-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 1rem;
+      border-bottom: 1px solid var(--border-card);
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .filter-input {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.85rem;
+      font-family: var(--font-sans);
+    }
+    .filter-input:focus {
+      outline: none;
+      border-color: var(--color-cyan);
+    }
+
+    .category-group {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+    .category-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dark);
+      padding: 0.25rem 1rem;
+    }
+
+    .item-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .item-row {
+      padding: 0.6rem 1rem;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s;
+      border-left: 2px solid transparent;
+      color: var(--text-muted);
+    }
+    .item-row:hover {
+      background: rgba(255, 255, 255, 0.02);
+      color: #fff;
+    }
+    .item-row.active {
+      background: rgba(var(--color-cyan-rgb), 0.03);
+      border-left-color: var(--color-cyan);
+      color: var(--color-cyan);
+    }
+
+    .right-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .viewer-header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border-card);
+      background: rgba(0, 0, 0, 0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .viewer-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .viewer-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--color-cyan);
+    }
+    .btn-verify {
+      background: rgba(var(--color-cyan-rgb), 0.1);
+      border-color: var(--color-cyan);
+      color: var(--color-cyan);
+    }
+    .btn-verify:hover {
+      background: rgba(var(--color-cyan-rgb), 0.2);
+    }
+
+    .viewer-body {
+      flex: 1;
+      padding: 1.5rem;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .path-bar {
+      background: #05080e;
+      border: 1px solid var(--border-card);
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .code-view {
+      background: #05080e;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1.25rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.5;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      flex: 1;
+      color: #e5e7eb;
+    }
+
+    .verification-status-panel {
+      padding: 1.25rem;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      display: none;
+      white-space: pre-wrap;
+    }
+    .verification-status-panel.success {
+      display: block;
+      background: rgba(16, 185, 129, 0.03);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+    }
+    .verification-status-panel.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.03);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+    }
+
+    .status-badge {
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .status-success { background: rgba(16, 185, 129, 0.1); border: 1px solid var(--color-emerald); color: var(--color-emerald); }
+    .status-failure { background: rgba(239, 68, 68, 0.1); border: 1px solid var(--color-rose); color: var(--color-rose); }
+    .status-info { background: rgba(0, 240, 255, 0.1); border: 1px solid var(--color-cyan); color: var(--color-cyan); }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 1.5rem;
+      color: var(--text-dark);
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="header-logo">
+        <div class="logo-box">
+          <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="32" height="32" />
+        </div>
+        <div>
+          <h1>Observability Viewer</h1>
+          <div class="subtitle">Interactive Split Panel & Run Receipt Verification Sandbox</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap: 1rem;">
+        <a href="index.html" class="back-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back to Hub
+        </a>
+        <div class="version-tag">
+          <div class="version-dot"></div>
+          Clio Coder v0.2.3
+        </div>
+      </div>
+    </header>
+
+    <!-- Split Viewer Panel -->
+    <div class="split-viewer">
+      
+      <!-- Left Panel: Lists -->
+      <div class="left-panel">
+        <div class="panel-header">
+          <input type="text" class="filter-input" id="filter-box" placeholder="Type to filter artifacts..." oninput="filterArtifacts()">
+        </div>
+        
+        <div style="flex: 1; overflow-y: auto;">
+          <div class="category-group" id="group-Receipts">
+            <div class="category-title">Receipts</div>
+            <ul class="item-list" id="list-Receipts">
+              <!-- Rendered dynamically -->
+            </ul>
+          </div>
+          <div class="category-group" id="group-Dispatch">
+            <div class="category-title">Dispatch outputs</div>
+            <ul class="item-list" id="list-Dispatch">
+              <!-- Rendered dynamically -->
+            </ul>
+          </div>
+          <div class="category-group" id="group-Tool">
+            <div class="category-title">Tool outputs</div>
+            <ul class="item-list" id="list-Tool">
+              <!-- Rendered dynamically -->
+            </ul>
+          </div>
+          <div class="category-group" id="group-Compaction">
+            <div class="category-title">Compaction summaries</div>
+            <ul class="item-list" id="list-Compaction">
+              <!-- Rendered dynamically -->
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Panel: View & Inspect -->
+      <div class="right-panel">
+        <div class="viewer-header">
+          <div class="viewer-title" id="viewer-title">
+            <span class="status-badge status-info" id="viewer-badge">Receipt</span>
+            <span id="viewer-filename">run-9a3c9f28.json</span>
+          </div>
+          <div class="viewer-actions">
+            <button type="button" class="btn btn-verify" id="verify-btn" onclick="runIntegrityVerification()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Verify Checksum (v)
+            </button>
+            <button type="button" class="btn" onclick="showBackingPath()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              Backing Path (o)
+            </button>
+          </div>
+        </div>
+
+        <div class="viewer-body">
+          <div class="path-bar">
+            <span id="backing-path-display">~/.gemini/antigravity-cli/receipts/run-9a3c9f28.json</span>
+            <span style="font-size:0.7rem; color:var(--text-dark);" id="capped-indicator">Lines: 12</span>
+          </div>
+          
+          <div class="verification-status-panel" id="verification-panel">
+          </div>
+
+          <pre class="code-view" id="artifact-content-pre"></pre>
+        </div>
+      </div>
+
+    </div>
+
+    <footer>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.2.3. Designed with high-performance dark aesthetics.</p>
+    </footer>
+  </div>
+
+  <script>
+    const ARTIFACTS = {
+      "receipts-1": {
+        name: "run-9a3c9f28.json",
+        category: "Receipts",
+        path: "~/.gemini/antigravity-cli/receipts/run-9a3c9f28.json",
+        badge: "Receipt",
+        badgeClass: "status-info",
+        content: `{
+  "runId": "run-9a3c9f28",
+  "command": "npm run build && node scripts/compile.js",
+  "exitCode": 0,
+  "startedAt": "2026-06-12T08:12:00Z",
+  "finishedAt": "2026-06-12T08:12:45Z",
+  "receiptIntegrity": "sha256-abc874fde3c99a0042188ffabec12530164c676643",
+  "filesCreated": [
+    "dist/index.js",
+    "dist/index.d.ts"
+  ]
+}`,
+        verifySuccess: true,
+        verifyLog: `[INFO] Read ~/.gemini/antigravity-cli/receipts/run-9a3c9f28.json
+[INFO] Validating required receipt fields and value ranges:
+  - runId: run-9a3c9f28 (VALID)
+  - command: 'npm run build && node scripts/compile.js' (VALID)
+  - exitCode: 0 (VALID)
+[INFO] Read ~/.gemini/antigravity-cli/state/runs.json
+[INFO] Found matching run envelope in global runs ledger.
+[INFO] Recomputing receipt integrity checksum:
+  - Expected: sha256-abc874fde3c99a0042188ffabec12530164c676643
+  - Computed: sha256-abc874fde3c99a0042188ffabec12530164c676643
+[SUCCESS] Receipt integrity verification PASSED.`
+      },
+      "receipts-2": {
+        name: "run-0428fa8e.json",
+        category: "Receipts",
+        path: "~/.gemini/antigravity-cli/receipts/run-0428fa8e.json",
+        badge: "Receipt",
+        badgeClass: "status-info",
+        content: `{
+  "runId": "run-0428fa8e",
+  "command": "sbatch run_sim.sh",
+  "exitCode": 1,
+  "startedAt": "2026-06-12T08:15:00Z",
+  "finishedAt": "2026-06-12T08:15:02Z",
+  "receiptIntegrity": "sha256-fffffffffffffffff99999999999999999999999",
+  "filesCreated": []
+}`,
+        verifySuccess: false,
+        verifyLog: `[INFO] Read ~/.gemini/antigravity-cli/receipts/run-0428fa8e.json
+[INFO] Validating required receipt fields and value ranges:
+  - runId: run-0428fa8e (VALID)
+  - command: 'sbatch run_sim.sh' (VALID)
+  - exitCode: 1 (WARNING: non-zero exit code)
+[INFO] Read ~/.gemini/antigravity-cli/state/runs.json
+[ERROR] Missing or unmatched run envelope in global runs ledger runs.json.
+[ERROR] Receipt integrity checksum mismatch:
+  - Expected: sha256-fffffffffffffffff99999999999999999999999
+  - Computed: sha256-000000000000000000000000000000000000000
+[FAILURE] Receipt integrity verification FAILED.`
+      },
+      "dispatch-1": {
+        name: "runs.json",
+        category: "Dispatch",
+        badge: "Ledger",
+        badgeClass: "status-success",
+        path: "~/.gemini/antigravity-cli/state/runs.json",
+        content: `[
+  {
+    "runId": "run-9a3c9f28",
+    "status": "success",
+    "cwd": "/home/akougkas/iowarp/clio-coder",
+    "timestamp": 1781259120000
+  },
+  {
+    "runId": "run-b209d841",
+    "status": "success",
+    "cwd": "/home/akougkas/iowarp/clio-coder",
+    "timestamp": 1781259180000
+  }
+]`,
+        verifySuccess: true,
+        verifyLog: `[INFO] Global runs ledger validation is read-only. Use 'Verify' on individual receipts.`
+      },
+      "tool-1": {
+        name: "bashExecution-out.log",
+        category: "Tool",
+        badge: "Output",
+        badgeClass: "status-success",
+        path: "/home/akougkas/iowarp/clio-coder/.clio/tmp/bashExecution-out.log",
+        content: `✔ All tests passed (12 specs)
+ℹ Checking boundary constraints...
+✔ Boundary checks passed.
+[incremental reader: file capped at first 50,000 lines]`,
+        verifySuccess: true,
+        verifyLog: `[INFO] Plain text execution log verified. Verification not applicable to raw tool outputs.`
+      },
+      "compaction-1": {
+        name: "current.jsonl",
+        category: "Compaction",
+        badge: "Summary",
+        badgeClass: "status-info",
+        path: "~/.gemini/antigravity-cli/sessions/cwd_hash_a9e3/sess_7a3d90f/current.jsonl",
+        content: `{"turn": 1, "compactionSummary": "Initialized project with local settings targets: deepseek-r1:8b"}
+{"turn": 4, "compactionSummary": "Masked 6 stale tool observations older than excludeLastTurns."}
+{"turn": 5, "compactionSummary": "LLM summary compaction executed: compressed 15,200 tokens into 1,200 summary tokens."}`,
+        verifySuccess: true,
+        verifyLog: `[INFO] History compaction ledger format verified.`
+      }
+    };
+
+    let activeKey = "receipts-1";
+
+    function initList() {
+      // Clear
+      document.getElementById("list-Receipts").innerHTML = "";
+      document.getElementById("list-Dispatch").innerHTML = "";
+      document.getElementById("list-Tool").innerHTML = "";
+      document.getElementById("list-Compaction").innerHTML = "";
+
+      Object.keys(ARTIFACTS).forEach(key => {
+        const art = ARTIFACTS[key];
+        const row = document.createElement("li");
+        row.className = `item-row ${key === activeKey ? 'active' : ''}`;
+        row.id = `item-${key}`;
+        row.onclick = () => selectArtifact(key);
+        row.innerHTML = `
+          <span>${art.name}</span>
+          <span style="font-size:0.65rem; color:var(--text-dark);">${art.badge}</span>
+        `;
+
+        document.getElementById(`list-${art.category}`).appendChild(row);
+      });
+    }
+
+    function selectArtifact(key) {
+      activeKey = key;
+      document.querySelectorAll(".item-row").forEach(el => { el.classList.remove("active"); });
+      document.getElementById(`item-${key}`).classList.add("active");
+
+      const art = ARTIFACTS[key];
+      document.getElementById("viewer-filename").innerText = art.name;
+      document.getElementById("viewer-badge").innerText = art.badge;
+      document.getElementById("viewer-badge").className = `status-badge ${art.badgeClass}`;
+      document.getElementById("backing-path-display").innerText = art.path;
+      
+      const codeEl = document.getElementById("artifact-content-pre");
+      codeEl.textContent = art.content;
+
+      const lines = art.content.split("\n").length;
+      document.getElementById("capped-indicator").innerText = `Lines: ${lines}`;
+
+      // Reset verification panel
+      const panel = document.getElementById("verification-panel");
+      panel.style.display = "none";
+      panel.className = "verification-status-panel";
+      
+      // Toggle verify button visibility based on category
+      const verifyBtn = document.getElementById("verify-btn");
+      if (art.category === "Receipts") {
+        verifyBtn.style.display = "inline-flex";
+      } else {
+        verifyBtn.style.display = "none";
+      }
+    }
+
+    function runIntegrityVerification() {
+      const art = ARTIFACTS[activeKey];
+      const panel = document.getElementById("verification-panel");
+      
+      panel.style.display = "block";
+      panel.textContent = art.verifyLog;
+      
+      if (art.verifySuccess) {
+        panel.className = "verification-status-panel success";
+      } else {
+        panel.className = "verification-status-panel error";
+      }
+    }
+
+    function showBackingPath() {
+      const art = ARTIFACTS[activeKey];
+      alert(`Backing absolute path:\n${art.path}`);
+    }
+
+    function filterArtifacts() {
+      const q = document.getElementById("filter-box").value.toLowerCase();
+      
+      Object.keys(ARTIFACTS).forEach(key => {
+        const art = ARTIFACTS[key];
+        const row = document.getElementById(`item-${key}`);
+        if (art.name.toLowerCase().includes(q) || art.category.toLowerCase().includes(q)) {
+          row.style.display = "flex";
+        } else {
+          row.style.display = "none";
+        }
+      });
+    }
+
+    // Keybindings support
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "v" || e.key === "V") {
+        const art = ARTIFACTS[activeKey];
+        if (art.category === "Receipts") {
+          runIntegrityVerification();
+        }
+      } else if (e.key === "o" || e.key === "O") {
+        showBackingPath();
+      }
+    });
+
+    window.onload = () => {
+      initList();
+      selectArtifact(activeKey);
+    };
+  </script>
+</body>
+</html>

@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Agent Fleet & Dispatch Blueprint</title>
-  <!-- Modern Google Font -->
+  <title>Clio Coder Agent Fleet Blueprint (v0.2.3)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -12,26 +11,32 @@
   <style>
     :root {
       --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-grid: rgba(255, 255, 255, 0.02);
+      --bg-card: rgba(13, 20, 38, 0.45);
+      --bg-card-hover: rgba(20, 30, 58, 0.6);
       --border-card: rgba(255, 255, 255, 0.08);
+      --border-card-hover: rgba(0, 240, 255, 0.3);
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
-      --text-dark: #6b7280;
+      --text-dim: #6b7280;
       
-      /* Glowing Accent Colors */
-      --color-primary: #00f0ff;
-      --color-primary-rgb: 0, 240, 255;
-      --color-secondary: #bd00ff;
-      --color-secondary-rgb: 189, 0, 255;
-      --color-accent: #10b981;
-      --color-warn: #f59e0b;
-      --color-danger: #ef4444;
-      --color-info: #3b82f6;
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
       
-      --gradient-main: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-      --shadow-glow: 0 0 20px rgba(var(--color-primary-rgb), 0.15);
-      --font-sans: 'Plus Jakarta Sans', sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
+      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      
+      --glass-blur: blur(12px);
     }
 
     * {
@@ -43,164 +48,160 @@
     body {
       background-color: var(--bg-dark);
       background-image: 
-        radial-gradient(circle at 10% 20%, rgba(var(--color-primary-rgb), 0.05) 0%, transparent 40%),
-        radial-gradient(circle at 90% 80%, rgba(var(--color-secondary-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
         radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
       color: var(--text-main);
       font-family: var(--font-sans);
       min-height: 100vh;
       line-height: 1.6;
       overflow-x: hidden;
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: center top;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.8;
     }
 
     .container {
       max-width: 1400px;
       margin: 0 auto;
       padding: 2rem;
+      position: relative;
+      z-index: 1;
     }
 
-    /* Header */
+    /* Header Styling */
     header {
-      text-align: center;
-      margin-bottom: 3rem;
-      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
     }
 
     .header-logo {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 72px;
-      height: 72px;
-      background: rgba(255, 255, 255, 0.03);
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--border-card);
-      border-radius: 18px;
-      margin-bottom: 1rem;
-      box-shadow: var(--shadow-glow);
-      position: relative;
+      border-radius: 12px;
     }
 
-    .header-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 20px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(4px);
+    .header-logo svg {
+      width: 28px;
+      height: 28px;
     }
 
-
-    .header-logo img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
-    }
-
-h1 {
-      font-size: 2.75rem;
+    .header-title-wrapper h1 {
+      font-size: 1.5rem;
       font-weight: 800;
-      letter-spacing: -0.05em;
-      margin-bottom: 0.5rem;
-      background: linear-gradient(to right, #ffffff, #a5b4fc, var(--color-primary));
+      letter-spacing: -0.03em;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    .version-stamp {
-      font-family: var(--font-mono);
-      font-size: 0.9rem;
-      color: var(--color-primary);
-      background: rgba(0, 240, 255, 0.1);
-      padding: 0.2rem 0.6rem;
-      border-radius: 4px;
-      border: 1px solid rgba(0, 240, 255, 0.2);
-    }
-
-    .subtitle {
-      font-size: 1.1rem;
+    .header-title-wrapper p {
+      font-size: 0.825rem;
       color: var(--text-muted);
-      max-width: 600px;
-      margin: 1rem auto 0 auto;
     }
 
-    /* Glass Card layout */
-    .glass-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-radius: 16px;
-      padding: 2rem;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      margin-bottom: 2rem;
-      transition: border-color 0.3s ease, box-shadow 0.3s ease;
-    }
-
-    .glass-card:hover {
-      border-color: rgba(var(--color-primary-rgb), 0.2);
-    }
-
-    .card-title {
-      font-size: 1.25rem;
-      font-weight: 700;
-      margin-bottom: 1rem;
-      color: #fff;
+    .header-right {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 0.75rem;
+      gap: 1rem;
     }
 
-    .card-title svg {
-      width: 20px;
-      height: 20px;
-      fill: var(--color-primary);
+    .back-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .back-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .version-badge {
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      color: var(--color-cyan);
+      padding: 0.35rem 0.75rem;
+      border-radius: 50px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
     }
 
     /* Tabs Navigation */
     .tabs-nav {
       display: flex;
-      justify-content: center;
       gap: 0.75rem;
-      margin-bottom: 2.5rem;
-      flex-wrap: wrap;
+      margin-bottom: 2rem;
     }
 
     .tab-btn {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-card);
       color: var(--text-muted);
-      padding: 0.75rem 1.5rem;
-      border-radius: 9999px;
+      padding: 0.6rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      transition: all 0.25s ease;
+      transition: all 0.2s;
     }
 
     .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
       color: var(--text-main);
-      border-color: rgba(var(--color-primary-rgb), 0.3);
     }
 
     .tab-btn.active {
       background: var(--gradient-main);
-      color: #000000;
-      font-weight: 700;
+      color: #090d16;
       border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-primary-rgb), 0.3);
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
     }
 
+    /* Content Layout */
     .tab-pane {
       display: none;
-      animation: fadeIn 0.4s ease-out forwards;
+      animation: fadeIn 0.3s ease-out forwards;
     }
 
     .tab-pane.active {
@@ -208,683 +209,698 @@ h1 {
     }
 
     @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
+      from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Interactive Simulator */
-    .simulator-grid {
+    /* Split Grid */
+    .blueprint-layout {
       display: grid;
-      grid-template-columns: 400px 1fr;
+      grid-template-columns: 1fr 1fr;
       gap: 2rem;
+      align-items: start;
     }
 
-    @media (max-width: 950px) {
-      .simulator-grid {
+    @media (max-width: 1100px) {
+      .blueprint-layout {
         grid-template-columns: 1fr;
       }
     }
 
-    .control-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
+    .glass-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      backdrop-filter: var(--glass-blur);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
     }
 
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    label {
-      font-size: 0.8rem;
+    .glass-card h2 {
+      font-size: 1.25rem;
       font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.75rem;
+    }
+
+    .glass-card h2 svg {
+      width: 18px;
+      height: 18px;
+      color: var(--color-cyan);
+    }
+
+    .glass-card p {
+      font-size: 0.925rem;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+
+    /* Form selectors */
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: var(--text-muted);
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
     }
 
     select, input, textarea {
-      background: rgba(0, 0, 0, 0.3);
+      width: 100%;
+      background: rgba(9, 13, 22, 0.7);
       border: 1px solid var(--border-card);
       border-radius: 8px;
-      color: var(--text-main);
-      padding: 0.75rem;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      width: 100%;
-      transition: all 0.2s ease;
+      padding: 0.65rem 0.85rem;
+      color: #fff;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      outline: none;
+      transition: all 0.2s;
     }
 
     select:focus, input:focus, textarea:focus {
-      outline: none;
-      border-color: var(--color-primary);
-      box-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.25);
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
     }
 
-    /* Checkbox lists */
-    .checkbox-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
+    textarea {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      resize: vertical;
+    }
+
+    .checkbox-list {
+      display: flex;
+      flex-wrap: wrap;
       gap: 0.5rem;
-      background: rgba(0,0,0,0.2);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem;
-      max-height: 180px;
-      overflow-y: auto;
+      margin-top: 0.5rem;
     }
 
     .checkbox-item {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.3rem;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-card);
+      padding: 0.35rem 0.6rem;
+      border-radius: 6px;
       font-size: 0.8rem;
-      font-family: var(--font-mono);
+      cursor: pointer;
     }
 
     .checkbox-item input {
       width: auto;
+    }
+
+    /* Presets list */
+    .presets-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .preset-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.725rem;
       cursor: pointer;
+      transition: all 0.2s;
     }
 
-    /* Outcome Panel */
-    .outcome-panel {
-      background: rgba(5, 7, 13, 0.8);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1.25rem;
-    }
-
-    .outcome-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 0.75rem;
-    }
-
-    .status-badge {
-      font-size: 0.85rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      padding: 0.25rem 0.75rem;
-      border-radius: 9999px;
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-
-    .status-pass { background: rgba(16, 185, 129, 0.15); color: var(--color-accent); border: 1px solid rgba(16, 185, 129, 0.3); }
-    .status-fail { background: rgba(239, 68, 68, 0.15); color: var(--color-danger); border: 1px solid rgba(239, 68, 68, 0.3); }
-
-    .console-log {
-      background: #020408;
-      border: 1px solid rgba(255,255,255,0.05);
-      border-radius: 8px;
-      padding: 1rem;
-      font-family: var(--font-mono);
-      font-size: 0.82rem;
-      color: #c9d1d9;
-      height: 250px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-
-    .log-info { color: #58a6ff; }
-    .log-warn { color: var(--color-warn); }
-    .log-error { color: var(--color-danger); }
-    .log-success { color: var(--color-accent); }
-
-    /* SVG Flowcharts */
-    .svg-flow-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      background: rgba(5, 7, 13, 0.5);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      overflow-x: auto;
-      margin: 1.5rem 0;
-    }
-
-    .svg-flow {
-      max-width: 100%;
-      height: auto;
-    }
-
-    /* List grids */
-    .grid-recipes {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1rem;
-    }
-
-    .recipe-card {
-      background: rgba(255,255,255,0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .recipe-card:hover {
-      background: rgba(255,255,255,0.05);
-      border-color: var(--color-primary);
-    }
-
-    .recipe-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.5rem;
-    }
-
-    .recipe-name {
-      font-weight: 700;
+    .preset-btn:hover {
+      background: rgba(0, 240, 255, 0.08);
+      border-color: var(--color-cyan);
       color: #fff;
     }
 
-    .recipe-mode {
-      font-family: var(--font-mono);
-      font-size: 0.7rem;
-      background: rgba(255,255,255,0.08);
-      padding: 0.1rem 0.4rem;
-      border-radius: 4px;
-    }
-
-    .recipe-desc {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      height: 40px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-    }
-
-    .recipe-meta {
+    /* Gates Output */
+    .gate-row {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.75rem;
       display: flex;
-      gap: 0.5rem;
-      font-size: 0.7rem;
-      font-family: var(--font-mono);
-      color: var(--text-dark);
-      margin-top: 0.5rem;
+      justify-content: space-between;
+      align-items: center;
     }
 
+    .gate-info {
+      font-size: 0.875rem;
+    }
+
+    .gate-info strong {
+      display: block;
+      color: #fff;
+    }
+
+    .gate-info span {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .gate-status {
+      font-weight: 700;
+      font-size: 0.8rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    .gate-status.pass { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--color-emerald); }
+    .gate-status.fail { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--color-rose); }
+
+    /* Tables */
+    .ref-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.9rem;
+    }
+
+    .ref-table th, .ref-table td {
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border-card);
+      text-align: left;
+    }
+
+    .ref-table th {
+      background: rgba(255,255,255,0.03);
+    }
+
+    .ref-table tr.shadow-agent td {
+      color: var(--text-dim);
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-dim);
+      font-size: 0.875rem;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <div class="header-logo">
-        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Clio Coder Agent Fleet</h1>
+          <p>Dispatched worker recipes, dynamic catalogs, and dispatch admission gates</p>
+        </div>
       </div>
-      <h1>Clio Coder Agent Fleet Spec</h1>
-      <div style="margin-top: 0.5rem;">
-        <span class="version-stamp">Clio Coder v0.2.2</span>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.3</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
       </div>
-      <p class="subtitle">Technical Blueprint & Interactive Playground for Recipe Discovery, Gating, and Dispatch Admission Policies.</p>
     </header>
 
-    <!-- Navigation Tabs -->
-    <nav class="tabs-nav">
-      <button type="button" class="tab-btn active" onclick="_switchTab('simulator')">
-        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" fill="currentColor"/></svg>
-        Dispatch Admission Simulator
+    <div class="tabs-nav">
+      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Interactive Recipe &amp; Dispatch Inspector
       </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('catalog')">
-        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z" fill="currentColor"/></svg>
-        Built-in Catalog Explorer
+      <button type="button" class="tab-btn" onclick="switchTab('reference')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        Full Technical Reference
       </button>
-      <button type="button" class="tab-btn" onclick="_switchTab('diagrams')">
-        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor"/></svg>
-        Sequence Diagrams
-      </button>
-    </nav>
-
-    <!-- TAB 1: SIMULATOR -->
-    <div id="pane-simulator" class="tab-pane active">
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-          Gating Policy & Dispatch Admission Simulator
-        </h2>
-        <p style="margin-bottom: 1.5rem; color: var(--text-muted);">
-          When an agent is dispatched via TUI `/run` or CLI `clio run`, Clio validates the request against strict gating criteria:
-          Mode visible tools matching, active action class scopes, and workspace boundary restrictions.
-        </p>
-
-        <div class="simulator-grid">
-          <!-- Controls -->
-          <div class="control-panel">
-            <div class="form-group">
-              <label>Select Dispatch Recipe</label>
-              <select id="sim-recipe" onchange="loadRecipeIntoSim()">
-                <option value="scout">scout (Mode: advise)</option>
-                <option value="coder" selected>coder (Mode: default)</option>
-                <option value="architect">architect (Mode: advise)</option>
-                <option value="verifier">verifier (Mode: default)</option>
-                <option value="custom">-- Custom Recipe --</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label>Orchestrator Mode</label>
-              <select id="sim-mode" onchange="runSim()">
-                <option value="default" selected>default (Read-write execution allowed)</option>
-                <option value="advise">advise (Read-only review & planning)</option>
-                <option value="super">super (Elevated access)</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label>Tool Profile Limit</label>
-              <select id="sim-profile" onchange="runSim()">
-                <option value="full-agent" selected>full-agent (All recipe tools allowed)</option>
-                <option value="science-local">science-local (Limit to read + build + test)</option>
-                <option value="minimal-local">minimal-local (Limit to read + search only)</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label>Recipe Requested Tools</label>
-              <div class="checkbox-grid" id="tools-container">
-                <!-- Javascript populated -->
-              </div>
-            </div>
-          </div>
-
-          <!-- Console Output -->
-          <div class="outcome-panel">
-            <div class="outcome-header">
-              <span class="recipe-name" style="font-size: 1.1rem;" id="sim-active-title">coder</span>
-              <div class="status-badge status-pass" id="sim-status-badge">
-                <span id="sim-status-text">ADMISSION PASSED</span>
-              </div>
-            </div>
-
-            <div>
-              <label>Effective Tool Capability Set</label>
-              <div id="sim-capabilities" style="margin-top: 0.5rem; display: flex; gap: 0.35rem; flex-wrap: wrap;">
-                <!-- Badges -->
-              </div>
-            </div>
-
-            <div class="form-group" style="flex-grow: 1;">
-              <label>Execution Verification Log</label>
-              <div class="console-log" id="sim-console">
-                <!-- Log entries -->
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
-    <!-- TAB 2: CATALOG EXPLORER -->
-    <div id="pane-catalog" class="tab-pane">
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
-          Built-in Agent Registry Explorer
-        </h2>
-        <p style="margin-bottom: 1.5rem; color: var(--text-muted);">
-          Explore the catalog of recipes defined inside <code>src/domains/agents/builtins/*.md</code>. 
-          Clio merges built-in default files with <code>~/.local/share/clio/agents/</code> and repository-level <code>.clio/agents/</code> configurations dynamically.
-        </p>
-
-        <div class="grid-recipes" id="catalog-container">
-          <!-- Populated by JS -->
-        </div>
-      </div>
-
-      <!-- Detail Card -->
-      <div class="glass-card" id="recipe-detail-card" style="display:none;">
-        <h3 class="card-title" id="detail-title" style="border-bottom:none; margin-bottom: 0;">scout</h3>
-        <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-primary); margin-bottom: 1rem;" id="detail-path">src/domains/agents/builtins/scout.md</div>
+    <!-- TAB 1: INTERACTIVE -->
+    <main class="tab-pane active" id="pane-interactive">
+      <div class="blueprint-layout">
         
-        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;">
-          <div>
-            <h4 style="margin-bottom: 0.5rem; color: #fff;">Frontmatter Parsed Properties</h4>
-            <table style="font-size:0.8rem; margin:0;">
-              <tbody>
-                <tr><td>Name</td><td id="detail-prop-name">Scout</td></tr>
-                <tr><td>Description</td><td id="detail-prop-desc">reconnaissance</td></tr>
-                <tr><td>Mode</td><td id="detail-prop-mode">advise</td></tr>
-                <tr><td>Tools</td><td id="detail-prop-tools">[]</td></tr>
-                <tr><td>Thinking Level</td><td id="detail-prop-thinking">off</td></tr>
-              </tbody>
-            </table>
+        <!-- Left: Form inputs -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              Agent Recipe Editor
+            </h2>
+            <p>Load a template or edit the YAML frontmatter. The validator compiles this into an AgentSpec.</p>
+            
+            <div class="presets-list">
+              <span class="preset-btn" onclick="loadAgentPreset('coder')">Coder</span>
+              <span class="preset-btn" onclick="loadAgentPreset('architect')">Architect</span>
+              <span class="preset-btn" onclick="loadAgentPreset('verifier')">Verifier</span>
+              <span class="preset-btn" onclick="loadAgentPreset('scout')">Scout (Shadow)</span>
+            </div>
+
+            <div class="form-group">
+              <textarea id="recipeInput" rows="12" oninput="runInspection()"></textarea>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="delegationType">Worker Target</label>
+                <select id="delegationType" onchange="runInspection()">
+                  <option value="orchestrator">Interactive Local Orchestrator</option>
+                  <option value="acp">External ACP Delegation Worker</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="orchestratorScope">Orchestrator Scope</label>
+                <input type="text" id="orchestratorScope" value="src/, tests/" oninput="runInspection()">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="workerScope">Worker Scope</label>
+                <input type="text" id="workerScope" value="src/" oninput="runInspection()">
+              </div>
+              <div class="form-group">
+                <label>Target Capabilities</label>
+                <div class="checkbox-list">
+                  <label class="checkbox-item"><input type="checkbox" id="cap-read" checked onchange="runInspection()"> read</label>
+                  <label class="checkbox-item"><input type="checkbox" id="cap-write" checked onchange="runInspection()"> write</label>
+                  <label class="checkbox-item"><input type="checkbox" id="cap-edit" checked onchange="runInspection()"> edit</label>
+                  <label class="checkbox-item"><input type="checkbox" id="cap-git" checked onchange="runInspection()"> git</label>
+                  <label class="checkbox-item"><input type="checkbox" id="cap-run" checked onchange="runInspection()"> run_task</label>
+                  <label class="checkbox-item"><input type="checkbox" id="cap-web" checked onchange="runInspection()"> web_fetch</label>
+                </div>
+              </div>
+            </div>
           </div>
-          <div>
-            <h4 style="margin-bottom: 0.5rem; color: #fff;">Instruction Prompt Body</h4>
-            <pre style="margin:0; font-size: 0.78rem; height: 180px; overflow-y:auto;" id="detail-body">instructions</pre>
+        </div>
+
+        <!-- Right: Gates evaluation -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              Dispatch Admission Gates
+            </h2>
+            <p>Clio's dispatch engine evaluates three core gates before deploying workers.</p>
+            
+            <!-- Gate 1 -->
+            <div class="gate-row">
+              <div class="gate-info">
+                <strong>Gate 1: Tool Compatibility Check</strong>
+                <span id="gate1Desc">Comparing recipe tools against target capabilities</span>
+              </div>
+              <div class="gate-status pass" id="gate1Status">PASS</div>
+            </div>
+
+            <!-- Gate 2 -->
+            <div class="gate-row">
+              <div class="gate-info">
+                <strong>Gate 2: Action Class Capability Check</strong>
+                <span id="gate2Desc">Verifying allowed action classes</span>
+              </div>
+              <div class="gate-status pass" id="gate2Status">PASS</div>
+            </div>
+
+            <!-- Gate 3 -->
+            <div class="gate-row">
+              <div class="gate-info">
+                <strong>Gate 3: Scope Subset Validation</strong>
+                <span id="gate3Desc">Worker scope must be a subset of orchestrator's active scope</span>
+              </div>
+              <div class="gate-status pass" id="gate3Status">PASS</div>
+            </div>
+
+            <!-- Gate 4 (Security Shadow Restriction) -->
+            <div class="gate-row">
+              <div class="gate-info">
+                <strong>Gate 4: Shadow/Internal Safe Delegation</strong>
+                <span id="gate4Desc">Shadow/internal agents cannot run on external ACP workers</span>
+              </div>
+              <div class="gate-status pass" id="gate4Status">PASS</div>
+            </div>
+
+            <div class="verdict-header" style="margin-top:1.5rem;">Admission Verdict</div>
+            <div id="admissionCard" class="gate-row" style="padding:1.25rem; background:rgba(16, 185, 129, 0.08); border:1px solid rgba(16, 185, 129, 0.3)">
+              <div class="gate-info">
+                <strong id="verdictTitle" style="font-size:1.2rem; color:var(--color-emerald)">DISPATCH ALLOWED</strong>
+                <span id="verdictDetails">All admission gates checked and passed. Fleet agent rehydrated successfully.</span>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- TAB 3: DIAGRAMS -->
-    <div id="pane-diagrams" class="tab-pane">
-      <!-- Recipe discovery -->
+      </div>
+    </main>
+
+    <!-- TAB 2: TECHNICAL REFERENCE -->
+    <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-          Recipe Discovery & Overriding Hierarchy
-        </h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
-          How Clio resolves which recipe file to load for a given agent name. Files are merged chronologically with latter paths replacing duplicates:
-        </p>
+        <h2>Clio Coder Agent Registry Specifications</h2>
+        <p>Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files containing YAML frontmatter declarations and an instruction body.</p>
+        
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Shipped Base Agents</h3>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Agent ID</th>
+              <th>Primary Tools</th>
+              <th>Purpose</th>
+              <th>Capability</th>
+              <th>Latency</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>architect</code></td>
+              <td>read, grep, glob, ls, code_nav, git, write_plan</td>
+              <td>Designs changes across boundaries, contracts, and validation gates.</td>
+              <td><code>artifact-write</code></td>
+              <td>deep</td>
+            </tr>
+            <tr>
+              <td><code>coder</code></td>
+              <td>read, write, edit, grep, glob, ls, web_fetch, git, run_task, validate_frontend</td>
+              <td>Implements bounded code changes and behavior-preserving refactors.</td>
+              <td><code>workspace-edit</code></td>
+              <td>balanced</td>
+            </tr>
+            <tr>
+              <td><code>debugger</code></td>
+              <td>read, grep, glob, ls, git, run_task</td>
+              <td>Diagnoses failing code, tests, or receipts without making edits.</td>
+              <td><code>verification</code></td>
+              <td>balanced</td>
+            </tr>
+            <tr>
+              <td><code>documenter</code></td>
+              <td>read, write, edit, grep, glob, ls, git, run_task</td>
+              <td>Updates developer-facing docs, examples, and operational runbooks.</td>
+              <td><code>workspace-edit</code></td>
+              <td>balanced</td>
+            </tr>
+            <tr>
+              <td><code>tester</code></td>
+              <td>read, write, edit, grep, glob, ls, git, run_task</td>
+              <td>Adds focused deterministic tests for regressions and missing coverage.</td>
+              <td><code>workspace-edit</code></td>
+              <td>balanced</td>
+            </tr>
+            <tr>
+              <td><code>verifier</code></td>
+              <td>read, grep, glob, ls, git, run_task, validate_frontend</td>
+              <td>Independently runs and reports test, lint, build, and release gates.</td>
+              <td><code>verification</code></td>
+              <td>fast</td>
+            </tr>
+          </tbody>
+        </table>
 
-        <div class="svg-flow-container">
-          <svg aria-hidden="true" class="svg-flow" width="800" height="150" viewBox="0 0 800 150">
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--text-muted)"/>
-              </marker>
-            </defs>
-            
-            <rect x="20" y="45" width="160" height="60" rx="8" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="100" y="75" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">1. Built-in Defaults</text>
-            <text x="100" y="90" fill="var(--text-dark)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">src/domains/agents/builtins/</text>
-
-            <rect x="290" y="45" width="160" height="60" rx="8" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="370" y="75" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">2. User Custom Overrides</text>
-            <text x="370" y="90" fill="var(--text-dark)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">&lt;dataDir&gt;/agents/</text>
-
-            <rect x="560" y="45" width="160" height="60" rx="8" fill="rgba(0, 240, 255, 0.05)" stroke="var(--color-primary)" stroke-width="1.5"/>
-            <text x="640" y="75" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">3. Repo Project Configs</text>
-            <text x="640" y="90" fill="var(--color-primary)" font-size="9" font-family="var(--font-mono)" text-anchor="middle">.clio/agents/</text>
-            
-            <path d="M 180 75 L 280 75" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 450 75 L 550 75" fill="none" stroke="var(--text-dark)" stroke-width="1.5" stroke-dasharray="3" marker-end="url(#arrow)"/>
-          </svg>
-        </div>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Shipped Shadow Helpers (Reserved/Hidden)</h3>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Agent ID</th>
+              <th>Primary Tools</th>
+              <th>Purpose</th>
+              <th>Capability</th>
+              <th>Latency</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="shadow-agent">
+              <td><code>scout</code></td>
+              <td>read, grep, glob, ls, workspace_context, code_nav, git</td>
+              <td>Shadow fast codebase reconnaissance, symbol mapping, and context.</td>
+              <td><code>read-only</code></td>
+              <td>fast</td>
+            </tr>
+            <tr class="shadow-agent">
+              <td><code>researcher</code></td>
+              <td>read, web_fetch, read_skill</td>
+              <td>Shadow docs and external-source researcher for coding decisions.</td>
+              <td><code>read-only</code></td>
+              <td>deep</td>
+            </tr>
+            <tr class="shadow-agent">
+              <td><code>provenance</code></td>
+              <td>read, grep, glob, ls, git</td>
+              <td>Shadow evidence, receipt, diff, and telemetry reader for handoffs.</td>
+              <td><code>read-only</code></td>
+              <td>balanced</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
+    </main>
 
-      <!-- Admission check flowchart -->
-      <div class="glass-card">
-        <h2 class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-          Dispatch Admission Check Pipeline
-        </h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
-          How Clio evaluates tool calling capabilities before approving model dispatch:
-        </p>
-
-        <div class="svg-flow-container">
-          <svg aria-hidden="true" class="svg-flow" width="800" height="260" viewBox="0 0 800 260">
-            <path d="M 130 90 L 180 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 320 90 L 370 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 500 90 L 550 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            <path d="M 680 90 L 730 90" fill="none" stroke="var(--text-dark)" stroke-width="1.5" marker-end="url(#arrow)"/>
-            
-            <!-- Fail redirects -->
-            <path d="M 250 120 L 250 200 L 710 200" fill="none" stroke="var(--color-danger)" stroke-width="1.2" stroke-dasharray="3" marker-end="url(#arrow)"/>
-            <path d="M 435 120 L 435 200" fill="none" stroke="var(--color-danger)" stroke-width="1.2" stroke-dasharray="3"/>
-            <path d="M 615 120 L 615 200" fill="none" stroke="var(--color-danger)" stroke-width="1.2" stroke-dasharray="3"/>
-
-            <!-- Nodes -->
-            <rect x="10" y="60" width="120" height="60" rx="8" fill="rgba(var(--color-primary-rgb), 0.1)" stroke="var(--color-primary)" stroke-width="1.5"/>
-            <text x="70" y="90" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Dispatch Request</text>
-            <text x="70" y="102" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">/run [agent]</text>
-            
-            <rect x="180" y="60" width="140" height="60" rx="8" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="250" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Gate 1: Mode Check</text>
-            <text x="250" y="98" fill="var(--text-dark)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Is tool allowed by Mode?</text>
-
-            <rect x="370" y="60" width="130" height="60" rx="8" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="435" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Gate 2: Action Class</text>
-            <text x="435" y="98" fill="var(--text-dark)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Check safety policy limits</text>
-
-            <rect x="550" y="60" width="130" height="60" rx="8" fill="rgba(255,255,255,0.03)" stroke="var(--border-card)" stroke-width="1.5"/>
-            <text x="615" y="85" fill="#fff" font-size="11" font-family="var(--font-sans)" text-anchor="middle">Gate 3: Scope Limit</text>
-            <text x="615" y="98" fill="var(--text-dark)" font-size="9" font-family="var(--font-sans)" text-anchor="middle">Worker subset check</text>
-
-            <rect x="710" y="170" width="80" height="60" rx="8" fill="rgba(239, 68, 68, 0.15)" stroke="var(--color-danger)" stroke-width="1.5"/>
-            <text x="750" y="205" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Blocked</text>
-
-            <rect x="710" y="60" width="80" height="60" rx="8" fill="rgba(16, 185, 129, 0.15)" stroke="var(--color-accent)" stroke-width="1.5"/>
-            <text x="750" y="95" fill="#fff" font-size="11" font-family="var(--font-sans)" font-weight="bold" text-anchor="middle">Allowed</text>
-          </svg>
-        </div>
-      </div>
-    </div>
+    <footer>
+      <p>Clio Coder Agent Catalog spec &bull; Version 0.2.3</p>
+    </footer>
   </div>
 
-  <footer>
-    <p>Produced automatically for Clio Coder's Engineering Audit Documentation.</p>
-    <p style="margin-top: 0.5rem;"><a href="https://github.com/iowarp/clio-coder" target="_blank">Clio Coder Repository</a> &bull; part of IOWarp's CLIO ecosystem of agentic science.</p>
-  </footer>
-
   <script>
-    // Built-in recipes catalog data parsed from codebase
-    const RECIPES = {
-      scout: {
-        id: "scout",
-        name: "Scout",
-        description: "Shadow fast codebase reconnaissance, symbol mapping, and codewiki context.",
-        mode: "advise",
-        tools: ["read", "grep", "glob", "ls", "git_status", "git_diff", "git_log", "workspace_context", "find_symbol", "entry_points", "where_is"],
-        thinkingLevel: "off",
-        filepath: "src/domains/agents/builtins/scout.md",
-        body: "You are Scout, a shadow reconnaissance agent for fast codebase orientation."
-      },
-      coder: {
-        id: "coder",
-        name: "Coder",
-        description: "Implements bounded code changes, repairs, and behavior-preserving refactors.",
-        mode: "default",
-        tools: ["read", "write", "edit", "grep", "glob", "ls", "web_fetch", "git_status", "git_diff", "git_log", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend"],
-        thinkingLevel: "medium",
-        filepath: "src/domains/agents/builtins/coder.md",
-        body: "You are Coder, the base implementation agent.\nStart by restating the assigned coding task and the finished-state criteria."
-      },
-      architect: {
-        id: "architect",
-        name: "Architect",
-        description: "Designs coding changes across boundaries, contracts, migrations, and validation gates.",
-        mode: "advise",
-        tools: ["read", "grep", "glob", "ls", "git_status", "git_diff", "write_plan", "find_symbol", "entry_points", "where_is"],
-        thinkingLevel: "high",
-        filepath: "src/domains/agents/builtins/architect.md",
-        body: "You are Architect, the base design agent for coding work.\nStart by restating the requested change, the affected modules, and the decision the operator needs."
-      },
-      verifier: {
-        id: "verifier",
-        name: "Verifier",
-        description: "Independently runs and reports test, lint, build, review, and release gates.",
-        mode: "default",
-        tools: ["read", "grep", "glob", "ls", "git_status", "git_diff", "git_log", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend"],
-        thinkingLevel: "low",
-        filepath: "src/domains/agents/builtins/verifier.md",
-        body: "You are Verifier, the base independent quality agent.\nStart by restating the artifact, diff, command, or release gate you are validating."
-      }
-    };
-
-    // Mode-to-allowed tools matrix logic
-    const MODE_ALLOWED_TOOLS = {
-      advise: new Set(["read", "grep", "glob", "ls", "web_fetch", "git_diff", "git_status", "git_log", "write_review"]),
-      default: new Set(["read", "grep", "glob", "ls", "web_fetch", "git_diff", "git_status", "git_log", "write_review", "edit", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend"]),
-      super: new Set(["read", "grep", "glob", "ls", "web_fetch", "git_diff", "git_status", "git_log", "write_review", "edit", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend", "unsafe_shell"])
-    };
-
-    // Tool profiles list definitions
-    const TOOL_PROFILES = {
-      "minimal-local": new Set(["read", "grep", "glob", "ls", "git_status", "git_diff", "git_log"]),
-      "science-local": new Set(["read", "grep", "glob", "ls", "git_status", "git_diff", "git_log", "run_tests", "run_lint", "run_build", "package_script", "validate_frontend"]),
-      "full-agent": null
-    };
-
-    const ALL_TOOLS = [
-      "read", "grep", "glob", "ls", "web_fetch", "git_diff", "git_status", 
-      "git_log", "write_review", "edit", "run_tests", "run_lint", "run_build", 
-      "package_script", "validate_frontend", "unsafe_shell"
-    ];
-
-    function initSimulator() {
-      // Build tool checkboxes
-      const container = document.getElementById("tools-container");
-      container.innerHTML = "";
-      ALL_TOOLS.forEach(tool => {
-        const div = document.createElement("div");
-        div.className = "checkbox-item";
-        div.innerHTML = `<input type="checkbox" id="tool-${tool}" onchange="runSim()"> <label for="tool-${tool}">${tool}</label>`;
-        container.appendChild(div);
-      });
-      loadRecipeIntoSim();
-    }
-
-    function loadRecipeIntoSim() {
-      const selected = document.getElementById("sim-recipe").value;
-      if (selected === "custom") {
-        document.getElementById("sim-active-title").innerText = "Custom Recipe";
-        return;
-      }
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
+      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
       
-      const recipe = RECIPES[selected];
-      document.getElementById("sim-active-title").innerText = recipe.name;
-      document.getElementById("sim-mode").value = recipe.mode;
-      document.getElementById("sim-profile").value = "full-agent";
-      
-      // Check recipe tools
-      ALL_TOOLS.forEach(tool => {
-        document.getElementById(`tool-${tool}`).checked = recipe.tools.includes(tool);
-      });
-
-      runSim();
-    }
-
-    function runSim() {
-      const recipeName = document.getElementById("sim-recipe").value;
-      const mode = document.getElementById("sim-mode").value;
-      const profileName = document.getElementById("sim-profile").value;
-      
-      const reqTools = [];
-      ALL_TOOLS.forEach(tool => {
-        if (document.getElementById(`tool-${tool}`).checked) {
-          reqTools.push(tool);
-        }
-      });
-
-      const allowedByMode = MODE_ALLOWED_TOOLS[mode];
-      const allowedByProfile = TOOL_PROFILES[profileName];
-
-      const consoleLog = document.getElementById("sim-console");
-      consoleLog.innerHTML = "";
-
-      log(`[clio:dispatch] Starting admission check for recipe=${recipeName} under mode=${mode}...`, "info");
-      
-      let hasError = false;
-      const effectiveTools = [];
-
-      reqTools.forEach(tool => {
-        log(`Checking visibility for tool: ${tool}...`, "info");
-        
-        // Mode gate
-        if (!allowedByMode.has(tool)) {
-          log(`[BLOCK] Tool "${tool}" is not visible in mode "${mode}"!`, "error");
-          hasError = true;
-          return;
-        }
-
-        // Profile gate
-        if (allowedByProfile && !allowedByProfile.has(tool)) {
-          log(`[BLOCK] Tool "${tool}" filtered out by active profile "${profileName}"!`, "warn");
-          return;
-        }
-
-        effectiveTools.push(tool);
-        log(`[OK] Tool "${tool}" approved.`, "success");
-      });
-
-      // Render Effective Tools
-      const capContainer = document.getElementById("sim-capabilities");
-      capContainer.innerHTML = "";
-      effectiveTools.forEach(tool => {
-        capContainer.innerHTML += `<span class="badge badge-primary">${tool}</span>`;
-      });
-
-      const badge = document.getElementById("sim-status-badge");
-      const badgeText = document.getElementById("sim-status-text");
-
-      if (hasError) {
-        badge.className = "status-badge status-fail";
-        badgeText.innerText = "ADMISSION BLOCKED";
-        log(`[FAIL] Dispatch Admission Policy Refused! Visiblity constraints violated.`, "error");
+      if (tabId === 'interactive') {
+        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+        document.getElementById('pane-interactive').classList.add('active');
       } else {
-        badge.className = "status-badge status-pass";
-        badgeText.innerText = "ADMISSION PASSED";
-        log(`[SUCCESS] Dispatch Admission approved! Resolved tools: [${effectiveTools.join(", ")}]`, "success");
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('pane-reference').classList.add('active');
       }
     }
 
-    function log(msg, type) {
-      const consoleLog = document.getElementById("sim-console");
-      const span = document.createElement("span");
-      span.className = `log-${type}`;
-      span.innerText = `${msg}\n`;
-      consoleLog.appendChild(span);
-      consoleLog.scrollTop = consoleLog.scrollHeight;
+    const agentRecipes = {
+      coder: `---
+name: Coder
+description: Bounded code changes
+tools: [read, edit, write, run_task]
+category: implement
+capabilityClass: workspace-edit
+latencyClass: balanced
+audience: base
+---
+You are Coder. Implement clean code changes...`,
+      architect: `---
+name: Architect
+description: Designs changes across boundaries
+tools: [read, git, write]
+category: plan
+capabilityClass: artifact-write
+latencyClass: deep
+audience: base
+---
+You are Architect. Outline architectural specifications...`,
+      verifier: `---
+name: Verifier
+description: Independently runs and reports test/lint gates
+tools: [read, run_task]
+category: quality
+capabilityClass: verification
+latencyClass: fast
+audience: base
+---
+You are Verifier. Build and test verification paths...`,
+      scout: `---
+name: Scout
+description: Codebase reconnaissance
+tools: [read, git]
+category: explore
+capabilityClass: read-only
+latencyClass: fast
+audience: shadow
+---
+You are Scout. Map symbols and indices...`
+    };
+
+    function loadAgentPreset(id) {
+      document.getElementById('recipeInput').value = agentRecipes[id].trim();
+      runInspection();
     }
 
-    function initCatalog() {
-      const container = document.getElementById("catalog-container");
-      container.innerHTML = "";
-      Object.keys(RECIPES).forEach(key => {
-        const recipe = RECIPES[key];
-        const card = document.createElement("div");
-        card.className = "recipe-card";
-        card.onclick = () => showRecipeDetail(key);
-        card.innerHTML = `
-          <div class="recipe-header">
-            <span class="recipe-name">${recipe.name}</span>
-            <span class="recipe-mode">${recipe.mode}</span>
-          </div>
-          <div class="recipe-desc">${recipe.description}</div>
-          <div class="recipe-meta">
-            <span>Tools: ${recipe.tools.length}</span>
-            <span>Thinking: ${recipe.thinkingLevel}</span>
-          </div>
-        `;
-        container.appendChild(card);
+    // Parse frontmatter tags
+    function parseFrontmatter(text) {
+      const parsed = {
+        name: '',
+        tools: [],
+        audience: 'base',
+        capabilityClass: 'workspace-edit'
+      };
+
+      try {
+        const lines = text.split('\n');
+        let inYaml = false;
+        lines.forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed === '---') {
+            inYaml = !inYaml;
+            return;
+          }
+          if (inYaml) {
+            const index = trimmed.indexOf(':');
+            if (index !== -1) {
+              const key = trimmed.substring(0, index).trim();
+              const val = trimmed.substring(index + 1).trim().replace(/['"[\]]/g, '');
+              
+              if (key === 'name') parsed.name = val;
+              if (key === 'audience') parsed.audience = val;
+              if (key === 'capabilityClass') parsed.capabilityClass = val;
+              if (key === 'tools') {
+                parsed.tools = val.split(',').map(t => t.trim());
+              }
+            }
+          }
+        });
+      } catch(e) {}
+
+      return parsed;
+    }
+
+    // Inspect recipes and run gates
+    function runInspection() {
+      const text = document.getElementById('recipeInput').value;
+      const delegation = document.getElementById('delegationType').value;
+      const orchScopeStr = document.getElementById('orchestratorScope').value;
+      const wrkScopeStr = document.getElementById('workerScope').value;
+
+      const spec = parseFrontmatter(text);
+
+      // Evaluate capabilities checklist
+      const targetCaps = [];
+      if (document.getElementById('cap-read').checked) targetCaps.push('read');
+      if (document.getElementById('cap-write').checked) targetCaps.push('write');
+      if (document.getElementById('cap-edit').checked) targetCaps.push('edit');
+      if (document.getElementById('cap-git').checked) targetCaps.push('git');
+      if (document.getElementById('cap-run').checked) targetCaps.push('run_task');
+      if (document.getElementById('cap-web').checked) targetCaps.push('web_fetch');
+
+      // ------------------------------------------------
+      // GATE 1: Tools Check
+      // ------------------------------------------------
+      let gate1Pass = true;
+      const unsupported = [];
+      spec.tools.forEach(t => {
+        if (!targetCaps.includes(t)) {
+          gate1Pass = false;
+          unsupported.push(t);
+        }
       });
+      const g1Status = document.getElementById('gate1Status');
+      g1Status.innerText = gate1Pass ? 'PASS' : 'FAIL';
+      g1Status.className = `gate-status ${gate1Pass ? 'pass' : 'fail'}`;
+      document.getElementById('gate1Desc').innerText = gate1Pass ? 
+        'All recipe tools are supported by target capabilities.' : 
+        `Unsupported tools: [${unsupported.join(', ')}]`;
+
+      // ------------------------------------------------
+      // GATE 2: Action Class Check
+      // ------------------------------------------------
+      const gate2Pass = true; // simplified demo check
+      const g2Status = document.getElementById('gate2Status');
+      g2Status.innerText = 'PASS';
+      g2Status.className = 'gate-status pass';
+
+      // ------------------------------------------------
+      // GATE 3: Scope Check
+      // ------------------------------------------------
+      const orchScopes = orchScopeStr.split(',').map(s => s.trim()).filter(Boolean);
+      const wrkScopes = wrkScopeStr.split(',').map(s => s.trim()).filter(Boolean);
+      let gate3Pass = true;
+      const invalidScopes = [];
+
+      wrkScopes.forEach(ws => {
+        // checks if ws is matched in orchScopes
+        let found = false;
+        orchScopes.forEach(os => {
+          if (ws.startsWith(os)) found = true;
+        });
+        if (!found) {
+          gate3Pass = false;
+          invalidScopes.push(ws);
+        }
+      });
+
+      const g3Status = document.getElementById('gate3Status');
+      g3Status.innerText = gate3Pass ? 'PASS' : 'FAIL';
+      g3Status.className = `gate-status ${gate3Pass ? 'pass' : 'fail'}`;
+      document.getElementById('gate3Desc').innerText = gate3Pass ? 
+        "Worker scope resides inside orchestrator scope bounds." : 
+        `Worker scope escapes orchestrator bounds: [${invalidScopes.join(', ')}]`;
+
+      // ------------------------------------------------
+      // GATE 4: Shadow/Internal Block
+      // ------------------------------------------------
+      let gate4Pass = true;
+      if (spec.audience === 'shadow' && delegation === 'acp') {
+        gate4Pass = false;
+      }
+      const g4Status = document.getElementById('gate4Status');
+      g4Status.innerText = gate4Pass ? 'PASS' : 'FAIL';
+      g4Status.className = `gate-status ${gate4Pass ? 'pass' : 'fail'}`;
+      document.getElementById('gate4Desc').innerText = gate4Pass ? 
+        "No shadow/internal delegation conflicts detected." : 
+        "Security Error: Shadow/internal agents cannot run on external ACP workers.";
+
+      // ------------------------------------------------
+      // OVERALL VERDICT
+      // ------------------------------------------------
+      const finalPass = gate1Pass && gate2Pass && gate3Pass && gate4Pass;
+      const vCard = document.getElementById('admissionCard');
+      const vTitle = document.getElementById('verdictTitle');
+      const vDetails = document.getElementById('verdictDetails');
+
+      if (finalPass) {
+        vCard.style.background = 'rgba(16, 185, 129, 0.08)';
+        vCard.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+        vTitle.innerText = "DISPATCH ALLOWED";
+        vTitle.style.color = 'var(--color-emerald)';
+        vDetails.innerText = "All admission gates checked and passed. Fleet agent rehydrated successfully.";
+      } else {
+        vCard.style.background = 'rgba(239, 68, 68, 0.08)';
+        vCard.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+        vTitle.innerText = "DISPATCH REJECTED";
+        vTitle.style.color = 'var(--color-rose)';
+        
+        let details = "Failure summary: ";
+        if (!gate1Pass) details += "Missing target capabilities. ";
+        if (!gate3Pass) details += "Worker scope escapes orchestrator bounds. ";
+        if (!gate4Pass) details += "External ACP delegation block on shadow agents. ";
+        vDetails.innerText = details;
+      }
     }
 
-    function showRecipeDetail(key) {
-      const recipe = RECIPES[key];
-      document.getElementById("recipe-detail-card").style.display = "block";
-      document.getElementById("detail-title").innerText = recipe.name;
-      document.getElementById("detail-path").innerText = recipe.filepath;
-      document.getElementById("detail-prop-name").innerText = recipe.name;
-      document.getElementById("detail-prop-desc").innerText = recipe.description;
-      document.getElementById("detail-prop-mode").innerText = recipe.mode;
-      document.getElementById("detail-prop-tools").innerText = JSON.stringify(recipe.tools);
-      document.getElementById("detail-prop-thinking").innerText = recipe.thinkingLevel;
-      document.getElementById("detail-body").innerText = recipe.body;
-    }
-
-    function _switchTab(tabId) {
-      const panes = document.querySelectorAll('.tab-pane');
-      panes.forEach(pane => { pane.classList.remove('active'); });
-      const buttons = document.querySelectorAll('.tab-btn');
-      buttons.forEach(btn => { btn.classList.remove('active'); });
-
-      document.getElementById(`pane-${tabId}`).classList.add('active');
-      event.currentTarget.classList.add('active');
-    }
-
-    // Run Initial setups
-    initSimulator();
-    initCatalog();
+    // Init
+    window.onload = () => {
+      loadAgentPreset('coder');
+    };
   </script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Evolution & Change Manifest Blueprint</title>
+  <title>Clio Coder Code Evolution Blueprint (v0.2.3)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -11,11 +11,14 @@
   <style>
     :root {
       --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-grid: rgba(255, 255, 255, 0.02);
+      --bg-card: rgba(13, 20, 38, 0.45);
+      --bg-card-hover: rgba(20, 30, 58, 0.6);
       --border-card: rgba(255, 255, 255, 0.08);
+      --border-card-hover: rgba(0, 240, 255, 0.3);
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
-      --text-dark: #6b7280;
+      --text-dim: #6b7280;
       
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
@@ -29,9 +32,11 @@
       --color-rose-rgb: 239, 68, 68;
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
+      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
       --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      
+      --glass-blur: blur(12px);
     }
 
     * {
@@ -51,161 +56,152 @@
       min-height: 100vh;
       line-height: 1.6;
       overflow-x: hidden;
+      position: relative;
     }
 
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.02);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(var(--color-cyan-rgb), 0.3);
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: center top;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.8;
     }
 
     .container {
       max-width: 1400px;
       margin: 0 auto;
       padding: 2rem;
+      position: relative;
+      z-index: 1;
     }
 
+    /* Header Styling */
     header {
-      text-align: center;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       margin-bottom: 2.5rem;
-      position: relative;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
     }
 
     .header-logo {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 72px;
-      height: 72px;
-      background: rgba(255, 255, 255, 0.03);
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--border-card);
-      border-radius: 18px;
-      margin-bottom: 1rem;
-      box-shadow: var(--shadow-glow);
-      position: relative;
-    }
-    
-    .header-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 20px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(4px);
+      border-radius: 12px;
     }
 
-    .header-logo img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
+    .header-logo svg {
+      width: 28px;
+      height: 28px;
     }
 
-    h1 {
-      font-size: 2.5rem;
+    .header-title-wrapper h1 {
+      font-size: 1.5rem;
       font-weight: 800;
-      letter-spacing: -0.05em;
-      margin-bottom: 0.5rem;
+      letter-spacing: -0.03em;
       background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    .subtitle {
-      font-size: 1.1rem;
+    .header-title-wrapper p {
+      font-size: 0.825rem;
       color: var(--text-muted);
-      max-width: 600px;
-      margin: 0 auto 1.5rem auto;
-      font-weight: 400;
     }
 
-    .meta-grid {
-      display: flex;
-      justify-content: center;
-      gap: 1rem;
-      margin-bottom: 2rem;
-      flex-wrap: wrap;
-    }
-
-    .meta-badge {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-card);
-      padding: 0.5rem 1rem;
-      border-radius: 8px;
-      font-size: 0.85rem;
+    .header-right {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 1rem;
     }
 
-    .meta-badge .label {
+    .back-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
       color: var(--text-muted);
-    }
-
-    .meta-badge .value {
-      font-family: var(--font-mono);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
       font-weight: 600;
-      color: var(--color-cyan);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
     }
 
+    .back-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .version-badge {
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      color: var(--color-cyan);
+      padding: 0.35rem 0.75rem;
+      border-radius: 50px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+
+    /* Tabs Navigation */
     .tabs-nav {
       display: flex;
-      justify-content: center;
       gap: 0.75rem;
       margin-bottom: 2rem;
-      flex-wrap: wrap;
     }
 
     .tab-btn {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-card);
       color: var(--text-muted);
-      padding: 0.75rem 1.5rem;
-      border-radius: 9999px;
+      padding: 0.6rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.2s;
     }
 
     .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
       color: var(--text-main);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
     }
 
     .tab-btn.active {
       background: var(--gradient-main);
       color: #090d16;
-      font-weight: 700;
       border-color: transparent;
-      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.3);
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
     }
 
-    .tab-btn svg {
-      width: 18px;
-      height: 18px;
-      fill: none;
-      stroke: currentColor;
-      stroke-width: 2;
-    }
-
+    /* Content Layout */
     .tab-pane {
       display: none;
-      animation: fadeIn 0.4s ease-out forwards;
+      animation: fadeIn 0.3s ease-out forwards;
     }
 
     .tab-pane.active {
@@ -213,755 +209,469 @@
     }
 
     @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Split layout */
+    .blueprint-layout {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 2rem;
+      align-items: start;
+    }
+
+    @media (max-width: 1100px) {
+      .blueprint-layout {
+        grid-template-columns: 1fr;
       }
     }
 
     .glass-card {
       background: var(--bg-card);
       border: 1px solid var(--border-card);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
       border-radius: 16px;
-      padding: 2rem;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      padding: 1.75rem;
       margin-bottom: 2rem;
+      backdrop-filter: var(--glass-blur);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
     }
 
-    .card-title {
-      font-size: 1.3rem;
+    .glass-card h2 {
+      font-size: 1.25rem;
       font-weight: 700;
-      margin-bottom: 1.25rem;
       color: #ffffff;
+      margin-bottom: 1.25rem;
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: 0.5rem;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       padding-bottom: 0.75rem;
     }
 
-    .card-title svg {
-      width: 20px;
-      height: 20px;
-      stroke: var(--color-cyan);
-      stroke-width: 2;
-      fill: none;
+    .glass-card h2 svg {
+      width: 18px;
+      height: 18px;
+      color: var(--color-cyan);
     }
 
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
+    .glass-card p {
+      font-size: 0.925rem;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
     }
 
-    @media (max-width: 900px) {
-      .grid-2 {
-        grid-template-columns: 1fr;
-      }
-    }
-
+    /* Form Elements */
     .form-group {
       margin-bottom: 1.25rem;
     }
 
-    label {
+    .form-group label {
       display: block;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 600;
       color: var(--text-muted);
       margin-bottom: 0.5rem;
-      font-weight: 500;
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
 
-    input[type="text"], input[type="number"], select, textarea {
+    textarea {
       width: 100%;
+      background: rgba(9, 13, 22, 0.7);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      color: #fff;
+      font-family: var(--font-mono);
+      font-size: 0.825rem;
+      outline: none;
+      resize: vertical;
+    }
+
+    /* Presets list */
+    .presets-list {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .preset-btn {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      font-size: 0.95rem;
-      transition: all 0.2s ease;
-    }
-
-    input:focus, select:focus, textarea:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    textarea.code-area {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      background: #05080e;
-      resize: vertical;
-      min-height: 250px;
-      line-height: 1.5;
-    }
-
-    .btn {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-card);
-      color: var(--text-main);
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.2s ease;
-    }
-
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .btn-primary {
-      background: var(--gradient-main);
-      color: #090d16;
-      border-color: transparent;
-      font-weight: 700;
-    }
-
-    .btn-primary:hover {
-      background: linear-gradient(135deg, #2bf1ff, #d64eff);
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.3);
-    }
-
-    .status-panel {
-      padding: 1rem;
-      border-radius: 8px;
-      margin-top: 1rem;
-      font-size: 0.9rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-    }
-
-    .status-panel.success {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      color: #34d399;
-    }
-
-    .status-panel.error {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.2);
-      color: #fca5a5;
-    }
-
-    .status-panel.warning {
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid rgba(245, 158, 11, 0.2);
-      color: #fcd34d;
-    }
-
-    .flowchart-container {
-      background: #05080e;
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 1.5rem;
-      overflow: auto;
-      display: flex;
-      justify-content: center;
-    }
-
-    .risk-meter-container {
-      background: rgba(255,255,255,0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .risk-bar {
-      height: 20px;
-      background: rgba(255,255,255,0.05);
-      border-radius: 10px;
-      overflow: hidden;
-      position: relative;
-      margin: 1rem 0;
-    }
-
-    .risk-fill {
-      height: 100%;
-      width: 0%;
-      background: var(--gradient-main);
-      transition: width 0.4s ease;
-    }
-
-    .risk-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.8rem;
       color: var(--text-muted);
-      font-family: var(--font-mono);
-    }
-
-    /* Checklist */
-    .checklist {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .checklist-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-      padding: 0.5rem;
+      padding: 0.35rem 0.75rem;
       border-radius: 6px;
-      background: rgba(255,255,255,0.01);
-      border: 1px solid transparent;
-      transition: all 0.2s ease;
-    }
-
-    .checklist-item.done {
-      background: rgba(16, 185, 129, 0.03);
-      border-color: rgba(16, 185, 129, 0.1);
-    }
-
-    .checklist-item input[type="checkbox"] {
-      margin-top: 0.3rem;
+      font-size: 0.75rem;
       cursor: pointer;
+      transition: all 0.2s;
     }
 
-    .checklist-item-text {
-      flex-grow: 1;
-    }
-
-    .checklist-title {
-      font-weight: 600;
+    .preset-btn:hover {
+      background: rgba(0, 240, 255, 0.08);
+      border-color: var(--color-cyan);
       color: #fff;
-      font-size: 0.95rem;
     }
 
-    .checklist-desc {
-      font-size: 0.85rem;
-      color: var(--text-muted);
+    /* Validation Results display */
+    .status-panel {
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+      border: 1px solid transparent;
+      font-size: 0.9rem;
+    }
+
+    .status-panel.success { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.3); color: var(--color-emerald); }
+    .status-panel.error { background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3); color: var(--color-rose); }
+    .status-panel.warning { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.3); color: var(--color-amber); }
+
+    .summary-badge-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    .summary-badge {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-card);
+      padding: 0.4rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: var(--font-sans);
+    }
+
+    /* Tables */
+    .ref-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.9rem;
+    }
+
+    .ref-table th, .ref-table td {
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border-card);
+      text-align: left;
+    }
+
+    .ref-table th {
+      background: rgba(255,255,255,0.03);
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-dim);
+      font-size: 0.875rem;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <div class="header-logo">
-        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
-      </div>
-      <h1>Evolution & Change Manifest Workspace</h1>
-      <p class="subtitle">Interactive Visual Specification for Auditability, Regressions, and Falsification</p>
-      
-      <div class="meta-grid">
-        <div class="meta-badge">
-          <span class="label">Release:</span>
-          <span class="value">v0.2.2-alpha</span>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
         </div>
-        <div class="meta-badge">
-          <span class="label">Scope:</span>
-          <span class="value">change-manifest.json / validationPlan</span>
-        </div>
-        <div class="meta-badge">
-          <span class="label">Authority:</span>
-          <span class="value">Falsifiable Risk Review</span>
+        <div class="header-title-wrapper">
+          <h1>Clio Coder Evolution &amp; Change Manifests</h1>
+          <p>Durable change manifest workspace, authority safety checks, and risk analysis metrics</p>
         </div>
       </div>
-
-      <div class="tabs-nav">
-        <button type="button" class="tab-btn active" onclick="_switchTab('validator')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          JSON Schema Validator
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('assessor')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-          Authority Risk Assessor
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('tracker')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
-          Workflow Checklist
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('flowchart')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
-          Evolution Lifecycle
-        </button>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.3</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
       </div>
     </header>
 
-    <!-- Tab 1: JSON Schema Validator -->
-    <div id="validator" class="tab-pane active">
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-            Change Manifest JSON Editor
-          </div>
-          <div class="form-group">
-            <label>Raw change-manifest.json Content</label>
-            <textarea id="raw-json" class="code-area" oninput="validateJson()"></textarea>
-          </div>
-          <div style="display: flex; gap: 0.5rem;">
-            <button type="button" class="btn btn-primary" onclick="loadSampleJson('valid')">Load Valid Manifest</button>
-            <button type="button" class="btn" onclick="loadSampleJson('invalid')">Load High-Risk Regress Missing</button>
-          </div>
-        </div>
-
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
-            Manifest Audit Receipt
-          </div>
-          <div id="validator-status" class="status-panel success">
-            Valid JSON format. Ready to validate schema.
-          </div>
-          <div style="margin-top: 1.5rem;">
-            <h4 style="margin-bottom: 0.5rem; font-size: 0.95rem; color: #ffffff;">Detected Manifest Attributes:</h4>
-            <div id="manifest-properties" style="display: flex; flex-direction: column; gap: 0.5rem;">
-              <!-- Populated dynamically -->
-            </div>
-          </div>
-        </div>
-      </div>
+    <div class="tabs-nav">
+      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Interactive Manifest Editor &amp; Risk Evaluator
+      </button>
+      <button type="button" class="tab-btn" onclick="switchTab('reference')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        Full Technical Reference
+      </button>
     </div>
 
-    <!-- Tab 2: Authority Risk Assessor -->
-    <div id="assessor" class="tab-pane">
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-            Select Change Characteristics
-          </div>
-
-          <div class="form-group">
-            <label>Change Authority Level</label>
-            <select id="risk-authority" onchange="assessRisk()">
-              <option value="prompt">prompt (Low)</option>
-              <option value="tool-description">tool-description (Low)</option>
-              <option value="memory">memory (Low)</option>
-              <option value="schema">schema (High)</option>
-              <option value="cli">cli (High)</option>
-              <option value="tool-implementation">tool-implementation (High)</option>
-              <option value="middleware">middleware (High)</option>
-              <option value="runtime">runtime (High)</option>
-              <option value="safety">safety (High)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Scope of modified files</label>
-            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-              <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
-                <input type="checkbox" class="risk-files" value="source" onchange="assessRisk()" checked> Modifying primary codebase under src/
-              </label>
-              <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
-                <input type="checkbox" class="risk-files" value="safety" onchange="assessRisk()"> Modifying safety.yaml / policy rules
-              </label>
-              <label style="text-transform:none; font-size:0.9rem; display:flex; align-items:center; gap:0.5rem; color:var(--text-main)">
-                <input type="checkbox" class="risk-files" value="prompt" onchange="assessRisk()"> Modifying only prompt fragments / markdown
-              </label>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Validation Evidence Status</label>
-            <select id="risk-evidence" onchange="assessRisk()">
-              <option value="missing">No external evidence (exploratory iteration)</option>
-              <option value="eval">Includes local eval runner reports</option>
-              <option value="receipts">Includes verified tool receipts and command logs</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="glass-card">
-          <div class="card-title">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2"/></svg>
-            Risk Assessment Metric
-          </div>
-
-          <div class="risk-meter-container">
-            <p style="font-weight:600;">Change Risk & Review Path: <span id="risk-verdict" style="color:var(--color-cyan)">LOW RISK</span></p>
-            <div class="risk-bar">
-              <div class="risk-fill" id="risk-bar-fill"></div>
-            </div>
-            <div class="risk-labels">
-              <span>0% LOW</span>
-              <span>50% MEDIUM</span>
-              <span>100% HIGH</span>
-            </div>
-          </div>
-
-          <div id="risk-requirements" class="status-panel success">
-            Validation plan matches low-level criteria.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 3: Recommended Workflow Tracker -->
-    <div id="tracker" class="tab-pane">
-      <div class="glass-card">
-        <div class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
-          Clio Coder Recommended Change Workflow
-        </div>
+    <!-- TAB 1: INTERACTIVE -->
+    <main class="tab-pane active" id="pane-interactive">
+      <div class="blueprint-layout">
         
-        <div class="checklist">
-          <div class="checklist-item" id="item-1">
-            <input type="checkbox" onchange="_toggleCheckItem(1)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">1. Capture the Current Git Commit SHA</p>
-              <p class="checklist-desc">Run <code style="font-family:var(--font-mono); color:var(--color-cyan)">git rev-parse HEAD</code> to reference the base state of the codebase before any harness modification.</p>
+        <!-- Left: Manifest Editor -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+              Manifest JSON Editor
+            </h2>
+            <p>Paste or edit your change-manifest.json. The evaluator checks constraints on high-authority risks and evidence reference verification.</p>
+            
+            <div class="presets-list">
+              <span class="preset-btn" onclick="loadManifestPreset('valid')">Valid v1 Manifest</span>
+              <span class="preset-btn" onclick="loadManifestPreset('missing-regression')">Trigger High-Authority Error (Missing Regression)</span>
+              <span class="preset-btn" onclick="loadManifestPreset('missing-evidence')">Trigger Evidence Error (Later iteration empty evidence)</span>
             </div>
-          </div>
 
-          <div class="checklist-item" id="item-2">
-            <input type="checkbox" onchange="_toggleCheckItem(2)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">2. Snapshot Component Integrity</p>
-              <p class="checklist-desc">Save a component snapshot of key runtime schemas and prompt envelopes before making edits: <code style="font-family:var(--font-mono); color:var(--color-cyan)">clio components snapshot --out before.json</code>.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-3">
-            <input type="checkbox" onchange="_toggleCheckItem(3)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">3. Draft the Change Manifest File</p>
-              <p class="checklist-desc">Create <code style="font-family:var(--font-mono);">change-manifest.json</code> containing the targets, predicted regression classes, validation strategies, and authority declarations.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-4">
-            <input type="checkbox" onchange="_toggleCheckItem(4)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">4. Execute Code Improvements & Validate</p>
-              <p class="checklist-desc">Write minimal modifications to targets/tools. Execute validation tests and generate test reports or receipts under <code>&lt;dataDir&gt;/evals/</code> or <code>&lt;dataDir&gt;/evidence/</code>.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-5">
-            <input type="checkbox" onchange="_toggleCheckItem(5)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">5. Validate Manifest Conformity</p>
-              <p class="checklist-desc">Run <code style="font-family:var(--font-mono); color:var(--color-cyan)">clio evolve manifest validate change-manifest.json</code> to ensure zero schema drift, and check that high-authority paths document regression hypotheses.</p>
-            </div>
-          </div>
-
-          <div class="checklist-item" id="item-6">
-            <input type="checkbox" onchange="_toggleCheckItem(6)">
-            <div class="checklist-item-text">
-              <p class="checklist-title">6. Promote Change or Rollback</p>
-              <p class="checklist-desc">If tests pass and manifest validates, merge the changes. If not, follow the declared <code style="font-family:var(--font-mono)">rollbackPlan</code> to clean the branch back to the baseline SHA.</p>
+            <div class="form-group">
+              <textarea id="manifestInput" rows="18" oninput="validateManifest()"></textarea>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- Tab 4: Evolution Lifecycle -->
-    <div id="flowchart" class="tab-pane">
+        <!-- Right: Evaluator -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              Manifest Risk Assessor
+            </h2>
+            <p>Runs evolution verification rules matching schema configurations.</p>
+            
+            <div class="verdict-header">Validation Output</div>
+            <div id="manifestResult" class="status-panel success">
+              JSON is empty. Load a preset.
+            </div>
+
+            <div class="verdict-header">Change Metrics Summary</div>
+            <div class="summary-badge-grid">
+              <div class="summary-badge">Iteration: <strong id="m-iteration" style="color:var(--color-cyan)">exploratory-1</strong></div>
+              <div class="summary-badge">Files: <strong id="m-files" style="color:var(--color-cyan)">1</strong></div>
+              <div class="summary-badge">Authority: <strong id="m-authority" style="color:var(--color-cyan)">prompt</strong></div>
+              <div class="summary-badge">Regression Count: <strong id="m-regressions" style="color:var(--color-cyan)">0</strong></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- TAB 2: TECHNICAL REFERENCE -->
+    <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
-        <div class="card-title">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          Change Manifest Validation Flow
-        </div>
-        <div class="flowchart-container">
-          <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;">
-            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#00f0ff" />
-              </marker>
-              <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="4" result="blur" />
-                <feComposite in="SourceGraphic" in2="blur" operator="over" />
-              </filter>
-            </defs>
+        <h2>Clio Coder Change Manifest Specifications</h2>
+        <p>Change manifests are JSON structures generated or validated using the <code>clio evolve manifest</code> command to support reviewable and falsifiable harness changes.</p>
+        
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Change Manifest Schema</h3>
+        <p>Every change must satisfy specific verification keys:</p>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Field Path</th>
+              <th>Type</th>
+              <th>Constraint</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>iterationId</code></td>
+              <td>string</td>
+              <td>Required. Only <code>exploratory-1</code> may omit linked evidence references.</td>
+            </tr>
+            <tr>
+              <td><code>authorityLevel</code></td>
+              <td>enum</td>
+              <td>Required. Must be one of the nine allowed authority channels.</td>
+            </tr>
+            <tr>
+              <td><code>predictedRegressions</code></td>
+              <td>string array</td>
+              <td>Required. High-authority changes **must** list at least one regression.</td>
+            </tr>
+            <tr>
+              <td><code>rollbackPlan</code></td>
+              <td>string</td>
+              <td>Required non-empty string.</td>
+            </tr>
+          </tbody>
+        </table>
 
-            <!-- Grid background -->
-            <path d="M 0 0 L 850 0 M 0 40 L 850 40 M 0 80 L 850 80 M 0 120 L 850 120 M 0 160 L 850 160 M 0 200 L 850 200 M 0 240 L 850 240 M 0 280 L 850 280 M 0 320 L 850 320 M 0 360 L 850 360 M 0 400 L 850 400" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
-            <path d="M 0 0 L 0 420 M 50 0 L 50 420 M 100 0 L 100 420 M 150 0 L 150 420 M 200 0 L 200 420 M 250 0 L 250 420 M 300 0 L 300 420 M 350 0 L 350 420 M 400 0 L 400 420 M 450 0 L 450 420 M 500 0 L 500 420 M 550 0 L 550 420 M 600 0 L 600 420 M 650 0 L 650 420 M 700 0 L 700 420 M 750 0 L 750 420 M 800 0 L 800 420" stroke="rgba(255,255,255,0.02)" stroke-width="1" />
-
-            <!-- STAGE 1: INVENTORY -->
-            <g transform="translate(10, 40)">
-              <rect x="10" y="20" width="160" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
-              <text x="90" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">1. DRAFT</text>
-              
-              <!-- change-manifest.json -->
-              <rect x="25" y="80" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="90" y="105" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Manifest draft</text>
-              <text x="90" y="123" fill="var(--text-muted)" font-size="9" text-anchor="middle">Declares fixes/regressions</text>
-
-              <!-- before.json -->
-              <rect x="25" y="180" width="130" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="90" y="205" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">before.json</text>
-              <text x="90" y="223" fill="var(--text-muted)" font-size="9" text-anchor="middle">Pre-change components</text>
-            </g>
-
-            <!-- STAGE 2: VALIDATE SCHEMA & THREATS -->
-            <g transform="translate(200, 40)">
-              <rect x="10" y="20" width="200" height="280" rx="8" fill="rgba(0, 240, 255, 0.03)" stroke="var(--color-cyan)" stroke-width="1.5" filter="url(#glow-cyan)" />
-              <text x="110" y="45" fill="var(--color-cyan)" font-size="12" font-weight="700" text-anchor="middle" letter-spacing="1">2. AUDIT CHECKS</text>
-
-              <!-- Authority Resolver -->
-              <rect x="25" y="80" width="170" height="50" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="110" y="105" fill="#fff" font-size="11" text-anchor="middle">Check Authority Rules</text>
-              <text x="110" y="120" fill="var(--text-muted)" font-size="9" text-anchor="middle">High vs Low Authority</text>
-
-              <!-- Regressions -->
-              <rect x="25" y="170" width="170" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
-              <text x="110" y="195" fill="#fff" font-size="11" text-anchor="middle">Verify Regressions</text>
-              <text x="110" y="213" fill="var(--text-muted)" font-size="9" text-anchor="middle">Required for safety/runtime/cli</text>
-            </g>
-
-            <!-- STAGE 3: RESOLUTION -->
-            <g transform="translate(430, 40)">
-              <rect x="10" y="20" width="180" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
-              <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">3. RESULTS</text>
-
-              <!-- Success -> Merge -->
-              <rect x="25" y="80" width="150" height="50" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1" />
-              <text x="100" y="105" fill="var(--color-emerald)" font-size="12" font-weight="700" text-anchor="middle">Promotion</text>
-              <text x="100" y="120" fill="var(--text-muted)" font-size="9" text-anchor="middle">Validate passes -> Commit</text>
-
-              <!-- Fail -> Rollback -->
-              <rect x="25" y="170" width="150" height="50" rx="6" fill="rgba(239, 68, 68, 0.05)" stroke="var(--color-rose)" stroke-width="1" />
-              <text x="100" y="195" fill="var(--color-rose)" font-size="12" font-weight="700" text-anchor="middle">Rollback Plan</text>
-              <text x="100" y="210" fill="var(--text-muted)" font-size="9" text-anchor="middle">Revert to baseline SHA</text>
-            </g>
-
-            <!-- Arrows -->
-            <path d="M 180 140 L 210 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
-            <path d="M 410 140 L 440 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
-          </svg>
-        </div>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Authority levels</h3>
+        <p>Allowed levels include: <code>prompt</code>, <code>tool-description</code>, <code>tool-implementation</code>, <code>middleware</code>, <code>memory</code>, <code>runtime</code>, <code>safety</code>, <code>schema</code>, <code>cli</code>.</p>
+        <p>High-authority levels that require explicit regression declarations include: <code>tool-implementation</code>, <code>middleware</code>, <code>runtime</code>, <code>safety</code>, <code>schema</code>, <code>cli</code>.</p>
       </div>
-    </div>
+    </main>
+
+    <footer>
+      <p>Clio Coder Evolution spec &bull; Version 0.2.3</p>
+    </footer>
   </div>
 
   <script>
-    function _switchTab(tabId) {
-      document.querySelectorAll('.tab-pane').forEach(el => { el.classList.remove('active'); });
-      document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('active'); });
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
+      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
       
-      document.getElementById(tabId).classList.add('active');
-      event.currentTarget.classList.add('active');
-    }
-
-    const validSample = `{
-  "version": 1,
-  "iterationId": "cli-targets-refactor-2",
-  "baseGitSha": "834d6f1c4e0a4f5b6c7d8e9f0a1b2c3d4e5f6g7h",
-  "createdAt": "2026-06-06T12:00:00Z",
-  "changes": [
-    {
-      "id": "refactor-target-eligibility",
-      "componentIds": ["runtime-descriptor:llamacpp"],
-      "filesChanged": ["src/domains/providers/runtimes/llamacpp.ts"],
-      "authorityLevel": "runtime",
-      "evidenceRefs": ["eval-run-48"],
-      "rootCause": "Clean eligibility logic check bounds",
-      "targetedFix": "Restrict non-HTTP eligible check routines",
-      "predictedFixes": ["Only registered HTTP runtimes are loaded"],
-      "predictedRegressions": ["Will reject mock targets without schemes"],
-      "validationPlan": ["npm run test:live"],
-      "rollbackPlan": "git checkout 834d6f1 -- src/domains/providers/runtimes/llamacpp.ts"
-    }
-  ]
-}`;
-
-    const invalidSample = `{
-  "version": 1,
-  "iterationId": "exploratory-2",
-  "baseGitSha": "0000000000000000000000000000000000000000",
-  "createdAt": "2026-06-06T12:00:00Z",
-  "changes": [
-    {
-      "id": "high-risk-runtime-change",
-      "filesChanged": ["src/domains/providers/runtimes/llamacpp.ts"],
-      "authorityLevel": "runtime",
-      "evidenceRefs": [],
-      "rootCause": "Exploratory iteration",
-      "targetedFix": "Refactor execution",
-      "predictedFixes": [],
-      "predictedRegressions": [],
-      "validationPlan": [],
-      "rollbackPlan": "None declared"
-    }
-  ]
-}`;
-
-    function loadSampleJson(type) {
-      if (type === 'valid') {
-        document.getElementById('raw-json').value = validSample;
+      if (tabId === 'interactive') {
+        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+        document.getElementById('pane-interactive').classList.add('active');
       } else {
-        document.getElementById('raw-json').value = invalidSample;
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('pane-reference').classList.add('active');
       }
-      validateJson();
     }
 
-    function validateJson() {
-      const text = document.getElementById('raw-json').value;
-      const statusPanel = document.getElementById('validator-status');
-      const propertiesList = document.getElementById('manifest-properties');
-      propertiesList.innerHTML = '';
+    const manifestSamples = {
+      valid: `{
+  "version": 1,
+  "iterationId": "exploratory-1",
+  "baseGitSha": "0000000000000000000000000000000000000000",
+  "createdAt": "2026-04-29T00:00:00.000Z",
+  "changes": [
+    {
+      "id": "change-1",
+      "componentIds": ["context-file:CLIO.md"],
+      "filesChanged": ["CLIO.md"],
+      "authorityLevel": "prompt",
+      "evidenceRefs": [],
+      "rootCause": "Exploratory setup.",
+      "targetedFix": "Initial config changes.",
+      "predictedFixes": ["First setup."],
+      "predictedRegressions": [],
+      "validationPlan": ["npm run test"],
+      "rollbackPlan": "git checkout CLIO.md"
+    }
+  ]
+}`,
+      missingRegression: `{
+  "version": 1,
+  "iterationId": "iteration-2",
+  "baseGitSha": "3e9b048fa...",
+  "createdAt": "2026-04-29T00:00:00.000Z",
+  "changes": [
+    {
+      "id": "safety-update",
+      "filesChanged": ["src/domains/safety/policy-engine.ts"],
+      "authorityLevel": "safety",
+      "evidenceRefs": ["run-82f9c"],
+      "rootCause": "Update safety policy bounds.",
+      "targetedFix": "Tighten path blocks.",
+      "predictedFixes": ["Better safety net."],
+      "predictedRegressions": [],
+      "validationPlan": ["npm run test"],
+      "rollbackPlan": "git revert HEAD"
+    }
+  ]
+}`,
+      missingEvidence: `{
+  "version": 1,
+  "iterationId": "iteration-2",
+  "baseGitSha": "3e9b048fa...",
+  "createdAt": "2026-04-29T00:00:00.000Z",
+  "changes": [
+    {
+      "id": "prompt-change",
+      "filesChanged": ["src/domains/prompts/init.ts"],
+      "authorityLevel": "prompt",
+      "evidenceRefs": [],
+      "rootCause": "Update wording.",
+      "targetedFix": "Tweak text.",
+      "predictedFixes": ["Better flow."],
+      "predictedRegressions": [],
+      "validationPlan": ["npm run test"],
+      "rollbackPlan": "git revert HEAD"
+    }
+  ]
+}`
+    };
+
+    function loadManifestPreset(type) {
+      document.getElementById('manifestInput').value = manifestSamples[type].trim();
+      validateManifest();
+    }
+
+    function validateManifest() {
+      const text = document.getElementById('manifestInput').value;
+      const output = document.getElementById('manifestResult');
 
       if (!text.trim()) {
-        statusPanel.className = 'status-panel warning';
-        statusPanel.textContent = 'JSON payload is empty. Write or load a sample change-manifest.json.';
+        output.className = 'status-panel warning';
+        output.innerText = 'JSON is empty. Load a preset.';
         return;
       }
 
       try {
         const obj = JSON.parse(text);
         const errors = [];
-
+        
         if (obj.version !== 1) {
-          errors.push(`Root 'version' must be number 1 (found "${obj.version}")`);
+          errors.push("Schema Version must equal 1.");
         }
+
         if (!obj.iterationId) {
-          errors.push(`Root 'iterationId' must be a non-empty string`);
+          errors.push("iterationId is required.");
         }
-        if (!obj.baseGitSha || obj.baseGitSha.length !== 40) {
-          errors.push(`Root 'baseGitSha' must be a 40-character commit SHA (found length ${obj.baseGitSha ? obj.baseGitSha.length : 0})`);
-        }
+
+        let totalRegressions = 0;
+        let totalFiles = 0;
+        let primaryAuthority = 'prompt';
 
         if (Array.isArray(obj.changes)) {
           obj.changes.forEach((change, idx) => {
-            if (!change.id) {
-              errors.push(`changes[${idx}].id is required`);
-            }
+            if (change.filesChanged) totalFiles += change.filesChanged.length;
+            primaryAuthority = change.authorityLevel || 'prompt';
             
-            const highAuth = ['tool-implementation', 'middleware', 'runtime', 'safety', 'schema', 'cli'].includes(change.authorityLevel);
-            if (highAuth) {
-              if (!Array.isArray(change.predictedRegressions) || change.predictedRegressions.length === 0) {
-                errors.push(`changes[${idx}] has high authority Level "${change.authorityLevel}" but contains empty or missing 'predictedRegressions' array. High-authority modifications MUST document risks to make them reviewable.`);
+            // Check high-authority regression requirement
+            const highAuthorities = ['tool-implementation', 'middleware', 'runtime', 'safety', 'schema', 'cli'];
+            if (highAuthorities.includes(change.authorityLevel)) {
+              if (!change.predictedRegressions || change.predictedRegressions.length === 0) {
+                errors.push(`Change[${idx}] ("${change.id}"): High-authority changes (${change.authorityLevel}) must declare at least one predicted regression risk to ensure transparency in reviews.`);
               }
             }
 
-            if (!change.filesChanged && !change.componentIds) {
-              errors.push(`changes[${idx}] requires at least one filesChanged or componentIds entry.`);
+            // Check evidence references
+            if (obj.iterationId !== 'exploratory-1') {
+              if (!change.evidenceRefs || change.evidenceRefs.length === 0) {
+                errors.push(`Change[${idx}] ("${change.id}"): evidenceRefs cannot be empty for iteration "${obj.iterationId}". Only "exploratory-1" iteration is allowed to have empty evidenceRefs.`);
+              }
             }
 
-            if (!change.rollbackPlan || change.rollbackPlan === 'None declared') {
-              errors.push(`changes[${idx}] must provide an active, actionable rollbackPlan (found "${change.rollbackPlan}")`);
+            if (change.predictedRegressions) {
+              totalRegressions += change.predictedRegressions.length;
             }
           });
         } else {
-          errors.push(`'changes' must be a non-empty array`);
+          errors.push("changes must be an array.");
         }
+
+        // update metrics
+        document.getElementById('m-iteration').innerText = obj.iterationId || 'None';
+        document.getElementById('m-files').innerText = totalFiles;
+        document.getElementById('m-authority').innerText = primaryAuthority;
+        document.getElementById('m-regressions').innerText = totalRegressions;
 
         if (errors.length > 0) {
-          statusPanel.className = 'status-panel error';
-          statusPanel.innerHTML = `<strong>Manifest Schema Failures:</strong><ul style="margin-left: 1.5rem; margin-top:0.5rem;">${errors.map(e => `<li>${e}</li>`).join('')}</ul>`;
+          output.className = 'status-panel error';
+          output.innerHTML = `<strong>Validation Errors Found:</strong><ul style="margin-left:1.5rem; margin-top:0.5rem;">` + 
+            errors.map(err => `<li>${err}</li>`).join('') + `</ul>`;
         } else {
-          statusPanel.className = 'status-panel success';
-          statusPanel.innerHTML = `<strong>Success:</strong> change-manifest.json conforms perfectly to Clio's evolution rules. Verified auditable and rollback-ready.`;
-          
-          addPropertyBadge('Iteration ID', obj.iterationId, 'cyan');
-          addPropertyBadge('Base Git SHA', obj.baseGitSha.substring(0,7), 'purple');
-          addPropertyBadge('Changes Count', obj.changes.length, 'emerald');
+          output.className = 'status-panel success';
+          output.innerHTML = "<strong>Success:</strong> change-manifest.json is structurally valid and satisfies high-authority risk transparency constraints.";
         }
-      } catch (err) {
-        statusPanel.className = 'status-panel error';
-        statusPanel.textContent = `JSON Syntax Error: ${err.message}`;
+
+      } catch(err) {
+        output.className = 'status-panel error';
+        output.innerText = `JSON Parse Error: ${err.message}`;
       }
     }
 
-    function addPropertyBadge(label, val, color) {
-      const container = document.getElementById('manifest-properties');
-      const item = document.createElement('div');
-      item.className = 'meta-badge';
-      item.style.borderLeft = `3px solid var(--color-${color})`;
-      item.innerHTML = `<span class="label">${label}:</span> <span class="value" style="color:var(--color-${color})">${val}</span>`;
-      container.appendChild(item);
-    }
-
-    // Assessor logic
-    function assessRisk() {
-      const auth = document.getElementById('risk-authority').value;
-      const evidence = document.getElementById('risk-evidence').value;
-      
-      let score = 0;
-      const rules = [];
-
-      // Authority score
-      const highAuth = ['tool-implementation', 'middleware', 'runtime', 'safety', 'schema', 'cli'].includes(auth);
-      if (highAuth) {
-        score += 60;
-        rules.push(`High authority level: requires predicted regressions array.`);
-      } else {
-        score += 20;
-        rules.push(`Low authority level: standard review pipeline.`);
-      }
-
-      // Files modified
-      let fileScore = 0;
-      document.querySelectorAll('.risk-files:checked').forEach(el => {
-        if (el.value === 'source') fileScore += 20;
-        if (el.value === 'safety') fileScore += 30;
-        if (el.value === 'prompt') fileScore += 5;
-      });
-      score += fileScore;
-
-      // Evidence score
-      if (evidence === 'missing') {
-        score += 20;
-        rules.push(`No validation evidence: flagged as exploratory iteration.`);
-      } else {
-        score -= 20;
-        rules.push(`Evidence supplied: reduces regression impact risk.`);
-      }
-
-      score = Math.max(10, Math.min(100, score));
-
-      const bar = document.getElementById('risk-bar-fill');
-      bar.style.width = `${score}%`;
-
-      const verdict = document.getElementById('risk-verdict');
-      const requirements = document.getElementById('risk-requirements');
-
-      if (score < 40) {
-        verdict.textContent = 'LOW RISK';
-        verdict.style.color = '#10b981';
-        requirements.className = 'status-panel success';
-        requirements.innerHTML = `<strong>Advisory Review:</strong> Low-risk prompt/documentation edit. Standard Git checks.`;
-      } else if (score < 75) {
-        verdict.textContent = 'MEDIUM RISK';
-        verdict.style.color = '#f59e0b';
-        requirements.className = 'status-panel warning';
-        requirements.innerHTML = `<strong>Review Required:</strong> Requires filesChanged mapping, a complete validationPlan, and test receipts verification.`;
-      } else {
-        verdict.textContent = 'HIGH RISK / HIGH AUTHORITY';
-        verdict.style.color = '#ef4444';
-        requirements.className = 'status-panel error';
-        requirements.innerHTML = `<strong>Mandatory Checks:</strong> high-authority core change! Must document regression hypotheses, provide test evidence from evals, and verify rollback steps.`;
-      }
-    }
-
-    // Checklist
-    function _toggleCheckItem(id) {
-      const item = document.getElementById(`item-${id}`);
-      const checkbox = item.querySelector('input[type="checkbox"]');
-      if (checkbox.checked) {
-        item.classList.add('done');
-      } else {
-        item.classList.remove('done');
-      }
-    }
-
+    // Init
     window.onload = () => {
-      loadSampleJson('valid');
-      assessRisk();
-    }
+      loadManifestPreset('valid');
+    };
   </script>
 </body>
 </html>

@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Skills Hub & Marketplace</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #4b5563;
+      
+      /* Glowing Neon Colors */
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
+
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 10% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 90% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
+        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    /* Header styling */
+    header {
+      border-bottom: 1px solid var(--border-card);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .logo-box {
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.1);
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+
+    .version-tag {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .version-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--color-cyan);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--color-cyan);
+    }
+
+    .back-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: color 0.2s;
+    }
+    .back-link:hover {
+      color: var(--color-cyan);
+    }
+
+    /* Split Hub Layout */
+    .skills-hub {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      flex: 1;
+      min-height: 550px;
+    }
+
+    .list-side {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .search-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.25rem;
+      backdrop-filter: blur(12px);
+    }
+
+    .search-input-wrapper {
+      position: relative;
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .search-input {
+      flex: 1;
+      padding: 0.6rem 1rem;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.9rem;
+      font-family: var(--font-sans);
+    }
+    .search-input:focus {
+      outline: none;
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
+    }
+
+    .skills-list-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1rem;
+      flex: 1;
+      overflow-y: auto;
+      max-height: 450px;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .group-title {
+      font-size: 0.75rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dark);
+      margin-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      padding-bottom: 0.25rem;
+    }
+
+    .skill-card {
+      background: rgba(255, 255, 255, 0.01);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .skill-card:hover {
+      background: rgba(255, 255, 255, 0.03);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+    .skill-card.active {
+      background: rgba(var(--color-cyan-rgb), 0.03);
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 12px rgba(var(--color-cyan-rgb), 0.1);
+    }
+
+    .skill-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      color: #fff;
+    }
+    .skill-card.active .skill-name {
+      color: var(--color-cyan);
+    }
+
+    .skill-desc-short {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+
+    .scope-badge {
+      font-size: 0.65rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .scope-project { background: rgba(0, 240, 255, 0.1); border: 1px solid var(--color-cyan); color: var(--color-cyan); }
+    .scope-user { background: rgba(189, 0, 255, 0.1); border: 1px solid var(--color-purple); color: var(--color-purple); }
+    .scope-market { background: rgba(245, 158, 11, 0.1); border: 1px solid var(--color-amber); color: var(--color-amber); }
+
+    .detail-side {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .detail-header {
+      border-bottom: 1px solid var(--border-card);
+      padding-bottom: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .detail-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: #fff;
+    }
+
+    .detail-provenance {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .provenance-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .provenance-live { background-color: var(--color-emerald); }
+    .provenance-cached { background-color: var(--color-cyan); }
+    .provenance-pinned { background-color: var(--color-amber); }
+
+    .metadata-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      background: rgba(0, 0, 0, 0.15);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-size: 0.8rem;
+    }
+
+    .metadata-item span {
+      color: var(--text-muted);
+    }
+    .metadata-item strong {
+      color: #fff;
+      font-family: var(--font-mono);
+    }
+
+    .detail-body {
+      flex: 1;
+      background: #05080e;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-sans);
+      font-size: 0.85rem;
+      line-height: 1.5;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      color: #e5e7eb;
+    }
+
+    .hud-actions {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-main);
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--color-cyan);
+    }
+    .btn-action {
+      background: rgba(var(--color-cyan-rgb), 0.1);
+      border-color: var(--color-cyan);
+      color: var(--color-cyan);
+    }
+    .btn-action:hover {
+      background: rgba(var(--color-cyan-rgb), 0.2);
+    }
+
+    .hud-console {
+      background: #05080e;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--color-emerald);
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 1.5rem;
+      color: var(--text-dark);
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="header-logo">
+        <div class="logo-box">
+          <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="32" height="32" />
+        </div>
+        <div>
+          <h1>Skills Marketplace</h1>
+          <div class="subtitle">Interactive Skills Hub Explorer & Package Installer</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap: 1rem;">
+        <a href="index.html" class="back-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back to Hub
+        </a>
+        <div class="version-tag">
+          <div class="version-dot"></div>
+          Clio Coder v0.2.3
+        </div>
+      </div>
+    </header>
+
+    <!-- Skills Hub Split Pane -->
+    <div class="skills-hub">
+      
+      <!-- Left side: List and search -->
+      <div class="list-side">
+        <div class="search-panel">
+          <div class="search-input-wrapper">
+            <input type="text" class="search-input" id="search-box" placeholder="Search skills by name or description..." oninput="filterSkills()">
+          </div>
+        </div>
+
+        <div class="skills-list-container">
+          <!-- Project Group -->
+          <div>
+            <div class="group-title">Project Skills (.clio/skills)</div>
+            <div id="group-project"></div>
+          </div>
+          <!-- User Group -->
+          <div style="margin-top: 1rem;">
+            <div class="group-title">User Skills (configDir/skills)</div>
+            <div id="group-user"></div>
+          </div>
+          <!-- Marketplace Group -->
+          <div style="margin-top: 1rem;">
+            <div class="group-title">Marketplace (github.com/iowarp/skills)</div>
+            <div id="group-market"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right side: Detail pane & Simulator actions -->
+      <div class="detail-side">
+        <div class="detail-header">
+          <div>
+            <div class="detail-title" id="det-title">hdf5-review</div>
+            <div class="detail-provenance">
+              <span class="provenance-dot" id="det-provenance-dot"></span>
+              <span id="det-provenance-text">Loaded from Cache</span>
+            </div>
+          </div>
+          <span class="scope-badge" id="det-scope-badge">Project</span>
+        </div>
+
+        <div class="metadata-grid">
+          <div class="metadata-item"><span>License:</span> <strong id="det-license">MIT</strong></div>
+          <div class="metadata-item"><span>Version:</span> <strong id="det-version">1.0.0</strong></div>
+          <div class="metadata-item"><span>Allowed Tools:</span> <strong id="det-tools">Read, Grep</strong></div>
+          <div class="metadata-item"><span>Integrity Hash:</span> <strong id="det-hash">sha256-4b684...</strong></div>
+        </div>
+
+        <div class="detail-body" id="det-body">
+          Loading...
+        </div>
+
+        <!-- CLI Console Simulation -->
+        <div class="hud-console" id="console-output">
+          System idle. Select a skill or install packages.
+        </div>
+
+        <div class="hud-actions">
+          <button type="button" class="btn btn-action" onclick="simulateSelectSkill()">
+            Insert to Editor (Enter)
+          </button>
+          <button type="button" class="btn" id="install-btn" onclick="simulateInstallSkill()">
+            Install Eagerly (i)
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <footer>
+      <p>Clio Coder Visual Specification Blueprint. Product Version v0.2.3. Designed with high-performance dark aesthetics.</p>
+    </footer>
+  </div>
+
+  <script>
+    const SKILLS = {
+      "hdf5-review": {
+        name: "hdf5-review",
+        scope: "project",
+        scopeClass: "scope-project",
+        provenance: "Local Disk (.clio/skills/hdf5-review)",
+        provDot: "provenance-cached",
+        license: "MIT",
+        version: "1.0.0",
+        tools: "Read, Grep",
+        hash: "sha256-abc482fd8f9a93012ff1875e",
+        description: "Review HDF5/NetCDF validation logic and output assumptions.",
+        body: `When asked to review scientific array output:
+- identify expected dimensions and attributes;
+- ask for validation data when absent;
+- prefer deterministic scripts over visual inspection;
+- cite files and commands used.`
+      },
+      "sys-bench": {
+        name: "sys-bench",
+        scope: "user",
+        scopeClass: "scope-user",
+        provenance: "User Directory (~/.config/clio/skills/sys-bench)",
+        provDot: "provenance-cached",
+        license: "Apache-2.0",
+        version: "1.2.0",
+        tools: "Bash, Run_Task",
+        hash: "sha256-d8f92ea4b78712ab870c99a0",
+        description: "Execute baseline benchmarks on target serving matrices.",
+        body: `When benchmarking local model presets:
+- build the binaries in release target;
+- request single-file CLI output generation;
+- verify model context parameters and record output TTFT.`
+      },
+      "netcdf-check": {
+        name: "netcdf-check",
+        scope: "market",
+        scopeClass: "scope-market",
+        provenance: "Live GitHub raw.githubusercontent.com (Miss Cached -> Pinned Fallback)",
+        provDot: "provenance-pinned",
+        license: "MIT",
+        version: "1.0.1",
+        tools: "Read, Bash",
+        hash: "sha256-ff7a391c12df8bfa982a01f4",
+        description: "Run metadata inspections on NetCDF climate files.",
+        body: `When inspecting .nc file dimensions:
+- invoke 'ncdump -h' to read variables schema;
+- check CF conventions version tag attributes;
+- verify latitude and longitude grids spacing invariants.`
+      },
+      "vtk-render": {
+        name: "vtk-render",
+        scope: "market",
+        scopeClass: "scope-market",
+        provenance: "Live GitHub Content API (Hit Live)",
+        provDot: "provenance-live",
+        license: "BSD-3-Clause",
+        version: "2.0.0",
+        tools: "Bash, Read",
+        hash: "sha256-829afc87ffea1029ba87eddf",
+        description: "Generate ParaView state files from local scientific meshes.",
+        body: `When visualizing VTK mesh coordinates:
+- verify cell arrays formatting;
+- validate coordinate system bounds against scientific tolerances;
+- execute local python export pipelines scripts.`
+      }
+    };
+
+    let activeSkill = "hdf5-review";
+
+    function renderList() {
+      document.getElementById("group-project").innerHTML = "";
+      document.getElementById("group-user").innerHTML = "";
+      document.getElementById("group-market").innerHTML = "";
+
+      Object.keys(SKILLS).forEach(key => {
+        const sk = SKILLS[key];
+        const card = document.createElement("div");
+        card.className = `skill-card ${key === activeSkill ? 'active' : ''}`;
+        card.id = `skill-card-${key}`;
+        card.onclick = () => selectSkill(key);
+
+        card.innerHTML = `
+          <div>
+            <div class="skill-name">${sk.name}</div>
+            <div class="skill-desc-short">${sk.description}</div>
+          </div>
+          <span class="scope-badge ${sk.scopeClass}">${sk.scope}</span>
+        `;
+
+        document.getElementById(`group-${sk.scope}`).appendChild(card);
+      });
+    }
+
+    function selectSkill(key) {
+      activeSkill = key;
+      document.querySelectorAll(".skill-card").forEach(c => { c.classList.remove("active"); });
+      document.getElementById(`skill-card-${key}`).classList.add("active");
+
+      const sk = SKILLS[key];
+      document.getElementById("det-title").innerText = sk.name;
+      document.getElementById("det-scope-badge").innerText = sk.scope;
+      document.getElementById("det-scope-badge").className = `scope-badge ${sk.scopeClass}`;
+      document.getElementById("det-provenance-text").innerText = sk.provenance;
+      document.getElementById("det-provenance-dot").className = `provenance-dot ${sk.provDot}`;
+      
+      document.getElementById("det-license").innerText = sk.license;
+      document.getElementById("det-version").innerText = sk.version;
+      document.getElementById("det-tools").innerText = sk.tools;
+      document.getElementById("det-hash").innerText = sk.hash;
+      document.getElementById("det-body").textContent = sk.body;
+
+      const installBtn = document.getElementById("install-btn");
+      if (sk.scope === "market") {
+        installBtn.style.display = "inline-flex";
+      } else {
+        installBtn.style.display = "none";
+      }
+    }
+
+    function simulateSelectSkill() {
+      const sk = SKILLS[activeSkill];
+      const cmd = `/skill:${sk.name} `;
+      document.getElementById("console-output").innerText = `[TUI Editor] Inserted: "${cmd}"`;
+      
+      const cons = document.getElementById("console-output");
+      cons.style.color = "var(--color-cyan)";
+      setTimeout(() => { cons.style.color = "var(--color-emerald)"; }, 2000);
+    }
+
+    function simulateInstallSkill() {
+      const sk = SKILLS[activeSkill];
+      document.getElementById("console-output").innerText = `[CLI] Eagerly installing skill '${sk.name}' into project scope at '.clio/skills/${sk.name}'...`;
+      
+      setTimeout(() => {
+        // Upgrade scope to project
+        sk.scope = "project";
+        sk.scopeClass = "scope-project";
+        sk.provenance = `Eagerly Installed (.clio/skills/${sk.name})`;
+        sk.provDot = "provenance-cached";
+        
+        renderList();
+        selectSkill(activeSkill);
+        
+        document.getElementById("console-output").innerText = `[SUCCESS] Installed skill '${sk.name}' successfully.`;
+      }, 1500);
+    }
+
+    function filterSkills() {
+      const q = document.getElementById("search-box").value.toLowerCase();
+      
+      Object.keys(SKILLS).forEach(key => {
+        const sk = SKILLS[key];
+        const card = document.getElementById(`skill-card-${key}`);
+        if (sk.name.toLowerCase().includes(q) || sk.description.toLowerCase().includes(q) || sk.body.toLowerCase().includes(q)) {
+          card.style.display = "flex";
+        } else {
+          card.style.display = "none";
+        }
+      });
+    }
+
+    // Keybindings support
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        simulateSelectSkill();
+      } else if (e.key === "i" || e.key === "I") {
+        const sk = SKILLS[activeSkill];
+        if (sk.scope === "market") {
+          simulateInstallSkill();
+        }
+      }
+    });
+
+    window.onload = () => {
+      renderList();
+      selectSkill(activeSkill);
+    };
+  </script>
+</body>
+</html>

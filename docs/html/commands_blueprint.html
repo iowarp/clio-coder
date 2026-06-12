@@ -3,23 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Command & TUI Spec</title>
-  
-  <!-- Fonts -->
+  <title>Clio Coder Commands &amp; Modes Blueprint (v0.2.3)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
       --bg-dark: #090d16;
-      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-grid: rgba(255, 255, 255, 0.02);
+      --bg-card: rgba(13, 20, 38, 0.45);
+      --bg-card-hover: rgba(20, 30, 58, 0.6);
       --border-card: rgba(255, 255, 255, 0.08);
+      --border-card-hover: rgba(0, 240, 255, 0.3);
       --text-main: #f3f4f6;
       --text-muted: #9ca3af;
-      --text-dark: #4b5563;
+      --text-dim: #6b7280;
       
-      /* Glowing Neon Colors */
       --color-cyan: #00f0ff;
       --color-cyan-rgb: 0, 240, 255;
       --color-purple: #bd00ff;
@@ -32,9 +32,11 @@
       --color-rose-rgb: 239, 68, 68;
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
-      --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      
+      --glass-blur: blur(12px);
     }
 
     * {
@@ -46,169 +48,183 @@
     body {
       background-color: var(--bg-dark);
       background-image: 
-        radial-gradient(circle at 5% 15%, rgba(var(--color-cyan-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 95% 85%, rgba(var(--color-purple-rgb), 0.04) 0%, transparent 35%),
-        radial-gradient(circle at 50% 50%, #0c1220 0%, var(--bg-dark) 100%);
+        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
       color: var(--text-main);
       font-family: var(--font-sans);
       min-height: 100vh;
       line-height: 1.6;
       overflow-x: hidden;
+      position: relative;
     }
 
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.01);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(var(--color-cyan-rgb), 0.25);
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: center top;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.8;
     }
 
     .container {
-      max-width: 1440px;
+      max-width: 1400px;
       margin: 0 auto;
       padding: 2rem;
+      position: relative;
+      z-index: 1;
     }
 
     /* Header Styling */
     header {
-      position: relative;
-      padding-bottom: 2rem;
-      border-bottom: 1px solid var(--border-card);
-      margin-bottom: 3rem;
       display: flex;
-      flex-direction: column;
+      justify-content: space-between;
       align-items: center;
-      text-align: center;
+      margin-bottom: 2.5rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
     }
 
     .header-logo {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 72px;
-      height: 72px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 18px;
-      margin-bottom: 1rem;
-      box-shadow: var(--shadow-glow);
-      position: relative;
-    }
-
-    .header-logo::after {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 20px;
-      background: var(--gradient-main);
-      z-index: -1;
-      opacity: 0.3;
-      filter: blur(4px);
-    }
-
-    .header-logo img {
-      width: 78%;
-      height: 78%;
-      object-fit: contain;
-      filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.35));
-    }
-
-    .header-badge {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border: 1px solid rgba(var(--color-cyan-rgb), 0.2);
-      color: var(--color-cyan);
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      padding: 0.25rem 0.75rem;
-      border-radius: 100px;
-      margin-bottom: 1rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    h1 {
-      font-size: 2.75rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      background: linear-gradient(to right, #ffffff, #88a0ff, var(--color-cyan));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 0.5rem;
-    }
-
-    .subtitle {
-      color: var(--text-muted);
-      font-size: 1.1rem;
-      max-width: 700px;
-      margin-bottom: 1.5rem;
-    }
-
-    .metadata-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1rem;
-      width: 100%;
-      max-width: 900px;
-      background: var(--bg-card);
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--border-card);
       border-radius: 12px;
-      padding: 1rem;
-      backdrop-filter: blur(16px);
     }
 
-    .meta-item {
-      text-align: left;
-      border-right: 1px solid var(--border-card);
-      padding-right: 1rem;
-    }
-    .meta-item:last-child {
-      border-right: none;
-      padding-right: 0;
-    }
-    .meta-label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 0.25rem;
-    }
-    .meta-value {
-      font-family: var(--font-mono);
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--color-cyan);
+    .header-logo svg {
+      width: 28px;
+      height: 28px;
     }
 
-    /* Dashboard Layout */
-    .section-title {
-      font-size: 1.75rem;
-      font-weight: 700;
-      margin-bottom: 1.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      border-left: 4px solid var(--color-cyan);
-      padding-left: 0.75rem;
-    }
-    .section-title span {
-      background: var(--gradient-main);
+    .header-title-wrapper h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    .grid-2col {
+    .header-title-wrapper p {
+      font-size: 0.825rem;
+      color: var(--text-muted);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .back-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .back-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+    }
+
+    .version-badge {
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      color: var(--color-cyan);
+      padding: 0.35rem 0.75rem;
+      border-radius: 50px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+
+    /* Tabs Navigation */
+    .tabs-nav {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+    }
+
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.6rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+    }
+
+    .tab-btn.active {
+      background: var(--gradient-main);
+      color: #090d16;
+      border-color: transparent;
+      box-shadow: 0 4px 15px rgba(var(--color-cyan-rgb), 0.25);
+    }
+
+    /* Content Layout */
+    .tab-pane {
+      display: none;
+      animation: fadeIn 0.3s ease-out forwards;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Split layout */
+    .blueprint-layout {
       display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
+      grid-template-columns: 1fr 1fr;
       gap: 2rem;
-      margin-bottom: 4rem;
+      align-items: start;
+    }
+
+    @media (max-width: 1100px) {
+      .blueprint-layout {
+        grid-template-columns: 1fr;
+      }
     }
 
     .glass-card {
@@ -216,1966 +232,521 @@
       border: 1px solid var(--border-card);
       border-radius: 16px;
       padding: 1.75rem;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-      position: relative;
-      overflow: hidden;
+      margin-bottom: 2rem;
+      backdrop-filter: var(--glass-blur);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
     }
 
-    .glass-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-    }
-
-    /* Interactive Search UI */
-    .filter-bar {
-      display: flex;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-    }
-
-    .search-input-wrapper {
-      position: relative;
-      flex: 1;
-      min-width: 250px;
-    }
-
-    .search-input {
-      width: 100%;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1rem 0.75rem 2.5rem;
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      font-size: 0.95rem;
-      transition: all 0.2s ease;
-    }
-
-    .search-input:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 10px rgba(var(--color-cyan-rgb), 0.15);
-      background: rgba(0, 0, 0, 0.4);
-    }
-
-    .search-icon {
-      position: absolute;
-      left: 1rem;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-muted);
-      pointer-events: none;
-      width: 16px;
-      height: 16px;
-    }
-
-    .filter-select {
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem 1.5rem 0.75rem 1rem;
-      color: var(--text-main);
-      font-family: var(--font-sans);
-      font-size: 0.95rem;
-      cursor: pointer;
-      outline: none;
-    }
-
-    .filter-select:focus {
-      border-color: var(--color-purple);
-    }
-
-    .tabs {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
-      border-bottom: 1px solid var(--border-card);
-      padding-bottom: 0.5rem;
-    }
-
-    .tab-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 0.5rem 1rem;
-      font-weight: 600;
-      font-size: 0.95rem;
-      cursor: pointer;
-      border-radius: 6px;
-      transition: all 0.2s;
-    }
-
-    .tab-btn.active {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      color: var(--color-cyan);
-    }
-
-    .tab-btn:hover:not(.active) {
-      color: var(--text-main);
-      background: rgba(255,255,255,0.02);
-    }
-
-    /* Result list */
-    .results-container {
-      max-height: 550px;
-      overflow-y: auto;
-      padding-right: 0.5rem;
-    }
-
-    .command-card {
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 10px;
-      padding: 1rem;
-      margin-bottom: 1rem;
-      transition: all 0.2s ease;
-      cursor: pointer;
-    }
-
-    .command-card:hover {
-      background: rgba(255, 255, 255, 0.04);
-      border-color: rgba(var(--color-cyan-rgb), 0.3);
-      transform: translateX(4px);
-    }
-
-    .command-card.active {
-      border-color: var(--color-cyan);
-      background: rgba(var(--color-cyan-rgb), 0.03);
-    }
-
-    .cmd-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.5rem;
-    }
-
-    .cmd-name {
-      font-family: var(--font-mono);
-      font-weight: 600;
-      font-size: 1.05rem;
-      color: #ffffff;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .badge-pill {
-      font-family: var(--font-sans);
-      font-size: 0.7rem;
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
+    .glass-card h2 {
+      font-size: 1.25rem;
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .badge-cli {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      color: var(--color-cyan);
-      border: 1px solid rgba(var(--color-cyan-rgb), 0.2);
-    }
-
-    .badge-slash {
-      background: rgba(var(--color-purple-rgb), 0.15);
-      color: #e280ff;
-      border: 1px solid rgba(var(--color-purple-rgb), 0.2);
-    }
-
-    .badge-key {
-      background: rgba(var(--color-amber-rgb), 0.1);
-      color: var(--color-amber);
-      border: 1px solid rgba(var(--color-amber-rgb), 0.2);
-    }
-
-    .cmd-description {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      margin-bottom: 0.75rem;
-    }
-
-    .cmd-meta {
-      display: flex;
-      gap: 1rem;
-      font-size: 0.8rem;
-      color: var(--text-dark);
-      flex-wrap: wrap;
-    }
-
-    .cmd-meta-item {
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
-      background: rgba(0, 0, 0, 0.2);
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.03);
-    }
-
-    .cmd-meta-item strong {
-      color: var(--text-muted);
-    }
-
-    /* Console Parser Simulator */
-    .simulator-container {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-
-    .term-window {
-      background: #02040a;
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      font-family: var(--font-mono);
-      overflow: hidden;
-      box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .term-header {
-      background: #0d1117;
-      padding: 0.5rem 1rem;
+      color: #ffffff;
+      margin-bottom: 1.25rem;
       display: flex;
       align-items: center;
       gap: 0.5rem;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.75rem;
     }
 
-    .term-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-    .td-red { background: #ff5f56; }
-    .td-yellow { background: #ffbd2e; }
-    .td-green { background: #27c93f; }
-    .term-title {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-left: 0.5rem;
-      flex: 1;
-    }
-
-    .term-body {
-      padding: 1.25rem;
-      font-size: 0.9rem;
-      overflow-y: auto;
-      flex: 1;
-      min-height: 250px;
-    }
-
-    .prompt-line {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
+    .glass-card h2 svg {
+      width: 18px;
+      height: 18px;
       color: var(--color-cyan);
+    }
+
+    .glass-card p {
+      font-size: 0.925rem;
+      color: var(--text-muted);
       margin-bottom: 1rem;
     }
 
-    .prompt-input {
-      flex: 1;
+    /* Interactive Terminal console */
+    .tui-console {
+      background: #020408;
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1.25rem;
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
+      position: relative;
+      min-height: 200px;
+    }
+
+    .tui-line {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: #fff;
+    }
+
+    .tui-prompt {
+      color: var(--color-cyan);
+      font-weight: 700;
+    }
+
+    .tui-input {
       background: transparent;
       border: none;
-      color: #ffffff;
+      color: #fff;
       font-family: var(--font-mono);
-      font-size: 0.9rem;
       outline: none;
-      caret-color: var(--color-cyan);
-    }
-
-    .presets-title {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 1rem;
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .presets-list {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-      margin-bottom: 1.5rem;
-    }
-
-    .preset-btn {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-card);
-      border-radius: 6px;
-      padding: 0.35rem 0.6rem;
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-
-    .preset-btn:hover {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border-color: var(--color-cyan);
-      color: #ffffff;
-    }
-
-    .analysis-panel {
-      margin-top: 1.25rem;
-      background: rgba(255,255,255,0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 1rem;
-    }
-
-    .analysis-title {
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .status-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
-    }
-
-    .status-valid {
-      background: rgba(var(--color-emerald-rgb), 0.15);
-      color: var(--color-emerald);
-    }
-    .status-invalid {
-      background: rgba(var(--color-rose-rgb), 0.15);
-      color: var(--color-rose);
-    }
-
-    .analysis-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 0.75rem;
-      font-size: 0.85rem;
-    }
-
-    .analysis-card {
-      background: rgba(0,0,0,0.2);
-      border: 1px solid rgba(255,255,255,0.03);
-      padding: 0.6rem;
-      border-radius: 6px;
-    }
-
-    .analysis-label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      margin-bottom: 0.2rem;
-    }
-
-    .analysis-val {
-      font-family: var(--font-mono);
-      color: var(--color-cyan);
-      word-break: break-all;
-    }
-
-    .validation-log {
-      grid-column: span 2;
-      border-left: 2px solid var(--color-amber);
-      background: rgba(var(--color-amber-rgb), 0.05);
-      padding: 0.5rem;
-      border-radius: 0 4px 4px 0;
-      color: #ffca64;
-      font-size: 0.8rem;
-    }
-
-    /* Keybinding Overrides & Warning Calculator */
-    .key-grid-3col {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 2rem;
-      margin-bottom: 4rem;
-    }
-
-    .override-editor {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .override-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: rgba(0,0,0,0.2);
-      padding: 0.5rem 0.75rem;
-      border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.03);
-    }
-
-    .override-action {
-      font-size: 0.85rem;
-      color: var(--text-main);
-    }
-
-    .override-input {
-      background: rgba(0,0,0,0.4);
-      border: 1px solid var(--border-card);
-      border-radius: 4px;
-      color: var(--color-cyan);
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      padding: 0.25rem 0.5rem;
-      width: 100px;
-      text-align: center;
-    }
-
-    .override-input:focus {
-      outline: none;
-      border-color: var(--color-cyan);
-    }
-
-    .key-tester {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      gap: 1.5rem;
-    }
-
-    .key-display {
-      background: rgba(0,0,0,0.4);
-      border: 2px dashed rgba(var(--color-cyan-rgb), 0.3);
-      width: 180px;
-      height: 100px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: var(--font-mono);
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: var(--color-cyan);
-      box-shadow: inset 0 0 15px rgba(var(--color-cyan-rgb), 0.1);
-      cursor: pointer;
-      user-select: none;
-      transition: all 0.2s;
-    }
-
-    .key-display:hover {
-      border-color: var(--color-cyan);
-      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.2);
-    }
-
-    .tester-prompt {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      text-align: center;
-    }
-
-    .warning-card {
-      background: rgba(var(--color-rose-rgb), 0.04);
-      border: 1px solid rgba(var(--color-rose-rgb), 0.15);
-      border-radius: 10px;
-      padding: 1rem;
-      height: 100%;
-    }
-
-    .warning-item {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 0.75rem;
-      font-size: 0.85rem;
-    }
-
-    .warning-bullet {
-      color: var(--color-rose);
-      font-weight: 800;
-    }
-
-    /* State Machine Simulator */
-    .mode-sim-container {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      margin-bottom: 4rem;
-    }
-
-    .mode-selector-strip {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .mode-btn {
-      flex: 1;
-      background: rgba(255,255,255,0.02);
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      padding: 0.75rem;
-      color: var(--text-muted);
-      font-weight: 700;
-      font-family: var(--font-sans);
-      cursor: pointer;
-      transition: all 0.2s;
-      text-align: center;
-      text-transform: uppercase;
-      font-size: 0.85rem;
-      letter-spacing: 0.05em;
-    }
-
-    .mode-btn.active[data-mode="default"] {
-      background: rgba(var(--color-cyan-rgb), 0.1);
-      border-color: var(--color-cyan);
-      color: var(--color-cyan);
-    }
-
-    .mode-btn.active[data-mode="advise"] {
-      background: rgba(var(--color-amber-rgb), 0.1);
-      border-color: var(--color-amber);
-      color: var(--color-amber);
-    }
-
-    .mode-btn.active[data-mode="super"] {
-      background: rgba(var(--color-purple-rgb), 0.15);
-      border-color: #d67bff;
-      color: #d67bff;
-      box-shadow: 0 0 10px rgba(var(--color-purple-rgb), 0.2);
-    }
-
-    .tool-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .tool-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.6rem 0.75rem;
-      background: rgba(0,0,0,0.2);
-      border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.03);
-    }
-
-    .tool-label {
-      font-size: 0.85rem;
-      font-weight: 600;
-    }
-
-    .tool-admission {
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      text-transform: uppercase;
-    }
-
-    .admit-allow {
-      background: rgba(var(--color-emerald-rgb), 0.15);
-      color: var(--color-emerald);
-      border: 1px solid rgba(var(--color-emerald-rgb), 0.2);
-    }
-
-    .admit-deny {
-      background: rgba(var(--color-rose-rgb), 0.15);
-      color: var(--color-rose);
-      border: 1px solid rgba(var(--color-rose-rgb), 0.2);
-    }
-
-    .admit-park {
-      background: rgba(var(--color-amber-rgb), 0.15);
-      color: var(--color-amber);
-      border: 1px solid rgba(var(--color-amber-rgb), 0.2);
-    }
-
-    .matrix-display {
-      background: rgba(0,0,0,0.3);
-      border-radius: 12px;
-      padding: 1.25rem;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-    }
-
-    .matrix-title {
-      font-family: var(--font-mono);
-      font-size: 0.95rem;
-      color: var(--color-cyan);
-      margin-bottom: 0.75rem;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
-      padding-bottom: 0.5rem;
-    }
-
-    .matrix-body {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      flex: 1;
-      margin-bottom: 1rem;
-    }
-
-    .matrix-rules {
-      list-style-type: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .matrix-rules li {
-      position: relative;
-      padding-left: 1rem;
-    }
-
-    .matrix-rules li::before {
-      content: '⚡';
-      position: absolute;
-      left: 0;
-      color: var(--color-cyan);
-    }
-
-    /* Flow Diagrams */
-    .flow-diagram-container {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 3rem;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-    }
-
-    .svg-wrapper {
       width: 100%;
-      overflow-x: auto;
-      text-align: center;
-      padding: 1rem 0;
     }
 
-    svg {
-      max-width: 100%;
-      height: auto;
-      background: transparent;
+    /* Autocomplete overlay */
+    .autocomplete-popover {
+      position: absolute;
+      top: 3.5rem;
+      left: 1.25rem;
+      right: 1.25rem;
+      background: rgba(13, 20, 38, 0.95);
+      border: 1px solid var(--color-cyan);
+      border-radius: 8px;
+      box-shadow: var(--shadow-glow);
+      z-index: 10;
+      max-height: 180px;
+      overflow-y: auto;
+      display: none;
     }
 
-    .svg-node {
-      fill: rgba(13, 21, 37, 0.95);
-      stroke: var(--border-card);
-      stroke-width: 1.5px;
-      rx: 8px;
+    .autocomplete-item {
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-muted);
     }
 
-    .svg-node.cyan { stroke: var(--color-cyan); }
-    .svg-node.purple { stroke: var(--color-purple); }
-    .svg-node.emerald { stroke: var(--color-emerald); }
-    .svg-node.amber { stroke: var(--color-amber); }
-    .svg-node.rose { stroke: var(--color-rose); }
-
-    .svg-text {
-      fill: var(--text-main);
-      font-size: 11px;
-      font-family: var(--font-sans);
-      text-anchor: middle;
-      font-weight: 500;
+    .autocomplete-item:hover, .autocomplete-item.selected {
+      background: rgba(0, 240, 255, 0.15);
+      color: #fff;
     }
 
-    .svg-text-mono {
-      fill: var(--text-main);
-      font-size: 10px;
+    .autocomplete-item strong {
+      color: var(--color-cyan);
+    }
+
+    .tui-details {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 6px;
+      border-left: 2.5px solid var(--color-cyan);
+      display: none;
+    }
+
+    /* Notice level simulator */
+    .logs-wrapper {
+      background: #020408;
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
       font-family: var(--font-mono);
-      text-anchor: middle;
+      font-size: 0.8rem;
+      height: 150px;
+      overflow-y: auto;
+      margin-top: 1rem;
     }
 
-    .svg-text-header {
-      font-weight: bold;
-      fill: #ffffff;
-      font-size: 12px;
+    .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
     }
 
-    .svg-edge {
-      fill: none;
-      stroke: rgba(255, 255, 255, 0.15);
-      stroke-width: 1.5;
-      marker-end: url(#arrow);
+    .log-btn {
+      flex: 1;
+      padding: 0.4rem;
+      cursor: pointer;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-card);
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #fff;
     }
 
-    .svg-edge.cyan { stroke: rgba(var(--color-cyan-rgb), 0.4); }
-    .svg-edge.purple { stroke: rgba(var(--color-purple-rgb), 0.4); }
-    .svg-edge.emerald { stroke: rgba(var(--color-emerald-rgb), 0.4); }
-    .svg-edge.amber { stroke: rgba(var(--color-amber-rgb), 0.4); }
-
-    .svg-edge-label {
-      fill: var(--text-muted);
-      font-size: 9px;
-      font-family: var(--font-sans);
-      text-anchor: middle;
-      background: #090d16;
+    .log-btn:hover {
+      background: rgba(255,255,255,0.08);
     }
 
-    /* Footer Details */
-    footer.page-footer {
-      text-align: center;
-      padding: 3rem 0;
-      color: var(--text-dark);
-      font-size: 0.85rem;
-      border-top: 1px solid var(--border-card);
-      margin-top: 5rem;
+    .log-line {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .log-line.info { color: var(--text-muted); }
+    .log-line.success { color: var(--color-emerald); }
+    .log-line.warn { color: var(--color-amber); }
+    .log-line.error { color: var(--color-rose); }
+
+    /* Keybindings Visual Grid */
+    .key-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+
+    .key-card {
+      background: rgba(0,0,0,0.15);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .kbd-tag {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      border-bottom-width: 3px;
+      padding: 0.2rem 0.5rem;
+      border-radius: 5px;
       font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* Ref table */
+    .ref-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.9rem;
+    }
+
+    .ref-table th, .ref-table td {
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border-card);
+      text-align: left;
+    }
+
+    .ref-table th {
+      background: rgba(255,255,255,0.03);
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-dim);
+      font-size: 0.875rem;
     }
   </style>
 </head>
 <body>
-
   <div class="container">
-    <!-- Header -->
     <header>
-      <div class="header-logo">
-        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Clio Coder Commands &amp; Modes</h1>
+          <p>CLI syntax rules, TUI slash commands, notice channels, and hotkey bindings</p>
+        </div>
       </div>
-      <div class="header-badge">Interactive System Blueprint</div>
-      <h1>Clio Coder Command & TUI Spec</h1>
-      <p class="subtitle">An architectural blueprint detailing user-facing commands, keyboard shortcuts, interactive modes, TUI routing pipelines, safety state matrices, and screen paint workflows.</p>
-      
-      <div class="metadata-grid">
-        <div class="meta-item">
-          <div class="meta-label">Product Version</div>
-          <div class="meta-value">v0.2.2</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">System Harness</div>
-          <div class="meta-value">Terminal UI-First</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Release Class</div>
-          <div class="meta-value">Alpha / HPC-Native</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-label">Current Node Epoch</div>
-          <div class="meta-value">2026-06-06</div>
-        </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.3</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
       </div>
     </header>
 
-    <!-- SECTION 1: COMMAND SEARCH & CONSOLE SIMULATOR -->
-    <div class="section-title">
-      <span>Command Explorer & Console Validator</span>
+    <div class="tabs-nav">
+      <button type="button" class="tab-btn active" onclick="switchTab('interactive')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Interactive Console Simulator
+      </button>
+      <button type="button" class="tab-btn" onclick="switchTab('reference')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        Full Technical Reference
+      </button>
     </div>
-    
-    <div class="grid-2col">
-      <!-- Left side: Command DB Explorer -->
-      <div class="glass-card">
-        <div class="tabs">
-          <button type="button" class="tab-btn active" onclick="_setTab('all')">All</button>
-          <button type="button" class="tab-btn" onclick="_setTab('cli')">CLI Commands</button>
-          <button type="button" class="tab-btn" onclick="_setTab('slash')">Slash Commands</button>
-          <button type="button" class="tab-btn" onclick="_setTab('hotkey')">TUI Hotkeys</button>
-        </div>
+
+    <!-- TAB 1: INTERACTIVE -->
+    <main class="tab-pane active" id="pane-interactive">
+      <div class="blueprint-layout">
         
-        <div class="filter-bar">
-          <div class="search-input-wrapper">
-            <!-- Simple SVG Search Icon -->
-            <svg aria-hidden="true" class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            <input type="text" id="commandSearch" class="search-input" placeholder="Search commands, keys, parameters..." oninput="filterCommands()">
-          </div>
-          
-          <select id="modeFilter" class="filter-select" onchange="filterCommands()">
-            <option value="any">Any Mode Availability</option>
-            <option value="default">Available in Default</option>
-            <option value="advise">Available in Advise</option>
-            <option value="super">Available in Super</option>
-          </select>
-          
-          <select id="prereqFilter" class="filter-select" onchange="filterCommands()">
-            <option value="any">Any Prerequisite</option>
-            <option value="target">Requires Target Connection</option>
-            <option value="auth">Requires Auth Login</option>
-            <option value="none">No Prerequisites</option>
-          </select>
-        </div>
-        
-        <div class="results-container" id="commandsList">
-          <!-- Populated by JS -->
-        </div>
-      </div>
-      
-      <!-- Right side: Real-time Parser Simulator -->
-      <div class="glass-card">
-        <div class="simulator-container">
-          <h3 style="margin-bottom: 0.5rem; font-size: 1.1rem; font-weight:600; color:#fff;">Interactive Console Sandbox</h3>
-          <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Type a CLI or Slash command below to run the live parser, option validator, and safety checker.</p>
-          
-          <div class="presets-title">Presets & Examples (Click to load)</div>
-          <div class="presets-list">
-            <button type="button" class="preset-btn" onclick="loadPreset('clio run --agent coder &quot;audit dependencies&quot;')">clio run --agent coder ...</button>
-            <button type="button" class="preset-btn" onclick="loadPreset('clio targets use cloud-target')">clio targets use ...</button>
-            <button type="button" class="preset-btn" onclick="loadPreset('/run architect &quot;refactor main.ts&quot; --thinking high')">/run architect ...</button>
-            <button type="button" class="preset-btn" onclick="loadPreset('/model agentic-qwen:medium')">/model agentic-qwen...</button>
-            <button type="button" class="preset-btn" onclick="loadPreset('clio reset --state')">clio reset --state</button>
-            <button type="button" class="preset-btn" onclick="loadPreset('clio run --thinking custom')">clio run [invalid option]</button>
-          </div>
-          
-          <div class="term-window">
-            <div class="term-header">
-              <div class="term-dot td-red"></div>
-              <div class="term-dot td-yellow"></div>
-              <div class="term-dot td-green"></div>
-              <div class="term-title">clio-coder v0.2.2 – interactive shell environment</div>
-            </div>
+        <!-- Left: Console simulator -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+              TUI Slash Command Console
+            </h2>
+            <p>Type a slash command (e.g. <code>/settings</code>, <code>/run</code>, <code>/targets</code>, <code>/help</code>) to test Clio's autocomplete and ListOverlay detail pane.</p>
             
-            <div class="term-body">
-              <div class="prompt-line">
-                <span>clio &gt;</span>
-                <input type="text" id="sandboxInput" class="prompt-input" placeholder="Type command here..." oninput="analyzeCommand()" value="clio run --agent coder &quot;audit dependencies&quot;">
+            <div class="tui-console">
+              <div class="tui-line">
+                <span class="tui-prompt">clio &gt;</span>
+                <input type="text" id="consoleInput" class="tui-input" placeholder="Type / to trigger autocomplete..." oninput="onInputChanged()" onkeydown="onConsoleKeyDown(event)">
               </div>
-              
-              <div class="analysis-panel">
-                <div class="analysis-title">
-                  <span>Compilation & Admission Output</span>
-                  <span id="validIndicator" class="status-indicator status-valid">Valid</span>
-                </div>
-                
-                <div class="analysis-grid">
-                  <div class="analysis-card">
-                    <div class="analysis-label">Command Surface</div>
-                    <div class="analysis-val" id="valType">CLI Headless</div>
-                  </div>
-                  
-                  <div class="analysis-card">
-                    <div class="analysis-label">Primary Subcommand</div>
-                    <div class="analysis-val" id="valAction">run</div>
-                  </div>
-                  
-                  <div class="analysis-card" style="grid-column: span 2;">
-                    <div class="analysis-label">Parsed Options / Flags</div>
-                    <div class="analysis-val" id="valFlags">--agent="coder"</div>
-                  </div>
-                  
-                  <div class="analysis-card" style="grid-column: span 2;">
-                    <div class="analysis-label">Arguments & Prompts</div>
-                    <div class="analysis-val" id="valArgs">"audit dependencies"</div>
-                  </div>
-                  
-                  <div class="analysis-card">
-                    <div class="analysis-label">Admission Rules Check</div>
-                    <div class="analysis-val" id="valAdmission" style="color:var(--color-emerald);">Admitted (Read-Only)</div>
-                  </div>
-                  
-                  <div class="analysis-card">
-                    <div class="analysis-label">Connection Dependency</div>
-                    <div class="analysis-val" id="valPrereq">Requires target</div>
-                  </div>
-                  
-                  <div class="validation-log" id="validationLog" style="display: none;">
-                    <!-- Errors show up here -->
-                  </div>
-                </div>
+
+              <!-- Autocomplete popover -->
+              <div class="autocomplete-popover" id="autocompletePopover">
+                <!-- items injected via script -->
               </div>
-              
+            </div>
+
+            <!-- Detail overlay mock -->
+            <div class="tui-details" id="commandDetails">
+              <strong id="detailTitle" style="color:var(--color-cyan)">/run</strong>
+              <p id="detailUsage" style="font-family:var(--font-mono); font-size:0.75rem; margin-top:0.25rem; color:#fff;">Usage: /run &lt;agent&gt; &lt;task&gt;</p>
+              <p id="detailDesc" style="font-size:0.875rem; color:var(--text-muted); margin-top:0.5rem;">Dispatches a fleet agent worker with specific rules.</p>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- SECTION 2: KEYBOARD PORTABILITY CALCULATOR -->
-    <div class="section-title">
-      <span>TUI Hotkey Portability & Conflict Calculator</span>
-    </div>
-    
-    <div class="key-grid-3col">
-      <!-- 1: Interactive Key Tester -->
-      <div class="glass-card">
-        <h3 style="margin-bottom: 0.75rem; font-size:1.1rem; color:#fff;">TUI Shortcut Compatibility</h3>
-        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1.5rem;">Click the box below and press a key chord, or select a predefined sequence to calculate its transport reliability across terminal emulators.</p>
-        
-        <div class="key-tester">
-          <div class="key-display" id="keyDisplay" tabindex="0" onkeydown="_testKey(event)">Alt+M</div>
-          <div class="tester-prompt">Click to record keypress<br>or select preset below:</div>
-          
-          <select id="presetKeys" class="filter-select" style="width: 100%; text-align: center;" onchange="_loadPresetKey()">
-            <option value="alt+m">Alt+M (Cycle Mode)</option>
-            <option value="shift+tab">Shift+Tab (Cycle Thinking)</option>
-            <option value="alt+s">Alt+S (Super Request)</option>
-            <option value="ctrl+g">Ctrl+G (Portable Leader)</option>
-            <option value="ctrl+s">Ctrl+S (Flow Control Risk)</option>
-            <option value="ctrl+shift+z">Ctrl+Shift+Z (Requires CSI-u)</option>
-            <option value="ctrl+p">Ctrl+P (IDE Collision)</option>
-          </select>
-        </div>
-      </div>
-      
-      <!-- 2: Terminal Warning Diagnostics -->
-      <div class="glass-card">
-        <h3 style="margin-bottom: 0.75rem; font-size:1.1rem; color:#fff;">Transport Warnings</h3>
-        <div class="warning-card">
-          <div id="compatibilityStatus" style="font-family: var(--font-mono); font-size:1rem; font-weight:700; margin-bottom:1rem; color:var(--color-emerald);">
-            STATUS: 100% COMPATIBLE
-          </div>
-          <div id="warningsList" style="display: flex; flex-direction: column; gap:0.75rem;">
-            <!-- Generated dynamically -->
-            <div class="warning-item">
-              <span class="warning-bullet">✔</span>
-              <span>Fully compatible on all major terminal profiles (macOS Terminal, Kitty, WezTerm, VS Code TTY).</span>
+        <!-- Right: Notice channels tester -->
+        <div class="specs-col">
+          <div class="glass-card">
+            <h2>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              Notice Channels Logger
+            </h2>
+            <p>Clio TUI displays colored logs utilizing specific notice channel glyphs. Click below to simulate lines:</p>
+            
+            <div class="logs-wrapper" id="simLogs">
+              <div class="log-line info">· System initialized. Autonomy level set to auto-edit.</div>
+            </div>
+
+            <div class="btn-row">
+              <button type="button" class="log-btn" style="border-left: 3px solid var(--text-dim)" onclick="logNotice('info')">Log Info</button>
+              <button type="button" class="log-btn" style="border-left: 3px solid var(--color-emerald)" onclick="logNotice('success')">Log Success</button>
+              <button type="button" class="log-btn" style="border-left: 3px solid var(--color-amber)" onclick="logNotice('warn')">Log Warn</button>
+              <button type="button" class="log-btn" style="border-left: 3px solid var(--color-rose)" onclick="logNotice('error')">Log Error</button>
             </div>
           </div>
         </div>
+
       </div>
-      
-      <!-- 3: Rebind Overrider -->
+    </main>
+
+    <!-- TAB 2: TECHNICAL REFERENCE -->
+    <main class="tab-pane" id="pane-reference">
       <div class="glass-card">
-        <h3 style="margin-bottom: 0.75rem; font-size:1.1rem; color:#fff;">Mock Binding Settings</h3>
-        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">Mock customize Clio keybindings. The validator will check for duplicate bindings in real-time.</p>
+        <h2>Clio Coder Keybindings &amp; Command List</h2>
         
-        <div class="override-editor" id="overrideEditor">
-          <!-- Loaded by JS -->
-        </div>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">App Keybindings</h3>
+        <p>Alt bindings represent the main navigation channel. In macOS terminals, ensure Meta is set to Option.</p>
         
-        <div id="overrideConflictAlert" style="margin-top: 1rem; font-size: 0.8rem; padding: 0.5rem; border-radius: 6px; display: none;">
-          <!-- Conflict warnings -->
-        </div>
-      </div>
-    </div>
-
-    <!-- SECTION 3: MODE SAFETY & ADMISSION SIMULATOR -->
-    <div class="section-title">
-      <span>Operator Mode Safety Matrix</span>
-    </div>
-    
-    <div class="mode-sim-container">
-      <div class="glass-card">
-        <h3 style="margin-bottom: 0.75rem; font-size:1.1rem; color:#fff;">Active Mode Selection</h3>
-        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1.5rem;">Select an operator mode to simulate target evaluation and tool admission blockades from Clio Coder's safety model.</p>
-        
-        <div class="mode-selector-strip">
-          <button type="button" class="mode-btn active" data-mode="default" onclick="_setSimMode('default')">Default Mode</button>
-          <button type="button" class="mode-btn" data-mode="advise" onclick="_setSimMode('advise')">Advise Mode</button>
-          <button type="button" class="mode-btn" data-mode="super" onclick="_setSimMode('super')">Super Mode</button>
-        </div>
-        
-        <div class="tool-list">
-          <div class="tool-row">
-            <span class="tool-label">File Reads (e.g. view_file)</span>
-            <span class="tool-admission admit-allow" id="readAdmit">Admitted</span>
+        <div class="key-grid">
+          <div class="key-card">
+            <span>Cycle thinking levels</span>
+            <span class="kbd-tag">Shift+Tab</span>
           </div>
-          <div class="tool-row">
-            <span class="tool-label">File Writes & Edits (e.g. replace_file_content)</span>
-            <span class="tool-admission admit-allow" id="writeAdmit">Admitted</span>
+          <div class="key-card">
+            <span>Open Session Tree Navigator</span>
+            <span class="kbd-tag">Alt+T</span>
           </div>
-          <div class="tool-row">
-            <span class="tool-label">Bash Exec (Curated Allowlist / Audited entries)</span>
-            <span class="tool-admission admit-allow" id="allowBashAdmit">Admitted</span>
+          <div class="key-card">
+            <span>Toggle Footer Dashboard size</span>
+            <span class="kbd-tag">Alt+U</span>
           </div>
-          <div class="tool-row">
-            <span class="tool-label">Bash Exec (Arbitrary / Privileged commands)</span>
-            <span class="tool-admission admit-park" id="arbitraryBashAdmit">Parks</span>
+          <div class="key-card">
+            <span>Open Model/Target Selector</span>
+            <span class="kbd-tag">Alt+L</span>
+          </div>
+          <div class="key-card">
+            <span>Cycle through scoped models</span>
+            <span class="kbd-tag">Alt+J / Alt+K</span>
+          </div>
+          <div class="key-card">
+            <span>Toggle Dispatch Board overlay</span>
+            <span class="kbd-tag">Alt+W</span>
           </div>
         </div>
+
+        <h3 style="margin: 2rem 0 0.5rem 0; color:#fff;">TUI Slash Commands</h3>
+        <table class="ref-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Usage</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/quit</code></td>
+              <td><code>/quit</code></td>
+              <td>Exit Clio Coder</td>
+            </tr>
+            <tr>
+              <td><code>/help</code></td>
+              <td><code>/help [query]</code></td>
+              <td>Open interactive help center and hotkeys</td>
+            </tr>
+            <tr>
+              <td><code>/settings</code></td>
+              <td><code>/settings</code></td>
+              <td>Open interactive full-screen Settings Center</td>
+            </tr>
+            <tr>
+              <td><code>/targets</code></td>
+              <td><code>/targets</code></td>
+              <td>Manage target connections, health check, and live probes</td>
+            </tr>
+            <tr>
+              <td><code>/run</code></td>
+              <td><code>/run &lt;agent&gt; &lt;task&gt;</code></td>
+              <td>Deploy worker agent locally</td>
+            </tr>
+            <tr>
+              <td><code>/context-view</code></td>
+              <td><code>/context-view</code></td>
+              <td>Visualize active context breakdown (system/files/history)</td>
+            </tr>
+            <tr>
+              <td><code>/resume</code></td>
+              <td><code>/resume</code></td>
+              <td>Resume a past session from history ledger</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      
-      <div class="glass-card">
-        <div class="matrix-display">
-          <div>
-            <div class="matrix-title" id="matrixTitle">Enforcement Domain: DEFAULT MODE</div>
-            <div class="matrix-body" id="matrixBody">
-              Default mode provides active write access and allows execution of safe and structured actions. Unallowlisted bash commands are parked and request Operator Elevation (Alt+S) to proceed.
-            </div>
-          </div>
-          
-          <div style="background: rgba(0,0,0,0.4); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border-card);">
-            <div style="font-size: 0.75rem; font-weight:700; color:var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">Safety Policy Matrix Rules:</div>
-            <ul class="matrix-rules" id="matrixRules">
-              <li>Admitted tools execute immediately.</li>
-              <li>Parked tools pop up the Super Mode approval screen in the TUI.</li>
-              <li>Operator must press Enter to elevate, or Esc to abort.</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
+    </main>
 
-    <!-- SECTION 4: DATA FLOW DIAGRAMS -->
-    <div class="section-title">
-      <span>Architectural Pipeline Flows</span>
-    </div>
-    
-    <!-- SVG Flow 1: Keyboard Input Router -->
-    <div class="flow-diagram-container">
-      <h3 style="margin-bottom: 0.5rem; font-weight: 700; color: #fff;">1. Keyboard Input Router Workflow</h3>
-      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Maps how keystrokes from the terminal raw stream are routed through overlay controls, leader key timers, and hotkey managers.</p>
-      <div class="svg-wrapper">
-        <svg aria-hidden="true" width="960" height="420" viewBox="0 0 960 420">
-          <defs>
-            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.4)" />
-            </marker>
-          </defs>
-          
-          <!-- Nodes -->
-          <!-- Raw Input -->
-          <rect x="20" y="180" width="120" height="50" class="svg-node cyan" />
-          <text x="80" y="205" class="svg-text svg-text-header">Raw Input Bytes</text>
-          <text x="80" y="220" class="svg-text-mono">process.stdin.on</text>
-
-          <!-- Router Entry -->
-          <rect x="200" y="180" width="130" height="50" class="svg-node" />
-          <text x="265" y="205" class="svg-text svg-text-header">Input Handler</text>
-          <text x="265" y="220" class="svg-text-mono">handleTuiKeyInput()</text>
-
-          <!-- Overlay Check -->
-          <polygon points="430,155 530,205 430,255 330,205" fill="rgba(13, 21, 37, 0.95)" stroke="var(--color-purple)" stroke-width="1.5" />
-          <text x="430" y="202" class="svg-text svg-text-header">Overlay Open?</text>
-          <text x="430" y="217" class="svg-text-mono">overlayState !== "closed"</text>
-
-          <!-- Overlay Router -->
-          <rect x="365" y="40" width="130" height="50" class="svg-node purple" />
-          <text x="430" y="65" class="svg-text svg-text-header">Overlay Dispatcher</text>
-          <text x="430" y="80" class="svg-text-mono">routeOverlayKey()</text>
-
-          <!-- Leader Key Check -->
-          <polygon points="630,155 730,205 630,255 530,205" fill="rgba(13, 21, 37, 0.95)" stroke="var(--color-amber)" stroke-width="1.5" />
-          <text x="630" y="202" class="svg-text svg-text-header">Leader Chord?</text>
-          <text x="630" y="217" class="svg-text-mono">Ctrl+G Pending?</text>
-
-          <!-- Leader Key Handler -->
-          <rect x="565" y="40" width="130" height="50" class="svg-node amber" />
-          <text x="630" y="65" class="svg-text svg-text-header">Leader Routing</text>
-          <text x="630" y="80" class="svg-text-mono">routeLeaderKey()</text>
-
-          <!-- Hotkey Mapper -->
-          <polygon points="830,155 930,205 830,255 730,205" fill="rgba(13, 21, 37, 0.95)" stroke="var(--color-cyan)" stroke-width="1.5" />
-          <text x="830" y="202" class="svg-text svg-text-header">Clio Action Key?</text>
-          <text x="830" y="217" class="svg-text-mono">matches(data, id)</text>
-
-          <!-- Hotkey Dispatcher -->
-          <rect x="765" y="320" width="130" height="50" class="svg-node cyan" />
-          <text x="830" y="345" class="svg-text svg-text-header">Execute Action</text>
-          <text x="830" y="360" class="svg-text-mono">dispatchInteractiveAction()</text>
-
-          <!-- Text Editor Fallback -->
-          <rect x="565" y="320" width="130" height="50" class="svg-node emerald" />
-          <text x="630" y="345" class="svg-text svg-text-header">Editor/Console Input</text>
-          <text x="630" y="360" class="svg-text-mono">ClioEditor.handleInput()</text>
-
-          <!-- Edges -->
-          <path d="M 140 205 L 192 205" class="svg-edge cyan" />
-          <path d="M 330 205 L 342 205" class="svg-edge" />
-          
-          <!-- Overlay Branch (Yes) -->
-          <path d="M 430 155 L 430 98" class="svg-edge purple" />
-          <text x="445" y="130" class="svg-text">Yes</text>
-          
-          <!-- Overlay Branch (No) -->
-          <path d="M 530 205 L 542 205" class="svg-edge" />
-          <text x="548" y="195" class="svg-text">No</text>
-          
-          <!-- Leader Branch (Yes) -->
-          <path d="M 630 155 L 630 98" class="svg-edge amber" />
-          <text x="645" y="130" class="svg-text">Yes</text>
-          
-          <!-- Leader Branch (No) -->
-          <path d="M 730 205 L 742 205" class="svg-edge" />
-          <text x="748" y="195" class="svg-text">No</text>
-
-          <!-- Hotkey Branch (Yes) -->
-          <path d="M 830 255 L 830 312" class="svg-edge cyan" />
-          <text x="845" y="280" class="svg-text">Yes</text>
-
-          <!-- Hotkey Branch (No) -->
-          <path d="M 830 205 H 940 V 300 H 630 L 630 312" class="svg-edge" />
-          <text x="885" y="195" class="svg-text">No</text>
-
-          <!-- overlay checks back to UI -->
-          <path d="M 365 65 H 265 V 172" class="svg-edge" />
-          <!-- leader checks back to TUI -->
-          <path d="M 565 65 H 265 V 172" class="svg-edge" />
-        </svg>
-      </div>
-    </div>
-    
-    <!-- SVG Flow 2: Screen Paint Loop -->
-    <div class="flow-diagram-container">
-      <h3 style="margin-bottom: 0.5rem; font-weight: 700; color: #fff;">2. Screen Paint & Re-render Loop</h3>
-      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Explains the TUI paint cycle from event trigger, layout build phase, to terminal ANSI stream flush.</p>
-      <div class="svg-wrapper">
-        <svg aria-hidden="true" width="960" height="300" viewBox="0 0 960 300">
-          <!-- Nodes -->
-          <!-- Render Event triggers -->
-          <rect x="20" y="100" width="130" height="80" class="svg-node amber" />
-          <text x="85" y="125" class="svg-text svg-text-header">Trigger Events</text>
-          <text x="85" y="145" class="svg-text-mono">User Keypress</text>
-          <text x="85" y="160" class="svg-text-mono">Async Agent Event</text>
-          <text x="85" y="175" class="svg-text-mono">Progress Tick</text>
-
-          <!-- requestRender -->
-          <rect x="210" y="115" width="130" height="50" class="svg-node" />
-          <text x="275" y="140" class="svg-text svg-text-header">Debounce Router</text>
-          <text x="275" y="155" class="svg-text-mono">tui.requestRender()</text>
-
-          <!-- Coalescing Render -->
-          <rect x="390" y="115" width="140" height="50" class="svg-node purple" />
-          <text x="460" y="140" class="svg-text svg-text-header">Renderer Coalescing</text>
-          <text x="460" y="155" class="svg-text-mono">CoalescingChatRenderer</text>
-
-          <!-- Layout Assembler -->
-          <rect x="580" y="115" width="140" height="50" class="svg-node cyan" />
-          <text x="650" y="140" class="svg-text svg-text-header">Layout Compiler</text>
-          <text x="650" y="155" class="svg-text-mono">buildLayout()</text>
-
-          <!-- Screen Write -->
-          <rect x="770" y="115" width="160" height="50" class="svg-node emerald" />
-          <text x="850" y="140" class="svg-text svg-text-header">Write stdout Stream</text>
-          <text x="850" y="155" class="svg-text-mono">process.stdout.write(ansi)</text>
-
-          <!-- Edges -->
-          <path d="M 150 140 L 202 140" class="svg-edge amber" />
-          <path d="M 340 140 L 382 140" class="svg-edge" />
-          <path d="M 530 140 L 572 140" class="svg-edge purple" />
-          <path d="M 720 140 L 762 140" class="svg-edge cyan" />
-          
-          <!-- Details annotations below layout -->
-          <text x="650" y="200" class="svg-text-mono" style="fill:var(--text-muted);">Assembles Transcript + Dashboard + Overlays</text>
-        </svg>
-      </div>
-    </div>
-
-    <!-- SVG Flow 3: Command Dispatcher Pipeline -->
-    <div class="flow-diagram-container">
-      <h3 style="margin-bottom: 0.5rem; font-weight: 700; color: #fff;">3. Command Dispatcher Pipeline</h3>
-      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Traces execution from interactive TUI editor or headless shell inputs down to the Fleet agent dispatch contract.</p>
-      <div class="svg-wrapper">
-        <svg aria-hidden="true" width="960" height="380" viewBox="0 0 960 380">
-          <!-- Inputs -->
-          <rect x="20" y="60" width="130" height="50" class="svg-node purple" />
-          <text x="85" y="85" class="svg-text svg-text-header">TUI Editor Input</text>
-          <text x="85" y="100" class="svg-text-mono">e.g. /run architect ...</text>
-
-          <rect x="20" y="230" width="130" height="50" class="svg-node cyan" />
-          <text x="85" y="255" class="svg-text svg-text-header">CLI Headless Arg</text>
-          <text x="85" y="270" class="svg-text-mono">e.g. clio run ...</text>
-
-          <!-- Parsers -->
-          <rect x="210" y="60" width="140" height="50" class="svg-node purple" />
-          <text x="280" y="85" class="svg-text svg-text-header">Slash Parser</text>
-          <text x="280" y="100" class="svg-text-mono">parseSlashCommand()</text>
-
-          <rect x="210" y="230" width="140" height="50" class="svg-node cyan" />
-          <text x="280" y="255" class="svg-text svg-text-header">CLI Argument Parser</text>
-          <text x="280" y="270" class="svg-text-mono">parseRunCliArgs()</text>
-
-          <!-- Router / Coordinator -->
-          <rect x="420" y="145" width="140" height="50" class="svg-node" />
-          <text x="490" y="170" class="svg-text svg-text-header">Execution Coordinator</text>
-          <text x="490" y="185" class="svg-text-mono">handleRun() / runClioRun()</text>
-
-          <!-- Dispatch Contract -->
-          <rect x="610" y="145" width="140" height="50" class="svg-node amber" />
-          <text x="680" y="170" class="svg-text svg-text-header">Dispatch Contract</text>
-          <text x="680" y="185" class="svg-text-mono">dispatch.dispatch()</text>
-
-          <!-- Agent executor -->
-          <rect x="800" y="145" width="140" height="80" class="svg-node emerald" />
-          <text x="870" y="170" class="svg-text svg-text-header">Fleet Agent Recipe</text>
-          <text x="870" y="190" class="svg-text-mono">Run Loop (scout, etc)</text>
-          <text x="870" y="205" class="svg-text-mono">Emits progres events</text>
-          <text x="870" y="220" class="svg-text-mono">Saves Run Receipt</text>
-
-          <!-- Edges -->
-          <path d="M 150 85 L 202 85" class="svg-edge purple" />
-          <path d="M 150 255 L 202 255" class="svg-edge cyan" />
-          
-          <path d="M 350 85 L 420 155" class="svg-edge purple" />
-          <path d="M 350 255 L 420 195" class="svg-edge cyan" />
-
-          <path d="M 560 170 L 602 170" class="svg-edge" />
-          <path d="M 750 170 L 792 170" class="svg-edge amber" />
-        </svg>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="page-footer">
-      Clio Coder Specification System • Interactive Command & TUI Engine Blueprint • Version 0.2.2 • 2026
+    <footer>
+      <p>Clio Coder UI Command specs &bull; Version 0.2.3</p>
     </footer>
   </div>
 
-  <!-- Vanila JS Code for Simulators -->
   <script>
-    // Databases
-    const commandsDb = [
-      // CLI subcommands
-      {
-        name: "clio",
-        type: "cli",
-        description: "Launch the interactive Terminal UI (TUI) session inside the current workspace.",
-        syntax: "clio [flags]",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "None. Automatically checks for configurations and boots."
-      },
-      {
-        name: "clio run",
-        type: "cli",
-        description: "Execute one headless main-agent turn to perform a specified code task.",
-        syntax: "clio run \"<task>\" [flags]",
-        modes: ["default", "super"],
-        prereqs: "target",
-        params: "--target <id> | --model <wireId> | --thinking <level> | --json | --agent <recipe> | --skill <path>"
-      },
-      {
-        name: "clio configure",
-        type: "cli",
-        description: "Launch the interactive setup wizard to configure target API backends and settings.",
-        syntax: "clio configure [--list]",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "--list: lists known runtime targets."
-      },
-      {
-        name: "clio targets",
-        type: "cli",
-        description: "Show a list of configured model execution targets and test their connectivity/auth health.",
-        syntax: "clio targets [add | remove | use | rename | profile | convert]",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "--json: format output | add: register a target | use <id>: set active default"
-      },
-      {
-        name: "clio models",
-        type: "cli",
-        description: "Query and list available models across all configured execution targets.",
-        syntax: "clio models [search] [--target <id>]",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "search: optional text match filter | --target: restrict search"
-      },
-      {
-        name: "clio auth",
-        type: "cli",
-        description: "Manage credentials and access keys for local or cloud provider target models.",
-        syntax: "clio auth [list | status | login | logout] <target-or-runtime>",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "list: print configs | status: inspect active login | login/logout: credentials flows"
-      },
-      {
-        name: "clio doctor",
-        type: "cli",
-        description: "Run self-diagnostics on the repository, check directory permissions, verify package config, and repair state.",
-        syntax: "clio doctor [--fix]",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "--fix: automatically recreate missing configs or directories"
-      },
-      {
-        name: "clio reset",
-        type: "cli",
-        description: "Nuke local cache, configuration files, credentials, or sessions to recover from corrupted state.",
-        syntax: "clio reset [--state | --auth | --config | --all]",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "Requires flag specifying state scope to wipe."
-      },
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('active'); });
+      document.querySelectorAll('.tab-pane').forEach(pane => { pane.classList.remove('active'); });
       
-      // Slash commands
-      {
-        name: "/run",
-        type: "slash",
-        description: "Spawn a specialized agent executor dynamically in the current TUI chat panel.",
-        syntax: "/run [options] <agent> <task>",
-        modes: ["default", "super"],
-        prereqs: "target",
-        params: "--thinking <level> | --model <id> | --tool-profile <profile>"
-      },
-      {
-        name: "/model",
-        type: "slash",
-        description: "Instantly switch the orchestrator model or filter the model selection overlay.",
-        syntax: "/model [pattern[:thinking]]",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "pattern: search string | thinking: override default thinking value"
-      },
-      {
-        name: "/compact",
-        type: "slash",
-        description: "Condense long chat history turns into a structured summary context to save token budgets.",
-        syntax: "/compact [instructions]",
-        modes: ["default", "super"],
-        prereqs: "target",
-        params: "instructions: customized focus notes for the summarizer agent."
-      },
-      {
-        name: "/view",
-        type: "slash",
-        description: "Browse session observability artifacts and verify receipt integrity.",
-        syntax: "/view [filter] | /view verify <runId>",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "filter: artifact id or text filter | verify <runId>: checks run receipt integrity"
-      },
-      {
-        name: "/tree",
-        type: "slash",
-        description: "Open the interactive session branch explorer to view alternate code turns.",
-        syntax: "/tree",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "None. Renders an overlay window."
-      },
-      {
-        name: "/settings",
-        type: "slash",
-        description: "View and edit settings properties interactively inside the terminal console.",
-        syntax: "/settings",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "None. Keyboard selection list overlays."
-      },
-      {
-        name: "/quit",
-        type: "slash",
-        description: "Cleanly save TUI sessions and terminate process execution.",
-        syntax: "/quit",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "None."
-      },
-
-      // TUI hotkeys
-      {
-        name: "Alt+M",
-        type: "hotkey",
-        description: "Cycle the active operator security mode: Default (Writes/Parks Bash) ↔ Advise (Read-Only).",
-        syntax: "Press Alt+M",
-        modes: ["default", "advise"],
-        prereqs: "none",
-        params: "Action mapping: clio.mode.cycle"
-      },
-      {
-        name: "Alt+S",
-        type: "hotkey",
-        description: "Elevate context safety mode to 'Super' to authorize a parked bash script or command.",
-        syntax: "Press Alt+S",
-        modes: ["default", "advise"],
-        prereqs: "none",
-        params: "Action mapping: clio.super.request. Launches verification window."
-      },
-      {
-        name: "Alt+U",
-        type: "hotkey",
-        description: "Toggle the bottom footer dashboard between compact grid and detailed metric layout.",
-        syntax: "Press Alt+U",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "Action mapping: clio.status.toggle"
-      },
-      {
-        name: "Shift+Tab",
-        type: "hotkey",
-        description: "Cycle thinking intensity level for reasoning models.",
-        syntax: "Press Shift+Tab",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "Action mapping: clio.thinking.cycle. Transitions: off → minimal → low → medium → high → xhigh."
-      },
-      {
-        name: "Ctrl+G",
-        type: "hotkey",
-        description: "Portable leader fallback prefix. Useful for macOS terminals when Option keys cannot map to Alt.",
-        syntax: "Press Ctrl+G followed by hotkey letter",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "Action mapping: clio.leader. Starts a 1.5s timeout listener."
-      },
-      {
-        name: "Ctrl+C",
-        type: "hotkey",
-        description: "General cancel command: interrupts streaming token output, closes open selector boxes, clears inputs, or exits on double tap.",
-        syntax: "Press Ctrl+C (twice to exit)",
-        modes: ["default", "advise", "super"],
-        prereqs: "none",
-        params: "Special handler inside routeTuiKeyInput()."
+      if (tabId === 'interactive') {
+        document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+        document.getElementById('pane-interactive').classList.add('active');
+      } else {
+        document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+        document.getElementById('pane-reference').classList.add('active');
       }
+    }
+
+    // Command registry
+    const commandsList = [
+      { cmd: "/settings", usage: "/settings", desc: "Opens the TUI settings screen to modify autonomy level, worker permission modes, thinking levels, compaction thresholds, and retries." },
+      { cmd: "/targets", usage: "/targets", desc: "Inspects live endpoint probes, switches the default orchestrator (key 'u'), connects credentials (key 'c'), or probes targets." },
+      { cmd: "/run", usage: "/run <agent> <task>", desc: "Spawns a fleet agent locally to implement changes, verify code, debug unit errors, or update developer docs." },
+      { cmd: "/context-view", usage: "/context-view", desc: "Visualizes token sliding window and compaction breakdown." },
+      { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
+      { cmd: "/quit", usage: "/quit", desc: "Exits clio process cleanly." }
     ];
 
-    let currentTab = 'all';
+    let selectedIndex = 0;
+    let filteredCmds = [...commandsList];
 
-    // Set Tabs
-    function _setTab(tab) {
-      currentTab = tab;
-      const buttons = document.querySelectorAll('.tab-btn');
-      buttons.forEach(btn => { btn.classList.remove('active'); });
-      event.target.classList.add('active');
-      filterCommands();
-    }
+    function onInputChanged() {
+      const val = document.getElementById('consoleInput').value;
+      const popover = document.getElementById('autocompletePopover');
 
-    // Filter commands DB
-    function filterCommands() {
-      const searchVal = document.getElementById('commandSearch').value.toLowerCase();
-      const modeVal = document.getElementById('modeFilter').value;
-      const prereqVal = document.getElementById('prereqFilter').value;
-      
-      const filtered = commandsDb.filter(cmd => {
-        // Tab type matching
-        if (currentTab !== 'all' && cmd.type !== currentTab) return false;
+      if (val.startsWith('/')) {
+        const query = val.toLowerCase();
+        filteredCmds = commandsList.filter(c => c.cmd.toLowerCase().startsWith(query));
+        selectedIndex = 0;
         
-        // Search text matching
-        const textMatch = cmd.name.toLowerCase().includes(searchVal) || 
-                          cmd.description.toLowerCase().includes(searchVal) || 
-                          cmd.syntax.toLowerCase().includes(searchVal);
-        if (!textMatch) return false;
-        
-        // Mode filter matching
-        if (modeVal !== 'any' && !cmd.modes.includes(modeVal)) return false;
-        
-        // Prereq filter matching
-        if (prereqVal !== 'any') {
-          if (prereqVal === 'none' && cmd.prereqs !== 'none') return false;
-          if (prereqVal !== 'none' && cmd.prereqs !== prereqVal) return false;
-        }
-        
-        return true;
-      });
-      
-      renderCommands(filtered);
-    }
-
-    // Render commands cards
-    function renderCommands(list) {
-      const container = document.getElementById('commandsList');
-      container.innerHTML = '';
-      
-      if (list.length === 0) {
-        container.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-muted);">No commands matched filters.</div>`;
-        return;
-      }
-      
-      list.forEach(cmd => {
-        const typeBadge = cmd.type === 'cli' ? 'badge-cli' : (cmd.type === 'slash' ? 'badge-slash' : 'badge-key');
-        const typeLabel = cmd.type === 'cli' ? 'CLI Subcommand' : (cmd.type === 'slash' ? 'Slash Cmd' : 'TUI Hotkey');
-        
-        const card = document.createElement('div');
-        card.className = 'command-card';
-        card.onclick = () => loadPreset(cmd.name === 'Alt+M' || cmd.name === 'Alt+S' || cmd.name === 'Shift+Tab' || cmd.name === 'Ctrl+G' || cmd.name === 'Ctrl+C' ? '' : cmd.name);
-        card.innerHTML = `
-          <div class="cmd-header">
-            <span class="cmd-name">
-              ${cmd.name}
-              <span class="badge-pill ${typeBadge}">${typeLabel}</span>
-            </span>
-            <span style="font-family:var(--font-mono); font-size:0.75rem; color:var(--color-cyan);">${cmd.syntax}</span>
-          </div>
-          <div class="cmd-description">${cmd.description}</div>
-          <div class="cmd-meta">
-            <div class="cmd-meta-item"><strong>Prereqs:</strong> ${cmd.prereqs}</div>
-            <div class="cmd-meta-item"><strong>Modes:</strong> ${cmd.modes.join(', ')}</div>
-            <div class="cmd-meta-item" style="flex: 1 1 100%;"><strong>Details:</strong> ${cmd.params}</div>
-          </div>
-        `;
-        container.appendChild(card);
-      });
-    }
-
-    // Preset loader for console simulator
-    function loadPreset(val) {
-      if (!val) return;
-      document.getElementById('sandboxInput').value = val;
-      analyzeCommand();
-    }
-
-    // Real-time Command Parser & Validator Simulator
-    const validAgents = ['architect', 'coder', 'debugger', 'documenter', 'tester', 'verifier'];
-    const shadowAgents = ['provenance', 'researcher', 'scout'];
-    const validThinking = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-    const validTools = ['minimal-local', 'science-local', 'full-agent'];
-
-    function analyzeCommand() {
-      const raw = document.getElementById('sandboxInput').value.trim();
-      const indicator = document.getElementById('validIndicator');
-      const valType = document.getElementById('valType');
-      const valAction = document.getElementById('valAction');
-      const valFlags = document.getElementById('valFlags');
-      const valArgs = document.getElementById('valArgs');
-      const valAdmission = document.getElementById('valAdmission');
-      const valPrereq = document.getElementById('valPrereq');
-      const log = document.getElementById('validationLog');
-      
-      log.style.display = 'none';
-      log.innerHTML = '';
-      
-      if (raw.length === 0) {
-        indicator.textContent = "Empty";
-        indicator.className = "status-indicator status-invalid";
-        return;
-      }
-      
-      let isValid = true;
-      const errors = [];
-      
-      // Slash command parsing
-      if (raw.startsWith('/')) {
-        valType.textContent = "TUI Slash Command";
-        const parts = raw.split(/\s+/);
-        const cmd = parts[0];
-        valAction.textContent = cmd;
-        
-        // Match slash registry
-        if (cmd === '/run') {
-          valPrereq.textContent = "Active Target & Agent recipe";
-          // Validate /run syntax
-          const options = {};
-          let i = 1;
-          while (i < parts.length && parts[i].startsWith('--')) {
-            const flag = parts[i];
-            const val = parts[i+1];
-            if (!val) {
-              errors.push(`Flag ${flag} requires a value`);
-              isValid = false;
-            } else {
-              options[flag] = val;
-            }
-            i += 2;
-          }
-          const agent = parts[i];
-          const task = parts.slice(i+1).join(' ');
-          
-          valFlags.textContent = Object.entries(options).map(([k, v]) => `${k}="${v}"`).join(', ') || 'None';
-          valArgs.textContent = `Agent: ${agent || '(missing)'}, Task: ${task || '(missing)'}`;
-          
-          if (!agent) {
-            errors.push("Missing fleet agent recipe id (e.g. coder)");
-            isValid = false;
-          } else if (shadowAgents.includes(agent)) {
-            errors.push(`Shadow agent "${agent}" is reserved for Clio internal orchestration; user-origin /run requests must use a base or custom agent.`);
-            isValid = false;
-          } else if (!validAgents.includes(agent)) {
-            errors.push(`Unknown user-visible agent recipe id: "${agent}". Known recipes: ${validAgents.join(', ')}`);
-            isValid = false;
-          }
-          if (!task) {
-            errors.push("Missing task text prompt instructions");
-            isValid = false;
-          }
-          
-          // Validate nested options
-          if (options['--thinking'] && !validThinking.includes(options['--thinking'])) {
-            errors.push(`Invalid thinking level "${options['--thinking']}". Must be: ${validThinking.join('|')}`);
-            isValid = false;
-          }
-          if (options['--tool-profile'] && !validTools.includes(options['--tool-profile'])) {
-            errors.push(`Invalid tool profile "${options['--tool-profile']}". Must be: ${validTools.join('|')}`);
-            isValid = false;
-          }
-
-          // Safety check depending on current simulated mode
-          const currentMode = document.querySelector('.mode-btn.active').dataset.mode;
-          if (currentMode === 'advise') {
-            valAdmission.textContent = "Rejected (Advise blocks Run)";
-            valAdmission.style.color = "var(--color-rose)";
-            errors.push("Advise mode blocks write/execute dispatches. /run command is rejected.");
-            isValid = false;
-          } else {
-            valAdmission.textContent = "Admitted (Requires Connection)";
-            valAdmission.style.color = "var(--color-emerald)";
-          }
-          
-        } else if (cmd === '/model') {
-          valPrereq.textContent = "None";
-          const pattern = parts.slice(1).join(' ');
-          valFlags.textContent = "None";
-          valArgs.textContent = pattern ? `Pattern: "${pattern}"` : "Launches Selector Overlay";
-          valAdmission.textContent = "Admitted";
-          valAdmission.style.color = "var(--color-emerald)";
-        } else if (cmd === '/compact') {
-          valPrereq.textContent = "Active target";
-          const inst = parts.slice(1).join(' ');
-          valFlags.textContent = "None";
-          valArgs.textContent = inst ? `Instructions: "${inst}"` : "Default Compaction";
-          valAdmission.textContent = "Admitted";
-          valAdmission.style.color = "var(--color-emerald)";
+        if (filteredCmds.length > 0) {
+          renderAutocomplete();
+          popover.style.display = 'block';
         } else {
-          // General slash command
-          const registry = ['/quit', '/help', '/context-init', '/context-clear', '/skill', '/prompts', '/extensions', '/share', '/run', '/delegate', '/agents', '/targets', '/cost', '/context-view', '/fleet', '/view', '/thinking', '/model', '/scoped-models', '/settings', '/resume', '/new', '/tree', '/fork', '/compact'];
-          if (!registry.includes(cmd)) {
-            errors.push(`Unknown slash command: "${cmd}". Type /help for assistance.`);
-            isValid = false;
-          }
-          valFlags.textContent = "None";
-          valArgs.textContent = parts.slice(1).join(' ') || "None";
-          valAdmission.textContent = "Admitted (Overlay / Utility)";
-          valAdmission.style.color = "var(--color-emerald)";
-          valPrereq.textContent = "None";
+          popover.style.display = 'none';
         }
-      }
-      
-      // CLI command parsing
-      else {
-        valType.textContent = "CLI Command";
-        const parts = raw.split(/\s+/);
-        const cliName = parts[0];
-        
-        if (cliName !== 'clio') {
-          errors.push(`Unrecognized shell executable "${cliName}". Use "clio" to invoke Clio Coder.`);
-          isValid = false;
-          valAction.textContent = "unknown";
-          valFlags.textContent = "N/A";
-          valArgs.textContent = "N/A";
-          valAdmission.textContent = "Unknown Action";
-          valAdmission.style.color = "var(--color-rose)";
-          valPrereq.textContent = "None";
-        } else {
-          const subcommand = parts[1];
-          valAction.textContent = subcommand || "clio (boot TUI)";
-          
-          if (!subcommand) {
-            valFlags.textContent = "None";
-            valArgs.textContent = "None";
-            valAdmission.textContent = "Boot TUI Session";
-            valAdmission.style.color = "var(--color-emerald)";
-            valPrereq.textContent = "None";
-          } else if (subcommand === 'run') {
-            valPrereq.textContent = "Target connected";
-            const options = {};
-            const taskArray = [];
-            let i = 2;
-            while (i < parts.length) {
-              const part = parts[i];
-              if (part.startsWith('--')) {
-                const val = parts[i+1];
-                options[part] = val || 'true';
-                i += 2;
-              } else {
-                taskArray.push(part);
-                i += 1;
-              }
-            }
-            const task = taskArray.join(' ');
-            
-            valFlags.textContent = Object.entries(options).map(([k, v]) => `${k}="${v}"`).join(', ') || 'None';
-            valArgs.textContent = `Task prompt: "${task || '(missing)'}"`;
-            
-            if (!task) {
-              errors.push("Missing headless task prompt argument");
-              isValid = false;
-            }
-            if (options['--thinking'] && !validThinking.includes(options['--thinking'])) {
-              errors.push(`Invalid thinking level "${options['--thinking']}". Must be: ${validThinking.join('|')}`);
-              isValid = false;
-            }
-            if (options['--tool-profile'] && !validTools.includes(options['--tool-profile'])) {
-              errors.push(`Invalid tool profile "${options['--tool-profile']}". Must be: ${validTools.join('|')}`);
-              isValid = false;
-            }
-            if (options['--agent'] && shadowAgents.includes(options['--agent'])) {
-              errors.push(`Shadow agent "${options['--agent']}" is reserved for Clio internal orchestration; use a base or custom agent here.`);
-              isValid = false;
-            } else if (options['--agent'] && !validAgents.includes(options['--agent'])) {
-              errors.push(`Unknown user-visible fleet agent recipe id: "${options['--agent']}"`);
-              isValid = false;
-            }
-
-            const currentMode = document.querySelector('.mode-btn.active').dataset.mode;
-            if (currentMode === 'advise') {
-              valAdmission.textContent = "Rejected (Advise Blocks Writes)";
-              valAdmission.style.color = "var(--color-rose)";
-              errors.push("Advise mode blocks write operations. Headless clio run rejected.");
-              isValid = false;
-            } else {
-              valAdmission.textContent = "Admitted";
-              valAdmission.style.color = "var(--color-emerald)";
-            }
-            
-          } else {
-            const cliSubcommands = ['configure', 'targets', 'models', 'auth', 'doctor', 'reset', 'uninstall', 'upgrade', 'agents', 'components', 'evidence', 'eval', 'memory', 'evolve', 'extensions', 'skills', 'share', 'init', 'version', '--version', '-v', '--help', '-h'];
-            if (!cliSubcommands.includes(subcommand)) {
-              errors.push(`Unknown clio subcommand: "${subcommand}". Type "clio --help" for guidance.`);
-              isValid = false;
-            }
-            valFlags.textContent = parts.filter(p => p.startsWith('--') && p !== subcommand).join(', ') || 'None';
-            valArgs.textContent = parts.filter(p => !p.startsWith('--') && p !== 'clio' && p !== subcommand).join(' ') || 'None';
-            valAdmission.textContent = "Admitted";
-            valAdmission.style.color = "var(--color-emerald)";
-            valPrereq.textContent = subcommand === 'models' || subcommand === 'auth' ? 'Depends on configs' : 'None';
-          }
-        }
-      }
-      
-      if (isValid) {
-        indicator.textContent = "Valid";
-        indicator.className = "status-indicator status-valid";
       } else {
-        indicator.textContent = "Error";
-        indicator.className = "status-indicator status-invalid";
-        log.style.display = 'block';
-        log.innerHTML = errors.map(err => `<div>✖ ${err}</div>`).join('');
+        popover.style.display = 'none';
       }
     }
 
-    // SECTION 2: KEY COMPATIBILITY CALCULATOR
-    function _testKey(event) {
-      event.preventDefault();
-      const modifiers = [];
-      if (event.ctrlKey) modifiers.push('ctrl');
-      if (event.shiftKey) modifiers.push('shift');
-      if (event.altKey) modifiers.push('alt');
-      if (event.metaKey) modifiers.push('super');
-      
-      let base = event.key;
-      if (base === 'Control' || base === 'Shift' || base === 'Alt' || base === 'Meta') {
-        return; // Don't print modifier releases
-      }
-      
-      // Normalize
-      base = base.toLowerCase();
-      if (base === 'escape') base = 'esc';
-      
-      const fullChord = [...modifiers, base].join('+');
-      
-      document.getElementById('keyDisplay').textContent = formatKeyLabel(fullChord);
-      calculateCompatibility(fullChord);
-    }
+    function renderAutocomplete() {
+      const popover = document.getElementById('autocompletePopover');
+      popover.innerHTML = '';
 
-    function formatKeyLabel(chord) {
-      return chord.split('+').map(seg => seg.charAt(0).toUpperCase() + seg.slice(1)).join('+');
-    }
-
-    function _loadPresetKey() {
-      const val = document.getElementById('presetKeys').value;
-      document.getElementById('keyDisplay').textContent = formatKeyLabel(val);
-      calculateCompatibility(val);
-    }
-
-    function calculateCompatibility(chord) {
-      const status = document.getElementById('compatibilityStatus');
-      const wList = document.getElementById('warningsList');
-      wList.innerHTML = '';
-      
-      const parts = chord.toLowerCase().split('+');
-      const hasCtrl = parts.includes('ctrl');
-      const hasAlt = parts.includes('alt');
-      const hasShift = parts.includes('shift');
-      const baseKey = parts[parts.length - 1];
-      
-      let compatibility = 100;
-      const warnings = [];
-      
-      // 1. macOS Option-as-Meta warning
-      if (hasAlt && baseKey.length === 1 && baseKey >= 'a' && baseKey <= 'z') {
-        compatibility = 70;
-        warnings.push({
-          type: 'macOS Option warning',
-          desc: "macOS Terminal.app captures Alt by default (sends composed letters like Option-M to 'µ'). Users must enable 'Use Option as Meta key' in terminal settings, or execute 'Ctrl+G then key' portable leader fallback sequence."
-        });
-      }
-      
-      // 2. CSI-u warning
-      if (hasCtrl && hasShift && baseKey.length === 1) {
-        compatibility = 40;
-        warnings.push({
-          type: 'CSI-u capability required',
-          desc: `Shortcut chord "${chord}" requires CSI-u keyboard protocol compatibility. Standard Linux tty/xterm, VS Code terminal, and tmux multiplexers do NOT reliably transmit three-finger control shifts. Works natively on Kitty, WezTerm, and configured iTerm2.`
-        });
-      }
-      
-      // 3. TTY Flow control interception
-      if (hasCtrl && (baseKey === 's' || baseKey === 'q')) {
-        compatibility = 30;
-        warnings.push({
-          type: 'TTY Flow Control interception risk',
-          desc: "Ctrl+S and Ctrl+Q are captured at the TTY terminal driver layer (XOFF/XON flow control). Invocations freeze input streams or resume them, blocking transport layers from ever delivering these byte arrays to Clio Coder."
-        });
-      }
-      if (hasCtrl && baseKey === 'z') {
-        compatibility = 30;
-        warnings.push({
-          type: 'Shell job suspension risk',
-          desc: "Ctrl+Z sends the SIGTSTP signal, suspending the node engine process to the background in Bash/Zsh instead of processing custom app mappings."
-        });
-      }
-
-      // 4. VS Code reserved key warnings
-      if (chord === 'ctrl+p' || chord === 'ctrl+l') {
-        compatibility = 60;
-        warnings.push({
-          type: 'IDE interception collision',
-          desc: "VS Code intercepts Ctrl+P (quick open file) and Ctrl+L (expand line selection/chat panel), preventing nested terminal streams from capturing the inputs."
-        });
-      }
-      
-      if (compatibility === 100) {
-        status.textContent = "STATUS: 100% COMPATIBLE";
-        status.style.color = "var(--color-emerald)";
-        wList.innerHTML = `
-          <div class="warning-item">
-            <span class="warning-bullet">✔</span>
-            <span>Fully compatible on all major terminal profiles (macOS Terminal, Kitty, WezTerm, VS Code TTY).</span>
-          </div>
-        `;
-      } else {
-        status.textContent = `STATUS: ${compatibility}% RELIABLE`;
-        status.style.color = compatibility >= 60 ? "var(--color-warn)" : "var(--color-rose)";
-        
-        warnings.forEach(w => {
-          const item = document.createElement('div');
-          item.className = 'warning-item';
-          item.innerHTML = `
-            <span class="warning-bullet">⚠</span>
-            <span><strong>${w.type}:</strong> ${w.desc}</span>
-          `;
-          wList.appendChild(item);
-        });
-      }
-    }
-
-    // Mock Keybinding Override Editor
-    const mockBindings = {
-      "clio.thinking.cycle": "shift+tab",
-      "clio.mode.cycle": "alt+m",
-      "clio.super.request": "alt+s",
-      "clio.status.toggle": "alt+u",
-      "clio.session.tree": "alt+t",
-      "clio.dispatchBoard.toggle": "alt+w",
-      "clio.model.select": "alt+l",
-      "clio.exit": "ctrl+d"
-    };
-
-    function loadOverrideEditor() {
-      const editor = document.getElementById('overrideEditor');
-      editor.innerHTML = '';
-      
-      Object.entries(mockBindings).forEach(([id, key]) => {
-        const row = document.createElement('div');
-        row.className = 'override-row';
-        row.innerHTML = `
-          <span class="override-action" style="font-family:var(--font-mono); font-size:0.75rem;">${id.replace('clio.', '')}</span>
-          <input type="text" class="override-input" data-id="${id}" value="${key}" oninput="validateMockOverrides()">
-        `;
-        editor.appendChild(row);
+      filteredCmds.forEach((c, idx) => {
+        const item = document.createElement('div');
+        item.className = `autocomplete-item ${idx === selectedIndex ? 'selected' : ''}`;
+        item.innerHTML = `<strong>${c.cmd}</strong> <span>${c.usage}</span>`;
+        item.onclick = () => {
+          selectCommand(c);
+        };
+        popover.appendChild(item);
       });
     }
 
-    function validateMockOverrides() {
-      const inputs = document.querySelectorAll('.override-input');
-      const alertBox = document.getElementById('overrideConflictAlert');
-      
-      const bindsMap = {};
-      const conflicts = [];
-      
-      inputs.forEach(inp => {
-        const id = inp.dataset.id;
-        const key = inp.value.trim().toLowerCase();
-        
-        if (key) {
-          if (bindsMap[key]) {
-            conflicts.push(`"${key}" is assigned to both <strong>${bindsMap[key]}</strong> and <strong>${id.replace('clio.', '')}</strong>`);
-          } else {
-            bindsMap[key] = id.replace('clio.', '');
+    function selectCommand(c) {
+      document.getElementById('consoleInput').value = c.cmd;
+      document.getElementById('autocompletePopover').style.display = 'none';
+
+      // Show details
+      document.getElementById('commandDetails').style.display = 'block';
+      document.getElementById('detailTitle').innerText = c.cmd;
+      document.getElementById('detailUsage').innerText = `Usage: ${c.usage}`;
+      document.getElementById('detailDesc').innerText = c.desc;
+    }
+
+    function onConsoleKeyDown(e) {
+      const popover = document.getElementById('autocompletePopover');
+      if (popover.style.display === 'block') {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          selectedIndex = (selectedIndex + 1) % filteredCmds.length;
+          renderAutocomplete();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          selectedIndex = (selectedIndex - 1 + filteredCmds.length) % filteredCmds.length;
+          renderAutocomplete();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (filteredCmds[selectedIndex]) {
+            selectCommand(filteredCmds[selectedIndex]);
           }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          popover.style.display = 'none';
         }
-      });
-      
-      if (conflicts.length > 0) {
-        alertBox.style.display = 'block';
-        alertBox.style.background = 'rgba(239, 68, 68, 0.1)';
-        alertBox.style.border = '1px solid rgba(239, 68, 68, 0.2)';
-        alertBox.style.color = '#ff8f8f';
-        alertBox.innerHTML = conflicts.map(c => `<div>✖ Conflict: ${c}</div>`).join('');
+      }
+    }
+
+    // Logs simulator
+    function logNotice(level) {
+      const logs = document.getElementById('simLogs');
+      let glyph = '·';
+      let msg = '';
+      if (level === 'info') {
+        glyph = '·';
+        msg = 'Settings hot-reloaded: autonomy level is auto-edit.';
+      } else if (level === 'success') {
+        glyph = '✓';
+        msg = 'Connection established successfully with target "local-ollama".';
+      } else if (level === 'warn') {
+        glyph = '!';
+        msg = '[safety-net] Unrecognized bash command sequencing. Will ask operator.';
       } else {
-        alertBox.style.display = 'block';
-        alertBox.style.background = 'rgba(16, 185, 129, 0.1)';
-        alertBox.style.border = '1px solid rgba(16, 185, 129, 0.2)';
-        alertBox.style.color = '#a7ffd5';
-        alertBox.innerHTML = '✔ Binding table compiles with no conflicts.';
+        glyph = '✗';
+        msg = 'Fatal: API Key credentials missing for Anthropic Cloud runtime.';
       }
-    }
 
-    // SECTION 3: SAFETY MODE SIMULATOR
-    function _setSimMode(mode) {
-      const buttons = document.querySelectorAll('.mode-btn');
-      buttons.forEach(btn => { btn.classList.remove('active'); });
-      event.target.classList.add('active');
+      const logLine = document.createElement('div');
+      logLine.className = `log-line ${level}`;
+      logLine.innerHTML = `<span>${glyph}</span> <span>${msg}</span>`;
       
-      const rAdmit = document.getElementById('readAdmit');
-      const wAdmit = document.getElementById('writeAdmit');
-      const abAdmit = document.getElementById('allowBashAdmit');
-      const arbAdmit = document.getElementById('arbitraryBashAdmit');
-      
-      const mTitle = document.getElementById('matrixTitle');
-      const mBody = document.getElementById('matrixBody');
-      const mRules = document.getElementById('matrixRules');
-      
-      if (mode === 'default') {
-        rAdmit.textContent = "Admitted"; rAdmit.className = "tool-admission admit-allow";
-        wAdmit.textContent = "Admitted"; wAdmit.className = "tool-admission admit-allow";
-        abAdmit.textContent = "Admitted"; abAdmit.className = "tool-admission admit-allow";
-        arbAdmit.textContent = "Parks"; arbAdmit.className = "tool-admission admit-park";
-        
-        mTitle.textContent = "Enforcement Domain: DEFAULT MODE";
-        mBody.textContent = "Provides active write access. Admits curated and allowed tool calls directly. Raw/unallowlisted bash shell requests are parked and require user confirmation (Alt+S) to elevate context.";
-        mRules.innerHTML = `
-          <li>Read / write file systems are open for coding files.</li>
-          <li>Bash executions are cross-checked against allowlisted commands.</li>
-          <li>Safe tool profiles run without prompts.</li>
-        `;
-      } else if (mode === 'advise') {
-        rAdmit.textContent = "Admitted"; rAdmit.className = "tool-admission admit-allow";
-        wAdmit.textContent = "Denied"; wAdmit.className = "tool-admission admit-deny";
-        abAdmit.textContent = "Denied"; abAdmit.className = "tool-admission admit-deny";
-        arbAdmit.textContent = "Denied"; arbAdmit.className = "tool-admission admit-deny";
-        
-        mTitle.textContent = "Enforcement Domain: ADVISE MODE";
-        mBody.textContent = "Read-oriented operator lane. Planning, analysis, and dependency crawling are fully authorized. Every tool operation proposing writes, local file edits, or terminal shell execution is blocked immediately.";
-        mRules.innerHTML = `
-          <li>Prevents agents from introducing destructive code anomalies.</li>
-          <li>Dispatches run with strict read-only tool profiles.</li>
-          <li>Operator elevation requests to run write tools are rejected.</li>
-        `;
-      } else if (mode === 'super') {
-        rAdmit.textContent = "Admitted"; rAdmit.className = "tool-admission admit-allow";
-        wAdmit.textContent = "Admitted"; wAdmit.className = "tool-admission admit-allow";
-        abAdmit.textContent = "Admitted"; abAdmit.className = "tool-admission admit-allow";
-        arbAdmit.textContent = "Admitted"; arbAdmit.className = "tool-admission admit-allow";
-        
-        mTitle.textContent = "Enforcement Domain: SUPER MODE";
-        mBody.textContent = "Elevated operator privilege tier. Bypasses general command parking gates. Allows execution of custom bash commands, compiler runs, and full-harness code changes. Strict safety guardrails still block root-level hard violations.";
-        mRules.innerHTML = `
-          <li>Full execution permission is granted to reasoning chains.</li>
-          <li>Command parking checks are bypassed for a single action window.</li>
-          <li>Security violations are still audited in run receipts.</li>
-        `;
-      }
-      
-      // Also update the sandbox output safety checks if input changes
-      analyzeCommand();
+      logs.appendChild(logLine);
+      logs.scrollTop = logs.scrollHeight;
     }
-
-    // Initial setups
-    window.onload = () => {
-      renderCommands(commandsDb);
-      analyzeCommand();
-      loadOverrideEditor();
-      validateMockOverrides();
-    };
   </script>
-
 </body>
 </html>

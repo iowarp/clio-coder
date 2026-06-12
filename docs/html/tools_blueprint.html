@@ -712,7 +712,7 @@
       </div>
       <div class="version-tag">
         <div class="version-dot"></div>
-        Clio Coder v0.2.2
+        Clio Coder v0.2.3
       </div>
     </div>
   </header>
@@ -720,18 +720,21 @@
   <!-- Navigation Tabs -->
   <div class="tabs-nav">
     <button type="button" class="tab-btn active" onclick="_switchTab('tab-diagrams')">
-      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>
       Architecture & Visual Flowcharts
     </button>
     <button type="button" class="tab-btn" onclick="_switchTab('tab-calculator')">
-      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 14h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm-4 8H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2z"/></svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 14h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm-4 8H7v-2h2v2zm0-4H7v-2h2v2zm0-4H7V7h2v2z"/></svg>
       Token Pressure Calculator
-      <span class="pulse-badge"><span class="pulse-dot"></span>Calc</span>
     </button>
     <button type="button" class="tab-btn" onclick="_switchTab('tab-simulator')">
-      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
       Tool & Registry Simulator
-      <span class="pulse-badge"><span class="pulse-dot"></span>Sim</span>
+    </button>
+    <button type="button" class="tab-btn" onclick="_switchTab('tab-recompiler')">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      Prompt Recompiler & Capping
+      <span class="pulse-badge"><span class="pulse-dot"></span>New</span>
     </button>
   </div>
 
@@ -747,7 +750,7 @@
           The model calls tools natively through the LLM API's structural JSON envelope rather than parsing text logs.
         </div>
         <div class="svg-wrapper">
-          <svg aria-hidden="true" width="900" height="280" viewBox="0 0 900 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg aria-hidden="true" width="900" height="280" viewBox="0 0 900 280" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
             <!-- Background grids -->
             <rect width="900" height="280" rx="8" fill="#04070e" />
             
@@ -806,7 +809,7 @@
           When supported by targets (e.g. llamacpp or cloud cache), Clio leverages these hashes to skip resending the session shell prompt if it has not changed.
         </div>
         <div class="svg-wrapper">
-          <svg aria-hidden="true" width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg aria-hidden="true" width="900" height="350" viewBox="0 0 900 350" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
             <rect width="900" height="350" rx="8" fill="#04070e" />
             
             <!-- Box: Full Rendered Prompt Envelope -->
@@ -875,7 +878,7 @@
           Upon execution, outputs are bounded to respect context pressure through safe UTF-8 truncation and suffix injection.
         </div>
         <div class="svg-wrapper">
-          <svg aria-hidden="true" width="900" height="340" viewBox="0 0 900 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg aria-hidden="true" width="900" height="340" viewBox="0 0 900 340" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
             <rect width="900" height="340" rx="8" fill="#04070e" />
 
             <!-- Path Timeline -->
@@ -1199,6 +1202,127 @@
             <button type="button" class="copy-btn" onclick="_copyText('result-details-out')">Copy Details</button>
           </div>
           <pre class="console-out" id="result-details-out" style="max-height: 180px; color:#c084fc;"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: Prompt Recompiler & Tool Result Capping Validator -->
+  <div id="tab-recompiler" class="tab-pane">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1.5rem;">
+      <!-- Section 1: System Prompt Recompile Simulator -->
+      <div class="glass-card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; display: flex; flex-direction: column; gap: 1.25rem;">
+        <h3 style="color: var(--color-cyan); font-family: var(--font-sans); font-size: 1.2rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; margin-top: 0;">
+          <svg width="20" height="20" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          System Prompt Recompile Simulator
+        </h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+          Clio Coder compiles one provider-facing system prompt per session. It recompiles only when the compile key (<code style="font-family: var(--font-mono); color: var(--color-purple);">endpoint|model|autonomy|sessionId</code>) changes or configuration is hot-reloaded.
+        </p>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label for="recomp-endpoint" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Endpoint</label>
+          <select id="recomp-endpoint" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
+            <option value="http://localhost:11434">ollama (http://localhost:11434)</option>
+            <option value="http://localhost:1234">lmstudio (http://localhost:1234)</option>
+            <option value="https://api.openai.com/v1">openai-completions (https://api.openai.com)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label for="recomp-model" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Model ID</label>
+          <select id="recomp-model" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
+            <option value="deepseek-r1:8b">deepseek-r1:8b</option>
+            <option value="phi-4">phi-4</option>
+            <option value="gpt-4o">gpt-4o</option>
+            <option value="o1-mini">o1-mini</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label for="recomp-autonomy" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Autonomy Level</label>
+          <select id="recomp-autonomy" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
+            <option value="read-only">read-only</option>
+            <option value="suggest">suggest</option>
+            <option value="auto-edit">auto-edit</option>
+            <option value="full-auto">full-auto</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label for="recomp-session" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Session ID</label>
+          <input type="text" id="recomp-session" value="sess_7a3d90f" oninput="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff; font-family: var(--font-mono);">
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; margin-bottom: 1rem;">
+          <input type="checkbox" id="recomp-hotreload" onchange="simulateRecompilerAndCapping()" style="cursor: pointer;">
+          <label for="recomp-hotreload" style="font-size: 0.85rem; color: var(--text-main); cursor: pointer;">Simulate Config Hot-Reload Invalidation</label>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-card); padding-top: 1rem; margin-top: auto; display: flex; flex-direction: column; gap: 0.75rem;">
+          <div style="font-size: 0.85rem;">
+            <span style="color: var(--text-muted);">Current Compile Key:</span>
+            <pre id="recomp-key-out" style="background: #05080e; padding: 0.5rem; border-radius: 6px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-purple); margin-top: 0.25rem; overflow-x: auto; white-space: nowrap; border: 1px solid var(--border-card);"></pre>
+          </div>
+          <div style="font-size: 0.85rem;">
+            <span style="color: var(--text-muted);">Active Compile Key Hash:</span>
+            <pre id="recomp-hash-out" style="background: #05080e; padding: 0.5rem; border-radius: 6px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-cyan); margin-top: 0.25rem; overflow-x: auto; white-space: nowrap; border: 1px solid var(--border-card);"></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Session Ledger & Capping Validator -->
+      <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+        <!-- Ledger Output -->
+        <div class="glass-card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; display: flex; flex-direction: column; gap: 0.75rem; flex: 1;">
+          <h3 style="color: var(--color-emerald); font-family: var(--font-sans); font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; margin-top: 0;">
+            <svg width="18" height="18" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+            Session Ledger Logs (System Recompiler)
+          </h3>
+          <div id="recomp-ledger-out" style="background: #05080e; border: 1px solid var(--border-card); border-radius: 8px; padding: 1rem; font-family: var(--font-mono); font-size: 0.8rem; overflow-y: auto; max-height: 200px; flex: 1; display: flex; flex-direction: column; gap: 0.4rem; min-height: 150px;">
+          </div>
+        </div>
+
+        <!-- Tool Result Capping Validator -->
+        <div class="glass-card" style="padding: 1.5rem; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 12px; display: flex; flex-direction: column; gap: 1rem;">
+          <h3 style="color: var(--color-amber); font-family: var(--font-sans); font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; margin-top: 0; margin-bottom: 0.5rem;">
+            <svg width="18" height="18" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Tool Result Capping Validator
+          </h3>
+          
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="capping-tool" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Tool / Policy Group</label>
+            <select id="capping-tool" class="form-control" onchange="simulateRecompilerAndCapping()" style="width: 100%; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-card); border-radius: 6px; color: #fff;">
+              <option value="read_file">read_file / read-kind (Cap: 6KB, Backstop: 8KB)</option>
+              <option value="bash">bash / run_task / web_fetch / summary-kind (Cap: 16KB)</option>
+              <option value="ask_user">ask_user (Cap: 20KB)</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="capping-size" style="font-size: 0.8rem; color: var(--text-main); display: block; margin-bottom: 0.25rem;">Generated Output Size (KB)</label>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+              <input type="range" id="capping-size" min="1" max="35" value="10" oninput="simulateRecompilerAndCapping()" style="flex: 1;">
+              <span id="capping-size-val" style="font-family: var(--font-mono); font-size: 0.9rem; color: var(--color-amber); font-weight: 700; width: 60px;">10 KB</span>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--border-card); padding-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+              <span style="color: var(--text-muted);">Result Truncated:</span>
+              <span id="capping-truncated-badge" style="font-weight: 700;">No</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+              <span style="color: var(--text-muted);">Policy Limit Applied:</span>
+              <span id="capping-limit-val" style="font-family: var(--font-mono); color: var(--color-cyan);">6 KB</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+              <span style="color: var(--text-muted);">Final Output Payload Size:</span>
+              <span id="capping-final-val" style="font-family: var(--font-mono); color: var(--color-emerald);">10 KB</span>
+            </div>
+            <div id="capping-hint-box" style="margin-top: 0.5rem; background: rgba(245, 158, 11, 0.05); border: 1px dashed rgba(245, 158, 11, 0.2); padding: 0.5rem; border-radius: 6px; font-size: 0.75rem; color: var(--color-amber); line-height: 1.4;">
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1969,6 +2093,155 @@
       console.error('Could not copy text: ', err);
     });
   }
+
+  // --- RECOMPILER AND CAPPING VALIDATOR SIMULATOR ---
+  let lastCompileKey = "";
+  let lastCompileHash = "";
+  const recompileLedger = [];
+
+  function cyrb128(str) {
+    let h1 = 1779033703, h2 = 3024733165, h3 = 3362453605, h4 = 502492259;
+    for (let i = 0, k; i < str.length; i++) {
+      k = str.charCodeAt(i);
+      h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+      h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+      h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+      h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+    }
+    h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+    h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+    h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+    h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+    return [(h1^h2^h3^h4)>>>0, (h2^h1)>>>0, (h3^h1)>>>0, (h4^h1)>>>0];
+  }
+  function simpleHash(str) {
+    const hashes = cyrb128(str);
+    return hashes.map(h => h.toString(16).padStart(8, '0')).join('');
+  }
+
+  function simulateRecompilerAndCapping() {
+    // 1. Recompiler Logic
+    const ep = document.getElementById("recomp-endpoint").value;
+    const model = document.getElementById("recomp-model").value;
+    const autonomy = document.getElementById("recomp-autonomy").value;
+    const session = document.getElementById("recomp-session").value.trim() || "sess_default";
+    const hotReload = document.getElementById("recomp-hotreload").checked;
+
+    const compileKey = `${ep}|${model}|${autonomy}|${session}`;
+    const compileHash = simpleHash(compileKey).substring(0, 16);
+    
+    document.getElementById("recomp-key-out").innerText = compileKey;
+    document.getElementById("recomp-hash-out").innerText = compileHash;
+
+    const ledgerEl = document.getElementById("recomp-ledger-out");
+    
+    let forced = false;
+    let compiled = false;
+
+    if (compileKey !== lastCompileKey || hotReload) {
+      compiled = true;
+      if (hotReload) {
+        forced = true;
+        document.getElementById("recomp-hotreload").checked = false; // Reset toggle
+      }
+      
+      const prevHash = lastCompileHash || "none";
+      const tokenEst = 3500 + Math.floor(Math.random() * 800) + (autonomy.length * 20);
+      
+      const logEntry = {
+        timestamp: new Date().toLocaleTimeString(),
+        event: "promptRecompiled",
+        prevHash: prevHash,
+        newHash: compileHash,
+        tokenEstimate: tokenEst,
+        reason: forced ? "Config Hot-Reload Invalidation" : "Compile Key Changed"
+      };
+      
+      recompileLedger.unshift(logEntry);
+      
+      lastCompileKey = compileKey;
+      lastCompileHash = compileHash;
+    }
+
+    // Render Ledger
+    ledgerEl.innerHTML = "";
+    if (recompileLedger.length === 0) {
+      ledgerEl.innerHTML = `<div style="color:var(--text-dark); text-align:center; padding:1rem 0;">No ledger entries yet</div>`;
+    } else {
+      recompileLedger.forEach(entry => {
+        const item = document.createElement("div");
+        item.style.paddingBottom = "0.4rem";
+        item.style.borderBottom = "1px solid rgba(255,255,255,0.02)";
+        item.innerHTML = `
+          <span style="color:var(--text-muted); font-size:0.75rem;">[${entry.timestamp}]</span>
+          <span style="color:var(--color-purple); font-weight:bold;">${entry.event}</span>: 
+          prev=<span style="color:var(--text-dark);">${entry.prevHash}</span>, 
+          new=<span style="color:var(--color-cyan);">${entry.newHash}</span>, 
+          tokens=<span style="color:var(--color-amber);">${entry.tokenEstimate}</span> 
+          <span style="color:var(--text-dark); font-size:0.75rem;">(${entry.reason})</span>
+        `;
+        ledgerEl.appendChild(item);
+      });
+    }
+
+    if (compiled) {
+      ledgerEl.style.borderColor = "var(--color-cyan)";
+      setTimeout(() => { ledgerEl.style.borderColor = "var(--border-card)"; }, 3000);
+    }
+
+    // 2. Capping Validator Logic
+    const capTool = document.getElementById("capping-tool").value;
+    const mockSizeKB = parseInt(document.getElementById("capping-size").value, 10);
+    document.getElementById("capping-size-val").innerText = `${mockSizeKB} KB`;
+
+    let limitKB = 6;
+    let hint = "";
+    let truncated = false;
+
+    if (capTool === "read_file") {
+      limitKB = 6;
+      truncated = mockSizeKB > limitKB;
+      if (truncated) {
+        hint = `Result capped at source policy limit of 6KB. Continuation text added: "Use offset/limit arguments or narrow the path query to inspect omitted contents."`;
+      } else {
+        hint = "Result is within the 6KB safety limit and delivered in full.";
+      }
+    } else if (capTool === "bash") {
+      limitKB = 16;
+      truncated = mockSizeKB > limitKB;
+      if (truncated) {
+        hint = `Result capped at summary-kind policy limit of 16KB. Trailing terminal lines omitted.`;
+      } else {
+        hint = "Result is within the 16KB summary safety limit and delivered in full.";
+      }
+    } else if (capTool === "ask_user") {
+      limitKB = 20;
+      truncated = mockSizeKB > limitKB;
+      if (truncated) {
+        hint = `Result capped at ask_user policy limit of 20KB. Excess query context removed.`;
+      } else {
+        hint = "Result is within the 20KB ask_user safety limit and delivered in full.";
+      }
+    }
+
+    const finalSizeKB = truncated ? limitKB : mockSizeKB;
+    
+    const truncBadge = document.getElementById("capping-truncated-badge");
+    truncBadge.innerText = truncated ? "YES (Capped)" : "NO";
+    truncBadge.style.color = truncated ? "var(--color-rose)" : "var(--color-emerald)";
+
+    document.getElementById("capping-limit-val").innerText = `${limitKB} KB`;
+    document.getElementById("capping-final-val").innerText = `${finalSizeKB} KB`;
+    
+    const hintBox = document.getElementById("capping-hint-box");
+    hintBox.innerText = hint;
+    hintBox.style.borderColor = truncated ? "rgba(239, 68, 68, 0.3)" : "rgba(16, 185, 129, 0.3)";
+    hintBox.style.background = truncated ? "rgba(239, 68, 68, 0.03)" : "rgba(16, 185, 129, 0.03)";
+    hintBox.style.color = truncated ? "var(--color-rose)" : "var(--text-main)";
+  }
+
+  // Initialize recompiler
+  simulateRecompilerAndCapping();
 </script>
 </body>
 </html>

@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clio Coder Documentation Hub (v0.2.3)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-grid: rgba(255, 255, 255, 0.02);
+      --bg-card: rgba(13, 20, 38, 0.45);
+      --bg-card-hover: rgba(20, 30, 58, 0.65);
+      --border-card: rgba(255, 255, 255, 0.08);
+      --border-card-hover: rgba(0, 240, 255, 0.35);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      
+      --color-cyan: #00f0ff;
+      --color-cyan-rgb: 0, 240, 255;
+      --color-purple: #bd00ff;
+      --color-purple-rgb: 189, 0, 255;
+      --color-emerald: #10b981;
+      --color-emerald-rgb: 16, 185, 129;
+      --color-amber: #f59e0b;
+      --color-amber-rgb: 245, 158, 11;
+      --color-rose: #ef4444;
+      --color-rose-rgb: 239, 68, 68;
+      
+      --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
+      --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      
+      --glass-blur: blur(12px);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(var(--color-cyan-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(var(--color-purple-rgb), 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, #0d1527 0%, var(--bg-dark) 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: center top;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.8;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 3rem 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header Styling */
+    header {
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+
+    .header-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 80px;
+      height: 80px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      border-radius: 24px;
+      margin-bottom: 1.5rem;
+      position: relative;
+      box-shadow: var(--shadow-glow);
+    }
+
+    .header-logo::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 26px;
+      background: var(--gradient-main);
+      z-index: -1;
+      opacity: 0.3;
+      filter: blur(8px);
+    }
+
+    .header-logo svg {
+      width: 48px;
+      height: 48px;
+    }
+
+    h1 {
+      font-size: 3rem;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+      margin-bottom: 0.75rem;
+      background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+    }
+
+    .subtitle {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 700px;
+      margin: 0 auto 2rem auto;
+      font-weight: 400;
+    }
+
+    .meta-badges {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+      flex-wrap: wrap;
+    }
+
+    .meta-badge {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      padding: 0.5rem 1.25rem;
+      border-radius: 50px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      backdrop-filter: var(--glass-blur);
+    }
+
+    .meta-badge.version {
+      border-color: rgba(var(--color-cyan-rgb), 0.3);
+      color: var(--color-cyan);
+    }
+
+    .meta-badge.active-status {
+      border-color: rgba(var(--color-emerald-rgb), 0.3);
+      color: var(--color-emerald);
+    }
+
+    /* Search & Filter Controls */
+    .controls-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 1.5rem;
+      margin-bottom: 3rem;
+      backdrop-filter: var(--glass-blur);
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .search-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(9, 13, 22, 0.8);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 1rem 1.25rem 1rem 3rem;
+      font-family: var(--font-sans);
+      font-size: 1rem;
+      color: var(--text-main);
+      outline: none;
+      transition: all 0.3s ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--color-cyan);
+      box-shadow: 0 0 15px rgba(var(--color-cyan-rgb), 0.2);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 1.25rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+
+    /* Grid layout */
+    .sections-container {
+      display: grid;
+      gap: 3rem;
+    }
+
+    .category-section {
+      transition: opacity 0.3s ease;
+    }
+
+    .category-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      border-left: 4px solid var(--color-cyan);
+      padding-left: 0.75rem;
+    }
+
+    .category-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 1.5rem;
+    }
+
+    /* Doc Card Styling */
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 1.75rem;
+      text-decoration: none;
+      color: inherit;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+      backdrop-filter: var(--glass-blur);
+    }
+
+    .doc-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: transparent;
+      transition: background-color 0.3s ease;
+    }
+
+    .doc-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-card-hover);
+      transform: translateY(-5px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 15px rgba(var(--color-cyan-rgb), 0.08);
+    }
+
+    .doc-card.flagship:hover {
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 15px rgba(var(--color-cyan-rgb), 0.15);
+      border-color: rgba(var(--color-cyan-rgb), 0.5);
+    }
+
+    .doc-card.flagship::before {
+      background: var(--gradient-main);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .card-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #ffffff;
+      transition: color 0.3s ease;
+    }
+
+    .doc-card:hover .card-title {
+      color: var(--color-cyan);
+    }
+
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .status-badge.badge-flagship {
+      background: rgba(0, 240, 255, 0.1);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      color: var(--color-cyan);
+    }
+
+    .status-badge.badge-stale {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      color: var(--color-amber);
+    }
+
+    .status-badge.badge-active {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      color: var(--color-emerald);
+    }
+
+    .card-desc {
+      font-size: 0.925rem;
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      flex-grow: 1;
+    }
+
+    .card-meta {
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    .card-meta .path {
+      font-family: var(--font-mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 60%;
+    }
+
+    .card-meta .interactive-feature {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      color: var(--color-cyan);
+      font-weight: 500;
+    }
+
+    .quick-start {
+      margin-top: 3.5rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 2rem;
+      backdrop-filter: var(--glass-blur);
+    }
+
+    .quick-start h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .code-block {
+      background: rgba(9, 13, 22, 0.7);
+      border: 1px solid var(--border-card);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      color: var(--text-main);
+      overflow-x: auto;
+      margin-top: 0.75rem;
+    }
+
+    .code-block span.comment {
+      color: var(--text-dim);
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 5rem;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-dim);
+      font-size: 0.875rem;
+    }
+
+    footer p {
+      margin-bottom: 0.5rem;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      h1 { font-size: 2.25rem; }
+      .container { padding: 2rem 1rem; }
+      .category-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-logo">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><title>Icon</title>
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="url(#logoGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 17L12 22L22 17" stroke="url(#logoGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 12L12 17L22 12" stroke="url(#logoGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs>
+            <linearGradient id="logoGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#00f0ff" />
+              <stop offset="1" stop-color="#bd00ff" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h1>Clio Coder Documentation</h1>
+      <p class="subtitle">Interactive technical blueprints and specifications for IOWarp's terminal-first agentic coding environment</p>
+      
+      <div class="meta-badges">
+        <span class="meta-badge version">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          Release v0.2.3
+        </span>
+        <span class="meta-badge active-status">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          Phase A Complete
+        </span>
+      </div>
+    </header>
+
+    <main>
+      <!-- Controls Panel -->
+      <div class="controls-panel">
+        <div class="search-wrapper">
+          <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" class="search-input" id="searchDocs" placeholder="Search blueprints, file paths, interactive features..." oninput="filterCards()">
+        </div>
+      </div>
+
+      <!-- Categories Container -->
+      <div class="sections-container" id="sectionsContainer">
+        
+        <!-- Category 1: Security & Configuration -->
+        <section class="category-section" id="cat-security">
+          <h2 class="category-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            Security &amp; Configuration
+          </h2>
+          <div class="category-grid">
+            <a href="safety_blueprint.html" class="doc-card flagship" data-title="Safety Model" data-tags="safety security autonomy block ask path rules git bash">
+              <div class="card-header">
+                <h3 class="card-title">Safety Model</h3>
+                <span class="status-badge badge-flagship">v0.2.3 Upgrade</span>
+              </div>
+              <p class="card-desc">Code-enforced safety postures, four-level autonomy dial (read-only, suggest, auto-edit, full-auto), always-on safety net checks, and interactive approvals flow.</p>
+              <div class="card-meta">
+                <span class="path">safety-model.md</span>
+                <span class="interactive-feature">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                  Interactive Simulator
+                </span>
+              </div>
+            </a>
+
+            <a href="configuration_blueprint.html" class="doc-card flagship" data-title="Configuration &amp; Targets" data-tags="configuration targets runtimes auth endpoint settings settings.yaml model local cloud reasoning">
+              <div class="card-header">
+                <h3 class="card-title">Configuration &amp; Targets</h3>
+                <span class="status-badge badge-flagship">v0.2.3 Upgrade</span>
+              </div>
+              <p class="card-desc">Target-first routing, setting profiles, configuration schema validator, AWS/Vertex/API Key authorization structures, and live routing mechanisms.</p>
+              <div class="card-meta">
+                <span class="path">configuration-and-targets.md</span>
+                <span class="interactive-feature">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                  YAML Validator
+                </span>
+              </div>
+            </a>
+
+            <a href="lifecycle_blueprint.html" class="doc-card" data-title="Installation &amp; Lifecycle" data-tags="lifecycle install update setup permissions runtime doctor folders">
+              <div class="card-header">
+                <h3 class="card-title">Installation &amp; Lifecycle</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Checkout and build setups, local install scripts, directory locations (cache, data, configs), doctor check flows, and session cleanup lifecycles.</p>
+              <div class="card-meta">
+                <span class="path">installation-and-lifecycle.md</span>
+                <span class="interactive-feature">Command Builder</span>
+              </div>
+            </a>
+          </div>
+        </section>
+
+        <!-- Category 2: Core Systems -->
+        <section class="category-section" id="cat-core">
+          <h2 class="category-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            Core Systems
+          </h2>
+          <div class="category-grid">
+            <a href="architecture_blueprint.html" class="doc-card" data-title="Architecture" data-tags="architecture flow core domains boundaries data compiler dispatch">
+              <div class="card-header">
+                <h3 class="card-title">Architecture</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Source codebase layout, modular boundaries, domain initialization, and runtime orchestrator-to-worker dispatch relationships.</p>
+              <div class="card-meta">
+                <span class="path">architecture.md</span>
+                <span class="interactive-feature">Flow Explorer</span>
+              </div>
+            </a>
+
+            <a href="context_blueprint.html" class="doc-card" data-title="Context Engine" data-tags="context engine token compaction prime sliding window snapshot">
+              <div class="card-header">
+                <h3 class="card-title">Context Engine</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Sliding window mechanics, token accounting, per-turn snapshot records, historical compaction thresholds, and context priming configurations.</p>
+              <div class="card-meta">
+                <span class="path">context-engine.md</span>
+                <span class="interactive-feature">Compaction Calculator</span>
+              </div>
+            </a>
+
+            <a href="tools_blueprint.html" class="doc-card" data-title="Prompt Envelope &amp; Tools" data-tags="tools envelope registry providers raw format parse custom">
+              <div class="card-header">
+                <h3 class="card-title">Prompt Envelope &amp; Tools</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Tool registry admission rules, provider envelopes, call translation formats, and structured response parsing definitions.</p>
+              <div class="card-meta">
+                <span class="path">prompt-envelope-and-tools.md</span>
+                <span class="interactive-feature">Registry Inspector</span>
+              </div>
+            </a>
+
+            <a href="middleware_blueprint.html" class="doc-card" data-title="Middleware &amp; Components" data-tags="middleware components hooks hooks hooks lifecycle effects snapshots">
+              <div class="card-header">
+                <h3 class="card-title">Middleware &amp; Components</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Interactive terminal UI component rendering, middleware hooks registry, execution pipelines, and snapshot lifecycle contracts.</p>
+              <div class="card-meta">
+                <span class="path">middleware-and-components.md</span>
+                <span class="interactive-feature">Hook Flow Simulator</span>
+              </div>
+            </a>
+          </div>
+        </section>
+
+        <!-- Category 3: Agents & Memory -->
+        <section class="category-section" id="cat-agents">
+          <h2 class="category-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            Agents &amp; Memory
+          </h2>
+          <div class="category-grid">
+            <a href="agents_blueprint.html" class="doc-card" data-title="Built-in Agents" data-tags="agents recipes built-in frontmatter profiles fleet dispatch admission">
+              <div class="card-header">
+                <h3 class="card-title">Built-in Agents</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Core recipes, frontmatter declarations, worker dispatch admission scopes, and task profiles catalog.</p>
+              <div class="card-meta">
+                <span class="path">built-in-agents.md</span>
+                <span class="interactive-feature">Recipe Validator</span>
+              </div>
+            </a>
+
+            <a href="memory_blueprint.html" class="doc-card" data-title="Evidence &amp; Memory" data-tags="memory evidence audit approval search workspace sessions retrieval">
+              <div class="card-header">
+                <h3 class="card-title">Evidence &amp; Memory</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Persistent evidence storage, audit log structure, session record schemas, and approval-gated memory retrieval tools.</p>
+              <div class="card-meta">
+                <span class="path">evidence-and-memory.md</span>
+                <span class="interactive-feature">Evidence Visualizer</span>
+              </div>
+            </a>
+
+            <a href="skills_blueprint.html" class="doc-card" data-title="Skills Marketplace" data-tags="skills market shared trust tools script packages">
+              <div class="card-header">
+                <h3 class="card-title">Skills Marketplace</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Custom reusable skill scripts, registry trust compat roots, sharing format, and skills lookup engine.</p>
+              <div class="card-meta">
+                <span class="path">skills-marketplace.md</span>
+                <span class="interactive-feature">Marketplace Search</span>
+              </div>
+            </a>
+
+            <a href="models_blueprint.html" class="doc-card" data-title="Model Catalog" data-tags="model catalog targets probes capabilities yaml knowledge base routing thinking">
+              <div class="card-header">
+                <h3 class="card-title">Model Catalog &amp; Routing</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Configured targets, runtime dynamic probes, providers capabilities matching, and Thinking Replay Semantics routing (Ollama/LM Studio/OpenAI).</p>
+              <div class="card-meta">
+                <span class="path">model-catalog.md</span>
+                <span class="interactive-feature">Target Prober</span>
+              </div>
+            </a>
+          </div>
+        </section>
+
+        <!-- Category 4: Validation & Evals -->
+        <section class="category-section" id="cat-validation">
+          <h2 class="category-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            Validation &amp; Evals
+          </h2>
+          <div class="category-grid">
+            <a href="eval_blueprint.html" class="doc-card" data-title="Evaluation Runner" data-tags="eval runner testing suites yaml report comparison evidence">
+              <div class="card-header">
+                <h3 class="card-title">Evaluation Runner</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Local YAML evaluation suites, metrics tracking, model comparison outputs, and target validation execution command specs.</p>
+              <div class="card-meta">
+                <span class="path">eval-runner.md</span>
+                <span class="interactive-feature">Eval Runner Planner</span>
+              </div>
+            </a>
+
+            <a href="validation_blueprint.html" class="doc-card" data-title="Scientific Validation" data-tags="scientific validation contract hpc assertions code tests">
+              <div class="card-header">
+                <h3 class="card-title">Scientific Validation</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Scientific software checks, advisory execution validation patterns, HPC compiler assumption verification, and regression guardrails.</p>
+              <div class="card-meta">
+                <span class="path">scientific-validation.md</span>
+                <span class="interactive-feature">Assertion Generator</span>
+              </div>
+            </a>
+
+            <a href="evolution_blueprint.html" class="doc-card" data-title="Code Evolution" data-tags="evolution manifest json clio evolve auditability change">
+              <div class="card-header">
+                <h3 class="card-title">Code Evolution</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Falsifiable Change Manifest schemas, atomic patch validation pipelines, audit logs, and `clio evolve` command specifications.</p>
+              <div class="card-meta">
+                <span class="path">evolution.md</span>
+                <span class="interactive-feature">Manifest Editor</span>
+              </div>
+            </a>
+          </div>
+        </section>
+
+        <!-- Category 5: Guides & Diagnostics -->
+        <section class="category-section" id="cat-guides">
+          <h2 class="category-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Guides &amp; Diagnostics
+          </h2>
+          <div class="category-grid">
+            <a href="observability_blueprint.html" class="doc-card" data-title="Observability" data-tags="observability receipts view status audit log telemetry logs">
+              <div class="card-header">
+                <h3 class="card-title">Observability</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Live receipt inspection overlays, stats visualization, metrics payloads, telemetry suppression flags, and debug doctor utilities.</p>
+              <div class="card-meta">
+                <span class="path">observability.md</span>
+                <span class="interactive-feature">Receipt Inspector</span>
+              </div>
+            </a>
+
+            <a href="extensions_blueprint.html" class="doc-card" data-title="Extensions &amp; Custom Skills" data-tags="extensions custom skills manifest share export import zip JSON package">
+              <div class="card-header">
+                <h3 class="card-title">Extensions &amp; Custom Skills</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Resource packaging roots precedence, custom prompt/skill manifests schema, and portable share archive packages (.json import/export).</p>
+              <div class="card-meta">
+                <span class="path">extensions-and-sharing.md</span>
+                <span class="interactive-feature">Manifest Builder</span>
+              </div>
+            </a>
+
+            <a href="documentation_blueprint.html" class="doc-card" data-title="Documentation Guide" data-tags="documentation guide workflow markdown html style alpha">
+              <div class="card-header">
+                <h3 class="card-title">Documentation Guide</h3>
+                <span class="status-badge badge-active">v0.2.3 Active</span>
+              </div>
+              <p class="card-desc">Standards for markdown document maintainers, styling guidelines for visual blueprints, and version bumps check procedures.</p>
+              <div class="card-meta">
+                <span class="path">documentation-guide.md</span>
+                <span class="interactive-feature">Style Validator</span>
+              </div>
+            </a>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- Quick Start Section -->
+      <div class="quick-start">
+        <h3>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Developer Quick Start
+        </h3>
+        <p>Run these commands to install Clio Coder locally from a source checkout and run a local doctor check:</p>
+        <div class="code-block">
+          <span class="comment"># Clone the repository</span>
+          git clone https://github.com/iowarp/clio-coder.git
+          cd clio-coder
+
+          <span class="comment"># Link CLI commands locally</span>
+          npm run install:local
+          hash -r
+
+          <span class="comment"># Run diagnostics in your code repository</span>
+          cd /path/to/your/repo
+          clio doctor --fix
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <p>Clio Coder Visual Documentation Center &bull; Version 0.2.3 (Release v0.2.3)</p>
+      <p>All specifications and interactive blueprints are aligned with docs/*.md source files.</p>
+    </footer>
+  </div>
+
+  <script>
+    function filterCards() {
+      const query = document.getElementById('searchDocs').value.toLowerCase().trim();
+      const cards = document.querySelectorAll('.doc-card');
+      const sections = document.querySelectorAll('.category-section');
+
+      // Hide/Show cards based on filter
+      cards.forEach(card => {
+        const title = card.getAttribute('data-title').toLowerCase();
+        const tags = card.getAttribute('data-tags').toLowerCase();
+        const desc = card.querySelector('.card-desc').textContent.toLowerCase();
+        const path = card.querySelector('.path').textContent.toLowerCase();
+
+        if (title.includes(query) || tags.includes(query) || desc.includes(query) || path.includes(query)) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+
+      // Hide/Show entire sections if all cards inside them are hidden
+      sections.forEach(sec => {
+        const visibleCards = sec.querySelectorAll('.doc-card[style="display: flex;"]');
+        const totalCards = sec.querySelectorAll('.doc-card');
+        
+        // If query is empty, show everything
+        if (!query) {
+          sec.style.display = 'block';
+          totalCards.forEach(c => { c.style.display = 'flex'; });
+          return;
+        }
+
+        if (visibleCards.length === 0) {
+          sec.style.display = 'none';
+        } else {
+          sec.style.display = 'block';
+        }
+      });
+    }
+
+    window.filterCards = filterCards;
+  </script>
+</body>
+</html>
