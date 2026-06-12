@@ -14,6 +14,7 @@ import { runFleetCommand } from "./fleet.js";
 import { runInitCommand } from "./init.js";
 import { runMemoryCommand } from "./memory.js";
 import { runModelsCommand } from "./models.js";
+import { runPathsCommand } from "./paths.js";
 import { runResetCommand } from "./reset.js";
 import { runClioRun } from "./run.js";
 import { runExportCommand, runImportCommand, runShareCommand } from "./share.js";
@@ -46,6 +47,7 @@ Usage:
   clio models [search]      list models for configured targets
   clio auth list|status|login|logout [target-or-runtime]
   clio doctor [--fix]       diagnose state; --fix creates or repairs it
+  clio paths [--json]       print resolved config/data/cache directories
   clio reset                recover or wipe Clio Coder state
   clio context-clear [--all]  clear accumulated project context artifacts
   clio uninstall            remove Clio Coder state and print package removal guidance
@@ -131,6 +133,8 @@ async function main(argv: string[]): Promise<number> {
 			return runClioRun(subArgs, bootOptions);
 		case "doctor":
 			return runDoctorCommand(subArgs);
+		case "paths":
+			return runPathsCommand(subArgs);
 		case "reset":
 			return runResetCommand(subArgs);
 		case "uninstall":
