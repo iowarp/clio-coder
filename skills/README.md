@@ -10,9 +10,9 @@ Clio's engine discovers *runtime* skills from these roots (see
 `src/domains/resources/skills/loader.ts`):
 
 - extension roots
-- `~/.agents`, `~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.copilot` → `/skills`
+- `~/.agents`, `~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.copilot` → their `skills/` subdir
 - `<clio-config>/skills` (per-user)
-- project `.agents` / `.claude` / `.codex` / `.opencode` / `.github` → `/skills`
+- project `.agents` / `.claude` / `.codex` / `.opencode` / `.github` → their `skills/` subdir
 - `.clio/skills` (per-project)
 
 This repo's `skills/` directory is **not** one of those roots, so nothing here

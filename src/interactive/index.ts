@@ -657,10 +657,9 @@ export function routeResumeOverlayKey(_data: string, _deps: ResumeOverlayKeyDeps
 
 /**
  * Pure overlay key router for the /tree overlay. Esc is intentionally NOT
- * consumed here because the overlay runs in three submodes (browse,
- * edit-label, confirm-delete) and Esc cancels a submode before it closes the
- * overlay. TreeOverlayBox.handleInput calls the onClose dep itself when Esc
- * is pressed in browse mode; every other key also falls through to the Box.
+ * consumed here because the overlay runs in browse and edit-label submodes.
+ * TreeOverlayBox.handleInput calls the onClose dep itself when Esc is pressed
+ * in browse mode; every other key also falls through to the Box.
  */
 export function routeTreeOverlayKey(_data: string, _deps: TreeOverlayKeyDeps): boolean {
 	return false;
@@ -2326,25 +2325,26 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openTreeOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		if (!deps.session) {
-			io.stderr("[/tree] session contract unavailable\n");
+			notify("error", "tree unavailable: session contract is not wired", "tree:unavailable");
 			return;
 		}
 		const sessionContract = deps.session;
 		overlayState = "tree";
 		overlayHandle = openTreeOverlay(tui, {
 			session: sessionContract,
-			onSwitchBranch: (sessionId) => {
+			onSwitchTurn: (turnId) => {
 				try {
-					sessionContract.switchBranch(sessionId);
+					sessionContract.switchTurn(turnId);
+					const sessionId = sessionContract.current()?.id ?? null;
+					if (!sessionId) throw new Error("no current session after turn switch");
 					const turns = openSession(sessionId).turns();
 					chatPanel.reset();
-					rehydrateChatPanelFromTurns(chatPanel, turns);
-					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
-					const leafTurnId = sessionContract.tree(sessionId).leafId;
-					deps.chat.resetForSession(leafTurnId, replayMessages);
+					rehydrateChatPanelFromTurns(chatPanel, turns, { uptoTurnId: turnId });
+					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
+					deps.chat.resetForSession(turnId, replayMessages);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/tree] switchBranch failed: ${msg}\n`);
+					notify("error", `tree switch failed: ${msg}`, "tree:switch-failed");
 				}
 				footer.refresh();
 			},

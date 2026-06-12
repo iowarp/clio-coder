@@ -142,6 +142,7 @@ function createSession(entries: SessionEntry[] = []): SessionContract {
 		fork: () => current as SessionMeta,
 		tree: () => ({ nodes: [], rootSessionId: "session-1" }) as never,
 		switchBranch: () => current as SessionMeta,
+		switchTurn: () => current as SessionMeta,
 		editLabel: () => {},
 		deleteSession: () => {},
 		history: () => (current ? [current] : []),

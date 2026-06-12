@@ -18,7 +18,7 @@ import {
 } from "./manager.js";
 import { forkFromState } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
-import { buildTreeSnapshot, type TreeSnapshot } from "./tree/navigator.js";
+import { buildTreeSnapshot, computeLeafId, type TreeSnapshot } from "./tree/navigator.js";
 import { buildTurnPreview } from "./tree/preview.js";
 import { probeWorkspace } from "./workspace/index.js";
 
@@ -39,6 +39,7 @@ type ResumeVia = "resume" | "switch_branch";
  */
 export function createSessionBundle(context: DomainContext): DomainBundle<SessionContract> {
 	let state: SessionManagerState | null = null;
+	let currentTurnId: string | null = null;
 
 	function emitPark(sessionId: string, reason: ParkReason): void {
 		context.bus.emit(BusChannels.SessionParked, { sessionId, reason, at: Date.now() });
@@ -53,6 +54,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		const s = state;
 		emitPark(s.meta.id, reason);
 		state = null;
+		currentTurnId = null;
 		await s.writer.close();
 	}
 
@@ -86,7 +88,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// to a previewless snapshot. The overlay handles missing previews
 			// gracefully via its kind-label fallback.
 		}
-		return buildTreeSnapshot({ meta, nodes: bundle.nodes, labels: bundle.labels, previews });
+		return buildTreeSnapshot({
+			meta,
+			nodes: bundle.nodes,
+			labels: bundle.labels,
+			previews,
+			...(state?.meta.id === sessionId ? { leafId: currentTurnId } : {}),
+		});
 	}
 
 	const contract: SessionContract = {
@@ -110,11 +118,14 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			next.meta.workspace = probeWorkspace(cwd);
 			persistSessionMeta(next);
 			state = next;
+			currentTurnId = null;
 			return next.meta;
 		},
 		append(turn: TurnInput) {
 			if (!state) throw new Error("session.append: no current session");
-			return appendTurn(state, turn);
+			const record = appendTurn(state, turn);
+			currentTurnId = record.id;
+			return record;
 		},
 		appendEntry(entry: SessionEntryInput) {
 			if (!state) throw new Error("session.appendEntry: no current session");
@@ -151,6 +162,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			}
 			const next = resumeSessionState(sessionId);
 			state = next;
+			currentTurnId = computeLeafId(readTreeBundle(sessionId).nodes);
 			emitResume(next.meta.id, "resume");
 			return next.meta;
 		},
@@ -165,6 +177,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				...(input?.cwd !== undefined ? { cwd: input.cwd } : {}),
 			});
 			state = next;
+			currentTurnId = computeLeafId(readTreeBundle(next.meta.id).nodes);
 			return next.meta;
 		},
 		tree(sessionId) {
@@ -192,8 +205,19 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			}
 			const next = resumeSessionState(sessionId);
 			state = next;
+			currentTurnId = computeLeafId(readTreeBundle(sessionId).nodes);
 			emitResume(next.meta.id, "switch_branch");
 			return next.meta;
+		},
+		switchTurn(turnId) {
+			if (!state) throw new Error("session.switchTurn: no current session");
+			void flushIfCurrent(state.meta.id);
+			const nodes = readTreeBundle(state.meta.id).nodes;
+			if (!nodes.some((node) => node.id === turnId)) {
+				throw new Error(`session.switchTurn: turn not found: ${turnId}`);
+			}
+			currentTurnId = turnId;
+			return state.meta;
 		},
 		editLabel(turnId, label, sessionId) {
 			const targetId = sessionId ?? state?.meta.id;

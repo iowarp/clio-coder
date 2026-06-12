@@ -292,4 +292,24 @@ describe("contracts/persistence", () => {
 		if (first.kind === "message") strictEqual(payloadText(first.payload), "first question");
 		if (second.kind === "message") strictEqual(payloadText(second.payload), "first reply");
 	});
+
+	it("switches the current append point to a selected turn", () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+
+		contract.create({ cwd: scratch });
+		const u1 = contract.append({ parentId: null, kind: "user", payload: { text: "first question" } });
+		const a1 = contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "first reply" } });
+		const u2 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "latest branch" } });
+
+		strictEqual(contract.tree().leafId, u2.id);
+
+		contract.switchTurn(a1.id);
+		strictEqual(contract.tree().leafId, a1.id);
+
+		const parentId = contract.tree().leafId;
+		const u3 = contract.append({ parentId, kind: "user", payload: { text: "alternate branch" } });
+		strictEqual(u3.parentId, a1.id);
+		strictEqual(contract.tree().leafId, u3.id);
+	});
 });

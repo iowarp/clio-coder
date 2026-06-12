@@ -5,6 +5,95 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## 0.2.3 - 2026-06-11
+
+Clio Coder 0.2.3 is a TUI command-surface sprint. It moves the interactive
+experience away from transcript dumps and one-off command handlers toward a
+small registry-backed command set, reusable full-screen overlays, and footer
+notices that keep operational feedback out of the chat transcript.
+
+The release also consolidates model targets, skills, settings, and
+observability into single-purpose hubs. Several old slash commands are retired
+because their behavior now lives in richer surfaces: `/targets`, `/skill`,
+`/help`, and `/view`.
+
+### Added
+
+- Added a declarative slash-command registry. Command parsing, usage lines,
+  autocomplete, and the command reference now derive from one spec with aliases,
+  flags, positionals, subcommands, repeatable values, and command-owned value
+  placeholders.
+- Added the shared `ListOverlay` kit for grouped, filterable browse surfaces
+  with Esc-clears-then-closes behavior, wrap-around selection, live footer
+  hints, and optional markdown detail panes.
+- Added full-screen overlays for `/help`, `/agents`, `/prompts`, and
+  `/extensions`. `/help [query]` opens the Help Center pre-filtered, and
+  `/prompts` can insert a selected prompt invocation into the editor.
+- Added the `/targets` target hub with compact target rows, in-place details,
+  active/health sorting, selected-row actions, serialized async auth/probe
+  actions, and success-level footer notifications.
+- Added the `/skill` Skills Hub with installed project/user groups, a live
+  GitHub marketplace backed by the repository `skills/` tree, lazy SKILL.md
+  detail loading, 24-hour disk caching, offline fallback to stale and pinned
+  marketplace data, and in-place marketplace install.
+- Added the `/settings` Settings Center with Safety, Orchestrator, Fleet,
+  Budget, Compaction, Retry, and Terminal sections, a two-lane desktop layout,
+  a stacked narrow layout, row descriptions, config paths, current values, and
+  refresh-in-place behavior on config changes.
+- Added `/view`, a full-screen observability viewer for run receipts, dispatch
+  metadata and outputs, durable tool outputs, and compaction summaries. It has
+  a grouped/filterable artifact list, a pager-style content pane, lazy
+  token-fenced loading, cached markdown rendering, JSON pretty-printing under a
+  10 MB cap, 50k-line truncation, selected-receipt verification, path notices,
+  Tab focus switching, `/view <id-or-filter>`, and `/view verify <runId>`.
+- Added sprint closure contract coverage that locks the exact v0.2.3 slash
+  command registry and fails if a retired slash command returns.
+
+### Changed
+
+- Replaced bracket-prefixed command output dialects with a themed single-line
+  notice channel for info, success, warning, and error messages.
+- Replaced hand-written overlay footer text with `buildHint`, including
+  canonical key casing, browse/commit Esc verbs, and middle-first elision.
+- Standardized user-facing vocabulary on "target" while leaving persisted ids
+  under the existing endpoint-shaped settings fields.
+- Changed `/targets` so Enter only expands/collapses details; target activation
+  and auth/probe work happen through explicit selected-row keys.
+- Changed `/skill` so Enter inserts `/skill:<name>` for task completion, while
+  marketplace installation is an explicit selected-row action.
+- Changed `/settings` to delete read-only rows for worker profiles, endpoint
+  counts, and keybindings. Targets are managed in `/targets`, and keys are
+  documented in `/help`.
+- Changed observability workflows so the transcript remains compact and `/view`
+  carries detailed inspection, verification, and backing-path lookup.
+- Changed `/tree` Enter to switch to the highlighted turn id. The visible
+  transcript and chat-loop replay are truncated through that turn, and the next
+  append point follows the selected turn instead of the session id.
+
+### Fixed
+
+- Fixed `/tree` turn selection so rows are action-honest: turn rows now act on
+  turn ids, not the current session id.
+- Fixed `/tree` footer hints by removing delete actions that could never
+  succeed from a turn-row overlay.
+- Fixed `/tree` switch failures and unavailable-session handling to use typed
+  footer notices instead of raw stderr.
+- Fixed stale command references in user-facing docs so the post-sprint
+  command set points users to `/skill`, `/targets`, `/help`, and `/view`.
+
+### Removed
+
+- Removed the `/status` slash command. Live status moved into footer/dashboard
+  surfaces and command output notices.
+- Removed the `/hotkeys` slash command and the static `SLASH_HOTKEYS` table.
+  Key help now comes from `/help` and each overlay's live footer hint.
+- Removed the `/skills` slash command. The Skills Hub is `/skill`; colon
+  invocation aliases such as `/skill:<name>` and `/skills:<name>` remain.
+- Removed `/connect` and `/disconnect` as standalone slash commands. Target
+  auth actions now live on the selected row in `/targets`.
+- Removed `/receipts` and its old overlay. Receipt browsing and verification
+  live in `/view` and `/view verify <runId>`.
+
 ## 0.2.2 - 2026-06-11
 
 Clio Coder 0.2.2 is the largest harness revision since the v0.2.0 community

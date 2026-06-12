@@ -115,6 +115,12 @@ export interface SessionContract {
 	 */
 	switchBranch(sessionId: string): SessionMeta;
 	/**
+	 * Move the current session's active append point to a turn in its tree.
+	 * The interactive chat loop uses this id as the next parent while the
+	 * on-disk tree keeps all sibling branches intact.
+	 */
+	switchTurn(turnId: string): SessionMeta;
+	/**
 	 * Persist a display-only label for `turnId`. The marker is a
 	 * SessionInfoEntry with `targetTurnId` + `label` written to the target
 	 * session's current.jsonl. Empty `label` clears the marker. If the target
