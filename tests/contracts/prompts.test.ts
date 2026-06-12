@@ -415,6 +415,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 			listRuns: () => [],
 			getRun: () => null,
 			abort: () => {},
+			steer: () => {},
 			snapshot: () => ({
 				generatedAt: new Date().toISOString(),
 				running: [],

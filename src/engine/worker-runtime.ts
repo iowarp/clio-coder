@@ -71,6 +71,13 @@ export interface WorkerRunResult {
 export interface WorkerRunHandle {
 	promise: Promise<WorkerRunResult>;
 	abort(): void;
+	/**
+	 * Queue an operator steer on the agent's steering queue. pi-agent-core
+	 * drains the queue after every tool batch and injects the text as a user
+	 * message before the next assistant response. Fire-and-forget: a steer
+	 * that races run completion is dropped with the run.
+	 */
+	steer(text: string): void;
 }
 
 export type WorkerEventEmit = (event: AgentEvent | ClioWorkerEvent) => void;
@@ -308,5 +315,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	return {
 		promise,
 		abort: () => agent.abort(),
+		steer: (text: string) => {
+			const trimmed = text.trim();
+			if (trimmed.length === 0) return;
+			emit({ type: "clio_steer_received", payload: { chars: trimmed.length } });
+			agent.steer(taskMessage(trimmed));
+		},
 	};
 }

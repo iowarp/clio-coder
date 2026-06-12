@@ -71,6 +71,17 @@ export interface DispatchContract {
 	/** Abort a running run. */
 	abort(runId: string): void;
 
+	/**
+	 * Queue an operator steer on a running native worker. The text is sent as
+	 * a JSON line on the worker's open stdin and injected into its transcript
+	 * as a user message at the next loop boundary; the worker acks with a
+	 * `clio_steer_received` event on its stream. Throws with an operator-facing
+	 * message when the run is unknown or no longer active, when the run kind
+	 * has no stdin channel (acp-delegation), or when the worker's stdin is
+	 * already gone.
+	 */
+	steer(runId: string, text: string): void;
+
 	/** Read-only runtime snapshot for operator surfaces. */
 	snapshot(): DispatchSnapshot;
 

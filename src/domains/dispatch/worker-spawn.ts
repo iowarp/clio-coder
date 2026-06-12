@@ -31,6 +31,13 @@ export interface SpawnedWorker {
 	events: AsyncIterableIterator<unknown>;
 	abort(): void;
 	heartbeatAt: { current: number };
+	/**
+	 * Write one JSON line to the worker's open stdin (the same line protocol
+	 * that carried the spec). Returns false when the worker has exited or its
+	 * stdin is no longer writable; callers treat that as "run not steerable".
+	 * Optional so test fakes and non-stdin run handles stay valid.
+	 */
+	send?(value: unknown): boolean;
 }
 
 export interface SpawnOptions {
@@ -179,6 +186,18 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		return child.exitCode === null && child.signalCode === null;
 	}
 
+	const send = (value: unknown): boolean => {
+		if (!isAlive()) return false;
+		const stdin = child.stdin;
+		if (!stdin || stdin.destroyed || !stdin.writable) return false;
+		try {
+			stdin.write(`${JSON.stringify(value)}\n`);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
 	const abort = (): void => {
 		if (!isAlive()) return;
 		try {
@@ -209,5 +228,6 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		events,
 		abort,
 		heartbeatAt,
+		send,
 	};
 }

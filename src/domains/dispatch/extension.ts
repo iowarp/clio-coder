@@ -102,6 +102,11 @@ interface ActiveRun {
 	abort: () => void;
 	/** Hard termination used by the reconciler; for native workers this is the SIGTERM→SIGKILL path. */
 	kill: () => void;
+	/**
+	 * Send an operator steer line to the run's input channel. Returns false
+	 * when the channel is gone. Absent for run kinds without one (ACP).
+	 */
+	steer?: (text: string) => boolean;
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	startedAt: string;
@@ -1539,6 +1544,8 @@ export function createDispatchBundle(
 		}
 		const pid = worker.pid;
 		const abort = () => worker.abort();
+		const sendToWorker = worker.send?.bind(worker);
+		const steer = sendToWorker ? (text: string) => sendToWorker({ type: "steer", text }) : undefined;
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
 		const workerDone = worker.promise;
@@ -1685,6 +1692,7 @@ export function createDispatchBundle(
 			req,
 			abort,
 			kill: abort,
+			...(steer ? { steer } : {}),
 			promise: workerDone.then(() => undefined),
 			recipe: lifecycle.recipe,
 			startedAt,
@@ -2149,6 +2157,27 @@ export function createDispatchBundle(
 				run.abort();
 			} catch {
 				// child may already be gone
+			}
+		},
+		steer(runId, text) {
+			const trimmed = text.trim();
+			if (trimmed.length === 0) {
+				throw new Error("steer: empty message");
+			}
+			const run = active.get(runId);
+			if (!run) {
+				throw new Error(`steer: run '${runId}' is not active; only running native workers accept steers`);
+			}
+			if (run.aborted || run.stallKilled) {
+				throw new Error(`steer: run '${runId}' is ${run.aborted ? "aborting" : "terminating"} and cannot be steered`);
+			}
+			if (!run.steer) {
+				throw new Error(
+					`steer: run '${runId}' (${run.runtimeKind}) has no input channel; only native workers accept steers`,
+				);
+			}
+			if (!run.steer(trimmed)) {
+				throw new Error(`steer: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`);
 			}
 		},
 		snapshot,

@@ -63,6 +63,9 @@ async function main(): Promise<number> {
 	if (spec.runtimeResolution) input.runtimeResolution = spec.runtimeResolution;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
 	const handle = startWorkerRun(input, emitEvent);
+	// Steer lines arriving on stdin after the spec queue onto the agent's
+	// steering queue; the demux buffers any that landed before this point.
+	demux.onSteer((text) => handle.steer(text));
 	const onSignal = () => handle.abort();
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
@@ -73,6 +76,10 @@ async function main(): Promise<number> {
 		stopHeartbeat();
 		process.off("SIGINT", onSignal);
 		process.off("SIGTERM", onSignal);
+		const dropped = demux.droppedLineCount();
+		if (dropped > 0) {
+			process.stderr.write(`[worker] dropped ${dropped} unrecognized stdin line(s) after the spec\n`);
+		}
 		// Best-effort dispose of any LMStudioClient instances cached by the
 		// engine so we close their WebSocket sessions cleanly before the worker
 		// process exits.
