@@ -1,75 +1,44 @@
 import type { MiddlewareContract } from "./contract.js";
-import { listMiddlewareRules } from "./rules.js";
-import type {
-	MiddlewareEffectKind,
-	MiddlewareHook,
-	MiddlewareHookInput,
-	MiddlewareHookResult,
-	MiddlewareRule,
-	MiddlewareSnapshot,
-} from "./types.js";
+import { cloneMiddlewareRule, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
+import { cloneMiddlewareEffect, type MiddlewareRuleDefinition, runMiddlewareHook } from "./runtime.js";
+import type { MiddlewareRule, MiddlewareSnapshot } from "./types.js";
 
 export function createMiddlewareSnapshot(
 	rules: ReadonlyArray<MiddlewareRule> = listMiddlewareRules(),
 ): MiddlewareSnapshot {
 	return {
 		version: 1,
-		rules: rules.map(cloneRule),
+		rules: rules.map(cloneMiddlewareRule),
 	};
 }
 
+/**
+ * Rebuild a middleware contract from a declarative snapshot, typically inside
+ * a worker subprocess. The snapshot carries no effect payloads, so each rule
+ * is resolved against the builtin definition table by id; the snapshot's
+ * declarative fields (enabled, hooks, effectKinds) stay authoritative. A rule
+ * id with no builtin definition in this binary evaluates to no effects.
+ */
 export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapshot): MiddlewareContract {
-	const rules = snapshot.rules.map(cloneRule);
+	const builtinById = new Map(listMiddlewareRuleDefinitions().map((definition) => [definition.rule.id, definition]));
+	const definitions: MiddlewareRuleDefinition[] = snapshot.rules.map((rule) => {
+		const builtin = builtinById.get(rule.id);
+		const definition: MiddlewareRuleDefinition = {
+			rule: cloneMiddlewareRule(rule),
+			effects: builtin === undefined ? [] : builtin.effects.map(cloneMiddlewareEffect),
+		};
+		if (builtin?.toolNames !== undefined) definition.toolNames = [...builtin.toolNames];
+		return definition;
+	});
 	return {
 		runHook(input) {
-			return runSnapshotHook(input, rules);
+			return runMiddlewareHook(input, definitions);
 		},
 		listRules() {
-			return rules.map(cloneRule);
+			return definitions.map((definition) => cloneMiddlewareRule(definition.rule));
 		},
 		snapshot() {
-			return createMiddlewareSnapshot(rules);
+			return createMiddlewareSnapshot(definitions.map((definition) => definition.rule));
 		},
 	};
-}
-
-function runSnapshotHook(input: MiddlewareHookInput, rules: ReadonlyArray<MiddlewareRule>): MiddlewareHookResult {
-	return {
-		hook: input.hook,
-		input: cloneHookInput(input),
-		effects: [],
-		ruleIds: ruleIdsForHook(rules, input.hook),
-	};
-}
-
-function ruleIdsForHook(rules: ReadonlyArray<MiddlewareRule>, hook: MiddlewareHook): string[] {
-	const ids: string[] = [];
-	for (const rule of rules) {
-		if (rule.enabled && rule.hooks.includes(hook)) ids.push(rule.id);
-	}
-	return ids;
-}
-
-function cloneRule(rule: MiddlewareRule): MiddlewareRule {
-	return {
-		id: rule.id,
-		source: rule.source,
-		description: rule.description,
-		enabled: rule.enabled,
-		hooks: [...rule.hooks],
-		effectKinds: [...rule.effectKinds] as MiddlewareEffectKind[],
-	};
-}
-
-function cloneHookInput(input: MiddlewareHookInput): MiddlewareHookInput {
-	const cloned: MiddlewareHookInput = { hook: input.hook };
-	if (input.runId !== undefined) cloned.runId = input.runId;
-	if (input.sessionId !== undefined) cloned.sessionId = input.sessionId;
-	if (input.turnId !== undefined) cloned.turnId = input.turnId;
-	if (input.toolCallId !== undefined) cloned.toolCallId = input.toolCallId;
-	if (input.correlationId !== undefined) cloned.correlationId = input.correlationId;
-	if (input.toolName !== undefined) cloned.toolName = input.toolName;
-	if (input.modelId !== undefined) cloned.modelId = input.modelId;
-	if (input.metadata !== undefined) cloned.metadata = { ...input.metadata };
-	return cloned;
 }

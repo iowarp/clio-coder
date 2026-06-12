@@ -5,13 +5,15 @@ import { MiddlewareManifest } from "./manifest.js";
 
 export const MiddlewareDomainModule: DomainModule<MiddlewareContract> = {
 	manifest: MiddlewareManifest,
-	createExtension: createMiddlewareBundle,
+	createExtension: () => createMiddlewareBundle(),
 };
 
 export type { MiddlewareContract } from "./contract.js";
+export type { MiddlewareBundleOptions } from "./extension.js";
 export { createMiddlewareBundle } from "./extension.js";
 export { MiddlewareManifest } from "./manifest.js";
-export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRules } from "./rules.js";
+export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
+export type { MiddlewareRuleDefinition } from "./runtime.js";
 export { runMiddlewareHook } from "./runtime.js";
 export { createMiddlewareContractFromSnapshot, createMiddlewareSnapshot } from "./snapshot.js";
 export type {
