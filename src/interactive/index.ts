@@ -2257,7 +2257,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		const handle = openSettingsOverlay(tui, {
 			getSettings,
 			providers: deps.providers,
-			keybindings,
 			writeSettings: (next) => {
 				writeSettingsOut(next);
 				footer.refresh();
