@@ -25,14 +25,14 @@ function recordDispatchCost(
 	cost: ReturnType<typeof createCostTracker>,
 	payload: DispatchTerminalLike,
 ): void {
-	if (!payload.endpointId || !payload.wireModelId || typeof payload.tokenCount !== "number") {
+	if (!payload.targetId || !payload.wireModelId || typeof payload.tokenCount !== "number") {
 		return;
 	}
 	telemetry.record("counter", "tokens.total", payload.tokenCount);
 	// Dispatch bus payloads carry a total token count plus optional reasoning
 	// detail, so sessionTokens() leaves input/output at zero for dispatch runs.
 	// Chat-loop runs pass the full Usage breakdown through recordTokens().
-	cost.accumulate(payload.endpointId, payload.wireModelId, payload.tokenCount, payload.costUsd, {
+	cost.accumulate(payload.targetId, payload.wireModelId, payload.tokenCount, payload.costUsd, {
 		reasoningTokens: payload.reasoningTokenCount ?? 0,
 		totalTokens: payload.tokenCount,
 	});

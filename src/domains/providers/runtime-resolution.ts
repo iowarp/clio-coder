@@ -1,12 +1,12 @@
 import { targetRequiresAuth } from "./auth/index.js";
 import { getCatalogModelForRuntime } from "./catalog.js";
-import type { EndpointStatus, ProvidersContract } from "./contract.js";
+import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { isTargetEligibleRuntime } from "./eligibility.js";
 import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
-	resolveEndpointRuntimeCapabilities,
 	resolveModelRuntimeCapabilities,
+	resolveTargetRuntimeCapabilities,
 } from "./model-runtime-capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
@@ -22,7 +22,7 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 export interface ContextWindowDetails {
 	/** Best static knowledge of the model's window (hint > KB > catalog > runtime default). */
 	declaredContextWindow: number;
-	/** Raw probe result, when the endpoint was probed. */
+	/** Raw probe result, when the target was probed. */
 	probedContextWindow: number | null;
 	/** Context actually loaded server-side; only LM Studio reports this. */
 	loadedContextWindow: number | null;
@@ -35,7 +35,7 @@ export interface ContextWindowDetails {
 		| "catalog"
 		| "probe"
 		| "loaded"
-		| "endpoint-override"
+		| "target-override"
 		| "model-hint"
 		| "descriptor-default"
 		| "unknown";
@@ -63,7 +63,7 @@ export interface RuntimeCapabilityDecision {
 
 export interface ResolvedRuntimeTarget {
 	targetId: string;
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	runtimeId: string;
 	runtimeKind: RuntimeKind;
@@ -113,7 +113,7 @@ export type RuntimeTargetResolution =
 	| { ok: false; diagnostics: RuntimeResolutionDiagnostic[] };
 
 export interface ResolveRuntimeTargetInput {
-	endpointId?: string | null;
+	targetId?: string | null;
 	wireModelId?: string | null;
 	requestedThinkingLevel?: ThinkingLevel;
 	requiredCapabilities?: ReadonlyArray<string>;
@@ -133,15 +133,15 @@ function hasError(diagnostics: ReadonlyArray<RuntimeResolutionDiagnostic>): bool
 
 function statusFor(
 	providers: ProvidersContract,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	runtime: RuntimeDescriptor,
 	_wireModelId: string,
-): EndpointStatus {
-	const existing = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
+): TargetStatus {
+	const existing = providers.list().find((entry) => entry.target.id === target.id);
 	if (existing) return existing;
-	const capabilities: CapabilityFlags = { ...runtime.defaultCapabilities, ...(endpoint.capabilities ?? {}) };
+	const capabilities: CapabilityFlags = { ...runtime.defaultCapabilities, ...(target.capabilities ?? {}) };
 	return {
-		endpoint,
+		target,
 		runtime,
 		available: true,
 		reason: "synthetic-status",
@@ -243,16 +243,16 @@ interface ModelCapabilitiesResolution {
 	reasoningAuthoritative: boolean;
 }
 
-function probeReasoningApplies(status: EndpointStatus, wireModelId: string): boolean {
+function probeReasoningApplies(status: TargetStatus, wireModelId: string): boolean {
 	return probeCapabilitiesForModel(status, wireModelId)?.reasoning !== undefined;
 }
 
 function modelCapabilitiesFor(
 	providers: ProvidersContract,
-	status: EndpointStatus,
+	status: TargetStatus,
 	wireModelId: string,
 ): ModelCapabilitiesResolution {
-	const detectedReasoning = providers.getDetectedReasoning(status.endpoint.id, wireModelId);
+	const detectedReasoning = providers.getDetectedReasoning(status.target.id, wireModelId);
 	return {
 		capabilities: resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, { detectedReasoning }),
 		reasoningAuthoritative: detectedReasoning !== null || probeReasoningApplies(status, wireModelId),
@@ -264,27 +264,27 @@ export function resolveRuntimeTarget(
 	input: ResolveRuntimeTargetInput,
 ): RuntimeTargetResolution {
 	const diagnostics: RuntimeResolutionDiagnostic[] = [];
-	const endpointId = input.endpointId?.trim();
-	if (!endpointId) {
+	const targetId = input.targetId?.trim();
+	if (!targetId) {
 		return {
 			ok: false,
 			diagnostics: [diagnostic("error", "target-not-configured", "no target is configured")],
 		};
 	}
 
-	const endpoint = providers.getEndpoint(endpointId);
-	if (!endpoint) {
+	const target = providers.getTarget(targetId);
+	if (!target) {
 		return {
 			ok: false,
-			diagnostics: [diagnostic("error", "target-not-found", `target '${endpointId}' not found in settings.targets`)],
+			diagnostics: [diagnostic("error", "target-not-found", `target '${targetId}' not found in settings.targets`)],
 		};
 	}
 
-	const runtime = providers.getRuntime(endpoint.runtime);
+	const runtime = providers.getRuntime(target.runtime);
 	if (!runtime) {
 		return {
 			ok: false,
-			diagnostics: [diagnostic("error", "runtime-not-registered", `runtime '${endpoint.runtime}' not registered`)],
+			diagnostics: [diagnostic("error", "runtime-not-registered", `runtime '${target.runtime}' not registered`)],
 		};
 	}
 
@@ -295,28 +295,28 @@ export function resolveRuntimeTarget(
 				diagnostic(
 					"error",
 					"runtime-target-unsupported",
-					`target '${endpointId}' uses runtime '${runtime.id}' (${runtime.kind}); Clio only drives HTTP/native runtime targets`,
+					`target '${targetId}' uses runtime '${runtime.id}' (${runtime.kind}); Clio only drives HTTP/native runtime targets`,
 				),
 			],
 		};
 	}
 
-	const wireModelId = input.wireModelId?.trim() || endpoint.defaultModel?.trim();
+	const wireModelId = input.wireModelId?.trim() || target.defaultModel?.trim();
 	if (!wireModelId) {
 		return {
 			ok: false,
-			diagnostics: [diagnostic("error", "model-not-configured", `target '${endpointId}' has no model configured`)],
+			diagnostics: [diagnostic("error", "model-not-configured", `target '${targetId}' has no model configured`)],
 		};
 	}
 
-	const status = statusFor(providers, endpoint, runtime, wireModelId);
+	const status = statusFor(providers, target, runtime, wireModelId);
 
 	const requestedThinkingLevel = input.requestedThinkingLevel ?? "off";
 	const capabilityResolution = modelCapabilitiesFor(providers, status, wireModelId);
 	const capabilities: CapabilityFlags = { ...capabilityResolution.capabilities };
 	const probedContextWindow = probeCapabilitiesForModel(status, wireModelId)?.contextWindow ?? null;
 	const contextWindowDetails = resolveContextWindowDetails(
-		endpoint,
+		target,
 		runtime,
 		wireModelId,
 		providers.knowledgeBase,
@@ -327,8 +327,8 @@ export function resolveRuntimeTarget(
 		diagnostics.push(diagnostic("warning", "context-window-low", contextWindowDetails.warning));
 	}
 
-	const modelRuntime = resolveEndpointRuntimeCapabilities(
-		endpoint,
+	const modelRuntime = resolveTargetRuntimeCapabilities(
+		target,
 		runtime,
 		wireModelId,
 		capabilities,
@@ -336,20 +336,20 @@ export function resolveRuntimeTarget(
 		requestedThinkingLevel,
 	);
 	const decisions = capabilityDecisions(runtime, capabilities);
-	appendCapabilityDiagnostics(diagnostics, input, capabilities, decisions, endpointId);
+	appendCapabilityDiagnostics(diagnostics, input, capabilities, decisions, targetId);
 	appendThinkingDiagnostics(diagnostics, modelRuntime, requestedThinkingLevel);
 
 	if (hasError(diagnostics)) return { ok: false, diagnostics };
 
-	const target: ResolvedRuntimeTarget = {
-		targetId: endpoint.id,
-		endpoint,
+	const resolved: ResolvedRuntimeTarget = {
+		targetId: target.id,
+		target,
 		runtime,
 		runtimeId: runtime.id,
 		runtimeKind: runtime.kind,
 		apiFamily: runtime.apiFamily,
 		auth: runtime.auth,
-		authRequired: targetRequiresAuth(endpoint, runtime),
+		authRequired: targetRequiresAuth(target, runtime),
 		wireModelId,
 		requestedThinkingLevel,
 		effectiveThinkingLevel: modelRuntime.thinking.effectiveLevel,
@@ -360,8 +360,8 @@ export function resolveRuntimeTarget(
 		diagnostics,
 		contextWindowDetails,
 	};
-	if (runtime.tier !== undefined) target.runtimeTier = runtime.tier;
-	return { ok: true, target, diagnostics };
+	if (runtime.tier !== undefined) resolved.runtimeTier = runtime.tier;
+	return { ok: true, target: resolved, diagnostics };
 }
 
 function modelHintPatch(target: ResolvedRuntimeTarget, model: unknown): Partial<CapabilityFlags> {
@@ -409,7 +409,7 @@ export function refineRuntimeTargetWithModelHints(
 	if (Object.keys(patch).length === 0 && !windowHintDiffers) return target;
 	const capabilities: CapabilityFlags = { ...target.capabilities, ...patch };
 	const contextWindowDetails = resolveContextWindowDetails(
-		target.endpoint,
+		target.target,
 		target.runtime,
 		target.wireModelId,
 		knowledgeBase ?? null,
@@ -490,7 +490,7 @@ function positiveWindow(value: number | null | undefined): number | undefined {
  *  - `desired`: what Clio wants for coding. Local-native tiers still get a
  *    128k recommendation, but this is advisory only.
  *  - `effective`: what the target actually offers, most live source first:
- *    probe/loaded > endpoint config override > model-specific knowledge >
+ *    probe/loaded > target config override > model-specific knowledge >
  *    runtime descriptor default. Clio no longer invents a 128k effective
  *    window for unknown local models; providers must probe it or users must
  *    configure an explicit override.
@@ -498,7 +498,7 @@ function positiveWindow(value: number | null | undefined): number | undefined {
  * Warns when a local-native target's effective window is below the 128k recommendation.
  */
 export function resolveContextWindowDetails(
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	runtime: RuntimeDescriptor,
 	wireModelId: string,
 	knowledgeBase: KnowledgeBase | null,
@@ -534,7 +534,7 @@ export function resolveContextWindowDetails(
 			: declaredContextWindow;
 
 	const probeWindow = positiveWindow(probedContextWindow);
-	const overrideWindow = positiveWindow(endpoint.capabilities?.contextWindow);
+	const overrideWindow = positiveWindow(target.capabilities?.contextWindow);
 	let effective: number;
 	let source: ContextWindowDetails["contextWindowSource"];
 	if (probeWindow !== undefined) {
@@ -542,7 +542,7 @@ export function resolveContextWindowDetails(
 		source = runtime.id === "lmstudio-native" ? "loaded" : "probe";
 	} else if (overrideWindow !== undefined) {
 		effective = overrideWindow;
-		source = "endpoint-override";
+		source = "target-override";
 	} else if (modelDeclared !== undefined) {
 		effective = modelDeclared;
 		source = modelDeclaredSource;

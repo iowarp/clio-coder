@@ -85,7 +85,7 @@ describe("boundaries", () => {
 			"src/domains/providers/plugins.ts": "",
 			"src/domains/providers/registry.ts": "",
 			"src/domains/providers/runtimes/builtins.ts": "",
-			"src/domains/providers/types/endpoint-descriptor.ts": "",
+			"src/domains/providers/types/target-descriptor.ts": "",
 		});
 
 		strictEqual(runBoundaryCheck(root).violations.length, 0);

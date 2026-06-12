@@ -39,7 +39,7 @@ export interface WorkerSpec {
 	dynamicHash?: string;
 	agentId: string;
 	task: string;
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	runtime: SerializedWorkerRuntimeDescriptor;
 	/** Runtime id kept as a direct lookup key for older dispatch tests and receipts. */
 	runtimeId: string;
@@ -110,7 +110,7 @@ const THINKING_LEVELS = [
 	"high",
 	"xhigh",
 ] as const satisfies ReadonlyArray<ThinkingLevel>;
-const ENDPOINT_LIFECYCLES = ["user-managed", "clio-managed"] as const;
+const TARGET_LIFECYCLES = ["user-managed", "clio-managed"] as const;
 const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
 const MIDDLEWARE_EFFECT_KINDS = [
 	"inject_reminder",
@@ -205,49 +205,48 @@ function readOptionalStringArray(record: Record<string, unknown>, key: string, s
 	if (record[key] !== undefined) readStringArray(record[key], `${source}.${key}`);
 }
 
-function validateEndpoint(value: unknown, runtimeId: string): void {
-	const endpoint = readRecord(value, "WorkerSpec.endpoint");
-	const endpointId = readString(endpoint.id, "WorkerSpec.endpoint.id");
-	const endpointRuntime = readString(endpoint.runtime, "WorkerSpec.endpoint.runtime");
-	if (endpointRuntime !== runtimeId) {
-		throw new Error(`WorkerSpec endpoint runtime mismatch: endpoint.runtime=${endpointRuntime} runtimeId=${runtimeId}`);
+function validateTarget(value: unknown, runtimeId: string): void {
+	const target = readRecord(value, "WorkerSpec.target");
+	const targetId = readString(target.id, "WorkerSpec.target.id");
+	const targetRuntime = readString(target.runtime, "WorkerSpec.target.runtime");
+	if (targetRuntime !== runtimeId) {
+		throw new Error(`WorkerSpec target runtime mismatch: target.runtime=${targetRuntime} runtimeId=${runtimeId}`);
 	}
-	if (endpointId.length === 0) throw new Error("WorkerSpec.endpoint.id must be a non-empty string");
-	readOptionalString(endpoint, "url", "WorkerSpec.endpoint");
-	readOptionalString(endpoint, "defaultModel", "WorkerSpec.endpoint");
-	readOptionalStringArray(endpoint, "wireModels", "WorkerSpec.endpoint");
-	readOptionalBoolean(endpoint, "gateway", "WorkerSpec.endpoint");
-	readOptionalEnum(endpoint, "lifecycle", "WorkerSpec.endpoint", ENDPOINT_LIFECYCLES);
-	if (endpoint.auth !== undefined) validateEndpointAuth(endpoint.auth);
-	if (endpoint.pricing !== undefined) validateEndpointPricing(endpoint.pricing);
-	if (endpoint.capabilities !== undefined)
-		validateCapabilityPatch(endpoint.capabilities, "WorkerSpec.endpoint.capabilities");
+	if (targetId.length === 0) throw new Error("WorkerSpec.target.id must be a non-empty string");
+	readOptionalString(target, "url", "WorkerSpec.target");
+	readOptionalString(target, "defaultModel", "WorkerSpec.target");
+	readOptionalStringArray(target, "wireModels", "WorkerSpec.target");
+	readOptionalBoolean(target, "gateway", "WorkerSpec.target");
+	readOptionalEnum(target, "lifecycle", "WorkerSpec.target", TARGET_LIFECYCLES);
+	if (target.auth !== undefined) validateTargetAuth(target.auth);
+	if (target.pricing !== undefined) validateTargetPricing(target.pricing);
+	if (target.capabilities !== undefined) validateCapabilityPatch(target.capabilities, "WorkerSpec.target.capabilities");
 }
 
-function validateEndpointAuth(value: unknown): void {
-	const auth = readRecord(value, "WorkerSpec.endpoint.auth");
-	readOptionalString(auth, "apiKeyEnvVar", "WorkerSpec.endpoint.auth");
-	readOptionalString(auth, "apiKeyRef", "WorkerSpec.endpoint.auth");
-	readOptionalString(auth, "oauthProfile", "WorkerSpec.endpoint.auth");
+function validateTargetAuth(value: unknown): void {
+	const auth = readRecord(value, "WorkerSpec.target.auth");
+	readOptionalString(auth, "apiKeyEnvVar", "WorkerSpec.target.auth");
+	readOptionalString(auth, "apiKeyRef", "WorkerSpec.target.auth");
+	readOptionalString(auth, "oauthProfile", "WorkerSpec.target.auth");
 	if (auth.headers === undefined) return;
-	const headers = readRecord(auth.headers, "WorkerSpec.endpoint.auth.headers");
+	const headers = readRecord(auth.headers, "WorkerSpec.target.auth.headers");
 	for (const [key, value] of Object.entries(headers)) {
-		readString(value, `WorkerSpec.endpoint.auth.headers.${key}`);
+		readString(value, `WorkerSpec.target.auth.headers.${key}`);
 	}
 }
 
-function validateEndpointPricing(value: unknown): void {
-	const pricing = readRecord(value, "WorkerSpec.endpoint.pricing");
+function validateTargetPricing(value: unknown): void {
+	const pricing = readRecord(value, "WorkerSpec.target.pricing");
 	const input = pricing.input;
 	const output = pricing.output;
 	if (typeof input !== "number" || !Number.isFinite(input) || input < 0) {
-		throw new Error("WorkerSpec.endpoint.pricing.input must be a non-negative finite number");
+		throw new Error("WorkerSpec.target.pricing.input must be a non-negative finite number");
 	}
 	if (typeof output !== "number" || !Number.isFinite(output) || output < 0) {
-		throw new Error("WorkerSpec.endpoint.pricing.output must be a non-negative finite number");
+		throw new Error("WorkerSpec.target.pricing.output must be a non-negative finite number");
 	}
-	readOptionalNumber(pricing, "cacheRead", "WorkerSpec.endpoint.pricing");
-	readOptionalNumber(pricing, "cacheWrite", "WorkerSpec.endpoint.pricing");
+	readOptionalNumber(pricing, "cacheRead", "WorkerSpec.target.pricing");
+	readOptionalNumber(pricing, "cacheWrite", "WorkerSpec.target.pricing");
 }
 
 function validateCapabilityPatch(value: unknown, source: string): void {
@@ -371,7 +370,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "dynamicHash", "WorkerSpec");
 	readString(spec.agentId, "WorkerSpec.agentId");
 	readString(spec.task, "WorkerSpec.task");
-	validateEndpoint(spec.endpoint, runtimeId);
+	validateTarget(spec.target, runtimeId);
 	readString(spec.wireModelId, "WorkerSpec.wireModelId");
 	readOptionalString(spec, "sessionId", "WorkerSpec");
 	readOptionalString(spec, "apiKey", "WorkerSpec");

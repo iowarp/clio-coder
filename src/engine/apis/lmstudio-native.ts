@@ -414,7 +414,7 @@ const MIN_AUTOMATIC_LOAD_CONTEXT = 32_768;
 
 function automaticLoadContextLength(model: Model<"lmstudio-native">): number {
 	// When `model.contextWindow` is set (from a knowledge-base entry or an
-	// explicit `--context-window` override on the endpoint) it is the
+	// explicit `--context-window` override on the target) it is the
 	// authoritative budget for the load. Earlier versions also clamped against
 	// `maxTokens * 2`, but agent workloads are dominated by *input* tokens, so
 	// that clamp silently undersized the KV cache (e.g. 262K → 65K).

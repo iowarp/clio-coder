@@ -19,7 +19,7 @@ function makeRow(overrides: Partial<DispatchBoardRow> = {}): DispatchBoardRow {
 		agentId: "alpha",
 		runtimeKind: "http",
 		runtimeId: "rt-1",
-		endpointId: "local",
+		targetId: "local",
 		wireModelId: "qwen3-coder",
 		status: "running",
 		elapsedMs: 1200,
@@ -113,7 +113,7 @@ describe("dispatch board terminal taxonomy", () => {
 				bus.emit(BusChannels.DispatchStarted, {
 					runId: `run-${reason}`,
 					agentId: "coder",
-					endpointId: "default",
+					targetId: "default",
 					wireModelId: "model",
 					runtimeId: "runtime",
 					runtimeKind: "http",
@@ -121,7 +121,7 @@ describe("dispatch board terminal taxonomy", () => {
 				bus.emit(BusChannels.DispatchFailed, {
 					runId: `run-${reason}`,
 					agentId: "coder",
-					endpointId: "default",
+					targetId: "default",
 					wireModelId: "model",
 					runtimeId: "runtime",
 					runtimeKind: "http",
@@ -144,7 +144,7 @@ describe("dispatch board terminal taxonomy", () => {
 			bus.emit(BusChannels.DispatchStarted, {
 				runId: "run-dead",
 				agentId: "coder",
-				endpointId: "default",
+				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
 				runtimeKind: "http",
@@ -159,7 +159,7 @@ describe("dispatch board terminal taxonomy", () => {
 			bus.emit(BusChannels.DispatchFailed, {
 				runId: "run-dead",
 				agentId: "coder",
-				endpointId: "default",
+				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
 				runtimeKind: "http",

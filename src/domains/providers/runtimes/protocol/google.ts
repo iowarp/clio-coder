@@ -6,7 +6,7 @@ import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 export interface GoogleSynthesisInput {
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
@@ -15,7 +15,7 @@ export interface GoogleSynthesisInput {
 
 export function synthesizeGoogleModel(input: GoogleSynthesisInput): Model<Api> {
 	return synthesizeCatalogBackedModel({
-		endpoint: input.endpoint,
+		target: input.target,
 		wireModelId: input.wireModelId,
 		kb: input.kb,
 		defaultCapabilities: input.defaultCapabilities,

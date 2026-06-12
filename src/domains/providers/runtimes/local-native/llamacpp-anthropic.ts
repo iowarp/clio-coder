@@ -26,8 +26,8 @@ interface OpenAIModelsResponse {
 	data?: Array<{ id?: unknown }>;
 }
 
-function url(endpoint: TargetDescriptor): string | null {
-	return endpoint.url ? stripTrailingSlash(endpoint.url) : null;
+function url(target: TargetDescriptor): string | null {
+	return target.url ? stripTrailingSlash(target.url) : null;
 }
 
 const llamacppAnthropicRuntime: RuntimeDescriptor = {
@@ -39,9 +39,9 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	defaultCapabilities,
 	hidden: true,
-	async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-		const base = url(endpoint);
-		if (!base) return { ok: false, error: "endpoint has no url" };
+	async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+		const base = url(target);
+		if (!base) return { ok: false, error: "target has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
@@ -56,12 +56,12 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 		const enriched: ProbeResult = { ...head };
 		if (props.discoveredCapabilities) enriched.discoveredCapabilities = props.discoveredCapabilities;
 		if (props.serverVersion) enriched.serverVersion = props.serverVersion;
-		const note = await detectModelMismatch(base, endpoint, ctx);
+		const note = await detectModelMismatch(base, target, ctx);
 		if (note) enriched.notes = [note];
 		return enriched;
 	},
-	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-		const base = url(endpoint);
+	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
+		const base = url(target);
 		if (!base) return [];
 		const opts = { url: `${base}/v1/models`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const result = await (ctx.signal
@@ -72,15 +72,15 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 			.map((row) => (typeof row?.id === "string" ? row.id : null))
 			.filter((id): id is string => id !== null);
 	},
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,
 			apiFamily: "anthropic-messages",
 			provider: "llamacpp",
-			baseUrlForEndpoint: withAsIs,
+			baseUrlForTarget: withAsIs,
 		});
 	},
 };

@@ -137,10 +137,10 @@ function statusForResolvedTarget(
 	resolved: NonNullable<ReturnType<typeof resolveCliProviderReference>>,
 	auth: ReturnType<typeof openAuthStorage>,
 ): AuthStatus {
-	if (resolved.endpoint && !targetRequiresAuth(resolved.endpoint, resolved.runtime)) {
+	if (resolved.target && !targetRequiresAuth(resolved.target, resolved.runtime)) {
 		return authNotRequiredStatus(resolved.authTarget.providerId);
 	}
-	if (!resolved.endpoint && resolved.runtime.auth !== "api-key" && resolved.runtime.auth !== "oauth") {
+	if (!resolved.target && resolved.runtime.auth !== "api-key" && resolved.runtime.auth !== "oauth") {
 		return authNotRequiredStatus(resolved.authTarget.providerId);
 	}
 	return auth.statusForTarget(resolved.authTarget, { includeFallback: false });

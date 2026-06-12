@@ -114,7 +114,7 @@ export interface HeadlessSamplingOverrides {
 }
 
 export interface BootOptions {
-	/** Process-lifetime API key override applied to the active orchestrator endpoint. */
+	/** Process-lifetime API key override applied to the active orchestrator target. */
 	apiKey?: string;
 	/** Suppress CLIO.md project-context injection for this run. */
 	noContextFiles?: boolean;
@@ -155,7 +155,7 @@ function printJsonSessionHeader(meta: SessionMeta | null): Record<string, unknow
 		id: meta.id,
 		timestamp: meta.createdAt,
 		cwd: meta.cwd,
-		endpoint: meta.endpoint,
+		target: meta.target,
 		model: meta.model,
 		clioVersion: meta.clioVersion,
 	};
@@ -167,12 +167,12 @@ function applyHeadlessSettingsOverlay(
 ): ClioSettings {
 	const next = structuredClone(settings);
 	if (!overrides) return next;
-	const previousEndpoint = next.orchestrator.target;
+	const previousTarget = next.orchestrator.target;
 	if (overrides.target !== undefined) {
 		next.orchestrator.target = overrides.target;
-		if (overrides.model === undefined && (previousEndpoint !== overrides.target || !next.orchestrator.model)) {
-			const endpoint = next.targets.find((entry) => entry.id === overrides.target);
-			if (endpoint) next.orchestrator.model = endpoint.defaultModel ?? null;
+		if (overrides.model === undefined && (previousTarget !== overrides.target || !next.orchestrator.model)) {
+			const target = next.targets.find((entry) => entry.id === overrides.target);
+			if (target) next.orchestrator.model = target.defaultModel ?? null;
 		}
 	}
 	if (overrides.model !== undefined) next.orchestrator.model = overrides.model;
@@ -182,13 +182,13 @@ function applyHeadlessSettingsOverlay(
 
 interface CompactionResolution {
 	model: Model<never>;
-	endpointId: string;
+	targetId: string;
 	apiKey?: string;
 }
 
-function resolveEndpoint(providers: ProvidersContract, endpointId: string | null | undefined): TargetDescriptor | null {
-	if (!endpointId) return null;
-	return providers.getEndpoint(endpointId);
+function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
+	if (!targetId) return null;
+	return providers.getTarget(targetId);
 }
 
 export function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<ThinkingLevel>): ThinkingLevel {
@@ -199,36 +199,36 @@ export function advanceThinkingLevel(current: ThinkingLevel, available: Readonly
 	return levels[(idx + 1) % levels.length] ?? "off";
 }
 
-async function resolveApiKeyForEndpoint(
-	endpoint: TargetDescriptor,
+async function resolveApiKeyForTarget(
+	target: TargetDescriptor,
 	providers: ProvidersContract,
 ): Promise<string | undefined> {
-	const runtime = providers.getRuntime(endpoint.runtime);
+	const runtime = providers.getRuntime(target.runtime);
 	if (!runtime) return undefined;
-	if (!targetRequiresAuth(endpoint, runtime)) return undefined;
-	const resolved = await providers.auth.resolveForTarget(endpoint, runtime);
+	if (!targetRequiresAuth(target, runtime)) return undefined;
+	const resolved = await providers.auth.resolveForTarget(target, runtime);
 	return resolved.apiKey;
 }
 
 export function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	wireModelId: string,
 ): Model<never> | null {
-	const runtime = providers.getRuntime(endpoint.runtime);
+	const runtime = providers.getRuntime(target.runtime);
 	if (!runtime) return null;
 	let model: Model<never>;
 	try {
 		const kbHit = providers.knowledgeBase?.lookup(wireModelId) ?? null;
-		model = runtime.synthesizeModel(endpoint, wireModelId, kbHit) as unknown as Model<never>;
+		model = runtime.synthesizeModel(target, wireModelId, kbHit) as unknown as Model<never>;
 	} catch {
 		return null;
 	}
 	try {
-		const status = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
+		const status = providers.list().find((entry) => entry.target.id === target.id);
 		if (status) {
 			const caps = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, {
-				detectedReasoning: providers.getDetectedReasoning(endpoint.id, wireModelId),
+				detectedReasoning: providers.getDetectedReasoning(target.id, wireModelId),
 			});
 			applyModelCapabilityPatch(model, caps);
 		}
@@ -243,15 +243,15 @@ async function resolveCompactionModel(
 	settings: ClioSettings,
 	providers: ProvidersContract,
 ): Promise<CompactionResolution | null> {
-	const endpointId = settings.orchestrator?.target ?? null;
+	const targetId = settings.orchestrator?.target ?? null;
 	const wireModelId = settings.orchestrator?.model ?? null;
-	if (!endpointId || !wireModelId) return null;
-	const endpoint = resolveEndpoint(providers, endpointId);
-	if (!endpoint) return null;
-	const model = synthesizeOrchestratorModel(providers, endpoint, wireModelId);
+	if (!targetId || !wireModelId) return null;
+	const target = resolveTarget(providers, targetId);
+	if (!target) return null;
+	const model = synthesizeOrchestratorModel(providers, target, wireModelId);
 	if (!model) return null;
-	const apiKey = await resolveApiKeyForEndpoint(endpoint, providers);
-	const resolution: CompactionResolution = { model, endpointId };
+	const apiKey = await resolveApiKeyForTarget(target, providers);
+	const resolution: CompactionResolution = { model, targetId };
 	if (apiKey !== undefined) resolution.apiKey = apiKey;
 	return resolution;
 }
@@ -371,8 +371,8 @@ function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, res
 }
 
 /**
- * Alt+J / Alt+K step the orchestrator through the `scope` list of endpoint
- * ids or endpoint/model refs. Absent scope is a no-op so unconfigured users
+ * Alt+J / Alt+K step the orchestrator through the `scope` list of target
+ * ids or target/model refs. Absent scope is a no-op so unconfigured users
  * feel nothing.
  */
 export function advanceScopedTarget(
@@ -384,18 +384,17 @@ export function advanceScopedTarget(
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const filteredScope = scope.filter((entry) => {
-		const [endpointId] = entry.split("/");
-		const endpoint = settings.targets.find((e) => e.id === endpointId);
-		if (!endpoint) return false;
-		const runtime = registry.get(endpoint.runtime);
+		const [targetId] = entry.split("/");
+		const target = settings.targets.find((e) => e.id === targetId);
+		if (!target) return false;
+		const runtime = registry.get(target.runtime);
 		return runtime !== null && isTargetEligibleRuntime(runtime);
 	});
 	if (filteredScope.length === 0) return null;
-	const activeEndpoint = settings.orchestrator.target ?? "";
+	const activeTarget = settings.orchestrator.target ?? "";
 	const activeModel = settings.orchestrator.model ?? "";
-	const activeCombinedRef =
-		activeEndpoint.length > 0 && activeModel.length > 0 ? `${activeEndpoint}/${activeModel}` : "";
-	const idx = filteredScope.findIndex((entry) => entry === activeCombinedRef || entry === activeEndpoint);
+	const activeCombinedRef = activeTarget.length > 0 && activeModel.length > 0 ? `${activeTarget}/${activeModel}` : "";
+	const idx = filteredScope.findIndex((entry) => entry === activeCombinedRef || entry === activeTarget);
 	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : filteredScope.length - 1);
 	const next = filteredScope[base % filteredScope.length];
 	if (!next) return null;
@@ -404,7 +403,7 @@ export function advanceScopedTarget(
 	if (modelParts.length > 0) {
 		return { target: targetId, model: modelParts.join("/") };
 	}
-	if (activeEndpoint === targetId) {
+	if (activeTarget === targetId) {
 		return { target: targetId, model: activeModel || null };
 	}
 	const descriptor = settings.targets.find((entry) => entry.id === targetId);
@@ -485,11 +484,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			process.stderr.write("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
 		} else {
 			const settingsNow = applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
-			const activeEndpointId = settingsNow.orchestrator?.target;
-			const endpoint = resolveEndpoint(providers, activeEndpointId);
-			const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
-			if (endpoint && runtime) {
-				providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
+			const activeTargetId = settingsNow.orchestrator?.target;
+			const target = resolveTarget(providers, activeTargetId);
+			const runtime = target ? providers.getRuntime(target.runtime) : null;
+			if (target && runtime) {
+				providers.auth.setRuntimeOverrideForTarget(target, runtime, options.apiKey);
 			} else {
 				process.stderr.write("Clio Coder: --api-key supplied but no active orchestrator target is configured; ignoring.\n");
 			}
@@ -605,7 +604,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// (with any headless CLI overrides baked in); from here on every consumer
 	// reads the effective view — shared snapshot + session routing overlay — so
 	// another process writing settings.yaml can update defaults and the
-	// endpoint catalog but never redirect this session's routing.
+	// target catalog but never redirect this session's routing.
 	const sessionRouting = seedSessionRouting(
 		applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless),
 	);
@@ -707,7 +706,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		providers,
 		middleware,
 		protectedArtifacts: { replace: (state) => protectedArtifactsGuard.replaceState(state) },
-		knownEndpoints: () => new Set(providers.list().map((entry) => entry.endpoint.id)),
+		knownTargets: () => new Set(providers.list().map((entry) => entry.target.id)),
 		observability,
 		bus,
 		...(prompts ? { prompts } : {}),
@@ -851,8 +850,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSettings: getCurrentSettings,
 		getWorkerDefault: () => {
 			const workerDefault = getCurrentSettings().workers.default;
-			const result: { endpoint?: string; model?: string } = {};
-			if (workerDefault.target) result.endpoint = workerDefault.target;
+			const result: { target?: string; model?: string } = {};
+			if (workerDefault.target) result.target = workerDefault.target;
 			if (workerDefault.model) result.model = workerDefault.model;
 			return result;
 		},
@@ -935,25 +934,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			);
 			updateSessionRouting({ orchestrator: { thinkingLevel: nextLevel } });
 		},
-		onSelectModel: ({ endpoint, model }) => {
+		onSelectModel: ({ target, model }) => {
 			const registry = getRuntimeRegistry();
 			const settings = getCurrentSettings();
-			const target = settings.targets.find((e) => e.id === endpoint);
-			if (target) {
-				const runtime = registry.get(target.runtime);
+			const descriptor = settings.targets.find((e) => e.id === target);
+			if (descriptor) {
+				const runtime = registry.get(descriptor.runtime);
 				if (!runtime) {
 					throw new Error(
-						`cannot use target '${endpoint}' as orchestrator target because runtime '${target.runtime}' is not registered`,
+						`cannot use target '${target}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
 					);
 				}
 				if (!isTargetEligibleRuntime(runtime)) {
 					throw new Error(
-						`cannot use target '${endpoint}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
+						`cannot use target '${target}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 					);
 				}
 			}
-			updateSessionRouting({ orchestrator: { target: endpoint, model } });
-			rememberRecentModel(`${endpoint}/${model}`, getCurrentSettings().modelSelector.recentLimit);
+			updateSessionRouting({ orchestrator: { target, model } });
+			rememberRecentModel(`${target}/${model}`, getCurrentSettings().modelSelector.recentLimit);
 		},
 		onSetScope: (scope) => {
 			updateSessionRouting({ scope: Array.from(scope) });

@@ -13,7 +13,7 @@ import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import { spawnNativeWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
-import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
+import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
@@ -51,29 +51,29 @@ const MINIMAL_SPEC_LINE = `${JSON.stringify({
 	systemPrompt: "",
 	agentId: "coder",
 	task: "t",
-	endpoint: { id: "e", runtime: "x" },
+	target: { id: "e", runtime: "x" },
 	wireModelId: "m",
 	allowedTools: ["bash"],
 })}\n`;
 
 function stubContext(): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	const endpoint: TargetDescriptor = { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
-	settings.targets = [endpoint];
-	settings.workers.default.target = endpoint.id;
+	const target: TargetDescriptor = { id: "default", runtime: "openai", defaultModel: "gpt-4o" };
+	settings.targets = [target];
+	settings.workers.default.target = target.id;
 	settings.workers.default.model = "gpt-4o";
 
 	const runtime: RuntimeDescriptor = {
-		id: endpoint.runtime,
+		id: target.runtime,
 		displayName: "OpenAI",
 		kind: "http",
 		apiFamily: "openai-completions",
 		auth: "api-key",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
-		synthesizeModel: () => ({ id: endpoint.defaultModel, provider: endpoint.runtime }) as never,
+		synthesizeModel: () => ({ id: target.defaultModel, provider: target.runtime }) as never,
 	};
-	const status: EndpointStatus = {
-		endpoint,
+	const status: TargetStatus = {
+		target,
 		runtime,
 		available: true,
 		reason: "test",
@@ -83,12 +83,12 @@ function stubContext(): DomainContext {
 	};
 	const providers: ProvidersContract = {
 		list: () => [status],
-		getEndpoint: (id) => (id === endpoint.id ? endpoint : null),
+		getTarget: (id) => (id === target.id ? target : null),
 		getRuntime: (id) => (id === runtime.id ? runtime : null),
 		probeAll: async () => {},
 		probeAllLive: async () => {},
-		probeEndpoint: async () => status,
-		disconnectEndpoint: () => status,
+		probeTarget: async () => status,
+		disconnectTarget: () => status,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,
@@ -270,7 +270,7 @@ rl.on("line", (line) => {
 						systemPrompt: "",
 						agentId: "coder",
 						task: "t",
-						endpoint: { id: "e", runtime: "x" } as never,
+						target: { id: "e", runtime: "x" } as never,
 						runtime: {
 							version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
 							id: "x",

@@ -27,8 +27,8 @@ const bedrockRuntime: RuntimeDescriptor = {
 	apiFamily: "bedrock-converse-stream",
 	auth: "aws-sdk",
 	defaultCapabilities,
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null) {
-		return synthesizeBedrockModel({ endpoint, wireModelId, kb, defaultCapabilities });
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null) {
+		return synthesizeBedrockModel({ target, wireModelId, kb, defaultCapabilities });
 	},
 };
 

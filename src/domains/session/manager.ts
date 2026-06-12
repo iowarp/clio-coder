@@ -37,7 +37,7 @@ export function newTurnId(): string {
 export function startSession(input: {
 	cwd: string;
 	model?: string | null;
-	endpoint?: string | null;
+	target?: string | null;
 	initialEntries?: ReadonlyArray<unknown>;
 	initialTree?: ReadonlyArray<SessionTreeNode>;
 	parentSession?: string;
@@ -46,7 +46,7 @@ export function startSession(input: {
 	const { meta, writer } = engineCreateSession({
 		cwd: input.cwd,
 		model: input.model ?? null,
-		endpoint: input.endpoint ?? null,
+		target: input.target ?? null,
 		...(input.initialEntries !== undefined ? { initialEntries: input.initialEntries } : {}),
 		...(input.initialTree !== undefined ? { initialTree: input.initialTree } : {}),
 		...(input.parentSession !== undefined ? { parentSession: input.parentSession } : {}),

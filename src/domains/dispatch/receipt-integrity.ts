@@ -5,7 +5,9 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } fr
  * Integrity versions. v1 predates the outcome/lineage/identity blocks; v2
  * folds them into the digest. Verification branches strictly on the version
  * recorded in the receipt's integrity block, never on field-presence
- * heuristics, so every pre-v2 receipt keeps verifying unchanged.
+ * heuristics. Receipts written before the endpointId -> targetId rename are
+ * stale dev state and no longer verify; per the no-migrations mandate they
+ * are wiped, not read.
  */
 export const RUN_RECEIPT_INTEGRITY_VERSION = 2;
 export type ReceiptIntegrityVersion = 1 | 2;
@@ -66,7 +68,7 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: Rec
 		runId: receipt.runId,
 		agentId: receipt.agentId,
 		task: receipt.task,
-		endpointId: receipt.endpointId,
+		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
 		runtimeId: receipt.runtimeId,
 		runtimeKind: receipt.runtimeKind,
@@ -163,7 +165,7 @@ function ledgerDigestFieldsV1(envelope: RunEnvelope): Record<string, unknown> {
 		id: envelope.id,
 		agentId: envelope.agentId,
 		task: envelope.task,
-		endpointId: envelope.endpointId,
+		targetId: envelope.targetId,
 		wireModelId: envelope.wireModelId,
 		runtimeId: envelope.runtimeId,
 		runtimeKind: envelope.runtimeKind,
@@ -236,7 +238,7 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		["agentAudience", receipt.agentAudience, envelope.agentAudience],
 		["requestOrigin", receipt.requestOrigin, envelope.requestOrigin],
 		["task", receipt.task, envelope.task],
-		["endpointId", receipt.endpointId, envelope.endpointId],
+		["targetId", receipt.targetId, envelope.targetId],
 		["wireModelId", receipt.wireModelId, envelope.wireModelId],
 		["runtimeId", receipt.runtimeId, envelope.runtimeId],
 		["runtimeKind", receipt.runtimeKind, envelope.runtimeKind],

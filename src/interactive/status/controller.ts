@@ -60,18 +60,18 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 	const listeners = new Set<(status: AgentStatus) => void>();
 	const unsubscribes: Array<() => void> = [];
 
-	const currentTarget = (): { endpointId: string; modelId: string } => {
+	const currentTarget = (): { targetId: string; modelId: string } => {
 		const settings = deps.getSettings?.();
 		return {
-			endpointId: settings?.orchestrator?.target ?? "",
+			targetId: settings?.orchestrator?.target ?? "",
 			modelId: settings?.orchestrator?.model ?? "",
 		};
 	};
 
 	const isLocalRuntime = (): boolean => {
-		const endpointId = currentTarget().endpointId;
-		if (!endpointId) return false;
-		const entry = deps.providers.list().find((candidate) => candidate.endpoint.id === endpointId);
+		const targetId = currentTarget().targetId;
+		if (!targetId) return false;
+		const entry = deps.providers.list().find((candidate) => candidate.target.id === targetId);
 		return entry?.runtime?.tier === "local-native";
 	};
 
@@ -136,7 +136,7 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			now: at,
 			localRuntime: isLocalRuntime(),
 			modelId: target.modelId,
-			endpointId: target.endpointId,
+			targetId: target.targetId,
 			runId: deps.chat.getSessionId(),
 		});
 		if (next === prev) return;

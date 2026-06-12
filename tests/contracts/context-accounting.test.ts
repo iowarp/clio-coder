@@ -138,14 +138,14 @@ describe("contracts/context-accounting", () => {
 	});
 
 	it("keeps local-native 128k as advisory and does not inflate unknown effective context", () => {
-		const endpoint: TargetDescriptor = {
-			id: "local-endpoint",
+		const target: TargetDescriptor = {
+			id: "local-target",
 			runtime: "ollama-native",
 			capabilities: {},
 		};
 		const runtime = testRuntime("ollama-native");
 
-		const details = resolveContextWindowDetails(endpoint, runtime, "model", null, null);
+		const details = resolveContextWindowDetails(target, runtime, "model", null, null);
 		strictEqual(details.desiredContextWindow, 128000);
 		strictEqual(details.effectiveContextWindow, 8192);
 		strictEqual(details.contextWindowSource, "descriptor-default");
@@ -153,14 +153,14 @@ describe("contracts/context-accounting", () => {
 	});
 
 	it("caps effectiveContextWindow and warns if probed/loaded context below 128k", () => {
-		const endpoint: TargetDescriptor = {
-			id: "local-endpoint",
+		const target: TargetDescriptor = {
+			id: "local-target",
 			runtime: "lmstudio-native",
 			capabilities: {},
 		};
 		const runtime = testRuntime("lmstudio-native");
 
-		const details = resolveContextWindowDetails(endpoint, runtime, "model", null, 32000);
+		const details = resolveContextWindowDetails(target, runtime, "model", null, 32000);
 		strictEqual(details.desiredContextWindow, 128000);
 		strictEqual(details.effectiveContextWindow, 32000);
 		strictEqual(details.contextWindowSource, "loaded");

@@ -65,7 +65,7 @@ export interface EvidenceOverview {
 	tasks: string[];
 	cwds: string[];
 	agentIds: string[];
-	endpointIds: string[];
+	targetIds: string[];
 	runtimeIds: string[];
 	modelIds: string[];
 	totals: EvidenceTotals;
@@ -157,7 +157,7 @@ export interface EvidenceTraceRunRow {
 	wallTimeMs: number;
 	cwd: string;
 	agentId: string;
-	endpointId: string;
+	targetId: string;
 	runtimeId: string;
 	wireModelId: string;
 	tokenCount: number;

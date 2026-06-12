@@ -22,8 +22,8 @@ const defaultCapabilities: CapabilityFlags = {
 	maxTokens: 0,
 };
 
-function endpointUrl(endpoint: TargetDescriptor): string | null {
-	return endpoint.url ? stripTrailingSlash(endpoint.url) : null;
+function targetUrl(target: TargetDescriptor): string | null {
+	return target.url ? stripTrailingSlash(target.url) : null;
 }
 
 interface JinaRerankResponse {
@@ -44,13 +44,13 @@ const llamacppRerankRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	defaultCapabilities,
 	hidden: true,
-	async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-		const base = endpointUrl(endpoint);
-		if (!base) return { ok: false, error: "endpoint has no url" };
+	async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+		const base = targetUrl(target);
+		if (!base) return { ok: false, error: "target has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
-		const modelId = endpoint.defaultModel ?? "default";
+		const modelId = target.defaultModel ?? "default";
 		const probeResponse = await fetch(`${base}/reranking`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
@@ -67,31 +67,26 @@ const llamacppRerankRuntime: RuntimeDescriptor = {
 		if (props.serverVersion) result.serverVersion = props.serverVersion;
 		return result;
 	},
-	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-		const base = endpointUrl(endpoint);
+	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
+		const base = targetUrl(target);
 		if (!base) return [];
 		return probeOpenAIModels(base, ctx);
 	},
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,
 			apiFamily: "openai-completions",
 			provider: "llamacpp",
-			baseUrlForEndpoint: withV1,
+			baseUrlForTarget: withV1,
 		});
 	},
-	async rerank(
-		endpoint: TargetDescriptor,
-		query: string,
-		documents: string[],
-		ctx: ProbeContext,
-	): Promise<RerankResult> {
-		const base = endpointUrl(endpoint);
-		if (!base) throw new Error("endpoint has no url");
-		const modelId = endpoint.defaultModel ?? "default";
+	async rerank(target: TargetDescriptor, query: string, documents: string[], ctx: ProbeContext): Promise<RerankResult> {
+		const base = targetUrl(target);
+		if (!base) throw new Error("target has no url");
+		const modelId = target.defaultModel ?? "default";
 		const req = {
 			url: `${base}/reranking`,
 			method: "POST" as const,

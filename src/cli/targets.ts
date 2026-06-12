@@ -3,7 +3,7 @@ import { readSettings, updateSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
-import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
+import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import { isTargetEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
@@ -128,18 +128,18 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 		}
 	}
 	const entries = providers.list();
-	const filtered = parsed.target ? entries.filter((e) => e.endpoint.id === parsed.target) : entries;
+	const filtered = parsed.target ? entries.filter((e) => e.target.id === parsed.target) : entries;
 
 	if (parsed.json) {
 		const settings = readSettings();
-		const candidateFor = (status: EndpointStatus): string | null => {
+		const candidateFor = (status: TargetStatus): string | null => {
 			const orchestratorModel =
-				settings.orchestrator?.target === status.endpoint.id ? (settings.orchestrator?.model ?? null) : null;
-			return orchestratorModel ?? status.endpoint.defaultModel ?? null;
+				settings.orchestrator?.target === status.target.id ? (settings.orchestrator?.model ?? null) : null;
+			return orchestratorModel ?? status.target.defaultModel ?? null;
 		};
 		const rows = filtered.map((status) => {
 			const candidate = candidateFor(status);
-			const detectedReasoning = candidate ? providers.getDetectedReasoning(status.endpoint.id, candidate) : null;
+			const detectedReasoning = candidate ? providers.getDetectedReasoning(status.target.id, candidate) : null;
 			return serializeStatus(status, { detectedReasoning, candidateModelId: candidate });
 		});
 		process.stdout.write(`${JSON.stringify({ targets: rows }, null, 2)}\n`);
@@ -424,7 +424,7 @@ function pad(value: string, width: number): string {
 	return value.padEnd(width);
 }
 
-function renderTable(providers: ProvidersContract, entries: ReadonlyArray<EndpointStatus>): void {
+function renderTable(providers: ProvidersContract, entries: ReadonlyArray<TargetStatus>): void {
 	const headerLine = HEADER.map((h, i) => pad(h, WIDTHS[i] ?? 0)).join("");
 	let currentTier: ProviderOutputTier | null = null;
 	for (const status of [...entries].sort(compareStatusByTier)) {
@@ -438,9 +438,9 @@ function renderTable(providers: ProvidersContract, entries: ReadonlyArray<Endpoi
 	}
 }
 
-function formatRow(providers: ProvidersContract, status: EndpointStatus): string {
+function formatRow(providers: ProvidersContract, status: TargetStatus): string {
 	const runtime = status.runtime;
-	const ep = status.endpoint;
+	const ep = status.target;
 	const w = (i: number): number => WIDTHS[i] ?? 0;
 	const id = pad(ep.id, w(0));
 	const tierCell = pad(statusTier(status), w(1));
@@ -454,7 +454,7 @@ function formatRow(providers: ProvidersContract, status: EndpointStatus): string
 	return `${id}${tierCell}${runtimeCell}${authCell}${urlCell}${modelCell}${healthCell}${capsCell}${notesCell}`.trimEnd();
 }
 
-function healthPadSlack(status: EndpointStatus["health"]["status"]): number {
+function healthPadSlack(status: TargetStatus["health"]["status"]): number {
 	// chalk adds ansi bytes; pad width should not shrink
 	switch (status) {
 		case "healthy":
@@ -467,7 +467,7 @@ function healthPadSlack(status: EndpointStatus["health"]["status"]): number {
 	}
 }
 
-function colorHealth(status: EndpointStatus["health"]["status"]): string {
+function colorHealth(status: TargetStatus["health"]["status"]): string {
 	switch (status) {
 		case "healthy":
 			return chalk.green("healthy");
@@ -480,15 +480,15 @@ function colorHealth(status: EndpointStatus["health"]["status"]): string {
 	}
 }
 
-function formatUrl(status: EndpointStatus): string {
-	if (status.endpoint.url) return status.endpoint.url;
+function formatUrl(status: TargetStatus): string {
+	if (status.target.url) return status.target.url;
 	return "(built-in)";
 }
 
-function formatAuth(providers: ProvidersContract, status: EndpointStatus): string {
+function formatAuth(providers: ProvidersContract, status: TargetStatus): string {
 	if (!status.runtime) return "-";
 	if (status.runtime.auth !== "api-key" && status.runtime.auth !== "oauth") return status.runtime.auth;
-	const auth = providers.auth.statusForTarget(status.endpoint, status.runtime);
+	const auth = providers.auth.statusForTarget(status.target, status.runtime);
 	if (!auth.available) return "disconnected";
 	if (auth.source === "environment") return auth.detail ? `env:${auth.detail}` : "environment";
 	return auth.source.replace("stored-", "");
@@ -507,9 +507,9 @@ function capabilityBadges(caps: CapabilityFlags): string {
 	].join("");
 }
 
-function formatNotes(status: EndpointStatus): string {
+function formatNotes(status: TargetStatus): string {
 	const parts: string[] = [];
-	if (status.endpoint.gateway) parts.push("gateway");
+	if (status.target.gateway) parts.push("gateway");
 	if (status.runtime?.auth === "oauth") parts.push("oauth");
 	if (status.capabilities.contextWindow > 0) parts.push(`ctx ${status.capabilities.contextWindow}`);
 	if (!status.available && status.reason) parts.push(status.reason);
@@ -517,7 +517,7 @@ function formatNotes(status: EndpointStatus): string {
 	return parts.join(" ");
 }
 
-function statusTier(status: EndpointStatus): ProviderOutputTier {
+function statusTier(status: TargetStatus): ProviderOutputTier {
 	return status.runtime?.tier ?? "unknown";
 }
 
@@ -547,41 +547,41 @@ function tierRank(tier: ProviderOutputTier): number {
 	}
 }
 
-function compareStatusByTier(a: EndpointStatus, b: EndpointStatus): number {
+function compareStatusByTier(a: TargetStatus, b: TargetStatus): number {
 	return (
 		tierRank(statusTier(a)) - tierRank(statusTier(b)) ||
-		a.endpoint.id.localeCompare(b.endpoint.id) ||
-		a.endpoint.runtime.localeCompare(b.endpoint.runtime)
+		a.target.id.localeCompare(b.target.id) ||
+		a.target.runtime.localeCompare(b.target.runtime)
 	);
 }
 
 interface SerializedStatus {
-	target: EndpointStatus["endpoint"];
-	runtime: EndpointStatus["runtime"];
+	target: TargetStatus["target"];
+	runtime: TargetStatus["runtime"];
 	available: boolean;
 	reason: string;
-	health: EndpointStatus["health"];
-	capabilities: EndpointStatus["capabilities"];
-	probeCapabilities?: EndpointStatus["probeCapabilities"];
-	probeModelId?: EndpointStatus["probeModelId"];
-	probeNotes?: EndpointStatus["probeNotes"];
-	discoveredModels: EndpointStatus["discoveredModels"];
-	discoveredModelsSource?: EndpointStatus["discoveredModelsSource"];
-	discoveredModelStates?: EndpointStatus["discoveredModelStates"];
+	health: TargetStatus["health"];
+	capabilities: TargetStatus["capabilities"];
+	probeCapabilities?: TargetStatus["probeCapabilities"];
+	probeModelId?: TargetStatus["probeModelId"];
+	probeNotes?: TargetStatus["probeNotes"];
+	discoveredModels: TargetStatus["discoveredModels"];
+	discoveredModelsSource?: TargetStatus["discoveredModelsSource"];
+	discoveredModelStates?: TargetStatus["discoveredModelStates"];
 	tier: ProviderOutputTier;
 	detectedReasoning: boolean | null;
 	reasoningCandidateModelId: string | null;
 }
 
 function serializeStatus(
-	status: EndpointStatus,
+	status: TargetStatus,
 	extras: { detectedReasoning: boolean | null; candidateModelId: string | null } = {
 		detectedReasoning: null,
 		candidateModelId: null,
 	},
 ): SerializedStatus {
 	const out: SerializedStatus = {
-		target: status.endpoint,
+		target: status.target,
 		runtime: status.runtime,
 		available: status.available,
 		reason: status.reason,

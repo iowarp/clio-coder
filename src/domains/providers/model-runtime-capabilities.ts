@@ -1,5 +1,5 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { EndpointStatus, ProvidersContract } from "./contract.js";
+import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { resolveModelCapabilities } from "./model-capabilities.js";
 import { inferLocalModelFamily, isHarmonyModelId } from "./model-family.js";
 import { availableThinkingLevels, type CapabilityFlags, type ThinkingLevel } from "./types/capability-flags.js";
@@ -462,19 +462,19 @@ export function resolveModelRuntimeCapabilities(
 }
 
 export function resolveModelRuntimeCapabilitiesForStatus(
-	status: Pick<EndpointStatus, "endpoint" | "runtime" | "capabilities" | "probeCapabilities" | "probeModelId">,
+	status: Pick<TargetStatus, "target" | "runtime" | "capabilities" | "probeCapabilities" | "probeModelId">,
 	wireModelId: string | null | undefined,
 	knowledgeBase: KnowledgeBase | null,
 	options?: { detectedReasoning?: boolean | null; configuredThinkingLevel?: ThinkingLevel },
 ): ResolvedModelRuntimeCapabilities {
-	const modelId = wireModelId?.trim() || status.endpoint.defaultModel?.trim() || "";
+	const modelId = wireModelId?.trim() || status.target.defaultModel?.trim() || "";
 	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
 	const capabilities = resolveModelCapabilities(status, modelId, knowledgeBase, {
 		detectedReasoning: options?.detectedReasoning ?? null,
 	});
 	return resolveModelRuntimeCapabilities({
-		targetId: status.endpoint.id,
-		runtimeId: status.runtime?.id ?? status.endpoint.runtime,
+		targetId: status.target.id,
+		runtimeId: status.runtime?.id ?? status.target.runtime,
 		apiFamily: status.runtime?.apiFamily ?? null,
 		modelId,
 		capabilities,
@@ -485,15 +485,15 @@ export function resolveModelRuntimeCapabilitiesForStatus(
 
 export function resolveModelRuntimeCapabilitiesForProviders(
 	providers: ProvidersContract,
-	endpointId: string | null | undefined,
+	targetId: string | null | undefined,
 	wireModelId: string | null | undefined,
 	configuredThinkingLevel?: ThinkingLevel,
 ): ResolvedModelRuntimeCapabilities | null {
-	const id = endpointId?.trim();
+	const id = targetId?.trim();
 	if (!id) return null;
-	const status = providers.list().find((entry) => entry.endpoint.id === id);
+	const status = providers.list().find((entry) => entry.target.id === id);
 	if (!status) return null;
-	const modelId = wireModelId?.trim() || status.endpoint.defaultModel?.trim() || "";
+	const modelId = wireModelId?.trim() || status.target.defaultModel?.trim() || "";
 	const detectedReasoning =
 		modelId && typeof providers.getDetectedReasoning === "function" ? providers.getDetectedReasoning(id, modelId) : null;
 	return resolveModelRuntimeCapabilitiesForStatus(status, modelId, providers.knowledgeBase, {
@@ -567,8 +567,8 @@ export function coerceThinkingLevelForRuntime(
 	}).thinking.effectiveLevel;
 }
 
-export function resolveEndpointRuntimeCapabilities(
-	endpoint: TargetDescriptor,
+export function resolveTargetRuntimeCapabilities(
+	target: TargetDescriptor,
 	runtime: RuntimeDescriptor,
 	wireModelId: string,
 	capabilities: CapabilityFlags,
@@ -577,7 +577,7 @@ export function resolveEndpointRuntimeCapabilities(
 ): ResolvedModelRuntimeCapabilities {
 	const kbHit = knowledgeBase?.lookup(wireModelId) ?? null;
 	return resolveModelRuntimeCapabilities({
-		targetId: endpoint.id,
+		targetId: target.id,
 		runtimeId: runtime.id,
 		apiFamily: runtime.apiFamily,
 		modelId: wireModelId,

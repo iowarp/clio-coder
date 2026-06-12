@@ -210,17 +210,17 @@ describe("contracts/session-routing", () => {
 		const live = { current: settingsWithTargets() };
 		const providers = {
 			list: () =>
-				live.current.targets.map((endpoint) => ({
-					endpoint,
+				live.current.targets.map((target) => ({
+					target,
 					runtime: null,
 					available: true,
 					reason: "",
 					health: "ok",
 					capabilities: { chat: true, tools: true, reasoning: false },
-					discoveredModels: endpoint.id === "target-a" ? ["model-a"] : ["model-b"],
+					discoveredModels: target.id === "target-a" ? ["model-a"] : ["model-b"],
 				})),
 			getDetectedReasoning: () => null,
-			getEndpoint: (id: string) => live.current.targets.find((entry) => entry.id === id) ?? null,
+			getTarget: (id: string) => live.current.targets.find((entry) => entry.id === id) ?? null,
 		} as unknown as ProvidersContract;
 
 		const items = buildSettingItems(live.current, { providers, getSettings: () => live.current });

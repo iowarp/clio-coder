@@ -65,7 +65,7 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 		const skills = parseStringArray(frontmatter.skills);
 		if (skills) recipe.skills = skills;
 		if (typeof frontmatter.model === "string") recipe.model = frontmatter.model;
-		if (typeof frontmatter.endpoint === "string") recipe.endpoint = frontmatter.endpoint;
+		if (typeof frontmatter.target === "string") recipe.target = frontmatter.target;
 		const thinking = parseThinkingLevel(frontmatter.thinkingLevel);
 		if (thinking) recipe.thinkingLevel = thinking;
 		if (isAgentCategory(frontmatter.category)) recipe.category = frontmatter.category;

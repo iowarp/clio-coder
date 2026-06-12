@@ -230,12 +230,12 @@ export interface CreateChatLoopDeps {
 	 * `settings.orchestrator.target` surfaces a configuration error before
 	 * the agent is constructed.
 	 */
-	knownEndpoints: () => ReadonlySet<string>;
+	knownTargets: () => ReadonlySet<string>;
 	session?: SessionContract;
 	/**
 	 * Prompt compiler. When wired, the session system prompt is compiled once
 	 * per session and written into `state.systemPrompt`; recompiles happen
-	 * only on explicit events (model/endpoint change, safety-level change,
+	 * only on explicit events (model/target change, safety-level change,
 	 * config hot-reload, session switch).
 	 *
 	 * Optional so unit tests can inject stubs and a degraded boot (prompts
@@ -306,7 +306,7 @@ export interface CreateChatLoopDeps {
 }
 
 interface ChatLoopTarget {
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
 	runtimeResolution: ResolvedRuntimeTarget;
@@ -314,13 +314,13 @@ interface ChatLoopTarget {
 
 interface AgentRuntime {
 	agent: ReturnType<typeof createEngineAgent>["agent"];
-	endpointId: string;
+	targetId: string;
 	runtimeId: string;
 	wireModelId: string;
 	runtimeResolution: ResolvedRuntimeTarget;
 }
 
-const LOCAL_API_KEY_FALLBACK = "clio-local-endpoint";
+const LOCAL_API_KEY_FALLBACK = "clio-local-target";
 
 export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
@@ -341,7 +341,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let lastPromptCache: PromptCacheStats | null = null;
 	let lastSystemPromptReused = false;
 	// The session system prompt, compiled once per session. Recompiles happen
-	// only on explicit events: the compile key (endpoint, model, safety level,
+	// only on explicit events: the compile key (target, model, safety level,
 	// session id) changes, or a config hot-reload invalidates the cache. A
 	// recompile that changes the prompt text appends a "promptRecompiled"
 	// ledger entry so a cold provider cache is always explainable.
@@ -420,7 +420,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return captureContextSnapshot({
 			sessionId: agentRuntime.agent.sessionId ?? "unknown",
 			turnId,
-			providerId: agentRuntime.endpointId,
+			providerId: agentRuntime.targetId,
 			runtimeId: agentRuntime.runtimeId,
 			modelId: agentRuntime.wireModelId,
 			systemPrompt: agentRuntime.agent.state.systemPrompt,
@@ -587,8 +587,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!deps.session) return;
 		if (!deps.session.current()) {
 			const settings = deps.getSettings();
-			const input: { cwd: string; endpoint?: string; model?: string } = { cwd: process.cwd() };
-			if (settings.orchestrator.target) input.endpoint = settings.orchestrator.target;
+			const input: { cwd: string; target?: string; model?: string } = { cwd: process.cwd() };
+			if (settings.orchestrator.target) input.target = settings.orchestrator.target;
 			if (settings.orchestrator.model) input.model = settings.orchestrator.model;
 			deps.session.create(input);
 		}
@@ -870,11 +870,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
-		const endpointId = settings.orchestrator.target?.trim();
+		const targetId = settings.orchestrator.target?.trim();
 		const wireModelId = settings.orchestrator.model?.trim();
-		if (!endpointId || !wireModelId) return null;
+		if (!targetId || !wireModelId) return null;
 		const resolved = resolveRuntimeTarget(deps.providers, {
-			endpointId,
+			targetId,
 			wireModelId,
 			requestedThinkingLevel: settings.orchestrator.thinkingLevel ?? "off",
 			use: "orchestrator",
@@ -886,7 +886,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			throw new Error(`[Clio Coder] ${message ?? "orchestrator target resolution failed"}`);
 		}
 		return {
-			endpoint: resolved.target.endpoint,
+			target: resolved.target.target,
 			runtime: resolved.target.runtime,
 			wireModelId: resolved.target.wireModelId,
 			runtimeResolution: resolved.target,
@@ -894,37 +894,37 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * Probe a local-native endpoint once per endpoint+model selection, not on
+	 * Probe a local-native target once per target+model selection, not on
 	 * every submit (T3.1). The probe re-runs when the selection key changes
 	 * (which is also when the runtime is rebuilt or hot-swapped) or after a
-	 * generous TTL. Failures keep the last known endpoint state; the TTL
+	 * generous TTL. Failures keep the last known target state; the TTL
 	 * retries later.
 	 */
-	const ENDPOINT_PROBE_TTL_MS = 5 * 60 * 1000;
-	let lastEndpointProbe: { key: string; at: number } | null = null;
+	const TARGET_PROBE_TTL_MS = 5 * 60 * 1000;
+	let lastTargetProbe: { key: string; at: number } | null = null;
 	const ensureLiveCapabilitiesForSelectedModel = async (): Promise<void> => {
 		const settings = deps.getSettings();
-		const endpointId = settings.orchestrator.target?.trim();
+		const targetId = settings.orchestrator.target?.trim();
 		const wireModelId = settings.orchestrator.model?.trim();
-		if (!endpointId || !wireModelId) return;
-		const endpoint = deps.providers.getEndpoint(endpointId);
-		if (!endpoint) return;
-		const runtimeDesc = deps.providers.getRuntime(endpoint.runtime);
+		if (!targetId || !wireModelId) return;
+		const target = deps.providers.getTarget(targetId);
+		if (!target) return;
+		const runtimeDesc = deps.providers.getRuntime(target.runtime);
 		if (runtimeDesc?.tier !== "local-native") return;
-		const key = `${endpointId}|${wireModelId}`;
+		const key = `${targetId}|${wireModelId}`;
 		const now = Date.now();
-		if (lastEndpointProbe?.key === key && now - lastEndpointProbe.at < ENDPOINT_PROBE_TTL_MS) return;
-		lastEndpointProbe = { key, at: now };
+		if (lastTargetProbe?.key === key && now - lastTargetProbe.at < TARGET_PROBE_TTL_MS) return;
+		lastTargetProbe = { key, at: now };
 		try {
-			await deps.providers.probeEndpoint(endpointId);
+			await deps.providers.probeTarget(targetId);
 		} catch {
-			// Fall back to the last known endpoint state.
+			// Fall back to the last known target state.
 		}
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): Model<never> => {
 		const kbHit = deps.providers.knowledgeBase?.lookup(target.wireModelId) ?? null;
-		const synth = target.runtime.synthesizeModel(target.endpoint, target.wireModelId, kbHit);
+		const synth = target.runtime.synthesizeModel(target.target, target.wireModelId, kbHit);
 		target.runtimeResolution = refineRuntimeTargetWithModelHints(
 			target.runtimeResolution,
 			synth,
@@ -934,18 +934,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return synth as unknown as Model<never>;
 	};
 	const ensureReasoningProbe = (target: ChatLoopTarget): void => {
-		if (deps.providers.getDetectedReasoning(target.endpoint.id, target.wireModelId) !== null) return;
+		if (deps.providers.getDetectedReasoning(target.target.id, target.wireModelId) !== null) return;
 		void deps.providers
-			.probeReasoningForModel(target.endpoint.id, target.wireModelId)
+			.probeReasoningForModel(target.target.id, target.wireModelId)
 			.then((reasoning) => {
 				if (
 					reasoning !== null &&
 					runtime &&
-					runtime.endpointId === target.endpoint.id &&
+					runtime.targetId === target.target.id &&
 					runtime.wireModelId === target.wireModelId
 				) {
 					const refreshed = resolveRuntimeTarget(deps.providers, {
-						endpointId: target.endpoint.id,
+						targetId: target.target.id,
 						wireModelId: target.wireModelId,
 						requestedThinkingLevel: deps.getSettings().orchestrator.thinkingLevel ?? "off",
 						use: "orchestrator",
@@ -991,7 +991,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				parentTurnId: lastTurnId,
 				provider: target.runtime.id,
 				modelId: target.wireModelId,
-				endpoint: target.endpoint.id,
+				target: target.target.id,
 			});
 		} catch {
 			// Persistence failures must not break chat. The marker is a
@@ -1015,18 +1015,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const target = readTarget();
 		if (!target) return null;
 		emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
-		if (!deps.knownEndpoints().has(target.endpoint.id)) {
+		if (!deps.knownTargets().has(target.target.id)) {
 			throw new Error(
-				`[Clio Coder] orchestrator target=${target.endpoint.id} unknown. Run \`clio targets\` to see configured targets.`,
+				`[Clio Coder] orchestrator target=${target.target.id} unknown. Run \`clio targets\` to see configured targets.`,
 			);
 		}
 		if (
 			runtime &&
-			runtime.endpointId === target.endpoint.id &&
+			runtime.targetId === target.target.id &&
 			runtime.runtimeId === target.runtime.id &&
 			runtime.wireModelId === target.wireModelId
 		) {
-			// Same endpoint+runtime+model. Settings may still have moved
+			// Same target+runtime+model. Settings may still have moved
 			// thinkingLevel since the last call (the user invoked /thinking
 			// or Alt+T); reconcile the clamped level so the next prompt
 			// dispatches under the current intent without forcing a rebuild.
@@ -1044,7 +1044,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return runtime;
 		}
 
-		// Same endpoint+runtime, new wireModelId: hot-swap the model in place on
+		// Same target+runtime, new wireModelId: hot-swap the model in place on
 		// the live agent. Mirrors the pi-coding-agent setModel pattern (mutate
 		// `agent.state.model`, re-clamp thinking level, persist) so the runtime
 		// keeps its conversation, subscribers, and pending tool calls. Local
@@ -1052,7 +1052,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// via JIT load and TTL; Clio does not micromanage server-side eviction.
 		if (
 			runtime &&
-			runtime.endpointId === target.endpoint.id &&
+			runtime.targetId === target.target.id &&
 			runtime.runtimeId === target.runtime.id &&
 			runtime.wireModelId !== target.wireModelId
 		) {
@@ -1068,8 +1068,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// keep_alive=0 sweep against any other resident model so the prior
 			// pinned weight releases VRAM. Fire-and-forget so a slow server
 			// never blocks the model swap.
-			if (target.runtime.id === "ollama-native" && target.endpoint.url) {
-				void evictOtherOllamaModels(target.endpoint.url, target.wireModelId, target.endpoint.auth?.headers);
+			if (target.runtime.id === "ollama-native" && target.target.url) {
+				void evictOtherOllamaModels(target.target.url, target.wireModelId, target.target.auth?.headers);
 			}
 			return runtime;
 		}
@@ -1100,23 +1100,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			onPayload: async (payload, currentModel) =>
 				patchReasoningSummaryPayload(payload, currentModel as Model<never>, currentThinkingLevel),
 			getApiKey: async () => {
-				if (!targetRequiresAuth(target.endpoint, target.runtime)) {
+				if (!targetRequiresAuth(target.target, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
 				}
-				const resolved = await deps.providers.auth.resolveForTarget(target.endpoint, target.runtime);
+				const resolved = await deps.providers.auth.resolveForTarget(target.target, target.runtime);
 				return resolved.apiKey;
 			},
 		});
 
 		// Build the runtime object before subscribing so the callback closes
 		// over the same heap object the hot-swap path mutates. Reading
-		// `localRuntime.endpointId` / `localRuntime.wireModelId` at event time
+		// `localRuntime.targetId` / `localRuntime.wireModelId` at event time
 		// instead of the captured `target` guarantees per-turn observability
 		// rows are tagged with whatever model is active right now, not the
 		// model this agent was originally built with.
 		const localRuntime: AgentRuntime = {
 			agent: handle.agent,
-			endpointId: target.endpoint.id,
+			targetId: target.target.id,
 			runtimeId: target.runtime.id,
 			wireModelId: target.wireModelId,
 			runtimeResolution: target.runtimeResolution,
@@ -1187,21 +1187,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (publicEvent?.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(publicEvent.messages);
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
-					deps.observability.recordTokens(
-						localRuntime.endpointId,
-						localRuntime.wireModelId,
-						summary.tokens,
-						summary.costUsd,
-						{
-							input: summary.input,
-							output: summary.output,
-							cacheRead: summary.cacheRead,
-							cacheWrite: summary.cacheWrite,
-							reasoningTokens: summary.reasoning,
-							totalTokens: summary.tokens,
-							apiCalls: summary.apiCalls,
-						},
-					);
+					deps.observability.recordTokens(localRuntime.targetId, localRuntime.wireModelId, summary.tokens, summary.costUsd, {
+						input: summary.input,
+						output: summary.output,
+						cacheRead: summary.cacheRead,
+						cacheWrite: summary.cacheWrite,
+						reasoningTokens: summary.reasoning,
+						totalTokens: summary.tokens,
+						apiCalls: summary.apiCalls,
+					});
 				}
 				if (summary.output > 0 && firstAssistantDeltaAt !== null) {
 					const durationMs = Math.max(1, eventAt - firstAssistantDeltaAt);
@@ -1210,7 +1204,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						outputTokens: summary.output,
 						durationMs,
 						...(streamStartedAt !== null ? { ttftMs: firstAssistantDeltaAt - streamStartedAt } : {}),
-						providerId: localRuntime.endpointId,
+						providerId: localRuntime.targetId,
 						modelId: localRuntime.wireModelId,
 						recordedAt: eventAt,
 					});
@@ -1296,7 +1290,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		runtime = localRuntime;
 		// Append a modelChange marker only when this rebuild replaces a prior
 		// runtime, which is the cross-target swap case (mid-session change of
-		// endpoint or runtime id). On the initial build, the session header's
+		// target or runtime id). On the initial build, the session header's
 		// `meta.model` (written by `session.create()` in submit()) captures
 		// the first model and a marker would be redundant.
 		if (hadPriorRuntime) appendModelChangeEntry(target);
@@ -1444,7 +1438,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/**
 	 * Ensure the session system prompt is compiled and applied to the live
-	 * agent. Compiles only when the compile key (endpoint, model, safety
+	 * agent. Compiles only when the compile key (target, model, safety
 	 * level, session id) changes or a config hot-reload invalidated the
 	 * cache; every other submit reuses the cached prompt byte-for-byte. A
 	 * compile whose text differs from the previous prompt queues a
@@ -1455,7 +1449,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const settings = deps.getSettings();
 		const autonomy = settings.autonomy ?? "auto-edit";
 		const sessionId = deps.session?.current()?.id ?? "";
-		const key = `${agentRuntime.endpointId}|${agentRuntime.wireModelId}|${autonomy}|${sessionId}`;
+		const key = `${agentRuntime.targetId}|${agentRuntime.wireModelId}|${autonomy}|${sessionId}`;
 		if (sessionPrompt && sessionPromptKey === key) {
 			lastSystemPromptReused = true;
 			return sessionPrompt;
@@ -1466,7 +1460,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
 		const sessionInputs: SessionPromptInputs = {
-			provider: agentRuntime.endpointId,
+			provider: agentRuntime.targetId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
 			providerSupportsTools: runtimeSupportsTools(agentRuntime),
@@ -1750,7 +1744,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!deps.session.current()) {
 			deps.session.create({
 				cwd: process.cwd(),
-				endpoint: agentRuntime.endpointId,
+				target: agentRuntime.targetId,
 				model: agentRuntime.wireModelId,
 			});
 		}
@@ -2101,7 +2095,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			const effectiveWindow = runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 
-			const provider = runtime.endpointId ?? settings.orchestrator?.target ?? null;
+			const provider = runtime.targetId ?? settings.orchestrator?.target ?? null;
 			const model = runtime.wireModelId ?? settings.orchestrator?.model ?? null;
 
 			if (!currentContextSnapshot) {

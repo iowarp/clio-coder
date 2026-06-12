@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
-import type { EndpointStatus, ProvidersContract } from "../domains/providers/contract.js";
+import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import {
 	modelCandidatesForStatus,
 	ProvidersDomainModule,
@@ -104,7 +104,7 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 		}
 	}
 	const entries = providers.list();
-	const filtered = parsed.target ? entries.filter((e) => e.endpoint.id === parsed.target) : entries;
+	const filtered = parsed.target ? entries.filter((e) => e.target.id === parsed.target) : entries;
 	const rows = collectRows(filtered, providers).filter((row) => matchesSearch(row, parsed.search));
 
 	if (parsed.json) {
@@ -118,15 +118,15 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 	return 0;
 }
 
-function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: ProvidersContract): ModelRow[] {
+function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersContract): ModelRow[] {
 	const rows: ModelRow[] = [];
 	for (const status of entries) {
-		const runtimeId = status.runtime?.id ?? status.endpoint.runtime;
+		const runtimeId = status.runtime?.id ?? status.target.runtime;
 		const candidates = modelCandidatesForStatus(status);
 		if (candidates.length === 0) {
-			const caps = resolveRowCapabilities(status, status.endpoint.defaultModel ?? null, providers);
+			const caps = resolveRowCapabilities(status, status.target.defaultModel ?? null, providers);
 			rows.push({
-				targetId: status.endpoint.id,
+				targetId: status.target.id,
 				runtimeId,
 				modelId: "(no models)",
 				state: "-",
@@ -138,7 +138,7 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: Provider
 			const modelId = candidate.id;
 			const caps = resolveRowCapabilities(status, modelId, providers);
 			rows.push({
-				targetId: status.endpoint.id,
+				targetId: status.target.id,
 				runtimeId,
 				modelId,
 				state: candidate.loadState ?? "-",
@@ -149,9 +149,9 @@ function collectRows(entries: ReadonlyArray<EndpointStatus>, providers: Provider
 	return rows;
 }
 
-function resolveRowCapabilities(status: EndpointStatus, modelId: string | null, providers: ProvidersContract) {
+function resolveRowCapabilities(status: TargetStatus, modelId: string | null, providers: ProvidersContract) {
 	return resolveModelCapabilities(status, modelId, providers.knowledgeBase, {
-		detectedReasoning: modelId ? providers.getDetectedReasoning(status.endpoint.id, modelId) : null,
+		detectedReasoning: modelId ? providers.getDetectedReasoning(status.target.id, modelId) : null,
 	});
 }
 

@@ -66,7 +66,7 @@ export function catalogThinkingLevelsForRuntime(
 }
 
 export interface CatalogBackedSynthesisInput {
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
@@ -83,17 +83,17 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 		capabilitiesFromCatalogModel(input.defaultCapabilities, builtin),
 		input.kb?.entry.capabilities ?? null,
 		null,
-		input.endpoint.capabilities ?? null,
+		input.target.capabilities ?? null,
 	);
-	const pricing = input.endpoint.pricing;
-	const endpointHeaders = input.endpoint.auth?.headers;
+	const pricing = input.target.pricing;
+	const targetHeaders = input.target.auth?.headers;
 	const model: Model<Api> = {
 		...(builtin ?? {}),
 		id: input.wireModelId,
-		name: `${input.wireModelId} (${input.endpoint.id})`,
+		name: `${input.wireModelId} (${input.target.id})`,
 		api: input.api,
 		provider: input.provider,
-		baseUrl: input.endpoint.url ?? builtin?.baseUrl ?? input.defaultBaseUrl,
+		baseUrl: input.target.url ?? builtin?.baseUrl ?? input.defaultBaseUrl,
 		reasoning: caps.reasoning,
 		input: caps.vision ? (builtin?.input.includes("image") ? builtin.input : ["text", "image"]) : ["text"],
 		cost: {
@@ -105,7 +105,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 	};
-	const headers = { ...(input.defaultHeaders ?? {}), ...(builtin?.headers ?? {}), ...(endpointHeaders ?? {}) };
+	const headers = { ...(input.defaultHeaders ?? {}), ...(builtin?.headers ?? {}), ...(targetHeaders ?? {}) };
 	if (Object.keys(headers).length > 0) {
 		model.headers = headers;
 	}

@@ -122,7 +122,7 @@ export function formatDoctorReport(findings: DoctorFinding[]): string {
 }
 
 /**
- * Asynchronous doctor sweep: walks settings.endpoints and fingerprints any
+ * Asynchronous doctor sweep: walks settings.targets and fingerprints any
  * protocol-compatible URL that responds as a known native server (LM Studio,
  * Ollama). Emits a WARN finding so the user knows to switch to the native
  * runtime for proper resident-model lifecycle management. Network-bound and
@@ -141,16 +141,16 @@ export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
 	);
 	if (candidates.length === 0) return [];
 	const results = await Promise.all(
-		candidates.map(async (endpoint): Promise<DoctorFinding | null> => {
-			const url = endpoint.url;
+		candidates.map(async (target): Promise<DoctorFinding | null> => {
+			const url = target.url;
 			if (!url) return null;
 			const fingerprint = await fingerprintNativeRuntime(url);
 			if (!fingerprint) return null;
 			return {
 				ok: true,
 				level: "warn",
-				name: `target ${endpoint.id}`,
-				detail: `${fingerprint.displayName} detected at ${url}; run \`clio targets convert ${endpoint.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle`,
+				name: `target ${target.id}`,
+				detail: `${fingerprint.displayName} detected at ${url}; run \`clio targets convert ${target.id} --runtime ${fingerprint.runtimeId}\` for proper resident-model lifecycle`,
 			};
 		}),
 	);

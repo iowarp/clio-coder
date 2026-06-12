@@ -11,24 +11,24 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
  * reaches into `extension.ts` or the runtime registry directly.
  */
 
-export interface EndpointHealth {
+export interface TargetHealth {
 	status: "healthy" | "degraded" | "unknown" | "down";
 	lastCheckAt: string | null;
 	lastError: string | null;
 	latencyMs: number | null;
 }
 
-export interface EndpointStatus {
-	endpoint: TargetDescriptor;
+export interface TargetStatus {
+	target: TargetDescriptor;
 	/**
-	 * Null when `endpoint.runtime` does not resolve to a registered descriptor.
-	 * Callers treat null as "unknown runtime"; the endpoint is still listed so
+	 * Null when `target.runtime` does not resolve to a registered descriptor.
+	 * Callers treat null as "unknown runtime"; the target is still listed so
 	 * misconfigurations are visible in the TUI.
 	 */
 	runtime: RuntimeDescriptor | null;
 	available: boolean;
 	reason: string;
-	health: EndpointHealth;
+	health: TargetHealth;
 	/** Merged: defaults + knowledge base + probe + user override. */
 	capabilities: CapabilityFlags;
 	/** Probe-only capabilities preserved separately for per-model synthesis in the UI. */
@@ -52,11 +52,11 @@ export interface EndpointStatus {
 }
 
 export interface ProvidersContract {
-	/** All configured endpoints with readiness + health + capabilities. */
-	list(): ReadonlyArray<EndpointStatus>;
+	/** All configured targets with readiness + health + capabilities. */
+	list(): ReadonlyArray<TargetStatus>;
 
-	/** Resolve an endpoint by id. Null when the id is not in settings.endpoints. */
-	getEndpoint(id: string): TargetDescriptor | null;
+	/** Resolve an target by id. Null when the id is not in settings.targets. */
+	getTarget(id: string): TargetDescriptor | null;
 
 	/**
 	 * Runtime descriptor by id. Null when the runtime is not registered (neither
@@ -70,36 +70,36 @@ export interface ProvidersContract {
 	/** Live liveness + probeModels sweep. */
 	probeAllLive(): Promise<void>;
 
-	/** Probe a single endpoint live. Null when the id is not in settings.endpoints. */
-	probeEndpoint(id: string): Promise<EndpointStatus | null>;
+	/** Probe a single target live. Null when the id is not in settings.targets. */
+	probeTarget(id: string): Promise<TargetStatus | null>;
 
 	/** Clear in-memory live connection state for a configured target. */
-	disconnectEndpoint(id: string): EndpointStatus | null;
+	disconnectTarget(id: string): TargetStatus | null;
 
 	/**
-	 * Cached reasoning detection result for a given (endpoint, wire model id).
+	 * Cached reasoning detection result for a given (target, wire model id).
 	 * Returns true/false when a probe has populated the cache, null otherwise.
 	 * Surfaces local-server reasoning capability that is per loaded model and
 	 * cannot be inferred from runtime defaults alone.
 	 */
-	getDetectedReasoning(endpointId: string, modelId: string): boolean | null;
+	getDetectedReasoning(targetId: string, modelId: string): boolean | null;
 
 	/**
-	 * Probe an endpoint's loaded model for reasoning support. Caches the result
-	 * keyed by `(endpointId, modelId)` and returns it. Null when the runtime
-	 * lacks `probeReasoning`, the endpoint is unknown, or the probe could not
+	 * Probe an target's loaded model for reasoning support. Caches the result
+	 * keyed by `(targetId, modelId)` and returns it. Null when the runtime
+	 * lacks `probeReasoning`, the target is unknown, or the probe could not
 	 * reach the server.
 	 */
-	probeReasoningForModel(endpointId: string, modelId: string): Promise<boolean | null>;
+	probeReasoningForModel(targetId: string, modelId: string): Promise<boolean | null>;
 
 	/**
 	 * Shared auth access for both API keys and OAuth credentials. Provider ids
-	 * default to runtime ids, with endpoint-level overrides through
+	 * default to runtime ids, with target-level overrides through
 	 * `auth.apiKeyRef` / `auth.oauthProfile`.
 	 */
 	auth: {
-		statusForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): AuthStatus;
-		resolveForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): Promise<AuthResolution>;
+		statusForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): AuthStatus;
+		resolveForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): Promise<AuthResolution>;
 		getStored(providerId: string): AuthCredential | null;
 		listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }>;
 		setApiKey(providerId: string, key: string): void;
@@ -109,11 +109,11 @@ export interface ProvidersContract {
 		getOAuthProviders(): ReadonlyArray<{ id: string; name: string }>;
 		/**
 		 * Install a process-lifetime API key override for the provider behind
-		 * `endpoint`. Used by the top-level `--api-key <key>` startup flag so a
+		 * `target`. Used by the top-level `--api-key <key>` startup flag so a
 		 * one-shot run can authenticate without persisting credentials.
 		 */
-		setRuntimeOverrideForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor, key: string): void;
-		clearRuntimeOverrideForTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): void;
+		setRuntimeOverrideForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor, key: string): void;
+		clearRuntimeOverrideForTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): void;
 	};
 
 	/**
@@ -129,7 +129,7 @@ export interface ProvidersContract {
 
 	/**
 	 * Model knowledge base used by chat-loop and overlays to synthesize pi-ai
-	 * `Model<Api>` instances via `RuntimeDescriptor.synthesizeModel(endpoint,
+	 * `Model<Api>` instances via `RuntimeDescriptor.synthesizeModel(target,
 	 * wireModelId, kb)`. Null when the bundled YAMLs are unreadable at boot.
 	 */
 	knowledgeBase: KnowledgeBase | null;

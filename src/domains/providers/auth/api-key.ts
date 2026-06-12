@@ -19,7 +19,7 @@ export function normalizeStoredApiKeyRef(key: string): string | undefined {
 
 export function resolveProviderDynamicSecret(
 	value: string,
-	context: { providerId: string; endpointId?: string; field?: string },
+	context: { providerId: string; targetId?: string; field?: string },
 	options?: ResolveConfigValueOptions,
 ): string | undefined {
 	void context;

@@ -45,11 +45,11 @@ export interface AuthStorageBackend {
 export interface AuthTarget {
 	providerId: string;
 	/**
-	 * Endpoint id scoping runtime overrides. Absent for runtime-only targets
+	 * Target id scoping runtime overrides. Absent for runtime-only targets
 	 * (e.g. the auth-selector list of connectable providers) because those do
-	 * not belong to a specific endpoint.
+	 * not belong to a specific target.
 	 */
-	endpointId?: string;
+	targetId?: string;
 	explicitEnvVar?: string;
 	runtimeAuth: RuntimeAuth;
 }
@@ -170,16 +170,16 @@ function serializeStorageData(data: AuthStorageData): string {
 	});
 }
 
-export function resolveAuthTarget(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): AuthTarget {
-	const providerId = endpoint.auth?.oauthProfile?.trim() || endpoint.auth?.apiKeyRef?.trim() || runtime.id;
-	const target: AuthTarget = {
+export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): AuthTarget {
+	const providerId = target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.id;
+	const authTarget: AuthTarget = {
 		providerId,
-		endpointId: endpoint.id,
+		targetId: target.id,
 		runtimeAuth: runtime.auth,
 	};
-	const explicitEnvVar = endpoint.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
-	if (explicitEnvVar) target.explicitEnvVar = explicitEnvVar;
-	return target;
+	const explicitEnvVar = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
+	if (explicitEnvVar) authTarget.explicitEnvVar = explicitEnvVar;
+	return authTarget;
 }
 
 export function resolveRuntimeAuthTarget(runtime: RuntimeDescriptor): AuthTarget {
@@ -191,10 +191,10 @@ export function resolveRuntimeAuthTarget(runtime: RuntimeDescriptor): AuthTarget
 	return target;
 }
 
-export function targetRequiresAuth(endpoint: TargetDescriptor, runtime: RuntimeDescriptor): boolean {
+export function targetRequiresAuth(target: TargetDescriptor, runtime: RuntimeDescriptor): boolean {
 	if (runtime.auth === "oauth") return true;
 	if (runtime.auth !== "api-key") return false;
-	if (endpoint.auth?.apiKeyEnvVar || endpoint.auth?.apiKeyRef || endpoint.auth?.oauthProfile) return true;
+	if (target.auth?.apiKeyEnvVar || target.auth?.apiKeyRef || target.auth?.oauthProfile) return true;
 	return runtime.tier === "cloud" || Boolean(runtime.credentialsEnvVar);
 }
 
@@ -285,23 +285,23 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Install a process-lifetime API key override scoped to a specific endpoint.
-	 * Overrides are keyed by `endpointId` (not providerId) so two endpoints
+	 * Install a process-lifetime API key override scoped to a specific target.
+	 * Overrides are keyed by `targetId` (not providerId) so two targets
 	 * sharing a runtime do not share the override. `clio --api-key <key>`
-	 * applies only to the active endpoint, not every endpoint on that provider.
+	 * applies only to the active target, not every target on that provider.
 	 */
-	setRuntimeOverride(endpointId: string, apiKey: string): void {
-		if (endpointId.length === 0) {
-			throw new Error("auth.setRuntimeOverride: empty endpointId");
+	setRuntimeOverride(targetId: string, apiKey: string): void {
+		if (targetId.length === 0) {
+			throw new Error("auth.setRuntimeOverride: empty targetId");
 		}
 		const resolved = normalizeStoredApiKeyRef(apiKey);
-		if (!resolved) throw new Error(`auth.setRuntimeOverride: empty key for endpoint=${endpointId}`);
-		this.runtimeOverrides.set(endpointId, resolved);
+		if (!resolved) throw new Error(`auth.setRuntimeOverride: empty key for target=${targetId}`);
+		this.runtimeOverrides.set(targetId, resolved);
 	}
 
-	clearRuntimeOverride(endpointId: string): void {
-		if (endpointId.length === 0) return;
-		this.runtimeOverrides.delete(endpointId);
+	clearRuntimeOverride(targetId: string): void {
+		if (targetId.length === 0) return;
+		this.runtimeOverrides.delete(targetId);
 	}
 
 	setFallbackResolver(resolver: (providerId: string) => string | undefined): void {
@@ -316,9 +316,9 @@ export class AuthStorage {
 
 	status(
 		providerId: string,
-		opts?: { endpointId?: string; explicitEnvVar?: string; includeFallback?: boolean },
+		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean },
 	): AuthStatus {
-		if (opts?.endpointId && this.runtimeOverrides.has(opts.endpointId)) {
+		if (opts?.targetId && this.runtimeOverrides.has(opts.targetId)) {
 			return {
 				providerId,
 				available: true,
@@ -382,10 +382,10 @@ export class AuthStorage {
 	}
 
 	statusForTarget(target: AuthTarget, opts?: { includeFallback?: boolean }): AuthStatus {
-		const args: { endpointId?: string; explicitEnvVar?: string; includeFallback?: boolean } = {};
+		const args: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean } = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
-		if (target.endpointId) args.endpointId = target.endpointId;
+		if (target.targetId) args.targetId = target.targetId;
 		return this.status(target.providerId, args);
 	}
 
@@ -419,10 +419,10 @@ export class AuthStorage {
 
 	async resolveApiKey(
 		providerId: string,
-		opts?: { endpointId?: string; explicitEnvVar?: string; includeFallback?: boolean },
+		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean },
 	): Promise<AuthResolution> {
-		if (opts?.endpointId) {
-			const override = this.runtimeOverrides.get(opts.endpointId);
+		if (opts?.targetId) {
+			const override = this.runtimeOverrides.get(opts.targetId);
 			if (override) {
 				return {
 					providerId,
@@ -541,10 +541,10 @@ export class AuthStorage {
 	}
 
 	resolveForTarget(target: AuthTarget, opts?: { includeFallback?: boolean }): Promise<AuthResolution> {
-		const args: { endpointId?: string; explicitEnvVar?: string; includeFallback?: boolean } = {};
+		const args: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean } = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
-		if (target.endpointId) args.endpointId = target.endpointId;
+		if (target.targetId) args.targetId = target.targetId;
 		return this.resolveApiKey(target.providerId, args);
 	}
 

@@ -71,7 +71,7 @@ function parseOverview(value: unknown, source: string): EvidenceOverview {
 	const tasks = readStringArray(value, source, "tasks");
 	const cwds = readStringArray(value, source, "cwds");
 	const agentIds = readStringArray(value, source, "agentIds");
-	const endpointIds = readStringArray(value, source, "endpointIds");
+	const targetIds = readStringArray(value, source, "targetIds");
 	const runtimeIds = readStringArray(value, source, "runtimeIds");
 	const modelIds = readStringArray(value, source, "modelIds");
 	const totals = readTotals(value.totals, `${source}.totals`);
@@ -90,7 +90,7 @@ function parseOverview(value: unknown, source: string): EvidenceOverview {
 		tasks,
 		cwds,
 		agentIds,
-		endpointIds,
+		targetIds,
 		runtimeIds,
 		modelIds,
 		totals,

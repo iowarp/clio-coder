@@ -42,7 +42,7 @@ export interface WorkerRunInput {
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	agentId: string;
 	task: string;
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
 	modelCapabilities?: Partial<CapabilityFlags>;
@@ -185,9 +185,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	const kb = getKnowledgeBase();
 	const kbHit = kb.lookup(input.wireModelId);
-	const synthesized = input.runtime.synthesizeModel(input.endpoint, input.wireModelId, kbHit);
+	const synthesized = input.runtime.synthesizeModel(input.target, input.wireModelId, kbHit);
 	const model = applyModelCapabilityPatch(
-		input.endpoint.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>),
+		input.target.runtime === "faux" && fauxModel ? fauxModel : (synthesized as unknown as Model<never>),
 		input.modelCapabilities,
 	);
 

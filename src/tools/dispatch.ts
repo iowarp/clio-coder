@@ -66,8 +66,8 @@ function dispatchRequestFromArgs(
 		task,
 	};
 
-	const endpoint = stringArg(args, "target");
-	if (endpoint) request.endpoint = endpoint;
+	const target = stringArg(args, "target");
+	if (target) request.target = target;
 	const model = stringArg(args, "model");
 	if (model) request.model = model;
 	const cwd = stringArg(args, "cwd");
@@ -172,7 +172,7 @@ function receiptDetails(receipt: RunReceipt, receiptPath: string | null, summary
 	return {
 		runId: receipt.runId,
 		agentId: receipt.agentId,
-		endpointId: receipt.endpointId,
+		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
 		runtimeId: receipt.runtimeId,
 		runtimeKind: receipt.runtimeKind,
@@ -240,7 +240,7 @@ function formatDispatchOutput(
 	const note = successNote(receipt);
 	return [
 		`${dispatchRunHeading(receipt)}${note !== null ? ` (${note})` : ""}`,
-		`agent=${receipt.agentId} target=${receipt.endpointId} model=${receipt.wireModelId} runtime=${receipt.runtimeId}`,
+		`agent=${receipt.agentId} target=${receipt.targetId} model=${receipt.wireModelId} runtime=${receipt.runtimeId}`,
 		`exit=${receipt.exitCode} tokens=${receipt.tokenCount}${reasoning} toolCalls=${receipt.toolCalls} receipt=${receiptPath ?? "n/a"}${failure}`,
 		"",
 		"agent output:",
@@ -334,7 +334,7 @@ function formatBatchOutput(
 					? truncateUtf8(summary.lastAssistantText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured)";
 			return [
-				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.endpointId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath}${noteSuffix}${failure}`,
+				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath}${noteSuffix}${failure}`,
 				"  agent output:",
 				...output.split("\n").map((line) => `  ${line}`),
 			];

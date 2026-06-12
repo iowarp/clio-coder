@@ -9,7 +9,7 @@ export interface CompileSessionPromptInput {
 export interface PromptsContract {
 	/**
 	 * Compile the session system prompt. Called once per session (and again
-	 * only on explicit, logged events: model/endpoint change, autonomy-level
+	 * only on explicit, logged events: model/target change, autonomy-level
 	 * change, fragment reload, session switch). Inputs must be constant for
 	 * the session's lifetime.
 	 */

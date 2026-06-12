@@ -32,7 +32,7 @@ export interface ProbeContext {
 }
 
 /**
- * Map of which inference surfaces a probe found at the endpoint.
+ * Map of which inference surfaces a probe found at the target.
  * Composite local descriptors (llamacpp, lemonade) populate this from a
  * batched HEAD/GET sweep; fields are absent when the surface did not respond.
  * Values are the path the probe used so callers can cite it in errors.
@@ -109,21 +109,21 @@ export interface RuntimeDescriptor {
 	 * composite descriptor takes over the user-visible slot.
 	 */
 	hidden?: boolean;
-	probe?(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
-	probeModels?(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]>;
+	probe?(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
+	probeModels?(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]>;
 	/**
 	 * Optional per-model reasoning capability probe. Protocol-compatible local
 	 * servers (LM Studio, llama.cpp, Ollama, ...) advertise an OpenAI or
 	 * Anthropic wire surface regardless of whether the loaded model supports
 	 * thinking. Implementations here send a one-shot priming request and look at
 	 * `reasoning_content` / `reasoning` / `reasoning_text` in the response.
-	 * Result is cached per (endpoint, model) by the providers domain so
+	 * Result is cached per (target, model) by the providers domain so
 	 * /thinking can surface the correct level set.
 	 */
-	probeReasoning?(endpoint: TargetDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult>;
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;
-	complete?(endpoint: TargetDescriptor, opts: CompleteOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
-	infill?(endpoint: TargetDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
-	embed?(endpoint: TargetDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult>;
-	rerank?(endpoint: TargetDescriptor, query: string, documents: string[], ctx: ProbeContext): Promise<RerankResult>;
+	probeReasoning?(target: TargetDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult>;
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;
+	complete?(target: TargetDescriptor, opts: CompleteOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
+	infill?(target: TargetDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
+	embed?(target: TargetDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult>;
+	rerank?(target: TargetDescriptor, query: string, documents: string[], ctx: ProbeContext): Promise<RerankResult>;
 }

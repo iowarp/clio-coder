@@ -28,7 +28,7 @@ export interface DispatchOverlay {
 export interface TurnSummary {
 	elapsedMs: number;
 	modelId: string;
-	endpointId: string;
+	targetId: string;
 	inputTokens: number;
 	outputTokens: number;
 	cacheReadTokens: number;

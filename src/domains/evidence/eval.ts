@@ -80,7 +80,7 @@ function evalOverview(
 		tasks: uniqueStrings(artifact.results.map((result) => result.taskId)),
 		cwds: uniqueStrings(artifact.results.map((result) => result.cwd)),
 		agentIds: ["eval-local"],
-		endpointIds: ["local"],
+		targetIds: ["local"],
 		runtimeIds: ["local"],
 		modelIds: ["none"],
 		totals: {

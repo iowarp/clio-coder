@@ -40,7 +40,7 @@ function completedRow(overrides: Partial<RunEnvelope> & { id: string }): RunEnve
 	return {
 		agentId: "coder",
 		task: "test task",
-		endpointId: "mini",
+		targetId: "mini",
 		wireModelId: "test-model",
 		runtimeId: "openai-completions",
 		runtimeKind: "http",

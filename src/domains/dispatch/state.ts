@@ -261,7 +261,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				...(input.agentAudience !== undefined ? { agentAudience: input.agentAudience } : {}),
 				...(input.requestOrigin !== undefined ? { requestOrigin: input.requestOrigin } : {}),
 				task: input.task,
-				endpointId: input.endpointId,
+				targetId: input.targetId,
 				wireModelId: input.wireModelId,
 				runtimeId: input.runtimeId,
 				runtimeKind: input.runtimeKind,

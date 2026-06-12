@@ -169,7 +169,7 @@ function buildOverview(
 		tasks: uniqueStrings(envelopes.map((envelope) => truncateText(envelope.task, MAX_TASK_CHARS))),
 		cwds: uniqueStrings(envelopes.map((envelope) => envelope.cwd)),
 		agentIds: uniqueStrings(envelopes.map((envelope) => envelope.agentId)),
-		endpointIds: uniqueStrings(envelopes.map((envelope) => envelope.endpointId)),
+		targetIds: uniqueStrings(envelopes.map((envelope) => envelope.targetId)),
 		runtimeIds: uniqueStrings(envelopes.map((envelope) => envelope.runtimeId)),
 		modelIds: uniqueStrings(envelopes.map((envelope) => envelope.wireModelId)),
 		totals: {
@@ -367,7 +367,7 @@ function cleanedTraceRows(
 			wallTimeMs: durationMs(envelope.startedAt, envelope.endedAt),
 			cwd: envelope.cwd,
 			agentId: envelope.agentId,
-			endpointId: envelope.endpointId,
+			targetId: envelope.targetId,
 			runtimeId: envelope.runtimeId,
 			wireModelId: envelope.wireModelId,
 			tokenCount: source.receipt?.tokenCount ?? envelope.tokenCount,
@@ -1029,7 +1029,7 @@ function renderTranscript(
 		const envelope = source.envelope;
 		const exitCode = source.receipt?.exitCode ?? envelope.exitCode;
 		lines.push(
-			`- ${envelope.id} status=${envelope.status} exit=${exitCode ?? "?"} agent=${envelope.agentId} target=${envelope.endpointId}`,
+			`- ${envelope.id} status=${envelope.status} exit=${exitCode ?? "?"} agent=${envelope.agentId} target=${envelope.targetId}`,
 		);
 		lines.push(`  task: ${truncateText(envelope.task, MAX_TASK_CHARS)}`);
 	}
@@ -1175,7 +1175,7 @@ function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 		id: readString(value, source, "id"),
 		agentId: readString(value, source, "agentId"),
 		task: readString(value, source, "task"),
-		endpointId: readString(value, source, "endpointId"),
+		targetId: readString(value, source, "targetId"),
 		wireModelId: readString(value, source, "wireModelId"),
 		runtimeId: readString(value, source, "runtimeId"),
 		runtimeKind: readRunKind(value, source, "runtimeKind"),
@@ -1209,7 +1209,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		runId: readString(value, source, "runId"),
 		agentId: readString(value, source, "agentId"),
 		task: readString(value, source, "task"),
-		endpointId: readString(value, source, "endpointId"),
+		targetId: readString(value, source, "targetId"),
 		wireModelId: readString(value, source, "wireModelId"),
 		runtimeId: readString(value, source, "runtimeId"),
 		runtimeKind: readRunKind(value, source, "runtimeKind"),

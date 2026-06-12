@@ -34,7 +34,7 @@ export function resolveCliProviderReference(input: string): ResolvedProviderRefe
 	if (!oauthProvider) return null;
 	return {
 		input,
-		endpoint: null,
+		target: null,
 		runtime: {
 			id: oauthProvider.id,
 			displayName: oauthProvider.name,
@@ -65,7 +65,7 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 			return {
 				entry,
 				status,
-				targetCount: settings.targets.filter((endpoint) => endpoint.runtime === entry.runtimeId).length,
+				targetCount: settings.targets.filter((target) => target.runtime === entry.runtimeId).length,
 			};
 		});
 }

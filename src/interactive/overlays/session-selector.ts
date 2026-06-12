@@ -56,11 +56,11 @@ export function formatRelativeTime(iso: string | null | undefined, now: number =
 }
 
 function shortTarget(meta: SessionMeta): string {
-	const endpoint = meta.endpoint?.trim();
+	const target = meta.target?.trim();
 	const model = meta.model?.trim();
-	if (!endpoint && !model) return "no target";
-	if (endpoint && model) return `${endpoint}/${model}`;
-	return endpoint ?? model ?? "no target";
+	if (!target && !model) return "no target";
+	if (target && model) return `${target}/${model}`;
+	return target ?? model ?? "no target";
 }
 
 function previewLine(meta: SessionMeta): string {
@@ -82,7 +82,7 @@ function metaStrip(meta: SessionMeta, now: number): string {
 
 /**
  * Pure builder used by the /resume overlay. Each row carries a meta strip
- * (status, last-activity, msg count, endpoint/model) in the primary column
+ * (status, last-activity, msg count, target/model) in the primary column
  * and the first user-message preview in the description column.
  */
 export function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SelectItem[] {

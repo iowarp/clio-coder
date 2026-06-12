@@ -80,7 +80,7 @@ describe("contracts/settings center", () => {
 			items.map((item) => item.id),
 			expectedIds,
 		);
-		for (const deleted of ["workers.profiles", "endpoints.count", "keybindings"]) {
+		for (const deleted of ["workers.profiles", "targets.count", "keybindings"]) {
 			ok(!items.some((item) => item.id === deleted), `${deleted} must not render`);
 		}
 
@@ -214,7 +214,7 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("How freely Clio acts"));
 		ok(rendered.includes("cycles: read-only, suggest, auto-edit, full-auto"));
 		ok(!rendered.includes("workers.profiles"));
-		ok(!rendered.includes("endpoints.count"));
+		ok(!rendered.includes("targets.count"));
 		ok(!rendered.includes("keybindings"));
 	});
 

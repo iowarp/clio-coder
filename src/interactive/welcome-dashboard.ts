@@ -6,10 +6,10 @@ import { readCodewiki } from "../domains/context/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	type CapabilityFlags,
-	type EndpointStatus,
 	type ProvidersContract,
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
+	type TargetStatus,
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
@@ -53,17 +53,17 @@ export interface WelcomeDashboardStats {
 	handoffFreshness: string;
 }
 
-function activeStatus(status: EndpointStatus): boolean {
+function activeStatus(status: TargetStatus): boolean {
 	return status.available && status.health.status !== "down";
 }
 
 function findCurrentStatus(
-	statuses: ReadonlyArray<EndpointStatus>,
+	statuses: ReadonlyArray<TargetStatus>,
 	settings: Readonly<ClioSettings> | undefined,
-): EndpointStatus | null {
-	const endpointId = settings?.orchestrator?.target ?? null;
-	if (!endpointId) return null;
-	return statuses.find((status) => status.endpoint.id === endpointId) ?? null;
+): TargetStatus | null {
+	const targetId = settings?.orchestrator?.target ?? null;
+	if (!targetId) return null;
+	return statuses.find((status) => status.target.id === targetId) ?? null;
 }
 
 function capabilityLabels(caps: CapabilityFlags | null): string[] {
@@ -84,20 +84,20 @@ function _contextCapability(labels: ReadonlyArray<string>): string {
 }
 
 function selectedModelCapabilities(
-	status: EndpointStatus | null,
+	status: TargetStatus | null,
 	settings: Readonly<ClioSettings> | undefined,
 	providers: ProvidersContract,
 ): CapabilityFlags | null {
 	if (!status) return null;
-	const wireModelId = settings?.orchestrator?.model ?? status.endpoint.defaultModel ?? null;
+	const wireModelId = settings?.orchestrator?.model ?? status.target.defaultModel ?? null;
 	const detectedReasoning =
 		wireModelId && typeof providers.getDetectedReasoning === "function"
-			? providers.getDetectedReasoning(status.endpoint.id, wireModelId)
+			? providers.getDetectedReasoning(status.target.id, wireModelId)
 			: null;
 	return resolveModelCapabilities(status, wireModelId, providers.knowledgeBase, { detectedReasoning });
 }
 
-function healthReadout(status: EndpointStatus | null): string | null {
+function healthReadout(status: TargetStatus | null): string | null {
 	if (!status || status.health.status === "unknown") return null;
 	const latency =
 		typeof status.health.latencyMs === "number" && Number.isFinite(status.health.latencyMs)
@@ -128,8 +128,8 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
 	const current = findCurrentStatus(statuses, settings);
-	const targetLabel = current?.endpoint.id ?? settings?.orchestrator?.target ?? "not configured";
-	const modelLabel = settings?.orchestrator?.model ?? current?.endpoint.defaultModel ?? "not configured";
+	const targetLabel = current?.target.id ?? settings?.orchestrator?.target ?? "not configured";
+	const modelLabel = settings?.orchestrator?.model ?? current?.target.defaultModel ?? "not configured";
 	const workspace = deps.getWorkspaceSnapshot?.() ?? null;
 	const cwd = workspace?.cwd ?? process.cwd();
 	const currentAvailable = current ? activeStatus(current) : false;

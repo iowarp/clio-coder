@@ -9,7 +9,7 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
-import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
+import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -42,7 +42,7 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 }
 
 function providers(tier?: "local-native"): ProvidersContract {
-	const endpoint: TargetDescriptor = {
+	const target: TargetDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
 		defaultModel: "model",
@@ -69,8 +69,8 @@ function providers(tier?: "local-native"): ProvidersContract {
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			}) as never,
 	};
-	const status: EndpointStatus = {
-		endpoint,
+	const status: TargetStatus = {
+		target,
 		runtime,
 		available: true,
 		reason: "test",
@@ -80,10 +80,10 @@ function providers(tier?: "local-native"): ProvidersContract {
 	};
 	return {
 		list: () => [status],
-		getEndpoint: (id: string) => (id === endpoint.id ? endpoint : null),
+		getTarget: (id: string) => (id === target.id ? target : null),
 		getRuntime: (id: string) => (id === runtime.id ? runtime : null),
 		getDetectedReasoning: () => null,
-		probeEndpoint: async () => status,
+		probeTarget: async () => status,
 		probeReasoningForModel: async () => null,
 		knowledgeBase: null,
 		auth: {
@@ -105,7 +105,7 @@ function createSession(entries: SessionEntry[] = []): SessionContract {
 				createdAt: new Date().toISOString(),
 				cwd: input?.cwd ?? process.cwd(),
 				model: input?.model ?? "model",
-				endpoint: input?.endpoint ?? "test-target",
+				target: input?.target ?? "test-target",
 			} as SessionMeta;
 			return current;
 		},
@@ -236,7 +236,7 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		const loop = createChatLoop({
 			getSettings: () => settings({ threshold: 0.5 }),
 			providers: providers(),
-			knownEndpoints: () => new Set(["test-target"]),
+			knownTargets: () => new Set(["test-target"]),
 			session: createSession(entries),
 			readSessionEntries: () => entries,
 			autoCompact: async (_instructions: string | undefined, trigger: string | undefined): Promise<CompactResult> => {
@@ -295,7 +295,7 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		const loop = createChatLoop({
 			getSettings: () => settings(),
 			providers: providers(),
-			knownEndpoints: () => new Set(["test-target"]),
+			knownTargets: () => new Set(["test-target"]),
 			session: createSession(entries),
 			readSessionEntries: () => entries,
 			createAgent: createFakeAgentFactory(async (agent) => {
@@ -348,7 +348,7 @@ describe("contracts/chat-loop per-turn telemetry", () => {
 		const loop = createChatLoop({
 			getSettings: () => settings(),
 			providers: providers("local-native"),
-			knownEndpoints: () => new Set(["test-target"]),
+			knownTargets: () => new Set(["test-target"]),
 			session: createSession(entries),
 			readSessionEntries: () => entries,
 			bus,
@@ -463,7 +463,7 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 			const loop = createChatLoop({
 				getSettings: () => settings(),
 				providers: providers(),
-				knownEndpoints: () => new Set(["test-target"]),
+				knownTargets: () => new Set(["test-target"]),
 				session: createSession(entries),
 				readSessionEntries: () => entries,
 				toolRegistry: registry,

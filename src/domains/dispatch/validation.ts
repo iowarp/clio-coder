@@ -16,7 +16,7 @@ export interface JobSpec {
 	workerProfile?: string;
 	workerRuntime?: string;
 	delegationAgentId?: string;
-	endpoint?: string;
+	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
 	requiredCapabilities?: ReadonlyArray<string>;
@@ -43,7 +43,7 @@ const KNOWN_KEYS = new Set([
 	"workerProfile",
 	"workerRuntime",
 	"delegationAgentId",
-	"endpoint",
+	"target",
 	"model",
 	"thinkingLevel",
 	"requiredCapabilities",
@@ -86,9 +86,9 @@ export function validateJobSpec(spec: unknown): Validated {
 		errors.push("task must be a non-empty string");
 	}
 
-	if ("endpoint" in spec && spec.endpoint !== undefined) {
-		if (typeof spec.endpoint !== "string" || spec.endpoint.length === 0) {
-			errors.push("endpoint must be a non-empty string");
+	if ("target" in spec && spec.target !== undefined) {
+		if (typeof spec.target !== "string" || spec.target.length === 0) {
+			errors.push("target must be a non-empty string");
 		}
 	}
 
@@ -187,7 +187,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.workerProfile === "string") out.workerProfile = spec.workerProfile;
 	if (typeof spec.workerRuntime === "string") out.workerRuntime = spec.workerRuntime;
 	if (typeof spec.delegationAgentId === "string") out.delegationAgentId = spec.delegationAgentId;
-	if (typeof spec.endpoint === "string") out.endpoint = spec.endpoint;
+	if (typeof spec.target === "string") out.target = spec.target;
 	if (typeof spec.model === "string") out.model = spec.model;
 	if (typeof spec.thinkingLevel === "string") out.thinkingLevel = spec.thinkingLevel as JobThinkingLevel;
 	if (Array.isArray(spec.requiredCapabilities)) {

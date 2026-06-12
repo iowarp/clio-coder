@@ -9,7 +9,7 @@ import { extractLocalModelQuirks } from "../../types/local-model-quirks.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { lmStudioQuietLogger } from "../common/lmstudio-logger.js";
-import { type ClioLocalModelMetadata, endpointLifecycle, stripTrailingSlash } from "../common/local-synth.js";
+import { type ClioLocalModelMetadata, stripTrailingSlash, targetLifecycle } from "../common/local-synth.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	...EMPTY_CAPABILITIES,
@@ -38,14 +38,14 @@ function toHttpUrl(url: string): string {
 	return `http://${trimmed}`;
 }
 
-function buildClient(endpoint: TargetDescriptor, ctx: ProbeContext): LMStudioClient | { error: string } {
-	if (!endpoint.url) return { error: "endpoint has no url" };
+function buildClient(target: TargetDescriptor, ctx: ProbeContext): LMStudioClient | { error: string } {
+	if (!target.url) return { error: "target has no url" };
 	try {
 		const opts: ConstructorParameters<typeof LMStudioClient>[0] = {
-			baseUrl: toWebSocketUrl(endpoint.url),
+			baseUrl: toWebSocketUrl(target.url),
 			logger: lmStudioQuietLogger,
 		};
-		const auth = endpoint.auth;
+		const auth = target.auth;
 		const envName = auth?.apiKeyEnvVar;
 		if (envName && ctx.credentialsPresent.has(envName)) {
 			const value = process.env[envName];
@@ -208,9 +208,9 @@ function summaryFromV0(entry: LmStudioV0ModelEntry): LmStudioModelSummary | null
 
 function selectCapabilityEntry(
 	entries: ReadonlyArray<LmStudioModelSummary>,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 ): LmStudioModelSummary | null {
-	const configured = endpoint.defaultModel?.trim();
+	const configured = target.defaultModel?.trim();
 	if (configured) {
 		return entries.find((entry) => entry.id === configured) ?? null;
 	}
@@ -245,9 +245,9 @@ function modelCapabilitiesFromSummaries(
 	return out;
 }
 
-function modelsProbeHeaders(endpoint: TargetDescriptor, ctx: ProbeContext): Record<string, string> | undefined {
-	const headers: Record<string, string> = { ...(endpoint.auth?.headers ?? {}) };
-	const envName = endpoint.auth?.apiKeyEnvVar;
+function modelsProbeHeaders(target: TargetDescriptor, ctx: ProbeContext): Record<string, string> | undefined {
+	const headers: Record<string, string> = { ...(target.auth?.headers ?? {}) };
+	const envName = target.auth?.apiKeyEnvVar;
 	if (envName && ctx.credentialsPresent.has(envName)) {
 		const key = process.env[envName]?.trim();
 		if (key) headers.authorization = `Bearer ${key}`;
@@ -255,22 +255,22 @@ function modelsProbeHeaders(endpoint: TargetDescriptor, ctx: ProbeContext): Reco
 	return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
-async function probeApiModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-	if (!endpoint.url) return { ok: false, error: "endpoint has no url" };
-	const headers = modelsProbeHeaders(endpoint, ctx);
-	const v1 = await probeApiV1Models(endpoint, ctx, headers);
+async function probeApiModels(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+	if (!target.url) return { ok: false, error: "target has no url" };
+	const headers = modelsProbeHeaders(target, ctx);
+	const v1 = await probeApiV1Models(target, ctx, headers);
 	if (v1.ok) return v1;
-	const v0 = await probeApiV0Models(endpoint, ctx, headers);
+	const v0 = await probeApiV0Models(target, ctx, headers);
 	return v0.ok ? v0 : v1;
 }
 
 async function probeApiV1Models(
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	ctx: ProbeContext,
 	headers: Record<string, string> | undefined,
 ): Promise<ProbeResult> {
 	const opts: { url: string; timeoutMs: number; headers?: Record<string, string> } = {
-		url: `${toHttpUrl(endpoint.url ?? "")}/api/v1/models`,
+		url: `${toHttpUrl(target.url ?? "")}/api/v1/models`,
 		timeoutMs: ctx.httpTimeoutMs,
 	};
 	if (headers) opts.headers = headers;
@@ -281,16 +281,16 @@ async function probeApiV1Models(
 	const entries = v1ModelEntries(result.data)
 		.map(summaryFromV1)
 		.filter((entry): entry is LmStudioModelSummary => entry !== null);
-	return probeResultFromSummaries(entries, endpoint, result.latencyMs);
+	return probeResultFromSummaries(entries, target, result.latencyMs);
 }
 
 async function probeApiV0Models(
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	ctx: ProbeContext,
 	headers: Record<string, string> | undefined,
 ): Promise<ProbeResult> {
 	const opts: { url: string; timeoutMs: number; headers?: Record<string, string> } = {
-		url: `${toHttpUrl(endpoint.url ?? "")}/api/v0/models`,
+		url: `${toHttpUrl(target.url ?? "")}/api/v0/models`,
 		timeoutMs: ctx.httpTimeoutMs,
 	};
 	if (headers) opts.headers = headers;
@@ -301,16 +301,16 @@ async function probeApiV0Models(
 	const entries = v0ModelEntries(result.data)
 		.map(summaryFromV0)
 		.filter((entry): entry is LmStudioModelSummary => entry !== null);
-	return probeResultFromSummaries(entries, endpoint, result.latencyMs);
+	return probeResultFromSummaries(entries, target, result.latencyMs);
 }
 
 function probeResultFromSummaries(
 	entries: ReadonlyArray<LmStudioModelSummary>,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	latencyMs: number | undefined,
 ): ProbeResult {
 	const models = entries.map((entry) => entry.id);
-	const capabilityEntry = selectCapabilityEntry(entries, endpoint);
+	const capabilityEntry = selectCapabilityEntry(entries, target);
 	const discoveredCapabilities = capabilitiesFromModelEntry(capabilityEntry);
 	const modelCapabilities = modelCapabilitiesFromSummaries(entries);
 	const out: ProbeResult = { ok: true, models };
@@ -331,15 +331,15 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 	apiFamily: "lmstudio-native",
 	auth: "api-key",
 	defaultCapabilities,
-	async probe(endpoint, ctx): Promise<ProbeResult> {
-		const built = buildClient(endpoint, ctx);
+	async probe(target, ctx): Promise<ProbeResult> {
+		const built = buildClient(target, ctx);
 		if ("error" in built) return { ok: false, error: built.error };
 		const client = built;
 		const started = Date.now();
 		try {
 			const [version, apiModels] = await Promise.all([
 				withTimeout(client.system.getLMStudioVersion(), ctx.httpTimeoutMs, ctx.signal),
-				probeApiModels(endpoint, ctx),
+				probeApiModels(target, ctx),
 			]);
 			const latencyMs = Date.now() - started;
 			const result: ProbeResult = { ok: true, latencyMs, serverVersion: version.version };
@@ -358,8 +358,8 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			};
 		}
 	},
-	async probeModels(endpoint, ctx): Promise<string[]> {
-		const built = buildClient(endpoint, ctx);
+	async probeModels(target, ctx): Promise<string[]> {
+		const built = buildClient(target, ctx);
 		if ("error" in built) return [];
 		const client = built;
 		try {
@@ -375,19 +375,19 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			return [];
 		}
 	},
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		const caps = mergeCapabilities(
 			defaultCapabilities,
 			kb?.entry.capabilities ?? null,
 			null,
-			endpoint.capabilities ?? null,
+			target.capabilities ?? null,
 		);
-		const baseUrl = endpoint.url ? toWebSocketUrl(endpoint.url) : "";
-		const pricing = endpoint.pricing;
+		const baseUrl = target.url ? toWebSocketUrl(target.url) : "";
+		const pricing = target.pricing;
 		const quirks = extractLocalModelQuirks(kb?.entry.quirks);
 		const model: Model<Api> & ClioLocalModelMetadata = {
 			id: wireModelId,
-			name: `${wireModelId} (${endpoint.id})`,
+			name: `${wireModelId} (${target.id})`,
 			api: "lmstudio-native",
 			provider: "lmstudio",
 			baseUrl,
@@ -402,15 +402,15 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			contextWindow: caps.contextWindow,
 			maxTokens: caps.maxTokens,
 			clio: {
-				targetId: endpoint.id,
-				runtimeId: endpoint.runtime,
-				lifecycle: endpointLifecycle(endpoint),
-				...(endpoint.gateway === true ? { gateway: true } : {}),
+				targetId: target.id,
+				runtimeId: target.runtime,
+				lifecycle: targetLifecycle(target),
+				...(target.gateway === true ? { gateway: true } : {}),
 				...(kb?.entry.family ? { family: kb.entry.family } : {}),
 				...(quirks ? { quirks } : {}),
 			},
 		};
-		const headers = endpoint.auth?.headers;
+		const headers = target.auth?.headers;
 		if (headers) model.headers = headers;
 		return model;
 	},

@@ -493,8 +493,8 @@ function renderReminderMessageEntry(entry: CustomEntry, width: number): string[]
 }
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
-	const endpoint = entry.endpoint ? `${entry.endpoint}/` : "";
-	return wrapTextWithAnsi(`[model] ${endpoint}${entry.provider}/${entry.modelId}`, width);
+	const target = entry.target ? `${entry.target}/` : "";
+	return wrapTextWithAnsi(`[model] ${target}${entry.provider}/${entry.modelId}`, width);
 }
 
 function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: number): string[] {

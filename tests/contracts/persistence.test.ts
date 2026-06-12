@@ -61,7 +61,7 @@ describe("contracts/persistence", () => {
 		const env = ledger.create({
 			agentId: "coder",
 			task: "persistence task",
-			endpointId: "anthropic-default",
+			targetId: "anthropic-default",
 			wireModelId: "claude-sonnet-4-6",
 			runtimeId: "anthropic",
 			runtimeKind: "http" as const,
@@ -93,7 +93,7 @@ describe("contracts/persistence", () => {
 			runId: env.id,
 			agentId: "coder",
 			task: "persistence task",
-			endpointId: "anthropic-default",
+			targetId: "anthropic-default",
 			wireModelId: "claude-sonnet-4-6",
 			runtimeId: "anthropic",
 			runtimeKind: "http" as const,

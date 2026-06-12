@@ -314,9 +314,9 @@ export function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppS
 
 function selectedModelEntry(
 	entries: ReadonlyArray<{ id: string; status?: unknown }>,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 ): { id: string; status?: unknown } | null {
-	const expected = endpoint.defaultModel?.trim();
+	const expected = target.defaultModel?.trim();
 	if (expected) return entries.find((entry) => entry.id === expected) ?? null;
 	return entries[0] ?? null;
 }
@@ -332,11 +332,11 @@ function statusNotes(id: string, status: unknown): string[] {
 
 export async function probeLlamaCppModelStatus(
 	base: string,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	ctx: ProbeContext,
 ): Promise<LlamaCppStatusEnrichment> {
 	const entries = await probeOpenAIModelEntries(base, ctx);
-	const selected = selectedModelEntry(entries, endpoint);
+	const selected = selectedModelEntry(entries, target);
 	if (!selected) return {};
 	const args = argsFromStatus(selected.status);
 	if (args.length === 0) return { notes: statusNotes(selected.id, selected.status) };
@@ -363,10 +363,10 @@ export async function probeLlamaCppModelStatus(
  */
 export async function detectModelMismatch(
 	base: string,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	ctx: ProbeContext,
 ): Promise<string | null> {
-	const expected = endpoint.defaultModel?.trim();
+	const expected = target.defaultModel?.trim();
 	if (!expected) return null;
 	const ids = await probeOpenAIModels(base, ctx);
 	if (ids.length === 0) return null;

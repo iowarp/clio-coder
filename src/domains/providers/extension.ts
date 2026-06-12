@@ -8,7 +8,7 @@ import type { ConfigContract } from "../config/contract.js";
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
 import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
-import type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
+import type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
 import { resolveProvidersModelsDir } from "./knowledge-base-path.js";
 import { loadPluginRuntimes } from "./plugins.js";
@@ -47,37 +47,37 @@ function loadKnowledgeBase(): KnowledgeBase {
 	}
 }
 
-function emptyHealth(): EndpointHealth {
+function emptyHealth(): TargetHealth {
 	return { status: "unknown", lastCheckAt: null, lastError: null, latencyMs: null };
 }
 
 function availabilityFor(
 	desc: RuntimeDescriptor,
-	endpoint: TargetDescriptor,
-	authStatusFor: (endpoint: TargetDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
+	target: TargetDescriptor,
+	authStatusFor: (target: TargetDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
 ): { available: boolean; reason: string } {
 	if (desc.auth === "api-key" || desc.auth === "oauth") {
-		return authStatusFor(endpoint, desc);
+		return authStatusFor(target, desc);
 	}
 	return { available: true, reason: desc.auth };
 }
 
 function capabilitiesFor(
 	desc: RuntimeDescriptor,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	probe: ProbeResult | null,
 	kb: KnowledgeBase,
 ): CapabilityFlags {
-	const kbHit = endpoint.defaultModel ? kb.lookup(endpoint.defaultModel) : null;
+	const kbHit = target.defaultModel ? kb.lookup(target.defaultModel) : null;
 	const base = capabilitiesFromCatalogModel(
 		desc.defaultCapabilities,
-		endpoint.defaultModel ? getCatalogModelForRuntime(desc.id, endpoint.defaultModel) : undefined,
+		target.defaultModel ? getCatalogModelForRuntime(desc.id, target.defaultModel) : undefined,
 	);
 	const probeCaps =
-		!probe?.capabilityModelId || !endpoint.defaultModel || probe.capabilityModelId === endpoint.defaultModel
+		!probe?.capabilityModelId || !target.defaultModel || probe.capabilityModelId === target.defaultModel
 			? (probe?.discoveredCapabilities ?? null)
 			: null;
-	return mergeCapabilities(base, kbHit?.entry.capabilities ?? null, probeCaps, endpoint.capabilities ?? null);
+	return mergeCapabilities(base, kbHit?.entry.capabilities ?? null, probeCaps, target.capabilities ?? null);
 }
 
 function uniqueModels(ids: ReadonlyArray<string>): string[] {
@@ -95,7 +95,7 @@ function uniqueModels(ids: ReadonlyArray<string>): string[] {
 function discoveredModelsSource(
 	probe: ProbeResult | null,
 	preservePreviousProbe: boolean,
-	previous: EndpointStatus | undefined,
+	previous: TargetStatus | undefined,
 	desc: RuntimeDescriptor,
 ): "probe" | "cache" | "runtime" | "none" {
 	if (probe?.models !== undefined) return "probe";
@@ -117,12 +117,12 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
 	const kb = loadKnowledgeBase();
-	const statuses = new Map<string, EndpointStatus>();
+	const statuses = new Map<string, TargetStatus>();
 	const reasoningCache = new Map<string, boolean>();
 	const unsubscribeConfigListeners: Array<() => void> = [];
 
-	function reasoningCacheKey(endpointId: string, modelId: string): string {
-		return `${endpointId}:${modelId}`;
+	function reasoningCacheKey(targetId: string, modelId: string): string {
+		return `${targetId}:${modelId}`;
 	}
 
 	function readConfig(): ClioSettings {
@@ -131,44 +131,41 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return readSettings();
 	}
 
-	function authStatusFor(
-		endpoint: TargetDescriptor,
-		runtime: RuntimeDescriptor,
-	): { available: boolean; reason: string } {
-		const target = resolveAuthTarget(endpoint, runtime);
-		if (!targetRequiresAuth(endpoint, runtime)) {
+	function authStatusFor(target: TargetDescriptor, runtime: RuntimeDescriptor): { available: boolean; reason: string } {
+		const authTarget = resolveAuthTarget(target, runtime);
+		if (!targetRequiresAuth(target, runtime)) {
 			return { available: true, reason: "auth:not-required" };
 		}
-		const status = authStore.statusForTarget(target, { includeFallback: false });
+		const status = authStore.statusForTarget(authTarget, { includeFallback: false });
 		if (status.available) {
 			switch (status.source) {
 				case "runtime-override":
-					return { available: true, reason: `override:${target.providerId}` };
+					return { available: true, reason: `override:${authTarget.providerId}` };
 				case "stored-api-key":
-					return { available: true, reason: `store:api_key:${target.providerId}` };
+					return { available: true, reason: `store:api_key:${authTarget.providerId}` };
 				case "stored-oauth":
-					return { available: true, reason: `store:oauth:${target.providerId}` };
+					return { available: true, reason: `store:oauth:${authTarget.providerId}` };
 				case "environment":
-					return { available: true, reason: status.detail ? `env:${status.detail}` : `env:${target.providerId}` };
+					return { available: true, reason: status.detail ? `env:${status.detail}` : `env:${authTarget.providerId}` };
 				case "fallback":
-					return { available: true, reason: `fallback:${target.providerId}` };
+					return { available: true, reason: `fallback:${authTarget.providerId}` };
 				default:
-					return { available: true, reason: target.providerId };
+					return { available: true, reason: authTarget.providerId };
 			}
 		}
-		const envHint = target.explicitEnvVar ? `${target.explicitEnvVar} or ` : "";
-		return { available: false, reason: `missing auth (${envHint}store:${target.providerId})` };
+		const envHint = authTarget.explicitEnvVar ? `${authTarget.explicitEnvVar} or ` : "";
+		return { available: false, reason: `missing auth (${envHint}store:${authTarget.providerId})` };
 	}
 
 	function buildStatus(
-		endpoint: TargetDescriptor,
+		target: TargetDescriptor,
 		desc: RuntimeDescriptor | null,
 		probe: ProbeResult | null,
-		previous?: EndpointStatus,
-	): EndpointStatus {
+		previous?: TargetStatus,
+	): TargetStatus {
 		if (!desc) {
-			const out: EndpointStatus = {
-				endpoint,
+			const out: TargetStatus = {
+				target,
 				runtime: null,
 				available: false,
 				reason: "unknown runtime",
@@ -184,10 +181,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			if (previous?.probeNotes && previous.probeNotes.length > 0) out.probeNotes = previous.probeNotes;
 			return out;
 		}
-		const availability = availabilityFor(desc, endpoint, authStatusFor);
-		const capabilities = capabilitiesFor(desc, endpoint, probe, kb);
-		const preservePreviousProbe =
-			probe === null && previous !== undefined && sameProbeIdentity(previous.endpoint, endpoint);
+		const availability = availabilityFor(desc, target, authStatusFor);
+		const capabilities = capabilitiesFor(desc, target, probe, kb);
+		const preservePreviousProbe = probe === null && previous !== undefined && sameProbeIdentity(previous.target, target);
 		const probeCapabilities =
 			probe?.discoveredCapabilities ?? (preservePreviousProbe ? previous.probeCapabilities : null) ?? null;
 		const probeModelCapabilities =
@@ -204,7 +200,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const modelStates = probe?.modelStates ?? (preservePreviousProbe ? previous.discoveredModelStates : null) ?? null;
 		const modelSource = discoveredModelsSource(probe, preservePreviousProbe, previous, desc);
 		const healthy = probe !== null ? probe.ok : null;
-		const health: EndpointHealth =
+		const health: TargetHealth =
 			probe === null
 				? (previous?.health ?? emptyHealth())
 				: {
@@ -215,8 +211,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 					};
 		const available = availability.available && (probe === null || probe.ok);
 		const reason = probe !== null && !probe.ok ? (probe.error ?? "probe failed") : availability.reason;
-		const out: EndpointStatus = {
-			endpoint,
+		const out: TargetStatus = {
+			target,
 			runtime: desc,
 			available,
 			reason,
@@ -233,18 +229,18 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return out;
 	}
 
-	async function probeEndpointInternal(endpoint: TargetDescriptor, live: boolean): Promise<EndpointStatus> {
-		const previous = statuses.get(endpoint.id);
-		const desc = registry.get(endpoint.runtime);
+	async function probeTargetInternal(target: TargetDescriptor, live: boolean): Promise<TargetStatus> {
+		const previous = statuses.get(target.id);
+		const desc = registry.get(target.runtime);
 		if (!desc) {
-			const status = buildStatus(endpoint, null, null, previous);
-			statuses.set(endpoint.id, status);
-			context.bus.emit(BusChannels.ProviderHealth, { id: endpoint.id, status });
+			const status = buildStatus(target, null, null, previous);
+			statuses.set(target.id, status);
+			context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
 			return status;
 		}
 		if (!live || typeof desc.probe !== "function") {
-			const status = buildStatus(endpoint, desc, null, previous);
-			statuses.set(endpoint.id, status);
+			const status = buildStatus(target, desc, null, previous);
+			statuses.set(target.id, status);
 			return status;
 		}
 		const probeCtx: ProbeContext = {
@@ -253,13 +249,13 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		};
 		let probeResult: ProbeResult;
 		try {
-			probeResult = await desc.probe(endpoint, probeCtx);
+			probeResult = await desc.probe(target, probeCtx);
 		} catch (err) {
 			probeResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
 		}
 		if (probeResult.ok && typeof desc.probeModels === "function" && !probeResult.models) {
 			try {
-				const ids = await desc.probeModels(endpoint, probeCtx);
+				const ids = await desc.probeModels(target, probeCtx);
 				probeResult = { ...probeResult, models: ids };
 			} catch {
 				// model discovery is best-effort; keep probe as-is.
@@ -267,12 +263,12 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		if (probeResult.ok && typeof desc.probeReasoning === "function") {
 			const settings = readConfig();
-			const orchestratorTarget = settings.orchestrator.target === endpoint.id ? settings.orchestrator.model : null;
-			const candidateModelId = orchestratorTarget ?? endpoint.defaultModel ?? null;
+			const orchestratorTarget = settings.orchestrator.target === target.id ? settings.orchestrator.model : null;
+			const candidateModelId = orchestratorTarget ?? target.defaultModel ?? null;
 			if (candidateModelId) {
 				try {
-					const result = await desc.probeReasoning(endpoint, candidateModelId, probeCtx);
-					reasoningCache.set(reasoningCacheKey(endpoint.id, candidateModelId), result.reasoning);
+					const result = await desc.probeReasoning(target, candidateModelId, probeCtx);
+					reasoningCache.set(reasoningCacheKey(target.id, candidateModelId), result.reasoning);
 					const capabilityModelId = probeResult.capabilityModelId ?? null;
 					if (capabilityModelId === null || capabilityModelId === candidateModelId) {
 						probeResult = {
@@ -293,25 +289,25 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				}
 			}
 		}
-		const status = buildStatus(endpoint, desc, probeResult, previous);
-		statuses.set(endpoint.id, status);
-		context.bus.emit(BusChannels.ProviderHealth, { id: endpoint.id, status });
+		const status = buildStatus(target, desc, probeResult, previous);
+		statuses.set(target.id, status);
+		context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
 		return status;
 	}
 
-	async function probeReasoningForModelInternal(endpointId: string, modelId: string): Promise<boolean | null> {
+	async function probeReasoningForModelInternal(targetId: string, modelId: string): Promise<boolean | null> {
 		const settings = readConfig();
-		const endpoint = settings.targets.find((ep) => ep.id === endpointId);
-		if (!endpoint) return null;
-		const desc = registry.get(endpoint.runtime);
+		const target = settings.targets.find((ep) => ep.id === targetId);
+		if (!target) return null;
+		const desc = registry.get(target.runtime);
 		if (!desc || typeof desc.probeReasoning !== "function") return null;
 		const probeCtx: ProbeContext = {
 			credentialsPresent: credentialsPresent(),
 			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
 		};
 		try {
-			const result = await desc.probeReasoning(endpoint, modelId, probeCtx);
-			reasoningCache.set(reasoningCacheKey(endpointId, modelId), result.reasoning);
+			const result = await desc.probeReasoning(target, modelId, probeCtx);
+			reasoningCache.set(reasoningCacheKey(targetId, modelId), result.reasoning);
 			return result.reasoning;
 		} catch {
 			return null;
@@ -320,12 +316,12 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 
 	async function probeAll(): Promise<void> {
 		const settings = readConfig();
-		const next = new Map<string, EndpointStatus>();
+		const next = new Map<string, TargetStatus>();
 		reasoningCache.clear();
-		for (const endpoint of settings.targets) {
-			const desc = registry.get(endpoint.runtime);
-			const status = buildStatus(endpoint, desc, null, statuses.get(endpoint.id));
-			next.set(endpoint.id, status);
+		for (const target of settings.targets) {
+			const desc = registry.get(target.runtime);
+			const status = buildStatus(target, desc, null, statuses.get(target.id));
+			next.set(target.id, status);
 		}
 		statuses.clear();
 		for (const [id, status] of next) {
@@ -339,7 +335,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		for (const id of Array.from(statuses.keys())) {
 			if (!activeIds.has(id)) statuses.delete(id);
 		}
-		await Promise.all(settings.targets.map((ep) => probeEndpointInternal(ep, true)));
+		await Promise.all(settings.targets.map((ep) => probeTargetInternal(ep, true)));
 	}
 
 	const extension: DomainExtension = {
@@ -370,7 +366,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		list() {
 			return Array.from(statuses.values());
 		},
-		getEndpoint(id) {
+		getTarget(id) {
 			const settings = readConfig();
 			return settings.targets.find((ep) => ep.id === id) ?? null;
 		},
@@ -379,30 +375,30 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		},
 		probeAll,
 		probeAllLive,
-		async probeEndpoint(id) {
+		async probeTarget(id) {
 			const settings = readConfig();
-			const endpoint = settings.targets.find((ep) => ep.id === id);
-			if (!endpoint) return null;
-			return probeEndpointInternal(endpoint, true);
+			const target = settings.targets.find((ep) => ep.id === id);
+			if (!target) return null;
+			return probeTargetInternal(target, true);
 		},
-		disconnectEndpoint(id) {
+		disconnectTarget(id) {
 			const settings = readConfig();
-			const endpoint = settings.targets.find((ep) => ep.id === id);
-			if (!endpoint) return null;
+			const target = settings.targets.find((ep) => ep.id === id);
+			if (!target) return null;
 			for (const key of Array.from(reasoningCache.keys())) {
 				if (key.startsWith(`${id}:`)) reasoningCache.delete(key);
 			}
-			const status = buildStatus(endpoint, registry.get(endpoint.runtime), null);
-			statuses.set(endpoint.id, status);
-			context.bus.emit(BusChannels.ProviderHealth, { id: endpoint.id, status });
+			const status = buildStatus(target, registry.get(target.runtime), null);
+			statuses.set(target.id, status);
+			context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
 			return status;
 		},
-		getDetectedReasoning(endpointId, modelId) {
-			const cached = reasoningCache.get(reasoningCacheKey(endpointId, modelId));
+		getDetectedReasoning(targetId, modelId) {
+			const cached = reasoningCache.get(reasoningCacheKey(targetId, modelId));
 			return cached ?? null;
 		},
-		probeReasoningForModel(endpointId, modelId) {
-			return probeReasoningForModelInternal(endpointId, modelId);
+		probeReasoningForModel(targetId, modelId) {
+			return probeReasoningForModelInternal(targetId, modelId);
 		},
 		credentials: {
 			hasKey(providerId) {
@@ -421,17 +417,17 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			},
 		},
 		auth: {
-			statusForTarget(endpoint, runtime) {
-				if (!targetRequiresAuth(endpoint, runtime)) {
-					return authNotRequiredStatus(resolveAuthTarget(endpoint, runtime).providerId);
+			statusForTarget(target, runtime) {
+				if (!targetRequiresAuth(target, runtime)) {
+					return authNotRequiredStatus(resolveAuthTarget(target, runtime).providerId);
 				}
-				return authStore.statusForTarget(resolveAuthTarget(endpoint, runtime), { includeFallback: false });
+				return authStore.statusForTarget(resolveAuthTarget(target, runtime), { includeFallback: false });
 			},
-			resolveForTarget(endpoint, runtime) {
-				if (!targetRequiresAuth(endpoint, runtime)) {
-					return Promise.resolve(authNotRequiredStatus(resolveAuthTarget(endpoint, runtime).providerId));
+			resolveForTarget(target, runtime) {
+				if (!targetRequiresAuth(target, runtime)) {
+					return Promise.resolve(authNotRequiredStatus(resolveAuthTarget(target, runtime).providerId));
 				}
-				return authStore.resolveForTarget(resolveAuthTarget(endpoint, runtime), { includeFallback: false });
+				return authStore.resolveForTarget(resolveAuthTarget(target, runtime), { includeFallback: false });
 			},
 			getStored(providerId) {
 				return authStore.get(providerId) ?? null;
@@ -454,11 +450,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			getOAuthProviders() {
 				return authStore.getOAuthProviders();
 			},
-			setRuntimeOverrideForTarget(endpoint, _runtime, key) {
-				authStore.setRuntimeOverride(endpoint.id, key);
+			setRuntimeOverrideForTarget(target, _runtime, key) {
+				authStore.setRuntimeOverride(target.id, key);
 			},
-			clearRuntimeOverrideForTarget(endpoint, _runtime) {
-				authStore.clearRuntimeOverride(endpoint.id);
+			clearRuntimeOverrideForTarget(target, _runtime) {
+				authStore.clearRuntimeOverride(target.id);
 			},
 		},
 		knowledgeBase: kb,

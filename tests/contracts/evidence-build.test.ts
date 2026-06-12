@@ -59,7 +59,7 @@ async function sealRun(): Promise<{ runId: string; receiptPath: string }> {
 	const envelope = ledger.create({
 		agentId: "coder",
 		task: "evidence fixture task",
-		endpointId: "mini",
+		targetId: "mini",
 		wireModelId: "test-model",
 		runtimeId: "openai-completions",
 		runtimeKind: "http",
@@ -88,7 +88,7 @@ async function sealRun(): Promise<{ runId: string; receiptPath: string }> {
 		runId: envelope.id,
 		agentId: "coder",
 		task: "evidence fixture task",
-		endpointId: "mini",
+		targetId: "mini",
 		wireModelId: "test-model",
 		runtimeId: "openai-completions",
 		runtimeKind: "http",

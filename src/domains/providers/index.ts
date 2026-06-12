@@ -25,7 +25,7 @@ export {
 	targetRequiresAuth,
 } from "./auth/index.js";
 export { mergeCapabilities } from "./capabilities.js";
-export type { EndpointHealth, EndpointStatus, ProvidersContract } from "./contract.js";
+export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 export { isTargetEligibleRuntime } from "./eligibility.js";
 export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
@@ -59,11 +59,11 @@ export {
 	type ResolvedResponseCapability,
 	type ResolvedThinkingCapability,
 	type ResponseParserKind,
-	resolveEndpointRuntimeCapabilities,
 	resolveModelRuntimeCapabilities,
 	resolveModelRuntimeCapabilitiesForModel,
 	resolveModelRuntimeCapabilitiesForProviders,
 	resolveModelRuntimeCapabilitiesForStatus,
+	resolveTargetRuntimeCapabilities,
 	restrictThinkingLevelsByMechanism,
 	sortedSupportedThinkingLevels,
 	supportedThinkingLevelLabels,
@@ -95,7 +95,7 @@ export {
 export {
 	buildProviderSupportEntry,
 	compareProviderSupportEntries,
-	configuredEndpointsForRuntime,
+	configuredTargetsForRuntime,
 	defaultModelForRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,

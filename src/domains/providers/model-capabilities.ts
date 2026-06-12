@@ -1,6 +1,6 @@
 import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
-import type { EndpointStatus } from "./contract.js";
+import type { TargetStatus } from "./contract.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
 
@@ -34,8 +34,8 @@ export function applyModelCapabilityPatch<T extends ModelCapabilityPatchTarget>(
 
 export interface ResolveModelCapabilitiesOptions {
 	/**
-	 * Per-(endpoint, model) reasoning detection result, typically supplied by
-	 * `providers.getDetectedReasoning(endpointId, modelId)`. When true or
+	 * Per-(target, model) reasoning detection result, typically supplied by
+	 * `providers.getDetectedReasoning(targetId, modelId)`. When true or
 	 * false, the returned caps preserve that exact live result. Null leaves
 	 * the merged value untouched.
 	 */
@@ -43,45 +43,45 @@ export interface ResolveModelCapabilitiesOptions {
 }
 
 /**
- * Resolve the effective capability set for one endpoint/model pair.
+ * Resolve the effective capability set for one target/model pair.
  *
- * EndpointStatus stores a merged endpoint-level view in `capabilities`, which
+ * TargetStatus stores a merged target-level view in `capabilities`, which
  * is adequate for health/readiness, but the model picker and thinking controls
  * need the selected row's own knowledge-base hit. When model-keyed
  * `probeCapabilities` are present for this same wire model, rebuild the stack as:
  *
- *   runtime defaults + knowledge-base(model) + live probe + endpoint override
+ *   runtime defaults + knowledge-base(model) + live probe + target override
  *
  * When older test doubles do not provide `probeCapabilities`, fall back to the
- * pre-merged `status.capabilities` for the endpoint-default model.
+ * pre-merged `status.capabilities` for the target-default model.
  *
  * `options.detectedReasoning` lets callers feed in a per-model reasoning probe
  * result so /thinking and the model picker reflect what the loaded model can
  * actually do, without baking the detection into the runtime defaults.
  */
 type ProbeCapabilityStatus = Pick<
-	EndpointStatus,
-	"endpoint" | "probeCapabilities" | "probeModelCapabilities" | "probeModelId"
+	TargetStatus,
+	"target" | "probeCapabilities" | "probeModelCapabilities" | "probeModelId"
 >;
 
 export function probeCapabilitiesForModel(
 	status: ProbeCapabilityStatus,
 	wireModelId: string | null | undefined,
 ): Partial<CapabilityFlags> | null {
-	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.endpoint.defaultModel);
+	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
 	if (!modelId) return null;
 	const exact = status.probeModelCapabilities?.[modelId];
 	if (exact) return exact;
 	const probeModelId = normalizedModelId(status.probeModelId);
 	if (probeModelId !== null) return probeModelId === modelId ? (status.probeCapabilities ?? null) : null;
-	const defaultModelId = normalizedModelId(status.endpoint.defaultModel);
+	const defaultModelId = normalizedModelId(status.target.defaultModel);
 	return defaultModelId !== null && defaultModelId === modelId ? (status.probeCapabilities ?? null) : null;
 }
 
 export function resolveModelCapabilities(
 	status: Pick<
-		EndpointStatus,
-		"endpoint" | "runtime" | "capabilities" | "probeCapabilities" | "probeModelCapabilities" | "probeModelId"
+		TargetStatus,
+		"target" | "runtime" | "capabilities" | "probeCapabilities" | "probeModelCapabilities" | "probeModelId"
 	>,
 	wireModelId: string | null | undefined,
 	knowledgeBase: KnowledgeBase | null,
@@ -92,19 +92,19 @@ export function resolveModelCapabilities(
 		detectedReasoning === null ? caps : { ...caps, reasoning: detectedReasoning };
 
 	if (!status.runtime) return applyDetected(status.capabilities);
-	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.endpoint.defaultModel);
+	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
 	const baseCapabilities = capabilitiesFromCatalogModel(
 		status.runtime.defaultCapabilities ?? EMPTY_CAPABILITIES,
 		modelId ? getCatalogModelForRuntime(status.runtime.id, modelId) : undefined,
 	);
 	const hasModernProbeFields = status.probeCapabilities !== undefined || status.probeModelCapabilities !== undefined;
 	if (!hasModernProbeFields) {
-		if (!modelId || modelId === normalizedModelId(status.endpoint.defaultModel)) {
+		if (!modelId || modelId === normalizedModelId(status.target.defaultModel)) {
 			return applyDetected(status.capabilities);
 		}
 		const kbHit = knowledgeBase?.lookup(modelId) ?? null;
 		return applyDetected(
-			mergeCapabilities(baseCapabilities, kbHit?.entry.capabilities ?? null, null, status.endpoint.capabilities ?? null),
+			mergeCapabilities(baseCapabilities, kbHit?.entry.capabilities ?? null, null, status.target.capabilities ?? null),
 		);
 	}
 	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
@@ -113,7 +113,7 @@ export function resolveModelCapabilities(
 			baseCapabilities,
 			kbHit?.entry.capabilities ?? null,
 			probeCapabilitiesForModel(status, modelId),
-			status.endpoint.capabilities ?? null,
+			status.target.capabilities ?? null,
 		),
 	);
 }

@@ -12,7 +12,7 @@ const snapshot: TreeSnapshot = {
 		createdAt: "2026-06-11T00:00:00.000Z",
 		endedAt: null,
 		model: null,
-		endpoint: null,
+		target: null,
 	},
 	leafId: "turn-2",
 	rootIds: ["turn-1"],

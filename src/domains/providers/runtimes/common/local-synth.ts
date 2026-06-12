@@ -21,17 +21,17 @@ export interface ClioLocalModelMetadata {
 }
 
 export interface LocalSynthesisInput {
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
 	apiFamily: RuntimeApiFamily;
 	provider: string;
-	baseUrlForEndpoint: (endpointUrl: string) => string;
+	baseUrlForTarget: (targetUrl: string) => string;
 }
 
-export function endpointLifecycle(endpoint: TargetDescriptor): LocalModelLifecycle {
-	return endpoint.lifecycle ?? "user-managed";
+export function targetLifecycle(target: TargetDescriptor): LocalModelLifecycle {
+	return target.lifecycle ?? "user-managed";
 }
 
 function openAIThinkingFormat(
@@ -73,21 +73,16 @@ function localAnthropicCompat(): AnthropicMessagesCompat {
 }
 
 export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
-	const { endpoint, wireModelId, kb, defaultCapabilities, apiFamily, provider } = input;
-	const caps = mergeCapabilities(
-		defaultCapabilities,
-		kb?.entry.capabilities ?? null,
-		null,
-		endpoint.capabilities ?? null,
-	);
-	const rawUrl = endpoint.url ?? "";
-	const baseUrl = rawUrl.length > 0 ? input.baseUrlForEndpoint(rawUrl) : "";
-	const pricing = endpoint.pricing;
-	const headers = endpoint.auth?.headers;
+	const { target, wireModelId, kb, defaultCapabilities, apiFamily, provider } = input;
+	const caps = mergeCapabilities(defaultCapabilities, kb?.entry.capabilities ?? null, null, target.capabilities ?? null);
+	const rawUrl = target.url ?? "";
+	const baseUrl = rawUrl.length > 0 ? input.baseUrlForTarget(rawUrl) : "";
+	const pricing = target.pricing;
+	const headers = target.auth?.headers;
 	const quirks = extractLocalModelQuirks(kb?.entry.quirks);
 	const model: Model<Api> & ClioLocalModelMetadata = {
 		id: wireModelId,
-		name: `${wireModelId} (${endpoint.id})`,
+		name: `${wireModelId} (${target.id})`,
 		api: apiFamily,
 		provider,
 		baseUrl,
@@ -102,10 +97,10 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 		clio: {
-			targetId: endpoint.id,
-			runtimeId: endpoint.runtime,
-			lifecycle: endpointLifecycle(endpoint),
-			...(endpoint.gateway === true ? { gateway: true } : {}),
+			targetId: target.id,
+			runtimeId: target.runtime,
+			lifecycle: targetLifecycle(target),
+			...(target.gateway === true ? { gateway: true } : {}),
 			...(kb?.entry.family ? { family: kb.entry.family } : {}),
 			...(quirks ? { quirks } : {}),
 		},
@@ -127,6 +122,6 @@ export function stripTrailingSlash(url: string): string {
 export const withV1 = (url: string): string => `${stripTrailingSlash(url)}/v1`;
 export const withAsIs = (url: string): string => stripTrailingSlash(url);
 
-export function endpointBase(endpoint: TargetDescriptor): string | null {
-	return endpoint.url ? stripTrailingSlash(endpoint.url) : null;
+export function targetBaseUrl(target: TargetDescriptor): string | null {
+	return target.url ? stripTrailingSlash(target.url) : null;
 }

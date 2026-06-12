@@ -20,7 +20,7 @@ import {
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
-import { modelsForEndpoint } from "./model-selector.js";
+import { modelsForTarget } from "./model-selector.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
 export const SETTINGS_OVERLAY_MAX_HEIGHT = "100%";
@@ -178,15 +178,15 @@ function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	};
 }
 
-function selectEndpointSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
+function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const statuses = providers.list();
 		if (statuses.length === 0) {
 			return textInputSubmenu("Type target id")(currentValue, done);
 		}
 		const items = statuses.map((status) => ({
-			value: status.endpoint.id,
-			label: `${status.endpoint.id} (${status.endpoint.url ?? "no url"})`,
+			value: status.target.id,
+			label: `${status.target.id} (${status.target.url ?? "no url"})`,
 		}));
 		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
 		list.onSelect = (item) => done(item.value);
@@ -197,12 +197,12 @@ function selectEndpointSubmenu(providers: ProvidersContract): SettingSubmenuBuil
 
 function selectModelSubmenu(
 	providers: ProvidersContract,
-	getActiveEndpoint: () => string | undefined,
+	getActiveTarget: () => string | undefined,
 ): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
-		const endpointId = getActiveEndpoint();
-		const status = providers.list().find((s) => s.endpoint.id === endpointId);
-		const models = status ? modelsForEndpoint(status) : [];
+		const targetId = getActiveTarget();
+		const status = providers.list().find((s) => s.target.id === targetId);
+		const models = status ? modelsForTarget(status) : [];
 		if (models.length === 0) {
 			return textInputSubmenu("Type model name")(currentValue, done);
 		}
@@ -210,7 +210,7 @@ function selectModelSubmenu(
 		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
 		list.onSelect = (item) => done(item.value);
 		list.onCancel = () => done();
-		return new SubmenuWrapper(`Select model for ${endpointId}`, list);
+		return new SubmenuWrapper(`Select model for ${targetId}`, list);
 	};
 }
 
@@ -301,9 +301,7 @@ export function buildSettingItems(
 	const thinkingValues = resolvedThinking
 		? resolvedThinking.supportedLevels.map((level) => thinkingLevelChoiceLabel(resolvedThinking.mechanism, level))
 		: FALLBACK_THINKING_VALUES;
-	const endpointSubmenu = options?.providers
-		? selectEndpointSubmenu(options.providers)
-		: editTextSubmenu("Type target id");
+	const targetSubmenu = options?.providers ? selectTargetSubmenu(options.providers) : editTextSubmenu("Type target id");
 	const orchestratorModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().orchestrator.target ?? undefined)
 		: editTextSubmenu("Type model name");
@@ -327,7 +325,7 @@ export function buildSettingItems(
 			values: thinkingValues,
 		}),
 		settingItem("orchestrator.target", settings.orchestrator.target ?? "(unset)", {
-			submenu: endpointSubmenu,
+			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
 		settingItem("orchestrator.model", settings.orchestrator.model ?? "(unset)", {
@@ -335,7 +333,7 @@ export function buildSettingItems(
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
 		settingItem("workers.default.target", settings.workers.default.target ?? "(unset)", {
-			submenu: endpointSubmenu,
+			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
 		settingItem("workers.default.model", settings.workers.default.model ?? "(unset)", {
@@ -466,27 +464,27 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			if (value === "true" || value === "false") settings.terminal.showTerminalProgress = value === "true";
 			return;
 		case "orchestrator.target": {
-			const endpoint = value === "(unset)" || value === "" ? null : value;
+			const target = value === "(unset)" || value === "" ? null : value;
 			// Switching targets re-bases the model on the new target default.
-			if (endpoint !== settings.orchestrator.target) {
-				settings.orchestrator.model = endpoint
-					? (settings.targets.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
+			if (target !== settings.orchestrator.target) {
+				settings.orchestrator.model = target
+					? (settings.targets.find((entry) => entry.id === target)?.defaultModel ?? null)
 					: null;
 			}
-			settings.orchestrator.target = endpoint;
+			settings.orchestrator.target = target;
 			return;
 		}
 		case "orchestrator.model":
 			settings.orchestrator.model = value === "(unset)" || value === "" ? null : value;
 			return;
 		case "workers.default.target": {
-			const endpoint = value === "(unset)" || value === "" ? null : value;
-			if (endpoint !== settings.workers.default.target) {
-				settings.workers.default.model = endpoint
-					? (settings.targets.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
+			const target = value === "(unset)" || value === "" ? null : value;
+			if (target !== settings.workers.default.target) {
+				settings.workers.default.model = target
+					? (settings.targets.find((entry) => entry.id === target)?.defaultModel ?? null)
 					: null;
 			}
-			settings.workers.default.target = endpoint;
+			settings.workers.default.target = target;
 			return;
 		}
 		case "workers.default.model":

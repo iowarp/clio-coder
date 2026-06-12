@@ -77,7 +77,7 @@ function dispatchFingerprint(args: MiddlewareHookInput["toolArgs"]): string | nu
 			stringValue(record.agent) ??
 			DISPATCH_DEFAULT_AGENT_ID,
 		task,
-		target: stringValue(record.target) ?? stringValue(record.endpoint) ?? "",
+		target: stringValue(record.target) ?? "",
 		model: stringValue(record.model) ?? "",
 		profile:
 			stringValue(record.agent_profile) ?? stringValue(record.worker_profile) ?? stringValue(record.workerProfile) ?? "",
