@@ -91,10 +91,12 @@ hash -r
 clio --version
 ```
 
-`npm run install:local` verifies dependencies, builds the CLI, and installs a
-symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`. It warns if that
-directory is not on your `PATH`. The symlink executes `dist/cli/index.js`, so
-re-run `npm run build` after editing TypeScript sources.
+`npm run install:local` verifies dependencies, builds the CLI, installs a
+symlink at `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`, and then runs the
+installed CLI's structure repair so a fresh install passes plain `clio doctor`
+with no manual steps. It warns if the bin directory is not on your `PATH`. The
+symlink executes `dist/cli/index.js`, so re-run `npm run build` after editing
+TypeScript sources.
 
 To uninstall, preview first and then remove the symlink and local state:
 
@@ -109,14 +111,12 @@ or `--keep-state` to unlink the binary only. Full lifecycle details are in
 
 ## Quick Start
 
-Run Clio from the repository you want to work on. Check your environment,
-then configure one target against a running model server. The example below
-uses LM Studio; other local runtime ids include `ollama-native`, `llamacpp`,
-`vllm`, and `sglang`.
+Run Clio from the repository you want to work on, and configure one target
+against a running model server. The example below uses LM Studio; other local
+runtime ids include `ollama-native`, `llamacpp`, `vllm`, and `sglang`.
 
 ```bash
 cd /path/to/your/repo
-clio doctor --fix
 
 clio configure \
   --id local-lmstudio \

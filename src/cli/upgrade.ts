@@ -5,6 +5,7 @@ import { clioStateDir } from "../core/xdg.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import type { LifecycleContract } from "../domains/lifecycle/contract.js";
 import { LifecycleDomainModule } from "../domains/lifecycle/index.js";
+import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
 import { listMigrations } from "../domains/lifecycle/migrations/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { printError, printHeader, printOk } from "./shared.js";
@@ -14,13 +15,22 @@ type Channel = (typeof CHANNELS)[number];
 
 const HELP = `clio upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 
-Reinstall Clio Coder via npm, refresh state metadata, and apply pending data-dir migrations.
+Refresh state metadata and apply pending data-dir migrations. An npm-installed
+binary is also reinstalled via npm; a source-checkout install instead prints
+the git-based update steps and never touches the global npm prefix.
 
 Flags:
   --dry-run             print planned actions without changing anything
-  --channel=<chan>      npm dist-tag to install (latest|beta|dev). Defaults to latest.
-  --skip-migrations     skip migrations after the npm install step
+  --channel=<chan>      npm dist-tag to install (latest|beta|dev). npm installs only.
+  --skip-migrations     skip migrations after the install step
 `;
+
+const SOURCE_UPGRADE_STEPS = ["git pull", "npm run install:local", "hash -r"] as const;
+
+function printSourceUpgradeSteps(): void {
+	process.stdout.write("[upgrade] source checkout install: update the code with:\n");
+	for (const step of SOURCE_UPGRADE_STEPS) process.stdout.write(`  ${step}\n`);
+}
 
 interface UpgradeOptions {
 	dryRun: boolean;
@@ -145,8 +155,10 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 
 	const before = getVersionInfo().clio;
 	const stateDir = clioStateDir();
+	const method = detectInstallMethod();
 	printHeader("Clio Coder upgrade");
-	process.stdout.write(`channel     ${opts.channel}\n`);
+	process.stdout.write(`install     ${method === "source" ? "source checkout" : "npm"}\n`);
+	if (method === "npm") process.stdout.write(`channel     ${opts.channel}\n`);
 	process.stdout.write(`current     ${before}\n`);
 	process.stdout.write(`state dir   ${stateDir}\n`);
 
@@ -155,19 +167,26 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	const migrationIds = migrations.map((m) => m.id);
 
 	if (opts.dryRun) {
-		process.stdout.write(`[upgrade] would run: npm install -g @iowarp/clio-coder@${opts.channel}\n`);
+		if (method === "source") {
+			printSourceUpgradeSteps();
+		} else {
+			process.stdout.write(`[upgrade] would run: npm install -g @iowarp/clio-coder@${opts.channel}\n`);
+		}
 		if (opts.skipMigrations) {
 			process.stdout.write("[upgrade] would skip migrations (--skip-migrations)\n");
 		} else {
 			process.stdout.write(`[upgrade] would consider ${migrationIds.length} migration(s):\n`);
 			for (const id of migrationIds) process.stdout.write(`  - ${id}\n`);
 		}
+		process.stdout.write("[upgrade] would refresh state metadata\n");
 		printOk("dry run complete, no changes made");
 		return 0;
 	}
 
 	if (opts.postInstall) {
 		process.stdout.write("[upgrade] running post-install checks with the active clio binary\n");
+	} else if (method === "source") {
+		process.stdout.write("[upgrade] source checkout install detected; skipping npm install\n");
 	} else if (noNetwork) {
 		process.stdout.write("[upgrade] CLIO_TEST_UPGRADE_NO_NETWORK set, skipping npm install\n");
 	} else {
@@ -212,7 +231,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 		}
 	}
 
-	if (noNetwork) {
+	if (method === "source" || noNetwork) {
 		initializeClioHome();
 		process.stdout.write("[upgrade] refreshed state metadata\n");
 	} else {
@@ -223,6 +242,8 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 			return 1;
 		}
 	}
+
+	if (method === "source") printSourceUpgradeSteps();
 
 	const after = getVersionInfo().clio;
 	printOk(`${before} -> ${after} (migrations: ${appliedCount})`);

@@ -77,12 +77,13 @@ clio --version
 - verifies `dist/cli/index.js` exists and is executable;
 - creates `${CLIO_BIN_DIR:-$HOME/.local/bin}` and links `clio` there;
 - warns if that bin dir is not on `PATH`;
-- recommends `clio doctor --fix` (or runs it with `--run-doctor`).
+- runs the installed CLI's structure repair (`node dist/cli/index.js doctor
+  --fix` with the caller's environment), so a fresh install passes plain
+  `clio doctor` with no manual steps.
 
 First-run target setup after install:
 
 ```bash
-clio doctor --fix
 clio configure --list
 clio configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator --set-fleet-default
 clio targets use <id>
@@ -105,14 +106,15 @@ Runs a series of health sweeps across the environment:
 *   *Recovery:* Run `clio doctor --fix` to repair structure only: missing directories, missing template files, and credential permissions. `--fix` never rewrites an existing `settings.yaml`, valid or invalid.
 
 ### B. Upgrades (`clio upgrade`)
-Updates package installations and database states.
+Refreshes state metadata and applies pending data-dir migrations.
 ```bash
 clio upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations]
 ```
-The current source-checkout release is not published to npm, so source users
-should update with `git pull`, `npm run install:local`, `hash -r`, and
-`clio doctor --fix`. The `clio upgrade` npm-global path is retained for future
-registry availability.
+The command detects the install method from the running binary. On a source
+checkout it never runs `npm install -g`: it performs its safe local duties
+(migration check, `install.json` refresh) and prints the real update steps,
+`git pull`, `npm run install:local`, `hash -r`. The npm reinstall path applies
+only to a genuinely npm-installed binary, once the package is published.
 
 ### C. System Resets (`clio reset`)
 Selective recovery wipes:
@@ -142,7 +144,8 @@ hash -r
 ```
 
 This removes the `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio` symlink only when it
-points into the current checkout, then removes Clio config/data/cache. To keep
+points into the current checkout, then removes the Clio config, data, state,
+and cache roots, labeling each removal by its root name. To keep
 only the active settings and credentials files, not old backups or other config
 residue, run:
 

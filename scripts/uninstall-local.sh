@@ -8,14 +8,15 @@ Usage: scripts/uninstall-local.sh [--dry-run] [--force] [--keep-state] [--keep-s
                                   [--preserve-settings-auth <dir>] [--accept-bin-target <path>]
 
 Uninstall the deterministic local source symlink created by install-local.sh.
-By default, --force removes the symlink plus Clio config/data/cache. Use --keep-state
-for binary-only removal, or --keep-settings-auth to restore only active settings.yaml
-and credentials.yaml after removing all other Clio state.
+By default, --force removes the symlink plus the Clio config, data, state, and
+cache roots. Use --keep-state for binary-only removal, or --keep-settings-auth
+to restore only active settings.yaml and credentials.yaml after removing all
+other Clio state.
 
 Options:
   --dry-run                     Print planned removals without changing files. Does not require --force.
   --force, -f                   Required for non-dry-run uninstall.
-  --keep-state                  Remove only the local symlink; leave config/data/cache unchanged.
+  --keep-state                  Remove only the local symlink; leave all four Clio roots unchanged.
   --keep-settings-auth          Preserve only active settings.yaml and credentials.yaml in the config dir.
   --preserve-settings-auth DIR  Copy active settings.yaml and credentials.yaml to DIR, then restore them.
   --accept-bin-target PATH      Also allow removing a clio symlink that points at PATH or below PATH.
@@ -159,20 +160,25 @@ safe_rm_rf() {
 }
 
 add_remove_dir() {
-	local candidate existing i
-	candidate="$(normalize_path "$1")"
-	for existing in "${remove_dirs[@]}"; do
-		if path_is_under "$existing" "$candidate"; then
+	local label candidate existing i
+	label="$1"
+	candidate="$(normalize_path "$2")"
+	for i in "${!remove_dirs[@]}"; do
+		if path_is_under "${remove_dirs[$i]}" "$candidate"; then
+			remove_labels[$i]="${remove_labels[$i]}+$label"
 			return
 		fi
 	done
 	for i in "${!remove_dirs[@]}"; do
 		existing="${remove_dirs[$i]}"
 		if path_is_under "$candidate" "$existing"; then
+			label="$label+${remove_labels[$i]}"
 			unset 'remove_dirs[$i]'
+			unset 'remove_labels[$i]'
 		fi
 	done
 	remove_dirs+=("$candidate")
+	remove_labels+=("$label")
 }
 
 remove_local_link() {
@@ -361,6 +367,7 @@ temporary_stage=0
 preserved_settings=0
 preserved_credentials=0
 remove_dirs=()
+remove_labels=()
 
 log "source root: $repo_root"
 log "link path:   $link_path"
@@ -373,15 +380,15 @@ log "cache dir:   $cache_dir"
 remove_local_link
 
 if [[ $keep_state -eq 1 ]]; then
-	ok "leaving Clio config/data/cache unchanged (--keep-state)"
+	ok "leaving Clio config/data/state/cache unchanged (--keep-state)"
 else
 	copy_settings_auth
-	add_remove_dir "$config_dir"
-	add_remove_dir "$data_dir"
-	add_remove_dir "$state_dir"
-	add_remove_dir "$cache_dir"
-	for dir in "${remove_dirs[@]}"; do
-		safe_rm_rf "state" "$dir"
+	add_remove_dir "config" "$config_dir"
+	add_remove_dir "data" "$data_dir"
+	add_remove_dir "state" "$state_dir"
+	add_remove_dir "cache" "$cache_dir"
+	for i in "${!remove_dirs[@]}"; do
+		safe_rm_rf "${remove_labels[$i]}" "${remove_dirs[$i]}"
 	done
 	restore_settings_auth
 fi
