@@ -179,12 +179,17 @@ describe("contracts/slash-spec", () => {
 			["/share import /my/path", { kind: "share", args: "import /my/path" }],
 			["/share invalid", { kind: "share", args: "invalid" }],
 
-			// receipts
-			["/receipts", { kind: "receipts" }],
-			["/receipts verify myRunId", { kind: "receipt-verify", runId: "myRunId" }],
-			["/receipts verify", { kind: "receipt-usage" }],
-			["/receipts verify myRunId extra", { kind: "receipt-usage" }],
-			["/receipts invalid", { kind: "receipt-usage" }],
+			// view
+			["/view", { kind: "view" }],
+			["/view myRunId", { kind: "view", filter: "myRunId" }],
+			["/view Bash npm test", { kind: "view", filter: "Bash npm test" }],
+			["/view verify myRunId", { kind: "view-verify", runId: "myRunId" }],
+			["/view verify", { kind: "view-usage" }],
+			["/view verify myRunId extra", { kind: "view-usage" }],
+
+			// /receipts was absorbed into /view in v0.2.3
+			["/receipts", { kind: "unknown", text: "/receipts" }],
+			["/receipts verify myRunId", { kind: "unknown", text: "/receipts verify myRunId" }],
 
 			// model
 			["/model", { kind: "model" }],

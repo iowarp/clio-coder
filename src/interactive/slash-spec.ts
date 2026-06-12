@@ -85,6 +85,12 @@ export function usageLine(entry: { name: string; args?: CommandArgsSpec }, subco
 
 	if (argsSpec.subcommands) {
 		const subParts: string[] = [];
+		const rootSpec: CommandArgsSpec = {
+			...(argsSpec.flags ? { flags: argsSpec.flags } : {}),
+			...(argsSpec.positionals ? { positionals: argsSpec.positionals } : {}),
+		};
+		const rootStr = renderArgsSpec(rootSpec);
+		if (rootStr.length > 0) subParts.push(`${prefix} ${rootStr}`);
 		for (const [subName, subSpec] of Object.entries(argsSpec.subcommands)) {
 			const subStr = renderArgsSpec(subSpec);
 			subParts.push(`${prefix} ${subName}${subStr ? ` ${subStr}` : ""}`);

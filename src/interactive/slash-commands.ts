@@ -40,9 +40,9 @@ export type SlashCommand =
 	| { kind: "cost" }
 	| { kind: "context-view" }
 	| { kind: "fleet" }
-	| { kind: "receipts" }
-	| { kind: "receipt-verify"; runId: string }
-	| { kind: "receipt-usage" }
+	| { kind: "view"; filter?: string }
+	| { kind: "view-verify"; runId: string }
+	| { kind: "view-usage" }
 	| { kind: "thinking" }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
@@ -222,7 +222,8 @@ export interface SlashCommandContext {
 	openContextView: () => void;
 	/** Open the read-only `/fleet` overlay: running, retrying, and totals. */
 	openFleet: () => void;
-	openReceipts: () => void;
+	/** Open `/view`, the full observability artifact viewer. */
+	openView: (filter?: string) => void;
 	openThinking: () => void;
 	openModel: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
@@ -248,7 +249,7 @@ export interface SlashCommandContext {
 	 */
 	runCompact: (instructions: string | undefined) => void;
 	/**
-	 * Escape hatch for the `receipts verify` entry: verify a receipt file on disk
+	 * Escape hatch for the `view verify` entry: verify a receipt file on disk
 	 * and emit a single status line. Kept on the context so the registry does
 	 * not import the overlay module.
 	 */
@@ -658,10 +659,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "receipts",
-		description: "Browse or verify run receipts",
-		kinds: ["receipts", "receipt-verify", "receipt-usage"],
+		name: "view",
+		description: "Browse session artifacts and verify receipts",
+		kinds: ["view", "view-verify", "view-usage"],
 		args: {
+			positionals: [{ name: "filter", required: false, rest: true }],
 			subcommands: {
 				verify: {
 					positionals: [{ name: "runId", required: true }],
@@ -669,25 +671,25 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			},
 		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "receipt-usage" };
+			if (parsed.error) return { kind: "view-usage" };
 			if (parsed.subcommand === "verify") {
 				const runId = parsed.positionals[0] ?? "";
-				return { kind: "receipt-verify", runId };
+				return { kind: "view-verify", runId };
 			}
-			return { kind: "receipts" };
+			return parsed.rest ? { kind: "view", filter: parsed.rest } : { kind: "view" };
 		},
 		handle(command, ctx) {
-			const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "receipts");
+			const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "view");
 			if (!entry) return;
-			if (command.kind === "receipts") {
-				ctx.openReceipts();
+			if (command.kind === "view") {
+				ctx.openView(command.filter);
 				return;
 			}
-			if (command.kind === "receipt-usage") {
+			if (command.kind === "view-usage") {
 				ctx.notice("info", usageNotice(entry, "verify"));
 				return;
 			}
-			if (command.kind !== "receipt-verify") return;
+			if (command.kind !== "view-verify") return;
 			const result = ctx.verifyReceipt(command.runId);
 			if (result.ok) {
 				ctx.notice("success", `verify ok ${command.runId}`);
