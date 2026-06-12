@@ -16,6 +16,7 @@ export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRuleDefinitions, listMiddlew
 export type {
 	MiddlewareDiagnostic,
 	MiddlewareDiagnosticSink,
+	MiddlewareHookEvaluationContext,
 	MiddlewareHookRegistration,
 	MiddlewareRuleDefinition,
 	RunMiddlewareRegistrationsOptions,

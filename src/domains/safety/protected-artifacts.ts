@@ -1,4 +1,5 @@
 import path from "node:path";
+import { ToolNames } from "../../core/tool-names.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
 
@@ -49,6 +50,28 @@ interface NormalizedArtifact {
 
 const COMMAND_SEPARATORS = new Set([";", "&&", "||", "|"]);
 const SHELL_WRAPPERS = new Set(["command", "builtin", "sudo", "doas"]);
+
+/**
+ * Paths a tool call would mutate, derived from the tool's path argument.
+ * Returns at most one path today: write/edit when a path arg is present, and
+ * the artifact writers' defaults. Bash mutation targets are handled
+ * separately through command classification.
+ */
+export function toolMutationPaths(toolName: string, args: Record<string, unknown> | undefined): string[] {
+	if (toolName === ToolNames.WritePlan) return [mutationPathArg(args) ?? "PLAN.md"];
+	if (toolName === ToolNames.WriteReview) return [mutationPathArg(args) ?? "REVIEW.md"];
+	if (toolName === ToolNames.Write || toolName === ToolNames.Edit) {
+		const candidate = mutationPathArg(args);
+		return candidate === null ? [] : [candidate];
+	}
+	return [];
+}
+
+function mutationPathArg(args: Record<string, unknown> | undefined): string | null {
+	if (!args) return null;
+	const candidate = args.path ?? args.file_path ?? args.filePath;
+	return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+}
 
 export function protectArtifact(state: ProtectedArtifactState, artifact: ProtectedArtifact): ProtectedArtifactState {
 	const artifacts = artifactMap(state.artifacts);
