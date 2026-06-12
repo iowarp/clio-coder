@@ -9,6 +9,7 @@ import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import { hashToolCall } from "../domains/safety/loop-detector.js";
 import {
 	classifyDestructiveCommand,
 	detectValidationCommand,
@@ -104,26 +105,17 @@ export type ToolResult =
 	  }
 	| { kind: "error"; message: string; details?: ToolResultDetails };
 
-/**
- * Structural seam for the interactive loop guard
- * (src/engine/interactive-loop-guard.ts). Declared here so the registry does
- * not import engine code.
- */
-export interface RegistryLoopGuard {
-	check(tool: string, args: Record<string, unknown>, opts?: { turnId?: string }): { block: boolean; reason?: string };
-}
-
 export interface RegistryDeps {
 	safety: SafetyContract;
-	middleware?: MiddlewareContract;
 	/**
-	 * Interactive-orchestrator loop guard, checked in `runSpec` before every
-	 * admitted call. Worker subprocesses run their own guard in
-	 * worker-runtime.ts (pi-agent-core's beforeToolCall, worker-local loop
-	 * state), so worker registries must leave this unset or every call would
-	 * be observed twice and the threshold would halve.
+	 * Hook layer. The loop guard, registered on `before_tool` by both
+	 * composition roots (entry/orchestrator.ts and worker-runtime.ts via
+	 * engine/loop-guard.ts), observes every call attempt through this contract;
+	 * the registry feeds it `metadata.callFingerprint` and runs `before_tool`
+	 * for safety-blocked attempts too, so repetition of rejected calls stays
+	 * observable.
 	 */
-	loopGuard?: RegistryLoopGuard;
+	middleware?: MiddlewareContract;
 	protectedArtifacts?: ProtectedArtifactState;
 	onProtectedArtifactEvent?: (event: ProtectedArtifactRegistryEvent) => void;
 	onSkillActivation?: (activation: SkillActivation) => void;
@@ -289,32 +281,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		decision: SafetyDecision,
 		options?: ToolInvokeOptions,
 	): Promise<RegistryVerdict> => {
-		if (deps.loopGuard) {
-			const loopDecision = deps.loopGuard.check(
-				spec.name,
-				call.args ?? {},
-				options?.turnId !== undefined ? { turnId: options.turnId } : undefined,
-			);
-			if (loopDecision.block) {
-				return {
-					kind: "blocked",
-					reason: loopDecision.reason ?? `loop detected: ${spec.name} repeated identically; change strategy`,
-					decision,
-				};
-			}
-		}
-		const existingProtectedBlock = protectedArtifactBlock(spec, call);
-		if (existingProtectedBlock) return { kind: "blocked", reason: existingProtectedBlock, decision };
-		const duplicateDispatch = dispatchDuplicateBlock(successfulDispatchesByTurn, spec, call, options);
-		if (duplicateDispatch !== null) return { kind: "blocked", reason: duplicateDispatch, decision };
+		// before_tool hooks run first so the loop guard observes every admitted
+		// attempt, including ones the checks below would reject. The protected
+		// check runs once, after hooks, so it covers both pre-existing
+		// protections and paths protected by this evaluation's protect_path
+		// effects.
 		const beforeEffects = runToolHook("before_tool", spec, call, decision, options);
 		applyProtectPathEffects(beforeEffects, spec, call, options);
 		const block = firstBlockToolEffect(beforeEffects);
 		if (block) return { kind: "blocked", reason: block.reason, decision };
 		const protectedBlock = protectedArtifactBlock(spec, call);
-		const duplicateDispatchAfterHooks = dispatchDuplicateBlock(successfulDispatchesByTurn, spec, call, options);
-		if (duplicateDispatchAfterHooks !== null) return { kind: "blocked", reason: duplicateDispatchAfterHooks, decision };
 		if (protectedBlock) return { kind: "blocked", reason: protectedBlock, decision };
+		const duplicateDispatch = dispatchDuplicateBlock(successfulDispatchesByTurn, spec, call, options);
+		if (duplicateDispatch !== null) return { kind: "blocked", reason: duplicateDispatch, decision };
 		try {
 			const result = shapeToolResult(spec, await spec.run(call.args ?? {}, options), options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
@@ -415,6 +394,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return { kind: "execute", spec, decision };
 	};
 
+	/**
+	 * Loop-observe a safety-blocked attempt. The verdict stands and every
+	 * effect is discarded; this exists so the before_tool loop guard sees
+	 * rejected attempts too. Without it, a model repeating an identical
+	 * blocked call would never trip the detector (the former worker guard sat
+	 * in front of admission and had this coverage).
+	 */
+	const observeBlockedAttempt = (call: ClassifierCall, verdict: RegistryVerdict, options?: ToolInvokeOptions): void => {
+		if (verdict.kind !== "blocked" || !deps.middleware) return;
+		const spec = tools.get(call.tool as ToolName);
+		if (!spec) return;
+		runToolHook("before_tool", spec, call, verdict.decision, options);
+	};
+
 	const notifyPermissionRequired = (call: ClassifierCall, decision: SafetyDecision): void => {
 		for (const listener of permissionListeners) {
 			try {
@@ -440,7 +433,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listVisible: () => Array.from(tools.values()),
 		async invoke(call, options) {
 			const outcome = admit(call);
-			if (outcome.kind === "terminal") return outcome.verdict;
+			if (outcome.kind === "terminal") {
+				observeBlockedAttempt(call, outcome.verdict, options);
+				return outcome.verdict;
+			}
 			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision, options);
 			return new Promise<RegistryVerdict>((resolve) => {
 				const parkedCall: ParkedCall = { call, decision: outcome.decision, resolve };
@@ -464,6 +460,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					continue;
 				}
 				if (outcome.kind === "terminal") {
+					observeBlockedAttempt(entry.call, outcome.verdict, entry.options);
 					entry.resolve(outcome.verdict);
 					continue;
 				}
@@ -659,6 +656,10 @@ function buildToolHookInput(
 		actionClass: decision.classification.actionClass,
 		decisionKind: decision.kind,
 	};
+	// Stable call identity for repetition detectors (engine/loop-guard.ts).
+	// Computed for before_tool only; after_tool consumers identify the call
+	// via toolCallId.
+	if (hook === "before_tool") metadata.callFingerprint = hashToolCall(spec.name, call.args ?? {});
 	const validationCommand = detectedValidationCommand(call);
 	if (validationCommand !== null) {
 		metadata.validationCommand = validationCommand;
