@@ -63,7 +63,13 @@ import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } f
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, openLedger } from "./state.js";
-import { countToolCalls, recordToolFinish, snapshotToolStats } from "./tool-stats.js";
+import {
+	countToolCalls,
+	recordToolFinish,
+	snapshotToolStats,
+	summarizeToolActivity,
+	zeroSuccessfulToolNote,
+} from "./tool-stats.js";
 import {
 	type DispatchRequestOrigin,
 	RETRYABLE_OUTCOMES,
@@ -1334,6 +1340,9 @@ export function createDispatchBundle(
 				nodeVersion: process.version,
 				toolCalls: countToolCalls(toolStats),
 				toolStats: snapshotToolStats(toolStats),
+				// Clio-observed telemetry only: an external ACP agent executes its
+				// own tools, so no zero-activity note is derived from this record.
+				toolActivity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
 				safety: {
 					decisions: safetyDecisionCounts,
 					blockedAttempts,
@@ -1388,6 +1397,7 @@ export function createDispatchBundle(
 				costUsd: receipt.costUsd,
 				durationMs,
 				exitCode: receipt.exitCode,
+				toolActivity: receipt.toolActivity ?? null,
 			};
 			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);
@@ -1420,6 +1430,8 @@ export function createDispatchBundle(
 					exitCode: receiptDraft.exitCode,
 					sessionId: receiptDraft.sessionId,
 					tokenCount: receiptDraft.tokenCount,
+					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
+					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
 					staticShellHash: receiptDraft.staticShellHash ?? null,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
@@ -1704,8 +1716,13 @@ export function createDispatchBundle(
 			outcomeDetail: string | null,
 		): RunReceiptDraft => {
 			const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
+			const toolActivity = summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass);
+			// A run that exits 0 with zero successful tool calls keeps its
+			// succeeded outcome (the harness cannot judge semantic completion),
+			// but the receipt must not stay silent about the empty trail.
+			const activityNote = outcome === "succeeded" ? zeroSuccessfulToolNote(toolActivity) : null;
 			const includeDiagnostics = outcome !== "succeeded";
-			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(outcomeDetail, result, includeDiagnostics);
+			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(outcomeDetail ?? activityNote, result, includeDiagnostics);
 			const finalFailureMessage = mergeWorkerDiagnosticFailure(failureMessage, result, includeDiagnostics);
 			const pricing = lifecycle.target.endpoint.pricing;
 			const costUsd = pricing
@@ -1756,6 +1773,7 @@ export function createDispatchBundle(
 				nodeVersion: process.version,
 				toolCalls: countToolCalls(toolStats),
 				toolStats: snapshotToolStats(toolStats),
+				toolActivity,
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				safety: {
 					decisions: safetyDecisionCounts,
@@ -1798,6 +1816,7 @@ export function createDispatchBundle(
 				costUsd: receipt.costUsd,
 				durationMs,
 				exitCode: receipt.exitCode,
+				toolActivity: receipt.toolActivity ?? null,
 			};
 			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);
@@ -1829,6 +1848,8 @@ export function createDispatchBundle(
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					tokenCount: receiptDraft.tokenCount,
+					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
+					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
 					staticShellHash: receiptDraft.staticShellHash ?? null,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,

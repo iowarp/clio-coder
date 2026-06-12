@@ -12,6 +12,8 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadDomains } from "../core/domain-loader.js";
 import { clioDataDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -290,7 +292,36 @@ function rowHeartbeat(row: RunEnvelope): "alive" | "stale" | "dead" | "n/a" {
 	return isProcessAlive(row.pid) ? "alive" : "dead";
 }
 
-function statusSnapshot(): {
+function finiteCount(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function receiptTokenSplit(row: RunEnvelope): { input: number; output: number } | null {
+	const path = row.receiptPath ?? join(clioDataDir(), "receipts", `${row.id}.json`);
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RunReceipt>;
+		return { input: finiteCount(parsed.inputTokenCount), output: finiteCount(parsed.outputTokenCount) };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Input/output token split for a ledger row. Finalized rows carry the split
+ * directly; rows written before the ledger carried it fall back to the
+ * durable receipt so status totals agree with what the receipt records.
+ */
+function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
+	if (row.inputTokenCount !== undefined || row.outputTokenCount !== undefined) {
+		return { input: finiteCount(row.inputTokenCount), output: finiteCount(row.outputTokenCount) };
+	}
+	if (row.endedAt !== null) {
+		return receiptTokenSplit(row) ?? { input: 0, output: 0 };
+	}
+	return { input: 0, output: 0 };
+}
+
+export function statusSnapshot(): {
 	generatedAt: string;
 	running: Array<Record<string, unknown>>;
 	retrying: Array<Record<string, unknown>>;
@@ -318,6 +349,9 @@ function statusSnapshot(): {
 		});
 	const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
 	for (const row of rows) {
+		const split = rowTokenSplit(row);
+		totals.inputTokens += split.input;
+		totals.outputTokens += split.output;
 		totals.totalTokens += row.tokenCount;
 		totals.costUsd += row.costUsd;
 		const startedMs = Date.parse(row.startedAt);
@@ -359,7 +393,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 	}
 	const t = snapshot.totals;
 	process.stdout.write(
-		`totals: tokens=${t.totalTokens} cost=$${t.costUsd.toFixed(4)} runtime=${Math.round(t.runtimeSeconds)}s\n`,
+		`totals: tokens=${t.totalTokens} (in=${t.inputTokens} out=${t.outputTokens}) cost=$${t.costUsd.toFixed(4)} runtime=${Math.round(t.runtimeSeconds)}s\n`,
 	);
 	return 0;
 }

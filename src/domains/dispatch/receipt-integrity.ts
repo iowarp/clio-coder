@@ -121,6 +121,9 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: Rec
 	if (receipt.upstreamResponses !== undefined) {
 		draft.upstreamResponses = receipt.upstreamResponses;
 	}
+	if (receipt.toolActivity !== undefined) {
+		draft.toolActivity = receipt.toolActivity;
+	}
 	if (receipt.skillActivations !== undefined) {
 		draft.skillActivations = receipt.skillActivations;
 	}

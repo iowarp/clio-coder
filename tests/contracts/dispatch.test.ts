@@ -16,6 +16,11 @@ import { buildStableSystemPrompt, createDispatchBundle } from "../../src/domains
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { resolveRunOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
+import {
+	recordToolFinish,
+	summarizeToolActivity,
+	zeroSuccessfulToolNote,
+} from "../../src/domains/dispatch/tool-stats.js";
 import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
@@ -27,6 +32,7 @@ import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../.
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -1315,5 +1321,168 @@ rl.once("line", () => {
 		deepStrictEqual(unknownResponse, { outcome: { outcome: "selected", optionId: "reject2" } });
 		strictEqual(mediator.snapshot().toolCallLog[1]?.decision, "denied");
 		strictEqual(mediator.snapshot().toolCallLog[1]?.reason, "unknown ACP tool: launch_missiles");
+	});
+});
+
+describe("contracts/dispatch tool activity honesty", () => {
+	function instantWorker() {
+		return {
+			pid: 8100,
+			promise: Promise.resolve({ exitCode: 0, signal: null }),
+			events: emptyEvents(),
+			abort: () => {},
+			heartbeatAt: { current: Date.now() },
+		};
+	}
+
+	it("stamps a zero-tool succeeded run with an honest note on receipt, ledger row, and terminal payload", async () => {
+		const context = stubContext();
+		const completed: unknown[] = [];
+		const unsubscribe = context.bus.on(BusChannels.DispatchCompleted, (payload) => {
+			completed.push(payload);
+		});
+		const bundle = createDispatchBundle(context, { spawnWorker: instantWorker });
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "impossible write task" });
+			await drainEvents(handle.events);
+			const receipt = await handle.finalPromise;
+
+			strictEqual(receipt.outcome, "succeeded");
+			strictEqual(receipt.exitCode, 0);
+			strictEqual(receipt.outcomeDetail, "completed without executing any tools");
+			deepStrictEqual(receipt.toolActivity, {
+				calls: 0,
+				succeeded: 0,
+				failed: 0,
+				blocked: 0,
+				mutatingSucceeded: false,
+			});
+			strictEqual(bundle.contract.getRun(handle.runId)?.outcomeDetail, "completed without executing any tools");
+
+			const payload = completed[0] as { outcomeDetail?: string | null; toolActivity?: unknown } | undefined;
+			strictEqual(payload?.outcomeDetail, "completed without executing any tools");
+			deepStrictEqual(payload?.toolActivity, receipt.toolActivity);
+		} finally {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("dispatch tool summary surfaces the zero-tool note to the calling model", async () => {
+		const context = stubContext();
+		const bundle = createDispatchBundle(context, { spawnWorker: instantWorker });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const result = await tool.run({ task: "impossible write task" }, undefined as never);
+			strictEqual(result.kind, "ok");
+			if (result.kind === "ok") {
+				ok(result.output.includes("completed (completed without executing any tools)"), result.output);
+			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("keeps outcomeDetail null when at least one tool call succeeded", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 8101,
+				promise: exit.promise,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+				events: (async function* () {
+					yield {
+						type: "clio_tool_finish",
+						payload: { tool: "read", durationMs: 2, outcome: "ok", decision: "allowed" },
+					};
+				})(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "read something" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "succeeded");
+			strictEqual(receipt.outcomeDetail, null);
+			deepStrictEqual(receipt.toolActivity, {
+				calls: 1,
+				succeeded: 1,
+				failed: 0,
+				blocked: 0,
+				mutatingSucceeded: false,
+			});
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("notes a succeeded run whose tool calls all failed or were blocked", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 8102,
+				promise: exit.promise,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+				events: (async function* () {
+					yield {
+						type: "clio_tool_finish",
+						payload: { tool: "write", durationMs: 2, outcome: "error", decision: "allowed" },
+					};
+					yield {
+						type: "clio_tool_finish",
+						payload: { tool: "bash", durationMs: 1, outcome: "blocked", decision: "blocked" },
+					};
+				})(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "try and fail" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "succeeded");
+			strictEqual(receipt.outcomeDetail, "completed without a successful tool call (2 attempted: 1 failed, 1 blocked)");
+			deepStrictEqual(receipt.toolActivity, {
+				calls: 2,
+				succeeded: 0,
+				failed: 1,
+				blocked: 1,
+				mutatingSucceeded: false,
+			});
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("summarizeToolActivity classifies mutating success through the action classifier", () => {
+		const stats = new Map();
+		recordToolFinish(stats, { tool: "read", durationMs: 1, outcome: "ok" });
+		recordToolFinish(stats, { tool: "write", durationMs: 1, outcome: "ok" });
+		recordToolFinish(stats, { tool: "write", durationMs: 1, outcome: "error" });
+		const classify = (tool: string) => (tool === "write" ? ("write" as const) : ("read" as const));
+		deepStrictEqual(summarizeToolActivity(stats, classify), {
+			calls: 3,
+			succeeded: 2,
+			failed: 1,
+			blocked: 0,
+			mutatingSucceeded: true,
+		});
+		const readsOnly = new Map();
+		recordToolFinish(readsOnly, { tool: "read", durationMs: 1, outcome: "ok" });
+		strictEqual(summarizeToolActivity(readsOnly, classify).mutatingSucceeded, false);
+		strictEqual(zeroSuccessfulToolNote(summarizeToolActivity(readsOnly, classify)), null);
+		strictEqual(
+			zeroSuccessfulToolNote({ calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false }),
+			"completed without executing any tools",
+		);
 	});
 });

@@ -181,10 +181,24 @@ function receiptDetails(receipt: RunReceipt, receiptPath: string | null, summary
 		reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
 		costUsd: receipt.costUsd,
 		toolCalls: receipt.toolCalls,
+		...(receipt.outcome !== undefined ? { outcome: receipt.outcome } : {}),
+		outcomeDetail: receipt.outcomeDetail ?? null,
+		...(receipt.toolActivity !== undefined ? { toolActivity: receipt.toolActivity } : {}),
 		receiptPath,
 		eventCount: summary.count,
 		eventTypes: summary.types,
 	};
+}
+
+/**
+ * Surfaces a succeeded run's outcomeDetail to the calling model. Today that
+ * detail is only set for runs that finished without a successful tool call;
+ * the dispatch summary must not flatter such a run as plainly "completed".
+ */
+function successNote(receipt: RunReceipt): string | null {
+	if (receipt.outcome !== undefined && receipt.outcome !== "succeeded") return null;
+	if (receipt.exitCode !== 0) return null;
+	return receipt.outcomeDetail ?? null;
 }
 
 function dispatchRunHeading(receipt: RunReceipt): string {
@@ -223,8 +237,9 @@ function formatDispatchOutput(
 	const output = summary.lastAssistantText
 		? truncateUtf8(summary.lastAssistantText, maxOutputBytes, TRUNCATION_MARKER)
 		: "(no assistant text captured)";
+	const note = successNote(receipt);
 	return [
-		dispatchRunHeading(receipt),
+		`${dispatchRunHeading(receipt)}${note !== null ? ` (${note})` : ""}`,
 		`agent=${receipt.agentId} target=${receipt.endpointId} model=${receipt.wireModelId} runtime=${receipt.runtimeId}`,
 		`exit=${receipt.exitCode} tokens=${receipt.tokenCount}${reasoning} toolCalls=${receipt.toolCalls} receipt=${receiptPath ?? "n/a"}${failure}`,
 		"",
@@ -311,13 +326,15 @@ function formatBatchOutput(
 		...receipts.flatMap((receipt) => {
 			const summary = summaries.get(receipt.runId);
 			const receiptPath = receiptPaths.get(receipt.runId) ?? "n/a";
+			const note = successNote(receipt);
+			const noteSuffix = note !== null ? ` note=${note}` : "";
 			const failure = receipt.failureMessage ? ` failure=${receipt.failureMessage}` : "";
 			const output =
 				summary?.lastAssistantText && summary.lastAssistantText.length > 0
 					? truncateUtf8(summary.lastAssistantText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured)";
 			return [
-				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.endpointId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath}${failure}`,
+				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.endpointId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath}${noteSuffix}${failure}`,
 				"  agent output:",
 				...output.split("\n").map((line) => `  ${line}`),
 			];
