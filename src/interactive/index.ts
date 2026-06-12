@@ -56,7 +56,7 @@ import {
 	renderBashExecutionEntry,
 } from "./chat-renderer.js";
 import { ClioEditor } from "./clio-editor.js";
-import { createCommandOutputRunIo } from "./command-output.js";
+import { appendNotice, createCommandOutputRunIo } from "./command-output.js";
 import {
 	CONTEXT_ISLAND_WIDTH,
 	createContextActivityStore,
@@ -73,7 +73,7 @@ import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashbo
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
-import { showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
 import { openAuthSelectorOverlay } from "./overlays/auth-selector.js";
@@ -573,7 +573,6 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 	return false;
 }
 
-/** Legacy pure router for the retired status overlay shape. Runtime /status now toggles the footer dashboard. */
 /** Pure overlay key router for the target status overlay. Esc closes; everything else is swallowed. */
 export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
 	if (data === ESC) {
@@ -1342,6 +1341,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const slashCtx: SlashCommandContext = {
 		io,
+		notice: (level, text) => {
+			appendNotice(level, text, {
+				appendReplayBlock: (renderBlock) => chatPanel.appendReplayBlock(renderBlock),
+				requestRender: () => tui.requestRender(),
+			});
+		},
 		dispatch: deps.dispatch,
 		bus: deps.bus,
 		dataDir: deps.dataDir,
@@ -1415,7 +1420,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openDisconnect: (target) => openDisconnectOverlayState(target),
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
-		openStatus: () => toggleStatusFooterState(),
 		openFleet: () => openFleetOverlayState(),
 		openReceipts: () => openReceiptsOverlayState(),
 		openThinking: () => openThinkingOverlayState(),
@@ -1866,10 +1870,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		const endpointId = resolved.endpoint.id;
 		const runtimeId = resolved.runtime.id;
 		const probeTarget = async (dialog: ReturnType<typeof openAuthDialog>): Promise<void> => {
-			dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtimeId}`, "Checking connection..."]);
+			dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
 			const status = await deps.providers.probeEndpoint(endpointId);
 			if (!status) {
-				dialog.controller.setLines([`Target: ${endpointId}`, "Connection failed: target is not configured."]);
+				dialog.controller.setLines([`Target: ${endpointId}`, "Target check failed: target is not configured."]);
 				notify("error", `connect: ${endpointId} is not configured`, `connect:${endpointId}`);
 				return;
 			}
@@ -1881,7 +1885,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			dialog.controller.setLines([
 				`Target: ${endpointId}`,
 				`Runtime: ${runtimeId}`,
-				status.available ? `Connected (${health})` : `Connection failed (${health})`,
+				status.available ? `Target ready (${health})` : `Target check failed (${health})`,
 				detail,
 			]);
 			notify(
@@ -1936,7 +1940,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				} catch (error) {
 					dialog.controller.setLines([
 						`Target: ${endpointId}`,
-						`Connection failed: ${error instanceof Error ? error.message : String(error)}`,
+						`Target check failed: ${error instanceof Error ? error.message : String(error)}`,
 					]);
 					tui.requestRender();
 				}
@@ -2129,7 +2133,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			anchor: "center",
 			width: PERMISSION_OVERLAY_WIDTH,
 			title: permissionOverlayTitle(),
-			footerHint: "[Enter] allow once    [Esc] cancel",
+			footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
 		});
 		tui.requestRender();
 	};
@@ -2227,10 +2231,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.toggleExpanded();
 		renderTaskIsland();
 		tui.requestRender();
-	};
-
-	const toggleStatusFooterState = (): void => {
-		toggleFooterDashboardState();
 	};
 
 	const openFleetOverlayState = (): void => {
@@ -2562,7 +2562,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "dispatch-board";
 		overlayHandle = showClioOverlayFrame(tui, dispatchBoard, {
 			title: "Dispatch Board",
-			footerHint: "[Esc] close",
+			footerHint: buildHint("browse", []),
 			anchor: "center",
 			width: 80,
 		});

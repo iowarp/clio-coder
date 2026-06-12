@@ -12,7 +12,7 @@
  */
 
 import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
-import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const CWD_FALLBACK_OVERLAY_WIDTH = 88;
 
@@ -91,6 +91,6 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 		anchor: "center",
 		width: CWD_FALLBACK_OVERLAY_WIDTH,
 		title: "Session cwd",
-		footerHint: "[Enter] select    [Esc] cancel",
+		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
 	});
 }

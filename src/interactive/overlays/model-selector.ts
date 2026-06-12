@@ -26,6 +26,7 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import {
+	buildHint,
 	clioError,
 	clioFrame,
 	clioTitle,
@@ -480,7 +481,7 @@ export function buildModelItems(deps: {
 			items.push({
 				value: endpoint.id,
 				label: `${row.healthGlyph}  ${runtimeName}`,
-				description: `endpoint=${endpoint.id}  auth=${authText}${status.reason ? `  ${status.reason}` : ""}`,
+				description: `target=${endpoint.id}  auth=${authText}${status.reason ? `  ${status.reason}` : ""}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: endpoint.defaultModel ?? "" });
 			rows.push(row);
@@ -542,7 +543,7 @@ export function buildModelItems(deps: {
 			items.push({
 				value: rowRef,
 				label: `${row.healthGlyph}${favorite ? "★" : scopeHit ? "◇" : active ? "◆" : " "} ${wireModel}`,
-				description: `${row.context}  ${badges}  ${runtimeShortName}  endpoint=${endpoint.id}`,
+				description: `${row.context}  ${badges}  ${runtimeShortName}  target=${endpoint.id}`,
 			});
 			refs.push({ endpoint: endpoint.id, model: wireModel });
 			rows.push(row);
@@ -1026,7 +1027,14 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		anchor: "center",
 		width: overlayWidth,
 		title: "Models",
-		footerHint: "[type] search  [Tab] focus/all  [r] refresh target  [R] refresh all  [*] fav  [Enter] use  [Esc] close",
+		footerHint: buildHint("browse", [
+			{ key: "type", verb: "search" },
+			{ key: "Tab", verb: "focus/all" },
+			{ key: "r", verb: "refresh target" },
+			{ key: "R", verb: "refresh all" },
+			{ key: "*", verb: "fav" },
+			{ key: "Enter", verb: "use" },
+		]),
 	});
 	return {
 		...handle,

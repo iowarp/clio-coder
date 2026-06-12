@@ -9,7 +9,7 @@ import {
 	CombinedAutocompleteProvider,
 	type SlashCommand,
 } from "../engine/tui.js";
-import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";
+import { commandReference } from "./slash-commands.js";
 
 export type SlashAutocompleteCommand = SlashCommand;
 
@@ -42,11 +42,18 @@ function findExecutableOnPath(name: string): string | null {
 }
 
 export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
-	return BUILTIN_SLASH_COMMANDS.map((command) => ({
-		name: command.name,
-		description: command.description,
-		...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
-	}));
+	return commandReference().map((ref) => {
+		const prefix = `/${ref.name}`;
+		const argumentHint = ref.usage
+			.split(" | ")
+			.map((part) => (part.startsWith(`${prefix} `) ? part.slice(prefix.length + 1) : part))
+			.join(" | ");
+		return {
+			name: ref.name,
+			description: ref.description,
+			...(argumentHint !== ref.usage ? { argumentHint } : {}),
+		};
+	});
 }
 
 function isSlashCommandPrefix(lines: string[], cursorLine: number, cursorCol: number): string | null {

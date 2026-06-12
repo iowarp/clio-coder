@@ -7,10 +7,9 @@ import type {
 	RuntimeResolutionDiagnostic,
 } from "../domains/providers/index.js";
 import { type Component, Loader, matchesKey, type OverlayHandle, type TUI } from "../engine/tui.js";
-import { FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 76;
-const HINT = "[r] probe selected  [R] probe all  [Esc] close";
 
 export const PROVIDERS_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 export const PROVIDERS_OVERLAY_DISCOVERED_PREVIEW = 4;
@@ -263,7 +262,10 @@ export function openProvidersOverlay(
 		anchor: "center",
 		width: PROVIDERS_OVERLAY_WIDTH,
 		title: "Targets",
-		footerHint: HINT,
+		footerHint: buildHint("browse", [
+			{ key: "r", verb: "probe selected" },
+			{ key: "R", verb: "probe all" },
+		]),
 	});
 
 	const unsubscribeHealth = options?.bus?.on(BusChannels.ProviderHealth, () => {

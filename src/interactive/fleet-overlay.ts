@@ -2,10 +2,9 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract, DispatchSnapshot } from "../domains/dispatch/contract.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
-import { showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 84;
-const HINT = "[Esc] close";
 const REFRESH_MS = 1000;
 
 export const FLEET_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
@@ -164,7 +163,7 @@ export function openFleetOverlay(
 		anchor: "center",
 		width: FLEET_OVERLAY_WIDTH,
 		title: "Fleet status",
-		footerHint: HINT,
+		footerHint: buildHint("browse", []),
 	});
 
 	const refresh = (): void => {

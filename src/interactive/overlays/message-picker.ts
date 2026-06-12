@@ -3,7 +3,7 @@ import type { SessionContract } from "../../domains/session/contract.js";
 import type { MessageEntry } from "../../domains/session/entries.js";
 import { openSession } from "../../engine/session.js";
 import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
-import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 12;
@@ -122,6 +122,6 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 		anchor: "center",
 		width: MESSAGE_PICKER_OVERLAY_WIDTH,
 		title: "Fork",
-		footerHint: "[Enter] select    [Esc] cancel",
+		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
 	});
 }

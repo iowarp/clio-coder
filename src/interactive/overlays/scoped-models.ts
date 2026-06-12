@@ -1,7 +1,7 @@
 import type { ClioSettings } from "../../core/config.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
 import { matchesKey, type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
-import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { modelsForEndpoint, resolveOverlayRuntimeTarget, runtimeCapabilitySummary } from "./model-selector.js";
 
 export const SCOPED_OVERLAY_WIDTH = 72;
@@ -14,7 +14,7 @@ interface ScopedItemsInput {
 
 /**
  * Build the /scoped-models checklist. Each configured endpoint renders:
- *   - one `endpointId` row (endpoint-level scope, keeps `.model` on cycle)
+ *   - one `endpointId` row (target-level scope, keeps `.model` on cycle)
  *   - one `endpointId/wireModelId` row per candidate wire model so users
  *     can pin a specific model inside the cycle set.
  * Rows pre-check the entries already present in `currentScope`. Globs are
@@ -35,8 +35,8 @@ function buildScopedModelItems(input: ScopedItemsInput): SelectItem[] {
 			value: epKey,
 			label: `${active.has(epKey) ? "[x]" : "[ ]"} ${runtimeName}  ${epKey}`,
 			description: endpointResolution
-				? `endpoint-level scope  ${runtimeCapabilitySummary(endpointResolution)}`
-				: "endpoint-level scope",
+				? `target-level scope  ${runtimeCapabilitySummary(endpointResolution)}`
+				: "target-level scope",
 		});
 		for (const wireModel of modelsForEndpoint(status)) {
 			const key = `${ep.id}/${wireModel}`;
@@ -99,7 +99,10 @@ export function openScopedOverlay(tui: TUI, deps: OpenScopedOverlayDeps): Overla
 		anchor: "center",
 		width: SCOPED_OVERLAY_WIDTH,
 		title: "Scoped models",
-		footerHint: "[Space] toggle    [Enter] commit    [Esc] cancel",
+		footerHint: buildHint("commit", [
+			{ key: "Space", verb: "toggle" },
+			{ key: "Enter", verb: "commit" },
+		]),
 	});
 }
 

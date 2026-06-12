@@ -7,7 +7,7 @@ import {
 	thinkingLevelChoiceLabel,
 } from "../../domains/providers/index.js";
 import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
-import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 
 export const THINKING_OVERLAY_WIDTH = 44;
 
@@ -60,7 +60,7 @@ export function openThinkingOverlay(tui: TUI, deps: OpenThinkingOverlayDeps): Ov
 		anchor: "center",
 		width: THINKING_OVERLAY_WIDTH,
 		title: "Thinking",
-		footerHint: "[Enter] select    [Esc] cancel",
+		footerHint: buildHint("commit", [{ key: "Enter", verb: "select" }]),
 	});
 }
 

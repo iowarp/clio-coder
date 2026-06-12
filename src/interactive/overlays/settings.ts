@@ -12,10 +12,17 @@ import {
 	SelectList,
 	type SettingItem,
 	SettingsList,
+	Text,
 	type TUI,
 } from "../../engine/tui.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
-import { DEFAULT_SELECT_THEME, DEFAULT_SETTINGS_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import {
+	buildHint,
+	DEFAULT_SELECT_THEME,
+	DEFAULT_SETTINGS_THEME,
+	FocusBox,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
 import { modelsForEndpoint } from "./model-selector.js";
 
@@ -23,13 +30,17 @@ class SubmenuWrapper implements Component {
 	constructor(
 		private readonly title: string,
 		private readonly child: Component,
-		private readonly hint: string = "[Enter] confirm    [Esc] cancel",
+		private readonly hint: string = buildHint("commit", [{ key: "Enter", verb: "confirm" }]),
+		private readonly note?: string,
 	) {}
 
 	render(width: number): string[] {
 		const theme = clioTheme();
 		const lines: string[] = [];
 		lines.push(theme.style("title", `  ${this.title}`, { bold: true }));
+		if (this.note) {
+			lines.push(theme.fg("dim", `  ${this.note}`));
+		}
 		lines.push("");
 		lines.push(...this.child.render(width).map((line) => `  ${line}`));
 		lines.push("");
@@ -56,7 +67,7 @@ function selectEndpointSubmenu(providers: ProvidersContract) {
 		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
 		list.onSelect = (item) => done(item.value);
 		list.onCancel = () => done();
-		return new SubmenuWrapper("Select target endpoint", list);
+		return new SubmenuWrapper("Select target", list);
 	};
 }
 
@@ -106,7 +117,12 @@ function editNumberSubmenu(title: string) {
 			}
 		};
 		input.onEscape = () => done();
-		return new SubmenuWrapper(title, input, "[Enter] confirm    [Esc] cancel    (positive numbers only)");
+		return new SubmenuWrapper(
+			title,
+			input,
+			buildHint("commit", [{ key: "Enter", verb: "confirm" }]),
+			"Use a non-negative number.",
+		);
 	};
 }
 
@@ -212,7 +228,7 @@ export function buildSettingItems(
 		},
 		{
 			id: "endpoints.count",
-			label: "endpoints",
+			label: "targets",
 			currentValue: String(endpointCount),
 			description: "Configured targets. Edit settings.yaml or run /targets.",
 		},
@@ -462,12 +478,13 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		},
 		() => deps.onClose(),
 	);
-	const box = new FocusBox(list);
+	const parenthetical = new Text(clioTheme().fg("dim", "(applies to this session and to new sessions)"), 0, 0);
+	const box = new FocusBox([parenthetical, list], { inputTarget: list });
 	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SETTINGS_OVERLAY_WIDTH,
 		title: "Settings",
-		footerHint: "[Enter/Space] edit/cycle    [Esc] close    (applies to this session and to new sessions)",
+		footerHint: buildHint("browse", [{ key: "Enter/Space", verb: "edit/cycle" }]),
 	});
 	return Object.assign(handle, { refreshRows });
 }

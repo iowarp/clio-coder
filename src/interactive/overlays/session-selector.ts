@@ -10,7 +10,7 @@ import {
 	Text,
 	type TUI,
 } from "../../engine/tui.js";
-import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
@@ -262,7 +262,10 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SESSION_OVERLAY_WIDTH,
-		title: "Resume",
-		footerHint: "[type] search    [Enter] resume    [Esc] cancel",
+		title: "Sessions",
+		footerHint: buildHint("commit", [
+			{ key: "type", verb: "search" },
+			{ key: "Enter", verb: "resume" },
+		]),
 	});
 }

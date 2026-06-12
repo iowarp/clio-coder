@@ -2,10 +2,9 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
 import { type OverlayHandle, Text, type TUI } from "../engine/tui.js";
-import { showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 80;
-const HINT = "[Esc] close";
 
 export const COST_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
@@ -187,7 +186,7 @@ export function openCostOverlay(
 		anchor: "center",
 		width: COST_OVERLAY_WIDTH,
 		title: sessionId && sessionId.length > 0 ? `Session usage (${sessionId})` : "Session usage",
-		footerHint: HINT,
+		footerHint: buildHint("browse", []),
 	});
 
 	const refresh = (): void => {

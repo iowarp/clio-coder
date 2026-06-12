@@ -3,11 +3,10 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { type OverlayHandle, Text, type TUI, visibleWidth } from "../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "./context-meter.js";
-import { showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { abbreviateModelId, type ClioToken, clioTheme } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 68;
-const HINT = "[Esc] close";
 
 export const CONTEXT_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
@@ -136,7 +135,7 @@ export function openContextOverlay(
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
 		title: "Context window",
-		footerHint: HINT,
+		footerHint: buildHint("browse", []),
 	});
 
 	const refresh = (): void => {

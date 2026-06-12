@@ -107,7 +107,7 @@ export function terminalFailureFromAssistantMessage(
 			? rawError
 			: stopReason === "aborted"
 				? "request aborted"
-				: "provider returned an error";
+				: "model target returned an error";
 	return { stopReason, errorMessage, message };
 }
 
@@ -128,7 +128,7 @@ function lengthStopMetadata(message: AgentMessage): Record<string, unknown> {
 		kind: "provider_length_stop",
 		stopReason: "length",
 		message:
-			"Provider hit its generation/output limit before a complete assistant response. This is not a safety denial; compacting helps only when the prompt and tool observations are also near the context window.",
+			"Model target hit its generation/output limit before a complete assistant response. This is not a safety denial; compacting helps only when the prompt and tool observations are also near the context window.",
 	};
 	if (usage && typeof usage === "object") {
 		const u = usage as Record<string, unknown>;

@@ -1,5 +1,39 @@
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { RunIo } from "./slash-commands.js";
+import { type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
+
+export type NoticeLevel = "info" | "success" | "warn" | "error";
+
+export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutputSink): void {
+	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trimEnd();
+	if (normalized.trim().length === 0) return;
+	sink.appendReplayBlock((width) => {
+		const theme = clioTheme();
+		let glyph = "";
+		let token: ClioToken = "dim";
+		switch (level) {
+			case "info":
+				glyph = GLYPH.noticeInfo;
+				token = "dim";
+				break;
+			case "success":
+				glyph = GLYPH.noticeSuccess;
+				token = "success";
+				break;
+			case "warn":
+				glyph = GLYPH.noticeWarn;
+				token = "warning";
+				break;
+			case "error":
+				glyph = GLYPH.noticeError;
+				token = "error";
+				break;
+		}
+		const prefix = `${theme.fg(token, glyph)} `;
+		return wrapTextWithAnsi(`${prefix}${normalized}`, width);
+	});
+	sink.requestRender();
+}
 
 export type CommandOutputReplayBlock = (width: number) => string[];
 

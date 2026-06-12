@@ -105,6 +105,10 @@ Clio uses in-process event buses for status and audit surfaces, but safety is no
 - `src/tools/registry.ts` is the admission point for every tool invocation.
 - `src/domains/dispatch/receipt-integrity.ts` and related dispatch files persist receipts used by evidence and cost surfaces.
 
+## Command spec
+
+Interactive slash commands in Clio Coder are governed by a unified declarative command specification registry. This declarative system replaces hand-rolled parsing logic with structured specifications that define the names, aliases, flags, positionals, and subcommands for each entry. The central registry acts as the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser processes user input strings using these declarative specifications to generate structured argument objects and canonical command representations. By deriving all command-related behavior from these specifications, the system ensures consistency across usage help messages and autocomplete overlays.
+
 ---
 
 ## Verification commands
