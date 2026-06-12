@@ -27,6 +27,13 @@ export interface CommandArgsSpec {
 	positionals?: ReadonlyArray<CommandPositionalSpec>;
 	/** Subcommands with their own args, e.g. share export/import. */
 	subcommands?: Record<string, CommandArgsSpec>;
+	/**
+	 * For commands shaped like `<name> <rest...>`, continue recognizing
+	 * declared flags after earlier positionals until the first non-declared-flag
+	 * token starts the rest text. Off by default so established rest commands
+	 * keep their byte-for-byte parsing.
+	 */
+	parseFlagsBeforeRest?: boolean;
 }
 
 export interface ParsedArgs {
@@ -149,19 +156,7 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 	const positionalSpecs = currentSpec.positionals ?? [];
 	let positionalIndex = 0;
 
-	while (index < argsLine.length) {
-		const currentPositionalSpec = positionalSpecs[positionalIndex];
-		if (currentPositionalSpec?.rest) {
-			const restVal = argsLine.slice(index).trim();
-			if (restVal.length > 0) {
-				positionals.push(restVal);
-				rest = restVal;
-			}
-			positionalIndex++;
-			index = argsLine.length;
-			break;
-		}
-
+	const readToken = (): { token: string } | null => {
 		const tokenStart = index;
 		while (index < argsLine.length) {
 			const char = argsLine[index];
@@ -172,7 +167,76 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 			}
 		}
 		const token = argsLine.slice(tokenStart, index);
-		if (token.length === 0) break;
+		if (token.length === 0) return null;
+		return { token };
+	};
+
+	const consumeFlag = (matchedFlagSpec: CommandFlagSpec, token: string): string | null => {
+		const flagName = matchedFlagSpec.name;
+		if (matchedFlagSpec.takesValue) {
+			skipWhitespace();
+			if (index >= argsLine.length) return `Flag ${token} requires a value`;
+			const value = readToken();
+			if (value === null) return `Flag ${token} requires a value`;
+			const val = value.token;
+
+			if (matchedFlagSpec.values && !matchedFlagSpec.values.includes(val)) {
+				return `Invalid value for ${flagName}: ${val}`;
+			}
+
+			if (matchedFlagSpec.repeatable) {
+				const next = [...(flagValues.get(flagName) ?? []), val];
+				flagValues.set(flagName, next);
+				flags.set(flagName, next.join(" "));
+			} else {
+				flagValues.set(flagName, [val]);
+				flags.set(flagName, val);
+			}
+			return null;
+		}
+		flags.set(flagName, true);
+		return null;
+	};
+
+	const errorResult = (error: string): ParsedArgs => ({
+		flags,
+		flagValues,
+		positionals,
+		...(subcommand !== undefined ? { subcommand } : {}),
+		error,
+	});
+
+	while (index < argsLine.length) {
+		const currentPositionalSpec = positionalSpecs[positionalIndex];
+		if (currentPositionalSpec?.rest) {
+			if (currentSpec.parseFlagsBeforeRest) {
+				while (index < argsLine.length) {
+					const tokenStart = index;
+					const read = readToken();
+					if (read === null) break;
+					const matchedFlagSpec = flagSpecs.find((f) => f.name === read.token || f.aliases?.includes(read.token));
+					if (!matchedFlagSpec) {
+						index = tokenStart;
+						break;
+					}
+					const error = consumeFlag(matchedFlagSpec, read.token);
+					if (error) return errorResult(error);
+					skipWhitespace();
+				}
+			}
+			const restVal = argsLine.slice(index).trim();
+			if (restVal.length > 0) {
+				positionals.push(restVal);
+				rest = restVal;
+			}
+			positionalIndex++;
+			index = argsLine.length;
+			break;
+		}
+
+		const read = readToken();
+		if (read === null) break;
+		const token = read.token;
 
 		let isFlag = false;
 		let matchedFlagSpec: CommandFlagSpec | undefined;
@@ -182,73 +246,19 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 			if (matchedFlagSpec) {
 				isFlag = true;
 			} else {
-				return {
-					flags,
-					flagValues,
-					positionals,
-					...(subcommand !== undefined ? { subcommand } : {}),
-					error: `Unknown flag: ${token}`,
-				};
+				return errorResult(`Unknown flag: ${token}`);
 			}
 		}
 
 		if (isFlag && matchedFlagSpec) {
-			const flagName = matchedFlagSpec.name;
-			if (matchedFlagSpec.takesValue) {
-				skipWhitespace();
-				if (index >= argsLine.length) {
-					return {
-						flags,
-						flagValues,
-						positionals,
-						...(subcommand !== undefined ? { subcommand } : {}),
-						error: `Flag ${token} requires a value`,
-					};
-				}
-				const valStart = index;
-				while (index < argsLine.length) {
-					const char = argsLine[index];
-					if (char && !/\s/.test(char)) {
-						index++;
-					} else {
-						break;
-					}
-				}
-				const val = argsLine.slice(valStart, index);
-
-				if (matchedFlagSpec.values && !matchedFlagSpec.values.includes(val)) {
-					return {
-						flags,
-						flagValues,
-						positionals,
-						...(subcommand !== undefined ? { subcommand } : {}),
-						error: `Invalid value for ${flagName}: ${val}`,
-					};
-				}
-
-				if (matchedFlagSpec.repeatable) {
-					const next = [...(flagValues.get(flagName) ?? []), val];
-					flagValues.set(flagName, next);
-					flags.set(flagName, next.join(" "));
-				} else {
-					flagValues.set(flagName, [val]);
-					flags.set(flagName, val);
-				}
-			} else {
-				flags.set(flagName, true);
-			}
+			const error = consumeFlag(matchedFlagSpec, token);
+			if (error) return errorResult(error);
 		} else {
 			if (positionalIndex < positionalSpecs.length) {
 				positionals.push(token);
 				positionalIndex++;
 			} else {
-				return {
-					flags,
-					flagValues,
-					positionals,
-					...(subcommand !== undefined ? { subcommand } : {}),
-					error: `Unexpected argument: ${token}`,
-				};
+				return errorResult(`Unexpected argument: ${token}`);
 			}
 		}
 

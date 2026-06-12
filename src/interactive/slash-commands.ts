@@ -491,6 +491,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Run a fleet agent",
 		kinds: ["run", "run-usage"],
 		args: {
+			parseFlagsBeforeRest: true,
 			flags: [
 				{ name: "--agent-profile", aliases: ["--worker-profile", "--worker"], takesValue: true, valueName: "profile" },
 				{ name: "--runtime", aliases: ["--agent-runtime", "--worker-runtime"], takesValue: true, valueName: "runtimeId" },
