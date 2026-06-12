@@ -107,11 +107,11 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio.message.followUp": {
 		defaultKeys: "alt+enter",
-		description: "Queue the current input as a follow-up message",
+		description: "Queue the current input as a follow-up delivered after the active run (Enter steers the run live)",
 	},
 	"clio.message.dequeue": {
 		defaultKeys: "alt+up",
-		description: "Restore queued follow-up messages to the editor",
+		description: "Restore queued steering and follow-up messages to the editor",
 	},
 	"clio.notifications.dismiss": {
 		defaultKeys: "alt+x",

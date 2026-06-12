@@ -137,12 +137,26 @@ export interface RetryStatusEvent {
 	status: RetryStatusPayload;
 }
 
+/**
+ * How a message typed during a run is delivered. "steer" rides the engine
+ * steering queue and lands before the next model turn (Enter while
+ * streaming); "follow-up" rides the follow-up queue and lands when the run
+ * would otherwise stop (alt+enter).
+ */
+export type QueuedMessageKind = "steer" | "follow-up";
+
+export interface QueuedChatMessage {
+	text: string;
+	kind: QueuedMessageKind;
+}
+
 export interface QueueUpdateEvent {
 	type: "queue_update";
-	followUp: string[];
+	messages: QueuedChatMessage[];
 }
 
 export interface QueuedMessagesSnapshot {
+	steer: ReadonlyArray<string>;
 	followUp: ReadonlyArray<string>;
 }
 
@@ -321,7 +335,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let pendingPromptLogEntry: { previousHash: string | null; hash: string; tokenEstimate: number } | null = null;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
-	const queuedFollowUps: string[] = [];
+	// UI mirror of both engine queues, in enqueue order. Entries leave when
+	// the engine injects them into the transcript (message_end →
+	// appendQueuedUserTurn), when alt+up restores them to the editor, or when
+	// a cancel clears the run.
+	const queuedMirror: QueuedChatMessage[] = [];
 	const persistedUserEchoes: string[] = [];
 	const toolStartTimes = new Map<string, number>();
 	let currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
@@ -454,14 +472,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const emitQueueUpdate = (): void => {
-		emit({ type: "queue_update", followUp: [...queuedFollowUps] });
+		emit({ type: "queue_update", messages: queuedMirror.map((entry) => ({ ...entry })) });
 	};
 
-	const removeQueuedFollowUp = (text: string): void => {
-		const idx = queuedFollowUps.indexOf(text);
+	const removeQueuedMirrorEntry = (text: string): void => {
+		const idx = queuedMirror.findIndex((entry) => entry.text === text);
 		if (idx < 0) return;
-		queuedFollowUps.splice(idx, 1);
+		queuedMirror.splice(idx, 1);
 		emitQueueUpdate();
+	};
+
+	const clearQueuedMirror = (): QueuedChatMessage[] => {
+		const drained = queuedMirror.splice(0, queuedMirror.length);
+		if (runtime) {
+			runtime.agent.clearAllQueues();
+		}
+		if (drained.length > 0) emitQueueUpdate();
+		return drained;
 	};
 
 	const markPersistedUserEcho = async (text: string, prompt: () => Promise<void>): Promise<void> => {
@@ -534,7 +561,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			persistedUserEchoes.splice(persistedEchoIdx, 1);
 			return;
 		}
-		removeQueuedFollowUp(text);
+		removeQueuedMirrorEntry(text);
 		if (!deps.session) return;
 		if (!deps.session.current()) {
 			const settings = deps.getSettings();
@@ -1695,7 +1722,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return userTurn.id;
 	};
 
-	return {
+	/**
+	 * Stranded-steer fallback. The engine inner loop drains steering messages
+	 * after every tool batch, but the outer loop polls only follow-ups before
+	 * `agent_end`, so a steer enqueued in the run's final moments (or during
+	 * an error stop) is never injected. When the run settles with unconsumed
+	 * steer mirror entries, clear them and resubmit the texts as a fresh
+	 * prompt: exactly today's end-of-run delivery. Esc cancel clears both
+	 * queues first, so a cancelled run never resubmits.
+	 */
+	const resubmitStrandedSteers = async (): Promise<void> => {
+		const stranded = queuedMirror.filter((entry) => entry.kind === "steer");
+		if (stranded.length === 0) return;
+		for (const entry of stranded) {
+			const idx = queuedMirror.indexOf(entry);
+			if (idx >= 0) queuedMirror.splice(idx, 1);
+		}
+		runtime?.agent.clearSteeringQueue();
+		emitQueueUpdate();
+		emitNotice("[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.");
+		await api.submit(stranded.map((entry) => entry.text).join("\n\n"));
+	};
+
+	const api: ChatLoop = {
 		queueFollowUp(text: string): boolean {
 			const trimmed = text.trim();
 			if (trimmed.length === 0 || !streaming || !runtime) return false;
@@ -1704,35 +1753,38 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				content: trimmed,
 				timestamp: Date.now(),
 			} as AgentMessage;
-			queuedFollowUps.push(trimmed);
+			queuedMirror.push({ text: trimmed, kind: "follow-up" });
 			runtime.agent.followUp(message);
 			emitQueueUpdate();
 			return true;
 		},
 		clearQueuedFollowUps(): string[] {
-			const restored = [...queuedFollowUps];
-			queuedFollowUps.length = 0;
-			(runtime?.agent as { clearFollowUpQueue?: () => void } | undefined)?.clearFollowUpQueue?.();
-			emitQueueUpdate();
-			return restored;
+			return clearQueuedMirror().map((entry) => entry.text);
 		},
 		queuedMessages(): QueuedMessagesSnapshot {
-			return { followUp: [...queuedFollowUps] };
+			return {
+				steer: queuedMirror.filter((entry) => entry.kind === "steer").map((entry) => entry.text),
+				followUp: queuedMirror.filter((entry) => entry.kind === "follow-up").map((entry) => entry.text),
+			};
 		},
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
 			if (streaming) {
 				const hasImages = options.images !== undefined && options.images.length > 0;
 				const trimmed = text.trim();
 				if (!hasImages && trimmed.length > 0 && runtime) {
+					// Enter while streaming means "correct it now": the engine
+					// steering queue drains after every tool batch, so the text
+					// lands as a user message before the next model turn.
+					// alt+enter (queueFollowUp) keeps the after-this-run intent.
 					const message = {
 						role: "user",
 						content: trimmed,
 						timestamp: Date.now(),
 					} as AgentMessage;
-					queuedFollowUps.push(trimmed);
-					runtime.agent.followUp(message);
+					queuedMirror.push({ text: trimmed, kind: "steer" });
+					runtime.agent.steer(message);
 					emitQueueUpdate();
-					emitNotice("[Clio Coder] follow-up queued for the active run. Press Esc to cancel instead.");
+					emitNotice("[Clio Coder] steering the active run; lands before the next model turn. Press Esc to cancel.");
 					return;
 				}
 				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
@@ -1922,11 +1974,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// Safety net for thrown paths where agent_end never delivered;
 				// no-op when the agent_end flush already ran.
 				flushReconciledSnapshot();
+				// Runs on every exit path (normal settle, catch-arm returns) so
+				// a steer the engine never drained still reaches the model.
+				await resubmitStrandedSteers();
 			}
 		},
 		cancel(): void {
 			const wasStreaming = streaming;
 			retryCountdown?.cancel();
+			// Clear both queues before the abort settles the in-flight prompt:
+			// a cancelled run must not deliver queued steers or follow-ups, and
+			// the stranded-steer fallback must find an empty mirror.
+			clearQueuedMirror();
 			runtime?.agent.abort();
 			if (wasStreaming) {
 				emitNotice("[Clio Coder] active response cancelled.");
@@ -2037,7 +2096,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				cleanupSessionResources(runtime.agent.sessionId);
 			}
 			retryCountdown?.cancel();
-			queuedFollowUps.length = 0;
+			queuedMirror.length = 0;
 			persistedUserEchoes.length = 0;
 			pendingReminders.length = 0;
 			emitQueueUpdate();
@@ -2070,7 +2129,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				cleanupSessionResources(runtime.agent.sessionId);
 			}
 			retryCountdown?.cancel();
-			queuedFollowUps.length = 0;
+			queuedMirror.length = 0;
 			emitQueueUpdate();
 		},
 		async compact(instructions?: string): Promise<void> {
@@ -2107,4 +2166,5 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 		},
 	};
+	return api;
 }

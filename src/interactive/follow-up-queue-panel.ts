@@ -1,8 +1,9 @@
 import { type Component, truncateToWidth } from "../engine/tui.js";
+import type { QueuedChatMessage } from "./chat-loop.js";
 import { clioTheme } from "./theme/index.js";
 
 export interface FollowUpQueuePanel extends Component {
-	setMessages(messages: ReadonlyArray<string>): void;
+	setMessages(messages: ReadonlyArray<QueuedChatMessage>): void;
 }
 
 export interface FollowUpQueuePanelOptions {
@@ -17,7 +18,7 @@ function leftCell(text: string, width: number): string {
 }
 
 export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}): FollowUpQueuePanel {
-	let messages: string[] = [];
+	let messages: QueuedChatMessage[] = [];
 	let dirty = true;
 	let cachedWidth = 0;
 	let cachedKey: string | undefined;
@@ -37,14 +38,14 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 		const bodyWidth = Math.max(12, width - 4);
 		const lines: string[] = [];
 		for (const message of messages) {
-			const preview = truncateToWidth(message.replace(/\s+/g, " "), Math.max(12, bodyWidth - 8), "...", false);
-			lines.push(`queued: ${preview}`);
+			const preview = truncateToWidth(message.text.replace(/\s+/g, " "), Math.max(12, bodyWidth - 8), "...", false);
+			lines.push(`${message.kind === "steer" ? "steer" : "queued"}: ${preview}`);
 		}
 		const restoreKey = key && key.length > 0 ? key : "alt+up";
 		lines.push(`[${restoreKey}] restores to editor`);
 
 		const theme = clioTheme();
-		const titleStr = "Follow-up Queue";
+		const titleStr = "Steering Queue";
 		const top = `${theme.fg("frame", "┌─")}${theme.style("title", titleStr, { bold: true })}${theme.fg("frame", "─".repeat(Math.max(0, bodyWidth - titleStr.length)))}${theme.fg("frame", "┐")}`;
 		const body = lines.map((line) => `${theme.fg("frame", "│")} ${leftCell(line, bodyWidth)} ${theme.fg("frame", "│")}`);
 		const bottom = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(bodyWidth + 2))}${theme.fg("frame", "┘")}`;

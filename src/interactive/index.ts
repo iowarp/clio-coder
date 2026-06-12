@@ -78,6 +78,13 @@ import { openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
 import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
+import {
+	type EditorSteerMention,
+	formatSteerCandidates,
+	parseEditorSteerMention,
+	type RunningDispatchRef,
+	resolveSteerTarget,
+} from "./editor-steer.js";
 import { editTextExternally, resolveExternalEditor } from "./external-editor.js";
 import { openFleetOverlay } from "./fleet-overlay.js";
 import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
@@ -1105,7 +1112,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	}
 	const unsubscribeChat = deps.chat.onEvent((event) => {
 		if (event.type === "queue_update") {
-			followUpQueuePanel.setMessages(event.followUp);
+			followUpQueuePanel.setMessages(event.messages);
 			tui.requestRender();
 			return;
 		}
@@ -1606,6 +1613,52 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		render: () => tui.requestRender(),
 	};
 
+	/**
+	 * Route an `@<target> <text>` line to a running dispatch. Returns false
+	 * when no dispatches are running so the line falls through to normal chat
+	 * submission (where `@word` may be a file reference or plain prose); with
+	 * dispatches running, every parse hit is consumed here and resolution
+	 * failures surface as notices.
+	 */
+	const handleEditorSteerMention = (mention: EditorSteerMention): boolean => {
+		let running: RunningDispatchRef[] = [];
+		try {
+			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
+		} catch {
+			running = [];
+		}
+		if (running.length === 0) return false;
+		const resolution = resolveSteerTarget(mention.target, running);
+		if (resolution.kind === "match") {
+			try {
+				deps.dispatch.steer(resolution.run.runId, mention.text);
+				notify(
+					"success",
+					`steer sent to ${resolution.run.agentId} (${resolution.run.runId})`,
+					`steer:${resolution.run.runId}`,
+				);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				notify("error", `steer to @${mention.target} failed: ${msg}`, `steer:${mention.target}`);
+			}
+			return true;
+		}
+		if (resolution.kind === "ambiguous") {
+			notify(
+				"warning",
+				`@${mention.target} matches ${resolution.candidates.length} runs: ${formatSteerCandidates(resolution.candidates)}; use a runId prefix`,
+				`steer:${mention.target}`,
+			);
+			return true;
+		}
+		notify(
+			"warning",
+			`no running dispatch matches @${mention.target}; running: ${formatSteerCandidates(running)}`,
+			`steer:${mention.target}`,
+		);
+		return true;
+	};
+
 	const submitEditorText = (text: string): void => {
 		const trimmed = text.trim();
 		if (trimmed.length === 0) return;
@@ -1613,6 +1666,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (bashCommand) {
 			if (!deps.chat.isStreaming() && !activeEditorBash) editor.setText("");
 			if (runEditorBash(text)) tui.requestRender();
+			return;
+		}
+		const steerMention = parseEditorSteerMention(trimmed);
+		if (steerMention && handleEditorSteerMention(steerMention)) {
+			editor.addToHistory(text);
+			editor.setText("");
+			tui.requestRender();
 			return;
 		}
 		editor.setText("");
