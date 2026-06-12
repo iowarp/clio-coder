@@ -319,7 +319,7 @@ export function compactSecondaryLine(
 	const barCells = compactContextBarWidth(safeWidth);
 	let left = "";
 	if (context.ledger) {
-		const percent = context.ledger.percent !== null ? `${Math.round(context.ledger.percent)}%` : "?%";
+		const percent = context.ledger.percent !== null ? `${context.ledger.percent.toFixed(1)}%` : "?%";
 		left = `ctx ${renderContextMeterBar(context.ledger, barCells, theme)} ${percent}`;
 	} else {
 		left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));

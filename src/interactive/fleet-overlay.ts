@@ -1,7 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { DispatchContract, DispatchSnapshot } from "../domains/dispatch/contract.js";
-import { type OverlayHandle, Text, type TUI, truncateToWidth } from "../engine/tui.js";
+import { type Component, type OverlayHandle, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 84;
@@ -11,12 +11,12 @@ export const FLEET_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
 function fitLeft(text: string, width: number): string {
 	const clipped = truncateToWidth(text, width, "", true);
-	return `${clipped}${" ".repeat(Math.max(0, width - clipped.length))}`;
+	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
 function fitRight(text: string, width: number): string {
 	const clipped = truncateToWidth(text, width, "", true);
-	return `${" ".repeat(Math.max(0, width - clipped.length))}${clipped}`;
+	return `${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}${clipped}`;
 }
 
 function shortId(runId: string): string {
@@ -47,29 +47,35 @@ function divider(width: number): string {
 	return "─".repeat(width);
 }
 
-function runningHeader(): string {
-	return [
-		fitLeft("run", 10),
-		fitLeft("agent", 12),
-		fitLeft("rt", 5),
-		fitLeft("hb", 6),
-		fitLeft("phase", 11),
-		fitRight("try", 3),
-		fitRight("dep", 3),
-		fitRight("age", 7),
-		fitRight("tokens", 8),
-		fitRight("cost", 9),
-	].join(" ");
+function fitContentLine(text: string, width: number): string {
+	return truncateToWidth(text, Math.max(1, width), "", true);
 }
 
-function retryHeader(): string {
-	return [
-		fitLeft("source", 10),
-		fitLeft("agent", 12),
-		fitRight("try", 3),
-		fitLeft("due", 20),
-		fitLeft("reason", 32),
-	].join(" ");
+function runningHeader(width: number): string {
+	return fitContentLine(
+		[
+			fitLeft("run", 10),
+			fitLeft("agent", 12),
+			fitLeft("rt", 5),
+			fitLeft("hb", 6),
+			fitLeft("phase", 11),
+			fitRight("try", 3),
+			fitRight("dep", 3),
+			fitRight("age", 7),
+			fitRight("tokens", 8),
+			fitRight("cost", 9),
+		].join(" "),
+		width,
+	);
+}
+
+function retryHeader(width: number): string {
+	return fitContentLine(
+		[fitLeft("source", 10), fitLeft("agent", 12), fitRight("try", 3), fitLeft("due", 20), fitLeft("reason", 32)].join(
+			" ",
+		),
+		width,
+	);
 }
 
 function runningRow(row: DispatchSnapshot["running"][number], width: number): string {
@@ -109,47 +115,62 @@ export function formatFleetOverlayBodyLines(
 	snapshot: DispatchSnapshot,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 ): string[] {
+	const width = Math.max(1, Math.floor(contentWidth));
 	const lines: string[] = [];
-	lines.push(`generated ${snapshot.generatedAt}`);
-	lines.push(divider(contentWidth));
-	lines.push(`running (${snapshot.running.length})`);
+	const push = (line: string): void => {
+		lines.push(fitContentLine(line, width));
+	};
+	push(`generated ${snapshot.generatedAt}`);
+	lines.push(divider(width));
+	push(`running (${snapshot.running.length})`);
 	if (snapshot.running.length === 0) {
-		lines.push("  none in this TUI process");
+		push("  none in this TUI process");
 	} else {
-		lines.push(runningHeader());
-		for (const row of snapshot.running) lines.push(runningRow(row, contentWidth));
+		lines.push(runningHeader(width));
+		for (const row of snapshot.running) lines.push(runningRow(row, width));
 	}
 	lines.push("");
-	lines.push(`retrying (${snapshot.retrying.length})`);
+	push(`retrying (${snapshot.retrying.length})`);
 	if (snapshot.retrying.length === 0) {
-		lines.push("  none in this TUI process");
+		push("  none in this TUI process");
 	} else {
-		lines.push(retryHeader());
-		for (const row of snapshot.retrying) lines.push(retryRow(row, contentWidth));
+		lines.push(retryHeader(width));
+		for (const row of snapshot.retrying) lines.push(retryRow(row, width));
 	}
 	lines.push("");
-	lines.push("totals");
-	lines.push(`  ${totalsLine(snapshot.totals)}`);
+	push("totals");
+	push(`  ${totalsLine(snapshot.totals)}`);
 	if (snapshot.running.length === 0 && snapshot.retrying.length === 0) {
 		lines.push("");
-		lines.push("No in-process dispatches are active.");
-		lines.push("Cross-process live retry state is not attached to the TUI; use `clio fleet status`");
-		lines.push("for durable ledger-backed running rows from other Clio processes.");
+		push("No in-process dispatches are active.");
+		push("Cross-process live retry state is not attached to the TUI.");
+		push("Use `clio fleet status` for durable ledger-backed running rows.");
+		push("Rows from other Clio processes are not shown here.");
 	}
 	return lines;
 }
 
-function renderSnapshot(dispatch: DispatchContract): string {
+function renderSnapshot(dispatch: DispatchContract, width = DEFAULT_CONTENT_WIDTH): string[] {
 	try {
-		return formatFleetOverlayBodyLines(dispatch.snapshot(), DEFAULT_CONTENT_WIDTH).join("\n");
+		return formatFleetOverlayBodyLines(dispatch.snapshot(), width);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		return [`fleet snapshot unavailable`, "", message].join("\n");
+		return [`fleet snapshot unavailable`, "", fitContentLine(message, width)];
 	}
 }
 
 export interface OpenFleetOverlayOptions {
 	bus?: SafeEventBus;
+}
+
+class FleetOverlayBody implements Component {
+	constructor(private readonly dispatch: DispatchContract) {}
+
+	render(width: number): string[] {
+		return renderSnapshot(this.dispatch, Math.max(1, Math.floor(width)));
+	}
+
+	invalidate(): void {}
 }
 
 /** Mount the read-only `/fleet` overlay backed by in-process DispatchContract.snapshot(). */
@@ -158,8 +179,8 @@ export function openFleetOverlay(
 	dispatch: DispatchContract,
 	options?: OpenFleetOverlayOptions,
 ): OverlayHandle {
-	const text = new Text(renderSnapshot(dispatch), 0, 0);
-	const handle = showClioOverlayFrame(tui, text, {
+	const body = new FleetOverlayBody(dispatch);
+	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: FLEET_OVERLAY_WIDTH,
 		title: "Fleet status",
@@ -167,8 +188,7 @@ export function openFleetOverlay(
 	});
 
 	const refresh = (): void => {
-		text.setText(renderSnapshot(dispatch));
-		text.invalidate();
+		body.invalidate();
 		tui.requestRender();
 	};
 
