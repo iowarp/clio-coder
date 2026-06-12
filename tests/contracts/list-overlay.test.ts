@@ -157,6 +157,6 @@ describe("contracts/list-overlay", () => {
 		);
 
 		const hint = view.getHint();
-		strictEqual(hint, "[↑↓] select · [type] filter · [Enter/Tab] detail · [Esc] close");
+		strictEqual(hint, "[↑↓] select · [type] filter · [Enter/Tab] detail · [PgUp/PgDn] scroll detail · [Esc] close");
 	});
 });

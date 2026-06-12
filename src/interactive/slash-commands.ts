@@ -6,8 +6,8 @@ import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { resolveModelReference } from "../domains/providers/index.js";
-import type { PromptTemplate, ResourceList, Skill } from "../domains/resources/index.js";
-import { getMarketplaceSkills, parseSkillCommand } from "../domains/resources/index.js";
+import type { PromptTemplate, ResourceList } from "../domains/resources/index.js";
+import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
@@ -26,7 +26,6 @@ export type SlashCommand =
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
-	| { kind: "skills"; query?: string }
 	| { kind: "skill-selector" }
 	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
@@ -206,8 +205,7 @@ export interface SlashCommandContext {
 	shutdown: () => void;
 	runInit: (options: InitCommandOptions) => void;
 	runContextClear: (options: ContextClearCommandOptions) => void;
-	listSkills: () => ResourceList<Skill>;
-	openSkillSelector?: () => void;
+	openSkillsHub?: () => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
 	listAgents: () => ReadonlyArray<AgentSpec>;
@@ -375,7 +373,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skill",
-		description: "Open interactive skill selector or invoke a skill",
+		description: "Open the Skills Hub or invoke a skill",
 		aliases: ["skill:", "skills:"],
 		kinds: ["skill-selector", "skill-invocation"],
 		args: {
@@ -396,61 +394,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind === "skill-selector") {
-				if (ctx.openSkillSelector) {
-					ctx.openSkillSelector();
-				}
+				ctx.openSkillsHub?.();
 			} else if (command.kind === "skill-invocation") {
 				ctx.submitChat(command.text);
 			}
-		},
-	},
-	{
-		name: "skills",
-		description: "Browse or search skills",
-		kinds: ["skills"],
-		args: {
-			positionals: [{ name: "query", required: false, rest: true }],
-		},
-		fromArgs(parsed) {
-			const query = parsed.positionals[0];
-			return { kind: "skills", ...(query ? { query } : {}) };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "skills") return;
-			const list = ctx.listSkills();
-			const query = command.query?.toLowerCase();
-			const matches = (name: string, description: string): boolean =>
-				!query || name.toLowerCase().includes(query) || description.toLowerCase().includes(query);
-			const items = list.items.filter((skill) => matches(skill.name, skill.description));
-			const installedNames = new Set(list.items.map((skill) => skill.name));
-			const marketplace = getMarketplaceSkills().filter(
-				(skill) => !installedNames.has(skill.name) && matches(skill.name, skill.description),
-			);
-			if (items.length === 0 && marketplace.length === 0) {
-				// v023-M04
-				ctx.io.stdout(query ? `\nskills: no matches for "${command.query}"\n` : "\nskills: none\n");
-				return;
-			}
-			const rows = items.map((skill) => {
-				const usage = `/skill:${skill.name}`;
-				const origin = `${skill.scope}/${skill.source}${skill.trusted ? "" : ", untrusted"}`;
-				return `  ${usage.padEnd(26)} ${skill.description}  (${origin})`;
-			});
-			const marketplaceRows = marketplace.map((skill) => {
-				const usage = `/skill:${skill.name}`;
-				const origin = [skill.origin, ...(skill.audit ? [`audit: ${skill.audit}`] : [])].join(", ");
-				return `  ${usage.padEnd(26)} ${skill.description}  (marketplace: ${origin})`;
-			});
-			const sections = [
-				...(rows.length > 0 ? [`skills:\n${rows.join("\n")}`] : []),
-				...(marketplaceRows.length > 0
-					? [`marketplace (installs on first /skill:<name> use):\n${marketplaceRows.join("\n")}`]
-					: []),
-			];
-			const diagnostics =
-				list.diagnostics.length > 0 ? `\n${list.diagnostics.length} skill diagnostic(s) while loading resources.\n` : "\n";
-			// v023-M04
-			ctx.io.stdout(`\n${sections.join("\n\n")}\n${diagnostics}`);
 		},
 	},
 	{

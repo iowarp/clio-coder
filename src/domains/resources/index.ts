@@ -27,6 +27,15 @@ export type { ResourceList, ResourcesContract } from "./contract.js";
 export { createResourcesLoader, type ResourceLoaderOptions } from "./loader.js";
 export { ResourcesManifest } from "./manifest.js";
 export {
+	fetchRemoteMarketplace,
+	fetchRemoteSkillDetail,
+	isSafeSkillName,
+	parseSkillMarkdown,
+	type RemoteMarketplaceOptions,
+	type RemoteSkill,
+	type RemoteSkillDetail,
+} from "./marketplace-remote.js";
+export {
 	expandPromptTemplateInput,
 	loadPromptTemplates,
 	type PromptTemplate,
