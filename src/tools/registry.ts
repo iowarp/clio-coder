@@ -237,6 +237,12 @@ export interface ToolRegistry {
 	 * confirmation. Returns an unsubscribe handle.
 	 */
 	onPermissionRequired(listener: (call: ClassifierCall, decision: SafetyDecision) => void): () => void;
+	/**
+	 * Subscribe to the signal fired when the autonomy mapping auto-denies a
+	 * call (deny dispositions, today only at read-only). The verdict already
+	 * carries the rejection; this exists for operator-facing notices.
+	 */
+	onAutonomyDenied(listener: (call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel) => void): () => void;
 }
 
 export type RegistryVerdict =
@@ -255,6 +261,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const tools = new Map<ToolName, ToolSpec>();
 	const parked: ParkedCall[] = [];
 	const permissionListeners = new Set<(call: ClassifierCall, decision: SafetyDecision) => void>();
+	const autonomyDeniedListeners = new Set<
+		(call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel) => void
+	>();
 
 	const runSpec = async (
 		spec: ToolSpec,
@@ -319,7 +328,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const actionClass = decision.classification.actionClass;
 		if (decision.kind === "ask") {
 			if (level === "read-only") {
-				return { kind: "terminal", verdict: autonomyDenyVerdict(decision, level, call.tool, actionClass) };
+				const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
+				notifyAutonomyDenied(call, verdict.decision, level);
+				return { kind: "terminal", verdict };
 			}
 			if (grant?.actionClass === actionClass) return { kind: "execute", spec, decision };
 			return { kind: "park", decision };
@@ -347,7 +358,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
 		});
 		if (disposition === "deny") {
-			return { kind: "terminal", verdict: autonomyDenyVerdict(decision, level, call.tool, actionClass) };
+			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
+			notifyAutonomyDenied(call, verdict.decision, level);
+			return { kind: "terminal", verdict };
 		}
 		if (disposition === "ask") {
 			return { kind: "park", decision: toAutonomyAskDecision(decision, level, call.tool, actionClass) };
@@ -394,6 +407,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			} catch {
 				// Listener errors never abort admission; they are surfaced via
 				// whatever observability the caller wires up.
+			}
+		}
+	};
+
+	const notifyAutonomyDenied = (call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel): void => {
+		for (const listener of autonomyDeniedListeners) {
+			try {
+				listener(call, decision, level);
+			} catch {
+				// Same contract as permission listeners: never abort admission.
 			}
 		}
 	};
@@ -460,6 +483,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			permissionListeners.add(listener);
 			return () => {
 				permissionListeners.delete(listener);
+			};
+		},
+		onAutonomyDenied(listener) {
+			autonomyDeniedListeners.add(listener);
+			return () => {
+				autonomyDeniedListeners.delete(listener);
 			};
 		},
 	};

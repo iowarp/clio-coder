@@ -70,19 +70,21 @@ function lookupFragment(table: FragmentTable, id: string, role: string): LoadedF
 
 function safetyOneLiner(level: string): string {
 	switch (level) {
+		case "read-only":
+			return "inspect and answer; mutating calls are auto-denied, so propose changes instead.";
 		case "suggest":
-			return "describe the work; do not modify files or run effectful commands.";
+			return "every non-read action parks for one-shot operator approval before it runs.";
 		case "auto-edit":
-			return "edits inside the workspace are allowed; bash runs only allowlisted or project-policy commands.";
+			return "workspace edits and recognized commands run; other bash asks for approval.";
 		case "full-auto":
-			return "act without asking; bash runs only allowlisted or project-policy commands; system_modify still asks and git_destructive is blocked.";
+			return "act without asking; system_modify still asks and git_destructive is blocked by the safety net.";
 		default:
 			return "follow the active safety contract.";
 	}
 }
 
 function renderSafetySection(safetyFragment: LoadedFragment, level: string): string {
-	const oneLine = `Safety: ${level}. ${safetyOneLiner(level)}`;
+	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level)}`;
 	const body = safetyFragment.body.trim();
 	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }
@@ -183,7 +185,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	const identity = lookupFragment(table, inputs.identity, "identity");
 	const operatingContract = lookupFragment(table, inputs.operatingContract, "operating contract");
 	const safety = lookupFragment(table, inputs.safety, "safety");
-	const safetyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
+	const autonomyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
 	const session = inputs.sessionInputs;
 
 	const parts: string[] = [];
@@ -197,7 +199,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 
 	push("identity", identity.body);
 	push("operating-contract", operatingContract.body);
-	push("safety", renderSafetySection(safety, safetyLevel));
+	push("safety", renderSafetySection(safety, autonomyLevel));
 	push("runtime", renderRuntimeBlock(session));
 	push("tool-contract", renderToolContractBlock(session));
 	push("retrieval-hints", renderRetrievalHintsBlock(session));

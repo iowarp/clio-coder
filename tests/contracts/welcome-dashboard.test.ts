@@ -8,7 +8,7 @@ import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js"
 import { buildWelcomeDashboardLines, deriveWelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
 
 const mockSettings: ClioSettings = {
-	safetyLevel: "auto-edit",
+	autonomy: "auto-edit",
 	orchestrator: {
 		endpoint: "mock-endpoint",
 		model: "gemini-3.5-flash",
@@ -107,7 +107,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 		strictEqual(stats.targetLabel, "mock-endpoint");
 		strictEqual(stats.modelLabel, "gemini-3.5-flash");
 		strictEqual(stats.thinkingLevel, "on");
-		strictEqual(stats.safetyLevel, "auto-edit");
+		strictEqual(stats.autonomy, "auto-edit");
 		strictEqual(stats.toolProfile, "clio-policy");
 	});
 

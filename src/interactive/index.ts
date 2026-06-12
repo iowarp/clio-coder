@@ -53,6 +53,8 @@ import type { ImageContent } from "../engine/types.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
+	approvalParkedNotice,
+	autonomyDeniedNotice,
 	budgetAlertNotice,
 	middlewareHookFailedSessionNotice,
 	restartRequiredNotice,
@@ -1274,8 +1276,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
-	// Hot-reload fields (theme, keybindings, safetyLevel) repaint immediately;
-	// the safetyLevel row of an open /settings overlay must follow.
+	// Hot-reload fields (theme, keybindings, autonomy) repaint immediately;
+	// the autonomy row of an open /settings overlay must follow.
 	const unsubscribeConfigHotReloadOverlay = deps.bus.on(BusChannels.ConfigHotReload, () => {
 		settingsOverlayRefresh?.();
 	});
@@ -2161,12 +2163,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		});
 	};
 
+	const currentAutonomy = (): string => deps.getSettings?.().autonomy ?? "auto-edit";
+
 	const openPermissionOverlay = (call: ClassifierCall, decision: SafetyDecision): void => {
 		if (overlayState !== "closed") return;
 		pendingPermission = { call, decision };
 		permissionConfirmJustFired = false;
 		overlayState = "permission-confirm";
-		overlayHandle = showClioOverlayFrame(tui, createPermissionOverlayBody(call, decision), {
+		overlayHandle = showClioOverlayFrame(tui, createPermissionOverlayBody(call, decision, currentAutonomy()), {
 			anchor: "center",
 			width: PERMISSION_OVERLAY_WIDTH,
 			title: permissionOverlayTitle(),
@@ -2177,9 +2181,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const unsubscribePermissionRequired =
 		deps.toolRegistry?.onPermissionRequired((call, decision) => {
+			// The parked notice fires for every park, including ones queued while
+			// the overlay is already open, so the transcript names the asking axis
+			// even when the overlay shows a different call.
+			const parkedNotice = approvalParkedNotice(call.tool, decision, currentAutonomy());
+			appendNotice(parkedNotice.level, parkedNotice.text, busNoticeSink);
 			if (overlayState === "permission-confirm") return;
 			pendingPermission = { call, decision };
 			openPermissionOverlay(call, decision);
+		}) ?? (() => {});
+
+	// Autonomy auto-denials (read-only) never park, so without this notice the
+	// only trace is the rejection in the transcript, which reads like a model
+	// error rather than the dial doing its job.
+	const unsubscribeAutonomyDenied =
+		deps.toolRegistry?.onAutonomyDenied((_call, decision, level) => {
+			const notice = autonomyDeniedNotice(decision, level);
+			appendNotice(notice.level, notice.text, busNoticeSink);
+			tui.requestRender();
 		}) ?? (() => {});
 
 	const closeAskUserSession = (): void => {
@@ -2720,6 +2739,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeSafetyBlocked();
 		unsubscribeMiddlewareHookFailed();
 		unsubscribePermissionRequired();
+		unsubscribeAutonomyDenied();
 		unregisterAskUserHandler?.();
 		unregisterAskUserHandler = null;
 		pendingAskUserCancel?.();

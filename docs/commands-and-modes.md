@@ -144,15 +144,18 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 
 When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
 
-## Operating Posture
+## Operating Posture and Autonomy
 
-Clio Coder operates under a single, unified operating posture. There are no separate read-only, default-deny, or privileged modes, and no user-facing mode toggles.
+Clio Coder operates with a single, unified tool surface. There are no separate tool-visibility modes; what varies is the `autonomy` level (`read-only` | `suggest` | `auto-edit` | `full-auto`), edited in the `/settings` Autonomy & Safety section.
 
-Tool and command execution is governed entirely by:
+Tool and command execution is governed by:
 - **Target Capabilities:** What the selected model target actually supports (such as tools, streaming, and vision).
-- **Safety Policy Engine:** Granular rule packs loaded from `damage-control-rules.yaml`, project policies, and protected artifact paths. See [safety-model.md](safety-model.md) for details on safety gates and default-deny Bash behaviors.
+- **Safety Net:** Granular rule packs loaded from `damage-control-rules.yaml`, project policies, and protected artifact paths; always on, identical at every autonomy level.
+- **Autonomy Mapping:** Once the net passes a call, the level decides whether it runs, asks, or is denied. See [safety-model.md](safety-model.md) for the full matrix.
 
-When an action requires confirmation, the safety engine registers an authorization demand and pauses execution. The TUI displays a queued permission confirmation dialog. The operator can then approve or deny that single action without changing the overall operating posture.
+When an action asks for confirmation, whether from a safety-net rail or from the autonomy level, the call parks and the TUI displays a queued permission dialog whose `Asked by:` line names the asking axis. The operator can approve or deny that single action without changing the level.
+
+Notice vocabulary, one prefix per mechanism: `[safety-net]` for level-independent blocks, `[approval]` for parked calls, `[autonomy]` for read-only denials, and `[middleware]` for hook diagnostics.
 
 ## Dispatch and Built-In Agents
 

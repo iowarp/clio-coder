@@ -1453,9 +1453,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const ensureSessionPrompt = async (agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null> => {
 		if (!deps.prompts) return null;
 		const settings = deps.getSettings();
-		const safetyLevel = settings.safetyLevel ?? "auto-edit";
+		const autonomy = settings.autonomy ?? "auto-edit";
 		const sessionId = deps.session?.current()?.id ?? "";
-		const key = `${agentRuntime.endpointId}|${agentRuntime.wireModelId}|${safetyLevel}|${sessionId}`;
+		const key = `${agentRuntime.endpointId}|${agentRuntime.wireModelId}|${autonomy}|${sessionId}`;
 		if (sessionPrompt && sessionPromptKey === key) {
 			lastSystemPromptReused = true;
 			return sessionPrompt;
@@ -1486,7 +1486,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		try {
 			const result = await deps.prompts.compileSessionPrompt({
 				sessionInputs,
-				safetyLevel,
+				autonomy,
 				cwd: process.cwd(),
 			});
 			const previousHash = sessionPrompt?.systemPromptHash ?? null;

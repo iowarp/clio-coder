@@ -55,7 +55,7 @@ export function createPromptsBundle(
 			}
 			const configContract = config();
 			const settings: Readonly<ClioSettings> | undefined = configContract?.get();
-			const safety = input.safetyLevel ?? settings?.safetyLevel ?? "auto-edit";
+			const safety = input.autonomy ?? settings?.autonomy ?? "auto-edit";
 			const cwd = input.cwd ?? process.cwd();
 			let contextFiles = "";
 			if (!suppressContextFiles) {

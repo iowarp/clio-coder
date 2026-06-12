@@ -582,7 +582,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
-		autonomy: () => (config?.get() ?? readSettings()).safetyLevel ?? "auto-edit",
+		autonomy: () => (config?.get() ?? readSettings()).autonomy ?? "auto-edit",
 	});
 	let askUserHandler: AskUserHandler | null = null;
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>

@@ -92,7 +92,12 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 }
 
 function stubContext(
-	options: { endpoint?: EndpointDescriptor; runtime?: RuntimeDescriptor; recipes?: ReadonlyArray<AgentRecipe> } = {},
+	options: {
+		endpoint?: EndpointDescriptor;
+		runtime?: RuntimeDescriptor;
+		recipes?: ReadonlyArray<AgentRecipe>;
+		status?: Partial<EndpointStatus>;
+	} = {},
 ): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	const endpoint: EndpointDescriptor = options.endpoint ?? {
@@ -121,6 +126,7 @@ function stubContext(
 		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
 		capabilities: { ...runtime.defaultCapabilities },
 		discoveredModels: [],
+		...options.status,
 	};
 	const providers: ProvidersContract = {
 		list: () => [status],
@@ -298,6 +304,53 @@ describe("contracts/dispatch", () => {
 			strictEqual((capturedSpec as WorkerSpec | null)?.wireModelId, "session-model");
 			exit.resolve({ exitCode: 0, signal: null });
 			await handle.finalPromise;
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("canonicalizes worker spec and receipt model ids against a live catalog", async () => {
+		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
+		const canonical = "AgenticQwen-30B-A3B-i1-Q4_K_M-262K";
+		const endpoint: EndpointDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: requested };
+		const runtime: RuntimeDescriptor = {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: (_endpoint, wireModelId) => ({ id: wireModelId, provider: "llamacpp" }) as never,
+		};
+		const context = stubContext({
+			endpoint,
+			runtime,
+			status: { discoveredModels: [canonical], discoveredModelsSource: "probe" },
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let capturedSpec: WorkerSpec | null = null;
+
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 9999,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "canonical model dispatch" });
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual((capturedSpec as WorkerSpec | null)?.wireModelId, canonical);
+			strictEqual((capturedSpec as WorkerSpec | null)?.runtimeResolution?.wireModelId, canonical);
+			strictEqual(receipt.wireModelId, canonical);
 		} finally {
 			await bundle.extension.stop?.();
 		}

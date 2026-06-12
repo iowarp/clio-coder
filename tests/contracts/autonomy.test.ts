@@ -11,8 +11,11 @@ import {
 	type AutonomyLevel,
 	mapAutonomy,
 } from "../../src/domains/safety/autonomy.js";
+import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
+import { approvalParkedNotice, autonomyDeniedNotice } from "../../src/interactive/bus-notices.js";
+import { askAxis, createPermissionOverlayBody } from "../../src/interactive/permission-overlay.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 function mockSpec(name: string, baseActionClass: ActionClass): ToolSpec {
@@ -152,6 +155,69 @@ describe("contracts/autonomy registry admission", () => {
 		strictEqual(registry.hasParkedCalls(), true);
 		registry.cancelParkedCalls("operator declined");
 		strictEqual((await pending).kind, "blocked");
+	});
+});
+
+describe("contracts/autonomy ask provenance: notices and overlay", () => {
+	it("fires onAutonomyDenied at read-only and the [autonomy] notice names the level", async () => {
+		const registry = registryAt("read-only");
+		const denials: Array<{ decision: SafetyDecision; level: string }> = [];
+		registry.onAutonomyDenied((_call, decision, level) => {
+			denials.push({ decision, level });
+		});
+		await registry.invoke(writeCall("notes/autonomy-test.txt"));
+		strictEqual(denials.length, 1);
+		const denied = denials[0];
+		ok(denied);
+		strictEqual(denied.level, "read-only");
+		strictEqual(
+			autonomyDeniedNotice(denied.decision, denied.level).text,
+			"[autonomy] denied write (read-only): Clio proposes changes at this level.",
+		);
+	});
+
+	it("an autonomy ask names the level as the asking axis in notice and overlay", async () => {
+		const registry = registryAt("auto-edit");
+		const asks: SafetyDecision[] = [];
+		registry.onPermissionRequired((_call, decision) => {
+			asks.push(decision);
+			registry.cancelParkedCalls("test done");
+		});
+		await registry.invoke(bashCall("echo hello"));
+		const decision = asks[0];
+		ok(decision);
+		strictEqual(askAxis(decision).kind, "autonomy");
+
+		const notice = approvalParkedNotice("bash", decision, "auto-edit");
+		match(notice.text, /^\[approval\] bash parked \(execute\): asks at autonomy auto-edit\./);
+		ok(notice.text.includes(".clio/safety.yaml"));
+
+		const body = createPermissionOverlayBody(bashCall("echo hello"), decision, "auto-edit").render(60);
+		ok(body.includes("Asked by: autonomy level (auto-edit)"), body.join("\n"));
+	});
+
+	it("a safety-net confirm rail names its rule as the asking axis even at full-auto", async () => {
+		const registry = registryAt("full-auto");
+		const asks: SafetyDecision[] = [];
+		registry.onPermissionRequired((_call, decision) => {
+			asks.push(decision);
+			registry.cancelParkedCalls("test done");
+		});
+		await registry.invoke(bashCall("git stash drop"));
+		const decision = asks[0];
+		ok(decision);
+		const axis = askAxis(decision);
+		strictEqual(axis.kind, "net");
+		ok(axis.kind === "net" && axis.ruleId.includes("stash"), JSON.stringify(axis));
+
+		const notice = approvalParkedNotice("bash", decision, "full-auto");
+		match(notice.text, /^\[approval\] bash parked \(git_destructive\): safety-net rail \S+ asks for confirmation\./);
+
+		const body = createPermissionOverlayBody(bashCall("git stash drop"), decision, "full-auto").render(60);
+		ok(
+			body.some((line) => line.startsWith("Asked by: safety-net rail")),
+			body.join("\n"),
+		);
 	});
 });
 

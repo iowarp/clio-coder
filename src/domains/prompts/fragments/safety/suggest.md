@@ -1,13 +1,13 @@
 ---
 id: safety.suggest
 version: 1
-description: Suggest safety level
+description: Suggest autonomy level
 ---
 
-# Suggest safety
+# Suggest autonomy
 
-At suggest level, describe the work instead of executing it.
-Explain the intended edits, commands, and checks in concrete terms.
-Do not modify files, invoke write actions, or run effectful commands.
-Surface assumptions, risks, and confirmations the user would need.
-Keep the answer actionable enough that execution can follow cleanly.
+At suggest autonomy, the operator drives: every non-read action parks for one-shot approval before it runs.
+Read-class tools run freely. Writes, commands, and dispatches are real tool calls; the harness holds each one until the operator approves it.
+Make each proposed action concrete and minimal so the approval decision is easy.
+Surface assumptions and risks alongside the call, not after it.
+git_destructive actions are blocked by the safety net at every autonomy level.

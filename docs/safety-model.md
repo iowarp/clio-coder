@@ -9,28 +9,54 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 ---
 
-## Autonomy level vs the safety net
+## Two axes: autonomy and the safety net
 
-The `safetyLevel` setting (`suggest` | `auto-edit` | `full-auto`, shown as "autonomy" in the TUI) selects the system-prompt guidance that tells the model how much initiative to take. It is not an enforcement input: every gate described in this document applies identically at every level. The dial controls what the model is asked to do; the safety net controls what the harness allows. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
+The `autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
+
+### Autonomy levels
+
+| Action class | `read-only` | `suggest` | `auto-edit` (default) | `full-auto` |
+|---|---|---|---|---|
+| `read` | allow | allow | allow | allow |
+| `write` | deny | ask | allow | allow |
+| `execute`: builtin no-prompt set + project commands | deny | ask | allow | allow |
+| `execute`: any other bash | deny | ask | ask | allow |
+| `dispatch` | deny | ask | allow | allow |
+| `system_modify` | deny | ask | ask | ask |
+| `git_destructive` | net block | net block | net block | net block |
+| `unknown` | deny | ask | ask | ask |
+
+- **`read-only`**: Clio inspects and answers. Mutating calls are auto-denied with a rejection telling the model to propose the change instead; approvals are never invoked. Denials render as `[autonomy]` notices.
+- **`suggest`**: every non-read action parks for one-shot approval. The operator drives.
+- **`auto-edit`**: workspace edits and recognized commands run; unrecognized bash asks instead of blocking.
+- **`full-auto`**: bash runs without prompting; the net is the protection, not the prompt. `system_modify` still asks because it reaches outside the workspace; `unknown` still asks because the net cannot reason about calls it cannot classify.
+
+The level is persisted as `autonomy` in `settings.yaml`, hot-reloads, and is edited in the `/settings` Autonomy & Safety section.
 
 ---
 
 ## Enforcement path
 
+Every tool call, orchestrator or worker, evaluates in this order:
+
+1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`) that parks at every level; `pass` hands off to step 2.
+2. **Autonomy mapping**: the action class plus the level produce allow, ask, or deny per the matrix above.
+3. **Approvals**: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per `workers.onPermission` in workers, and non-stall denies in delegations.
+
 ```mermaid
 graph TD
     user[User request] --> surface[Provider tool capability]
-    surface --> posture[Single operating posture]
-    posture --> registry[Tool registry admission]
-    registry --> safety[Safety policy engine]
-    safety --> path[Path/project policy]
-    path --> middleware[Middleware + protected artifacts]
+    surface --> registry[Tool registry admission]
+    registry --> net[Safety net verdict: block / confirm / pass]
+    net --> autonomy[Autonomy mapping: allow / ask / deny]
+    autonomy --> approvals[Approvals: park, deny, or resolve per context]
+    approvals --> middleware[Middleware + protected artifacts]
     middleware --> run[Tool execution]
     run --> shape[Result shaping]
     shape --> receipt[Receipts, audit, evidence]
 ```
 
-Key principle: a tool hidden by target capability or explicit suppression is not shown to the model; a tool that is shown still must pass registry and safety admission before it can run.
+Net `confirm` is never auto-allowed by autonomy, including full-auto. Net `block` is never downgraded by anything. A tool hidden by target capability or explicit suppression is not shown to the model; a tool that is shown still must pass this path before it can run.
 
 ---
 
@@ -56,7 +82,7 @@ Target capability, dispatch tool profiles, and recipe constraints can further na
 
 ## Damage-control rules
 
-`damage-control-rules.yaml` is compiled into rule packs. Base rules apply broadly. Some rules require confirmation; hard-block rules are always blocked. Both behaviors apply at every autonomy level.
+`damage-control-rules.yaml` is compiled into rule packs. Base rules apply broadly. Rules with `ask: true` park for one-shot confirmation (for example `git stash drop` and remote-branch deletion); hard-block rules and classifier-pattern `git_destructive` hits are always blocked. Both behaviors apply at every autonomy level.
 
 Examples of patterns the rules target include destructive filesystem operations, dangerous device writes, fork bombs, pipe-to-shell installers, and destructive git operations.
 
@@ -64,14 +90,14 @@ Safety policy metadata records active rule IDs and hashes so receipts/evidence c
 
 ---
 
-## Default-deny Bash
+## Bash recognition
 
-Arbitrary Bash is denied by default. A Bash call can run when it matches one of these paths:
+The policy engine tags every bash command as recognized or unrecognized; the autonomy mapping decides what happens next:
 
-1. a valid `.clio/safety.yaml` command entry;
-2. a narrow built-in allowlist such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`.
+1. **Recognized**: a valid `.clio/safety.yaml` command entry, or the narrow built-in no-prompt set such as `pwd`, simple `ls`, `git status`, bounded `git diff/log`, common test/lint/build commands, `pytest`, `cargo test`, `go test`, or `make test`. Recognized commands run without prompting at `auto-edit` and `full-auto`.
+2. **Unrecognized**: anything else. Unrecognized bash asks for one-shot approval at `auto-edit` and runs at `full-auto`; at `suggest` it asks like every mutation, and at `read-only` it is denied.
 
-Clio denies shell operators such as `&&`, `||`, `;`, pipes, redirects, command substitution, and newlines unless an exact project-policy entry opts in.
+The net still blocks shell operators (`&&`, `||`, `;`, pipes, redirects, command substitution, newlines) at every level unless an exact project-policy entry opts in.
 
 Bash `cwd` is resolved under the workspace root. Escaping the workspace is blocked unless a reviewed project policy permits the exact command/cwd combination.
 
@@ -156,9 +182,9 @@ Dispatch workers run the same HTTP/native/pi-ai-backed runtimes as the orchestra
 
 ---
 
-## Permissions and Headless Behavior
+## Approvals
 
-The safety policy engine classifies actions as allowed, blocked, or requiring permission. When an action requires operator confirmation, the handling depends on whether Clio is running interactively or headlessly:
+An `ask` can come from either axis: a safety-net confirm rail (damage-control `ask` rule, project `requireConfirmation`) or the autonomy mapping. The permission overlay names the asking axis on its `Asked by:` line, and the transcript carries an `[approval]` notice for every parked call. How an ask resolves depends on the context:
 
 ### Interactive TUI Behavior
 
@@ -172,6 +198,11 @@ When executing tasks in headless mode through `clio run`, there is no terminal o
 - **Deterministic Denials:** Any action that requires permission is automatically and deterministically denied by the engine.
 - **Rejection Message:** The engine assigns a standard rejection reason to the denied action: `"clio run cannot confirm permission requests; rerun interactively to approve this action."`
 - **Cancellation of Parked Calls:** Upon a headless denial, all associated parked calls in the tool registry are immediately cancelled, and the headless run exits with an error code, protecting the workspace from unauthorized mutations.
+
+### Workers and delegations
+
+- **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `workers.onPermission`: `deny` continues the run with a rejection; `fail` ends it.
+- **Delegations (ACP)** under `clio-policy` governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.
 
 ---
 
