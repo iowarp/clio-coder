@@ -182,10 +182,49 @@ This is what makes several concurrent Clio terminals safe: each one routes throu
 
 Supporting mechanics:
 
-- **The `/settings` overlay tracks live state.** Every row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the overlay is open. Changing `orchestrator.target` rebases `orchestrator.model` on the new target's default model (same semantics as Alt+L and `clio targets use`), and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
+- **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.endpoint` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
 - **Saved-default writes are serialized across processes.** Every settings writer (interactive write-throughs, `clio targets`, `clio configure`) performs its read-modify-write under an advisory lock file (`settings.yaml.lock`) and lands the result via an atomic temp-file + rename. Two processes saving defaults at the same time can no longer drop each other's patches, readers never block and never see partial files, and a lock left behind by a dead process is taken over after a few seconds.
 - **Recently selected models are runtime state, not configuration.** They live in the data dir (`state/recent-models.json`), so an Alt+L pick no longer rewrites `settings.yaml` and no longer pings the config watcher in every other running session. A legacy `state.recentModels` list in `settings.yaml` is migrated to the data dir on first read and then left alone. `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
 - **ACP sessions get the notices through the session ledger.** Sessions served over the Agent Client Protocol (`clio` in ACP mode) have the same routing isolation, but ACP v1 offers no agent-initiated advisory channel: its `session/update` union only carries prompt-turn content, and out-of-turn updates would break strict clients. The external-divergence and target-removed notices are therefore recorded as `custom` session-ledger entries (`customType: "clio.routing-notice"`), visible to `/resume` and session tooling.
+
+---
+
+## Settings Center
+
+Open `/settings` in the TUI to edit session-visible defaults in a full-screen Center. Wide terminals show sections on the left and the selected section's rows on the right. Narrow terminals stack the same sections inline. Each row shows a human label, a dim config path, the current value, and a bottom description with the edit affordance.
+
+Targets are managed in `/targets`; keybindings are documented in `/help`.
+
+| Section | Editable rows |
+| --- | --- |
+| Safety | Safety level |
+| Orchestrator | Thinking level, Target, Model |
+| Fleet | Default target, Default model |
+| Budget | Session ceiling (USD), Model cycle set |
+| Compaction | Auto-compact, Protected recent turns, Compaction threshold |
+| Retry | Retry transient errors, Max retries, Base delay (ms), Max delay (ms) |
+| Terminal | Terminal progress badges |
+
+Label to config path mapping:
+
+| Label | Config path |
+| --- | --- |
+| Safety level | `safetyLevel` |
+| Thinking level | `orchestrator.thinkingLevel` |
+| Target | `orchestrator.endpoint` |
+| Model | `orchestrator.model` |
+| Default target | `workers.default.endpoint` |
+| Default model | `workers.default.model` |
+| Session ceiling (USD) | `budget.sessionCeilingUsd` |
+| Model cycle set | `scope` |
+| Auto-compact | `compaction.auto` |
+| Protected recent turns | `compaction.excludeLastTurns` |
+| Compaction threshold | `compaction.threshold` |
+| Retry transient errors | `retry.enabled` |
+| Max retries | `retry.maxRetries` |
+| Base delay (ms) | `retry.baseDelayMs` |
+| Max delay (ms) | `retry.maxDelayMs` |
+| Terminal progress badges | `terminal.showTerminalProgress` |
 
 ---
 
