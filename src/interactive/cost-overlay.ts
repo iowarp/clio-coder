@@ -1,7 +1,7 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
-import { type OverlayHandle, Text, type TUI } from "../engine/tui.js";
+import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 
 const DEFAULT_CONTENT_WIDTH = 80;
@@ -162,6 +162,21 @@ export function buildCostSnapshot(observability: ObservabilityContract, sessionI
 export interface OpenCostOverlayOptions {
 	bus?: SafeEventBus;
 	sessionId?: string | null;
+	chat?: {
+		onEvent(handler: (event: { type: string }) => void): () => void;
+	};
+}
+
+class CostOverlayBody implements Component {
+	constructor(private readonly getSnapshot: () => CostSnapshot) {}
+
+	render(width: number): string[] {
+		const contentWidth = Math.max(1, Math.floor(width));
+		const snapshot = this.getSnapshot();
+		return formatCostOverlayBodyLines(snapshot.totalUsd, snapshot.totalTokens, snapshot.rows, contentWidth);
+	}
+
+	invalidate(): void {}
 }
 
 /**
@@ -176,13 +191,8 @@ export function openCostOverlay(
 	options?: OpenCostOverlayOptions,
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
-	const initial = buildCostSnapshot(observability, sessionId);
-	const text = new Text(
-		formatCostOverlayBodyLines(initial.totalUsd, initial.totalTokens, initial.rows, DEFAULT_CONTENT_WIDTH).join("\n"),
-		0,
-		0,
-	);
-	const handle = showClioOverlayFrame(tui, text, {
+	const body = new CostOverlayBody(() => buildCostSnapshot(observability, sessionId));
+	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: COST_OVERLAY_WIDTH,
 		title: sessionId && sessionId.length > 0 ? `Session usage (${sessionId})` : "Session usage",
@@ -190,11 +200,7 @@ export function openCostOverlay(
 	});
 
 	const refresh = (): void => {
-		const snapshot = buildCostSnapshot(observability, sessionId);
-		text.setText(
-			formatCostOverlayBodyLines(snapshot.totalUsd, snapshot.totalTokens, snapshot.rows, DEFAULT_CONTENT_WIDTH).join("\n"),
-		);
-		text.invalidate();
+		body.invalidate();
 		tui.requestRender();
 	};
 
@@ -202,6 +208,13 @@ export function openCostOverlay(
 	if (options?.bus) {
 		unsubscribes.push(options.bus.on(BusChannels.DispatchCompleted, refresh));
 		unsubscribes.push(options.bus.on(BusChannels.DispatchFailed, refresh));
+	}
+	if (options?.chat) {
+		unsubscribes.push(
+			options.chat.onEvent((event) => {
+				if (event.type === "message_end" || event.type === "agent_end") refresh();
+			}),
+		);
 	}
 
 	return {

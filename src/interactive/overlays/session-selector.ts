@@ -133,7 +133,7 @@ export function createSessionOverlayBox(
 	onSelect: (sessionId: string) => void,
 	onClose: () => void,
 	options: { escapeGraceMs?: number } = {},
-): FocusBox {
+): FocusBox & { dispose(): void } {
 	const input = new Input();
 	const noMatchView = new Text("");
 	const allSessions = [...sessions];
@@ -142,7 +142,10 @@ export function createSessionOverlayBox(
 	let list = buildList(filtered);
 	let pendingEscape = "";
 	let pendingEscapeTimer: ReturnType<typeof setTimeout> | null = null;
-	const box = new FocusBox([], { onInput: handleInput });
+	const box = new FocusBox([], { onInput: handleInput }) as FocusBox & { dispose(): void };
+	box.dispose = (): void => {
+		clearPendingEscape();
+	};
 	input.setValue("");
 	input.onSubmit = () => commitSelection();
 	rebuildChildren();
@@ -259,7 +262,7 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 		(sessionId) => deps.onResume(sessionId),
 		() => deps.onClose(),
 	);
-	return showClioOverlayFrame(tui, box, {
+	const handle = showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: SESSION_OVERLAY_WIDTH,
 		title: "Sessions",
@@ -268,4 +271,11 @@ export function openSessionOverlay(tui: TUI, deps: OpenSessionOverlayDeps): Over
 			{ key: "Enter", verb: "resume" },
 		]),
 	});
+	return {
+		...handle,
+		hide(): void {
+			box.dispose();
+			handle.hide();
+		},
+	};
 }

@@ -3,6 +3,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { formatUsd } from "./footer/widgets.js";
 import { type ClioTheme, clioTheme, GLYPH, spinnerFrame } from "./theme/index.js";
 
 export type DispatchBoardStatus =
@@ -98,16 +99,18 @@ function padAnsi(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
+/** Compact duration, matching the footer's turn-summary style. */
 function formatElapsedMs(value: number): string {
-	return `${Math.max(0, Math.round(value))}ms`;
+	const ms = Math.max(0, Math.round(value));
+	if (ms < 1000) return `${ms}ms`;
+	const seconds = ms / 1000;
+	return seconds < 60
+		? `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
+		: `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
 }
 
 function _formatTokenCount(value: number): string {
 	return String(Math.max(0, Math.round(value)));
-}
-
-function formatUsd(value: number): string {
-	return `$${Math.max(0, value).toFixed(6)}`;
 }
 
 export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
@@ -141,8 +144,12 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? "waiting..." : "n/a";
 	const target = `${row.runtimeKind}:${row.endpointId} ${theme.fg("dim", "▸")} ${row.wireModelId}`;
 
-	const prefix = `┌── ${agentLabel} `;
 	const suffix = ` ${elapsed} ──┐`;
+	// The label can be arbitrarily long (agent ids are user data); clamp it so
+	// prefix + suffix never exceed the card width.
+	const labelBudget = Math.max(1, width - visibleWidth(suffix) - visibleWidth("┌──  "));
+	const clampedLabel = truncateToWidth(agentLabel, labelBudget, "...", true);
+	const prefix = `┌── ${clampedLabel} `;
 	const middleWidth = Math.max(0, width - visibleWidth(prefix) - visibleWidth(suffix));
 	const topBorder = `${theme.fg("frame", prefix)}${theme.fg("frame", "─".repeat(middleWidth))}${theme.fg("frame", suffix)}`;
 
@@ -227,7 +234,7 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 	if (visibleRows.length === 0) {
 		const theme = clioTheme();
 		body.push(theme.fg("dim", "No active tasks."));
-		body.push(theme.fg("dim", "Use /dispatch to spawn agents."));
+		body.push(theme.fg("dim", "Use /run or /delegate to spawn agents."));
 	} else {
 		for (let i = 0; i < visibleRows.length; i++) {
 			const row = visibleRows[i];

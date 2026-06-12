@@ -146,9 +146,9 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 
 	const safetyLevel = settings?.safetyLevel ?? "auto-edit";
 	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
-	const compactionThreshold = settings?.compaction?.threshold
-		? `${Math.round(settings.compaction.threshold * 100)}%`
-		: "80%";
+	const threshold = settings?.compaction?.threshold;
+	const compactionThreshold =
+		typeof threshold === "number" && Number.isFinite(threshold) ? `${Math.round(threshold * 100)}%` : "80%";
 
 	let clioMdStatus = "none";
 	let codewikiCount = 0;
@@ -333,16 +333,14 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 }
 
 export class WelcomeDashboard implements Component {
-	private readonly snapshot: WelcomeDashboardStats;
 	private readonly logo: Component | null;
 
-	constructor(deps: WelcomeDashboardDeps) {
-		this.snapshot = deriveWelcomeDashboardStats(deps);
+	constructor(private readonly deps: WelcomeDashboardDeps) {
 		this.logo = createLogoImage(clioTheme());
 	}
 
 	render(width: number): string[] {
-		const lines = buildWelcomeDashboardLines(this.snapshot, width);
+		const lines = buildWelcomeDashboardLines(deriveWelcomeDashboardStats(this.deps), width);
 		if (width < WIDE_MIN || !getCapabilities().images || !this.logo) return lines;
 		return [...this.logo.render(width), ...lines];
 	}
