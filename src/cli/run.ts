@@ -18,6 +18,7 @@ import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
+import { assistantTextFromEvent } from "../tools/dispatch.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
@@ -293,7 +294,13 @@ async function runDispatch(
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
 
+		// Human output is the worker's final answer plus the receipt line. Native
+		// workers carry the answer in the last assistant message_end event;
+		// acp-delegation runs stream it as text_delta increments instead, so the
+		// accumulated deltas serve as the fallback. Raw event names are noise for
+		// a human reader and stay --json-only.
 		let accumulatedText = "";
+		let lastAssistantText = "";
 		for await (const event of handle.events) {
 			if (parsed.json) {
 				process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -303,17 +310,18 @@ async function runDispatch(
 			if (e.type === "text_delta" && typeof e.text === "string") {
 				accumulatedText += e.text;
 			}
-			if (e.type && e.type !== "heartbeat" && e.type !== "text_delta") {
-				process.stderr.write(`${e.type}\n`);
-			}
-		}
-
-		if (!parsed.json) {
-			process.stdout.write(accumulatedText);
+			const assistantText = assistantTextFromEvent(event);
+			if (assistantText.length > 0) lastAssistantText = assistantText;
 		}
 
 		const receipt = await handle.finalPromise;
-		process.stdout.write(`\n${parsed.json ? JSON.stringify(receipt, null, 2) : formatReceipt(receipt)}\n`);
+		if (parsed.json) {
+			process.stdout.write(`\n${JSON.stringify(receipt, null, 2)}\n`);
+		} else {
+			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
+			if (answer.length > 0) process.stdout.write(`${answer}\n`);
+			process.stdout.write(`${formatReceipt(receipt)}\n`);
+		}
 
 		process.off("SIGINT", onSignal);
 		process.off("SIGTERM", onSignal);

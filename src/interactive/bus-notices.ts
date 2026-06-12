@@ -33,10 +33,10 @@ export function budgetAlertNotice(payload: unknown): BusNotice | null {
 	if (payload.level === "over") {
 		return {
 			level: "error",
-			text: `[budget] session spend ${spend} exceeded. Dispatches are not blocked; raise budget.sessionCeilingUsd or wind down.`,
+			text: `[budget] session spend ${spend} exceeded. New dispatches are denied at admission; raise budget.sessionCeilingUsd or wind down.`,
 		};
 	}
-	return { level: "warn", text: `[budget] session spend ${spend} reached.` };
+	return { level: "warn", text: `[budget] session spend ${spend} reached. New dispatches are denied at admission.` };
 }
 
 /**

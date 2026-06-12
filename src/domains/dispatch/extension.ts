@@ -736,6 +736,24 @@ export function createDispatchBundle(
 	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 
 	/**
+	 * Budget admission preflight denial. The dispatch dies before any worker or
+	 * run row exists, so without this denied tool_call row the audit log would
+	 * carry no trace that the admission gate refused the dispatch.
+	 */
+	function denyDispatchForBudget(preflight: { currentUsd: number; ceilingUsd: number }, agentId: string): never {
+		const reason = `budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`;
+		safety.audit.recordToolCall?.({
+			tool: "dispatch",
+			classification: { actionClass: "dispatch", reasons: ["budget admission preflight"] },
+			decision: "denied",
+			reasons: [reason],
+			reasonCode: "budget-ceiling",
+			args: { agentId },
+		});
+		throw new Error(`dispatch: admission denied: ${reason}`);
+	}
+
+	/**
 	 * In-memory retry queue (Symphony §14.3: it does not survive restart and
 	 * must not pretend to). Keyed by the finished run's id; backoff state is
 	 * keyed by the retry chain's rootRunId.
@@ -1104,9 +1122,7 @@ export function createDispatchBundle(
 		if (scheduling) {
 			const preflight = scheduling.preflight();
 			if (preflight.verdict === "over" || preflight.verdict === "at") {
-				throw new Error(
-					`dispatch: admission denied: budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
-				);
+				denyDispatchForBudget(preflight, req.agentId);
 			}
 		}
 
@@ -1504,9 +1520,7 @@ export function createDispatchBundle(
 		if (scheduling) {
 			const preflight = scheduling.preflight();
 			if (preflight.verdict === "over" || preflight.verdict === "at") {
-				throw new Error(
-					`dispatch: admission denied: budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`,
-				);
+				denyDispatchForBudget(preflight, req.agentId);
 			}
 		}
 

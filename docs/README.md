@@ -31,7 +31,7 @@ current source, tests, and `CHANGELOG.md`.
 | Source-first docs workflow, mapping matrix, and alpha wording guidance | [documentation-guide.md](documentation-guide.md) ([Interactive Blueprint](html/documentation_blueprint.html)) |
 
 Every project Clio works in gets its context from a checked-in `CLIO.md`,
-bootstrapped and maintained by `clio init`. The root
+bootstrapped and maintained by `clio context-init`. The root
 [CLIO.md](../CLIO.md) of this repository is the maintained reference example
 of the format.
 

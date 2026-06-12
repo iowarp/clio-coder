@@ -60,7 +60,7 @@ while keeping every privileged action gated and auditable.
 - **ACP interop.** `clio acp` serves the Agent Client Protocol over stdio for
   ACP frontends, and dispatch can delegate tasks to external ACP agents while
   Clio mediates permissions.
-- **Project context and skills.** `clio init` bootstraps a checked-in
+- **Project context and skills.** `clio context-init` bootstraps a checked-in
   `CLIO.md` as the canonical project guide, and reusable `SKILL.md` guides
   load on demand from per-user and per-project discovery roots, including
   cross-harness layouts.
@@ -146,7 +146,7 @@ configuration in depth is covered by
 ## Project Context: CLIO.md
 
 Clio loads a checked-in `CLIO.md` as the canonical project guide on every
-session. Run `clio init` in your repository to bootstrap one: the bootstrap
+session. Run `clio context-init` in your repository to bootstrap one: the bootstrap
 agent grounds it in your real source structure and can adopt existing
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
 provenance and conflict reporting.

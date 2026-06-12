@@ -117,7 +117,12 @@ function textFromContent(content: unknown): string {
 		.join("");
 }
 
-function assistantTextFromEvent(event: unknown): string {
+/**
+ * The worker's answer is the text of the last assistant `message_end` event.
+ * Shared with the headless `clio run --agent` path so both surfaces extract
+ * the final answer from the same event shape.
+ */
+export function assistantTextFromEvent(event: unknown): string {
 	if (!isRecord(event) || event.type !== "message_end" || !isRecord(event.message)) return "";
 	if (event.message.role !== "assistant") return "";
 	return textFromContent(event.message.content).trim();

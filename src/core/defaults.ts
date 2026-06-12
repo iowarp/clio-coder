@@ -279,7 +279,7 @@ scope: []
 
 # /models focused picker. Favorites are exact "target/model" refs shown before
 # the full search catalog. Recently selected models are runtime state and live
-# in the data dir (state/recent-models.json), not in this file.
+# in the state dir (recent-models.json), not in this file.
 modelSelector:
   favorites: []
   recentLimit: 12

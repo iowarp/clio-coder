@@ -417,8 +417,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		extra: Partial<CaptureContextSnapshotInput> = {},
 	): ContextSnapshot => {
 		const details = agentRuntime.runtimeResolution.contextWindowDetails;
+		// The snapshot row belongs to the named Clio session whose ledger it is
+		// appended to; the engine agent's own sessionId is unset in practice.
 		return captureContextSnapshot({
-			sessionId: agentRuntime.agent.sessionId ?? "unknown",
+			sessionId: deps.session?.current()?.id ?? agentRuntime.agent.sessionId ?? "unknown",
 			turnId,
 			providerId: agentRuntime.targetId,
 			runtimeId: agentRuntime.runtimeId,

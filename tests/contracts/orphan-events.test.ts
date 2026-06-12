@@ -37,12 +37,16 @@ describe("budget alert notice", () => {
 		ok(at);
 		strictEqual(at.level, "warn");
 		match(at.text, /\$5\.00 of \$5\.00/);
+		// Dispatch admission really denies at the ceiling; the notice must say
+		// so instead of claiming dispatches are not blocked.
+		match(at.text, /denied at admission/);
 
 		const over = budgetAlertNotice({ level: "over", currentUsd: 6.5, ceilingUsd: 5 });
 		ok(over);
 		strictEqual(over.level, "error");
 		match(over.text, /\$6\.50 of \$5\.00/);
 		match(over.text, /sessionCeilingUsd/);
+		match(over.text, /denied at admission/);
 	});
 
 	it("ignores malformed payloads", () => {
