@@ -35,8 +35,8 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio auth login <target-or-runtime>` | Add credentials through the supported flow. |
 | `clio auth logout <target-or-runtime>` | Remove stored credentials. |
 | `clio doctor [--fix]` | Diagnose state; with `--fix`, repair or create missing state. |
-| `clio reset [--state\|--auth\|--config\|--all]` | Reset selected Clio Coder state. |
-| `clio uninstall [--keep-config] [--keep-data]` | Remove Clio Coder state and print uninstall guidance. |
+| `clio reset [--state\|--data\|--cache\|--auth\|--config\|--all]` | Reset selected Clio Coder state. `--state` is the default level. |
+| `clio uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
 | `clio upgrade` | Check for and apply runtime upgrades. |
 | `clio agents` | List discovered agent specs. |
 | `clio components [--json]` | List behavior-affecting harness components. |
@@ -51,7 +51,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio share export --out <path>` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio share import <path> [--dry-run] [--force]` | Import a share archive with conflict reporting. |
 | `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
-| `clio init [--yes] [--preview|--adopt]` | Bootstrap or adopt agent configs into `CLIO.md`. |
+| `clio context-init [--yes] [--preview|--heuristic|--adopt]` | Explore the repo and bootstrap project context: `CLIO.md`, codewiki, handoff. |
 
 ## Headless Run Flags
 
@@ -225,7 +225,7 @@ credentials are available.
 ## Project Context
 
 Clio uses the nearest checked-in `CLIO.md` as the canonical project guide. Run
-`/init` in the TUI or `clio init` from the shell to create or refresh it.
+`/context-init` in the TUI or `clio context-init` from the shell to create or refresh it.
 During adoption, Clio can fold useful content from supported agent instruction
 files into `CLIO.md` with provenance.
 
@@ -298,7 +298,7 @@ The detail pane displays structured descriptions, usage, or state metadata using
 | Source changes do not appear | Re-run `npm run build`; linked CLI points at `dist/`. |
 | Session replay looks incomplete | Confirm durable session entries exist for the relevant tool, bash, or display activity. |
 | Doctor reports stale state metadata | Run `clio doctor --fix`; upgrades also refresh install metadata after reinstalling. |
-| You need a clean start | Use `clio reset --state`, `--auth`, `--config`, or `--all`. |
+| You need a clean start | Use `clio reset --state`, `--data`, `--cache`, `--auth`, `--config`, or `--all`. |
 
 For issue reports, include `clio --version`, `node --version`, `clio doctor`,
 `clio targets`, the command you ran, the target/model, expected behavior, and

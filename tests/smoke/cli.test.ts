@@ -179,6 +179,15 @@ function seedOpenAICompatOrchestrator(configDir: string, url: string): void {
 	writeFileSync(p, patched, "utf8");
 }
 
+function seedOpenAICompatFleetDefault(configDir: string): void {
+	const p = join(configDir, "settings.yaml");
+	const yaml = readFileSync(p, "utf8");
+	const patched = yaml
+		.replace(/^ {4}target: null$/m, "    target: mock-chat")
+		.replace(/^ {4}model: null$/m, "    model: mock-model");
+	writeFileSync(p, patched, "utf8");
+}
+
 function seedUnregisteredRuntimeTarget(configDir: string): void {
 	const p = join(configDir, "settings.yaml");
 	const yaml = readFileSync(p, "utf8");
@@ -322,6 +331,31 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "mock reply\n");
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("prints the worker final answer for headless --agent dispatch", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("dispatch mock answer");
+		const project = join(scratch.dir, "project");
+		mkdirSync(project, { recursive: true });
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			seedOpenAICompatFleetDefault(join(scratch.dir, "config"));
+			const result = await runCli(["--no-context-files", "run", "--agent", "coder", "say hi"], {
+				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				cwd: project,
+				timeoutMs: 30_000,
+			});
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			match(result.stdout, /dispatch mock answer/);
+			match(result.stdout, /receipt: /);
+			// Human output carries the answer and the receipt, not the raw
+			// event-name stream the worker emits.
+			ok(!/^message_update$/m.test(result.stdout), `stdout=${result.stdout}`);
+			ok(!/^message_update$/m.test(result.stderr), `stderr=${result.stderr}`);
 		} finally {
 			await closeServer(fixture.server);
 		}

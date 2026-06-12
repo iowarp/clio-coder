@@ -329,7 +329,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (decision.kind === "ask") {
 			if (level === "read-only") {
 				const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
-				recordRegistryDisposition(call, verdict.decision, "denied");
+				recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: `autonomy:${level}` });
 				notifyAutonomyDenied(call, verdict.decision, level);
 				return { kind: "terminal", verdict };
 			}
@@ -344,7 +344,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "execute", spec, decision };
 		}
 		if (actionClass === "git_destructive") {
-			recordRegistryDisposition(call, decision, "blocked", [`action ${actionClass} is hard-blocked`]);
+			recordRegistryDisposition(call, decision, "blocked", {
+				reasons: [`action ${actionClass} is hard-blocked`],
+				reasonCode: "classification:git_destructive",
+			});
 			return {
 				kind: "terminal",
 				verdict: {
@@ -361,7 +364,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		});
 		if (disposition === "deny") {
 			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
-			recordRegistryDisposition(call, verdict.decision, "denied");
+			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: `autonomy:${level}` });
 			notifyAutonomyDenied(call, verdict.decision, level);
 			return { kind: "terminal", verdict };
 		}
@@ -378,17 +381,22 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		call: ClassifierCall,
 		decision: SafetyDecision,
 		auditDecision: "allowed" | "blocked" | "permission_requested" | "denied",
-		reasons?: ReadonlyArray<string>,
+		overrides?: { reasons?: ReadonlyArray<string>; reasonCode?: string },
 	): void => {
 		// Row sequence for net-pass calls: safety.evaluate writes `classified`;
 		// registry admission writes the final autonomy disposition. Confirmed
 		// re-admissions keep their existing `allowed` row from safety.evaluate.
+		// When the registry, not the policy engine, made the final call, the
+		// caller passes a reasonCode override so the row does not repeat the
+		// net pass's "allowed" code on a non-allowed decision.
+		const reasons = overrides?.reasons;
 		deps.safety.audit.recordToolCall?.({
 			tool: call.tool,
 			classification: decision.classification,
 			decision: auditDecision,
 			args: call.args,
 			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+			...(overrides?.reasonCode !== undefined ? { reasonCode: overrides.reasonCode } : {}),
 			...(reasons !== undefined ? { reasons } : decision.kind === "allow" ? {} : { reasons: [decision.rejection.detail] }),
 		});
 	};

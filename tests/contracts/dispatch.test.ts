@@ -27,6 +27,7 @@ import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
+import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
@@ -98,6 +99,8 @@ function stubContext(
 		runtime?: RuntimeDescriptor;
 		recipes?: ReadonlyArray<AgentRecipe>;
 		status?: Partial<TargetStatus>;
+		budgetVerdict?: "under" | "at" | "over";
+		auditSink?: ToolCallAuditInput[];
 	} = {},
 ): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -188,7 +191,12 @@ function stubContext(
 			confirmed: CONFIRMED_SCOPE,
 		},
 		isSubset,
-		audit: { recordCount: () => 0 },
+		audit: {
+			recordCount: () => 0,
+			...(options.auditSink !== undefined
+				? { recordToolCall: (input: ToolCallAuditInput) => options.auditSink?.push(input) }
+				: {}),
+		},
 	};
 
 	const recipes: ReadonlyArray<AgentRecipe> = options.recipes ?? [
@@ -223,9 +231,12 @@ function stubContext(
 		if (name === "scheduling")
 			return {
 				ceilingUsd: () => 5,
-				checkCeiling: () => "under",
+				checkCeiling: () => options.budgetVerdict ?? "under",
 				raiseCeiling: () => {},
-				preflight: () => ({ verdict: "under", currentUsd: 0, ceilingUsd: 5 }),
+				preflight: () => {
+					const verdict = options.budgetVerdict ?? "under";
+					return verdict === "under" ? { verdict, currentUsd: 0, ceilingUsd: 5 } : { verdict, currentUsd: 5, ceilingUsd: 5 };
+				},
 				activeWorkers: () => 0,
 				tryAcquireWorker: () => true,
 				releaseWorker: () => {},
@@ -269,6 +280,39 @@ describe("contracts/dispatch", () => {
 			strictEqual(receipt.agentId, "coder");
 			strictEqual(receipt.task, "single dispatch");
 			ok(receipt.integrity?.digest);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("denies dispatch at the budget ceiling and writes a denied audit row", async () => {
+		const auditRows: ToolCallAuditInput[] = [];
+		const context = stubContext({ budgetVerdict: "at", auditSink: auditRows });
+		let spawned = false;
+
+		const bundle = createDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("worker must not spawn past a budget denial");
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "budget denied dispatch" }),
+				/dispatch: admission denied: budget ceiling crossed: \$5\.0000 \/ \$5\.0000/,
+			);
+			strictEqual(spawned, false);
+			// The denial happens before any run row or receipt exists; the audit
+			// log must still state what happened, with the budget reason.
+			strictEqual(auditRows.length, 1);
+			const row = auditRows[0];
+			ok(row);
+			strictEqual(row.tool, "dispatch");
+			strictEqual(row.decision, "denied");
+			strictEqual(row.reasonCode, "budget-ceiling");
+			match(row.reasons?.[0] ?? "", /budget ceiling crossed/);
 		} finally {
 			await bundle.extension.stop?.();
 		}

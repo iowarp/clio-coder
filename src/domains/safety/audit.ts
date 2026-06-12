@@ -26,6 +26,11 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
  * Older audit files written before the discriminator existed have rows with
  * the tool_call shape but no `kind` field. Any future reader should treat a
  * missing `kind` as `tool_call`.
+ *
+ * Rows flush from concurrent producers (orchestrator, workers, bus
+ * subscribers) and are NOT time-ordered within a file. File order is an
+ * implementation accident, never a contract: every reader must sort rows by
+ * `ts` before reasoning about sequence.
  */
 
 export interface ToolCallAuditRecord {
@@ -56,6 +61,13 @@ export interface ToolCallAuditInput {
 	args?: unknown;
 	policy?: SafetyPolicyDecision;
 	reasons?: ReadonlyArray<string>;
+	/**
+	 * Reason code of the final decision. Set this when the row's decision was
+	 * made by a later axis than the policy engine (autonomy denial, budget
+	 * admission): the policy's own reasonCode describes a net pass ("allowed")
+	 * and would misstate why the call was denied.
+	 */
+	reasonCode?: string;
 	now?: Date;
 }
 
@@ -189,7 +201,8 @@ export function buildAuditRecord(input: ToolCallAuditInput): ToolCallAuditRecord
 	};
 	if (input.posture !== undefined) record.posture = input.posture;
 	if (input.policy?.ruleId !== undefined) record.ruleId = input.policy.ruleId;
-	if (input.policy?.reasonCode !== undefined) record.reasonCode = input.policy.reasonCode;
+	const reasonCode = input.reasonCode ?? input.policy?.reasonCode;
+	if (reasonCode !== undefined) record.reasonCode = reasonCode;
 	if (input.policy?.policySource !== undefined) record.policySource = input.policy.policySource;
 	if (input.policy?.policyHash !== undefined) record.policyHash = input.policy.policyHash;
 	if (input.policy?.command !== undefined) record.command = redactString(input.policy.command);

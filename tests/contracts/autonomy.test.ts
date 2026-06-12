@@ -431,6 +431,9 @@ describe("contracts/autonomy audit honesty", () => {
 			denied.reasons.some((reason) => reason.includes("autonomy read-only")),
 			JSON.stringify(denied.reasons),
 		);
+		// The denied row's reasonCode must reflect the final decision (the
+		// autonomy axis), not repeat the policy engine's net-pass "allowed".
+		strictEqual(denied.reasonCode, "autonomy:read-only");
 	});
 
 	it("suggest autonomy park writes classified then permission_requested at park time", async () => {

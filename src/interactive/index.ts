@@ -1294,8 +1294,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	});
 	// Budget ceiling visibility. Scheduling emits budget.alert on enqueue when
-	// session spend meets or crosses the ceiling but never rejects the run;
-	// without this subscriber the alert dies on the bus.
+	// session spend meets or crosses the ceiling, and dispatch admission denies
+	// new dispatches at that point; this notice tells the operator why.
 	const unsubscribeBudgetAlert = deps.bus.on(BusChannels.BudgetAlert, (payload) => {
 		const notice = budgetAlertNotice(payload);
 		if (notice === null) return;
