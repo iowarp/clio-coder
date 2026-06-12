@@ -5,7 +5,11 @@ import type { MiddlewareDiagnostic } from "../../src/domains/middleware/runtime.
 import { createMiddlewareContractFromSnapshot } from "../../src/domains/middleware/snapshot.js";
 import { MIDDLEWARE_EFFECT_KINDS, MIDDLEWARE_HOOKS } from "../../src/domains/middleware/types.js";
 import { validateMiddlewareEffect, validateMiddlewareRule } from "../../src/domains/middleware/validate.js";
-import { middlewareHookFailedNotice } from "../../src/interactive/bus-notices.js";
+import {
+	middlewareBudgetWarningKey,
+	middlewareHookFailedNotice,
+	middlewareHookFailedSessionNotice,
+} from "../../src/interactive/bus-notices.js";
 
 describe("contracts/middleware-cutover end-state enums", () => {
 	it("the hook enum is exactly the five designed lifecycle events", () => {
@@ -103,6 +107,74 @@ describe("contracts/middleware-cutover hookFailed notice formatting", () => {
 		});
 		strictEqual(budget?.level, "warn");
 		ok(budget.text.includes("14.2ms") && budget.text.includes("10ms"));
+	});
+
+	it("suppresses repeated budget warnings per registration and hook", () => {
+		const seen = new Set<string>();
+		const first = middlewareHookFailedSessionNotice(
+			{
+				kind: "budget_exceeded",
+				registrationId: "observer.file-mutation",
+				hook: "after_tool",
+				at: Date.now(),
+				elapsedMs: 117.7,
+				budgetMs: 10,
+			},
+			seen,
+		);
+		strictEqual(first?.level, "warn");
+		ok(first.text.includes("further budget warnings for this hook suppressed"));
+
+		const repeated = middlewareHookFailedSessionNotice(
+			{
+				kind: "budget_exceeded",
+				registrationId: "observer.file-mutation",
+				hook: "after_tool",
+				at: Date.now(),
+				elapsedMs: 118.1,
+				budgetMs: 10,
+			},
+			seen,
+		);
+		strictEqual(repeated, null);
+
+		const otherHook = middlewareHookFailedSessionNotice(
+			{
+				kind: "budget_exceeded",
+				registrationId: "observer.file-mutation",
+				hook: "turn_end",
+				at: Date.now(),
+				elapsedMs: 13,
+				budgetMs: 10,
+			},
+			seen,
+		);
+		strictEqual(otherHook?.level, "warn");
+	});
+
+	it("keys budget-warning dedupe only for valid budget payloads", () => {
+		strictEqual(
+			middlewareBudgetWarningKey({
+				kind: "budget_exceeded",
+				registrationId: "observer.file-mutation",
+				hook: "after_tool",
+				at: Date.now(),
+				elapsedMs: 117.7,
+				budgetMs: 10,
+			}),
+			"observer.file-mutation\u0000after_tool",
+		);
+		strictEqual(
+			middlewareBudgetWarningKey({
+				kind: "hook_failed",
+				registrationId: "observer.file-mutation",
+				hook: "after_tool",
+				at: Date.now(),
+				message: "boom",
+			}),
+			null,
+		);
+		strictEqual(middlewareBudgetWarningKey({ kind: "budget_exceeded", registrationId: "", hook: "after_tool" }), null);
 	});
 
 	it("drops malformed payloads", () => {

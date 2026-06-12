@@ -1,7 +1,7 @@
 /**
- * Pure payload→notice formatters for bus channels the interactive layer
- * renders as operator notices. Validation lives here so malformed payloads
- * are dropped in one place and the index.ts subscribers stay wiring-only.
+ * Payload→notice formatters for bus channels the interactive layer renders
+ * as operator notices. Validation lives here so malformed payloads are
+ * dropped in one place and the index.ts subscribers stay wiring-only.
  * Returning null means "ignore the event".
  */
 
@@ -10,6 +10,10 @@ import type { BudgetAlertPayload, MiddlewareHookFailedPayload, SafetyBlockedPayl
 export interface BusNotice {
 	level: "warn" | "error";
 	text: string;
+}
+
+export interface MiddlewareHookFailedNoticeOptions {
+	noteBudgetWarningSuppression?: boolean;
 }
 
 function isBudgetAlertPayload(value: unknown): value is BudgetAlertPayload {
@@ -70,13 +74,22 @@ function isMiddlewareHookFailedPayload(value: unknown): value is MiddlewareHookF
 	return true;
 }
 
+export function middlewareBudgetWarningKey(payload: unknown): string | null {
+	if (!isMiddlewareHookFailedPayload(payload)) return null;
+	if (payload.kind !== "budget_exceeded") return null;
+	return `${payload.registrationId}\u0000${payload.hook}`;
+}
+
 /**
  * A middleware hook registration threw (its effects were discarded) or
  * overran the soft budget (its effects still applied). The turn proceeded
  * either way; this warn notice is the operator's only interactive signal
  * that a guard or assessor is misbehaving.
  */
-export function middlewareHookFailedNotice(payload: unknown): BusNotice | null {
+export function middlewareHookFailedNotice(
+	payload: unknown,
+	options: MiddlewareHookFailedNoticeOptions = {},
+): BusNotice | null {
 	if (!isMiddlewareHookFailedPayload(payload)) return null;
 	if (payload.kind === "hook_failed") {
 		const detail = payload.message !== undefined && payload.message.length > 0 ? `: ${payload.message}` : "";
@@ -87,10 +100,20 @@ export function middlewareHookFailedNotice(payload: unknown): BusNotice | null {
 	}
 	const elapsed = payload.elapsedMs !== undefined ? `${payload.elapsedMs.toFixed(1)}ms` : "unknown";
 	const budget = payload.budgetMs !== undefined ? `${payload.budgetMs}ms` : "budget";
+	const suffix = options.noteBudgetWarningSuppression ? "; further budget warnings for this hook suppressed" : "";
 	return {
 		level: "warn",
-		text: `[middleware] hook '${payload.registrationId}' exceeded its soft budget on ${payload.hook} (${elapsed} > ${budget}).`,
+		text: `[middleware] hook '${payload.registrationId}' exceeded its soft budget on ${payload.hook} (${elapsed} > ${budget})${suffix}.`,
 	};
+}
+
+export function middlewareHookFailedSessionNotice(payload: unknown, seenBudgetWarnings: Set<string>): BusNotice | null {
+	const key = middlewareBudgetWarningKey(payload);
+	if (key !== null) {
+		if (seenBudgetWarnings.has(key)) return null;
+		seenBudgetWarnings.add(key);
+	}
+	return middlewareHookFailedNotice(payload, { noteBudgetWarningSuppression: key !== null });
 }
 
 /**

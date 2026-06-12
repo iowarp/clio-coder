@@ -95,7 +95,7 @@ import {
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
-import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
+import { coalescePathSink, createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 
 export interface BootResult {
@@ -573,7 +573,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		createSkillActivationObserver((activation) => appendSkillActivationRegistryEvent(session, activation)),
 	);
 	if (contextDomain) {
-		middleware.registerHook(createFileMutationObserver((event) => contextDomain.noteFileChanges(event.paths)));
+		middleware.registerHook(
+			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
+		);
 	}
 	const toolRegistry = createRegistry({ safety, middleware });
 	let askUserHandler: AskUserHandler | null = null;
