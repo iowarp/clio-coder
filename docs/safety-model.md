@@ -9,6 +9,12 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 ---
 
+## Autonomy level vs the safety net
+
+The `safetyLevel` setting (`suggest` | `auto-edit` | `full-auto`, shown as "autonomy" in the TUI) selects the system-prompt guidance that tells the model how much initiative to take. It is not an enforcement input: every gate described in this document applies identically at every level. The dial controls what the model is asked to do; the safety net controls what the harness allows. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
+
+---
+
 ## Enforcement path
 
 ```mermaid
@@ -50,7 +56,7 @@ Target capability, dispatch tool profiles, and recipe constraints can further na
 
 ## Damage-control rules
 
-`damage-control-rules.yaml` is compiled into rule packs. Base rules apply broadly. Some rules can require confirmation; hard-block rules remain blocked across modes.
+`damage-control-rules.yaml` is compiled into rule packs. Base rules apply broadly. Some rules require confirmation; hard-block rules are always blocked. Both behaviors apply at every autonomy level.
 
 Examples of patterns the rules target include destructive filesystem operations, dangerous device writes, fork bombs, pipe-to-shell installers, and destructive git operations.
 

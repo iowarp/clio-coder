@@ -285,7 +285,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			? `${theme.fg("muted", `handoff ${stats.handoffFreshness}`)}`
 			: `${theme.fg("dim", "no handoff")}`;
 
-	const safetyStr = `safety ${theme.fg("accentDeep", stats.safetyLevel)}`;
+	const safetyStr = `autonomy ${theme.fg("accentDeep", stats.safetyLevel)}`;
 	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
 	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
 
