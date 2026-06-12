@@ -13,8 +13,20 @@ export type { MiddlewareBundleOptions } from "./extension.js";
 export { createMiddlewareBundle } from "./extension.js";
 export { MiddlewareManifest } from "./manifest.js";
 export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
-export type { MiddlewareRuleDefinition } from "./runtime.js";
-export { runMiddlewareHook } from "./runtime.js";
+export type {
+	MiddlewareDiagnostic,
+	MiddlewareDiagnosticSink,
+	MiddlewareHookRegistration,
+	MiddlewareRuleDefinition,
+	RunMiddlewareRegistrationsOptions,
+} from "./runtime.js";
+export {
+	MIDDLEWARE_HOOK_BUDGET_MS,
+	registrationFromRuleDefinition,
+	runMiddlewareHook,
+	runMiddlewareRegistrations,
+	writeMiddlewareDiagnosticToStderr,
+} from "./runtime.js";
 export { createMiddlewareContractFromSnapshot, createMiddlewareSnapshot } from "./snapshot.js";
 export type {
 	MiddlewareAnnotationSeverity,

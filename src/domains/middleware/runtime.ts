@@ -1,5 +1,11 @@
 import { listMiddlewareRuleDefinitions } from "./rules.js";
-import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookResult, MiddlewareRule } from "./types.js";
+import type {
+	MiddlewareEffect,
+	MiddlewareHook,
+	MiddlewareHookInput,
+	MiddlewareHookResult,
+	MiddlewareRule,
+} from "./types.js";
 
 /**
  * Runtime pairing of a declarative middleware rule with the data it needs to
@@ -23,17 +29,126 @@ export interface MiddlewareRuleDefinition {
 	effects: ReadonlyArray<MiddlewareEffect>;
 }
 
-export function runMiddlewareHook(
+/**
+ * Coded hook registration: the in-process counterpart of a declarative rule.
+ * `evaluate` runs synchronously on the caller's stack and may hold internal
+ * state it owns (loop windows, per-turn budgets), but it communicates with the
+ * rest of the system exclusively through the returned effects. Registrations
+ * share an id namespace with declarative rules; on collision the earlier
+ * entry wins.
+ */
+export interface MiddlewareHookRegistration {
+	id: string;
+	description: string;
+	hooks: ReadonlyArray<MiddlewareHook>;
+	/** Exact tool names, same matcher semantics as `MiddlewareRuleDefinition.toolNames`. */
+	toolNames?: ReadonlyArray<string>;
+	/** Synchronous evaluation. A throw is isolated and contributes no effects. */
+	evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect>;
+}
+
+/** Soft per-evaluation wall-time budget. Overruns are reported, never preempted. */
+export const MIDDLEWARE_HOOK_BUDGET_MS = 10;
+
+export type MiddlewareDiagnostic =
+	| { kind: "hook_failed"; registrationId: string; hook: MiddlewareHook; message: string }
+	| { kind: "budget_exceeded"; registrationId: string; hook: MiddlewareHook; elapsedMs: number; budgetMs: number };
+
+export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => void;
+
+/**
+ * Default diagnostic sink. stderr-only for now; once the typed bus lands a
+ * `middleware.hookFailed` channel, the composition root supplies a sink that
+ * also emits there.
+ */
+export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnostic): void {
+	if (diagnostic.kind === "hook_failed") {
+		process.stderr.write(
+			`[clio:middleware] registration '${diagnostic.registrationId}' failed on '${diagnostic.hook}': ${diagnostic.message}\n`,
+		);
+		return;
+	}
+	process.stderr.write(
+		`[clio:middleware] registration '${diagnostic.registrationId}' exceeded budget on '${diagnostic.hook}': ` +
+			`${diagnostic.elapsedMs.toFixed(1)}ms > ${diagnostic.budgetMs}ms\n`,
+	);
+}
+
+/**
+ * Wrap a declarative rule definition as a degenerate coded registration so a
+ * single ordered evaluation path serves both. The wrapped `evaluate` keeps the
+ * rule's enabled flag, hook list, tool scoping, and declared-effect-kind
+ * filtering exactly as `runMiddlewareHook` always applied them.
+ */
+export function registrationFromRuleDefinition(definition: MiddlewareRuleDefinition): MiddlewareHookRegistration {
+	const registration: MiddlewareHookRegistration = {
+		id: definition.rule.id,
+		description: definition.rule.description,
+		hooks: [...definition.rule.hooks],
+		evaluate: (input) => evaluateRuleDefinition(definition, input),
+	};
+	if (definition.toolNames !== undefined) registration.toolNames = [...definition.toolNames];
+	return registration;
+}
+
+export interface RunMiddlewareRegistrationsOptions {
+	/** Receives isolation and budget diagnostics. Defaults to the stderr writer. */
+	onDiagnostic?: MiddlewareDiagnosticSink;
+	/** Millisecond clock, injectable for budget tests. */
+	now?: () => number;
+}
+
+/**
+ * Evaluate every matching registration, in array order, against one hook
+ * input. Every registration runs; effects accumulate; the caller decides what
+ * the effects mean (the registry treats the first `block_tool` as the
+ * verdict). A throwing registration is reported and skipped, never propagated.
+ */
+export function runMiddlewareRegistrations(
 	input: MiddlewareHookInput,
-	definitions: ReadonlyArray<MiddlewareRuleDefinition> = listMiddlewareRuleDefinitions(),
+	registrations: ReadonlyArray<MiddlewareHookRegistration>,
+	options: RunMiddlewareRegistrationsOptions = {},
 ): MiddlewareHookResult {
+	const onDiagnostic = options.onDiagnostic ?? writeMiddlewareDiagnosticToStderr;
+	const now = options.now ?? (() => performance.now());
 	const effects: MiddlewareEffect[] = [];
 	const ruleIds: string[] = [];
-	for (const definition of definitions) {
-		const emitted = evaluateRuleDefinition(definition, input);
+	for (const registration of registrations) {
+		if (!registration.hooks.includes(input.hook)) continue;
+		if (registration.toolNames !== undefined) {
+			if (input.toolName === undefined) continue;
+			if (!registration.toolNames.includes(input.toolName)) continue;
+		}
+		let emitted: ReadonlyArray<MiddlewareEffect>;
+		const startedAt = now();
+		try {
+			// Each evaluate gets its own clone so a misbehaving registration
+			// cannot mutate the input seen by later registrations.
+			emitted = registration.evaluate(cloneHookInput(input));
+		} catch (err) {
+			emitDiagnostic(onDiagnostic, {
+				kind: "hook_failed",
+				registrationId: registration.id,
+				hook: input.hook,
+				message: err instanceof Error ? err.message : String(err),
+			});
+			continue;
+		}
+		const elapsedMs = now() - startedAt;
+		if (elapsedMs > MIDDLEWARE_HOOK_BUDGET_MS) {
+			emitDiagnostic(onDiagnostic, {
+				kind: "budget_exceeded",
+				registrationId: registration.id,
+				hook: input.hook,
+				elapsedMs,
+				budgetMs: MIDDLEWARE_HOOK_BUDGET_MS,
+			});
+		}
 		if (emitted.length === 0) continue;
-		effects.push(...emitted);
-		if (!ruleIds.includes(definition.rule.id)) ruleIds.push(definition.rule.id);
+		for (const effect of emitted) {
+			effects.push(cloneMiddlewareEffect(effect));
+		}
+		if (!ruleIds.includes(registration.id)) ruleIds.push(registration.id);
 	}
 	return {
 		hook: input.hook,
@@ -41,6 +156,21 @@ export function runMiddlewareHook(
 		effects,
 		ruleIds,
 	};
+}
+
+function emitDiagnostic(sink: MiddlewareDiagnosticSink, diagnostic: MiddlewareDiagnostic): void {
+	try {
+		sink(diagnostic);
+	} catch {
+		// A diagnostics sink must never affect hook evaluation or the turn.
+	}
+}
+
+export function runMiddlewareHook(
+	input: MiddlewareHookInput,
+	definitions: ReadonlyArray<MiddlewareRuleDefinition> = listMiddlewareRuleDefinitions(),
+): MiddlewareHookResult {
+	return runMiddlewareRegistrations(input, definitions.map(registrationFromRuleDefinition));
 }
 
 function evaluateRuleDefinition(definition: MiddlewareRuleDefinition, input: MiddlewareHookInput): MiddlewareEffect[] {
