@@ -28,4 +28,21 @@ export interface ClioPermissionResolvedEvent {
 	};
 }
 
-export type ClioWorkerEvent = ClioToolStartEvent | ClioToolFinishEvent | ClioPermissionResolvedEvent;
+/**
+ * Emitted when the worker accepts an operator steer line from stdin and
+ * queues it on the agent's steering queue. The steer text itself reaches the
+ * transcript as a normal user message at the next loop boundary; this event
+ * is the delivery ack for operator surfaces.
+ */
+export interface ClioSteerReceivedEvent {
+	type: "clio_steer_received";
+	payload: {
+		chars: number;
+	};
+}
+
+export type ClioWorkerEvent =
+	| ClioToolStartEvent
+	| ClioToolFinishEvent
+	| ClioPermissionResolvedEvent
+	| ClioSteerReceivedEvent;
