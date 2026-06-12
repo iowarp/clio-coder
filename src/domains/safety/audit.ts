@@ -34,7 +34,7 @@ export interface ToolCallAuditRecord {
 	correlationId: string;
 	tool: string;
 	actionClass: string;
-	decision: "allowed" | "blocked" | "permission_requested" | "classified";
+	decision: ToolCallAuditDecision;
 	posture?: string;
 	reasons: ReadonlyArray<string>;
 	ruleId?: string;
@@ -44,6 +44,19 @@ export interface ToolCallAuditRecord {
 	command?: string;
 	cwd?: string;
 	args?: unknown;
+}
+
+export type ToolCallAuditDecision = "allowed" | "blocked" | "permission_requested" | "classified" | "denied";
+
+export interface ToolCallAuditInput {
+	tool: string;
+	classification: { actionClass: string; reasons: ReadonlyArray<string> };
+	decision: ToolCallAuditDecision;
+	posture?: string;
+	args?: unknown;
+	policy?: SafetyPolicyDecision;
+	reasons?: ReadonlyArray<string>;
+	now?: Date;
 }
 
 export interface PermissionAuditRecord {
@@ -163,15 +176,7 @@ function redactArgs(value: unknown, depth = 0): unknown {
 	return String(value);
 }
 
-export function buildAuditRecord(input: {
-	tool: string;
-	classification: { actionClass: string; reasons: ReadonlyArray<string> };
-	decision: "allowed" | "blocked" | "permission_requested" | "classified";
-	posture?: string;
-	args?: unknown;
-	policy?: SafetyPolicyDecision;
-	now?: Date;
-}): ToolCallAuditRecord {
+export function buildAuditRecord(input: ToolCallAuditInput): ToolCallAuditRecord {
 	const now = input.now ?? new Date();
 	const record: ToolCallAuditRecord = {
 		kind: "tool_call",
@@ -180,7 +185,7 @@ export function buildAuditRecord(input: {
 		tool: input.tool,
 		actionClass: input.classification.actionClass,
 		decision: input.decision,
-		reasons: input.policy?.reasons ?? input.classification.reasons,
+		reasons: input.reasons ?? input.policy?.reasons ?? input.classification.reasons,
 	};
 	if (input.posture !== undefined) record.posture = input.posture;
 	if (input.policy?.ruleId !== undefined) record.ruleId = input.policy.ruleId;

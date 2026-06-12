@@ -99,6 +99,10 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		recordCount += 1;
 	}
 
+	function recordToolCallAudit(input: Parameters<typeof buildAuditRecord>[0]): void {
+		writeAudit(buildAuditRecord(input));
+	}
+
 	const extension: DomainExtension = {
 		async start() {
 			policyEngine = createSafetyPolicyEngine();
@@ -234,8 +238,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					policy,
 				};
 				if (posture !== undefined) auditInput.posture = posture;
-				const record = buildAuditRecord(auditInput);
-				writeAudit(record);
+				recordToolCallAudit(auditInput);
 				context.bus.emit(BusChannels.SafetyBlocked, {
 					tool: call.tool,
 					actionClass: classification.actionClass,
@@ -263,7 +266,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					policy,
 				};
 				if (posture !== undefined) auditInput.posture = posture;
-				writeAudit(buildAuditRecord(auditInput));
+				recordToolCallAudit(auditInput);
 				context.bus.emit(BusChannels.PermissionRequested, {
 					tool: call.tool,
 					actionClass: classification.actionClass,
@@ -286,13 +289,14 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			const auditInput: Parameters<typeof buildAuditRecord>[0] = {
 				tool: call.tool,
 				classification,
-				decision: "allowed",
+				// Non-confirmed net passes are not final: registry admission still
+				// applies autonomy and writes the resolved allowed/park/denied row.
+				decision: posture === "confirmed" ? "allowed" : "classified",
 				args: call.args,
 				policy,
 			};
 			if (posture !== undefined) auditInput.posture = posture;
-			const record = buildAuditRecord(auditInput);
-			writeAudit(record);
+			recordToolCallAudit(auditInput);
 			context.bus.emit(BusChannels.SafetyAllowed, {
 				tool: call.tool,
 				actionClass: classification.actionClass,
@@ -311,7 +315,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
 		policy: { metadata: (posture) => (policyEngine ?? createSafetyPolicyEngine()).metadata(posture) },
-		audit: { recordCount: () => recordCount },
+		audit: { recordCount: () => recordCount, recordToolCall: recordToolCallAudit },
 	};
 
 	return { extension, contract };

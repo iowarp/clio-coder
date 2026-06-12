@@ -928,6 +928,7 @@ function auditToolEvents(rows: ReadonlyArray<EvidenceAuditLinkedRow>): EvidenceT
 		const tool = readOptionalString(row.row.tool);
 		if (tool === null) continue;
 		const decision = readOptionalString(row.row.decision);
+		if (decision === "classified") continue;
 		const event: EvidenceToolEvent = {
 			source: "audit-row",
 			runId: row.runId,
@@ -936,7 +937,7 @@ function auditToolEvents(rows: ReadonlyArray<EvidenceAuditLinkedRow>): EvidenceT
 			count: 1,
 			ok: decision === "allowed" ? 1 : 0,
 			errors: 0,
-			blocked: decision === "blocked" ? 1 : 0,
+			blocked: decision === "blocked" || decision === "denied" ? 1 : 0,
 			totalDurationMs: 0,
 			linkKind: row.linkKind,
 			confidence: row.confidence,
