@@ -4,9 +4,9 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type {
 	AuthStatus,
 	CapabilityFlags,
-	EndpointStatus,
 	ProvidersContract,
 	RuntimeResolutionDiagnostic,
+	TargetStatus,
 } from "../domains/providers/index.js";
 import { modelLoadStateLabel } from "../domains/providers/index.js";
 import {
@@ -48,11 +48,11 @@ function padAnsi(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
-function endpointLocation(status: EndpointStatus): string {
-	return status.endpoint.url ?? "(no url)";
+function targetLocation(status: TargetStatus): string {
+	return status.target.url ?? "(no url)";
 }
 
-function healthLabel(status: EndpointStatus): string {
+function healthLabel(status: TargetStatus): string {
 	switch (status.health.status) {
 		case "healthy":
 			return "ok";
@@ -65,7 +65,7 @@ function healthLabel(status: EndpointStatus): string {
 	}
 }
 
-function healthGlyph(status: EndpointStatus): string {
+function healthGlyph(status: TargetStatus): string {
 	switch (status.health.status) {
 		case "healthy":
 			return "●";
@@ -78,7 +78,7 @@ function healthGlyph(status: EndpointStatus): string {
 	}
 }
 
-function healthToken(status: EndpointStatus): ClioToken {
+function healthToken(status: TargetStatus): ClioToken {
 	switch (status.health.status) {
 		case "healthy":
 			return "success";
@@ -91,23 +91,23 @@ function healthToken(status: EndpointStatus): ClioToken {
 	}
 }
 
-function latencyTag(status: EndpointStatus): string {
+function latencyTag(status: TargetStatus): string {
 	const ms = status.health.latencyMs;
 	return typeof ms === "number" ? `${ms}ms` : "-";
 }
 
-function formatHealthCompact(status: EndpointStatus): string {
+function formatHealthCompact(status: TargetStatus): string {
 	const text = `${healthGlyph(status)} ${healthLabel(status)} ${latencyTag(status)}`;
 	return clioTheme().fg(healthToken(status), text);
 }
 
-function formatHealthRow(status: EndpointStatus): string {
+function formatHealthRow(status: TargetStatus): string {
 	return `    health: ${healthLabel(status)}  latency: ${latencyTag(status)}`;
 }
 
-function formatRuntimeRow(status: EndpointStatus): string {
-	const runtimeId = status.runtime?.id ?? status.endpoint.runtime;
-	const runtimeName = status.runtime?.displayName ?? status.endpoint.runtime;
+function formatRuntimeRow(status: TargetStatus): string {
+	const runtimeId = status.runtime?.id ?? status.target.runtime;
+	const runtimeName = status.runtime?.displayName ?? status.target.runtime;
 	return `    runtime: ${runtimeId}  ${runtimeName}`;
 }
 
@@ -129,12 +129,12 @@ export function formatCapabilitiesRow(caps: CapabilityFlags): string {
 	return `    caps: ${ctx}  ${max}  ${flagText}`;
 }
 
-function formatReasonRow(status: EndpointStatus): string {
+function formatReasonRow(status: TargetStatus): string {
 	const prefix = status.available ? "ready" : "unavailable";
 	return `    ${prefix}: ${status.reason || "-"}`;
 }
 
-function formatDiscoveredRow(status: EndpointStatus): string {
+function formatDiscoveredRow(status: TargetStatus): string {
 	const ids = status.discoveredModels;
 	if (ids.length === 0) return "    models: (no probe yet)";
 	const preview = ids
@@ -161,7 +161,7 @@ function probeDiagnostic(err: unknown): RuntimeResolutionDiagnostic {
 	};
 }
 
-function defaultAuthDisplay(status: EndpointStatus): TargetAuthDisplay {
+function defaultAuthDisplay(status: TargetStatus): TargetAuthDisplay {
 	if (!status.runtime) return { summary: "unknown", detail: "unknown-runtime" };
 	const auth = status.runtime.auth;
 	if (auth === "none") return { summary: "none", detail: "not-required" };
@@ -174,7 +174,7 @@ function authSummaryForRuntimeAuth(runtimeAuth: string): string {
 	return runtimeAuth;
 }
 
-export function formatTargetAuthDisplay(status: EndpointStatus, auth: AuthStatus | null): TargetAuthDisplay {
+export function formatTargetAuthDisplay(status: TargetStatus, auth: AuthStatus | null): TargetAuthDisplay {
 	if (!status.runtime) return { summary: "unknown", detail: "unknown-runtime" };
 	if (!auth) return defaultAuthDisplay(status);
 	if (!auth.available) {
@@ -205,46 +205,46 @@ export function formatTargetAuthDisplay(status: EndpointStatus, auth: AuthStatus
 }
 
 export function buildTargetAuthMap(
-	statuses: ReadonlyArray<EndpointStatus>,
+	statuses: ReadonlyArray<TargetStatus>,
 	providers: ProvidersContract,
 ): ReadonlyMap<string, TargetAuthDisplay> {
 	const out = new Map<string, TargetAuthDisplay>();
 	for (const status of statuses) {
 		if (!status.runtime) {
-			out.set(status.endpoint.id, { summary: "unknown", detail: "unknown-runtime" });
+			out.set(status.target.id, { summary: "unknown", detail: "unknown-runtime" });
 			continue;
 		}
 		out.set(
-			status.endpoint.id,
-			formatTargetAuthDisplay(status, providers.auth.statusForTarget(status.endpoint, status.runtime)),
+			status.target.id,
+			formatTargetAuthDisplay(status, providers.auth.statusForTarget(status.target, status.runtime)),
 		);
 	}
 	return out;
 }
 
-export function formatProbeNotice(status: EndpointStatus): string {
-	return `probed ${status.endpoint.id} (${healthLabel(status)} ${latencyTag(status)})`;
+export function formatProbeNotice(status: TargetStatus): string {
+	return `probed ${status.target.id} (${healthLabel(status)} ${latencyTag(status)})`;
 }
 
 export function formatProbeAllNotice(count: number): string {
 	return `probed ${count} target${count === 1 ? "" : "s"}`;
 }
 
-function healthSortRank(status: EndpointStatus): number {
+function healthSortRank(status: TargetStatus): number {
 	return status.health.status === "healthy" ? 0 : 1;
 }
 
 export function sortTargetStatuses(
-	statuses: ReadonlyArray<EndpointStatus>,
-	activeEndpointId?: string | null,
-): EndpointStatus[] {
+	statuses: ReadonlyArray<TargetStatus>,
+	activeTargetId?: string | null,
+): TargetStatus[] {
 	return [...statuses].sort((a, b) => {
-		const aActive = activeEndpointId !== null && activeEndpointId !== undefined && a.endpoint.id === activeEndpointId;
-		const bActive = activeEndpointId !== null && activeEndpointId !== undefined && b.endpoint.id === activeEndpointId;
+		const aActive = activeTargetId !== null && activeTargetId !== undefined && a.target.id === activeTargetId;
+		const bActive = activeTargetId !== null && activeTargetId !== undefined && b.target.id === activeTargetId;
 		if (aActive !== bActive) return aActive ? -1 : 1;
 		const health = healthSortRank(a) - healthSortRank(b);
 		if (health !== 0) return health;
-		return a.endpoint.id.localeCompare(b.endpoint.id);
+		return a.target.id.localeCompare(b.target.id);
 	});
 }
 
@@ -254,21 +254,21 @@ export function toggleExpandedTarget(currentExpandedId: string | null, selectedI
 }
 
 function modelLabelForStatus(
-	status: EndpointStatus,
-	activeEndpointId?: string | null,
+	status: TargetStatus,
+	activeTargetId?: string | null,
 	activeModelId?: string | null,
 ): string {
-	if (status.endpoint.id === activeEndpointId && activeModelId) return activeModelId;
-	return status.endpoint.defaultModel ?? status.endpoint.wireModels?.[0] ?? "(no model)";
+	if (status.target.id === activeTargetId && activeModelId) return activeModelId;
+	return status.target.defaultModel ?? status.target.wireModels?.[0] ?? "(no model)";
 }
 
 function formatCollapsedTargetRow(
-	status: EndpointStatus,
+	status: TargetStatus,
 	options: {
 		width: number;
 		selected: boolean;
 		active: boolean;
-		activeEndpointId?: string | null;
+		activeTargetId?: string | null;
 		activeModelId?: string | null;
 		auth: TargetAuthDisplay;
 	},
@@ -276,24 +276,24 @@ function formatCollapsedTargetRow(
 	const theme = clioTheme();
 	const marker = options.selected ? theme.fg("accent", "▸") : " ";
 	const targetBudget = options.active ? Math.max(1, TARGET_COL_WIDTH - " active".length) : TARGET_COL_WIDTH;
-	const id = truncateToWidth(status.endpoint.id, targetBudget, "", true);
+	const id = truncateToWidth(status.target.id, targetBudget, "", true);
 	const target = options.active ? `${theme.style("title", id, { bold: true })} ${theme.fg("success", "active")}` : id;
-	const runtime = status.runtime?.displayName ?? status.endpoint.runtime;
+	const runtime = status.runtime?.displayName ?? status.target.runtime;
 	const prefix = [
 		`${marker} ${padAnsi(target, TARGET_COL_WIDTH)}`,
 		padAnsi(runtime, RUNTIME_COL_WIDTH),
 		padAnsi(formatHealthCompact(status), HEALTH_COL_WIDTH),
 		padAnsi(options.auth.summary, AUTH_COL_WIDTH),
 	].join("  ");
-	const model = modelLabelForStatus(status, options.activeEndpointId, options.activeModelId);
+	const model = modelLabelForStatus(status, options.activeTargetId, options.activeModelId);
 	const modelPrefix = `${prefix}  `;
 	if (visibleWidth(modelPrefix) >= options.width) return truncateToWidth(prefix, options.width, "", true);
 	return `${modelPrefix}${truncateToWidth(model, options.width - visibleWidth(modelPrefix), "", true)}`;
 }
 
-function formatTargetDetailLines(status: EndpointStatus, auth: TargetAuthDisplay, width: number): string[] {
+function formatTargetDetailLines(status: TargetStatus, auth: TargetAuthDisplay, width: number): string[] {
 	const lines = [
-		`    url: ${endpointLocation(status)}`,
+		`    url: ${targetLocation(status)}`,
 		formatRuntimeRow(status),
 		formatHealthRow(status),
 		formatAuthRow(auth.detail),
@@ -305,14 +305,14 @@ function formatTargetDetailLines(status: EndpointStatus, auth: TargetAuthDisplay
 }
 
 export function formatTargetsHubBodyLines(
-	statuses: ReadonlyArray<EndpointStatus>,
+	statuses: ReadonlyArray<TargetStatus>,
 	options: {
 		error?: RuntimeResolutionDiagnostic | null;
 		selectedId?: string | null;
 		expandedId?: string | null;
-		activeEndpointId?: string | null;
+		activeTargetId?: string | null;
 		activeModelId?: string | null;
-		authByEndpoint?: ReadonlyMap<string, TargetAuthDisplay>;
+		authByTarget?: ReadonlyMap<string, TargetAuthDisplay>;
 	} = {},
 	width = DEFAULT_CONTENT_WIDTH,
 ): string[] {
@@ -325,17 +325,17 @@ export function formatTargetsHubBodyLines(
 		lines.push("no targets configured (run clio configure)");
 		return lines;
 	}
-	const activeEndpointId = options.activeEndpointId ?? null;
+	const activeTargetId = options.activeTargetId ?? null;
 	const activeModelId = options.activeModelId ?? null;
-	for (const status of sortTargetStatuses(statuses, activeEndpointId)) {
-		const id = status.endpoint.id;
-		const auth = options.authByEndpoint?.get(id) ?? defaultAuthDisplay(status);
+	for (const status of sortTargetStatuses(statuses, activeTargetId)) {
+		const id = status.target.id;
+		const auth = options.authByTarget?.get(id) ?? defaultAuthDisplay(status);
 		lines.push(
 			formatCollapsedTargetRow(status, {
 				width,
 				selected: options.selectedId === id,
-				active: activeEndpointId === id,
-				activeEndpointId,
+				active: activeTargetId === id,
+				activeTargetId,
 				activeModelId,
 				auth,
 			}),
@@ -364,26 +364,26 @@ export function applyTargetsHubUseAction(targetId: string, deps: TargetsHubUseDe
 class ProvidersOverlayView implements Component {
 	constructor(
 		private getState: () => {
-			statuses: ReadonlyArray<EndpointStatus>;
+			statuses: ReadonlyArray<TargetStatus>;
 			error: RuntimeResolutionDiagnostic | null;
 			selectedId: string | null;
 			expandedId: string | null;
-			authByEndpoint: ReadonlyMap<string, TargetAuthDisplay>;
-			activeEndpointId: string | null;
+			authByTarget: ReadonlyMap<string, TargetAuthDisplay>;
+			activeTargetId: string | null;
 			activeModelId: string | null;
 		},
 	) {}
 
 	render(width: number): string[] {
-		const { statuses, error, selectedId, expandedId, authByEndpoint, activeEndpointId, activeModelId } = this.getState();
+		const { statuses, error, selectedId, expandedId, authByTarget, activeTargetId, activeModelId } = this.getState();
 		return formatTargetsHubBodyLines(
 			statuses,
 			{
 				error,
 				selectedId,
 				expandedId,
-				authByEndpoint,
-				activeEndpointId,
+				authByTarget,
+				activeTargetId,
 				activeModelId,
 			},
 			width,
@@ -414,32 +414,32 @@ export function openProvidersOverlay(
 	options?: OpenProvidersOverlayOptions,
 ): OverlayHandle {
 	const lifecycle = new AbortController();
-	let statuses: ReadonlyArray<EndpointStatus> = providers.list();
+	let statuses: ReadonlyArray<TargetStatus> = providers.list();
 	let error: RuntimeResolutionDiagnostic | null = null;
 	let expandedId: string | null = null;
 	let actionInFlight: string | null = null;
 
-	const activeEndpointId = (): string | null => options?.getSettings?.()?.orchestrator.target ?? null;
+	const activeTargetId = (): string | null => options?.getSettings?.()?.orchestrator.target ?? null;
 	const activeModelId = (): string | null => options?.getSettings?.()?.orchestrator.model ?? null;
-	const sortedStatuses = (): EndpointStatus[] => sortTargetStatuses(statuses, activeEndpointId());
-	let selectedId: string | null = sortedStatuses()[0]?.endpoint.id ?? null;
-	let authByEndpoint = buildTargetAuthMap(statuses, providers);
+	const sortedStatuses = (): TargetStatus[] => sortTargetStatuses(statuses, activeTargetId());
+	let selectedId: string | null = sortedStatuses()[0]?.target.id ?? null;
+	let authByTarget = buildTargetAuthMap(statuses, providers);
 
 	const refreshState = (): void => {
 		statuses = providers.list();
-		authByEndpoint = buildTargetAuthMap(statuses, providers);
+		authByTarget = buildTargetAuthMap(statuses, providers);
 		const sorted = sortedStatuses();
-		if (selectedId && !sorted.some((s) => s.endpoint.id === selectedId)) {
-			selectedId = sorted[0]?.endpoint.id ?? null;
+		if (selectedId && !sorted.some((s) => s.target.id === selectedId)) {
+			selectedId = sorted[0]?.target.id ?? null;
 		}
-		if (expandedId && !sorted.some((s) => s.endpoint.id === expandedId)) {
+		if (expandedId && !sorted.some((s) => s.target.id === expandedId)) {
 			expandedId = null;
 		}
 	};
 
-	const selectedStatus = (): EndpointStatus | null => {
+	const selectedStatus = (): TargetStatus | null => {
 		if (!selectedId) return null;
-		return statuses.find((status) => status.endpoint.id === selectedId) ?? null;
+		return statuses.find((status) => status.target.id === selectedId) ?? null;
 	};
 
 	const view = new ProvidersOverlayView(() => ({
@@ -447,8 +447,8 @@ export function openProvidersOverlay(
 		error,
 		selectedId,
 		expandedId,
-		authByEndpoint,
-		activeEndpointId: activeEndpointId(),
+		authByTarget,
+		activeTargetId: activeTargetId(),
 		activeModelId: activeModelId(),
 	}));
 
@@ -474,15 +474,15 @@ export function openProvidersOverlay(
 		nextSelection: (direction) => {
 			const sorted = sortedStatuses();
 			if (sorted.length === 0) return;
-			const idx = sorted.findIndex((s) => s.endpoint.id === selectedId);
+			const idx = sorted.findIndex((s) => s.target.id === selectedId);
 			if (idx === -1) {
-				selectedId = sorted[0]?.endpoint.id ?? null;
+				selectedId = sorted[0]?.target.id ?? null;
 				return;
 			}
 			const len = sorted.length;
 			const nextIdx = (idx + (direction === "down" ? 1 : len - 1)) % len;
 			const picked = sorted[nextIdx];
-			if (picked) selectedId = picked.endpoint.id;
+			if (picked) selectedId = picked.target.id;
 		},
 		toggleDetail: () => {
 			expandedId = toggleExpandedTarget(expandedId, selectedId);
@@ -496,12 +496,12 @@ export function openProvidersOverlay(
 				options?.notice?.("warning", "targets: settings writer unavailable", "targets:use");
 				return;
 			}
-			const next = applyTargetsHubUseAction(status.endpoint.id, {
+			const next = applyTargetsHubUseAction(status.target.id, {
 				getSettings: options.getSettings,
 				writeSettings: options.writeSettings,
 			});
 			const model = next?.orchestrator.model ?? "(no model)";
-			options.notice?.("success", `using target ${status.endpoint.id} (${model})`, `targets:use:${status.endpoint.id}`);
+			options.notice?.("success", `using target ${status.target.id} (${model})`, `targets:use:${status.target.id}`);
 			refreshState();
 			tui.requestRender();
 		},
@@ -513,8 +513,8 @@ export function openProvidersOverlay(
 				return;
 			}
 			runAction("connect", async () => {
-				await options.connectTarget?.(status.endpoint.id);
-				await providers.probeEndpoint(status.endpoint.id);
+				await options.connectTarget?.(status.target.id);
+				await providers.probeTarget(status.target.id);
 			});
 		},
 		disconnectSelected: () => {
@@ -525,16 +525,16 @@ export function openProvidersOverlay(
 				return;
 			}
 			runAction("disconnect", async () => {
-				await options.disconnectTarget?.(status.endpoint.id);
+				await options.disconnectTarget?.(status.target.id);
 			});
 		},
 		probeSelected: () => {
 			const status = selectedStatus();
 			if (!status) return;
 			runAction("probe", async () => {
-				await providers.probeEndpoint(status.endpoint.id);
-				const probed = providers.list().find((s) => s.endpoint.id === status.endpoint.id) ?? status;
-				options?.notice?.("success", formatProbeNotice(probed), `targets:probe:${status.endpoint.id}`);
+				await providers.probeTarget(status.target.id);
+				const probed = providers.list().find((s) => s.target.id === status.target.id) ?? status;
+				options?.notice?.("success", formatProbeNotice(probed), `targets:probe:${status.target.id}`);
 			});
 		},
 		probeAll: () => {

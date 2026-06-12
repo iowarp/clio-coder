@@ -55,7 +55,7 @@ const RECEIPT_REQUIRED_KEYS = [
 	"runId",
 	"agentId",
 	"task",
-	"endpointId",
+	"targetId",
 	"wireModelId",
 	"runtimeId",
 	"runtimeKind",
@@ -231,8 +231,8 @@ export function verifyReceiptFile(dataDir: string, runId: string): ReceiptVerify
 	if (!isNonEmptyString(r.task)) {
 		return { ok: false, reason: `task invalid: ${String(r.task)}` };
 	}
-	if (!isNonEmptyString(r.endpointId)) {
-		return { ok: false, reason: `endpointId invalid: ${String(r.endpointId)}` };
+	if (!isNonEmptyString(r.targetId)) {
+		return { ok: false, reason: `targetId invalid: ${String(r.targetId)}` };
 	}
 	if (!isNonEmptyString(r.wireModelId)) {
 		return { ok: false, reason: `wireModelId invalid: ${String(r.wireModelId)}` };
@@ -500,7 +500,7 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`status: ${env.status}`,
 						`outcome: ${env.outcome ?? "unknown"}`,
 						`exit: ${env.exitCode ?? "?"}`,
-						`target: ${env.endpointId}`,
+						`target: ${env.targetId}`,
 						`model: ${env.wireModelId}`,
 						`runtime: ${env.runtimeKind}:${env.runtimeId}`,
 						`started: ${env.startedAt}`,

@@ -28,8 +28,8 @@ const defaultCapabilities: CapabilityFlags = {
 	maxTokens: 4096,
 };
 
-function endpointUrl(endpoint: TargetDescriptor): string | null {
-	return endpoint.url ? stripTrailingSlash(endpoint.url) : null;
+function targetUrl(target: TargetDescriptor): string | null {
+	return target.url ? stripTrailingSlash(target.url) : null;
 }
 
 interface RawCompletionChunk {
@@ -138,14 +138,14 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	defaultCapabilities,
 	hidden: true,
-	async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-		const base = endpointUrl(endpoint);
-		if (!base) return { ok: false, error: "endpoint has no url" };
+	async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+		const base = targetUrl(target);
+		if (!base) return { ok: false, error: "target has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
 		const props = await probeLlamaCppProps(base, ctx);
-		const status = await probeLlamaCppModelStatus(base, endpoint, ctx);
+		const status = await probeLlamaCppModelStatus(base, target, ctx);
 		const enriched: ProbeResult = { ...health };
 		const discoveredCapabilities = {
 			...(props.discoveredCapabilities ?? {}),
@@ -156,36 +156,36 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 			if (status.modelId) enriched.capabilityModelId = status.modelId;
 		}
 		if (props.serverVersion) enriched.serverVersion = props.serverVersion;
-		const note = await detectModelMismatch(base, endpoint, ctx);
+		const note = await detectModelMismatch(base, target, ctx);
 		const notes = [...(status.notes ?? []), ...(note ? [note] : [])];
 		if (notes.length > 0) enriched.notes = notes;
 		return enriched;
 	},
-	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-		const base = endpointUrl(endpoint);
+	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
+		const base = targetUrl(target);
 		if (!base) return [];
 		return probeOpenAIModels(base, ctx);
 	},
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,
 			apiFamily: "openai-completions",
 			provider: "llamacpp",
-			baseUrlForEndpoint: withV1,
+			baseUrlForTarget: withV1,
 		});
 	},
-	async *complete(endpoint: TargetDescriptor, opts: CompleteOptions): AsyncIterable<CompletionChunk> {
-		const base = endpointUrl(endpoint);
-		if (!base) throw new Error("endpoint has no url");
+	async *complete(target: TargetDescriptor, opts: CompleteOptions): AsyncIterable<CompletionChunk> {
+		const base = targetUrl(target);
+		if (!base) throw new Error("target has no url");
 		const body = await postStream(`${base}/completion`, buildCompleteBody(opts), opts.signal);
 		for await (const chunk of streamSse(body)) yield chunk;
 	},
-	async *infill(endpoint: TargetDescriptor, opts: InfillOptions): AsyncIterable<CompletionChunk> {
-		const base = endpointUrl(endpoint);
-		if (!base) throw new Error("endpoint has no url");
+	async *infill(target: TargetDescriptor, opts: InfillOptions): AsyncIterable<CompletionChunk> {
+		const base = targetUrl(target);
+		if (!base) throw new Error("target has no url");
 		const body = await postStream(`${base}/infill`, buildInfillBody(opts), opts.signal);
 		for await (const chunk of streamSse(body)) yield chunk;
 	},

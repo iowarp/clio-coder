@@ -4,11 +4,11 @@ import { fuzzyFilter } from "../../engine/tui.js";
 /**
  * Compose the searchable text for a session. Includes every field a user
  * might recall: the id (for the rare "I remember the prefix" recall),
- * timestamps, cwd, endpoint/model pair, and any display name or turn labels
+ * timestamps, cwd, target/model pair, and any display name or turn labels
  * discovered from sessionInfo entries.
  */
 function getSessionSearchText(meta: SessionMeta): string {
-	const endpoint = meta.endpoint ?? "";
+	const target = meta.target ?? "";
 	const model = meta.model ?? "";
 	const cwd = meta.cwd ?? "";
 	const created = meta.createdAt ?? "";
@@ -17,7 +17,7 @@ function getSessionSearchText(meta: SessionMeta): string {
 	const name = meta.name ?? "";
 	const labels = meta.labels?.join(" ") ?? "";
 	const preview = meta.firstMessagePreview ?? "";
-	return `${meta.id} ${created} ${ended} ${lastActivity} ${endpoint}/${model} ${cwd} ${name} ${labels} ${preview}`;
+	return `${meta.id} ${created} ${ended} ${lastActivity} ${target}/${model} ${cwd} ${name} ${labels} ${preview}`;
 }
 
 /**

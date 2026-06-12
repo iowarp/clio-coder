@@ -36,17 +36,17 @@ function trimTrailingSlash(value: string): string {
 	return value.endsWith("/") && value.length > 1 ? value.slice(0, -1) : value;
 }
 
-function endpointBase(endpoint: TargetDescriptor): string {
-	return trimTrailingSlash(endpoint.url ?? OPENROUTER_BASE_URL);
+function targetBaseUrl(target: TargetDescriptor): string {
+	return trimTrailingSlash(target.url ?? OPENROUTER_BASE_URL);
 }
 
-function modelsUrl(endpoint: TargetDescriptor): string {
-	return `${endpointBase(endpoint)}/models`;
+function modelsUrl(target: TargetDescriptor): string {
+	return `${targetBaseUrl(target)}/models`;
 }
 
-function probeHeaders(endpoint: TargetDescriptor, ctx: ProbeContext): Record<string, string> {
-	const headers: Record<string, string> = { ...OPENROUTER_HEADERS, ...(endpoint.auth?.headers ?? {}) };
-	const envName = endpoint.auth?.apiKeyEnvVar ?? "OPENROUTER_API_KEY";
+function probeHeaders(target: TargetDescriptor, ctx: ProbeContext): Record<string, string> {
+	const headers: Record<string, string> = { ...OPENROUTER_HEADERS, ...(target.auth?.headers ?? {}) };
+	const envName = target.auth?.apiKeyEnvVar ?? "OPENROUTER_API_KEY";
 	if (ctx.credentialsPresent.has(envName)) {
 		const key = process.env[envName]?.trim();
 		if (key) headers.authorization = `Bearer ${key}`;
@@ -54,11 +54,11 @@ function probeHeaders(endpoint: TargetDescriptor, ctx: ProbeContext): Record<str
 	return headers;
 }
 
-async function fetchModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+async function fetchModels(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 	const opts = {
-		url: modelsUrl(endpoint),
+		url: modelsUrl(target),
 		timeoutMs: ctx.httpTimeoutMs,
-		headers: probeHeaders(endpoint, ctx),
+		headers: probeHeaders(target, ctx),
 	} as const;
 	const result = await (ctx.signal
 		? probeJson<OpenRouterModelsResponse>({ ...opts, signal: ctx.signal })
@@ -69,7 +69,7 @@ async function fetchModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promi
 		.filter((id): id is string => id !== null);
 	const out: ProbeResult = { ok: true, models };
 	if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
-	const configured = endpoint.defaultModel?.trim();
+	const configured = target.defaultModel?.trim();
 	if (configured && models.length > 0 && !models.includes(configured)) {
 		out.ok = false;
 		out.error = `configured model '${configured}' was not returned by OpenRouter`;
@@ -86,16 +86,16 @@ const openrouterRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "OPENROUTER_API_KEY",
 	defaultCapabilities,
-	probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-		return fetchModels(endpoint, ctx);
+	probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+		return fetchModels(target, ctx);
 	},
-	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-		const result = await fetchModels(endpoint, ctx);
+	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
+		const result = await fetchModels(target, ctx);
 		return result.ok && result.models ? [...result.models] : [];
 	},
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeCatalogBackedModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,

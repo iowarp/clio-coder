@@ -24,7 +24,7 @@ export interface DispatchBoardRow {
 	requestOrigin?: DispatchRequestOrigin;
 	runtimeKind: RunKind;
 	runtimeId: string;
-	endpointId: string;
+	targetId: string;
 	wireModelId: string;
 	status: DispatchBoardStatus;
 	elapsedMs: number;
@@ -126,7 +126,7 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 	}
 
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? "waiting..." : "n/a";
-	const target = `${row.runtimeKind}:${row.endpointId} ${theme.fg("dim", "▸")} ${row.wireModelId}`;
+	const target = `${row.runtimeKind}:${row.targetId} ${theme.fg("dim", "▸")} ${row.wireModelId}`;
 
 	const suffix = ` ${elapsed} ──┐`;
 	// The label can be arbitrarily long (agent ids are user data); clamp it so
@@ -362,7 +362,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.requestOrigin !== undefined ? { requestOrigin: entry.requestOrigin } : {}),
 		runtimeKind: entry.runtimeKind,
 		runtimeId: entry.runtimeId,
-		endpointId: entry.endpointId,
+		targetId: entry.targetId,
 		wireModelId: entry.wireModelId,
 		status: entry.status,
 		elapsedMs: resolveElapsedMs(entry, now),
@@ -424,7 +424,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			...(requestOrigin !== undefined ? { requestOrigin } : {}),
 			runtimeKind: parseRuntimeKind(raw.runtimeKind ?? previous?.runtimeKind),
 			runtimeId: parseText(raw.runtimeId, previous?.runtimeId ?? "-"),
-			endpointId: parseText(raw.endpointId, previous?.endpointId ?? "-"),
+			targetId: parseText(raw.targetId, previous?.targetId ?? "-"),
 			wireModelId: parseText(raw.wireModelId, previous?.wireModelId ?? "-"),
 			status,
 			tokenCount: previous?.tokenCount ?? 0,

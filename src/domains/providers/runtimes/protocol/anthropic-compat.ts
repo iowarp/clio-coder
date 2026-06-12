@@ -10,7 +10,7 @@ import type {
 	RuntimeTier,
 } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
-import { endpointBase, synthLocalModel, withAsIs } from "../common/local-synth.js";
+import { synthLocalModel, targetBaseUrl, withAsIs } from "../common/local-synth.js";
 import { probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
 export interface AnthropicCompatSpec {
@@ -26,23 +26,23 @@ export interface AnthropicCompatSpec {
 }
 
 export interface AnthropicCompatSynthesisInput {
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
 	provider: string;
-	baseUrlForEndpoint?: (endpointUrl: string) => string;
+	baseUrlForTarget?: (targetUrl: string) => string;
 }
 
 export function synthesizeAnthropicCompatModel(input: AnthropicCompatSynthesisInput): Model<Api> {
 	return synthLocalModel({
-		endpoint: input.endpoint,
+		target: input.target,
 		wireModelId: input.wireModelId,
 		kb: input.kb,
 		defaultCapabilities: input.defaultCapabilities,
 		apiFamily: "anthropic-messages",
 		provider: input.provider,
-		baseUrlForEndpoint: input.baseUrlForEndpoint ?? withAsIs,
+		baseUrlForTarget: input.baseUrlForTarget ?? withAsIs,
 	});
 }
 
@@ -58,19 +58,19 @@ export function makeAnthropicCompatRuntime(spec: AnthropicCompatSpec): RuntimeDe
 		auth: spec.auth,
 		defaultCapabilities: spec.defaultCapabilities,
 		...(spec.hidden === true ? { hidden: true } : {}),
-		async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-			const base = endpointBase(endpoint);
-			if (!base) return { ok: false, error: "endpoint has no url" };
+		async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+			const base = targetBaseUrl(target);
+			if (!base) return { ok: false, error: "target has no url" };
 			return probeUrl(`${base}${messagesPath}`, ctx, "HEAD");
 		},
-		async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-			const base = endpointBase(endpoint);
+		async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
+			const base = targetBaseUrl(target);
 			if (!base) return [];
 			return probeOpenAIModels(base, ctx, modelsPath);
 		},
-		synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+		synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 			return synthesizeAnthropicCompatModel({
-				endpoint,
+				target,
 				wireModelId,
 				kb,
 				defaultCapabilities: spec.defaultCapabilities,

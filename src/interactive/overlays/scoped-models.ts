@@ -2,7 +2,7 @@ import type { ClioSettings } from "../../core/config.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
 import { matchesKey, type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { modelsForEndpoint, resolveOverlayRuntimeTarget, runtimeCapabilitySummary } from "./model-selector.js";
+import { modelsForTarget, resolveOverlayRuntimeTarget, runtimeCapabilitySummary } from "./model-selector.js";
 
 export const SCOPED_OVERLAY_WIDTH = 72;
 const VISIBLE_ROWS = 12;
@@ -13,9 +13,9 @@ interface ScopedItemsInput {
 }
 
 /**
- * Build the /scoped-models checklist. Each configured endpoint renders:
- *   - one `endpointId` row (target-level scope, keeps `.model` on cycle)
- *   - one `endpointId/wireModelId` row per candidate wire model so users
+ * Build the /scoped-models checklist. Each configured target renders:
+ *   - one `targetId` row (target-level scope, keeps `.model` on cycle)
+ *   - one `targetId/wireModelId` row per candidate wire model so users
  *     can pin a specific model inside the cycle set.
  * Rows pre-check the entries already present in `currentScope`. Globs are
  * gone; every entry is a literal string match.
@@ -24,21 +24,21 @@ function buildScopedModelItems(input: ScopedItemsInput): SelectItem[] {
 	const active = new Set(input.currentScope);
 	const items: SelectItem[] = [];
 	for (const status of input.providers.list()) {
-		const ep = status.endpoint;
+		const ep = status.target;
 		const runtimeName = status.runtime?.displayName ?? ep.runtime;
 		const epKey = ep.id;
 		const defaultModel = ep.defaultModel?.trim();
-		const endpointResolution = defaultModel
+		const targetResolution = defaultModel
 			? resolveOverlayRuntimeTarget({ providers: input.providers, status, wireModelId: defaultModel })
 			: null;
 		items.push({
 			value: epKey,
 			label: `${active.has(epKey) ? "[x]" : "[ ]"} ${runtimeName}  ${epKey}`,
-			description: endpointResolution
-				? `target-level scope  ${runtimeCapabilitySummary(endpointResolution)}`
+			description: targetResolution
+				? `target-level scope  ${runtimeCapabilitySummary(targetResolution)}`
 				: "target-level scope",
 		});
-		for (const wireModel of modelsForEndpoint(status)) {
+		for (const wireModel of modelsForTarget(status)) {
 			const key = `${ep.id}/${wireModel}`;
 			const resolved = resolveOverlayRuntimeTarget({ providers: input.providers, status, wireModelId: wireModel });
 			items.push({

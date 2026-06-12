@@ -7,7 +7,7 @@ import { getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
 import {
 	buildProviderSupportEntry,
-	configuredEndpointsForRuntime,
+	configuredTargetsForRuntime,
 	defaultModelForRuntime,
 	isTargetEligibleRuntime,
 	listKnownModelsForRuntime,
@@ -261,7 +261,7 @@ function printRuntimeList(includeHidden: boolean): void {
 			process.stdout.write(`${supportGroupLabel(entry.group)}:\n`);
 		}
 		const runtime = getRuntimeRegistry().get(entry.runtimeId);
-		const endpointCount = configuredEndpointsForRuntime(settings, entry.runtimeId).length;
+		const targetCount = configuredTargetsForRuntime(settings, entry.runtimeId).length;
 		const status =
 			runtime && entry.connectable
 				? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false })
@@ -281,12 +281,12 @@ function printRuntimeList(includeHidden: boolean): void {
 				? entry.modelHints.slice(0, 2).join(", ")
 				: (defaultModelForRuntime(entry.runtimeId) ?? "-");
 		process.stdout.write(
-			`  ${entry.runtimeId.padEnd(22)} ${entry.label.padEnd(20)} ${authLabel.padEnd(11)} targets=${String(endpointCount).padEnd(3)} models=${modelLabel}\n`,
+			`  ${entry.runtimeId.padEnd(22)} ${entry.label.padEnd(20)} ${authLabel.padEnd(11)} targets=${String(targetCount).padEnd(3)} models=${modelLabel}\n`,
 		);
 	}
 }
 
-function deriveEndpointId(runtimeId: string, existing: ReadonlyArray<TargetDescriptor>): string {
+function deriveTargetId(runtimeId: string, existing: ReadonlyArray<TargetDescriptor>): string {
 	const base = runtimeId;
 	const taken = new Set(existing.map((e) => e.id));
 	if (!taken.has(base)) return base;
@@ -353,25 +353,25 @@ function validateContextWindowOverride(
 	return true;
 }
 
-async function runtimeProbe(runtime: RuntimeDescriptor, endpoint: TargetDescriptor): Promise<ProbeResult | null> {
+async function runtimeProbe(runtime: RuntimeDescriptor, target: TargetDescriptor): Promise<ProbeResult | null> {
 	if (typeof runtime.probe !== "function") return null;
 	try {
-		return await runtime.probe(endpoint, buildProbeContext());
+		return await runtime.probe(target, buildProbeContext());
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
 }
 
-async function runtimeProbeModels(runtime: RuntimeDescriptor, endpoint: TargetDescriptor): Promise<string[]> {
+async function runtimeProbeModels(runtime: RuntimeDescriptor, target: TargetDescriptor): Promise<string[]> {
 	if (typeof runtime.probeModels !== "function") return [];
 	try {
-		return await runtime.probeModels(endpoint, buildProbeContext());
+		return await runtime.probeModels(target, buildProbeContext());
 	} catch {
 		return [];
 	}
 }
 
-function applyEndpoint(settings: ClioSettings, descriptor: TargetDescriptor): void {
+function applyTarget(settings: ClioSettings, descriptor: TargetDescriptor): void {
 	const idx = settings.targets.findIndex((e) => e.id === descriptor.id);
 	if (idx >= 0) settings.targets[idx] = descriptor;
 	else settings.targets.push(descriptor);
@@ -537,12 +537,12 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
 
 async function resolveSupportedWireModels(
 	runtime: RuntimeDescriptor,
-	endpoint: TargetDescriptor,
+	target: TargetDescriptor,
 	existing?: TargetDescriptor,
 ): Promise<string[]> {
 	const known = listKnownModelsForRuntime(runtime.id);
 	if (known.length > 0) return known;
-	const discovered = runtime.kind === "http" ? await runtimeProbeModels(runtime, endpoint) : [];
+	const discovered = runtime.kind === "http" ? await runtimeProbeModels(runtime, target) : [];
 	if (discovered.length > 0) return discovered;
 	return existing?.wireModels ? [...existing.wireModels] : [];
 }
@@ -676,7 +676,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
 	const setWorkerDefault = args.setWorkerDefault || (args.workerProfile === undefined && args.workerModel !== undefined);
 	const applyConfiguration = (target: ClioSettings): void => {
-		applyEndpoint(target, descriptor);
+		applyTarget(target, descriptor);
 		if (setOrchestrator)
 			setOrchestratorPointer(target, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
 		if (setWorkerDefault)
@@ -904,7 +904,7 @@ async function runInteractive(
 	const settings = readSettings();
 	let support = buildProviderSupportEntry(runtime);
 	const initialRuntimeId = runtime.id;
-	const existingForRuntime = configuredEndpointsForRuntime(settings, initialRuntimeId);
+	const existingForRuntime = configuredTargetsForRuntime(settings, initialRuntimeId);
 	const existing =
 		(defaults.id
 			? settings.targets.find((entry) => entry.id === defaults.id && entry.runtime === initialRuntimeId)
@@ -913,8 +913,8 @@ async function runInteractive(
 		null;
 	if (existingForRuntime.length > 0) {
 		process.stdout.write(`\nExisting targets for ${runtime.id}:\n`);
-		for (const endpoint of existingForRuntime) {
-			process.stdout.write(`  - ${endpoint.id}${endpoint.defaultModel ? ` (${endpoint.defaultModel})` : ""}\n`);
+		for (const target of existingForRuntime) {
+			process.stdout.write(`  - ${target.id}${target.defaultModel ? ` (${target.defaultModel})` : ""}\n`);
 		}
 	}
 	process.stdout.write(`\nSelected runtime: ${runtime.id} (${support.summary})\n`);
@@ -922,13 +922,13 @@ async function runInteractive(
 	if (support.modelHints.length > 0) {
 		process.stdout.write(`Known models: ${support.modelHints.slice(0, 4).join(", ")}\n`);
 	}
-	const suggestedId = defaults.id ?? existing?.id ?? deriveEndpointId(runtime.id, settings.targets);
+	const suggestedId = defaults.id ?? existing?.id ?? deriveTargetId(runtime.id, settings.targets);
 	const idInput = await ask(rl, "Target id", suggestedId);
 	if (idInput === null || idInput.length === 0) {
 		printError("target id is required");
 		return 2;
 	}
-	const endpointId = idInput;
+	const targetId = idInput;
 
 	let url: string | undefined = existing?.url;
 	if (support.supportsCustomUrl) {
@@ -1002,7 +1002,7 @@ async function runInteractive(
 
 	let model: string | undefined = defaults.model;
 	let wireModels: string[] = existing?.wireModels ? [...existing.wireModels] : [];
-	const tentative = buildDescriptor(runtime, endpointId, {
+	const tentative = buildDescriptor(runtime, targetId, {
 		...(url !== undefined ? { url } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
 		...(apiKeyRef !== undefined ? { apiKeyRef } : {}),
@@ -1047,7 +1047,7 @@ async function runInteractive(
 	const gatewayDefault = defaults.gateway || existing?.gateway === true;
 	const gatewayAnswer = gatewayDefault ? true : await askYesNo(rl, "Mark as gateway?", false);
 
-	const descriptor = buildDescriptor(runtime, endpointId, {
+	const descriptor = buildDescriptor(runtime, targetId, {
 		...(url !== undefined ? { url } : {}),
 		...(model !== undefined ? { model } : {}),
 		...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
@@ -1101,7 +1101,7 @@ async function runInteractive(
 				rl,
 				"Orchestrator model",
 				wireModels,
-				settings.orchestrator.target === endpointId ? (settings.orchestrator.model ?? model) : model,
+				settings.orchestrator.target === targetId ? (settings.orchestrator.model ?? model) : model,
 			)))
 		: undefined;
 	if (orchestratorModel === null) return 0;
@@ -1111,13 +1111,13 @@ async function runInteractive(
 				rl,
 				"Fleet model",
 				wireModels,
-				settings.workers.default.target === endpointId ? (settings.workers.default.model ?? model) : model,
+				settings.workers.default.target === targetId ? (settings.workers.default.model ?? model) : model,
 			)))
 		: undefined;
 	if (workerModel === null) return 0;
 
 	const applyWizardChoice = (target: ClioSettings): void => {
-		applyEndpoint(target, descriptor);
+		applyTarget(target, descriptor);
 		if (setOrchestrator) setOrchestratorPointer(target, descriptor, orchestratorModel);
 		if (setWorkerDefault) setWorkerDefaultPointer(target, descriptor, workerModel);
 	};
@@ -1125,7 +1125,7 @@ async function runInteractive(
 	updateSettings(applyWizardChoice);
 
 	printSummary(settings, descriptor, probe);
-	printOk(`target ${endpointId} saved`);
+	printOk(`target ${targetId} saved`);
 	return 0;
 }
 

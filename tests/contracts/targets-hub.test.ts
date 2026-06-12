@@ -4,9 +4,9 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type {
 	AuthStatus,
-	EndpointStatus,
 	ProvidersContract,
 	RuntimeDescriptor,
+	TargetStatus,
 } from "../../src/domains/providers/index.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { applySettingChange } from "../../src/interactive/overlays/settings.js";
@@ -66,11 +66,11 @@ function status(
 		wireModels?: string[];
 		available?: boolean;
 		reason?: string;
-		health?: EndpointStatus["health"];
+		health?: TargetStatus["health"];
 		capabilities?: CapabilityFlags;
 		discoveredModels?: string[];
 	} = {},
-): EndpointStatus {
+): TargetStatus {
 	const rt =
 		overrides.runtime === undefined
 			? runtime(overrides.runtimeId ?? `${id}-runtime`, {
@@ -79,7 +79,7 @@ function status(
 				})
 			: overrides.runtime;
 	return {
-		endpoint: {
+		target: {
 			id,
 			runtime: rt?.id ?? overrides.runtimeId ?? `${id}-runtime`,
 			...(overrides.url === null ? {} : { url: overrides.url ?? `http://${id}.test` }),
@@ -144,9 +144,9 @@ describe("contracts/targets hub", () => {
 		]);
 		const providers = {
 			auth: {
-				statusForTarget: (endpoint: EndpointStatus["endpoint"]) => {
-					const found = authById.get(endpoint.id);
-					if (!found) throw new Error(`missing auth fixture for ${endpoint.id}`);
+				statusForTarget: (target: TargetStatus["target"]) => {
+					const found = authById.get(target.id);
+					if (!found) throw new Error(`missing auth fixture for ${target.id}`);
 					return found;
 				},
 			},
@@ -165,9 +165,9 @@ describe("contracts/targets hub", () => {
 				statuses,
 				{
 					selectedId: "dynamo",
-					activeEndpointId: "dynamo",
+					activeTargetId: "dynamo",
 					activeModelId: "current-live-model",
-					authByEndpoint: authMap,
+					authByTarget: authMap,
 				},
 				132,
 			),
@@ -203,7 +203,7 @@ describe("contracts/targets hub", () => {
 		];
 
 		deepStrictEqual(
-			sortTargetStatuses(rows, "beta").map((row) => row.endpoint.id),
+			sortTargetStatuses(rows, "beta").map((row) => row.target.id),
 			["beta", "alpha", "gamma", "zeta"],
 		);
 	});
@@ -218,7 +218,7 @@ describe("contracts/targets hub", () => {
 			capabilities: caps({ tools: true, reasoning: true, vision: true, contextWindow: 32000 }),
 			discoveredModels: ["m1", "m2", "m3", "m4", "m5"],
 		});
-		const authByEndpoint = new Map([["no-url", { summary: "env", detail: "env:LOCAL_KEY" }]]);
+		const authByTarget = new Map([["no-url", { summary: "env", detail: "env:LOCAL_KEY" }]]);
 
 		const rendered = plainLines(
 			formatTargetsHubBodyLines(
@@ -226,7 +226,7 @@ describe("contracts/targets hub", () => {
 				{
 					selectedId: "no-url",
 					expandedId: "no-url",
-					authByEndpoint,
+					authByTarget,
 				},
 				120,
 			),

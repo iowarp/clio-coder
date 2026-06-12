@@ -10,7 +10,7 @@ import { buildWelcomeDashboardLines, deriveWelcomeDashboardStats } from "../../s
 const mockSettings: ClioSettings = {
 	autonomy: "auto-edit",
 	orchestrator: {
-		target: "mock-endpoint",
+		target: "mock-target",
 		model: "gemini-3.5-flash",
 		thinkingLevel: "high",
 	},
@@ -18,7 +18,7 @@ const mockSettings: ClioSettings = {
 	targets: [],
 	workers: {
 		default: {
-			target: "mock-endpoint",
+			target: "mock-target",
 			model: "gemini-3.5-flash",
 		},
 		profiles: {},
@@ -45,8 +45,8 @@ const mockSettings: ClioSettings = {
 const mockProviders = {
 	list: () => [
 		{
-			endpoint: {
-				id: "mock-endpoint",
+			target: {
+				id: "mock-target",
 				defaultModel: "gemini-3.5-flash",
 				url: "https://mock.example.com",
 			},
@@ -98,7 +98,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 			getSettings: () => mockSettings,
 		});
 
-		strictEqual(stats.targetLabel, "mock-endpoint");
+		strictEqual(stats.targetLabel, "mock-target");
 		strictEqual(stats.modelLabel, "gemini-3.5-flash");
 		strictEqual(stats.thinkingLevel, "on");
 		strictEqual(stats.autonomy, "auto-edit");
@@ -190,6 +190,6 @@ describe("welcome-dashboard and footer integration tests", () => {
 		ok(joined.includes("ACTIVITY"));
 
 		// Target should be formatted inside the Session facts
-		ok(joined.includes("mock-endpoint"));
+		ok(joined.includes("mock-target"));
 	});
 });

@@ -24,7 +24,7 @@ import {
 import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
-import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
+import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
@@ -93,33 +93,33 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 
 function stubContext(
 	options: {
-		endpoint?: TargetDescriptor;
+		target?: TargetDescriptor;
 		runtime?: RuntimeDescriptor;
 		recipes?: ReadonlyArray<AgentRecipe>;
-		status?: Partial<EndpointStatus>;
+		status?: Partial<TargetStatus>;
 	} = {},
 ): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	const endpoint: TargetDescriptor = options.endpoint ?? {
+	const target: TargetDescriptor = options.target ?? {
 		id: "default",
 		runtime: "openai",
 		defaultModel: "gpt-4o",
 	};
-	settings.targets = [endpoint];
-	settings.workers.default.target = endpoint.id;
-	settings.workers.default.model = endpoint.defaultModel ?? "gpt-4o";
+	settings.targets = [target];
+	settings.workers.default.target = target.id;
+	settings.workers.default.model = target.defaultModel ?? "gpt-4o";
 
 	const runtime: RuntimeDescriptor = options.runtime ?? {
-		id: endpoint.runtime,
+		id: target.runtime,
 		displayName: "OpenAI",
 		kind: "http",
 		apiFamily: "openai-completions",
 		auth: "api-key",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
-		synthesizeModel: () => ({ id: endpoint.defaultModel, provider: endpoint.runtime }) as never,
+		synthesizeModel: () => ({ id: target.defaultModel, provider: target.runtime }) as never,
 	};
-	const status: EndpointStatus = {
-		endpoint,
+	const status: TargetStatus = {
+		target,
 		runtime,
 		available: true,
 		reason: "test",
@@ -130,12 +130,12 @@ function stubContext(
 	};
 	const providers: ProvidersContract = {
 		list: () => [status],
-		getEndpoint: (id) => (id === endpoint.id ? endpoint : null),
+		getTarget: (id) => (id === target.id ? target : null),
 		getRuntime: (id) => (id === runtime.id ? runtime : null),
 		probeAll: async () => {},
 		probeAllLive: async () => {},
-		probeEndpoint: async () => status,
-		disconnectEndpoint: () => status,
+		probeTarget: async () => status,
+		disconnectTarget: () => status,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,
@@ -312,7 +312,7 @@ describe("contracts/dispatch", () => {
 	it("canonicalizes worker spec and receipt model ids against a live catalog", async () => {
 		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
 		const canonical = "AgenticQwen-30B-A3B-i1-Q4_K_M-262K";
-		const endpoint: TargetDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: requested };
+		const target: TargetDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: requested };
 		const runtime: RuntimeDescriptor = {
 			id: "llamacpp",
 			displayName: "llama.cpp",
@@ -320,10 +320,10 @@ describe("contracts/dispatch", () => {
 			apiFamily: "openai-completions",
 			auth: "none",
 			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
-			synthesizeModel: (_endpoint, wireModelId) => ({ id: wireModelId, provider: "llamacpp" }) as never,
+			synthesizeModel: (_target, wireModelId) => ({ id: wireModelId, provider: "llamacpp" }) as never,
 		};
 		const context = stubContext({
-			endpoint,
+			target,
 			runtime,
 			status: { discoveredModels: [canonical], discoveredModelsSource: "probe" },
 		});
@@ -358,7 +358,7 @@ describe("contracts/dispatch", () => {
 
 	it("dispatch serializes the resolved http runtime onto the worker spec", async () => {
 		const id = "http-worker";
-		const endpoint: TargetDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };
+		const target: TargetDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };
 		const runtime: RuntimeDescriptor = {
 			id,
 			displayName: id,
@@ -368,7 +368,7 @@ describe("contracts/dispatch", () => {
 			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
 			synthesizeModel: () => ({ id: "worker-model", provider: id }) as never,
 		};
-		const context = stubContext({ endpoint, runtime });
+		const context = stubContext({ target, runtime });
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let capturedSpec: WorkerSpec | null = null;
 
@@ -674,7 +674,7 @@ describe("contracts/dispatch", () => {
 			strictEqual(capturedTask, "delegate this");
 			strictEqual(capturedCommand, "opencode");
 			strictEqual(receipt.runtimeKind, "acp-delegation");
-			strictEqual(receipt.endpointId, "delegation:opencode");
+			strictEqual(receipt.targetId, "delegation:opencode");
 			strictEqual(receipt.sessionId, "sess-1");
 			strictEqual(receipt.tokenCount, 3);
 			strictEqual(
@@ -817,7 +817,7 @@ rl.once("line", () => {
 					systemPrompt: "",
 					agentId: "coder",
 					task: "t",
-					endpoint: { id: "e", runtime: "x" } as never,
+					target: { id: "e", runtime: "x" } as never,
 					runtime: {
 						version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
 						id: "x",
@@ -1188,7 +1188,7 @@ rl.once("line", () => {
 			const env = ledger.create({
 				agentId: "coder",
 				task: "orphan task",
-				endpointId: "default",
+				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
 				runtimeKind: "http",
@@ -1212,7 +1212,7 @@ rl.once("line", () => {
 				runId: env.id,
 				agentId: "coder",
 				task: "orphan task",
-				endpointId: "default",
+				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
 				runtimeKind: "http",

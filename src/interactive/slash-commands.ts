@@ -82,7 +82,7 @@ export interface ContextClearCommandOptions {
 export interface RunCommandOptions {
 	workerProfile?: string;
 	workerRuntime?: string;
-	endpoint?: string;
+	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
 	toolProfile?: ToolProfileName;
@@ -93,7 +93,7 @@ export interface HandleRunDeps {
 	dispatch: DispatchContract;
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
-	workerDefault?: { endpoint?: string; model?: string } | undefined;
+	workerDefault?: { target?: string; model?: string } | undefined;
 	/**
 	 * Optional bus for forwarding per-event worker output. When supplied,
 	 * every non-heartbeat event is re-emitted on `BusChannels.DispatchProgress`
@@ -115,11 +115,11 @@ export async function handleRun(
 	options: RunCommandOptions = {},
 ): Promise<void> {
 	const { dispatch, notice, bus } = deps;
-	if (options.endpoint && options.workerProfile) {
-		notice("warn", `--target ${options.endpoint} takes precedence; --worker ${options.workerProfile} will be ignored`);
+	if (options.target && options.workerProfile) {
+		notice("warn", `--target ${options.target} takes precedence; --worker ${options.workerProfile} will be ignored`);
 	}
-	if (options.endpoint && options.workerRuntime) {
-		notice("warn", `--target ${options.endpoint} takes precedence; --runtime ${options.workerRuntime} will be ignored`);
+	if (options.target && options.workerRuntime) {
+		notice("warn", `--target ${options.target} takes precedence; --runtime ${options.workerRuntime} will be ignored`);
 	}
 	try {
 		const request = {
@@ -128,7 +128,7 @@ export async function handleRun(
 			requestOrigin: "user" as const,
 			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
 			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
-			...(options.endpoint ? { endpoint: options.endpoint } : {}),
+			...(options.target ? { target: options.target } : {}),
 			...(options.model ? { model: options.model } : {}),
 			...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
 			...(options.toolProfile ? { toolProfile: options.toolProfile } : {}),
@@ -198,7 +198,7 @@ export interface SlashCommandContext {
 	bus: SafeEventBus;
 	dataDir: string;
 	/** Returns the current `workers.default` block, resolved fresh on every /run. */
-	workerDefault: () => { endpoint?: string; model?: string } | undefined;
+	workerDefault: () => { target?: string; model?: string } | undefined;
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: (options: InitCommandOptions) => void;
@@ -516,8 +516,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const workerRuntime = parsed.flags.get("--runtime");
 			if (typeof workerRuntime === "string") options.workerRuntime = workerRuntime;
 
-			const endpoint = parsed.flags.get("--target");
-			if (typeof endpoint === "string") options.endpoint = endpoint;
+			const target = parsed.flags.get("--target");
+			if (typeof target === "string") options.target = target;
 
 			const model = parsed.flags.get("--model");
 			if (typeof model === "string") options.model = model;
@@ -746,7 +746,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				if (result.warning) ctx.notice("warn", result.warning);
 				ctx.applyModelRef(result.ref);
 				const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
-				ctx.notice("success", `active: ${result.ref.endpoint}/${result.ref.model}${suffix}`);
+				ctx.notice("success", `active: ${result.ref.target}/${result.ref.model}${suffix}`);
 				ctx.render();
 			})();
 		},

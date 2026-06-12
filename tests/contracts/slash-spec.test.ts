@@ -126,8 +126,8 @@ describe("contracts/slash-spec", () => {
 				{ kind: "run", agentId: "scout", task: "task", options: { workerRuntime: "node" } },
 			],
 			[
-				"/run --target myEndpoint scout task",
-				{ kind: "run", agentId: "scout", task: "task", options: { endpoint: "myEndpoint" } },
+				"/run --target myTarget scout task",
+				{ kind: "run", agentId: "scout", task: "task", options: { target: "myTarget" } },
 			],
 			["/run --model gpt-4 scout task", { kind: "run", agentId: "scout", task: "task", options: { model: "gpt-4" } }],
 			[
@@ -144,21 +144,15 @@ describe("contracts/slash-spec", () => {
 				"/run --require a --require b scout task",
 				{ kind: "run", agentId: "scout", task: "task", options: { requiredCapabilities: ["a", "b"] } },
 			],
-			[
-				"/run --target a --target b scout task",
-				{ kind: "run", agentId: "scout", task: "task", options: { endpoint: "b" } },
-			],
+			["/run --target a --target b scout task", { kind: "run", agentId: "scout", task: "task", options: { target: "b" } }],
 			[
 				"/run --agent-profile a --worker-profile b --worker c scout task",
 				{ kind: "run", agentId: "scout", task: "task", options: { workerProfile: "c" } },
 			],
-			[
-				"/run scout --target endpoint task",
-				{ kind: "run", agentId: "scout", task: "task", options: { endpoint: "endpoint" } },
-			],
+			["/run scout --target target task", { kind: "run", agentId: "scout", task: "task", options: { target: "target" } }],
 			[
 				"/run verifier --target dynamo inspect the project",
-				{ kind: "run", agentId: "verifier", task: "inspect the project", options: { endpoint: "dynamo" } },
+				{ kind: "run", agentId: "verifier", task: "inspect the project", options: { target: "dynamo" } },
 			],
 			[
 				"/run verifier --model qwen3 --require tools inspect the project",

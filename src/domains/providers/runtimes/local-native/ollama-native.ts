@@ -5,7 +5,7 @@ import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
-import { endpointBase, synthLocalModel, withAsIs } from "../common/local-synth.js";
+import { synthLocalModel, targetBaseUrl, withAsIs } from "../common/local-synth.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
@@ -33,9 +33,9 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 	apiFamily: "ollama-native",
 	auth: "none",
 	defaultCapabilities,
-	async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-		const base = endpointBase(endpoint);
-		if (!base) return { ok: false, error: "endpoint has no url" };
+	async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+		const base = targetBaseUrl(target);
+		if (!base) return { ok: false, error: "target has no url" };
 		const opts = { url: `${base}/api/tags`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const result = await (ctx.signal
 			? probeJson<OllamaTagsResponse>({ ...opts, signal: ctx.signal })
@@ -50,8 +50,8 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 		if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
 		return out;
 	},
-	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-		const base = endpointBase(endpoint);
+	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
+		const base = targetBaseUrl(target);
 		if (!base) return [];
 		const opts = { url: `${base}/api/tags`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const result = await (ctx.signal
@@ -62,15 +62,15 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 			.map((row) => (typeof row?.name === "string" ? row.name : null))
 			.filter((name): name is string => name !== null);
 	},
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,
 			apiFamily: "ollama-native",
 			provider: "ollama",
-			baseUrlForEndpoint: withAsIs,
+			baseUrlForTarget: withAsIs,
 		});
 	},
 };

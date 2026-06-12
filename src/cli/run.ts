@@ -45,7 +45,7 @@ Flags:
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
-  --agent-runtime <id>      pick the first fleet profile whose endpoint uses this runtime
+  --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the dispatch target must advertise (repeatable)
   --skill <path>            load one explicit skill for this run, repeatable
@@ -227,27 +227,27 @@ async function runDispatch(
 			return 1;
 		}
 		const settings = readSettings();
-		const profileEndpointId = parsed.agentProfile ? settings.workers?.profiles?.[parsed.agentProfile]?.target : undefined;
-		const runtimeByEndpoint = new Map(settings.targets.map((endpoint) => [endpoint.id, endpoint.runtime] as const));
-		const runtimeEndpointId = parsed.agentRuntime
+		const profileTargetId = parsed.agentProfile ? settings.workers?.profiles?.[parsed.agentProfile]?.target : undefined;
+		const runtimeByTarget = new Map(settings.targets.map((target) => [target.id, target.runtime] as const));
+		const runtimeTargetId = parsed.agentRuntime
 			? [settings.workers?.default, ...Object.values(settings.workers?.profiles ?? {})].find(
-					(profile) => profile?.target && runtimeByEndpoint.get(profile.target) === parsed.agentRuntime,
+					(profile) => profile?.target && runtimeByTarget.get(profile.target) === parsed.agentRuntime,
 				)?.target
 			: undefined;
-		const targetEndpointId =
+		const targetId =
 			parsed.target ??
-			profileEndpointId ??
-			runtimeEndpointId ??
+			profileTargetId ??
+			runtimeTargetId ??
 			settings.workers?.default?.target ??
 			settings.orchestrator?.target;
-		const endpoint = targetEndpointId ? providers.getEndpoint(targetEndpointId) : null;
-		const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
-		if (!endpoint || !runtime) {
+		const target = targetId ? providers.getTarget(targetId) : null;
+		const runtime = target ? providers.getRuntime(target.runtime) : null;
+		if (!target || !runtime) {
 			process.stderr.write("clio run: --api-key supplied but no target resolved; pass --target <id>\n");
 			await loaded.stop();
 			return 2;
 		}
-		providers.auth.setRuntimeOverrideForTarget(endpoint, runtime, options.apiKey);
+		providers.auth.setRuntimeOverrideForTarget(target, runtime, options.apiKey);
 	}
 
 	const noSkills = options.noSkills === true || parsed.noSkills === true;
@@ -260,7 +260,7 @@ async function runDispatch(
 	};
 	if (parsed.agentProfile) dispatchReq.workerProfile = parsed.agentProfile;
 	if (parsed.agentRuntime) dispatchReq.workerRuntime = parsed.agentRuntime;
-	if (parsed.target) dispatchReq.endpoint = parsed.target;
+	if (parsed.target) dispatchReq.target = parsed.target;
 	if (parsed.model) dispatchReq.model = parsed.model;
 	if (parsed.thinking) dispatchReq.thinkingLevel = parsed.thinking;
 	if (parsed.toolProfile) dispatchReq.toolProfile = parsed.toolProfile;
@@ -341,7 +341,7 @@ function formatReceipt(r: RunReceipt): string {
 	const reasoning =
 		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.endpointId} model=${r.wireModelId} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
+	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode} target=${r.targetId} model=${r.wireModelId} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }
 
 function mapExitCode(r: RunReceipt): number {

@@ -27,9 +27,9 @@ const googleRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "GOOGLE_API_KEY",
 	defaultCapabilities,
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null) {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null) {
 		return synthesizeGoogleModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,

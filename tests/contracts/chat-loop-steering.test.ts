@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
+import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -27,7 +27,7 @@ function settings(): ClioSettings {
 }
 
 function providers(): ProvidersContract {
-	const endpoint: TargetDescriptor = {
+	const target: TargetDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
 		defaultModel: "model",
@@ -53,8 +53,8 @@ function providers(): ProvidersContract {
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			}) as never,
 	};
-	const status: EndpointStatus = {
-		endpoint,
+	const status: TargetStatus = {
+		target,
 		runtime,
 		available: true,
 		reason: "test",
@@ -64,10 +64,10 @@ function providers(): ProvidersContract {
 	};
 	return {
 		list: () => [status],
-		getEndpoint: (id: string) => (id === endpoint.id ? endpoint : null),
+		getTarget: (id: string) => (id === target.id ? target : null),
 		getRuntime: (id: string) => (id === runtime.id ? runtime : null),
 		getDetectedReasoning: () => null,
-		probeEndpoint: async () => status,
+		probeTarget: async () => status,
 		probeReasoningForModel: async () => null,
 		knowledgeBase: null,
 		auth: {
@@ -89,7 +89,7 @@ function createSession(entries: SessionEntry[] = []): SessionContract {
 				createdAt: new Date().toISOString(),
 				cwd: input?.cwd ?? process.cwd(),
 				model: input?.model ?? "model",
-				endpoint: input?.endpoint ?? "test-target",
+				target: input?.target ?? "test-target",
 			} as SessionMeta;
 			return current;
 		},
@@ -259,7 +259,7 @@ function createLoop(log: SteeringHarnessLog, promptImpl: Parameters<typeof creat
 	return createChatLoop({
 		getSettings: () => settings(),
 		providers: providers(),
-		knownEndpoints: () => new Set(["test-target"]),
+		knownTargets: () => new Set(["test-target"]),
 		session: createSession(entries),
 		readSessionEntries: () => entries,
 		createAgent: createSteeringAgentFactory(log, promptImpl),

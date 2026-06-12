@@ -1,4 +1,4 @@
-import type { EndpointStatus } from "./contract.js";
+import type { TargetStatus } from "./contract.js";
 import { listKnownModelsForRuntime } from "./support.js";
 
 export type ProviderModelSource = "configured" | "live" | "catalog" | "default";
@@ -22,11 +22,11 @@ function uniqueModels(ids: ReadonlyArray<string | undefined>): string[] {
 	return out;
 }
 
-export function modelLoadStateLabel(status: EndpointStatus, modelId: string): string {
+export function modelLoadStateLabel(status: TargetStatus, modelId: string): string {
 	return status.discoveredModelStates?.[modelId]?.state ?? "-";
 }
 
-export function hasLiveModelCatalog(status: EndpointStatus): boolean {
+export function hasLiveModelCatalog(status: TargetStatus): boolean {
 	if (status.discoveredModelsSource === "probe" || status.discoveredModelsSource === "cache") return true;
 	// Unit-test and plugin mocks from before `discoveredModelsSource` still use
 	// `discoveredModels` to mean "this came from discovery".
@@ -39,10 +39,10 @@ export function hasLiveModelCatalog(status: EndpointStatus): boolean {
  * has returned a live catalog, that catalog is authoritative so stale
  * configured model names do not keep resolving after a provider removes them.
  */
-export function modelCandidatesForStatus(status: EndpointStatus): ProviderModelCandidate[] {
-	const configured = uniqueModels(status.endpoint.wireModels ?? []);
+export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCandidate[] {
+	const configured = uniqueModels(status.target.wireModels ?? []);
 	const discovered = uniqueModels(status.discoveredModels);
-	const defaultModel = status.endpoint.defaultModel?.trim() ?? "";
+	const defaultModel = status.target.defaultModel?.trim() ?? "";
 	const out: ProviderModelCandidate[] = [];
 	const seen = new Set<string>();
 	const add = (id: string, source: ProviderModelSource): void => {
@@ -74,7 +74,7 @@ export function modelCandidatesForStatus(status: EndpointStatus): ProviderModelC
 		return out;
 	}
 
-	const knownModels = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
+	const knownModels = listKnownModelsForRuntime(status.runtime?.id ?? status.target.runtime);
 	if (knownModels.length > 0) {
 		const knownSet = new Set(knownModels);
 		for (const id of uniqueModels([defaultModel, ...knownModels])) {
@@ -87,15 +87,15 @@ export function modelCandidatesForStatus(status: EndpointStatus): ProviderModelC
 	return out;
 }
 
-export function modelIdsForStatus(status: EndpointStatus): string[] {
+export function modelIdsForStatus(status: TargetStatus): string[] {
 	return modelCandidatesForStatus(status).map((candidate) => candidate.id);
 }
 
-export function canonicalizeWireModelId(status: EndpointStatus, requested: string): string {
+export function canonicalizeWireModelId(status: TargetStatus, requested: string): string {
 	const trimmedRequested = requested.trim();
 	if (trimmedRequested.length === 0) return requested;
 	const candidates = uniqueModels(
-		hasLiveModelCatalog(status) ? modelIdsForStatus(status) : (status.endpoint.wireModels ?? []),
+		hasLiveModelCatalog(status) ? modelIdsForStatus(status) : (status.target.wireModels ?? []),
 	);
 	if (candidates.includes(trimmedRequested)) return trimmedRequested;
 

@@ -18,7 +18,7 @@ export interface ReduceContext {
 	now: number;
 	localRuntime: boolean;
 	modelId?: string;
-	endpointId?: string;
+	targetId?: string;
 	runId?: string | null;
 }
 
@@ -68,8 +68,8 @@ function isActive(phase: StatusPhase): phase is Exclude<StatusPhase, "idle" | "e
 	return phase !== "idle" && phase !== "ended";
 }
 
-function targetModel(ctx: ReduceContext): { modelId: string; endpointId: string } {
-	return { modelId: ctx.modelId ?? "", endpointId: ctx.endpointId ?? "" };
+function targetModel(ctx: ReduceContext): { modelId: string; targetId: string } {
+	return { modelId: ctx.modelId ?? "", targetId: ctx.targetId ?? "" };
 }
 
 function peak(prev: AgentStatus, tier: AgentStatus["watchdogTier"]): AgentStatus["watchdogPeak"] {
@@ -241,7 +241,7 @@ function cancelledSummary(
 		startedAt: start,
 		endedAt: ctx.now,
 		modelId: model.modelId,
-		endpointId: model.endpointId,
+		targetId: model.targetId,
 		watchdogPeak: prev.watchdogPeak,
 		stopReason,
 		truncated,
@@ -374,7 +374,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 					startedAt: start,
 					endedAt: ctx.now,
 					modelId: model.modelId,
-					endpointId: model.endpointId,
+					targetId: model.targetId,
 					messages: event.messages,
 					watchdogPeak: prev.watchdogPeak,
 					cancelled: false,

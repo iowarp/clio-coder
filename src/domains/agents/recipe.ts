@@ -9,7 +9,7 @@ export interface AgentRecipe {
 	description: string;
 	tools?: ReadonlyArray<string>;
 	model?: string;
-	endpoint?: string;
+	target?: string;
 	thinkingLevel?: RecipeThinkingLevel;
 	/** Legacy recipe hint only; dispatch target selection comes from configured worker targets/profiles. */
 	runtime?: "native" | "cli";

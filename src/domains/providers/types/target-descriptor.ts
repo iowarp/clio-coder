@@ -18,7 +18,7 @@ export type TargetLifecycle = "user-managed" | "clio-managed";
 
 /**
  * Persisted target specification from settings.yaml (`targets:`). It binds a
- * user-facing target id to a RuntimeDescriptor id, endpoint URL/auth metadata,
+ * user-facing target id to a RuntimeDescriptor id, target URL/auth metadata,
  * model defaults, and capability overrides. Runtime resolution combines this
  * spec with the registry/catalog to produce a ResolvedRuntimeTarget.
  */

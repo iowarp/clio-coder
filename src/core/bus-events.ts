@@ -22,7 +22,7 @@ import type {
 	ToolActivitySummary,
 } from "../domains/dispatch/types.js";
 import type { MiddlewareHook } from "../domains/middleware/types.js";
-import type { EndpointStatus } from "../domains/providers/contract.js";
+import type { TargetStatus } from "../domains/providers/contract.js";
 import type { ClioSettings } from "./config.js";
 import type { TerminationPhase } from "./termination.js";
 
@@ -311,10 +311,10 @@ export interface SafetyAllowedPayload {
 // Providers
 // ---------------------------------------------------------------------------
 
-/** Published on {@link BusChannels.ProviderHealth} after every endpoint probe/disconnect. */
+/** Published on {@link BusChannels.ProviderHealth} after every target probe/disconnect. */
 export interface ProviderHealthPayload {
 	id: string;
-	status: EndpointStatus;
+	status: TargetStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +331,7 @@ export interface DispatchRunIdentity {
 	agentId: string;
 	agentAudience?: AgentAudience | undefined;
 	requestOrigin?: DispatchRequestOrigin | undefined;
-	endpointId: string;
+	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
@@ -361,7 +361,7 @@ export interface DispatchProgressPayload {
 	agentId: string;
 	agentAudience?: AgentAudience | undefined;
 	requestOrigin?: DispatchRequestOrigin | undefined;
-	endpointId?: string | undefined;
+	targetId?: string | undefined;
 	wireModelId?: string | undefined;
 	runtimeId?: string | undefined;
 	runtimeKind?: RunKind | undefined;

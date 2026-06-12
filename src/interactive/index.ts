@@ -181,7 +181,7 @@ export interface InteractiveDeps {
 	 * short-circuit with an actionable error when no provider is configured
 	 * instead of letting the dispatch throw with no config context.
 	 */
-	getWorkerDefault?: () => { endpoint?: string; model?: string } | undefined;
+	getWorkerDefault?: () => { target?: string; model?: string } | undefined;
 	/**
 	 * Resolver for current settings. Footer reads the orchestrator target
 	 * (what chat actually dispatches to) rather than the providers catalog's
@@ -199,7 +199,7 @@ export interface InteractiveDeps {
 	/** Persist the next thinking level when Shift+Tab is pressed. */
 	onCycleThinking?: () => void;
 	/** Persist the orchestrator target selected in /model. */
-	onSelectModel?: (ref: { endpoint: string; model: string }) => void;
+	onSelectModel?: (ref: { target: string; model: string }) => void;
 	/** Persist the next `provider.scope` list committed in /scoped-models. */
 	onSetScope?: (scope: string[]) => void;
 	/** Write handler the /settings overlay uses to persist cycled values. */
@@ -1059,9 +1059,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			const settings = deps.getSettings?.();
 			const model = settings?.orchestrator?.model?.trim();
 			if (!model) return "no model";
-			const endpoint = settings?.orchestrator?.target?.trim();
+			const target = settings?.orchestrator?.target?.trim();
 			const abbreviated = abbreviateModelId(model);
-			return endpoint ? `${endpoint}·${abbreviated}` : abbreviated;
+			return target ? `${target}·${abbreviated}` : abbreviated;
 		},
 		getThinkingLabel: () => {
 			const settings = deps.getSettings?.();
@@ -1256,7 +1256,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// session-owned, so external writers (another Clio session, the CLI, a
 	// manual edit) only change defaults; surface a notice when the new defaults
 	// diverge from this session's active routing, and warn when the active
-	// target was removed from the shared endpoint catalog.
+	// target was removed from the shared target catalog.
 	let settingsOverlayRefresh: (() => void) | null = null;
 	const unsubscribeConfigRouting = deps.bus.on(BusChannels.ConfigNextTurn, (payload) => {
 		const evt = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
@@ -1271,7 +1271,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		}
 		// Re-derive the /settings overlay rows while it is open: the shared
 		// snapshot just moved (target catalog, defaults), and rows like
-		// endpoints/fleet.profiles must track it.
+		// targets/fleet.profiles must track it.
 		settingsOverlayRefresh?.();
 		footer.refresh();
 		tui.requestRender();
@@ -1327,8 +1327,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const ensureSessionForLocalEntry = (): void => {
 		if (!deps.session || deps.session.current()) return;
 		const settings = deps.getSettings?.();
-		const input: { cwd: string; endpoint?: string; model?: string } = { cwd: process.cwd() };
-		if (settings?.orchestrator.target) input.endpoint = settings.orchestrator.target;
+		const input: { cwd: string; target?: string; model?: string } = { cwd: process.cwd() };
+		if (settings?.orchestrator.target) input.target = settings.orchestrator.target;
 		if (settings?.orchestrator.model) input.model = settings.orchestrator.model;
 		deps.session.create(input);
 	};
@@ -1472,7 +1472,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openModel: () => openModelOverlayState(),
 		providers: deps.providers,
 		applyModelRef: (ref) => {
-			deps.onSelectModel?.({ endpoint: ref.endpoint, model: ref.model });
+			deps.onSelectModel?.({ target: ref.target, model: ref.model });
 			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel);
 			tui.requestRender();
 		},
@@ -1965,46 +1965,46 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const performDisconnect = async (target: string): Promise<void> => {
 		const resolved = resolveConnectionReference(target);
-		if (!resolved?.endpoint) {
+		if (!resolved?.target) {
 			notify("warning", `disconnect: unknown target ${target}`, `connect:${target}`);
 			return;
 		}
-		const status = deps.providers.disconnectEndpoint(resolved.endpoint.id);
+		const status = deps.providers.disconnectTarget(resolved.target.id);
 		if (!status) {
 			notify("warning", `disconnect: unknown target ${target}`, `connect:${target}`);
 			return;
 		}
-		notify("info", `disconnected ${status.endpoint.id}; credentials unchanged`, `connect:${status.endpoint.id}`);
+		notify("info", `disconnected ${status.target.id}; credentials unchanged`, `connect:${status.target.id}`);
 		footer.refresh();
 		tui.requestRender();
 	};
 
-	const openConnectFlowState = async (target: string): Promise<void> => {
+	const openConnectFlowState = async (reference: string): Promise<void> => {
 		if (overlayState !== "closed" && overlayState !== "providers") return;
 		const returnHandle = overlayState === "providers" ? overlayHandle : null;
-		const resolved = resolveConnectionReference(target);
-		if (!resolved?.endpoint) {
-			notify("warning", `connect: unknown target ${target}. Add it with clio targets add.`, `connect:${target}`);
+		const resolved = resolveConnectionReference(reference);
+		if (!resolved?.target) {
+			notify("warning", `connect: unknown target ${reference}. Add it with clio targets add.`, `connect:${reference}`);
 			return;
 		}
-		const endpoint = resolved.endpoint;
+		const target = resolved.target;
 		const runtime = resolved.runtime;
 		const authTarget = resolved.authTarget;
-		const endpointId = endpoint.id;
+		const targetId = target.id;
 		const runtimeId = runtime.id;
 		await new Promise<void>((resolveAuthFlow) => {
-			const dialog = openAuthDialog(tui, `Connect ${endpointId}`, () => closeOverlay());
+			const dialog = openAuthDialog(tui, `Connect ${targetId}`, () => closeOverlay());
 			authReturnOverlayHandle = returnHandle;
 			authCloseResolve = resolveAuthFlow;
 			overlayState = "auth";
 			overlayHandle = dialog.handle;
 
 			const probeTarget = async (): Promise<void> => {
-				dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
-				const status = await deps.providers.probeEndpoint(endpointId);
+				dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtimeId}`, "Checking target..."]);
+				const status = await deps.providers.probeTarget(targetId);
 				if (!status) {
-					dialog.controller.setLines([`Target: ${endpointId}`, "Target check failed: target is not configured."]);
-					notify("error", `connect: ${endpointId} is not configured`, `connect:${endpointId}`);
+					dialog.controller.setLines([`Target: ${targetId}`, "Target check failed: target is not configured."]);
+					notify("error", `connect: ${targetId} is not configured`, `connect:${targetId}`);
 					return;
 				}
 				const health = status.health.status;
@@ -2013,15 +2013,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					status.health.lastError ||
 					(status.health.latencyMs !== null ? `${status.health.latencyMs}ms` : "no details");
 				dialog.controller.setLines([
-					`Target: ${endpointId}`,
+					`Target: ${targetId}`,
 					`Runtime: ${runtimeId}`,
 					status.available ? `Target ready (${health})` : `Target check failed (${health})`,
 					detail,
 				]);
 				notify(
 					status.available ? "info" : "warning",
-					status.available ? `connected ${endpointId} (${health})` : `connect ${endpointId} failed (${health})`,
-					`connect:${endpointId}`,
+					status.available ? `connected ${targetId} (${health})` : `connect ${targetId} failed (${health})`,
+					`connect:${targetId}`,
 				);
 				footer.refresh();
 				tui.requestRender();
@@ -2057,15 +2057,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				}
 			};
 
-			const requiresManagedAuth = targetRequiresAuth(endpoint, runtime);
-			const authStatus = deps.providers.auth.statusForTarget(endpoint, runtime);
+			const requiresManagedAuth = targetRequiresAuth(target, runtime);
+			const authStatus = deps.providers.auth.statusForTarget(target, runtime);
 			if (!requiresManagedAuth || authStatus.available) {
 				void (async () => {
 					try {
 						await probeTarget();
 					} catch (error) {
 						dialog.controller.setLines([
-							`Target: ${endpointId}`,
+							`Target: ${targetId}`,
 							`Target check failed: ${error instanceof Error ? error.message : String(error)}`,
 						]);
 						tui.requestRender();
@@ -2079,7 +2079,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			if (resolved.runtime.auth === "api-key") {
 				authDialogDismiss = dialog.controller.dismiss;
 				dialog.controller.setLines([
-					`Target: ${endpointId}`,
+					`Target: ${targetId}`,
 					`Runtime: ${runtime.id}`,
 					"API key required before Clio can connect to this target.",
 				]);
@@ -2093,7 +2093,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					} catch (error) {
 						const message = error instanceof Error ? error.message : String(error);
 						if (message !== "dismissed" && message !== "cancelled") {
-							notify("error", `connect ${endpointId}: ${message}`, `connect:${endpointId}`);
+							notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
 						}
 					} finally {
 						authDialogDismiss = null;
@@ -2104,7 +2104,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				return;
 			}
 			authDialogDismiss = dialog.controller.dismiss;
-			dialog.controller.setLines([`Target: ${endpointId}`, `Runtime: ${runtime.id}`, "Starting authorization flow..."]);
+			dialog.controller.setLines([`Target: ${targetId}`, `Runtime: ${runtime.id}`, "Starting authorization flow..."]);
 			void (async () => {
 				let manualCodeTimer: NodeJS.Timeout | null = null;
 				try {
@@ -2128,7 +2128,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 							maybeOpenExternalUrl(verificationUri);
 						},
 						onPrompt: async (prompt) => (await dialog.controller.prompt(prompt.message)).trim(),
-						onSelect: (prompt) => selectOAuthOption(prompt, [`Target: ${endpointId}`, `Runtime: ${runtime.id}`]),
+						onSelect: (prompt) => selectOAuthOption(prompt, [`Target: ${targetId}`, `Runtime: ${runtime.id}`]),
 						onManualCodeInput: async () =>
 							await new Promise<string>((resolve, reject) => {
 								manualCodeTimer = setTimeout(() => {
@@ -2149,7 +2149,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					if (message !== "dismissed" && message !== "cancelled") {
-						notify("error", `connect ${endpointId}: ${message}`, `connect:${endpointId}`);
+						notify("error", `connect ${targetId}: ${message}`, `connect:${targetId}`);
 					}
 				} finally {
 					if (manualCodeTimer) {
@@ -2368,7 +2368,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			onToggleFavorite: (ref, favorite) => {
 				if (!deps.getSettings || !deps.writeSettings) return;
 				const next = structuredClone(deps.getSettings()) as ClioSettings;
-				const value = `${ref.endpoint}/${ref.model}`;
+				const value = `${ref.target}/${ref.model}`;
 				const current = new Set(next.modelSelector?.favorites ?? []);
 				if (favorite) current.add(value);
 				else current.delete(value);

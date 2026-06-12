@@ -51,7 +51,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 		...(receipt.agentAudience !== undefined ? { agentAudience: receipt.agentAudience } : {}),
 		...(receipt.requestOrigin !== undefined ? { requestOrigin: receipt.requestOrigin } : {}),
 		task: receipt.task,
-		endpointId: receipt.endpointId,
+		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
 		runtimeId: receipt.runtimeId,
 		runtimeKind: receipt.runtimeKind,

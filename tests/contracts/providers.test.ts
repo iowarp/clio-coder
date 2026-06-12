@@ -7,7 +7,7 @@ import {
 	resolveAuthTarget,
 	targetRequiresAuth,
 } from "../../src/domains/providers/auth/index.js";
-import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
+import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
 import {
 	canonicalizeWireModelId,
@@ -40,19 +40,16 @@ function fakeDescriptor(id: string, overrides: Partial<RuntimeDescriptor> = {}):
 	};
 }
 
-function fakeLiveStatus(
-	discoveredModels: ReadonlyArray<string>,
-	overrides: Partial<EndpointStatus> = {},
-): EndpointStatus {
+function fakeLiveStatus(discoveredModels: ReadonlyArray<string>, overrides: Partial<TargetStatus> = {}): TargetStatus {
 	const runtime = fakeDescriptor("llamacpp");
-	const endpoint: TargetDescriptor = {
+	const target: TargetDescriptor = {
 		id: "mini",
 		runtime: runtime.id,
 		defaultModel: "AgenticQwen-30B-A3B-i1-Q4_K_M",
 		wireModels: ["AgenticQwen-30B-A3B-i1-Q4_K_M"],
 	};
 	return {
-		endpoint,
+		target,
 		runtime,
 		available: true,
 		reason: "test",
@@ -79,15 +76,15 @@ describe("contracts/providers", () => {
 	});
 
 	it("resolves runtime targets with default capabilities", () => {
-		const endpoint: TargetDescriptor = {
-			id: "my-endpoint",
+		const target: TargetDescriptor = {
+			id: "my-target",
 			runtime: "test-runtime",
 			defaultModel: "my-model",
 		};
 		const runtime = fakeDescriptor("test-runtime");
 
-		const status: EndpointStatus = {
-			endpoint,
+		const status: TargetStatus = {
+			target,
 			runtime,
 			available: true,
 			reason: "test",
@@ -98,29 +95,29 @@ describe("contracts/providers", () => {
 
 		const mockProviders: ProvidersContract = {
 			list: () => [status],
-			getEndpoint: (id: string) => (id === "my-endpoint" ? endpoint : null),
+			getTarget: (id: string) => (id === "my-target" ? target : null),
 			getRuntime: (id: string) => (id === "test-runtime" ? runtime : null),
 			getDetectedReasoning: () => null,
 			knowledgeBase: null,
 		} as never;
 
 		const resolution = resolveRuntimeTarget(mockProviders, {
-			endpointId: "my-endpoint",
+			targetId: "my-target",
 			wireModelId: "my-model",
 			requestedThinkingLevel: "off",
 		});
 
 		ok(resolution.ok);
 		if (resolution.ok) {
-			strictEqual(resolution.target.targetId, "my-endpoint");
+			strictEqual(resolution.target.targetId, "my-target");
 			strictEqual(resolution.target.runtimeId, "test-runtime");
 			strictEqual(resolution.target.wireModelId, "my-model");
 			strictEqual(resolution.target.capabilities.chat, true);
 		}
 	});
 
-	it("uses live probe capabilities for the selected LM Studio model, not only the endpoint default", () => {
-		const endpoint: TargetDescriptor = {
+	it("uses live probe capabilities for the selected LM Studio model, not only the target default", () => {
+		const target: TargetDescriptor = {
 			id: "zbook",
 			runtime: "lmstudio-native",
 			defaultModel: "qwopus3.5-9b-coder",
@@ -130,8 +127,8 @@ describe("contracts/providers", () => {
 			apiFamily: "lmstudio-native",
 			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 8192, maxTokens: 4096 },
 		});
-		const status: EndpointStatus = {
-			endpoint,
+		const status: TargetStatus = {
+			target,
 			runtime,
 			available: true,
 			reason: "test",
@@ -147,14 +144,14 @@ describe("contracts/providers", () => {
 		};
 		const mockProviders: ProvidersContract = {
 			list: () => [status],
-			getEndpoint: (id: string) => (id === endpoint.id ? endpoint : null),
+			getTarget: (id: string) => (id === target.id ? target : null),
 			getRuntime: (id: string) => (id === runtime.id ? runtime : null),
 			getDetectedReasoning: () => null,
 			knowledgeBase: null,
 		} as never;
 
 		const resolution = resolveRuntimeTarget(mockProviders, {
-			endpointId: "zbook",
+			targetId: "zbook",
 			wireModelId: "lfm2-24b-a2b",
 			requestedThinkingLevel: "off",
 		});
@@ -193,7 +190,7 @@ describe("contracts/providers", () => {
 		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
 		const status = fakeLiveStatus([], {
 			discoveredModelsSource: "none",
-			endpoint: {
+			target: {
 				id: "mini",
 				runtime: "llamacpp",
 			},
@@ -207,7 +204,7 @@ describe("contracts/providers", () => {
 		const canonical = "AgenticQwen-30B-A3B-i1-Q4_K_M-262K";
 		const status = fakeLiveStatus([], {
 			discoveredModelsSource: "none",
-			endpoint: {
+			target: {
 				id: "mini",
 				runtime: "llamacpp",
 				defaultModel: requested,
@@ -225,19 +222,19 @@ describe("contracts/providers", () => {
 	});
 
 	it("produces diagnostics when target is missing or runtime is not registered", () => {
-		const endpoint: TargetDescriptor = {
-			id: "err-endpoint",
+		const target: TargetDescriptor = {
+			id: "err-target",
 			runtime: "missing-runtime",
 			defaultModel: "model",
 		};
 		const mockProviders: ProvidersContract = {
 			list: () => [],
-			getEndpoint: (id: string) => (id === "err-endpoint" ? endpoint : null),
+			getTarget: (id: string) => (id === "err-target" ? target : null),
 			getRuntime: () => null,
 		} as never;
 
 		const res1 = resolveRuntimeTarget(mockProviders, {
-			endpointId: "missing-endpoint",
+			targetId: "missing-target",
 		});
 		strictEqual(res1.ok, false);
 		if (!res1.ok) {
@@ -245,7 +242,7 @@ describe("contracts/providers", () => {
 		}
 
 		const res2 = resolveRuntimeTarget(mockProviders, {
-			endpointId: "err-endpoint",
+			targetId: "err-target",
 		});
 		strictEqual(res2.ok, false);
 		if (!res2.ok) {
@@ -254,7 +251,7 @@ describe("contracts/providers", () => {
 	});
 
 	it("evaluates auth status and fallback criteria", () => {
-		const endpoint: TargetDescriptor = {
+		const target: TargetDescriptor = {
 			id: "custom-auth",
 			runtime: "openai",
 			auth: { apiKeyEnvVar: "CUSTOM_KEY" },
@@ -262,10 +259,10 @@ describe("contracts/providers", () => {
 		const runtime = fakeDescriptor("openai", { credentialsEnvVar: "OPENAI_API_KEY" });
 
 		// targetRequiresAuth checks
-		strictEqual(targetRequiresAuth(endpoint, runtime), true);
+		strictEqual(targetRequiresAuth(target, runtime), true);
 
 		// resolveAuthTarget mappings
-		const authTarget = resolveAuthTarget(endpoint, runtime);
+		const authTarget = resolveAuthTarget(target, runtime);
 		strictEqual(authTarget.providerId, "openai");
 		strictEqual(authTarget.explicitEnvVar, "CUSTOM_KEY");
 
@@ -280,8 +277,8 @@ describe("contracts/providers", () => {
 	});
 
 	it("synthesizes local/openai-compatible provider request shapes correctly", () => {
-		const endpoint: TargetDescriptor = {
-			id: "local-endpoint",
+		const target: TargetDescriptor = {
+			id: "local-target",
 			runtime: "openai-compat",
 			url: "http://localhost:1234/v1/",
 			pricing: { input: 0.15, output: 0.6, cacheRead: 0.05, cacheWrite: 0.1 },
@@ -289,7 +286,7 @@ describe("contracts/providers", () => {
 		};
 
 		const model = synthesizeOpenAICompatModel({
-			endpoint,
+			target,
 			wireModelId: "qwen-2.5",
 			kb: null,
 			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, reasoning: true },
@@ -308,14 +305,14 @@ describe("contracts/providers", () => {
 
 	it("treats a live model catalog as authoritative over stale configured names", () => {
 		const runtime = fakeDescriptor("llamacpp");
-		const endpoint: TargetDescriptor = {
+		const target: TargetDescriptor = {
 			id: "mini",
 			runtime: runtime.id,
 			defaultModel: "old-default",
 			wireModels: ["old-curated"],
 		};
-		const status: EndpointStatus = {
-			endpoint,
+		const status: TargetStatus = {
+			target,
 			runtime,
 			available: true,
 			reason: "ready",
@@ -327,7 +324,7 @@ describe("contracts/providers", () => {
 		};
 		const providers: ProvidersContract = {
 			list: () => [status],
-			getEndpoint: (id: string) => (id === endpoint.id ? endpoint : null),
+			getTarget: (id: string) => (id === target.id ? target : null),
 			getRuntime: (id: string) => (id === runtime.id ? runtime : null),
 			getDetectedReasoning: () => null,
 			knowledgeBase: null,
@@ -336,7 +333,7 @@ describe("contracts/providers", () => {
 		deepStrictEqual(modelCandidatesForStatus(status), [{ id: "new-live-model", source: "live", loadState: "loaded" }]);
 		strictEqual(resolveModelReference("old-default", providers).ref, null);
 		deepStrictEqual(resolveModelReference("new-live", providers).ref, {
-			endpoint: "mini",
+			target: "mini",
 			model: "new-live-model",
 		});
 	});
@@ -385,17 +382,17 @@ describe("contracts/providers/runtime-cleanup", () => {
 
 	it("rejects non-http runtime targets cleanly for orchestrator, print, and dispatch", () => {
 		const runtime = { ...fakeDescriptor("legacy-subprocess"), kind: "subprocess" } as unknown as RuntimeDescriptor;
-		const endpoint: TargetDescriptor = { id: "legacy-target", runtime: "legacy-subprocess", defaultModel: "m" };
+		const target: TargetDescriptor = { id: "legacy-target", runtime: "legacy-subprocess", defaultModel: "m" };
 		const mockProviders: ProvidersContract = {
 			list: () => [],
-			getEndpoint: (id: string) => (id === "legacy-target" ? endpoint : null),
+			getTarget: (id: string) => (id === "legacy-target" ? target : null),
 			getRuntime: (id: string) => (id === "legacy-subprocess" ? runtime : null),
 			getDetectedReasoning: () => null,
 			knowledgeBase: null,
 		} as never;
 
 		for (const use of ["orchestrator", "print", "dispatch"] as const) {
-			const res = resolveRuntimeTarget(mockProviders, { endpointId: "legacy-target", use });
+			const res = resolveRuntimeTarget(mockProviders, { targetId: "legacy-target", use });
 			strictEqual(res.ok, false, `${use} target must reject a non-http runtime`);
 			if (!res.ok) {
 				ok(res.diagnostics.some((d) => d.code === "runtime-target-unsupported"));
@@ -405,20 +402,20 @@ describe("contracts/providers/runtime-cleanup", () => {
 
 	it("accepts an http runtime as a dispatch worker target", () => {
 		const runtime = fakeDescriptor("http-worker", { auth: "api-key" });
-		const endpoint: TargetDescriptor = {
+		const target: TargetDescriptor = {
 			id: "http-worker-target",
 			runtime: "http-worker",
 			defaultModel: "worker-model",
 		};
 		const mockProviders: ProvidersContract = {
 			list: () => [],
-			getEndpoint: (targetId: string) => (targetId === endpoint.id ? endpoint : null),
+			getTarget: (targetId: string) => (targetId === target.id ? target : null),
 			getRuntime: (runtimeId: string) => (runtimeId === "http-worker" ? runtime : null),
 			getDetectedReasoning: () => null,
 			knowledgeBase: null,
 		} as never;
 
-		const res = resolveRuntimeTarget(mockProviders, { endpointId: endpoint.id, use: "dispatch" });
+		const res = resolveRuntimeTarget(mockProviders, { targetId: target.id, use: "dispatch" });
 		strictEqual(res.ok, true, "http target must be dispatch-eligible");
 	});
 
@@ -430,7 +427,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 					systemPrompt: "",
 					agentId: "coder",
 					task: "t",
-					endpoint: { id: "target", runtime: "legacy-sdk" },
+					target: { id: "target", runtime: "legacy-sdk" },
 					runtime: {
 						version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
 						id: "legacy-sdk",

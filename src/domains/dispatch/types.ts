@@ -79,7 +79,7 @@ export interface RunEnvelope {
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
-	endpointId: string;
+	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
@@ -225,7 +225,7 @@ export interface RunReceipt {
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
-	endpointId: string;
+	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;

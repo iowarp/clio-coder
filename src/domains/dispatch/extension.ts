@@ -111,7 +111,7 @@ interface ActiveRun {
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	startedAt: string;
-	endpointId: string;
+	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
@@ -333,7 +333,7 @@ export function buildDynamicPromptMessages(req: DispatchRequest): WorkerPromptMe
 }
 
 interface ResolvedTarget {
-	endpoint: TargetDescriptor;
+	target: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
 	thinkingLevel: ThinkingLevel;
@@ -343,7 +343,7 @@ interface ResolvedTarget {
 }
 
 interface WorkerTargetConfig {
-	endpoint: string | null;
+	target: string | null;
 	model: string | null;
 	thinkingLevel: ThinkingLevel;
 }
@@ -411,24 +411,24 @@ interface AcpDelegationLifecycleStage {
 	requestOrigin: DispatchRequestOrigin;
 }
 
-function capabilityInfoForEndpoint(providers: ProvidersContract, endpointId: string): CapabilityFlags | null {
-	return providers.list().find((entry) => entry.endpoint.id === endpointId)?.capabilities ?? null;
+function capabilityInfoForTarget(providers: ProvidersContract, targetId: string): CapabilityFlags | null {
+	return providers.list().find((entry) => entry.target.id === targetId)?.capabilities ?? null;
 }
 
 function capabilityInfoForModel(
 	providers: ProvidersContract,
-	endpointId: string,
+	targetId: string,
 	wireModelId: string | null | undefined,
 ): CapabilityFlags | null {
-	const status = providers.list().find((entry) => entry.endpoint.id === endpointId);
+	const status = providers.list().find((entry) => entry.target.id === targetId);
 	if (!status) return null;
-	const modelId = wireModelId ?? status.endpoint.defaultModel ?? null;
-	const detectedReasoning = modelId ? providers.getDetectedReasoning(endpointId, modelId) : null;
+	const modelId = wireModelId ?? status.target.defaultModel ?? null;
+	const detectedReasoning = modelId ? providers.getDetectedReasoning(targetId, modelId) : null;
 	return resolveModelCapabilities(status, modelId, providers.knowledgeBase, { detectedReasoning });
 }
 
-function runtimeIdForEndpoint(providers: ProvidersContract, endpointId: string): string | null {
-	return providers.getEndpoint(endpointId)?.runtime ?? null;
+function runtimeIdForTarget(providers: ProvidersContract, targetId: string): string | null {
+	return providers.getTarget(targetId)?.runtime ?? null;
 }
 
 function supportsRequiredCapabilities(
@@ -459,7 +459,7 @@ function acpRuntimeLimitations(): string[] {
 function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {
 	const workerDefault = settings?.workers?.default
 		? {
-				endpoint: settings.workers.default.target ?? null,
+				target: settings.workers.default.target ?? null,
 				model: settings.workers.default.model ?? null,
 				thinkingLevel: (settings.workers.default.thinkingLevel ?? "off") as ThinkingLevel,
 			}
@@ -467,7 +467,7 @@ function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefin
 	const workerProfiles: WorkerProfileMap = {};
 	for (const [name, profile] of Object.entries(settings?.workers?.profiles ?? {})) {
 		workerProfiles[name] = {
-			endpoint: profile.target ?? null,
+			target: profile.target ?? null,
 			model: profile.model ?? null,
 			thinkingLevel: (profile.thinkingLevel ?? "off") as ThinkingLevel,
 		};
@@ -546,7 +546,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		...(input.dynamicHash !== null ? { dynamicHash: input.dynamicHash } : {}),
 		agentId: input.req.agentId,
 		task: input.req.task,
-		endpoint: input.target.endpoint,
+		target: input.target.target,
 		runtime: serializeWorkerRuntimeDescriptor(input.target.runtime),
 		runtimeId: input.target.runtime.id,
 		wireModelId: input.target.wireModelId,
@@ -594,16 +594,16 @@ function pickCapabilityMatchedWorker(
 ): WorkerTargetConfig | null {
 	if ((!required || required.length === 0) && !runtimeId) return null;
 	if (
-		workerDefault?.endpoint &&
-		(!runtimeId || runtimeIdForEndpoint(providers, workerDefault.endpoint) === runtimeId) &&
-		supportsRequiredCapabilities(capabilityInfoForModel(providers, workerDefault.endpoint, workerDefault.model), required)
+		workerDefault?.target &&
+		(!runtimeId || runtimeIdForTarget(providers, workerDefault.target) === runtimeId) &&
+		supportsRequiredCapabilities(capabilityInfoForModel(providers, workerDefault.target, workerDefault.model), required)
 	) {
 		return workerDefault;
 	}
 	for (const profile of Object.values(workerProfiles)) {
-		if (!profile.endpoint) continue;
-		if (runtimeId && runtimeIdForEndpoint(providers, profile.endpoint) !== runtimeId) continue;
-		if (supportsRequiredCapabilities(capabilityInfoForModel(providers, profile.endpoint, profile.model), required)) {
+		if (!profile.target) continue;
+		if (runtimeId && runtimeIdForTarget(providers, profile.target) !== runtimeId) continue;
+		if (supportsRequiredCapabilities(capabilityInfoForModel(providers, profile.target, profile.model), required)) {
 			return profile;
 		}
 	}
@@ -618,16 +618,16 @@ function resolveDispatchTarget(
 	providers: ProvidersContract,
 ): ResolvedTarget {
 	let selectedWorkerTarget: WorkerTargetConfig | null = null;
-	let endpointId = req.endpoint ?? null;
-	if (!endpointId && req.workerProfile) {
+	let targetId = req.target ?? null;
+	if (!targetId && req.workerProfile) {
 		const profile = workerProfiles[req.workerProfile];
 		if (!profile) throw new Error(`dispatch: fleet profile '${req.workerProfile}' not configured`);
-		if (!profile.endpoint) throw new Error(`dispatch: fleet profile '${req.workerProfile}' has no target`);
+		if (!profile.target) throw new Error(`dispatch: fleet profile '${req.workerProfile}' has no target`);
 		selectedWorkerTarget = profile;
-		endpointId = profile.endpoint;
+		targetId = profile.target;
 	}
-	if (!endpointId) endpointId = recipe.endpoint ?? null;
-	if (!endpointId) {
+	if (!targetId) targetId = recipe.target ?? null;
+	if (!targetId) {
 		selectedWorkerTarget = pickCapabilityMatchedWorker(
 			req.requiredCapabilities,
 			req.workerRuntime,
@@ -635,36 +635,36 @@ function resolveDispatchTarget(
 			workerProfiles,
 			providers,
 		);
-		endpointId = selectedWorkerTarget?.endpoint ?? null;
+		targetId = selectedWorkerTarget?.target ?? null;
 	}
-	if (!endpointId && req.workerRuntime) {
+	if (!targetId && req.workerRuntime) {
 		throw new Error(`dispatch: no worker target configured for runtime '${req.workerRuntime}'`);
 	}
-	if (!endpointId) {
+	if (!targetId) {
 		selectedWorkerTarget = workerDefault;
-		endpointId = workerDefault?.endpoint ?? null;
+		targetId = workerDefault?.target ?? null;
 	}
-	if (!endpointId) {
+	if (!targetId) {
 		throw new Error("dispatch: no target configured (set the fleet default, add a fleet profile, or pass target)");
 	}
-	const endpoint = providers.getEndpoint(endpointId);
-	if (!endpoint) throw new Error(`dispatch: target '${endpointId}' not found`);
-	const runtime = providers.getRuntime(endpoint.runtime);
-	if (!runtime) throw new Error(`dispatch: runtime '${endpoint.runtime}' not registered`);
-	const matchingDefault = workerDefault?.endpoint === endpointId ? workerDefault : null;
+	const target = providers.getTarget(targetId);
+	if (!target) throw new Error(`dispatch: target '${targetId}' not found`);
+	const runtime = providers.getRuntime(target.runtime);
+	if (!runtime) throw new Error(`dispatch: runtime '${target.runtime}' not registered`);
+	const matchingDefault = workerDefault?.target === targetId ? workerDefault : null;
 	const fallbackWorkerTarget = selectedWorkerTarget ?? matchingDefault;
-	const requestedWireModelId = req.model ?? recipe.model ?? fallbackWorkerTarget?.model ?? endpoint.defaultModel;
+	const requestedWireModelId = req.model ?? recipe.model ?? fallbackWorkerTarget?.model ?? target.defaultModel;
 	if (!requestedWireModelId) {
-		throw new Error(`dispatch: no model for target '${endpointId}' (set a fleet profile model or target.defaultModel)`);
+		throw new Error(`dispatch: no model for target '${targetId}' (set a fleet profile model or target.defaultModel)`);
 	}
-	const status = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
+	const status = providers.list().find((entry) => entry.target.id === target.id);
 	const wireModelId = status ? canonicalizeWireModelId(status, requestedWireModelId) : requestedWireModelId;
 	const thinkingLevel = (req.thinkingLevel ??
 		recipe.thinkingLevel ??
 		fallbackWorkerTarget?.thinkingLevel ??
 		"off") as ThinkingLevel;
 	const resolved = resolveRuntimeTarget(providers, {
-		endpointId,
+		targetId,
 		wireModelId,
 		requestedThinkingLevel: thinkingLevel,
 		use: "dispatch",
@@ -677,30 +677,30 @@ function resolveDispatchTarget(
 	}
 	const modelCapabilities = resolved.target.capabilities;
 	return {
-		endpoint,
+		target,
 		runtime,
 		wireModelId,
 		thinkingLevel: resolved.target.effectiveThinkingLevel,
-		capabilities: capabilityInfoForEndpoint(providers, endpoint.id),
+		capabilities: capabilityInfoForTarget(providers, target.id),
 		modelCapabilities,
 		runtimeResolution: resolved.target,
 	};
 }
 
 function enforceCapabilityGate(
-	endpointId: string,
+	targetId: string,
 	capabilities: CapabilityFlags | null,
 	required: ReadonlyArray<string> | undefined,
 ): void {
 	if (!required || required.length === 0) return;
 	if (!capabilities) {
-		throw new Error(`dispatch: admission denied: capability info unavailable for endpoint '${endpointId}'`);
+		throw new Error(`dispatch: admission denied: capability info unavailable for target '${targetId}'`);
 	}
 	const caps = capabilities as unknown as Record<string, unknown>;
 	for (const name of required) {
 		const value = caps[name];
 		if (value === undefined || value === false || value === 0 || value === "") {
-			throw new Error(`dispatch: admission denied: capability '${name}' not supported by endpoint '${endpointId}'`);
+			throw new Error(`dispatch: admission denied: capability '${name}' not supported by target '${targetId}'`);
 		}
 	}
 }
@@ -796,7 +796,7 @@ export function createDispatchBundle(
 		// Honoring the gate means waiting it out, not skipping it: schedule no
 		// earlier than the cooldown expiry so the retry is not denied on
 		// arrival by a cooldown this same failure created.
-		const cooldown = targetCooldowns.get(cooldownKey(run.endpointId, run.runtimeId, run.wireModelId));
+		const cooldown = targetCooldowns.get(cooldownKey(run.targetId, run.runtimeId, run.wireModelId));
 		const cooldownRemainingMs = cooldown ? Math.max(0, cooldown.until - now()) : 0;
 		const delayMs = Math.max(backoffDelayMs, cooldownRemainingMs > 0 ? cooldownRemainingMs + 250 : 0);
 		const attempt = run.lineage.attempt + 1;
@@ -851,7 +851,7 @@ export function createDispatchBundle(
 				runId: run.runId,
 				agentId: run.agentId,
 				...(run.requestOrigin !== undefined ? { requestOrigin: run.requestOrigin } : {}),
-				endpointId: run.endpointId,
+				targetId: run.targetId,
 				wireModelId: run.wireModelId,
 				runtimeId: run.runtimeId,
 				runtimeKind: run.runtimeKind,
@@ -879,7 +879,7 @@ export function createDispatchBundle(
 		context.bus.emit(BusChannels.DispatchProgress, {
 			runId: run.runId,
 			agentId: run.agentId,
-			endpointId: run.endpointId,
+			targetId: run.targetId,
 			wireModelId: run.wireModelId,
 			runtimeId: run.runtimeId,
 			runtimeKind: run.runtimeKind,
@@ -957,12 +957,12 @@ export function createDispatchBundle(
 		heartbeatTimer = null;
 	}
 
-	function cooldownKey(endpointId: string, runtimeId: string, wireModelId: string): string {
-		return `${endpointId}\0${runtimeId}\0${wireModelId}`;
+	function cooldownKey(targetId: string, runtimeId: string, wireModelId: string): string {
+		return `${targetId}\0${runtimeId}\0${wireModelId}`;
 	}
 
-	function assertTargetNotCoolingDown(endpointId: string, runtimeId: string, wireModelId: string): void {
-		const key = cooldownKey(endpointId, runtimeId, wireModelId);
+	function assertTargetNotCoolingDown(targetId: string, runtimeId: string, wireModelId: string): void {
+		const key = cooldownKey(targetId, runtimeId, wireModelId);
 		const cooldown = targetCooldowns.get(key);
 		if (!cooldown) return;
 		const remaining = cooldown.until - now();
@@ -971,18 +971,18 @@ export function createDispatchBundle(
 			return;
 		}
 		throw new Error(
-			`dispatch: target '${endpointId}' is cooling down for ${Math.ceil(remaining / 1000)}s after ${cooldown.reason}`,
+			`dispatch: target '${targetId}' is cooling down for ${Math.ceil(remaining / 1000)}s after ${cooldown.reason}`,
 		);
 	}
 
 	function recordTargetOutcome(
-		endpointId: string,
+		targetId: string,
 		runtimeId: string,
 		wireModelId: string,
 		status: RunStatus,
 		exitCode: number,
 	): void {
-		const key = cooldownKey(endpointId, runtimeId, wireModelId);
+		const key = cooldownKey(targetId, runtimeId, wireModelId);
 		if (status === "completed" && exitCode === 0) {
 			targetCooldowns.delete(key);
 			return;
@@ -1005,7 +1005,7 @@ export function createDispatchBundle(
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
 		const targets = readWorkerTargets(options?.getSettings?.() ?? config?.get());
 		const target = resolveDispatchTarget(req, recipe, targets.workerDefault, targets.workerProfiles, providers);
-		enforceCapabilityGate(target.endpoint.id, target.modelCapabilities, req.requiredCapabilities);
+		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, recipe);
@@ -1016,15 +1016,15 @@ export function createDispatchBundle(
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
 		const currentToolSignature = toolSignature(admission.allowedTools);
-		const auth = targetRequiresAuth(target.endpoint, target.runtime)
-			? await providers.auth.resolveForTarget(target.endpoint, target.runtime)
+		const auth = targetRequiresAuth(target.target, target.runtime)
+			? await providers.auth.resolveForTarget(target.target, target.runtime)
 			: null;
 		// pi-ai's openai-completions provider refuses to stream without an apiKey
 		// even when the target is a local server that ignores Authorization headers.
 		// Match chat-loop's LOCAL_API_KEY_FALLBACK so dispatch-spawned workers can
 		// reach openai-compat local endpoints (LM Studio, llama.cpp) without
 		// requiring the user to invent a credential.
-		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-endpoint" : undefined);
+		const apiKey = auth?.apiKey ?? (auth === null ? "clio-local-target" : undefined);
 		const runtimeKind: RunKind = target.runtime.kind;
 		const limitations = runtimeLimitations(runtimeKind, target.runtime.id);
 		return {
@@ -1096,10 +1096,10 @@ export function createDispatchBundle(
 		finalPromise: Promise<RunReceipt>;
 	}> {
 		const lifecycle = resolveAcpDelegationLifecycle(req);
-		const endpointId = `delegation:${lifecycle.agentConfig.id}`;
+		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = lifecycle.agentConfig.id;
-		assertTargetNotCoolingDown(endpointId, runtimeId, wireModelId);
+		assertTargetNotCoolingDown(targetId, runtimeId, wireModelId);
 
 		if (scheduling) {
 			const preflight = scheduling.preflight();
@@ -1224,7 +1224,7 @@ export function createDispatchBundle(
 			agentId: req.agentId,
 			requestOrigin: lifecycle.requestOrigin,
 			task: req.task,
-			endpointId,
+			targetId,
 			wireModelId,
 			runtimeId,
 			runtimeKind: "acp-delegation",
@@ -1253,7 +1253,7 @@ export function createDispatchBundle(
 			runId: envelope.id,
 			agentId: req.agentId,
 			requestOrigin: lifecycle.requestOrigin,
-			endpointId,
+			targetId,
 			wireModelId,
 			runtimeId,
 			runtimeKind: "acp-delegation",
@@ -1262,7 +1262,7 @@ export function createDispatchBundle(
 			runId: envelope.id,
 			agentId: req.agentId,
 			requestOrigin: lifecycle.requestOrigin,
-			endpointId,
+			targetId,
 			wireModelId,
 			runtimeId,
 			runtimeKind: "acp-delegation",
@@ -1278,7 +1278,7 @@ export function createDispatchBundle(
 			promise: acp.promise.then(() => undefined),
 			recipe: null,
 			startedAt,
-			endpointId,
+			targetId,
 			wireModelId,
 			runtimeId,
 			runtimeKind: "acp-delegation",
@@ -1320,7 +1320,7 @@ export function createDispatchBundle(
 				agentId: req.agentId,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
-				endpointId,
+				targetId,
 				wireModelId,
 				runtimeId,
 				runtimeKind: "acp-delegation",
@@ -1391,7 +1391,7 @@ export function createDispatchBundle(
 				runId: envelope.id,
 				agentId: req.agentId,
 				requestOrigin: lifecycle.requestOrigin,
-				endpointId,
+				targetId,
 				wireModelId,
 				runtimeId,
 				runtimeKind: "acp-delegation",
@@ -1458,7 +1458,7 @@ export function createDispatchBundle(
 				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
 				await ledgerRef.persist();
 				active.delete(envelope.id);
-				recordTargetOutcome(endpointId, runtimeId, wireModelId, status, receipt.exitCode);
+				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, outcome);
 				maybeScheduleRetry(activeRun, outcome, detail);
@@ -1499,7 +1499,7 @@ export function createDispatchBundle(
 		}
 
 		const lifecycle = await resolveLifecycle(req);
-		assertTargetNotCoolingDown(lifecycle.target.endpoint.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
+		assertTargetNotCoolingDown(lifecycle.target.target.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
 
 		if (scheduling) {
 			const preflight = scheduling.preflight();
@@ -1645,7 +1645,7 @@ export function createDispatchBundle(
 			agentAudience: lifecycle.agentAudience,
 			requestOrigin: lifecycle.requestOrigin,
 			task: req.task,
-			endpointId: lifecycle.target.endpoint.id,
+			targetId: lifecycle.target.target.id,
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
 			runtimeKind: lifecycle.runtimeKind,
@@ -1676,7 +1676,7 @@ export function createDispatchBundle(
 			agentId: req.agentId,
 			agentAudience: lifecycle.agentAudience,
 			requestOrigin: lifecycle.requestOrigin,
-			endpointId: lifecycle.target.endpoint.id,
+			targetId: lifecycle.target.target.id,
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
 			runtimeKind: lifecycle.runtimeKind,
@@ -1686,7 +1686,7 @@ export function createDispatchBundle(
 			agentId: req.agentId,
 			agentAudience: lifecycle.agentAudience,
 			requestOrigin: lifecycle.requestOrigin,
-			endpointId: lifecycle.target.endpoint.id,
+			targetId: lifecycle.target.target.id,
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
 			runtimeKind: lifecycle.runtimeKind,
@@ -1704,7 +1704,7 @@ export function createDispatchBundle(
 			promise: workerDone.then(() => undefined),
 			recipe: lifecycle.recipe,
 			startedAt,
-			endpointId: lifecycle.target.endpoint.id,
+			targetId: lifecycle.target.target.id,
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
 			runtimeKind: lifecycle.runtimeKind,
@@ -1720,7 +1720,7 @@ export function createDispatchBundle(
 			heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
-			pricing: lifecycle.target.endpoint.pricing ?? null,
+			pricing: lifecycle.target.target.pricing ?? null,
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
 		};
 
@@ -1740,7 +1740,7 @@ export function createDispatchBundle(
 			const includeDiagnostics = outcome !== "succeeded";
 			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(outcomeDetail ?? activityNote, result, includeDiagnostics);
 			const finalFailureMessage = mergeWorkerDiagnosticFailure(failureMessage, result, includeDiagnostics);
-			const pricing = lifecycle.target.endpoint.pricing;
+			const pricing = lifecycle.target.target.pricing;
 			const costUsd = pricing
 				? (tokenMeter.inputTokens * pricing.input) / 1_000_000 +
 					(tokenMeter.outputTokens * pricing.output) / 1_000_000 +
@@ -1756,7 +1756,7 @@ export function createDispatchBundle(
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
-				endpointId: lifecycle.target.endpoint.id,
+				targetId: lifecycle.target.target.id,
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
@@ -1813,7 +1813,7 @@ export function createDispatchBundle(
 				agentId: req.agentId,
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
-				endpointId: lifecycle.target.endpoint.id,
+				targetId: lifecycle.target.target.id,
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
@@ -1886,7 +1886,7 @@ export function createDispatchBundle(
 				await ledgerRef.persist();
 				active.delete(envelope.id);
 				recordTargetOutcome(
-					lifecycle.target.endpoint.id,
+					lifecycle.target.target.id,
 					lifecycle.target.runtime.id,
 					lifecycle.target.wireModelId,
 					status,

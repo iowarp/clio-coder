@@ -30,12 +30,12 @@ const deepseekRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "DEEPSEEK_API_KEY",
 	defaultCapabilities,
-	async probeModels(_endpoint: TargetDescriptor, _ctx: ProbeContext): Promise<string[]> {
+	async probeModels(_target: TargetDescriptor, _ctx: ProbeContext): Promise<string[]> {
 		return listCatalogModelsForRuntime("deepseek").map((model) => model.id);
 	},
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeCatalogBackedModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,

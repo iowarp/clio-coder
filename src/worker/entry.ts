@@ -46,7 +46,7 @@ async function main(): Promise<number> {
 		dynamicPromptMessages: spec.dynamicPromptMessages ?? [],
 		agentId: spec.agentId,
 		task: spec.task,
-		endpoint: spec.endpoint,
+		target: spec.target,
 		runtime,
 		wireModelId: spec.wireModelId,
 		allowedTools: spec.allowedTools,

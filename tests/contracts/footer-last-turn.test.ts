@@ -17,7 +17,7 @@ function makeSummary(overrides: Partial<TurnSummary> = {}): TurnSummary {
 	return {
 		elapsedMs: 4000,
 		modelId: "qwen3-coder",
-		endpointId: "mini",
+		targetId: "mini",
 		inputTokens: 11,
 		outputTokens: 339,
 		cacheReadTokens: 0,

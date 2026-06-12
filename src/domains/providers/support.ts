@@ -21,7 +21,7 @@ export interface ProviderSupportEntry {
 
 export interface ResolvedProviderReference {
 	input: string;
-	endpoint: TargetDescriptor | null;
+	target: TargetDescriptor | null;
 	runtime: RuntimeDescriptor;
 	authTarget: AuthTarget;
 }
@@ -138,11 +138,11 @@ export function listProviderSupportEntries(
 	return filtered.map((runtime) => buildProviderSupportEntry(runtime)).sort(compareProviderSupportEntries);
 }
 
-export function configuredEndpointsForRuntime(
+export function configuredTargetsForRuntime(
 	settings: Readonly<ClioSettings>,
 	runtimeId: string,
 ): ReadonlyArray<TargetDescriptor> {
-	return settings.targets.filter((endpoint) => endpoint.runtime === runtimeId);
+	return settings.targets.filter((target) => target.runtime === runtimeId);
 }
 
 export function resolveProviderReference(
@@ -152,22 +152,22 @@ export function resolveProviderReference(
 ): ResolvedProviderReference | null {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return null;
-	const endpoint = settings.targets.find((entry) => entry.id === trimmed) ?? null;
-	if (endpoint) {
-		const runtime = getRuntime(endpoint.runtime);
+	const target = settings.targets.find((entry) => entry.id === trimmed) ?? null;
+	if (target) {
+		const runtime = getRuntime(target.runtime);
 		if (!runtime) return null;
 		return {
 			input: trimmed,
-			endpoint,
+			target,
 			runtime,
-			authTarget: resolveAuthTarget(endpoint, runtime),
+			authTarget: resolveAuthTarget(target, runtime),
 		};
 	}
 	const runtime = getRuntime(trimmed);
 	if (!runtime) return null;
 	return {
 		input: trimmed,
-		endpoint: null,
+		target: null,
 		runtime,
 		authTarget: resolveRuntimeAuthTarget(runtime),
 	};

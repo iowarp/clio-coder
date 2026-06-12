@@ -65,7 +65,7 @@ export interface ModelChangeEntry extends BaseSessionEntry {
 	kind: "modelChange";
 	provider: string;
 	modelId: string;
-	endpoint?: string;
+	target?: string;
 }
 
 export interface ThinkingLevelChangeEntry extends BaseSessionEntry {
@@ -362,7 +362,7 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 		case "custom":
 			return isString(v.customType) && isOptionalBoolean(v.display);
 		case "modelChange":
-			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.endpoint);
+			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.target);
 		case "thinkingLevelChange":
 			return isString(v.thinkingLevel);
 		case "fileEntry":

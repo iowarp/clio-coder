@@ -47,7 +47,7 @@ export interface ClioSessionMeta {
 	createdAt: string;
 	endedAt: string | null;
 	model: string | null;
-	endpoint: string | null;
+	target: string | null;
 	clioVersion: string;
 	piMonoVersion: string;
 	platform: string;
@@ -356,7 +356,7 @@ function newTurnId(): string {
 	return raw.padStart(12, "0");
 }
 
-function buildMeta(input: { cwd: string; model?: string | null; endpoint?: string | null }): ClioSessionMeta {
+function buildMeta(input: { cwd: string; model?: string | null; target?: string | null }): ClioSessionMeta {
 	const resolvedCwd = resolve(input.cwd);
 	return {
 		id: newTurnId(),
@@ -365,7 +365,7 @@ function buildMeta(input: { cwd: string; model?: string | null; endpoint?: strin
 		createdAt: new Date().toISOString(),
 		endedAt: null,
 		model: input.model ?? null,
-		endpoint: input.endpoint ?? null,
+		target: input.target ?? null,
 		clioVersion: readClioVersion(),
 		piMonoVersion: readPiMonoVersion(),
 		platform: process.platform,
@@ -634,7 +634,7 @@ function createWriter(
 export function createSession(input: {
 	cwd: string;
 	model?: string | null;
-	endpoint?: string | null;
+	target?: string | null;
 	initialEntries?: ReadonlyArray<unknown>;
 	initialTree?: ReadonlyArray<SessionTreeNode>;
 	parentSession?: string;

@@ -4,11 +4,11 @@ import type { SafeEventBus } from "../../core/event-bus.js";
 import { listRecentModels } from "../../core/recent-models.js";
 import type {
 	CapabilityFlags,
-	EndpointStatus,
 	ProvidersContract,
 	ResolvedRuntimeTarget,
 	RuntimeCapabilityDecision,
 	RuntimeResolutionDiagnostic,
+	TargetStatus,
 	ThinkingLevel,
 } from "../../domains/providers/index.js";
 import {
@@ -66,7 +66,7 @@ function resolveOverlayWidth(terminalColumns: number): number {
 }
 
 export interface ModelSelection {
-	endpoint: string;
+	target: string;
 	model: string;
 }
 
@@ -82,7 +82,7 @@ export interface OpenModelOverlayDeps {
 	autoRefresh?: boolean;
 }
 
-function healthGlyph(status: EndpointStatus): string {
+function healthGlyph(status: TargetStatus): string {
 	switch (status.health.status) {
 		case "healthy":
 			return "●";
@@ -137,7 +137,7 @@ type ModelRefreshScope = "selected" | "all";
 
 export interface ModelRow {
 	value: string;
-	endpoint: string;
+	target: string;
 	model: string;
 	runtimeName: string;
 	runtimeShortName: string;
@@ -179,8 +179,8 @@ export interface ModelOverlaySummary {
 	focusedModels?: number;
 }
 
-/** Enumerate endpoint wire model ids with live discovery taking precedence when available. */
-export function modelsForEndpoint(status: EndpointStatus): string[] {
+/** Enumerate target wire model ids with live discovery taking precedence when available. */
+export function modelsForTarget(status: TargetStatus): string[] {
 	return modelIdsForStatus(status);
 }
 
@@ -192,7 +192,7 @@ export interface ModelItemsResult {
 	summary: ModelOverlaySummary;
 }
 
-function fallbackCapabilityDecisions(status: EndpointStatus, caps: CapabilityFlags): RuntimeCapabilityDecision {
+function fallbackCapabilityDecisions(status: TargetStatus, caps: CapabilityFlags): RuntimeCapabilityDecision {
 	const kind = status.runtime?.kind;
 	return {
 		chat: caps.chat,
@@ -205,10 +205,10 @@ function fallbackCapabilityDecisions(status: EndpointStatus, caps: CapabilityFla
 	};
 }
 
-function providersWithStatusFallback(providers: ProvidersContract, status: EndpointStatus): ProvidersContract {
+function providersWithStatusFallback(providers: ProvidersContract, status: TargetStatus): ProvidersContract {
 	return {
 		...providers,
-		getEndpoint: (id) => providers.getEndpoint(id) ?? (id === status.endpoint.id ? status.endpoint : null),
+		getTarget: (id) => providers.getTarget(id) ?? (id === status.target.id ? status.target : null),
 		getRuntime: (id) => providers.getRuntime(id) ?? (status.runtime && id === status.runtime.id ? status.runtime : null),
 	};
 }
@@ -225,12 +225,12 @@ interface OverlayRuntimeResolution {
 /** Resolve the same runtime/capability descriptor used by the footer and chat loop for one overlay row. */
 export function resolveOverlayRuntimeTarget(input: {
 	providers: ProvidersContract;
-	status: EndpointStatus;
+	status: TargetStatus;
 	wireModelId: string;
 	requestedThinkingLevel?: ThinkingLevel;
 }): OverlayRuntimeResolution {
 	const resolution = resolveRuntimeTarget(providersWithStatusFallback(input.providers, input.status), {
-		endpointId: input.status.endpoint.id,
+		targetId: input.status.target.id,
 		wireModelId: input.wireModelId,
 		requestedThinkingLevel: input.requestedThinkingLevel ?? "off",
 		use: "orchestrator",
@@ -273,13 +273,13 @@ export function runtimeCapabilitySummary(resolution: OverlayRuntimeResolution): 
 	return parts.join("  ");
 }
 
-function modelBucket(status: EndpointStatus): ModelBucket {
+function modelBucket(status: TargetStatus): ModelBucket {
 	const tier = status.runtime?.tier;
 	if (
 		tier === "protocol" ||
 		tier === "local-native" ||
-		status.endpoint.url?.includes("127.0.0.1") ||
-		status.endpoint.url?.includes("localhost")
+		status.target.url?.includes("127.0.0.1") ||
+		status.target.url?.includes("localhost")
 	) {
 		return "local";
 	}
@@ -294,17 +294,17 @@ function shortRuntimeName(name: string): string {
 		.replace(/\s+SDK$/i, "");
 }
 
-function authLabel(deps: { providers: ProvidersContract; status: EndpointStatus }): string {
+function authLabel(deps: { providers: ProvidersContract; status: TargetStatus }): string {
 	const { providers, status } = deps;
 	if (!status.runtime) return "unknown";
-	const auth = providers.auth.statusForTarget(status.endpoint, status.runtime);
+	const auth = providers.auth.statusForTarget(status.target, status.runtime);
 	if (!auth.available) return "disconnected";
 	if (auth.source === "environment") return auth.detail ? `env:${auth.detail}` : "environment";
 	if (auth.source === "none") return "not required";
 	return auth.detail ? `${auth.source}:${auth.detail}` : auth.source;
 }
 
-function healthText(status: EndpointStatus): string {
+function healthText(status: TargetStatus): string {
 	const latency =
 		typeof status.health.latencyMs === "number" && Number.isFinite(status.health.latencyMs)
 			? ` ${Math.round(status.health.latencyMs)}ms`
@@ -314,7 +314,7 @@ function healthText(status: EndpointStatus): string {
 	return `${status.health.status}${latency}`;
 }
 
-function statusPriority(status: EndpointStatus): number {
+function statusPriority(status: TargetStatus): number {
 	if (status.available && status.health.status === "healthy") return 0;
 	if (status.available && status.health.status !== "down") return 1;
 	return 2;
@@ -340,7 +340,7 @@ function buildSummary(rows: ReadonlyArray<ModelRow>, targets: number, activeRef:
 
 /**
  * Build the target-first model picker. Each configured target renders one
- * row per candidate wire model (see `modelsForEndpoint`). Targets without
+ * row per candidate wire model (see `modelsForTarget`). Targets without
  * a resolvable wire model still render a single "no-model" row so users can
  * see the target exists and why it is not selectable. Scope stars come from
  * `settings.scope`: both plain `targetId` and `targetId/wireModelId` refs
@@ -350,9 +350,9 @@ export function buildModelItems(deps: {
 	settings: Readonly<ClioSettings>;
 	providers: ProvidersContract;
 }): ModelItemsResult {
-	const activeEndpoint = deps.settings.orchestrator?.target?.trim() ?? "";
+	const activeTarget = deps.settings.orchestrator?.target?.trim() ?? "";
 	const activeModel = deps.settings.orchestrator?.model?.trim() ?? "";
-	const activeRef = activeEndpoint && activeModel ? `${activeEndpoint}/${activeModel}` : activeEndpoint;
+	const activeRef = activeTarget && activeModel ? `${activeTarget}/${activeModel}` : activeTarget;
 	const favoriteSet = new Set(deps.settings.modelSelector?.favorites ?? []);
 	const recentSet = new Set(listRecentModels({ limit: deps.settings.modelSelector?.recentLimit ?? 12 }));
 	const list = [...deps.providers.list()]
@@ -360,13 +360,13 @@ export function buildModelItems(deps: {
 			return status.runtime !== null && isTargetEligibleRuntime(status.runtime);
 		})
 		.sort((a, b) => {
-			const aActive = a.endpoint.id === activeEndpoint ? 0 : 1;
-			const bActive = b.endpoint.id === activeEndpoint ? 0 : 1;
+			const aActive = a.target.id === activeTarget ? 0 : 1;
+			const bActive = b.target.id === activeTarget ? 0 : 1;
 			return (
 				aActive - bActive ||
 				statusPriority(a) - statusPriority(b) ||
-				(a.runtime?.displayName ?? a.endpoint.runtime).localeCompare(b.runtime?.displayName ?? b.endpoint.runtime) ||
-				a.endpoint.id.localeCompare(b.endpoint.id)
+				(a.runtime?.displayName ?? a.target.runtime).localeCompare(b.runtime?.displayName ?? b.target.runtime) ||
+				a.target.id.localeCompare(b.target.id)
 			);
 		});
 	const scopeSet = new Set(deps.settings.scope ?? []);
@@ -374,15 +374,15 @@ export function buildModelItems(deps: {
 	const refs: ModelSelection[] = [];
 	const rows: ModelRow[] = [];
 	for (const status of list) {
-		const { endpoint } = status;
-		const runtimeName = status.runtime?.displayName ?? endpoint.runtime;
+		const { target } = status;
+		const runtimeName = status.runtime?.displayName ?? target.runtime;
 		const runtimeShortName = shortRuntimeName(runtimeName);
 		const candidates = modelCandidatesForStatus(status);
 		const authText = authLabel({ providers: deps.providers, status });
 		const bucket = modelBucket(status);
-		const singleEndpoint = list.length === 1;
+		const singleTarget = list.length === 1;
 		if (candidates.length === 0) {
-			const fallbackModel = endpoint.defaultModel?.trim() ?? "";
+			const fallbackModel = target.defaultModel?.trim() ?? "";
 			const resolution =
 				fallbackModel.length > 0
 					? resolveOverlayRuntimeTarget({
@@ -395,12 +395,12 @@ export function buildModelItems(deps: {
 			const rowCaps = resolution?.capabilities ?? status.capabilities;
 			const decisions = resolution?.capabilityDecisions ?? fallbackCapabilityDecisions(status, rowCaps);
 			const row: ModelRow = {
-				value: endpoint.id,
-				endpoint: endpoint.id,
+				value: target.id,
+				target: target.id,
 				model: "",
 				runtimeName,
 				runtimeShortName,
-				runtimeId: status.runtime?.id ?? endpoint.runtime,
+				runtimeId: status.runtime?.id ?? target.runtime,
 				apiFamily: status.runtime?.apiFamily ?? "unknown",
 				bucket,
 				source: "missing",
@@ -414,31 +414,31 @@ export function buildModelItems(deps: {
 				thinking: resolution?.thinking ?? "unresolved",
 				streaming: decisions.streaming,
 				diagnostics: resolution?.diagnostics ?? [
-					{ severity: "error", code: "model-not-configured", message: `target '${endpoint.id}' has no model configured` },
+					{ severity: "error", code: "model-not-configured", message: `target '${target.id}' has no model configured` },
 				],
 				badges: capabilityBadges(rowCaps),
 				context: contextDecisionLabel(decisions),
 				maxTokens: maxTokensDecisionLabel(decisions),
-				active: endpoint.id === activeEndpoint,
-				scoped: scopeSet.has(endpoint.id),
+				active: target.id === activeTarget,
+				scoped: scopeSet.has(target.id),
 				favorite: false,
 				recent: false,
 				defaultModel: false,
-				visibleByDefault: endpoint.id === activeEndpoint || scopeSet.has(endpoint.id),
+				visibleByDefault: target.id === activeTarget || scopeSet.has(target.id),
 				selectable: false,
 			};
 			items.push({
-				value: endpoint.id,
+				value: target.id,
 				label: `${row.healthGlyph}  ${runtimeName}`,
-				description: `target=${endpoint.id}  auth=${authText}${status.reason ? `  ${status.reason}` : ""}`,
+				description: `target=${target.id}  auth=${authText}${status.reason ? `  ${status.reason}` : ""}`,
 			});
-			refs.push({ endpoint: endpoint.id, model: endpoint.defaultModel ?? "" });
+			refs.push({ target: target.id, model: target.defaultModel ?? "" });
 			rows.push(row);
 			continue;
 		}
 		for (const candidate of candidates) {
 			const wireModel = candidate.id;
-			const rowRef = `${endpoint.id}/${wireModel}`;
+			const rowRef = `${target.id}/${wireModel}`;
 			const resolution = resolveOverlayRuntimeTarget({
 				providers: deps.providers,
 				status,
@@ -449,21 +449,21 @@ export function buildModelItems(deps: {
 			const decisions = resolution.capabilityDecisions;
 			const badges = capabilityBadges(rowCaps);
 			const exactScopeHit = scopeSet.has(rowRef);
-			const endpointScopeHit = scopeSet.has(endpoint.id);
-			const scopeHit = exactScopeHit || endpointScopeHit;
-			const active = endpoint.id === activeEndpoint && wireModel === activeModel;
+			const targetScopeHit = scopeSet.has(target.id);
+			const scopeHit = exactScopeHit || targetScopeHit;
+			const active = target.id === activeTarget && wireModel === activeModel;
 			const favorite = favoriteSet.has(rowRef) || exactScopeHit;
 			const recent = recentSet.has(rowRef);
-			const defaultModel = wireModel === endpoint.defaultModel;
-			const endpointScopedFocus = endpointScopeHit && (active || defaultModel);
-			const focusPinned = singleEndpoint && candidate.source === "configured";
+			const defaultModel = wireModel === target.defaultModel;
+			const targetScopedFocus = targetScopeHit && (active || defaultModel);
+			const focusPinned = singleTarget && candidate.source === "configured";
 			const row: ModelRow = {
 				value: rowRef,
-				endpoint: endpoint.id,
+				target: target.id,
 				model: wireModel,
 				runtimeName,
 				runtimeShortName,
-				runtimeId: status.runtime?.id ?? endpoint.runtime,
+				runtimeId: status.runtime?.id ?? target.runtime,
 				apiFamily: status.runtime?.apiFamily ?? "unknown",
 				bucket,
 				source: candidate.source,
@@ -488,15 +488,15 @@ export function buildModelItems(deps: {
 				recent,
 				defaultModel,
 				focusPinned,
-				visibleByDefault: active || favorite || recent || defaultModel || endpointScopedFocus || focusPinned,
+				visibleByDefault: active || favorite || recent || defaultModel || targetScopedFocus || focusPinned,
 				selectable: true,
 			};
 			items.push({
 				value: rowRef,
 				label: `${row.healthGlyph}${favorite ? "★" : scopeHit ? "◇" : active ? "◆" : " "} ${wireModel}`,
-				description: `${row.context}  ${badges}  ${runtimeShortName}  target=${endpoint.id}`,
+				description: `${row.context}  ${badges}  ${runtimeShortName}  target=${target.id}`,
 			});
-			refs.push({ endpoint: endpoint.id, model: wireModel });
+			refs.push({ target: target.id, model: wireModel });
 			rows.push(row);
 		}
 	}
@@ -583,7 +583,7 @@ function formatModelRow(row: ModelRow, width: number, selected: boolean): string
 		`${fitCell(truncateMiddle(modelLabel, columns.modelWidth), columns.modelWidth)}` +
 		`${fitCell(row.context, CONTEXT_COL_WIDTH, "right")} ` +
 		`${fitCell(row.badges, CAPS_COL_WIDTH)}`;
-	if (columns.showTarget) line += ` ${fitCell(row.endpoint, columns.targetWidth)}`;
+	if (columns.showTarget) line += ` ${fitCell(row.target, columns.targetWidth)}`;
 	if (columns.showRuntime) line += ` ${fitCell(row.runtimeShortName, columns.runtimeWidth)}`;
 	line = fitLine(line, width);
 	return selected ? clioTitle(line) : line;
@@ -616,7 +616,7 @@ function sourceLabel(source: ModelSource): string {
 }
 
 function formatModelDetail(row: ModelRow, width: number): string[] {
-	const ref = row.model.length > 0 ? `${row.endpoint}/${row.model}` : row.endpoint;
+	const ref = row.model.length > 0 ? `${row.target}/${row.model}` : row.target;
 	const tags: string[] = [];
 	if (row.active) tags.push("current");
 	if (row.favorite) tags.push("favorite");
@@ -649,7 +649,7 @@ function matchesQuery(row: ModelRow, query: string): boolean {
 		.filter(Boolean);
 	if (tokens.length === 0) return true;
 	const haystack = [
-		row.endpoint,
+		row.target,
 		row.model,
 		row.runtimeName,
 		row.runtimeShortName,
@@ -746,7 +746,7 @@ function renderModelOverlayLines(input: {
 }
 
 interface ModelRefreshActions {
-	selected?: (endpointId: string) => Promise<ModelItemsResult>;
+	selected?: (targetId: string) => Promise<ModelItemsResult>;
 	all?: () => Promise<ModelItemsResult>;
 	requestRender?: () => void;
 }
@@ -867,7 +867,7 @@ export class ModelOverlayView implements Component {
 			row.recent === true ||
 			row.scoped === true ||
 			row.defaultModel === true;
-		this.onToggleFavorite({ endpoint: row.endpoint, model: row.model }, row.favorite === true);
+		this.onToggleFavorite({ target: row.target, model: row.model }, row.favorite === true);
 	}
 
 	refresh(scope: ModelRefreshScope): void {
@@ -880,16 +880,14 @@ export class ModelOverlayView implements Component {
 		const selected = this.selectedRow();
 		const preferredValue = selected?.value ?? null;
 		if (scope === "all" && !this.refreshActions.all) return;
-		if (scope === "selected" && (!this.refreshActions.selected || !selected?.endpoint)) return;
+		if (scope === "selected" && (!this.refreshActions.selected || !selected?.target)) return;
 		this.refreshing = scope;
 		this.refreshError = null;
 		this.selectionError = null;
 		this.refreshActions.requestRender?.();
 		try {
 			const next =
-				scope === "all"
-					? await this.refreshActions.all?.()
-					: await this.refreshActions.selected?.(selected?.endpoint ?? "");
+				scope === "all" ? await this.refreshActions.all?.() : await this.refreshActions.selected?.(selected?.target ?? "");
 			if (signal.aborted) return;
 			if (next) this.replaceItems(next, preferredValue);
 		} catch (err) {
@@ -935,11 +933,11 @@ export class ModelOverlayView implements Component {
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter") || data === "\n") {
 			const row = this.selectedRow();
 			if (row?.selectable) {
-				this.onSelect({ endpoint: row.endpoint, model: row.model });
+				this.onSelect({ target: row.target, model: row.model });
 				this.onClose();
 				return;
 			}
-			this.selectionError = row ? `target ${row.endpoint} has no selectable model id` : "no model is selected";
+			this.selectionError = row ? `target ${row.target} has no selectable model id` : "no model is selected";
 			this.refreshActions.requestRender?.();
 			return;
 		}
@@ -989,7 +987,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 	};
 	const initial = build();
 	const overlayWidth = resolveOverlayWidth(tui.terminal?.columns ?? 0);
-	const activeEndpoint = currentSettings().orchestrator?.target?.trim();
+	const activeTarget = currentSettings().orchestrator?.target?.trim();
 	const activeModel = currentSettings().orchestrator?.model?.trim();
 	const view = new ModelOverlayView(
 		initial.rows,
@@ -998,8 +996,8 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		deps.onToggleFavorite ? (ref, favorite) => deps.onToggleFavorite?.(ref, favorite) : undefined,
 		() => deps.onClose(),
 		{
-			selected: async (endpointId) => {
-				await deps.providers.probeEndpoint(endpointId);
+			selected: async (targetId) => {
+				await deps.providers.probeTarget(targetId);
 				return build({ reloadCatalog: true });
 			},
 			all: async () => {
@@ -1009,7 +1007,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 			requestRender: () => tui.requestRender(),
 		},
 	);
-	if (activeEndpoint && activeModel) view.setSelectedValue(`${activeEndpoint}/${activeModel}`);
+	if (activeTarget && activeModel) view.setSelectedValue(`${activeTarget}/${activeModel}`);
 	const unsubscribeHealth = deps.bus?.on(BusChannels.ProviderHealth, () => {
 		if (view.isDisposed()) return;
 		view.replaceItems(build());

@@ -7,7 +7,7 @@
  * `["off"]` for these targets. Probing with a one-shot priming request reveals
  * the truth: a thinking-capable model emits a non-empty `reasoning_content`
  * (llama.cpp), `reasoning` (LM Studio + chat-templates), or `reasoning_text`
- * field in the streamed response. Caching the result per (endpoint, model)
+ * field in the streamed response. Caching the result per (target, model)
  * keeps the cost to a single round-trip per session.
  */
 import { performance } from "node:perf_hooks";

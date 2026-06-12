@@ -99,14 +99,14 @@ Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning t
 
 ## Settings shape
 
-On disk, configured model targets live under `targets:`. When loaded in code, the historical internal name is `endpoints`.
+On disk, configured model targets live under `targets:`. The in-memory shape uses the same name; there is no separate internal vocabulary.
 
 Terminology used in code and receipts:
 
 | Term | Meaning |
 | --- | --- |
 | `RuntimeDescriptor` | HTTP/native/pi-ai-backed executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, or `llamacpp`. |
-| Target / `TargetSpec` / `EndpointDescriptor` | Persisted user-configured endpoint plus runtime id, model defaults, auth metadata, and capability overrides. |
+| Target / `TargetDescriptor` | Persisted user-configured target plus runtime id, model defaults, auth metadata, and capability overrides. |
 | Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
 | Orchestrator target | Main chat/print target. HTTP/native/pi-ai-backed. |
 | Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, resolved exactly like an orchestrator target. |
@@ -182,7 +182,7 @@ This is what makes several concurrent Clio terminals safe: each one routes throu
 
 Supporting mechanics:
 
-- **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.endpoint` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
+- **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.target` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
 - **Saved-default writes are serialized across processes.** Every settings writer (interactive write-throughs, `clio targets`, `clio configure`) performs its read-modify-write under an advisory lock file (`settings.yaml.lock`) and lands the result via an atomic temp-file + rename. Two processes saving defaults at the same time can no longer drop each other's patches, readers never block and never see partial files, and a lock left behind by a dead process is taken over after a few seconds.
 - **Recently selected models are runtime state, not configuration.** They live in the data dir (`state/recent-models.json`), so an Alt+L pick no longer rewrites `settings.yaml` and no longer pings the config watcher in every other running session. A legacy `state.recentModels` list in `settings.yaml` is migrated to the data dir on first read and then left alone. `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
 - **ACP sessions get the notices through the session ledger.** Sessions served over the Agent Client Protocol (`clio` in ACP mode) have the same routing isolation, but ACP v1 offers no agent-initiated advisory channel: its `session/update` union only carries prompt-turn content, and out-of-turn updates would break strict clients. The external-divergence and target-removed notices are therefore recorded as `custom` session-ledger entries (`customType: "clio.routing-notice"`), visible to `/resume` and session tooling.
@@ -213,9 +213,9 @@ Label to config path mapping:
 | Worker permission asks | `workers.onPermission` |
 | Delegation governance | `delegation.defaults.toolGovernance` |
 | Thinking level | `orchestrator.thinkingLevel` |
-| Target | `orchestrator.endpoint` |
+| Target | `orchestrator.target` |
 | Model | `orchestrator.model` |
-| Default target | `workers.default.endpoint` |
+| Default target | `workers.default.target` |
 | Default model | `workers.default.model` |
 | Session ceiling (USD) | `budget.sessionCeilingUsd` |
 | Model cycle set | `scope` |

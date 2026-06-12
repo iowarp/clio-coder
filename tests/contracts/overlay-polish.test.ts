@@ -5,9 +5,9 @@ import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispa
 import type { CostEntry, ObservabilityContract } from "../../src/domains/observability/index.js";
 import {
 	EMPTY_CAPABILITIES,
-	type EndpointStatus,
 	type ProvidersContract,
 	type RuntimeDescriptor,
+	type TargetStatus,
 } from "../../src/domains/providers/index.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { type Component, type OverlayHandle, type TUI, visibleWidth } from "../../src/engine/tui.js";
@@ -113,10 +113,10 @@ function runtimeDescriptor(): RuntimeDescriptor {
 	};
 }
 
-function endpointStatus(id: string, wireModels: ReadonlyArray<string> = []): EndpointStatus {
+function targetStatus(id: string, wireModels: ReadonlyArray<string> = []): TargetStatus {
 	const runtime = runtimeDescriptor();
 	return {
-		endpoint: {
+		target: {
 			id,
 			runtime: runtime.id,
 			url: "http://localhost:1234",
@@ -132,18 +132,18 @@ function endpointStatus(id: string, wireModels: ReadonlyArray<string> = []): End
 }
 
 function providersFor(
-	statuses: ReadonlyArray<EndpointStatus>,
+	statuses: ReadonlyArray<TargetStatus>,
 	overrides: Partial<ProvidersContract> = {},
 ): ProvidersContract {
 	const statusesRef = [...statuses];
 	const base = {
 		list: () => statusesRef,
-		getEndpoint: (id: string) => statusesRef.find((status) => status.endpoint.id === id)?.endpoint ?? null,
+		getTarget: (id: string) => statusesRef.find((status) => status.target.id === id)?.target ?? null,
 		getRuntime: (id: string) => statusesRef.find((status) => status.runtime?.id === id)?.runtime ?? null,
 		probeAll: async () => {},
 		probeAllLive: async () => {},
-		probeEndpoint: async (id: string) => statusesRef.find((status) => status.endpoint.id === id) ?? null,
-		disconnectEndpoint: () => null,
+		probeTarget: async (id: string) => statusesRef.find((status) => status.target.id === id) ?? null,
+		disconnectTarget: () => null,
 		getDetectedReasoning: () => null,
 		probeReasoningForModel: async () => null,
 		auth: {
@@ -182,9 +182,9 @@ function providersFor(
 	return { ...base, ...overrides } as unknown as ProvidersContract;
 }
 
-function settings(endpoint = "mock", model = "model-a", threshold?: number): ClioSettings {
+function settings(target = "mock", model = "model-a", threshold?: number): ClioSettings {
 	return {
-		orchestrator: { target: endpoint, model, thinkingLevel: "off" },
+		orchestrator: { target: target, model, thinkingLevel: "off" },
 		autonomy: "auto-edit",
 		delegation: { defaults: { toolGovernance: "clio-policy" } },
 		...(threshold !== undefined ? { compaction: { threshold } } : {}),
@@ -232,7 +232,7 @@ describe("milestone 08 overlay polish regressions", () => {
 	it("/model leaves nonselectable no-model rows open and reports a consistent model count", () => {
 		const result = buildModelItems({
 			settings: settings("empty", ""),
-			providers: providersFor([endpointStatus("empty")]),
+			providers: providersFor([targetStatus("empty")]),
 		});
 		let selected = 0;
 		let closed = 0;
@@ -266,10 +266,10 @@ describe("milestone 08 overlay polish regressions", () => {
 		let resolveProbe = (): void => {
 			throw new Error("probe resolver was not installed");
 		};
-		const providers = providersFor([endpointStatus("mock", ["model-a"])], {
-			probeEndpoint: () =>
-				new Promise<EndpointStatus | null>((resolve) => {
-					resolveProbe = () => resolve(endpointStatus("mock", ["model-b"]));
+		const providers = providersFor([targetStatus("mock", ["model-a"])], {
+			probeTarget: () =>
+				new Promise<TargetStatus | null>((resolve) => {
+					resolveProbe = () => resolve(targetStatus("mock", ["model-b"]));
 				}),
 		});
 		const harness = fakeTui(100);
@@ -292,21 +292,21 @@ describe("milestone 08 overlay polish regressions", () => {
 	});
 
 	it("/model auto-refreshes live model catalogs on open", async () => {
-		let current = [endpointStatus("mock", ["old-model"])];
+		let current = [targetStatus("mock", ["old-model"])];
 		const live = {
-			...endpointStatus("mock"),
+			...targetStatus("mock"),
 			discoveredModels: ["new-live-model"],
 			discoveredModelsSource: "probe" as const,
 			discoveredModelStates: { "new-live-model": { state: "loaded" as const } },
 		};
 		const providers = providersFor([], {
 			list: () => current,
-			getEndpoint: (id: string) => current.find((status) => status.endpoint.id === id)?.endpoint ?? null,
+			getTarget: (id: string) => current.find((status) => status.target.id === id)?.target ?? null,
 			getRuntime: (id: string) => current.find((status) => status.runtime?.id === id)?.runtime ?? null,
 			probeAllLive: async () => {
 				current = [live];
 			},
-			probeEndpoint: async (id: string) => current.find((status) => status.endpoint.id === id) ?? null,
+			probeTarget: async (id: string) => current.find((status) => status.target.id === id) ?? null,
 		});
 		const harness = fakeTui(100);
 		const handle = openModelOverlay(harness.tui, {
@@ -459,7 +459,7 @@ describe("milestone 08 overlay polish regressions", () => {
 
 	it("welcome dashboard recomputes target stats on each render and preserves a zero compaction threshold", () => {
 		let active = "target-a";
-		const providers = providersFor([endpointStatus("target-a", ["model-a"]), endpointStatus("target-b", ["model-b"])]);
+		const providers = providersFor([targetStatus("target-a", ["model-a"]), targetStatus("target-b", ["model-b"])]);
 		const stats = deriveWelcomeDashboardStats({
 			providers,
 			observability: {} as ObservabilityContract,

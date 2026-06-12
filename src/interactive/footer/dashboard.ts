@@ -363,7 +363,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		const statuses = deps.providers.list();
 		const current = settings?.orchestrator?.target
-			? (statuses.find((s) => s.endpoint.id === settings.orchestrator?.target) ?? null)
+			? (statuses.find((s) => s.target.id === settings.orchestrator?.target) ?? null)
 			: null;
 
 		const targetLabel = settings?.orchestrator?.target ?? "none";
@@ -379,7 +379,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		const thinking = resolution?.thinking.display ?? settings?.orchestrator?.thinkingLevel ?? "off";
 
-		const wireModelId = settings?.orchestrator?.model ?? current?.endpoint.defaultModel ?? null;
+		const wireModelId = settings?.orchestrator?.model ?? current?.target.defaultModel ?? null;
 		const detectedReasoning =
 			wireModelId && typeof deps.providers.getDetectedReasoning === "function"
 				? deps.providers.getDetectedReasoning(settings?.orchestrator?.target ?? "", wireModelId)

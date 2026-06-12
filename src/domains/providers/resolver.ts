@@ -3,7 +3,7 @@ import { modelIdsForStatus } from "./model-discovery.js";
 import { type ThinkingLevel, VALID_THINKING_LEVELS } from "./types/capability-flags.js";
 
 export interface ResolvedModelRef {
-	endpoint: string;
+	target: string;
 	model: string;
 	thinkingLevel?: ThinkingLevel;
 }
@@ -64,7 +64,7 @@ function globToRegExp(glob: string): RegExp {
 }
 
 interface CandidateRef {
-	endpoint: string;
+	target: string;
 	model: string;
 	full: string;
 }
@@ -74,10 +74,10 @@ function collectCandidates(providers: ProvidersContract): CandidateRef[] {
 	const seen = new Set<string>();
 	for (const status of providers.list()) {
 		for (const model of modelIdsForStatus(status)) {
-			const key = `${status.endpoint.id}/${model}`;
+			const key = `${status.target.id}/${model}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
-			out.push({ endpoint: status.endpoint.id, model, full: key });
+			out.push({ target: status.target.id, model, full: key });
 		}
 	}
 	return out;
@@ -98,7 +98,7 @@ function buildResult(
 	if (!pick) {
 		return { ref: null, error: `no models match pattern "${pattern}"` };
 	}
-	const ref: ResolvedModelRef = { endpoint: pick.ref.endpoint, model: pick.ref.model };
+	const ref: ResolvedModelRef = { target: pick.ref.target, model: pick.ref.model };
 	if (thinkingLevel) ref.thinkingLevel = thinkingLevel;
 	const result: ResolveModelResult = { ref };
 	if (pick.ambiguous) {
@@ -144,7 +144,7 @@ export function resolveModelReference(rawPattern: string, providers: ProvidersCo
 	if (slashIdx !== -1) {
 		const ep = base.slice(0, slashIdx).toLowerCase();
 		const mdl = base.slice(slashIdx + 1).toLowerCase();
-		const epModel = candidates.filter((c) => c.endpoint.toLowerCase() === ep && c.model.toLowerCase() === mdl);
+		const epModel = candidates.filter((c) => c.target.toLowerCase() === ep && c.model.toLowerCase() === mdl);
 		if (epModel.length > 0) return buildResult(base, pickFirst(epModel), thinkingLevel);
 	}
 

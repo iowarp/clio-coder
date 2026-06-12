@@ -6,7 +6,7 @@ export interface BuildSummaryInput {
 	startedAt: number;
 	endedAt: number;
 	modelId: string;
-	endpointId: string;
+	targetId: string;
 	messages: ReadonlyArray<AgentMessage>;
 	watchdogPeak: WatchdogTier;
 	cancelled: boolean;
@@ -75,7 +75,7 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 	const summary: TurnSummary = {
 		elapsedMs: Math.max(0, input.endedAt - input.startedAt),
 		modelId: input.modelId,
-		endpointId: input.endpointId,
+		targetId: input.targetId,
 		inputTokens,
 		outputTokens,
 		cacheReadTokens,
@@ -94,7 +94,7 @@ export function emptySummary(input: {
 	startedAt: number;
 	endedAt: number;
 	modelId: string;
-	endpointId: string;
+	targetId: string;
 	watchdogPeak: WatchdogTier;
 	stopReason?: TurnStopReason;
 	stopDetail?: string;
@@ -103,7 +103,7 @@ export function emptySummary(input: {
 	return {
 		elapsedMs: Math.max(0, input.endedAt - input.startedAt),
 		modelId: input.modelId,
-		endpointId: input.endpointId,
+		targetId: input.targetId,
 		inputTokens: 0,
 		outputTokens: 0,
 		cacheReadTokens: 0,

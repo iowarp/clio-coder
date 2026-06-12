@@ -29,9 +29,9 @@ const mistralRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "MISTRAL_API_KEY",
 	defaultCapabilities,
-	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeCatalogBackedModel({
-			endpoint,
+			target,
 			wireModelId,
 			kb,
 			defaultCapabilities,
