@@ -74,6 +74,41 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
 - Added bounded worker diagnostics. A crashed or garbage-printing worker keeps
   a 4KB stderr tail and a malformed-stdout count that reach the run receipt,
   the dispatch failure detail, and the dispatch board.
+- Added the unified middleware hook layer. Five lifecycle events (before_tool,
+  after_tool, turn_start, turn_end, on_compaction) evaluate coded registrations
+  beside declarative rules in one ordered, error-isolated, budget-measured
+  pass. Both loop guards merged into one registration, protected artifacts and
+  dispatch dedup left the registry for registrations, the orchestrator
+  callbacks became after_tool observers, the finish contract and tool-prose
+  assessor became turn_end registrations, and `inject_reminder` delivers
+  buffered reminders into the next model request as one visible persisted
+  system-reminder block. Hook diagnostics publish on a typed
+  `middleware.hookFailed` channel rendered as warn notices. The registry's
+  control seams dropped from seven to two.
+- Added typed bus payloads. Every channel has a payload interface derived from
+  its real emit sites, `BusPayloadMap` makes emit and subscribe generic over
+  the channel, and a contracts tripwire fails when any channel lacks an
+  emitter or subscriber.
+- Added live agent steering. Enter while a run streams now lands the typed
+  correction between tool batches through the engine's steering queue, while
+  alt+enter keeps after-run follow-up semantics in a typed Steering Queue
+  panel. Workers accept steer messages over their existing stdin line protocol
+  with `clio_steer_received` acks, `dispatch.steer(runId, text)` joins the
+  dispatch contract, and `@<agentId> <text>` in the editor routes a steer to a
+  running worker by agent id or runId prefix.
+- Added receipt tool-activity records. Receipts carry calls, successes,
+  failures, blocks, and whether any mutating call succeeded; a run that
+  finishes succeeded without a single successful tool call gets a factual
+  outcomeDetail note visible on the board, in fleet status, and in the
+  dispatch tool heading.
+- Added durable customization writes. Memory records, extension state, skill
+  overwrites, settings, and share imports share one atomic
+  write-fsync-backup-rename helper, and share-archive import preflights every
+  entry, rejecting absolute paths, dot-dot segments, and symlink escapes with
+  zero writes on rejection.
+- Added parked-call loop observation. Denied or cancelled permission-parked
+  calls are observed by the loop guard, so a headless model retrying a denied
+  call gets recovery guidance instead of looping until timeout.
 
 ### Changed
 
@@ -122,6 +157,29 @@ because their behavior now lives in richer surfaces: `/targets`, `/skill`,
 - Fixed the status controller collapsing every abort into one hardcoded path;
   turn summaries now carry abort provenance (dispatch abort, dispatch drain,
   or stream cancel with its reason).
+- Fixed fuzzy edit matching laundering the model's typographic typos into
+  files. Replacements are spliced against the original span so unchanged
+  bytes keep the file's own quotes and unicode; only the genuinely changed
+  middle takes the model's bytes.
+- Fixed evidence verification silently failing every modern receipt. The
+  parsers dropped post-v1 fields before recomputing digests while
+  `evidence build` printed ok unconditionally; clean receipts now verify and
+  corrupted ones print the integrity failure and exit nonzero.
+- Fixed `fleet status` zeroing the input/output token split that receipts
+  carry.
+- Fixed the Skills Hub rendering with dead keys: the hub had never joined the
+  overlay key-routing union, so every keystroke fell through to a
+  key-swallowing branch. The routing seam is now contract-tested for all five
+  list overlays.
+- Fixed silently ignored `--skill` paths: missing or invalid explicit skills
+  now fail with the loader's diagnostic and exit 2 before any model call.
+- Fixed `clio models` claiming no targets were configured on an empty search
+  and letting long model ids collide with the caps column.
+- Fixed `/view` missing receipts written by concurrent processes until
+  restart; every listing now merges a fresh disk read.
+- Fixed filtered Esc closing shared list overlays instead of clearing the
+  filter first, and added completion notices for `/targets` probes and
+  `/settings` changes.
 
 ### Removed
 
