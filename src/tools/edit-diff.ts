@@ -168,6 +168,93 @@ function findExactMatch(content: string, oldText: string, newText: string): Reso
 	};
 }
 
+function commonPrefixLength(a: string, b: string): number {
+	const max = Math.min(a.length, b.length);
+	let i = 0;
+	while (i < max && a[i] === b[i]) i += 1;
+	return i;
+}
+
+function commonSuffixLength(a: string, b: string, maxLength: number): number {
+	const max = Math.min(a.length, b.length, maxLength);
+	let i = 0;
+	while (i < max && a[a.length - 1 - i] === b[b.length - 1 - i]) i += 1;
+	return i;
+}
+
+function spliceChangedLine(originalLine: string, oldLine: string, newLine: string): string {
+	const normalizedOld = normalizeForFuzzyMatch(oldLine);
+	const normalizedNew = normalizeForFuzzyMatch(newLine);
+	const trimmedOriginal = originalLine.trimEnd();
+	const trimmedNew = newLine.trimEnd();
+	const oneToOne =
+		trimmedOriginal.length === normalizedOld.length &&
+		oldLine.trimEnd().length === normalizedOld.length &&
+		trimmedNew.length === normalizedNew.length;
+	if (!oneToOne) return newLine;
+	const prefix = commonPrefixLength(normalizedOld, normalizedNew);
+	const suffix = commonSuffixLength(
+		normalizedOld,
+		normalizedNew,
+		Math.min(normalizedOld.length, normalizedNew.length) - prefix,
+	);
+	return (
+		trimmedOriginal.slice(0, prefix) +
+		trimmedNew.slice(prefix, normalizedNew.length - suffix) +
+		trimmedOriginal.slice(normalizedOld.length - suffix) +
+		newLine.slice(trimmedNew.length)
+	);
+}
+
+function spliceFuzzyNewText(matchedOriginal: string, oldText: string, newText: string): string {
+	const originalHadTrailingNewline = matchedOriginal.endsWith("\n");
+	const oldHadTrailingNewline = oldText.endsWith("\n");
+	if (originalHadTrailingNewline !== oldHadTrailingNewline) return newText;
+	const originalBody = originalHadTrailingNewline ? matchedOriginal.slice(0, -1) : matchedOriginal;
+	const oldBody = oldHadTrailingNewline ? oldText.slice(0, -1) : oldText;
+	if (normalizeForFuzzyMatch(originalBody) !== normalizeForFuzzyMatch(oldBody)) return newText;
+
+	const newHadTrailingNewline = newText.endsWith("\n");
+	const newBody = newHadTrailingNewline ? newText.slice(0, -1) : newText;
+	const originalLines = originalBody.split("\n");
+	const oldLines = oldBody.split("\n");
+	const newLines = newBody.split("\n");
+	if (originalLines.length !== oldLines.length) return newText;
+
+	let resultLines: string[];
+	if (oldLines.length === newLines.length) {
+		resultLines = oldLines.map((oldLine, i) => {
+			const originalLine = originalLines[i] ?? oldLine;
+			const newLine = newLines[i] ?? oldLine;
+			if (normalizeForFuzzyMatch(oldLine) === normalizeForFuzzyMatch(newLine)) return originalLine;
+			return spliceChangedLine(originalLine, oldLine, newLine);
+		});
+	} else {
+		const maxPairs = Math.min(oldLines.length, newLines.length);
+		let prefixLines = 0;
+		while (
+			prefixLines < maxPairs &&
+			normalizeForFuzzyMatch(oldLines[prefixLines] ?? "") === normalizeForFuzzyMatch(newLines[prefixLines] ?? "")
+		) {
+			prefixLines += 1;
+		}
+		let suffixLines = 0;
+		while (
+			suffixLines < maxPairs - prefixLines &&
+			normalizeForFuzzyMatch(oldLines[oldLines.length - 1 - suffixLines] ?? "") ===
+				normalizeForFuzzyMatch(newLines[newLines.length - 1 - suffixLines] ?? "")
+		) {
+			suffixLines += 1;
+		}
+		resultLines = [
+			...originalLines.slice(0, prefixLines),
+			...newLines.slice(prefixLines, newLines.length - suffixLines),
+			...originalLines.slice(originalLines.length - suffixLines, originalLines.length),
+		];
+	}
+	return resultLines.join("\n") + (newHadTrailingNewline ? "\n" : "");
+}
+
 function findFuzzyMatch(content: string, oldText: string, newText: string): ResolvedMatch {
 	const fuzzyContent = normalizeForFuzzyMatch(content);
 	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
@@ -176,11 +263,12 @@ function findFuzzyMatch(content: string, oldText: string, newText: string): Reso
 	const fuzzyMatch = { found: true, index: indexes[0] ?? -1, matchLength: fuzzyOldText.length };
 	const originalMatch = lineSpanForFuzzyMatch(content, fuzzyContent, fuzzyMatch);
 	if (!originalMatch.found) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
+	const matchedOriginal = content.slice(originalMatch.index, originalMatch.index + originalMatch.matchLength);
 	return {
 		found: true,
 		index: originalMatch.index,
 		matchLength: originalMatch.matchLength,
-		newText,
+		newText: spliceFuzzyNewText(matchedOriginal, oldText, newText),
 		occurrences: indexes.length,
 	};
 }

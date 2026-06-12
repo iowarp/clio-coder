@@ -148,6 +148,25 @@ describe("contracts/tools basic happy paths", () => {
 		strictEqual(readFileSync(filePath, "utf8"), "two");
 	});
 
+	it("writeTool notes when an overwrite drops the trailing newline", async () => {
+		const root = scratchDir();
+		const filePath = join(root, "note.txt");
+
+		const r1 = await writeTool.run({ path: filePath, content: "one\n" });
+		strictEqual(r1.kind, "ok");
+		ok(r1.kind === "ok" && !r1.output.includes("no longer ends with a newline"));
+
+		const r2 = await writeTool.run({ path: filePath, content: "two" });
+		strictEqual(r2.kind, "ok");
+		ok(r2.kind === "ok" && r2.output.includes("no longer ends with a newline"));
+
+		const r3 = await writeTool.run({ path: filePath, content: "three" });
+		strictEqual(r3.kind, "ok");
+		ok(r3.kind === "ok" && !r3.output.includes("no longer ends with a newline"));
+
+		strictEqual(readFileSync(filePath, "utf8"), "three");
+	});
+
 	it("editTool applies edits and returns diff", async () => {
 		const root = scratchDir();
 		const filePath = join(root, "src.ts");

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
@@ -24,12 +24,22 @@ export const writeTool: ToolSpec = {
 		if (content === null) return { kind: "error", message: "write: missing content argument" };
 		const filePath = resolveToCwd(pathArg);
 		try {
+			let previousEndedWithNewline = false;
 			await withFileMutationQueue(filePath, async () => {
+				try {
+					previousEndedWithNewline = readFileSync(filePath, "utf8").endsWith("\n");
+				} catch {
+					previousEndedWithNewline = false;
+				}
 				mkdirSync(dirname(filePath), { recursive: true });
 				writeFileSync(filePath, content, "utf8");
 			});
 			const bytes = Buffer.byteLength(content, "utf8");
-			return { kind: "ok", output: `wrote ${bytes}B to ${pathArg}` };
+			let output = `wrote ${bytes}B to ${pathArg}`;
+			if (previousEndedWithNewline && !content.endsWith("\n")) {
+				output += `\nnote: ${pathArg} no longer ends with a newline; the previous content did`;
+			}
+			return { kind: "ok", output };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `write: ${msg}` };
