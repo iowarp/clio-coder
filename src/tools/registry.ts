@@ -329,6 +329,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (decision.kind === "ask") {
 			if (level === "read-only") {
 				const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
+				recordRegistryDisposition(call, verdict.decision, "denied");
 				notifyAutonomyDenied(call, verdict.decision, level);
 				return { kind: "terminal", verdict };
 			}
@@ -343,6 +344,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "execute", spec, decision };
 		}
 		if (actionClass === "git_destructive") {
+			recordRegistryDisposition(call, decision, "blocked", [`action ${actionClass} is hard-blocked`]);
 			return {
 				kind: "terminal",
 				verdict: {
@@ -359,13 +361,36 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		});
 		if (disposition === "deny") {
 			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
+			recordRegistryDisposition(call, verdict.decision, "denied");
 			notifyAutonomyDenied(call, verdict.decision, level);
 			return { kind: "terminal", verdict };
 		}
 		if (disposition === "ask") {
-			return { kind: "park", decision: toAutonomyAskDecision(decision, level, call.tool, actionClass) };
+			const askDecision = toAutonomyAskDecision(decision, level, call.tool, actionClass);
+			recordRegistryDisposition(call, askDecision, "permission_requested");
+			return { kind: "park", decision: askDecision };
 		}
+		recordRegistryDisposition(call, decision, "allowed");
 		return { kind: "execute", spec, decision };
+	};
+
+	const recordRegistryDisposition = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		auditDecision: "allowed" | "blocked" | "permission_requested" | "denied",
+		reasons?: ReadonlyArray<string>,
+	): void => {
+		// Row sequence for net-pass calls: safety.evaluate writes `classified`;
+		// registry admission writes the final autonomy disposition. Confirmed
+		// re-admissions keep their existing `allowed` row from safety.evaluate.
+		deps.safety.audit.recordToolCall?.({
+			tool: call.tool,
+			classification: decision.classification,
+			decision: auditDecision,
+			args: call.args,
+			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+			...(reasons !== undefined ? { reasons } : decision.kind === "allow" ? {} : { reasons: [decision.rejection.detail] }),
+		});
 	};
 
 	/**

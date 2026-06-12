@@ -195,9 +195,10 @@ In interactive mode, a permission request opens a queued overlay prompt immediat
 ### Deterministic Headless Behavior
 
 When executing tasks in headless mode through `clio run`, there is no terminal operator to prompt.
-- **Deterministic Denials:** Any action that requires permission is automatically and deterministically denied by the engine.
+- **Deterministic Denials:** Any action that requires permission resolves as a deterministic tool denial. The model receives the rejection and may adapt within the same run.
 - **Rejection Message:** The engine assigns a standard rejection reason to the denied action: `"clio run cannot confirm permission requests; rerun interactively to approve this action."`
-- **Cancellation of Parked Calls:** Upon a headless denial, all associated parked calls in the tool registry are immediately cancelled, and the headless run exits with an error code, protecting the workspace from unauthorized mutations.
+- **Run Exit:** The process exit code reflects the overall run outcome, not the permission denial by itself. A run can still exit 0 if the model completes successfully after receiving the rejected tool result.
+- **Receipts and Audit:** Headless permission denials increment `permissionRequested` receipt/audit counts, so scripts can detect that approval would have been needed without treating every denial as a failed process.
 
 ### Workers and delegations
 

@@ -1,10 +1,15 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
+import type { DomainContext } from "../../src/core/domain-loader.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
+import type { ToolCallAuditRecord } from "../../src/domains/safety/audit.js";
 import {
 	AUTONOMY_LEVELS,
 	type AutonomyDisposition,
@@ -12,6 +17,7 @@ import {
 	mapAutonomy,
 } from "../../src/domains/safety/autonomy.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
+import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { approvalParkedNotice, autonomyDeniedNotice } from "../../src/interactive/bus-notices.js";
@@ -40,11 +46,72 @@ function registryAt(level: AutonomyLevel): ToolRegistry {
 	return registry;
 }
 
+function registerMockTools(registry: ToolRegistry): void {
+	registry.register(mockSpec(ToolNames.Read, "read"));
+	registry.register(mockSpec(ToolNames.Write, "write"));
+	registry.register(mockSpec(ToolNames.Bash, "execute"));
+	registry.register(mockSpec(ToolNames.Dispatch, "dispatch"));
+}
+
 const bashCall = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
 const writeCall = (filePath: string) => ({ tool: ToolNames.Write, args: { file_path: filePath, content: "x" } });
 
 async function settle(): Promise<void> {
 	await Promise.resolve();
+}
+
+function readToolCallAuditRows(dataDir: string): ToolCallAuditRecord[] {
+	const auditDir = join(dataDir, "audit");
+	let files: string[];
+	try {
+		files = readdirSync(auditDir).filter((file) => file.endsWith(".jsonl"));
+	} catch {
+		return [];
+	}
+	return files.flatMap((file) =>
+		readFileSync(join(auditDir, file), "utf8")
+			.split("\n")
+			.filter((line) => line.trim().length > 0)
+			.map((line) => JSON.parse(line) as ToolCallAuditRecord)
+			.filter((row) => row.kind === "tool_call"),
+	);
+}
+
+async function withAuditedRegistry(
+	level: AutonomyLevel,
+	fn: (registry: ToolRegistry) => Promise<void>,
+): Promise<ToolCallAuditRecord[]> {
+	const originalEnv = { ...process.env };
+	const scratch = mkdtempSync(join(tmpdir(), "clio-autonomy-audit-"));
+	const dataDir = join(scratch, "data");
+	process.env.CLIO_HOME = scratch;
+	process.env.CLIO_DATA_DIR = dataDir;
+	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
+	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
+	resetXdgCache();
+	const bus = createSafeEventBus();
+	const mockContext: DomainContext = { bus, getContract: () => undefined };
+	const bundle = createSafetyBundle(mockContext);
+	const registry = createRegistry({ safety: bundle.contract, autonomy: () => level });
+	registerMockTools(registry);
+	let stopped = false;
+	await bundle.extension.start();
+	try {
+		await fn(registry);
+		await bundle.extension.stop?.();
+		stopped = true;
+		return readToolCallAuditRows(dataDir);
+	} finally {
+		if (!stopped) await bundle.extension.stop?.();
+		for (const k of Object.keys(process.env)) {
+			if (!(k in originalEnv)) Reflect.deleteProperty(process.env, k);
+		}
+		for (const [k, v] of Object.entries(originalEnv)) {
+			if (v !== undefined) process.env[k] = v;
+		}
+		resetXdgCache();
+		rmSync(scratch, { recursive: true, force: true });
+	}
 }
 
 describe("contracts/autonomy mapping matrix", () => {
@@ -342,5 +409,63 @@ describe("contracts/autonomy approvals contexts", () => {
 		});
 		strictEqual(readOnly.snapshot().toolCallLog[0]?.decision, "denied");
 		match(readOnly.snapshot().toolCallLog[0]?.reason ?? "", /autonomy level is read-only/);
+	});
+});
+
+describe("contracts/autonomy audit honesty", () => {
+	it("read-only autonomy denial writes classified then denied rows without claiming allowed", async () => {
+		const rows = await withAuditedRegistry("read-only", async (registry) => {
+			const verdict = await registry.invoke(writeCall("notes/autonomy-test.txt"));
+			strictEqual(verdict.kind, "blocked");
+		});
+
+		deepStrictEqual(
+			rows.map((row) => row.decision),
+			["classified", "denied"],
+		);
+		const denied = rows[1];
+		ok(denied);
+		strictEqual(denied.tool, ToolNames.Write);
+		ok(
+			denied.reasons.some((reason) => reason.includes("autonomy read-only")),
+			JSON.stringify(denied.reasons),
+		);
+	});
+
+	it("suggest autonomy park writes classified then permission_requested at park time", async () => {
+		const rows = await withAuditedRegistry("suggest", async (registry) => {
+			const pending = registry.invoke(writeCall("notes/autonomy-test.txt"));
+			await settle();
+			strictEqual(registry.hasParkedCalls(), true);
+			registry.cancelParkedCalls("operator declined");
+			strictEqual((await pending).kind, "blocked");
+		});
+
+		deepStrictEqual(
+			rows.map((row) => row.decision),
+			["classified", "permission_requested"],
+		);
+		const requested = rows[1];
+		ok(requested);
+		ok(
+			requested.reasons.some((reason) => reason.includes("Autonomy suggest")),
+			JSON.stringify(requested.reasons),
+		);
+	});
+
+	it("a granted autonomy park keeps a single final allowed row on resume", async () => {
+		const rows = await withAuditedRegistry("auto-edit", async (registry) => {
+			const pending = registry.invoke(bashCall("echo hello"));
+			await settle();
+			strictEqual(registry.hasParkedCalls(), true);
+			await registry.resumeParkedCalls({ actionClass: "execute", requestedBy: "test" });
+			strictEqual((await pending).kind, "ok");
+		});
+
+		deepStrictEqual(
+			rows.map((row) => row.decision),
+			["classified", "permission_requested", "allowed"],
+		);
+		strictEqual(rows.filter((row) => row.decision === "allowed").length, 1);
 	});
 });

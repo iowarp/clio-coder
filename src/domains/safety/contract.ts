@@ -1,4 +1,5 @@
 import type { Classification, ClassifierCall } from "./action-classifier.js";
+import type { ToolCallAuditInput } from "./audit.js";
 import type { DamageControlMatch } from "./damage-control.js";
 import type { LoopVerdict } from "./loop-detector.js";
 import type { SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
@@ -27,9 +28,10 @@ export interface SafetyContract {
 	classify(call: ClassifierCall): Classification;
 
 	/**
-	 * Full evaluation: classify + damage-control match + decision. Writes an
-	 * audit record AND emits on safety.classified + (safety.allowed | safety.blocked).
-	 * `posture` is optional context carried into the audit entry.
+	 * Full evaluation: classify + damage-control match + decision. Writes the
+	 * safety-net audit row and emits on safety.classified + (safety.allowed |
+	 * safety.blocked). Registry admission writes any final autonomy disposition
+	 * through `audit.recordToolCall`.
 	 */
 	evaluate(call: ClassifierCall, posture?: string): SafetyDecision;
 
@@ -49,6 +51,9 @@ export interface SafetyContract {
 	/** Immutable safety policy metadata for receipts, audit, and replay. */
 	readonly policy?: { metadata(posture?: string): SafetyPolicyMetadata };
 
-	/** Exposed only so diag scripts can read the last N records. Not for domain consumption. */
-	readonly audit: { recordCount(): number };
+	/**
+	 * Shared audit sink. `recordCount` is for diagnostics; `recordToolCall` is
+	 * the registry's hook for autonomy-level final dispositions.
+	 */
+	readonly audit: { recordCount(): number; recordToolCall?(input: ToolCallAuditInput): void };
 }
