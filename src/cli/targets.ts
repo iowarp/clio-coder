@@ -566,6 +566,8 @@ interface SerializedStatus {
 	probeModelId?: EndpointStatus["probeModelId"];
 	probeNotes?: EndpointStatus["probeNotes"];
 	discoveredModels: EndpointStatus["discoveredModels"];
+	discoveredModelsSource?: EndpointStatus["discoveredModelsSource"];
+	discoveredModelStates?: EndpointStatus["discoveredModelStates"];
 	tier: ProviderOutputTier;
 	detectedReasoning: boolean | null;
 	reasoningCandidateModelId: string | null;
@@ -590,6 +592,12 @@ function serializeStatus(
 		detectedReasoning: extras.detectedReasoning,
 		reasoningCandidateModelId: extras.candidateModelId,
 	};
+	if (status.discoveredModelsSource !== undefined) {
+		out.discoveredModelsSource = status.discoveredModelsSource;
+	}
+	if (status.discoveredModelStates !== undefined) {
+		out.discoveredModelStates = status.discoveredModelStates;
+	}
 	if (status.probeCapabilities !== undefined) {
 		out.probeCapabilities = status.probeCapabilities;
 	}

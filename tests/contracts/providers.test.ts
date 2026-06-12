@@ -9,6 +9,7 @@ import {
 } from "../../src/domains/providers/auth/index.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
+import { modelCandidatesForStatus, resolveModelReference } from "../../src/domains/providers/index.js";
 import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
@@ -219,6 +220,41 @@ describe("contracts/providers", () => {
 		strictEqual(model.cost.input, 0.15);
 		strictEqual(model.cost.output, 0.6);
 		ok(model.compat);
+	});
+
+	it("treats a live model catalog as authoritative over stale configured names", () => {
+		const runtime = fakeDescriptor("llamacpp");
+		const endpoint: EndpointDescriptor = {
+			id: "mini",
+			runtime: runtime.id,
+			defaultModel: "old-default",
+			wireModels: ["old-curated"],
+		};
+		const status: EndpointStatus = {
+			endpoint,
+			runtime,
+			available: true,
+			reason: "ready",
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			discoveredModels: ["new-live-model"],
+			discoveredModelsSource: "probe",
+			discoveredModelStates: { "new-live-model": { state: "loaded" } },
+		};
+		const providers: ProvidersContract = {
+			list: () => [status],
+			getEndpoint: (id: string) => (id === endpoint.id ? endpoint : null),
+			getRuntime: (id: string) => (id === runtime.id ? runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		deepStrictEqual(modelCandidatesForStatus(status), [{ id: "new-live-model", source: "live", loadState: "loaded" }]);
+		strictEqual(resolveModelReference("old-default", providers).ref, null);
+		deepStrictEqual(resolveModelReference("new-live", providers).ref, {
+			endpoint: "mini",
+			model: "new-live-model",
+		});
 	});
 });
 

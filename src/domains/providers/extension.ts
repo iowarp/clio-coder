@@ -92,6 +92,18 @@ function uniqueModels(ids: ReadonlyArray<string>): string[] {
 	return out;
 }
 
+function discoveredModelsSource(
+	probe: ProbeResult | null,
+	preservePreviousProbe: boolean,
+	previous: EndpointStatus | undefined,
+	desc: RuntimeDescriptor,
+): "probe" | "cache" | "runtime" | "none" {
+	if (probe?.models !== undefined) return "probe";
+	if (preservePreviousProbe && previous?.discoveredModels && previous.discoveredModels.length > 0) return "cache";
+	if (desc.knownModels && desc.knownModels.length > 0) return "runtime";
+	return "none";
+}
+
 function sameProbeIdentity(previous: EndpointDescriptor, next: EndpointDescriptor): boolean {
 	return (
 		previous.id === next.id &&
@@ -166,6 +178,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				probeModelCapabilities: previous?.probeModelCapabilities ?? null,
 				probeModelId: previous?.probeModelId ?? null,
 				discoveredModels: previous?.discoveredModels ?? [],
+				discoveredModelsSource: previous?.discoveredModelsSource ?? "none",
+				discoveredModelStates: previous?.discoveredModelStates ?? null,
 			};
 			if (previous?.probeNotes && previous.probeNotes.length > 0) out.probeNotes = previous.probeNotes;
 			return out;
@@ -187,6 +201,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const discoveredModels = uniqueModels(
 			probe?.models ?? (preservePreviousProbe ? previous.discoveredModels : undefined) ?? desc.knownModels ?? [],
 		);
+		const modelStates = probe?.modelStates ?? (preservePreviousProbe ? previous.discoveredModelStates : null) ?? null;
+		const modelSource = discoveredModelsSource(probe, preservePreviousProbe, previous, desc);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: EndpointHealth =
 			probe === null
@@ -210,6 +226,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			probeModelCapabilities,
 			probeModelId,
 			discoveredModels,
+			discoveredModelsSource: modelSource,
+			discoveredModelStates: modelStates,
 		};
 		if (probeNotes && probeNotes.length > 0) out.probeNotes = probeNotes;
 		return out;

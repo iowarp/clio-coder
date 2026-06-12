@@ -17,6 +17,7 @@ function row(overrides: Partial<ModelRow>): ModelRow {
 		contextWindow: 131_072,
 		maxTokens: 8192,
 		reasoning: true,
+		state: "-",
 		...overrides,
 	};
 }
@@ -80,5 +81,12 @@ describe("contracts/models-output", () => {
 		]);
 		const offsets = [lines[1], lines[2]].map((line) => (line ?? "").search(/\sC[TR-]/));
 		strictEqual(offsets[0], offsets[1]);
+	});
+
+	it("adds a state column only when live load-state metadata is present", () => {
+		const lines = modelTableLines([row({ modelId: "router-model", state: "loaded" })]);
+		strictEqual(lines[0]?.split(/\s{2,}/).length, 7);
+		ok(lines[0]?.includes("state"));
+		ok(lines[1]?.includes("loaded"));
 	});
 });

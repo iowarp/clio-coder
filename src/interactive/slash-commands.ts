@@ -729,15 +729,25 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "model-set") return;
-			const result = resolveModelReference(command.pattern, ctx.providers);
-			if (!result.ref) {
-				ctx.notice("error", result.error ?? `no match for "${command.pattern}"`);
-				return;
-			}
-			if (result.warning) ctx.notice("warn", result.warning);
-			ctx.applyModelRef(result.ref);
-			const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
-			ctx.notice("success", `active: ${result.ref.endpoint}/${result.ref.model}${suffix}`);
+			void (async () => {
+				try {
+					await ctx.providers.probeAllLive();
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					ctx.notice("warn", `model refresh failed; resolving cached catalog: ${msg}`);
+				}
+				const result = resolveModelReference(command.pattern, ctx.providers);
+				if (!result.ref) {
+					ctx.notice("error", result.error ?? `no match for "${command.pattern}"`);
+					ctx.render();
+					return;
+				}
+				if (result.warning) ctx.notice("warn", result.warning);
+				ctx.applyModelRef(result.ref);
+				const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
+				ctx.notice("success", `active: ${result.ref.endpoint}/${result.ref.model}${suffix}`);
+				ctx.render();
+			})();
 		},
 	},
 	{

@@ -60,6 +60,7 @@ const llamacppRuntime: RuntimeDescriptor = {
 		const result: ProbeResult = { ok: true };
 		if (catalog.models.length > 0) result.models = catalog.models;
 		if (Object.keys(catalog.modelCapabilities).length > 0) result.modelCapabilities = catalog.modelCapabilities;
+		if (Object.keys(catalog.modelStates).length > 0) result.modelStates = catalog.modelStates;
 		if (typeof health.latencyMs === "number") result.latencyMs = health.latencyMs;
 		const discoveredCapabilities = {
 			...(props.discoveredCapabilities ?? {}),

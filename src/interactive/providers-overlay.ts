@@ -8,6 +8,7 @@ import type {
 	ProvidersContract,
 	RuntimeResolutionDiagnostic,
 } from "../domains/providers/index.js";
+import { modelLoadStateLabel } from "../domains/providers/index.js";
 import {
 	type Component,
 	Loader,
@@ -136,7 +137,13 @@ function formatReasonRow(status: EndpointStatus): string {
 function formatDiscoveredRow(status: EndpointStatus): string {
 	const ids = status.discoveredModels;
 	if (ids.length === 0) return "    models: (no probe yet)";
-	const preview = ids.slice(0, PROVIDERS_OVERLAY_DISCOVERED_PREVIEW).join(", ");
+	const preview = ids
+		.slice(0, PROVIDERS_OVERLAY_DISCOVERED_PREVIEW)
+		.map((id) => {
+			const state = modelLoadStateLabel(status, id);
+			return state === "-" ? id : `${id}:${state}`;
+		})
+		.join(", ");
 	const suffix =
 		ids.length > PROVIDERS_OVERLAY_DISCOVERED_PREVIEW ? ` (+${ids.length - PROVIDERS_OVERLAY_DISCOVERED_PREVIEW})` : "";
 	return `    models: ${preview}${suffix}`;

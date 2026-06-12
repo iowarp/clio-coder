@@ -1,7 +1,7 @@
 import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
-import type { ProbeContext, ProbeResult } from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeModelStatus, ProbeResult } from "../../types/runtime-descriptor.js";
 
 export interface OpenAIModelsResponse {
 	data?: Array<Record<string, unknown> & { id?: unknown; status?: unknown }>;
@@ -19,6 +19,7 @@ export async function probeOpenAIModels(base: string, ctx: ProbeContext, modelsP
 export interface OpenAIModelCatalogProbe {
 	models: string[];
 	modelCapabilities: Record<string, Partial<CapabilityFlags>>;
+	modelStates: Record<string, ProbeModelStatus>;
 }
 
 export async function probeOpenAIModelCatalog(
@@ -30,16 +31,19 @@ export async function probeOpenAIModelCatalog(
 	const result = await (ctx.signal
 		? probeJson<OpenAIModelsResponse>({ ...opts, signal: ctx.signal })
 		: probeJson<OpenAIModelsResponse>(opts));
-	if (!result.ok || !result.data?.data) return { models: [], modelCapabilities: {} };
+	if (!result.ok || !result.data?.data) return { models: [], modelCapabilities: {}, modelStates: {} };
 	const models: string[] = [];
 	const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
+	const modelStates: Record<string, ProbeModelStatus> = {};
 	for (const row of result.data.data) {
 		if (typeof row?.id !== "string" || row.id.length === 0) continue;
 		models.push(row.id);
 		const caps = capabilitiesFromOpenAIModelEntry(row);
 		if (Object.keys(caps).length > 0) modelCapabilities[row.id] = caps;
+		const state = modelStateFromOpenAIModelEntry(row);
+		if (state) modelStates[row.id] = state;
 	}
-	return { models, modelCapabilities };
+	return { models, modelCapabilities, modelStates };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,6 +73,61 @@ function booleanFromAny(record: Record<string, unknown>, keys: ReadonlyArray<str
 function nestedRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
 	const value = record[key];
 	return isRecord(value) ? value : null;
+}
+
+function firstString(record: Record<string, unknown> | null, keys: ReadonlyArray<string>): string | undefined {
+	if (!record) return undefined;
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string" && value.trim().length > 0) return value.trim();
+	}
+	return undefined;
+}
+
+function firstBoolean(record: Record<string, unknown> | null, keys: ReadonlyArray<string>): boolean | undefined {
+	if (!record) return undefined;
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "boolean") return value;
+	}
+	return undefined;
+}
+
+function normalizeModelState(raw: string | undefined): ProbeModelStatus["state"] | undefined {
+	const value = raw
+		?.trim()
+		.toLowerCase()
+		.replace(/[\s_]+/g, "-");
+	if (!value) return undefined;
+	if (value === "loaded" || value === "ready" || value === "running" || value === "active") return "loaded";
+	if (value === "loading" || value === "pending" || value === "queued" || value === "starting") return "loading";
+	if (value === "unloaded" || value === "not-loaded" || value === "idle" || value === "stopped") return "unloaded";
+	if (value === "failed" || value === "error" || value === "errored") return "failed";
+	if (value === "unknown") return "unknown";
+	return undefined;
+}
+
+function modelStateFromOpenAIModelEntry(row: Record<string, unknown>): ProbeModelStatus | undefined {
+	const status = nestedRecord(row, "status");
+	const failed = firstBoolean(status, ["failed"]) ?? firstBoolean(row, ["failed"]);
+	if (failed === true) {
+		const detail =
+			firstString(status, ["error", "reason", "message"]) ?? firstString(row, ["error", "reason", "message"]);
+		return detail ? { state: "failed", detail } : { state: "failed" };
+	}
+	const raw =
+		typeof row.status === "string"
+			? row.status
+			: (firstString(status, ["value", "state", "status"]) ?? firstString(row, ["state"]));
+	const normalized = normalizeModelState(raw);
+	if (normalized) {
+		const detail = firstString(status, ["detail", "message", "reason"]);
+		return detail ? { state: normalized, detail } : { state: normalized };
+	}
+	const loaded = firstBoolean(status, ["loaded"]) ?? firstBoolean(row, ["loaded"]);
+	if (loaded === true) return { state: "loaded" };
+	if (loaded === false) return { state: "unloaded" };
+	return undefined;
 }
 
 function statusArgsFromEntry(row: Record<string, unknown>): string[] {

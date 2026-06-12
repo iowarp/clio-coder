@@ -3,7 +3,7 @@ import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
-import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { ProbeModelStatus, RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
 /**
  * Query-only surface exposed to other domains. Dispatch, chat-loop, TUI
@@ -41,6 +41,14 @@ export interface EndpointStatus {
 	probeNotes?: ReadonlyArray<string>;
 	/** Ids returned by the last successful probeModels() call. */
 	discoveredModels: ReadonlyArray<string>;
+	/**
+	 * Source for `discoveredModels`. `probe` means the target just returned a
+	 * live catalog, `cache` is a previously probed catalog preserved across a
+	 * config-only refresh, and `runtime` is static descriptor knowledge.
+	 */
+	discoveredModelsSource?: "probe" | "cache" | "runtime" | "none";
+	/** Probe-only per-model load state keyed by wire model id. */
+	discoveredModelStates?: Readonly<Record<string, ProbeModelStatus>> | null;
 }
 
 export interface ProvidersContract {

@@ -1,5 +1,5 @@
-import type { EndpointStatus, ProvidersContract } from "./contract.js";
-import { listKnownModelsForRuntime } from "./support.js";
+import type { ProvidersContract } from "./contract.js";
+import { modelIdsForStatus } from "./model-discovery.js";
 import { type ThinkingLevel, VALID_THINKING_LEVELS } from "./types/capability-flags.js";
 
 export interface ResolvedModelRef {
@@ -73,39 +73,13 @@ function collectCandidates(providers: ProvidersContract): CandidateRef[] {
 	const out: CandidateRef[] = [];
 	const seen = new Set<string>();
 	for (const status of providers.list()) {
-		for (const model of modelsForStatus(status)) {
+		for (const model of modelIdsForStatus(status)) {
 			const key = `${status.endpoint.id}/${model}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
 			out.push({ endpoint: status.endpoint.id, model, full: key });
 		}
 	}
-	return out;
-}
-
-function modelsForStatus(status: EndpointStatus): string[] {
-	const out: string[] = [];
-	const seen = new Set<string>();
-	const add = (id: string | undefined): void => {
-		const trimmed = id?.trim() ?? "";
-		if (trimmed.length === 0 || seen.has(trimmed)) return;
-		seen.add(trimmed);
-		out.push(trimmed);
-	};
-	const wireModels = status.endpoint.wireModels ?? [];
-	if (wireModels.length > 0 || status.discoveredModels.length > 0) {
-		for (const model of wireModels) add(model);
-		add(status.endpoint.defaultModel);
-		for (const model of status.discoveredModels) add(model);
-		return out;
-	}
-	const known = listKnownModelsForRuntime(status.runtime?.id ?? status.endpoint.runtime);
-	if (known.length > 0) {
-		add(status.endpoint.defaultModel);
-		for (const model of known) add(model);
-		return out;
-	}
-	add(status.endpoint.defaultModel);
 	return out;
 }
 
