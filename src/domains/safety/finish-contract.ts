@@ -1,3 +1,4 @@
+import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import { detectValidationCommand } from "./protected-artifacts.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
@@ -44,7 +45,6 @@ interface ToolCallEvidenceCandidate {
 	command: string;
 }
 
-const PACKAGE_VALIDATION_SCRIPTS = new Set(["test", "test:e2e", "lint", "build", "typecheck", "ci"]);
 const GIT_INSPECTION_OPS = new Set(["status", "diff", "log"]);
 
 const COMPLETION_PATTERNS: ReadonlyArray<RegExp> = [
@@ -334,7 +334,7 @@ function typedValidationSummary(toolName: string, payload: Record<string, unknow
 	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
 	if (toolName === "run_task") {
 		const task = typeof args?.task === "string" ? args.task.trim() : "";
-		if (!PACKAGE_VALIDATION_SCRIPTS.has(task)) return null;
+		if (!isVerificationScriptName(task)) return null;
 		return `npm run ${task}`;
 	}
 	if (toolName === "validate_frontend") {

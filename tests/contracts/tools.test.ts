@@ -20,6 +20,7 @@ import { applyToolProfile } from "../../src/tools/profiles.js";
 import { READ_TURN_OBSERVATION_BUDGET_ENV, readTool } from "../../src/tools/read.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
+import { runTaskTool } from "../../src/tools/safe-exec.js";
 import { writeTool } from "../../src/tools/write.js";
 
 const scratchRoots: string[] = [];
@@ -28,6 +29,18 @@ function scratchDir(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-tools-basic-"));
 	scratchRoots.push(root);
 	return root;
+}
+
+function workspaceScratchDir(): string {
+	const parent = join(process.cwd(), ".clio", "test-scratch");
+	mkdirSync(parent, { recursive: true });
+	const root = mkdtempSync(join(parent, "clio-tools-basic-"));
+	scratchRoots.push(root);
+	return root;
+}
+
+function writePackageJson(root: string, scripts: Record<string, string>): void {
+	writeFileSync(join(root, "package.json"), `${JSON.stringify({ scripts }, null, "\t")}\n`, "utf8");
 }
 
 afterEach(() => {
@@ -219,6 +232,99 @@ describe("contracts/tools basic happy paths", () => {
 		strictEqual(result.kind, "error");
 		ok(result.message.includes("err"));
 		ok(result.message.includes("exit 7"));
+	});
+
+	it("runTaskTool runs declared verification-family scripts", async () => {
+		const root = workspaceScratchDir();
+		writePackageJson(root, {
+			"check:boundaries": "node -e \"process.stdout.write('boundaries lane\\n')\"",
+			"test:contracts": "node -e \"process.stdout.write('contracts lane\\n')\"",
+		});
+
+		const contracts = await runTaskTool.run({ task: "test:contracts", cwd: root, timeout_ms: 10_000 });
+		strictEqual(contracts.kind, "ok");
+		ok(contracts.kind === "ok" && contracts.output.includes("contracts lane"));
+
+		const boundaries = await runTaskTool.run({ task: "check:boundaries", cwd: root, timeout_ms: 10_000 });
+		strictEqual(boundaries.kind, "ok");
+		ok(boundaries.kind === "ok" && boundaries.output.includes("boundaries lane"));
+	});
+
+	it("runTaskTool rejects non-verification families with a bash redirect", async () => {
+		const result = await runTaskTool.run({ task: "dev" });
+
+		strictEqual(result.kind, "error");
+		strictEqual(
+			result.kind === "error" ? result.message : "",
+			"run_task: task 'dev' is not a verification script (test*/lint*/build*/typecheck*/check*/format*/ci*); run it through bash.",
+		);
+	});
+
+	it("runTaskTool lists sorted declared verification scripts for undeclared family names", async () => {
+		const root = workspaceScratchDir();
+		writePackageJson(root, {
+			dev: "node server.js",
+			format: "biome format --write .",
+			"test:smoke": "node --test tests/smoke.test.mjs",
+			lint: "biome check .",
+			"check:boundaries": "node --test tests/boundaries.test.mjs",
+			ci: "npm run test",
+			clean: "rm -rf dist",
+			build: "tsup",
+			typecheck: "tsc --noEmit",
+			test: "node --test",
+			"ci:release": "npm run ci",
+			"test:contracts": "node --test tests/contracts.test.mjs",
+			"test:file": "node --test",
+		});
+
+		const result = await runTaskTool.run({ task: "test:unit", cwd: root });
+
+		strictEqual(result.kind, "error");
+		strictEqual(
+			result.kind === "error" ? result.message : "",
+			"run_task: package.json has no 'test:unit' script. Declared verification scripts: build, check:boundaries, ci, ci:release, format, lint, test, test:contracts, test:file, test:smoke, typecheck.",
+		);
+	});
+
+	it("runTaskTool forwards args to a declared test:file lane for one named test file", async () => {
+		const root = workspaceScratchDir();
+		writePackageJson(root, { "test:file": "node --test" });
+		writeFileSync(
+			join(root, "selected.test.mjs"),
+			[
+				"import { strictEqual } from 'node:assert/strict';",
+				"import test from 'node:test';",
+				"",
+				"test('selected file lane sentinel', () => {",
+				"\tstrictEqual(1 + 1, 2);",
+				"});",
+			].join("\n"),
+			"utf8",
+		);
+		writeFileSync(
+			join(root, "unselected.test.mjs"),
+			[
+				"import { strictEqual } from 'node:assert/strict';",
+				"import test from 'node:test';",
+				"",
+				"test('unselected file must not run', () => {",
+				"\tstrictEqual(1, 2);",
+				"});",
+			].join("\n"),
+			"utf8",
+		);
+
+		const result = await runTaskTool.run({
+			task: "test:file",
+			args: ["selected.test.mjs"],
+			cwd: root,
+			timeout_ms: 10_000,
+		});
+
+		strictEqual(result.kind, "ok");
+		ok(result.kind === "ok" && result.output.includes("selected file lane sentinel"));
+		ok(result.kind === "ok" && !result.output.includes("unselected file must not run"));
 	});
 
 	it("grepTool skips ignored caches and binaries", async () => {

@@ -75,6 +75,7 @@
 		"format": "biome format --write .",
 		"lint": "biome check .",
 		"check:boundaries": "node --import tsx --test 'tests/boundaries/**/*.test.ts'",
+		"test:file": "node --import tsx --test",
 		"test:smoke": "node --import tsx --test 'tests/smoke/**/*.test.ts'",
 		"test:contracts": "node --import tsx --test 'tests/contracts/**/*.test.ts'",
 		"test": "node --import tsx --test 'tests/contracts/**/*.test.ts' 'tests/smoke/**/*.test.ts' 'tests/boundaries/**/*.test.ts'",

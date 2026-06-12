@@ -1,5 +1,6 @@
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { isVerificationScriptName } from "../../core/verification-scripts.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
 
@@ -413,11 +414,8 @@ function pathMatchesArtifact(commandPath: string, artifactKey: string, mode: "ta
 function validationMatch(executable: string, args: ReadonlyArray<string>): string | null {
 	if (executable === "npm") {
 		if (args[0] === "test") return "npm test";
-		if (args[0] === "run" && args[1] === "test") return "npm run test";
-		if (args[0] === "run" && args[1] === "test:e2e") return "npm run test:e2e";
-		if (args[0] === "run" && args[1] === "lint") return "npm run lint";
-		if (args[0] === "run" && args[1] === "build") return "npm run build";
-		if (args[0] === "run" && args[1] === "typecheck") return "npm run typecheck";
+		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
+		if (script !== null && isVerificationScriptName(script)) return `npm run ${script}`;
 	}
 	if (executable === "pytest") return "pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return "python -m pytest";
