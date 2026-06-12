@@ -90,3 +90,19 @@ export function modelCandidatesForStatus(status: EndpointStatus): ProviderModelC
 export function modelIdsForStatus(status: EndpointStatus): string[] {
 	return modelCandidatesForStatus(status).map((candidate) => candidate.id);
 }
+
+export function canonicalizeWireModelId(status: EndpointStatus, requested: string): string {
+	const trimmedRequested = requested.trim();
+	if (trimmedRequested.length === 0) return requested;
+	const candidates = uniqueModels(
+		hasLiveModelCatalog(status) ? modelIdsForStatus(status) : (status.endpoint.wireModels ?? []),
+	);
+	if (candidates.includes(trimmedRequested)) return trimmedRequested;
+
+	const separators = ["-", ":", ".", "/"];
+	const matches = candidates.filter((candidate) => {
+		if (candidate.toLowerCase() === trimmedRequested.toLowerCase()) return true;
+		return separators.some((separator) => candidate.startsWith(`${trimmedRequested}${separator}`));
+	});
+	return matches.length === 1 ? (matches[0] ?? requested) : requested;
+}
