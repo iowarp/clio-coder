@@ -2,7 +2,6 @@ import {
 	type Component,
 	fuzzyFilter,
 	Input,
-	type KeyId,
 	Markdown,
 	matchesKey,
 	type OverlayHandle,
@@ -228,7 +227,7 @@ export class ListOverlayView implements Component {
 	}
 
 	private renderDetail(width: number, height: number, selectedItem: ListOverlayItem | undefined): string[] {
-		if (!selectedItem || !selectedItem.detail) {
+		if (!selectedItem?.detail) {
 			return Array.from({ length: height }, () => " ".repeat(width));
 		}
 		const detailLines = selectedItem.detail();

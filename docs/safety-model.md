@@ -171,7 +171,7 @@ When executing tasks in headless mode through `clio run`, there is no terminal o
 
 ## Receipts and evidence
 
-Safety decisions feed receipts, audit rows, and evidence artifacts. When reporting a problem, include redacted receipts or evidence IDs when possible so maintainers can see:
+Safety decisions feed receipts, audit rows, and evidence artifacts. The interactive [`/view`](observability.md) surface can inspect and verify receipt artifacts without mutating them. When reporting a problem, include redacted receipts or evidence IDs when possible so maintainers can see:
 
 - mode and requested action class;
 - policy source and rule IDs;

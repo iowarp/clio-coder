@@ -101,7 +101,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/cost` | - | `/cost` | Show session token and cost totals |
 | `/context-view` | `/context`, `/ctx` | `/context-view` | Visualize the active context window and its breakdown |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
-| `/receipts` | - | `/receipts verify <runId>` | Browse or verify run receipts |
+| `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | - | `/thinking` | Open thinking-level selector |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
 | `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |

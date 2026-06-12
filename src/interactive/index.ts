@@ -97,7 +97,6 @@ import {
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
 import { openProvidersOverlay, type TargetsHubNoticeLevel } from "./providers-overlay.js";
-import { openReceiptsOverlay, verifyReceiptFile } from "./receipts-overlay.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import {
 	type ContextClearCommandOptions,
@@ -109,6 +108,8 @@ import {
 } from "./slash-commands.js";
 import { createStatusController, resolveInlineVerb, spinnerFrame, type TurnSummary } from "./status/index.js";
 import { abbreviateModelId } from "./theme/index.js";
+import { createDefaultArtifactProviders, verifyReceiptFile } from "./view/artifacts.js";
+import { openViewOverlay } from "./view/view-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
@@ -152,7 +153,7 @@ export interface InteractiveDeps {
 	session?: SessionContract;
 	/** Read current session entries for replay/context rebuilds after local non-chat entries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
-	/** XDG data dir (clioDataDir()). `/receipts verify` reads from <dataDir>/receipts/<id>.json. */
+	/** XDG data dir (clioDataDir()). `/view verify` reads from <dataDir>/receipts/<id>.json. */
 	dataDir: string;
 	/**
 	 * Resolver for the current `workers.default` block. `/run` uses this to
@@ -265,7 +266,7 @@ export type OverlayState =
 	| "cost"
 	| "context-view"
 	| "fleet"
-	| "receipts"
+	| "view"
 	| "thinking"
 	| "model"
 	| "scoped-models"
@@ -354,10 +355,6 @@ export interface CostOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
-export interface ReceiptsOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
 export interface FleetOverlayKeyDeps {
 	closeOverlay: () => void;
 }
@@ -404,7 +401,6 @@ export interface OverlayKeyDeps
 		ProvidersOverlayKeyDeps,
 		AuthOverlayKeyDeps,
 		CostOverlayKeyDeps,
-		ReceiptsOverlayKeyDeps,
 		FleetOverlayKeyDeps,
 		ThinkingOverlayKeyDeps,
 		ModelOverlayKeyDeps,
@@ -603,21 +599,8 @@ export function routeCostOverlayKey(data: string, deps: CostOverlayKeyDeps): boo
 }
 
 /**
- * Pure overlay key router for the /receipts overlay. Esc closes. Every other
- * key is left untouched so the Box-wrapped SelectList can handle Up/Down/Enter
- * through the TUI's focused-component pipeline.
- */
-export function routeReceiptsOverlayKey(data: string, deps: ReceiptsOverlayKeyDeps): boolean {
-	if (data === ESC) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
-/**
- * Pure overlay key router for the /thinking overlay. Same policy as receipts:
- * Esc closes; arrows and Enter fall through to the focused SelectList.
+ * Pure overlay key router for the /thinking overlay. Esc closes; arrows and
+ * Enter fall through to the focused SelectList.
  */
 export function routeThinkingOverlayKey(data: string, deps: ThinkingOverlayKeyDeps): boolean {
 	if (data === ESC) {
@@ -809,9 +792,9 @@ export function routeOverlayKey(
 		routeCostOverlayKey(data, deps);
 		return true;
 	}
-	if (overlayState === "receipts") {
-		// Do not swallow arrow keys or Enter; the focused SelectList needs them.
-		return routeReceiptsOverlayKey(data, deps);
+	if (overlayState === "view") {
+		// The viewer owns Esc, filter editing, pane focus, verification, and pager keys.
+		return false;
 	}
 	if (overlayState === "thinking") {
 		// Same policy as receipts: the Box forwards unconsumed input to the SelectList.
@@ -1388,7 +1371,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
 		openFleet: () => openFleetOverlayState(),
-		openReceipts: () => openReceiptsOverlayState(),
+		openView: (filter) => openViewOverlayState(filter),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
 		providers: deps.providers,
@@ -2169,10 +2152,21 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	};
 
-	const openReceiptsOverlayState = (): void => {
+	const openViewOverlayState = (initialFilter?: string): void => {
 		if (overlayState !== "closed") return;
-		overlayState = "receipts";
-		overlayHandle = openReceiptsOverlay(tui, deps.dispatch);
+		overlayState = "view";
+		const sessionMeta = deps.session?.current() ?? null;
+		overlayHandle = openViewOverlay(tui, {
+			providers: createDefaultArtifactProviders({
+				dataDir: deps.dataDir,
+				dispatch: deps.dispatch,
+				sessionMeta,
+				readSessionEntries: deps.readSessionEntries,
+			}),
+			...(initialFilter ? { initialFilter } : {}),
+			notice: (level, text, key) => notify(level, text, key),
+			onClose: () => closeOverlay(),
+		});
 		tui.requestRender();
 	};
 
