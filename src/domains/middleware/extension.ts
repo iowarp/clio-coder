@@ -1,7 +1,13 @@
 import type { DomainBundle } from "../../core/domain-loader.js";
 import type { MiddlewareContract } from "./contract.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions } from "./rules.js";
-import { type MiddlewareRuleDefinition, runMiddlewareHook } from "./runtime.js";
+import {
+	type MiddlewareDiagnosticSink,
+	type MiddlewareHookRegistration,
+	type MiddlewareRuleDefinition,
+	registrationFromRuleDefinition,
+	runMiddlewareRegistrations,
+} from "./runtime.js";
 import { createMiddlewareSnapshot } from "./snapshot.js";
 
 export interface MiddlewareBundleOptions {
@@ -11,19 +17,32 @@ export interface MiddlewareBundleOptions {
 	 * an earlier one is dropped so `ruleIds` stays unambiguous.
 	 */
 	ruleDefinitions?: ReadonlyArray<MiddlewareRuleDefinition>;
+	/**
+	 * Coded hook registrations, evaluated after every declarative rule, in
+	 * array order. Ids share one namespace with rule ids; a registration whose
+	 * id collides with an earlier rule or registration is dropped.
+	 */
+	registrations?: ReadonlyArray<MiddlewareHookRegistration>;
+	/**
+	 * Receives isolation and budget diagnostics from hook evaluation. Defaults
+	 * to the stderr writer in runtime.ts.
+	 */
+	onDiagnostic?: MiddlewareDiagnosticSink;
 }
 
 export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): DomainBundle<MiddlewareContract> {
-	const definitions = combineRuleDefinitions(listMiddlewareRuleDefinitions(), options.ruleDefinitions ?? []);
+	const ruleDefinitions = combineRuleDefinitions(listMiddlewareRuleDefinitions(), options.ruleDefinitions ?? []);
+	const registrations = combineRegistrations(ruleDefinitions, options.registrations ?? []);
+	const runOptions = options.onDiagnostic !== undefined ? { onDiagnostic: options.onDiagnostic } : {};
 	const contract: MiddlewareContract = {
 		runHook(input) {
-			return runMiddlewareHook(input, definitions);
+			return runMiddlewareRegistrations(input, registrations, runOptions);
 		},
 		listRules() {
-			return definitions.map((definition) => cloneMiddlewareRule(definition.rule));
+			return ruleDefinitions.map((definition) => cloneMiddlewareRule(definition.rule));
 		},
 		snapshot() {
-			return createMiddlewareSnapshot(definitions.map((definition) => definition.rule));
+			return createMiddlewareSnapshot(ruleDefinitions.map((definition) => definition.rule));
 		},
 	};
 	return {
@@ -46,6 +65,25 @@ function combineRuleDefinitions(
 		if (seen.has(definition.rule.id)) continue;
 		seen.add(definition.rule.id);
 		combined.push(definition);
+	}
+	return combined;
+}
+
+/**
+ * One ordered evaluation list: declarative rules first (builtin, then
+ * composition-root), then coded registrations, deduplicated across the shared
+ * id namespace with the earlier entry winning.
+ */
+function combineRegistrations(
+	ruleDefinitions: ReadonlyArray<MiddlewareRuleDefinition>,
+	coded: ReadonlyArray<MiddlewareHookRegistration>,
+): MiddlewareHookRegistration[] {
+	const seen = new Set<string>(ruleDefinitions.map((definition) => definition.rule.id));
+	const combined: MiddlewareHookRegistration[] = ruleDefinitions.map(registrationFromRuleDefinition);
+	for (const registration of coded) {
+		if (seen.has(registration.id)) continue;
+		seen.add(registration.id);
+		combined.push(registration);
 	}
 	return combined;
 }
