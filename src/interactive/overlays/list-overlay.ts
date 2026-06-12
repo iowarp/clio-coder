@@ -2,6 +2,7 @@ import {
 	type Component,
 	fuzzyFilter,
 	Input,
+	type KeyId,
 	Markdown,
 	matchesKey,
 	type OverlayHandle,
@@ -36,6 +37,8 @@ export interface ListOverlayOptions {
 	hints?: ReadonlyArray<{ key: string; verb: string }>;
 	/** Custom message when list is empty. */
 	emptyMessage?: string;
+	/** Layout mode: stack (detail below list) or split (detail to the right). */
+	layout?: "stack" | "split";
 	/** Primary action; omitted means Enter toggles the detail pane. */
 	onSelect?: (item: ListOverlayItem) => void;
 	/** Secondary keyed actions, e.g. { i: install }. */
@@ -49,6 +52,7 @@ export class ListOverlayView implements Component {
 	private isFilterFocused = false;
 	private showDetail = false;
 	private listScrollOffset = 0;
+	private detailScrollOffset = 0;
 	private readonly input: Input;
 
 	constructor(
@@ -61,6 +65,11 @@ export class ListOverlayView implements Component {
 		if (options.initialFilter) {
 			this.input.setValue(options.initialFilter);
 		}
+	}
+
+	private selectIndex(index: number): void {
+		this.selectedIndex = index;
+		this.detailScrollOffset = 0;
 	}
 
 	getHint(): string {
@@ -77,6 +86,7 @@ export class ListOverlayView implements Component {
 			} else {
 				hintEntries.push({ key: "Tab", verb: "detail" });
 			}
+			hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
 		}
 
 		if (this.options.hints) {
@@ -86,28 +96,20 @@ export class ListOverlayView implements Component {
 		return buildHint(this.options.mode, hintEntries);
 	}
 
-	render(width: number): string[] {
-		const allItems = this.options.items;
-		const query = this.filterText.trim();
-		const filteredItems = query
-			? fuzzyFilter([...allItems], query, (item) => `${item.label} ${item.group ?? ""}`)
-			: allItems;
+	private padLine(line: string, targetWidth: number): string {
+		const w = visibleWidth(line);
+		if (w >= targetWidth) return truncateToWidth(line, targetWidth, "...", true);
+		return line + " ".repeat(targetWidth - w);
+	}
 
-		if (this.selectedIndex >= filteredItems.length) {
-			this.selectedIndex = Math.max(0, filteredItems.length - 1);
-		}
-
+	private renderList(
+		width: number,
+		listMaxLines: number,
+		filteredItems: ReadonlyArray<ListOverlayItem>,
+		pad: boolean,
+	): string[] {
 		const lines: string[] = [];
-
-		if (this.options.filterable) {
-			this.input.focused = this.isFilterFocused;
-			const inputLines = this.input.render(width);
-			lines.push(...inputLines);
-		}
-
-		const selectedItem = filteredItems[this.selectedIndex];
-		const hasDetail = selectedItem && !!selectedItem.detail;
-		const listMaxLines = this.showDetail && hasDetail ? 6 : 12;
+		const allItems = this.options.items;
 
 		const uniqueGroups: string[] = [];
 		const seenGroups = new Set<string>();
@@ -151,7 +153,8 @@ export class ListOverlayView implements Component {
 
 		if (filteredItems.length === 0) {
 			const theme = selectListTheme(clioTheme());
-			lines.push(theme.noMatch(`  ${this.options.emptyMessage ?? "No matches found"}`));
+			const noMatchText = theme.noMatch(`  ${this.options.emptyMessage ?? "No matches found"}`);
+			lines.push(this.padLine(noMatchText, width));
 		} else {
 			const selectedRowIndex = renderedRows.findIndex(
 				(row) => row.type === "item" && row.itemIndex === this.selectedIndex,
@@ -172,7 +175,7 @@ export class ListOverlayView implements Component {
 
 			for (const row of visibleRows) {
 				if (row.type === "group") {
-					lines.push(clioTheme().fg("dim", `── ${row.groupName}`));
+					lines.push(this.padLine(clioTheme().fg("dim", `── ${row.groupName}`), width));
 				} else {
 					const item = row.item;
 					if (!item) {
@@ -206,32 +209,122 @@ export class ListOverlayView implements Component {
 						}
 					}
 
-					lines.push(`${prefix}${labelPart}${spacing}${metaPart}`);
+					lines.push(this.padLine(`${prefix}${labelPart}${spacing}${metaPart}`, width));
 				}
 			}
 
 			if (renderedRows.length > listMaxLines) {
 				const scrollText = `  (${this.selectedIndex + 1}/${filteredItems.length})`;
-				lines.push(theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")));
+				lines.push(this.padLine(theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")), width));
 			}
 		}
 
-		if (this.showDetail && hasDetail) {
-			lines.push(clioTheme().fg("frame", "─".repeat(width)));
+		if (pad) {
+			while (lines.length < listMaxLines) {
+				lines.push(" ".repeat(width));
+			}
+		}
+		return lines;
+	}
 
-			const detailLines = selectedItem.detail ? selectedItem.detail() : [];
-			const detailMarkdown = detailLines.join("\n");
-			const md = new Markdown(detailMarkdown, 0, 0, markdownTheme(clioTheme()));
-			const mdLines = md.render(width);
+	private renderDetail(width: number, height: number, selectedItem: ListOverlayItem | undefined): string[] {
+		if (!selectedItem || !selectedItem.detail) {
+			return Array.from({ length: height }, () => " ".repeat(width));
+		}
+		const detailLines = selectedItem.detail();
+		const detailMarkdown = detailLines.join("\n");
+		const md = new Markdown(detailMarkdown, 0, 0, markdownTheme(clioTheme()));
+		const mdLines = md.render(width);
 
-			const visibleDetailLines = mdLines.slice(0, 10);
-			lines.push(...visibleDetailLines);
+		const maxScrollOffset = Math.max(0, mdLines.length - height);
+		this.detailScrollOffset = Math.max(0, Math.min(this.detailScrollOffset, maxScrollOffset));
+
+		const sliced = mdLines.slice(this.detailScrollOffset, this.detailScrollOffset + height);
+		const padded = sliced.map((line) => {
+			const w = visibleWidth(line);
+			if (w >= width) return truncateToWidth(line, width, "...", true);
+			return line + " ".repeat(width - w);
+		});
+
+		while (padded.length < height) {
+			padded.push(" ".repeat(width));
+		}
+		return padded;
+	}
+
+	render(width: number): string[] {
+		const allItems = this.options.items;
+		const query = this.filterText.trim();
+		const filteredItems = query
+			? fuzzyFilter([...allItems], query, (item) => `${item.label} ${item.group ?? ""}`)
+			: allItems;
+
+		if (this.selectedIndex >= filteredItems.length) {
+			this.selectIndex(Math.max(0, filteredItems.length - 1));
+		}
+
+		const lines: string[] = [];
+
+		if (this.options.filterable) {
+			this.input.focused = this.isFilterFocused;
+			const inputLines = this.input.render(width);
+			lines.push(...inputLines);
+		}
+
+		const selectedItem = filteredItems[this.selectedIndex];
+		const hasDetail = selectedItem && !!selectedItem.detail;
+
+		const isSplit = this.options.layout === "split" && width >= 90;
+
+		if (isSplit) {
+			const listMaxLines = 14;
+			const detailWidth = Math.max(32, Math.floor(width * 0.45));
+			const listWidth = width - detailWidth - 1;
+
+			const listLines = this.renderList(listWidth, listMaxLines, filteredItems, true);
+			const detailLines = this.renderDetail(detailWidth, listMaxLines, selectedItem);
+
+			for (let i = 0; i < listMaxLines; i++) {
+				const left = listLines[i] ?? " ".repeat(listWidth);
+				const right = detailLines[i] ?? " ".repeat(detailWidth);
+				const separator = clioTheme().fg("frame", "│");
+				lines.push(`${left}${separator}${right}`);
+			}
+		} else {
+			const listMaxLines = this.showDetail && hasDetail ? 6 : 12;
+			const listLines = this.renderList(width, listMaxLines, filteredItems, false);
+			lines.push(...listLines);
+
+			if (this.showDetail && hasDetail) {
+				lines.push(clioTheme().fg("frame", "─".repeat(width)));
+				const detailLines = this.renderDetail(width, 10, selectedItem);
+				lines.push(...detailLines);
+			}
 		}
 
 		return lines;
 	}
 
+	private detailPaneVisible(): boolean {
+		return this.options.layout === "split" || this.showDetail;
+	}
+
 	handleInput(data: string): void {
+		// PgDn / Ctrl+D and PgUp / Ctrl+U scroll the detail pane, but only
+		// while one is visible; otherwise the keys fall through untouched.
+		if (this.detailPaneVisible()) {
+			if (data === "\x1b[6~" || data === "\x04") {
+				this.detailScrollOffset += 5;
+				this.onChange();
+				return;
+			}
+			if (data === "\x1b[5~" || data === "\x15") {
+				this.detailScrollOffset = Math.max(0, this.detailScrollOffset - 5);
+				this.onChange();
+				return;
+			}
+		}
+
 		const allItems = this.options.items;
 		const query = this.filterText.trim();
 		const filteredItems = query
@@ -241,7 +334,7 @@ export class ListOverlayView implements Component {
 		if (this.isFilterFocused) {
 			if (matchesKey(data, "up")) {
 				if (filteredItems.length > 0) {
-					this.selectedIndex = this.selectedIndex === 0 ? filteredItems.length - 1 : this.selectedIndex - 1;
+					this.selectIndex(this.selectedIndex === 0 ? filteredItems.length - 1 : this.selectedIndex - 1);
 				}
 				this.isFilterFocused = false;
 				this.onChange();
@@ -249,7 +342,7 @@ export class ListOverlayView implements Component {
 			}
 			if (matchesKey(data, "down")) {
 				if (filteredItems.length > 0) {
-					this.selectedIndex = this.selectedIndex === filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+					this.selectIndex(this.selectedIndex === filteredItems.length - 1 ? 0 : this.selectedIndex + 1);
 				}
 				this.isFilterFocused = false;
 				this.onChange();
@@ -276,7 +369,7 @@ export class ListOverlayView implements Component {
 				if (this.filterText.length > 0) {
 					this.filterText = "";
 					this.input.setValue("");
-					this.selectedIndex = 0;
+					this.selectIndex(0);
 					this.onChange();
 				} else {
 					this.options.onClose();
@@ -288,20 +381,20 @@ export class ListOverlayView implements Component {
 			const next = this.input.getValue();
 			if (next !== this.filterText) {
 				this.filterText = next;
-				this.selectedIndex = 0;
+				this.selectIndex(0);
 				this.onChange();
 			}
 		} else {
 			if (matchesKey(data, "up") || data === "k") {
 				if (filteredItems.length > 0) {
-					this.selectedIndex = this.selectedIndex === 0 ? filteredItems.length - 1 : this.selectedIndex - 1;
+					this.selectIndex(this.selectedIndex === 0 ? filteredItems.length - 1 : this.selectedIndex - 1);
 				}
 				this.onChange();
 				return;
 			}
 			if (matchesKey(data, "down") || data === "j") {
 				if (filteredItems.length > 0) {
-					this.selectedIndex = this.selectedIndex === filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+					this.selectIndex(this.selectedIndex === filteredItems.length - 1 ? 0 : this.selectedIndex + 1);
 				}
 				this.onChange();
 				return;
@@ -343,7 +436,7 @@ export class ListOverlayView implements Component {
 				this.isFilterFocused = true;
 				this.input.handleInput(data);
 				this.filterText = this.input.getValue();
-				this.selectedIndex = 0;
+				this.selectIndex(0);
 				this.onChange();
 				return;
 			}
@@ -352,7 +445,7 @@ export class ListOverlayView implements Component {
 				this.isFilterFocused = true;
 				this.input.handleInput(data);
 				this.filterText = this.input.getValue();
-				this.selectedIndex = 0;
+				this.selectIndex(0);
 				this.onChange();
 				return;
 			}

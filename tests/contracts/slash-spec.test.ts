@@ -95,9 +95,9 @@ describe("contracts/slash-spec", () => {
 			["/skills:writer draft release notes", { kind: "skill-invocation", text: "/skills:writer draft release notes" }],
 			["/skill writer draft release notes", { kind: "skill-invocation", text: "/skill writer draft release notes" }],
 
-			// skills
-			["/skills", { kind: "skills" }],
-			["/skills git tools", { kind: "skills", query: "git tools" }],
+			// /skills was absorbed into the /skill hub in v0.2.3
+			["/skills", { kind: "unknown", text: "/skills" }],
+			["/skills git tools", { kind: "unknown", text: "/skills git tools" }],
 
 			// run
 			["/run scout task text", { kind: "run", agentId: "scout", task: "task text", options: {} }],

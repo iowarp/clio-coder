@@ -87,6 +87,7 @@ import { openPromptsOverlay } from "./overlays/prompts.js";
 import { extractScopeFromSettings, openScopedOverlay } from "./overlays/scoped-models.js";
 import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openSettingsOverlay } from "./overlays/settings.js";
+import { openSkillsHub } from "./overlays/skills-hub.js";
 import {
 	openThinkingOverlay,
 	readThinkingLevel,
@@ -278,7 +279,8 @@ export type OverlayState =
 	| "help"
 	| "agents"
 	| "prompts"
-	| "extensions";
+	| "extensions"
+	| "skills-hub";
 
 export interface KeyBindingDeps {
 	/**
@@ -1358,41 +1360,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			void shutdown();
 		},
 		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
-		listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
-		openSkillSelector: () => {
-			const installed = deps.resources?.skills(process.cwd()).items ?? [];
-			const marketplace = getMarketplaceSkills();
-			const options = [
-				...installed.map((s) => ({
-					label: s.name,
-					description: s.description,
-				})),
-				...marketplace
-					.filter((s) => !installed.some((inst) => inst.name === s.name))
-					.map((s) => ({
-						label: `${s.name} (marketplace)`,
-						description: s.description,
-					})),
-			];
-			if (options.length === 0) {
-				io.stdout("No skills available.\n");
-				return;
-			}
-			void openAskUserOverlayState([
-				{
-					question: "Select a skill to activate:",
-					options,
-				},
-			]).then((res) => {
-				if (res.cancelled || !res.answers[0]?.answer) return;
-				let selected = res.answers[0].answer;
-				if (selected.endsWith(" (marketplace)")) {
-					selected = selected.slice(0, -" (marketplace)".length);
-				}
-				editor.setText(`/skill:${selected} `);
-				tui.requestRender();
-			});
-		},
+		openSkillsHub: () => openSkillsHubState(),
 		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
 		listAgents: () => deps.agents?.listSpecs().filter(isUserVisibleAgent) ?? [],
 		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
@@ -2566,6 +2534,26 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		overlayState = "agents";
 		overlayHandle = openAgentsOverlay(tui, slashCtx, () => closeOverlay());
+		tui.requestRender();
+	};
+
+	const openSkillsHubState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "skills-hub";
+		overlayHandle = openSkillsHub(tui, {
+			listSkills: () => deps.resources?.skills(process.cwd()) ?? { items: [], diagnostics: [] },
+			dataDir: deps.dataDir,
+			setEditorText: (text) => {
+				editor.setText(text);
+				tui.requestRender();
+			},
+			notice: (level, text) => slashCtx.notice(level, text),
+			installSkill: async (name) => {
+				const result = await installMarketplaceSkill(name, { scope: "project" });
+				return { name: result.name, path: result.path, warnings: result.warnings };
+			},
+			onClose: () => closeOverlay(),
+		});
 		tui.requestRender();
 	};
 

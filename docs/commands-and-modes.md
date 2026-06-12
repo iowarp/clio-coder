@@ -90,8 +90,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/context-init` | - | `/context-init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]` | Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff |
 | `/context-clear` | - | `/context-clear [--all] [--confirm] [--confirm-all]` | Clear accumulated project context artifacts |
-| `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open interactive skill selector or invoke a skill |
-| `/skills` | - | `/skills [query]` | Browse or search skills |
+| `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
 | `/prompts` | - | `/prompts` | List prompt templates |
 | `/extensions` | - | `/extensions` | List installed extensions |
 | `/share` | - | `/share export <path> \| /share import [--dry-run] [--force] <path>` | Export or import Clio archives |
