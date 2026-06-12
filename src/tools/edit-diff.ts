@@ -57,27 +57,187 @@ interface FuzzyMatchResult {
 	found: boolean;
 	index: number;
 	matchLength: number;
-	usedFuzzyMatch: boolean;
 }
 
-function fuzzyFindText(content: string, oldText: string): FuzzyMatchResult {
-	const exactIndex = content.indexOf(oldText);
-	if (exactIndex !== -1) {
-		return { found: true, index: exactIndex, matchLength: oldText.length, usedFuzzyMatch: false };
-	}
-	const fuzzyContent = normalizeForFuzzyMatch(content);
-	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
-	const fuzzyIndex = fuzzyContent.indexOf(fuzzyOldText);
-	if (fuzzyIndex === -1) {
-		return { found: false, index: -1, matchLength: 0, usedFuzzyMatch: false };
-	}
-	return { found: true, index: fuzzyIndex, matchLength: fuzzyOldText.length, usedFuzzyMatch: true };
+interface LineBounds {
+	contentStart: number;
+	contentEnd: number;
+	terminatorEnd: number;
+	text: string;
 }
 
-function countOccurrences(content: string, oldText: string): number {
+interface ResolvedMatch {
+	found: boolean;
+	index: number;
+	matchLength: number;
+	newText: string;
+	occurrences: number;
+}
+
+function findNonOverlappingOccurrences(content: string, text: string): number[] {
+	if (text.length === 0) return [];
+	const indexes: number[] = [];
+	let fromIndex = 0;
+	for (;;) {
+		const index = content.indexOf(text, fromIndex);
+		if (index === -1) break;
+		indexes.push(index);
+		fromIndex = index + text.length;
+	}
+	return indexes;
+}
+
+function splitLineBounds(content: string): LineBounds[] {
+	const lines: LineBounds[] = [];
+	let contentStart = 0;
+	for (let i = 0; i < content.length; i += 1) {
+		if (content[i] !== "\n") continue;
+		lines.push({
+			contentStart,
+			contentEnd: i,
+			terminatorEnd: i + 1,
+			text: content.slice(contentStart, i),
+		});
+		contentStart = i + 1;
+	}
+	lines.push({
+		contentStart,
+		contentEnd: content.length,
+		terminatorEnd: content.length,
+		text: content.slice(contentStart),
+	});
+	return lines;
+}
+
+function lineIndexAtOffset(lines: ReadonlyArray<LineBounds>, offset: number): number {
+	for (let i = 0; i < lines.length; i += 1) {
+		const line = lines[i];
+		if (line && offset < line.terminatorEnd) return i;
+	}
+	return Math.max(0, lines.length - 1);
+}
+
+function lineSpanForFuzzyMatch(content: string, fuzzyContent: string, match: FuzzyMatchResult): FuzzyMatchResult {
+	const originalLines = splitLineBounds(content);
+	const fuzzyLines = splitLineBounds(fuzzyContent);
+	const startLine = lineIndexAtOffset(fuzzyLines, match.index);
+	const endLine = lineIndexAtOffset(fuzzyLines, match.index + match.matchLength - 1);
+	const originalStart = originalLines[startLine]?.contentStart ?? 0;
+	const fallbackEndLine = originalLines[originalLines.length - 1];
+	if (!fallbackEndLine) return { found: false, index: -1, matchLength: 0 };
+	const originalEndLine = originalLines[endLine] ?? fallbackEndLine;
+	const includeTrailingLineEnding = fuzzyContent[match.index + match.matchLength - 1] === "\n";
+	const originalEnd = includeTrailingLineEnding ? originalEndLine.terminatorEnd : originalEndLine.contentEnd;
+	return { found: true, index: originalStart, matchLength: originalEnd - originalStart };
+}
+
+function leadingWhitespace(line: string): string {
+	return /^[\t ]*/.exec(line)?.[0] ?? "";
+}
+
+function stripLeadingWhitespace(line: string): string {
+	return line.slice(leadingWhitespace(line).length);
+}
+
+function logicalLinesForMatch(text: string): { lines: string[]; includeTrailingLineEnding: boolean } {
+	const includeTrailingLineEnding = text.endsWith("\n");
+	const body = includeTrailingLineEnding ? text.slice(0, -1) : text;
+	return { lines: body.split("\n"), includeTrailingLineEnding };
+}
+
+function applyIndentDelta(text: string, oldIndent: string, matchedIndent: string): string {
+	return text
+		.split("\n")
+		.map((line) => {
+			if (line.trim().length === 0) return "";
+			if (line.startsWith(oldIndent)) return `${matchedIndent}${line.slice(oldIndent.length)}`;
+			return line;
+		})
+		.join("\n");
+}
+
+function findExactMatch(content: string, oldText: string, newText: string): ResolvedMatch {
+	const indexes = findNonOverlappingOccurrences(content, oldText);
+	if (indexes.length === 0) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
+	return {
+		found: true,
+		index: indexes[0] ?? -1,
+		matchLength: oldText.length,
+		newText,
+		occurrences: indexes.length,
+	};
+}
+
+function findFuzzyMatch(content: string, oldText: string, newText: string): ResolvedMatch {
 	const fuzzyContent = normalizeForFuzzyMatch(content);
 	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
-	return fuzzyContent.split(fuzzyOldText).length - 1;
+	const indexes = findNonOverlappingOccurrences(fuzzyContent, fuzzyOldText);
+	if (indexes.length === 0) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
+	const fuzzyMatch = { found: true, index: indexes[0] ?? -1, matchLength: fuzzyOldText.length };
+	const originalMatch = lineSpanForFuzzyMatch(content, fuzzyContent, fuzzyMatch);
+	if (!originalMatch.found) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
+	return {
+		found: true,
+		index: originalMatch.index,
+		matchLength: originalMatch.matchLength,
+		newText,
+		occurrences: indexes.length,
+	};
+}
+
+function findIndentationRelaxedMatch(content: string, oldText: string, newText: string): ResolvedMatch {
+	const oldSequence = logicalLinesForMatch(oldText);
+	const oldComparableLines = oldSequence.lines.map(stripLeadingWhitespace);
+	const contentLines = splitLineBounds(content);
+	const matches: { index: number; matchLength: number; matchedIndent: string }[] = [];
+	const maxStart = contentLines.length - oldComparableLines.length;
+
+	for (let startLine = 0; startLine <= maxStart; startLine += 1) {
+		let matched = true;
+		for (let offset = 0; offset < oldComparableLines.length; offset += 1) {
+			const contentLine = contentLines[startLine + offset];
+			if (!contentLine || stripLeadingWhitespace(contentLine.text) !== oldComparableLines[offset]) {
+				matched = false;
+				break;
+			}
+		}
+		if (!matched) continue;
+
+		const lastLine = contentLines[startLine + oldComparableLines.length - 1];
+		if (!lastLine) continue;
+		if (oldSequence.includeTrailingLineEnding && lastLine.terminatorEnd === lastLine.contentEnd) continue;
+		const firstLine = contentLines[startLine];
+		if (!firstLine) continue;
+		const matchStart = firstLine.contentStart;
+		const matchEnd = oldSequence.includeTrailingLineEnding ? lastLine.terminatorEnd : lastLine.contentEnd;
+		matches.push({
+			index: matchStart,
+			matchLength: matchEnd - matchStart,
+			matchedIndent: leadingWhitespace(firstLine.text),
+		});
+	}
+
+	if (matches.length === 0) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
+	const match = matches[0];
+	if (!match) return { found: false, index: -1, matchLength: 0, newText, occurrences: 0 };
+	const oldIndent = leadingWhitespace(oldSequence.lines[0] ?? "");
+	return {
+		found: true,
+		index: match.index,
+		matchLength: match.matchLength,
+		newText: applyIndentDelta(newText, oldIndent, match.matchedIndent),
+		occurrences: matches.length,
+	};
+}
+
+function resolveMatch(content: string, oldText: string, newText: string): ResolvedMatch {
+	const exactMatch = findExactMatch(content, oldText, newText);
+	if (exactMatch.found) return exactMatch;
+
+	const fuzzyMatch = findFuzzyMatch(content, oldText, newText);
+	if (fuzzyMatch.found) return fuzzyMatch;
+
+	return findIndentationRelaxedMatch(content, oldText, newText);
 }
 
 function notFoundError(path: string, editIndex: number, totalEdits: number): Error {
@@ -121,24 +281,20 @@ export function applyEditsToNormalizedContent(
 		}
 	}
 
-	const initialMatches = normalizedEdits.map((edit) => fuzzyFindText(normalizedContent, edit.oldText));
-	const baseContent = initialMatches.some((match) => match.usedFuzzyMatch)
-		? normalizeForFuzzyMatch(normalizedContent)
-		: normalizedContent;
+	const baseContent = normalizedContent;
 
 	const matchedEdits: MatchedEdit[] = [];
 	for (let i = 0; i < normalizedEdits.length; i += 1) {
 		const edit = normalizedEdits[i];
 		if (!edit) continue;
-		const match = fuzzyFindText(baseContent, edit.oldText);
+		const match = resolveMatch(baseContent, edit.oldText, edit.newText);
 		if (!match.found) throw notFoundError(path, i, normalizedEdits.length);
-		const occurrences = countOccurrences(baseContent, edit.oldText);
-		if (occurrences > 1) throw duplicateError(path, i, normalizedEdits.length, occurrences);
+		if (match.occurrences > 1) throw duplicateError(path, i, normalizedEdits.length, match.occurrences);
 		matchedEdits.push({
 			editIndex: i,
 			matchIndex: match.index,
 			matchLength: match.matchLength,
-			newText: edit.newText,
+			newText: match.newText,
 		});
 	}
 
