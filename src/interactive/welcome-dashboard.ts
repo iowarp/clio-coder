@@ -44,7 +44,7 @@ export interface WelcomeDashboardStats {
 	targetHealthLabel: string | null;
 	activeCapabilities: string[];
 	extensions: { active: number; installed: number } | null;
-	safetyLevel: string;
+	autonomy: string;
 	toolProfile: string;
 	compactionThreshold: string;
 	clioMdStatus: string;
@@ -144,7 +144,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		settings?.orchestrator?.thinkingLevel ??
 		"off";
 
-	const safetyLevel = settings?.safetyLevel ?? "auto-edit";
+	const autonomy = settings?.autonomy ?? "auto-edit";
 	const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
 	const threshold = settings?.compaction?.threshold;
 	const compactionThreshold =
@@ -197,7 +197,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		targetHealthLabel: healthReadout(current),
 		activeCapabilities,
 		extensions: deps.getExtensionStats?.() ?? null,
-		safetyLevel,
+		autonomy,
 		toolProfile,
 		compactionThreshold,
 		clioMdStatus,
@@ -285,7 +285,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			? `${theme.fg("muted", `handoff ${stats.handoffFreshness}`)}`
 			: `${theme.fg("dim", "no handoff")}`;
 
-	const safetyStr = `autonomy ${theme.fg("accentDeep", stats.safetyLevel)}`;
+	const safetyStr = `autonomy ${theme.fg("accentDeep", stats.autonomy)}`;
 	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
 	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
 

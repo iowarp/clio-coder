@@ -5,8 +5,10 @@
  */
 
 import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
+export type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -127,7 +129,7 @@ export interface DelegationSettings {
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
-	safetyLevel: "auto-edit" as "suggest" | "auto-edit" | "full-auto",
+	autonomy: "auto-edit" as AutonomyLevel,
 	endpoints: [] as EndpointDescriptor[],
 	runtimePlugins: [] as string[],
 	orchestrator: {
@@ -223,7 +225,7 @@ export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on fir
 
 version: 1
 identity: clio
-safetyLevel: auto-edit      # suggest | auto-edit | full-auto
+autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto
 
 # Inference targets. Each entry becomes selectable for chat and workers.
 # Add entries via \`clio configure\` or \`clio targets add\`

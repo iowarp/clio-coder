@@ -33,7 +33,7 @@ const FOOTER_NOTE = "applies to this session and to new sessions";
 const ROW_GAP = "  ";
 
 export const SETTINGS_SECTIONS = [
-	{ id: "safety", label: "Autonomy" },
+	{ id: "safety", label: "Autonomy & Safety" },
 	{ id: "orchestrator", label: "Orchestrator" },
 	{ id: "fleet", label: "Fleet" },
 	{ id: "budget", label: "Budget" },
@@ -45,7 +45,10 @@ export const SETTINGS_SECTIONS = [
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 export const SETTINGS_LABELS_BY_ID = {
-	safetyLevel: "Autonomy level",
+	autonomy: "Autonomy level",
+	"workers.onPermission": "Worker permission asks",
+	"delegation.defaults.toolGovernance": "Delegation governance",
+	safetyNet: "Safety net",
 	"orchestrator.thinkingLevel": "Thinking level",
 	"orchestrator.endpoint": "Target",
 	"orchestrator.model": "Model",
@@ -66,7 +69,7 @@ export const SETTINGS_LABELS_BY_ID = {
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID;
 
 export const SETTINGS_SECTION_ROWS = {
-	safety: ["safetyLevel"],
+	safety: ["autonomy", "workers.onPermission", "delegation.defaults.toolGovernance", "safetyNet"],
 	orchestrator: ["orchestrator.thinkingLevel", "orchestrator.endpoint", "orchestrator.model"],
 	fleet: ["workers.default.endpoint", "workers.default.model"],
 	budget: ["budget.sessionCeilingUsd", "scope"],
@@ -76,7 +79,10 @@ export const SETTINGS_SECTION_ROWS = {
 } as const satisfies Record<SettingsSectionId, readonly EditableSettingId[]>;
 
 const SETTINGS_DESCRIPTIONS_BY_ID = {
-	safetyLevel: "Model initiative guidance; safety gates apply at every level.",
+	autonomy: "How freely Clio acts; the safety net always applies.",
+	"workers.onPermission": "Worker ask: deny rejects the call, fail ends the run.",
+	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
+	safetyNet: "Always-on rails; tuned in .clio/safety.yaml.",
 	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
 	"orchestrator.endpoint": "Active chat target id.",
 	"orchestrator.model": "Active chat wire model id.",
@@ -305,8 +311,17 @@ export function buildSettingItems(
 		? selectModelSubmenu(options.providers, () => live().workers.default.endpoint ?? undefined)
 		: editTextSubmenu("Type model name");
 	return [
-		settingItem("safetyLevel", settings.safetyLevel, {
-			values: ["suggest", "auto-edit", "full-auto"],
+		settingItem("autonomy", settings.autonomy, {
+			values: ["read-only", "suggest", "auto-edit", "full-auto"],
+		}),
+		settingItem("workers.onPermission", settings.workers.onPermission ?? "deny", {
+			values: ["deny", "fail"],
+		}),
+		settingItem("delegation.defaults.toolGovernance", settings.delegation.defaults.toolGovernance, {
+			values: ["clio-policy", "agent-managed", "deny-all"],
+		}),
+		settingItem("safetyNet", "always on", {
+			affordance: "read-only here",
 		}),
 		settingItem("orchestrator.thinkingLevel", displayedThinkingLevel, {
 			values: thinkingValues,
@@ -402,8 +417,16 @@ function applyNonNegativeInteger(value: string, set: (next: number) => void): vo
  */
 export function applySettingChange(settings: ClioSettings, id: string, value: string): void {
 	switch (id) {
-		case "safetyLevel":
-			if (value === "suggest" || value === "auto-edit" || value === "full-auto") settings.safetyLevel = value;
+		case "autonomy":
+			if (value === "read-only" || value === "suggest" || value === "auto-edit" || value === "full-auto")
+				settings.autonomy = value;
+			return;
+		case "workers.onPermission":
+			if (value === "deny" || value === "fail") settings.workers.onPermission = value;
+			return;
+		case "delegation.defaults.toolGovernance":
+			if (value === "clio-policy" || value === "agent-managed" || value === "deny-all")
+				settings.delegation.defaults.toolGovernance = value;
 			return;
 		case "orchestrator.thinkingLevel":
 			settings.orchestrator.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.orchestrator.thinkingLevel;

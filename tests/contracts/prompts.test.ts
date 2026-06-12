@@ -156,6 +156,19 @@ describe("contracts/prompts compiler logic", () => {
 		ok(a.sections.some((section) => section.id === "operating-contract"));
 	});
 
+	it("compiles at every autonomy level, including read-only", () => {
+		const table = loadFragments();
+		for (const level of ["read-only", "suggest", "auto-edit", "full-auto"]) {
+			const result = compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: `safety.${level}`,
+				sessionInputs: { provider: "p", model: "m" },
+			});
+			ok(result.systemPrompt.includes(`Autonomy: ${level}.`), `one-liner for ${level}`);
+		}
+	});
+
 	it("renders no per-turn state: tool-free phrasing is an instruction, not a prompt change", () => {
 		const table = loadFragments();
 		const result = compile(table, {

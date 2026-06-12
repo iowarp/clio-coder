@@ -21,7 +21,7 @@ export interface ConfigDiff {
 	restartRequired: string[];
 }
 
-const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "safetyLevel"]);
+const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "autonomy"]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
 	"endpoints",

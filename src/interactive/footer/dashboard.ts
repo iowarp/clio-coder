@@ -389,7 +389,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			: null;
 		const capabilities = capabilityLabels(caps);
 
-		const safety = settings?.safetyLevel ?? "auto-edit";
+		const safety = settings?.autonomy ?? "auto-edit";
 		const toolProfile = settings?.delegation?.defaults?.toolGovernance ?? "clio-policy";
 
 		return {

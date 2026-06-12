@@ -160,7 +160,12 @@ const DelegationSchema = Type.Object({
 export const SettingsSchema = Type.Object({
 	version: Type.Literal(1),
 	identity: Type.String({ minLength: 1 }),
-	safetyLevel: Type.Union([Type.Literal("suggest"), Type.Literal("auto-edit"), Type.Literal("full-auto")]),
+	autonomy: Type.Union([
+		Type.Literal("read-only"),
+		Type.Literal("suggest"),
+		Type.Literal("auto-edit"),
+		Type.Literal("full-auto"),
+	]),
 	endpoints: Type.Array(EndpointDescriptorSchema),
 	runtimePlugins: Type.Array(Type.String({ minLength: 1 })),
 	orchestrator: WorkerTargetSchema,

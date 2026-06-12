@@ -591,8 +591,13 @@ export function normalizeSettings(raw: unknown): ClioSettings {
 
 	const identity = trimString(raw.identity);
 	if (identity) settings.identity = identity;
-	if (raw.safetyLevel === "suggest" || raw.safetyLevel === "auto-edit" || raw.safetyLevel === "full-auto") {
-		settings.safetyLevel = raw.safetyLevel;
+	if (
+		raw.autonomy === "read-only" ||
+		raw.autonomy === "suggest" ||
+		raw.autonomy === "auto-edit" ||
+		raw.autonomy === "full-auto"
+	) {
+		settings.autonomy = raw.autonomy;
 	}
 
 	const rawTargets = Array.isArray(raw.targets) ? raw.targets : Array.isArray(raw.endpoints) ? raw.endpoints : [];

@@ -261,7 +261,7 @@ Options:
 
 If no include flags are supplied, export includes all supported classes for the selected scope.
 
-Settings fragments include non-secret UI/runtime preferences such as `safetyLevel`, `scope`, `budget`, `theme`, `terminal`, `keybindings`, `compaction`, and `retry`. Targets and credentials are not included.
+Settings fragments include non-secret UI/runtime preferences such as `autonomy`, `scope`, `budget`, `theme`, `terminal`, `keybindings`, `compaction`, and `retry`. Targets and credentials are not included.
 
 ### Import and inspect
 

@@ -4,7 +4,7 @@ Clio Coder keeps the model-facing envelope stable and moves enforcement into the
 
 ## One system prompt per session
 
-The chat loop compiles one provider-facing system prompt for a session. The compile key is `endpoint|model|safetyLevel|sessionId`.
+The chat loop compiles one provider-facing system prompt for a session. The compile key is `endpoint|model|autonomy|sessionId`.
 
 The compiled prompt is reused byte-for-byte on ordinary submits. It recompiles only when that key changes or when config hot-reload invalidates the prompt cache. When recompilation changes the text, the session ledger records a `promptRecompiled` entry with the previous hash, new hash, and token estimate.
 
@@ -14,7 +14,7 @@ There are no dynamic per-turn prompt fragments. Pending skill requests are visib
 
 For tool-capable providers, Clio sends the full registry as the session tool surface. The list is deterministic and sorted through the worker-tool resolver, so the serialized schemas stay byte-identical on every submit.
 
-Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user policy, Bash policy, path policy, protected artifacts, dispatch admission, and middleware are enforced when a tool is invoked. The autonomy level (`safetyLevel`) is not in that list: it selects the safety prompt fragment, which is guidance to the model, and it does not change any invocation-time gate. Prompt text and provider schemas do not bypass the registry.
+Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user policy, Bash policy, path policy, protected artifacts, dispatch admission, middleware, and the autonomy mapping are enforced when a tool is invoked. The `autonomy` level is applied at registry admission after the safety net passes a call; the safety prompt fragment mirrors that enforced matrix as guidance to the model. Prompt text and provider schemas do not bypass the registry.
 
 Providers that cannot call tools receive no schemas, and the prompt tells the model to proceed without tool calls.
 

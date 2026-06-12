@@ -25,7 +25,7 @@ function settingsWithTargets(): ClioSettings {
 		{ id: "target-a", runtime: "openai-compat", url: "http://localhost:1111", defaultModel: "model-a" },
 		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
 	];
-	settings.safetyLevel = "auto-edit";
+	settings.autonomy = "auto-edit";
 	settings.orchestrator = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.workers.default = { endpoint: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.scope = ["target-a/model-a", "target-b/model-b"];
@@ -95,7 +95,13 @@ describe("contracts/settings center", () => {
 				[...SETTINGS_SECTION_ROWS[section.id]],
 			);
 			for (const item of section.items) {
-				ok(item.values || item.submenu, `${item.id} must be editable`);
+				if (item.id === "safetyNet") {
+					// The safety-net summary row is deliberately read-only: the net is
+					// tuned in .clio/safety.yaml, never from the overlay.
+					ok(!item.values && !item.submenu, "safetyNet must not be editable");
+				} else {
+					ok(item.values || item.submenu, `${item.id} must be editable`);
+				}
 				strictEqual(item.configPath, item.id);
 			}
 		}
@@ -108,7 +114,18 @@ describe("contracts/settings center", () => {
 
 	it("preserves applySettingChange behavior for every editable id", () => {
 		const cases: Array<{ id: EditableSettingId; value: string; assert: (settings: ClioSettings) => void }> = [
-			{ id: "safetyLevel", value: "full-auto", assert: (settings) => strictEqual(settings.safetyLevel, "full-auto") },
+			{ id: "autonomy", value: "full-auto", assert: (settings) => strictEqual(settings.autonomy, "full-auto") },
+			{ id: "autonomy", value: "read-only", assert: (settings) => strictEqual(settings.autonomy, "read-only") },
+			{
+				id: "workers.onPermission",
+				value: "fail",
+				assert: (settings) => strictEqual(settings.workers.onPermission, "fail"),
+			},
+			{
+				id: "delegation.defaults.toolGovernance",
+				value: "deny-all",
+				assert: (settings) => strictEqual(settings.delegation.defaults.toolGovernance, "deny-all"),
+			},
 			{
 				id: "orchestrator.thinkingLevel",
 				value: "high",
@@ -192,10 +209,10 @@ describe("contracts/settings center", () => {
 		ok(rendered.includes("Autonomy"));
 		ok(rendered.includes("Orchestrator"));
 		ok(rendered.includes("Autonomy level"));
-		ok(rendered.includes("safetyLevel"));
+		ok(rendered.includes("autonomy"));
 		ok(rendered.includes("│"), "wide layout should include the lane divider");
-		ok(rendered.includes("Model initiative guidance"));
-		ok(rendered.includes("cycles: suggest, auto-edit, full-auto"));
+		ok(rendered.includes("How freely Clio acts"));
+		ok(rendered.includes("cycles: read-only, suggest, auto-edit, full-auto"));
 		ok(!rendered.includes("workers.profiles"));
 		ok(!rendered.includes("endpoints.count"));
 		ok(!rendered.includes("keybindings"));

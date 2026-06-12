@@ -6,6 +6,8 @@
  */
 
 import type { BudgetAlertPayload, MiddlewareHookFailedPayload, SafetyBlockedPayload } from "../core/bus-events.js";
+import type { SafetyDecision } from "../domains/safety/contract.js";
+import { askAxis } from "./permission-overlay.js";
 
 export interface BusNotice {
 	level: "warn" | "error";
@@ -114,6 +116,45 @@ export function middlewareHookFailedSessionNotice(payload: unknown, seenBudgetWa
 		seenBudgetWarnings.add(key);
 	}
 	return middlewareHookFailedNotice(payload, { noteBudgetWarningSuppression: key !== null });
+}
+
+/**
+ * A tool call parked for one-shot approval (sd-01 §3.3). The text names the
+ * axis that produced the ask: a safety-net rail asks at every level, while an
+ * autonomy ask exists only because of the current level and can be widened in
+ * .clio/safety.yaml when it is an execute action.
+ */
+export function approvalParkedNotice(tool: string, decision: SafetyDecision, autonomy: string): BusNotice {
+	const actionClass = decision.classification.actionClass;
+	const axis = askAxis(decision);
+	if (axis.kind === "net") {
+		return {
+			level: "warn",
+			text: `[approval] ${tool} parked (${actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to cancel.`,
+		};
+	}
+	const widen =
+		actionClass === "execute"
+			? " Approve once, or add it to .clio/safety.yaml commands."
+			: " Approve once, or Esc to cancel.";
+	return {
+		level: "warn",
+		text: `[approval] ${tool} parked (${actionClass}): asks at autonomy ${autonomy}.${widen}`,
+	};
+}
+
+/**
+ * The autonomy mapping auto-denied a call (deny dispositions; today only the
+ * read-only level). The transcript shows the rejection the model received;
+ * this notice names the level so the operator knows the dial, not a safety
+ * rail, refused the action.
+ */
+export function autonomyDeniedNotice(decision: SafetyDecision, level: string): BusNotice {
+	const actionClass = decision.classification.actionClass;
+	return {
+		level: "warn",
+		text: `[autonomy] denied ${actionClass} (${level}): Clio proposes changes at this level.`,
+	};
 }
 
 /**

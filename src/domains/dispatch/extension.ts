@@ -33,6 +33,7 @@ import type { ConfigContract } from "../config/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import {
 	type CapabilityFlags,
+	canonicalizeWireModelId,
 	type EndpointDescriptor,
 	firstRuntimeResolutionError,
 	type ProvidersContract,
@@ -580,7 +581,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	// Workers inherit the session's autonomy level at admission time (sd-01
 	// §2.5); the worker registry applies the same mapping the orchestrator's
 	// does, with asks resolving through onPermission above.
-	spec.autonomy = config?.get().safetyLevel ?? "auto-edit";
+	spec.autonomy = config?.get().autonomy ?? "auto-edit";
 	return spec;
 }
 
@@ -652,10 +653,12 @@ function resolveDispatchTarget(
 	if (!runtime) throw new Error(`dispatch: runtime '${endpoint.runtime}' not registered`);
 	const matchingDefault = workerDefault?.endpoint === endpointId ? workerDefault : null;
 	const fallbackWorkerTarget = selectedWorkerTarget ?? matchingDefault;
-	const wireModelId = req.model ?? recipe.model ?? fallbackWorkerTarget?.model ?? endpoint.defaultModel;
-	if (!wireModelId) {
+	const requestedWireModelId = req.model ?? recipe.model ?? fallbackWorkerTarget?.model ?? endpoint.defaultModel;
+	if (!requestedWireModelId) {
 		throw new Error(`dispatch: no model for target '${endpointId}' (set a fleet profile model or target.defaultModel)`);
 	}
+	const status = providers.list().find((entry) => entry.endpoint.id === endpoint.id);
+	const wireModelId = status ? canonicalizeWireModelId(status, requestedWireModelId) : requestedWireModelId;
 	const thinkingLevel = (req.thinkingLevel ??
 		recipe.thinkingLevel ??
 		fallbackWorkerTarget?.thinkingLevel ??
@@ -1129,7 +1132,7 @@ export function createDispatchBundle(
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				cwd: lifecycle.cwd,
 				safety,
-				autonomy: config?.get().safetyLevel ?? "auto-edit",
+				autonomy: config?.get().autonomy ?? "auto-edit",
 				clientVersion: readClioVersion(),
 			});
 		} catch (error) {

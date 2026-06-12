@@ -184,7 +184,7 @@ The README is the entry point; the full documentation set lives under
 | Commands, slash commands, keybindings, dispatch, troubleshooting | [commands-and-modes.md](docs/commands-and-modes.md) |
 | Runtime targets, local model configuration, fleet profiles, auth | [configuration-and-targets.md](docs/configuration-and-targets.md) |
 | Install, upgrade, reset, uninstall, state layout | [installation-and-lifecycle.md](docs/installation-and-lifecycle.md) |
-| Safety posture, default-deny Bash, project policy, typed validation | [safety-model.md](docs/safety-model.md) |
+| Autonomy levels, approvals, the safety net, project policy | [safety-model.md](docs/safety-model.md) |
 | Context window resolution, compaction, token accounting | [context-engine.md](docs/context-engine.md) |
 | Built-in agent recipes and dispatch admission | [built-in-agents.md](docs/built-in-agents.md) |
 | Prompt envelope reuse, tool delivery, bounded tool results | [prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |

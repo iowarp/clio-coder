@@ -97,7 +97,7 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Autonomy & safety net",
-				"**Autonomy level** (`/settings`, persisted as `safetyLevel`): suggest | auto-edit | full-auto. " +
+				"**Autonomy level** (`/settings`, persisted as `autonomy`): read-only | suggest | auto-edit | full-auto. " +
 					"It sets how much initiative the system prompt asks of the model. It does not loosen or tighten any hard gate.",
 				"**Approvals**: actions classified `system_modify`, plus rules marked for confirmation, park the tool call and open a one-shot approval overlay. " +
 					"Approving resumes only that call.",

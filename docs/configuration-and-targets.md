@@ -114,7 +114,7 @@ Terminology used in code and receipts:
 ```yaml
 version: 1
 identity: clio
-safetyLevel: auto-edit      # suggest | auto-edit | full-auto (autonomy level: model guidance; safety gates apply at every level)
+autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto (enforced at tool admission; the safety net applies at every level)
 
 targets:
   - id: local-lmstudio
@@ -175,7 +175,7 @@ The routing keys in `settings.yaml` (`orchestrator.*`, `workers.default.*`, `sco
 
 - Interactive changes (`/model`, Alt+L, `/settings`, Shift+Tab, `/thinking`, Alt+J / Alt+K, `/scoped-models`) apply to the current session immediately and are written back as the defaults for sessions launched later.
 - Writes from other processes — a second Clio session, `clio targets use`, `clio configure`, or a manual edit — update the defaults and the shared target catalog but never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.
-- Non-routing settings (theme, keybindings, safety level, retry, compaction, target catalog entries) still hot-reload into running sessions as before.
+- Non-routing settings (theme, keybindings, autonomy level, retry, compaction, target catalog entries) still hot-reload into running sessions as before.
 - `/resume` and `/new` switch sessions, not routing: the terminal keeps its active target/model/thinking across session switches.
 
 This is what makes several concurrent Clio terminals safe: each one routes through its own state, and `settings.yaml` only decides where the *next* session starts.
@@ -197,7 +197,7 @@ Targets are managed in `/targets`; keybindings are documented in `/help`.
 
 | Section | Editable rows |
 | --- | --- |
-| Autonomy | Autonomy level |
+| Autonomy & Safety | Autonomy level, Worker permission asks, Delegation governance, Safety net (read-only) |
 | Orchestrator | Thinking level, Target, Model |
 | Fleet | Default target, Default model |
 | Budget | Session ceiling (USD), Model cycle set |
@@ -209,7 +209,9 @@ Label to config path mapping:
 
 | Label | Config path |
 | --- | --- |
-| Autonomy level | `safetyLevel` |
+| Autonomy level | `autonomy` |
+| Worker permission asks | `workers.onPermission` |
+| Delegation governance | `delegation.defaults.toolGovernance` |
 | Thinking level | `orchestrator.thinkingLevel` |
 | Target | `orchestrator.endpoint` |
 | Model | `orchestrator.model` |
