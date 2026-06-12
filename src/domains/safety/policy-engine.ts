@@ -28,6 +28,12 @@ export type SafetyPolicySource =
 	| "none";
 
 export interface SafetyPolicyDecision {
+	/**
+	 * Net verdict (sd-01 §2.2): `block` is final at every autonomy level,
+	 * `ask` is a net rail demanding operator confirmation at every level, and
+	 * `allow` means the net passed; the autonomy mapping decides what happens
+	 * next at the admission seam (tools/registry.ts, acp/tool-mediator.ts).
+	 */
 	kind: "allow" | "ask" | "block";
 	classification: Classification;
 	tool: string;
@@ -43,6 +49,12 @@ export interface SafetyPolicyDecision {
 	projectPolicyPath?: string;
 	match?: DamageControlMatch;
 	rejection?: RejectionMessage;
+	/**
+	 * Execute-class passes only: whether the command is in the no-prompt set
+	 * (built-in allowlist, project policy command, typed execution tool). The
+	 * autonomy mapping asks for unrecognized execution below full-auto.
+	 */
+	execRecognition?: "recognized" | "unrecognized";
 }
 
 export interface SafetyPolicyMetadata {
@@ -118,10 +130,18 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
 			const base = baseDecision(call, classification, callCwd, posture, command);
+			// An explicit `ask: true` damage-control rule is an authored
+			// confirm rail and takes precedence over classifier escalation for
+			// the same command (sd-01 M3). Without this, the unconditional
+			// git_destructive block made every authored git ask rule dead
+			// config. Commands matched only by classifier patterns, and rules
+			// with `block: true`, stay hard blocks.
+			const askRule = hit?.match.ask === true && hit.match.block !== true;
 			if (
-				classification.actionClass === "git_destructive" ||
-				hit?.match.actionClass === "git_destructive" ||
-				hit?.match.block === true
+				!askRule &&
+				(classification.actionClass === "git_destructive" ||
+					hit?.match.actionClass === "git_destructive" ||
+					hit?.match.block === true)
 			) {
 				const blockInput: Omit<
 					SafetyPolicyDecision,
@@ -136,7 +156,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return blockDecision(base, blockInput);
 			}
 
-			if (hit?.match.ask === true && posture !== "confirmed") {
+			if (askRule && hit !== null && posture !== "confirmed") {
 				return askDecision(base, {
 					ruleId: hit.match.ruleId,
 					reasonCode: `damage-control:${hit.match.ruleId}`,
@@ -145,7 +165,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					match: hit.match,
 				});
 			}
-			if (hit?.match.ask === true && posture === "confirmed") {
+			if (askRule && hit !== null && posture === "confirmed") {
 				return allowDecision(base, {
 					ruleId: hit.match.ruleId,
 					reasonCode: `damage-control:${hit.match.ruleId}`,
@@ -189,7 +209,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			}
 
 			if (call.tool === ToolNames.Bash && classification.actionClass === "execute") {
-				const bash = evaluateDefaultDenyBash(command ?? "", callCwd, cwd, posture, projectPolicy);
+				const bash = evaluateBashPolicy(command ?? "", callCwd, cwd, posture, projectPolicy);
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -205,6 +225,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 			if (hit?.match.ruleId !== undefined) allowInput.ruleId = hit.match.ruleId;
 			if (hit?.match !== undefined) allowInput.match = hit.match;
+			// Typed execution tools (run_task, validate_frontend) are bounded by
+			// their own allowlists, so they sit in the no-prompt set.
+			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
 			return allowDecision(base, allowInput);
 		},
 		metadata(posture) {
@@ -270,7 +293,15 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 	}
 }
 
-function evaluateDefaultDenyBash(
+/**
+ * Bash net evaluation (sd-01 §2.2). Net blocks: empty commands, cwd escapes,
+ * and (until I3 lands the operator split) shell operators. Net confirms:
+ * project policy `requireConfirmation`. Everything else passes with an
+ * `execRecognition` tag: project policy commands and the built-in no-prompt
+ * allowlist are recognized; arbitrary bash is unrecognized and the autonomy
+ * mapping at the admission seam decides whether it runs, asks, or is denied.
+ */
+function evaluateBashPolicy(
 	command: string,
 	callCwd: string,
 	workspaceRoot: string,
@@ -296,6 +327,7 @@ function evaluateDefaultDenyBash(
 			reasonCode: `project-policy:${projectMatch.id}`,
 			reasons: [`allowed by project safety policy command '${projectMatch.id}'`],
 			policySource: "project-policy" as const,
+			execRecognition: "recognized",
 		};
 		if (policy.hash !== null) base.policyHash = policy.hash;
 		if (policy.path !== null) base.projectPolicyPath = policy.path;
@@ -334,17 +366,19 @@ function evaluateDefaultDenyBash(
 				kind: "allow",
 				ruleId: entry.id,
 				reasonCode: entry.id,
-				reasons: [`matched built-in default-deny command allowlist '${entry.id}'`],
+				reasons: [`matched built-in no-prompt command allowlist '${entry.id}'`],
 				policySource: "builtin-command-allowlist",
+				execRecognition: "recognized",
 			};
 		}
 	}
 	return {
-		kind: "block",
-		ruleId: "bash-default-deny",
-		reasonCode: "bash-default-deny",
-		reasons: ["arbitrary bash requires a structured tool or explicit project safety policy"],
+		kind: "allow",
+		ruleId: "bash-unrecognized",
+		reasonCode: "bash-unrecognized",
+		reasons: ["bash command is outside the no-prompt set; the autonomy level decides admission"],
 		policySource: "builtin-command-allowlist",
+		execRecognition: "unrecognized",
 	};
 }
 
