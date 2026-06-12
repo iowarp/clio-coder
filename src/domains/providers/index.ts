@@ -117,7 +117,6 @@ export {
 	EMPTY_CAPABILITIES,
 	VALID_THINKING_LEVELS,
 } from "./types/capability-flags.js";
-export type { EndpointAuth, EndpointDescriptor, EndpointPricing, TargetSpec } from "./types/endpoint-descriptor.js";
 export type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
 export type {
 	ProbeContext,
@@ -130,3 +129,4 @@ export type {
 	RuntimeKind,
 	RuntimeTier,
 } from "./types/runtime-descriptor.js";
+export type { TargetAuth, TargetDescriptor, TargetPricing } from "./types/target-descriptor.js";

@@ -5,7 +5,7 @@
  * NDJSON events line-by-line from stdout, and exposes them as an async iterator
  * so the dispatch domain can drive the orchestrator-side state machine.
  *
- * Post-W5 WorkerSpec carries a resolved EndpointDescriptor + runtime id +
+ * Post-W5 WorkerSpec carries a resolved TargetDescriptor + runtime id +
  * wireModelId instead of providerId/modelId. The worker subprocess re-hydrates
  * the runtime descriptor from its own provider registry.
  */

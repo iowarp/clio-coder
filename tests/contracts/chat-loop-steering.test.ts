@@ -4,8 +4,8 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
-import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
@@ -13,9 +13,9 @@ import { type ChatLoopEvent, createChatLoop, type QueuedChatMessage } from "../.
 
 function settings(): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.endpoint = "test-target";
+	value.orchestrator.target = "test-target";
 	value.orchestrator.model = "model";
-	value.endpoints = [
+	value.targets = [
 		{
 			id: "test-target",
 			runtime: "fake-runtime",
@@ -27,7 +27,7 @@ function settings(): ClioSettings {
 }
 
 function providers(): ProvidersContract {
-	const endpoint: EndpointDescriptor = {
+	const endpoint: TargetDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
 		defaultModel: "model",

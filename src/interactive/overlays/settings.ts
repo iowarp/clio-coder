@@ -50,9 +50,9 @@ export const SETTINGS_LABELS_BY_ID = {
 	"delegation.defaults.toolGovernance": "Delegation governance",
 	safetyNet: "Safety net",
 	"orchestrator.thinkingLevel": "Thinking level",
-	"orchestrator.endpoint": "Target",
+	"orchestrator.target": "Target",
 	"orchestrator.model": "Model",
-	"workers.default.endpoint": "Default target",
+	"workers.default.target": "Default target",
 	"workers.default.model": "Default model",
 	"budget.sessionCeilingUsd": "Session ceiling (USD)",
 	scope: "Model cycle set",
@@ -70,8 +70,8 @@ export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID;
 
 export const SETTINGS_SECTION_ROWS = {
 	safety: ["autonomy", "workers.onPermission", "delegation.defaults.toolGovernance", "safetyNet"],
-	orchestrator: ["orchestrator.thinkingLevel", "orchestrator.endpoint", "orchestrator.model"],
-	fleet: ["workers.default.endpoint", "workers.default.model"],
+	orchestrator: ["orchestrator.thinkingLevel", "orchestrator.target", "orchestrator.model"],
+	fleet: ["workers.default.target", "workers.default.model"],
 	budget: ["budget.sessionCeilingUsd", "scope"],
 	compaction: ["compaction.auto", "compaction.excludeLastTurns", "compaction.threshold"],
 	retry: ["retry.enabled", "retry.maxRetries", "retry.baseDelayMs", "retry.maxDelayMs"],
@@ -84,9 +84,9 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
 	safetyNet: "Always-on rails; tuned in .clio/safety.yaml.",
 	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
-	"orchestrator.endpoint": "Active chat target id.",
+	"orchestrator.target": "Active chat target id.",
 	"orchestrator.model": "Active chat wire model id.",
-	"workers.default.endpoint": "Default /run target id.",
+	"workers.default.target": "Default /run target id.",
 	"workers.default.model": "Default /run wire model id.",
 	"budget.sessionCeilingUsd": "Per-session cost cap.",
 	scope: "Alt+J and Alt+K model cycle set.",
@@ -292,7 +292,7 @@ export function buildSettingItems(
 	const resolvedThinking = options?.providers
 		? resolveModelRuntimeCapabilitiesForProviders(
 				options.providers,
-				settings.orchestrator.endpoint,
+				settings.orchestrator.target,
 				settings.orchestrator.model,
 				settings.orchestrator.thinkingLevel ?? "off",
 			)?.thinking
@@ -305,10 +305,10 @@ export function buildSettingItems(
 		? selectEndpointSubmenu(options.providers)
 		: editTextSubmenu("Type target id");
 	const orchestratorModelSubmenu = options?.providers
-		? selectModelSubmenu(options.providers, () => live().orchestrator.endpoint ?? undefined)
+		? selectModelSubmenu(options.providers, () => live().orchestrator.target ?? undefined)
 		: editTextSubmenu("Type model name");
 	const workerModelSubmenu = options?.providers
-		? selectModelSubmenu(options.providers, () => live().workers.default.endpoint ?? undefined)
+		? selectModelSubmenu(options.providers, () => live().workers.default.target ?? undefined)
 		: editTextSubmenu("Type model name");
 	return [
 		settingItem("autonomy", settings.autonomy, {
@@ -326,7 +326,7 @@ export function buildSettingItems(
 		settingItem("orchestrator.thinkingLevel", displayedThinkingLevel, {
 			values: thinkingValues,
 		}),
-		settingItem("orchestrator.endpoint", settings.orchestrator.endpoint ?? "(unset)", {
+		settingItem("orchestrator.target", settings.orchestrator.target ?? "(unset)", {
 			submenu: endpointSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
@@ -334,7 +334,7 @@ export function buildSettingItems(
 			submenu: orchestratorModelSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
-		settingItem("workers.default.endpoint", settings.workers.default.endpoint ?? "(unset)", {
+		settingItem("workers.default.target", settings.workers.default.target ?? "(unset)", {
 			submenu: endpointSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
 		}),
@@ -465,28 +465,28 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "terminal.showTerminalProgress":
 			if (value === "true" || value === "false") settings.terminal.showTerminalProgress = value === "true";
 			return;
-		case "orchestrator.endpoint": {
+		case "orchestrator.target": {
 			const endpoint = value === "(unset)" || value === "" ? null : value;
 			// Switching targets re-bases the model on the new target default.
-			if (endpoint !== settings.orchestrator.endpoint) {
+			if (endpoint !== settings.orchestrator.target) {
 				settings.orchestrator.model = endpoint
-					? (settings.endpoints.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
+					? (settings.targets.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
 					: null;
 			}
-			settings.orchestrator.endpoint = endpoint;
+			settings.orchestrator.target = endpoint;
 			return;
 		}
 		case "orchestrator.model":
 			settings.orchestrator.model = value === "(unset)" || value === "" ? null : value;
 			return;
-		case "workers.default.endpoint": {
+		case "workers.default.target": {
 			const endpoint = value === "(unset)" || value === "" ? null : value;
-			if (endpoint !== settings.workers.default.endpoint) {
+			if (endpoint !== settings.workers.default.target) {
 				settings.workers.default.model = endpoint
-					? (settings.endpoints.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
+					? (settings.targets.find((entry) => entry.id === endpoint)?.defaultModel ?? null)
 					: null;
 			}
-			settings.workers.default.endpoint = endpoint;
+			settings.workers.default.target = endpoint;
 			return;
 		}
 		case "workers.default.model":

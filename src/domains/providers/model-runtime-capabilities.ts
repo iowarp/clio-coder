@@ -3,7 +3,6 @@ import type { EndpointStatus, ProvidersContract } from "./contract.js";
 import { resolveModelCapabilities } from "./model-capabilities.js";
 import { inferLocalModelFamily, isHarmonyModelId } from "./model-family.js";
 import { availableThinkingLevels, type CapabilityFlags, type ThinkingLevel } from "./types/capability-flags.js";
-import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { KnowledgeBase, KnowledgeBaseHit } from "./types/knowledge-base.js";
 import {
 	extractLocalModelQuirks,
@@ -12,6 +11,7 @@ import {
 	type ThinkingQuirks,
 } from "./types/local-model-quirks.js";
 import type { RuntimeApiFamily, RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 export type AppliedThinkingNoticeKind = "applied" | "ignored-on-off" | "always-on" | "unsupported";
 export type ThinkingBudgetEnforcement = "enforced" | "informational" | "none";
@@ -568,7 +568,7 @@ export function coerceThinkingLevelForRuntime(
 }
 
 export function resolveEndpointRuntimeCapabilities(
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	runtime: RuntimeDescriptor,
 	wireModelId: string,
 	capabilities: CapabilityFlags,

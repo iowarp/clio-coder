@@ -1,7 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type {
 	ProbeContext,
@@ -10,6 +9,7 @@ import type {
 	RuntimeDescriptor,
 	RuntimeTier,
 } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { endpointBase, synthLocalModel, withAsIs } from "../common/local-synth.js";
 import { probeOpenAIModels, probeUrl } from "../common/probe-helpers.js";
 
@@ -26,7 +26,7 @@ export interface AnthropicCompatSpec {
 }
 
 export interface AnthropicCompatSynthesisInput {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
@@ -58,17 +58,17 @@ export function makeAnthropicCompatRuntime(spec: AnthropicCompatSpec): RuntimeDe
 		auth: spec.auth,
 		defaultCapabilities: spec.defaultCapabilities,
 		...(spec.hidden === true ? { hidden: true } : {}),
-		async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+		async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 			const base = endpointBase(endpoint);
 			if (!base) return { ok: false, error: "endpoint has no url" };
 			return probeUrl(`${base}${messagesPath}`, ctx, "HEAD");
 		},
-		async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
+		async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 			const base = endpointBase(endpoint);
 			if (!base) return [];
 			return probeOpenAIModels(base, ctx, modelsPath);
 		},
-		synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+		synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 			return synthesizeAnthropicCompatModel({
 				endpoint,
 				wireModelId,

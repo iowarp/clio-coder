@@ -2,16 +2,11 @@
  * Recently selected target/model refs ("targetId/wireModelId").
  *
  * Recents are runtime state, not user configuration, so they live in the data
- * dir (state/recent-models.json) instead of settings.yaml. Keeping them out of
- * the settings file means an Alt+L model pick no longer rewrites settings.yaml
- * just to bump a recency list, which previously fired the config watcher in
- * every other running session. Favorites (modelSelector.favorites) remain in
+ * dir (state/recent-models.json) and never in settings.yaml. Keeping them out
+ * of the settings file means an Alt+L model pick does not rewrite settings.yaml
+ * just to bump a recency list, which would fire the config watcher in every
+ * other running session. Favorites (modelSelector.favorites) remain in
  * settings.yaml because they are deliberate user configuration.
- *
- * Migration: settings files written before this split carry the list under
- * state.recentModels. The first read that finds no data-dir file seeds it from
- * that legacy list. The legacy key stays schema-valid and is left in place;
- * it simply stops being updated.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -55,34 +50,14 @@ function writeToDisk(path: string, refs: ReadonlyArray<string>): void {
 }
 
 /**
- * Current recents, newest first, truncated to `limit`. When the data-dir file
- * does not exist yet and `migrateFrom` (the legacy state.recentModels list) is
- * provided, it seeds both the cache and the file once. Without `migrateFrom`
- * an absent file is treated as empty but not cached, so a later call that does
- * carry the legacy list can still migrate it.
+ * Current recents, newest first, truncated to `limit`. An absent or unreadable
+ * file is an empty list.
  */
-export function listRecentModels(options?: { migrateFrom?: ReadonlyArray<string>; limit?: number }): string[] {
+export function listRecentModels(options?: { limit?: number }): string[] {
 	const path = recentModelsPath();
 	if (cache === null || cachePath !== path) {
-		const disk = readFromDisk(path);
-		if (disk !== null) {
-			cache = disk;
-			cachePath = path;
-		} else if (options?.migrateFrom !== undefined) {
-			const migrated = [...options.migrateFrom];
-			cache = migrated;
-			cachePath = path;
-			if (migrated.length > 0) {
-				try {
-					writeToDisk(path, migrated);
-				} catch {
-					// Recents are best-effort convenience state; a failed write must
-					// never break model selection.
-				}
-			}
-		} else {
-			return [];
-		}
+		cache = readFromDisk(path) ?? [];
+		cachePath = path;
 	}
 	const limit = Math.max(1, Math.floor(options?.limit ?? 12));
 	return cache.slice(0, limit);

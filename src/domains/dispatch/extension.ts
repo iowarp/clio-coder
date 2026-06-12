@@ -1,7 +1,7 @@
 /**
  * Dispatch domain wire-up (post-W5).
  *
- * Resolves a DispatchRequest to an EndpointDescriptor + RuntimeDescriptor +
+ * Resolves a DispatchRequest to an TargetDescriptor + RuntimeDescriptor +
  * wire model id via the providers contract. Gates admission on safety
  * scopes, concurrency, budget, and capability flags. Every admitted runtime
  * kind enters through the native worker subprocess; the worker entry
@@ -34,7 +34,6 @@ import type { MiddlewareContract } from "../middleware/contract.js";
 import {
 	type CapabilityFlags,
 	canonicalizeWireModelId,
-	type EndpointDescriptor,
 	firstRuntimeResolutionError,
 	type ProvidersContract,
 	type ResolvedRuntimeTarget,
@@ -42,6 +41,7 @@ import {
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
 	runtimeTargetSnapshot,
+	type TargetDescriptor,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
@@ -333,7 +333,7 @@ export function buildDynamicPromptMessages(req: DispatchRequest): WorkerPromptMe
 }
 
 interface ResolvedTarget {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
 	thinkingLevel: ThinkingLevel;
@@ -459,7 +459,7 @@ function acpRuntimeLimitations(): string[] {
 function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {
 	const workerDefault = settings?.workers?.default
 		? {
-				endpoint: settings.workers.default.endpoint ?? null,
+				endpoint: settings.workers.default.target ?? null,
 				model: settings.workers.default.model ?? null,
 				thinkingLevel: (settings.workers.default.thinkingLevel ?? "off") as ThinkingLevel,
 			}
@@ -467,7 +467,7 @@ function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefin
 	const workerProfiles: WorkerProfileMap = {};
 	for (const [name, profile] of Object.entries(settings?.workers?.profiles ?? {})) {
 		workerProfiles[name] = {
-			endpoint: profile.endpoint ?? null,
+			endpoint: profile.target ?? null,
 			model: profile.model ?? null,
 			thinkingLevel: (profile.thinkingLevel ?? "off") as ThinkingLevel,
 		};

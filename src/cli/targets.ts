@@ -134,7 +134,7 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 		const settings = readSettings();
 		const candidateFor = (status: EndpointStatus): string | null => {
 			const orchestratorModel =
-				settings.orchestrator?.endpoint === status.endpoint.id ? (settings.orchestrator?.model ?? null) : null;
+				settings.orchestrator?.target === status.endpoint.id ? (settings.orchestrator?.model ?? null) : null;
 			return orchestratorModel ?? status.endpoint.defaultModel ?? null;
 		};
 		const rows = filtered.map((status) => {
@@ -196,7 +196,7 @@ function runUse(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	const target = settings.endpoints.find((entry) => entry.id === parsed.id);
+	const target = settings.targets.find((entry) => entry.id === parsed.id);
 	if (!target) {
 		printError(`no target with id ${parsed.id}`);
 		return 1;
@@ -223,9 +223,9 @@ function runUse(args: ReadonlyArray<string>): number {
 	// write-through (Shift+Tab, Alt+L, …) cannot be lost between our read
 	// above and this save.
 	updateSettings((fresh) => {
-		fresh.orchestrator.endpoint = target.id;
+		fresh.orchestrator.target = target.id;
 		fresh.orchestrator.model = orchestratorModel;
-		fresh.workers.default.endpoint = target.id;
+		fresh.workers.default.target = target.id;
 		fresh.workers.default.model = workerModel;
 	});
 	printOk(`using target ${target.id} for chat and fleet dispatch`);
@@ -277,7 +277,7 @@ function runProfile(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	const target = settings.endpoints.find((entry) => entry.id === parsed.targetId);
+	const target = settings.targets.find((entry) => entry.id === parsed.targetId);
 	if (!target) {
 		printError(`no target with id ${parsed.targetId}`);
 		return 2;
@@ -285,7 +285,7 @@ function runProfile(args: ReadonlyArray<string>): number {
 	const existing = settings.workers.profiles[parsed.name];
 	const profileName = parsed.name;
 	const profile = {
-		endpoint: target.id,
+		target: target.id,
 		model: parsed.model ?? target.defaultModel ?? null,
 		thinkingLevel: parsed.thinkingLevel ?? existing?.thinkingLevel ?? "off",
 	};
@@ -312,12 +312,12 @@ function runFleet(args: ReadonlyArray<string>): number {
 	}
 	ensureClioState();
 	const settings = readSettings();
-	const byId = new Map(settings.endpoints.map((target) => [target.id, target] as const));
+	const byId = new Map(settings.targets.map((target) => [target.id, target] as const));
 	const rows = Object.entries(settings.workers.profiles).map(([name, profile]) => {
-		const target = profile.endpoint ? byId.get(profile.endpoint) : undefined;
+		const target = profile.target ? byId.get(profile.target) : undefined;
 		return {
 			name,
-			target: profile.endpoint,
+			target: profile.target,
 			runtime: target?.runtime ?? null,
 			model: profile.model,
 			thinkingLevel: profile.thinkingLevel,
@@ -397,7 +397,7 @@ function runConvert(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	const settings = readSettings();
-	const target = settings.endpoints.find((entry) => entry.id === id);
+	const target = settings.targets.find((entry) => entry.id === id);
 	if (!target) {
 		printError(`no target with id ${id}`);
 		return 1;
@@ -406,13 +406,13 @@ function runConvert(args: ReadonlyArray<string>): number {
 		printOk(`target ${id} already uses runtime ${runtimeId}`);
 		return 0;
 	}
-	if (settings.orchestrator.endpoint === id && !isTargetEligibleRuntime(runtime)) {
+	if (settings.orchestrator.target === id && !isTargetEligibleRuntime(runtime)) {
 		printError(`cannot convert orchestrator target '${id}' to non-HTTP/native runtime '${runtime.id}'`);
 		return 1;
 	}
 	const previousRuntime = target.runtime;
 	updateSettings((fresh) => {
-		const entry = fresh.endpoints.find((candidate) => candidate.id === id);
+		const entry = fresh.targets.find((candidate) => candidate.id === id);
 		if (entry) entry.runtime = runtimeId;
 	});
 	printOk(`converted target ${id}: ${previousRuntime} -> ${runtimeId}`);

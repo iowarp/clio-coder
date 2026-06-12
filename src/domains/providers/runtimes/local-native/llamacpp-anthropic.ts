@@ -2,9 +2,9 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { stripTrailingSlash, synthLocalModel, withAsIs } from "../common/local-synth.js";
 import { detectModelMismatch, probeLlamaCppProps } from "../common/probe-helpers.js";
 
@@ -26,7 +26,7 @@ interface OpenAIModelsResponse {
 	data?: Array<{ id?: unknown }>;
 }
 
-function url(endpoint: EndpointDescriptor): string | null {
+function url(endpoint: TargetDescriptor): string | null {
 	return endpoint.url ? stripTrailingSlash(endpoint.url) : null;
 }
 
@@ -39,7 +39,7 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	defaultCapabilities,
 	hidden: true,
-	async probe(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+	async probe(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const base = url(endpoint);
 		if (!base) return { ok: false, error: "endpoint has no url" };
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
@@ -60,7 +60,7 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 		if (note) enriched.notes = [note];
 		return enriched;
 	},
-	async probeModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]> {
+	async probeModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 		const base = url(endpoint);
 		if (!base) return [];
 		const opts = { url: `${base}/v1/models`, timeoutMs: ctx.httpTimeoutMs } as const;
@@ -72,7 +72,7 @@ const llamacppAnthropicRuntime: RuntimeDescriptor = {
 			.map((row) => (typeof row?.id === "string" ? row.id : null))
 			.filter((id): id is string => id !== null);
 	},
-	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthLocalModel({
 			endpoint,
 			wireModelId,

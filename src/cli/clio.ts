@@ -9,9 +9,9 @@ import { runConfigureCommand } from "./configure.js";
 
 function hasUsableDefaultTarget(): boolean {
 	const settings = readSettings();
-	const targetId = settings.orchestrator.endpoint;
+	const targetId = settings.orchestrator.target;
 	if (!targetId) return false;
-	const target = settings.endpoints.find((entry) => entry.id === targetId);
+	const target = settings.targets.find((entry) => entry.id === targetId);
 	if (!target) return false;
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);

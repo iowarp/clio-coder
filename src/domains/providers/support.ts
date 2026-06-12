@@ -2,8 +2,8 @@ import type { ClioSettings } from "../../core/config.js";
 import { type AuthTarget, resolveAuthTarget, resolveRuntimeAuthTarget } from "./auth/index.js";
 import { catalogProviderForRuntime, listCatalogModelsForRuntime } from "./catalog.js";
 import { getRuntimeRegistry } from "./registry.js";
-import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 export type ProviderSupportGroup = "featured" | "cloud-api" | "subscription" | "local-http";
 
@@ -21,7 +21,7 @@ export interface ProviderSupportEntry {
 
 export interface ResolvedProviderReference {
 	input: string;
-	endpoint: EndpointDescriptor | null;
+	endpoint: TargetDescriptor | null;
 	runtime: RuntimeDescriptor;
 	authTarget: AuthTarget;
 }
@@ -141,8 +141,8 @@ export function listProviderSupportEntries(
 export function configuredEndpointsForRuntime(
 	settings: Readonly<ClioSettings>,
 	runtimeId: string,
-): ReadonlyArray<EndpointDescriptor> {
-	return settings.endpoints.filter((endpoint) => endpoint.runtime === runtimeId);
+): ReadonlyArray<TargetDescriptor> {
+	return settings.targets.filter((endpoint) => endpoint.runtime === runtimeId);
 }
 
 export function resolveProviderReference(
@@ -152,7 +152,7 @@ export function resolveProviderReference(
 ): ResolvedProviderReference | null {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return null;
-	const endpoint = settings.endpoints.find((entry) => entry.id === trimmed) ?? null;
+	const endpoint = settings.targets.find((entry) => entry.id === trimmed) ?? null;
 	if (endpoint) {
 		const runtime = getRuntime(endpoint.runtime);
 		if (!runtime) return null;

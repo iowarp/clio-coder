@@ -2,8 +2,8 @@ import { ok, strictEqual } from "node:assert";
 import { describe, it } from "node:test";
 import {
 	EMPTY_CAPABILITIES,
-	type EndpointDescriptor,
 	type RuntimeDescriptor,
+	type TargetDescriptor,
 } from "../../src/domains/providers/index.js";
 import { resolveContextWindowDetails } from "../../src/domains/providers/runtime-resolution.js";
 import {
@@ -138,7 +138,7 @@ describe("contracts/context-accounting", () => {
 	});
 
 	it("keeps local-native 128k as advisory and does not inflate unknown effective context", () => {
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "local-endpoint",
 			runtime: "ollama-native",
 			capabilities: {},
@@ -153,7 +153,7 @@ describe("contracts/context-accounting", () => {
 	});
 
 	it("caps effectiveContextWindow and warns if probed/loaded context below 128k", () => {
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "local-endpoint",
 			runtime: "lmstudio-native",
 			capabilities: {},

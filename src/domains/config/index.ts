@@ -10,4 +10,3 @@ export const ConfigDomainModule: DomainModule = {
 export { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
 export type { ConfigContract } from "./contract.js";
 export { ConfigManifest } from "./manifest.js";
-export { SettingsSchema, type ValidatedSettings } from "./schema.js";

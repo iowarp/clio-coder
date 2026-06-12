@@ -1,7 +1,7 @@
 import { probeHttp, probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { ProbeContext, ProbeModelStatus, ProbeResult } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 export interface OpenAIModelsResponse {
 	data?: Array<Record<string, unknown> & { id?: unknown; status?: unknown }>;
@@ -314,7 +314,7 @@ export function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppS
 
 function selectedModelEntry(
 	entries: ReadonlyArray<{ id: string; status?: unknown }>,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 ): { id: string; status?: unknown } | null {
 	const expected = endpoint.defaultModel?.trim();
 	if (expected) return entries.find((entry) => entry.id === expected) ?? null;
@@ -332,7 +332,7 @@ function statusNotes(id: string, status: unknown): string[] {
 
 export async function probeLlamaCppModelStatus(
 	base: string,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	ctx: ProbeContext,
 ): Promise<LlamaCppStatusEnrichment> {
 	const entries = await probeOpenAIModelEntries(base, ctx);
@@ -363,7 +363,7 @@ export async function probeLlamaCppModelStatus(
  */
 export async function detectModelMismatch(
 	base: string,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	ctx: ProbeContext,
 ): Promise<string | null> {
 	const expected = endpoint.defaultModel?.trim();

@@ -11,8 +11,8 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { EndpointStatus, ProvidersContract } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
-import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
@@ -27,9 +27,9 @@ import { createReadSkillTool } from "../../src/tools/skills.js";
 
 function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	value.orchestrator.endpoint = "test-target";
+	value.orchestrator.target = "test-target";
 	value.orchestrator.model = "model";
-	value.endpoints = [
+	value.targets = [
 		{
 			id: "test-target",
 			runtime: "fake-runtime",
@@ -42,7 +42,7 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 }
 
 function providers(tier?: "local-native"): ProvidersContract {
-	const endpoint: EndpointDescriptor = {
+	const endpoint: TargetDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
 		defaultModel: "model",

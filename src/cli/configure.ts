@@ -19,8 +19,8 @@ import {
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
-import type { EndpointDescriptor } from "../domains/providers/types/endpoint-descriptor.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import { printError, printOk } from "./shared.js";
@@ -95,7 +95,7 @@ interface ParsedArgs {
 	apiKey?: string;
 	force: boolean;
 	gateway: boolean;
-	lifecycle?: EndpointDescriptor["lifecycle"];
+	lifecycle?: TargetDescriptor["lifecycle"];
 	setOrchestrator: boolean;
 	setWorkerDefault: boolean;
 	contextWindow?: number;
@@ -286,7 +286,7 @@ function printRuntimeList(includeHidden: boolean): void {
 	}
 }
 
-function deriveEndpointId(runtimeId: string, existing: ReadonlyArray<EndpointDescriptor>): string {
+function deriveEndpointId(runtimeId: string, existing: ReadonlyArray<TargetDescriptor>): string {
 	const base = runtimeId;
 	const taken = new Set(existing.map((e) => e.id));
 	if (!taken.has(base)) return base;
@@ -353,7 +353,7 @@ function validateContextWindowOverride(
 	return true;
 }
 
-async function runtimeProbe(runtime: RuntimeDescriptor, endpoint: EndpointDescriptor): Promise<ProbeResult | null> {
+async function runtimeProbe(runtime: RuntimeDescriptor, endpoint: TargetDescriptor): Promise<ProbeResult | null> {
 	if (typeof runtime.probe !== "function") return null;
 	try {
 		return await runtime.probe(endpoint, buildProbeContext());
@@ -362,7 +362,7 @@ async function runtimeProbe(runtime: RuntimeDescriptor, endpoint: EndpointDescri
 	}
 }
 
-async function runtimeProbeModels(runtime: RuntimeDescriptor, endpoint: EndpointDescriptor): Promise<string[]> {
+async function runtimeProbeModels(runtime: RuntimeDescriptor, endpoint: TargetDescriptor): Promise<string[]> {
 	if (typeof runtime.probeModels !== "function") return [];
 	try {
 		return await runtime.probeModels(endpoint, buildProbeContext());
@@ -371,13 +371,13 @@ async function runtimeProbeModels(runtime: RuntimeDescriptor, endpoint: Endpoint
 	}
 }
 
-function applyEndpoint(settings: ClioSettings, descriptor: EndpointDescriptor): void {
-	const idx = settings.endpoints.findIndex((e) => e.id === descriptor.id);
-	if (idx >= 0) settings.endpoints[idx] = descriptor;
-	else settings.endpoints.push(descriptor);
+function applyEndpoint(settings: ClioSettings, descriptor: TargetDescriptor): void {
+	const idx = settings.targets.findIndex((e) => e.id === descriptor.id);
+	if (idx >= 0) settings.targets[idx] = descriptor;
+	else settings.targets.push(descriptor);
 }
 
-function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDescriptor, model?: string | null): void {
+function setOrchestratorPointer(settings: ClioSettings, descriptor: TargetDescriptor, model?: string | null): void {
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
@@ -389,17 +389,17 @@ function setOrchestratorPointer(settings: ClioSettings, descriptor: EndpointDesc
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
 	}
-	settings.orchestrator.endpoint = descriptor.id;
+	settings.orchestrator.target = descriptor.id;
 	settings.orchestrator.model = model ?? descriptor.defaultModel ?? null;
 }
 
-function setWorkerDefaultPointer(settings: ClioSettings, descriptor: EndpointDescriptor, model?: string | null): void {
-	settings.workers.default.endpoint = descriptor.id;
+function setWorkerDefaultPointer(settings: ClioSettings, descriptor: TargetDescriptor, model?: string | null): void {
+	settings.workers.default.target = descriptor.id;
 	settings.workers.default.model = model ?? descriptor.defaultModel ?? null;
 }
 
-function assertOrchestratorReplacementEligible(settings: ClioSettings, descriptor: EndpointDescriptor): void {
-	if (settings.orchestrator.endpoint !== descriptor.id) return;
+function assertOrchestratorReplacementEligible(settings: ClioSettings, descriptor: TargetDescriptor): void {
+	if (settings.orchestrator.target !== descriptor.id) return;
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
@@ -414,19 +414,19 @@ function assertOrchestratorReplacementEligible(settings: ClioSettings, descripto
 function setWorkerProfilePointer(
 	settings: ClioSettings,
 	name: string,
-	descriptor: EndpointDescriptor,
+	descriptor: TargetDescriptor,
 	model?: string | null,
 ): void {
 	const trimmed = name.trim();
 	if (trimmed.length === 0) throw new Error("fleet profile name must be non-empty");
 	settings.workers.profiles[trimmed] = {
-		endpoint: descriptor.id,
+		target: descriptor.id,
 		model: model ?? descriptor.defaultModel ?? null,
 		thinkingLevel: "off",
 	};
 }
 
-function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, probe: ProbeResult | null): void {
+function printSummary(settings: ClioSettings, descriptor: TargetDescriptor, probe: ProbeResult | null): void {
 	process.stdout.write(`\nsaved target ${descriptor.id} (runtime=${descriptor.runtime})\n`);
 	if (descriptor.url) process.stdout.write(`  url        ${descriptor.url}\n`);
 	if (descriptor.defaultModel) process.stdout.write(`  model      ${descriptor.defaultModel}\n`);
@@ -439,10 +439,10 @@ function printSummary(settings: ClioSettings, descriptor: EndpointDescriptor, pr
 			: `probe failed: ${probe.error ?? "unknown"}`;
 		process.stdout.write(`  ${line}\n`);
 	}
-	if (settings.orchestrator.endpoint === descriptor.id) process.stdout.write("  orchestrator target\n");
-	if (settings.workers.default.endpoint === descriptor.id) process.stdout.write("  fleet default\n");
+	if (settings.orchestrator.target === descriptor.id) process.stdout.write("  orchestrator target\n");
+	if (settings.workers.default.target === descriptor.id) process.stdout.write("  fleet default\n");
 	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
-		if (profile.endpoint === descriptor.id) process.stdout.write(`  fleet profile ${name}\n`);
+		if (profile.target === descriptor.id) process.stdout.write(`  fleet profile ${name}\n`);
 	}
 	process.stdout.write(`\nsettings written to ${settingsPath()}\n`);
 }
@@ -458,13 +458,13 @@ function buildDescriptor(
 		apiKeyRef?: string;
 		oauthProfile?: string;
 		gateway?: boolean;
-		lifecycle?: EndpointDescriptor["lifecycle"];
+		lifecycle?: TargetDescriptor["lifecycle"];
 		contextWindow?: number;
 		maxTokens?: number;
 		reasoning?: boolean;
 	},
-): EndpointDescriptor {
-	const descriptor: EndpointDescriptor = { id, runtime: runtime.id };
+): TargetDescriptor {
+	const descriptor: TargetDescriptor = { id, runtime: runtime.id };
 	if (parts.url) descriptor.url = parts.url;
 	const wireModels =
 		parts.wireModels?.filter((value, index, all) => value.trim().length > 0 && all.indexOf(value) === index) ?? [];
@@ -473,7 +473,7 @@ function buildDescriptor(
 		const firstWireModel = wireModels[0];
 		if (firstWireModel) descriptor.defaultModel = firstWireModel;
 	}
-	const auth: NonNullable<EndpointDescriptor["auth"]> = {};
+	const auth: NonNullable<TargetDescriptor["auth"]> = {};
 	if (parts.apiKeyEnv) auth.apiKeyEnvVar = parts.apiKeyEnv;
 	if (parts.apiKeyRef) auth.apiKeyRef = parts.apiKeyRef;
 	if (parts.oauthProfile) auth.oauthProfile = parts.oauthProfile;
@@ -481,7 +481,7 @@ function buildDescriptor(
 	if (wireModels.length > 0) descriptor.wireModels = wireModels;
 	if (parts.gateway) descriptor.gateway = true;
 	if (parts.lifecycle) descriptor.lifecycle = parts.lifecycle;
-	const caps: NonNullable<EndpointDescriptor["capabilities"]> = {};
+	const caps: NonNullable<TargetDescriptor["capabilities"]> = {};
 	if (parts.contextWindow !== undefined) caps.contextWindow = parts.contextWindow;
 	if (parts.maxTokens !== undefined) caps.maxTokens = parts.maxTokens;
 	if (parts.reasoning !== undefined) caps.reasoning = parts.reasoning;
@@ -537,8 +537,8 @@ async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime
 
 async function resolveSupportedWireModels(
 	runtime: RuntimeDescriptor,
-	endpoint: EndpointDescriptor,
-	existing?: EndpointDescriptor,
+	endpoint: TargetDescriptor,
+	existing?: TargetDescriptor,
 ): Promise<string[]> {
 	const known = listKnownModelsForRuntime(runtime.id);
 	if (known.length > 0) return known;
@@ -593,7 +593,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	const settings = readSettings();
 	const auth = openAuthStorage();
 	const support = buildProviderSupportEntry(runtime);
-	const existing = settings.endpoints.find((e) => e.id === args.id);
+	const existing = settings.targets.find((e) => e.id === args.id);
 	if (existing && existing.runtime !== runtime.id) {
 		printError(`target ${args.id} already exists with runtime ${existing.runtime}`);
 		return 2;
@@ -907,7 +907,7 @@ async function runInteractive(
 	const existingForRuntime = configuredEndpointsForRuntime(settings, initialRuntimeId);
 	const existing =
 		(defaults.id
-			? settings.endpoints.find((entry) => entry.id === defaults.id && entry.runtime === initialRuntimeId)
+			? settings.targets.find((entry) => entry.id === defaults.id && entry.runtime === initialRuntimeId)
 			: null) ??
 		existingForRuntime[0] ??
 		null;
@@ -922,7 +922,7 @@ async function runInteractive(
 	if (support.modelHints.length > 0) {
 		process.stdout.write(`Known models: ${support.modelHints.slice(0, 4).join(", ")}\n`);
 	}
-	const suggestedId = defaults.id ?? existing?.id ?? deriveEndpointId(runtime.id, settings.endpoints);
+	const suggestedId = defaults.id ?? existing?.id ?? deriveEndpointId(runtime.id, settings.targets);
 	const idInput = await ask(rl, "Target id", suggestedId);
 	if (idInput === null || idInput.length === 0) {
 		printError("target id is required");
@@ -1091,17 +1091,17 @@ async function runInteractive(
 		? false
 		: defaults.setOrchestrator
 			? true
-			: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.orchestrator.endpoint);
+			: await askYesNo(rl, "use as orchestrator (chat) target?", !settings.orchestrator.target);
 	const setWorkerDefault = defaults.setWorkerDefault
 		? true
-		: await askYesNo(rl, "use as fleet default?", !settings.workers.default.endpoint);
+		: await askYesNo(rl, "use as fleet default?", !settings.workers.default.target);
 	const orchestratorModel = setOrchestrator
 		? (defaults.orchestratorModel ??
 			(await askModelChoice(
 				rl,
 				"Orchestrator model",
 				wireModels,
-				settings.orchestrator.endpoint === endpointId ? (settings.orchestrator.model ?? model) : model,
+				settings.orchestrator.target === endpointId ? (settings.orchestrator.model ?? model) : model,
 			)))
 		: undefined;
 	if (orchestratorModel === null) return 0;
@@ -1111,7 +1111,7 @@ async function runInteractive(
 				rl,
 				"Fleet model",
 				wireModels,
-				settings.workers.default.endpoint === endpointId ? (settings.workers.default.model ?? model) : model,
+				settings.workers.default.target === endpointId ? (settings.workers.default.model ?? model) : model,
 			)))
 		: undefined;
 	if (workerModel === null) return 0;
@@ -1130,22 +1130,22 @@ async function runInteractive(
 }
 
 export function runTargetRemove(id: string): number {
-	if (!readSettings().endpoints.some((e) => e.id === id)) {
+	if (!readSettings().targets.some((e) => e.id === id)) {
 		printError(`no target with id ${id}`);
 		return 1;
 	}
 	updateSettings((settings) => {
-		settings.endpoints = settings.endpoints.filter((e) => e.id !== id);
-		if (settings.orchestrator.endpoint === id) {
-			settings.orchestrator.endpoint = null;
+		settings.targets = settings.targets.filter((e) => e.id !== id);
+		if (settings.orchestrator.target === id) {
+			settings.orchestrator.target = null;
 			settings.orchestrator.model = null;
 		}
-		if (settings.workers.default.endpoint === id) {
-			settings.workers.default.endpoint = null;
+		if (settings.workers.default.target === id) {
+			settings.workers.default.target = null;
 			settings.workers.default.model = null;
 		}
 		for (const [name, profile] of Object.entries(settings.workers.profiles)) {
-			if (profile.endpoint === id) delete settings.workers.profiles[name];
+			if (profile.target === id) delete settings.workers.profiles[name];
 		}
 		settings.scope = settings.scope.filter((entry) => {
 			const [head] = entry.split("/");
@@ -1162,22 +1162,22 @@ export function runTargetRename(oldId: string, newId: string): number {
 		return 2;
 	}
 	const current = readSettings();
-	if (current.endpoints.some((e) => e.id === newId)) {
+	if (current.targets.some((e) => e.id === newId)) {
 		printError(`target id already exists: ${newId}`);
 		return 2;
 	}
-	if (!current.endpoints.some((e) => e.id === oldId)) {
+	if (!current.targets.some((e) => e.id === oldId)) {
 		printError(`no target with id ${oldId}`);
 		return 1;
 	}
 	updateSettings((settings) => {
-		const target = settings.endpoints.find((e) => e.id === oldId);
+		const target = settings.targets.find((e) => e.id === oldId);
 		if (!target) return;
 		target.id = newId;
-		if (settings.orchestrator.endpoint === oldId) settings.orchestrator.endpoint = newId;
-		if (settings.workers.default.endpoint === oldId) settings.workers.default.endpoint = newId;
+		if (settings.orchestrator.target === oldId) settings.orchestrator.target = newId;
+		if (settings.workers.default.target === oldId) settings.workers.default.target = newId;
 		for (const profile of Object.values(settings.workers.profiles)) {
-			if (profile.endpoint === oldId) profile.endpoint = newId;
+			if (profile.target === oldId) profile.target = newId;
 		}
 		settings.scope = settings.scope.map((entry) => {
 			const [head, ...rest] = entry.split("/");

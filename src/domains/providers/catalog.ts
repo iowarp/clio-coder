@@ -2,8 +2,8 @@ import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/a
 import type { Api, KnownProvider, Model } from "../../engine/types.js";
 import { mergeCapabilities } from "./capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
-import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "./types/knowledge-base.js";
+import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const engineAi = createEngineAi();
 
@@ -66,7 +66,7 @@ export function catalogThinkingLevelsForRuntime(
 }
 
 export interface CatalogBackedSynthesisInput {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;

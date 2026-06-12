@@ -16,7 +16,6 @@ import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import { EMPTY_CAPABILITIES } from "./types/capability-flags.js";
-import type { EndpointDescriptor } from "./types/endpoint-descriptor.js";
 import {
 	FileKnowledgeBase,
 	type KnowledgeBase,
@@ -24,6 +23,7 @@ import {
 	type KnowledgeBaseHit,
 } from "./types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 
@@ -53,8 +53,8 @@ function emptyHealth(): EndpointHealth {
 
 function availabilityFor(
 	desc: RuntimeDescriptor,
-	endpoint: EndpointDescriptor,
-	authStatusFor: (endpoint: EndpointDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
+	endpoint: TargetDescriptor,
+	authStatusFor: (endpoint: TargetDescriptor, runtime: RuntimeDescriptor) => { available: boolean; reason: string },
 ): { available: boolean; reason: string } {
 	if (desc.auth === "api-key" || desc.auth === "oauth") {
 		return authStatusFor(endpoint, desc);
@@ -64,7 +64,7 @@ function availabilityFor(
 
 function capabilitiesFor(
 	desc: RuntimeDescriptor,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	probe: ProbeResult | null,
 	kb: KnowledgeBase,
 ): CapabilityFlags {
@@ -104,7 +104,7 @@ function discoveredModelsSource(
 	return "none";
 }
 
-function sameProbeIdentity(previous: EndpointDescriptor, next: EndpointDescriptor): boolean {
+function sameProbeIdentity(previous: TargetDescriptor, next: TargetDescriptor): boolean {
 	return (
 		previous.id === next.id &&
 		previous.runtime === next.runtime &&
@@ -132,7 +132,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	}
 
 	function authStatusFor(
-		endpoint: EndpointDescriptor,
+		endpoint: TargetDescriptor,
 		runtime: RuntimeDescriptor,
 	): { available: boolean; reason: string } {
 		const target = resolveAuthTarget(endpoint, runtime);
@@ -161,7 +161,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	}
 
 	function buildStatus(
-		endpoint: EndpointDescriptor,
+		endpoint: TargetDescriptor,
 		desc: RuntimeDescriptor | null,
 		probe: ProbeResult | null,
 		previous?: EndpointStatus,
@@ -233,7 +233,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return out;
 	}
 
-	async function probeEndpointInternal(endpoint: EndpointDescriptor, live: boolean): Promise<EndpointStatus> {
+	async function probeEndpointInternal(endpoint: TargetDescriptor, live: boolean): Promise<EndpointStatus> {
 		const previous = statuses.get(endpoint.id);
 		const desc = registry.get(endpoint.runtime);
 		if (!desc) {
@@ -267,7 +267,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		if (probeResult.ok && typeof desc.probeReasoning === "function") {
 			const settings = readConfig();
-			const orchestratorTarget = settings.orchestrator.endpoint === endpoint.id ? settings.orchestrator.model : null;
+			const orchestratorTarget = settings.orchestrator.target === endpoint.id ? settings.orchestrator.model : null;
 			const candidateModelId = orchestratorTarget ?? endpoint.defaultModel ?? null;
 			if (candidateModelId) {
 				try {
@@ -301,7 +301,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 
 	async function probeReasoningForModelInternal(endpointId: string, modelId: string): Promise<boolean | null> {
 		const settings = readConfig();
-		const endpoint = settings.endpoints.find((ep) => ep.id === endpointId);
+		const endpoint = settings.targets.find((ep) => ep.id === endpointId);
 		if (!endpoint) return null;
 		const desc = registry.get(endpoint.runtime);
 		if (!desc || typeof desc.probeReasoning !== "function") return null;
@@ -322,7 +322,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const settings = readConfig();
 		const next = new Map<string, EndpointStatus>();
 		reasoningCache.clear();
-		for (const endpoint of settings.endpoints) {
+		for (const endpoint of settings.targets) {
 			const desc = registry.get(endpoint.runtime);
 			const status = buildStatus(endpoint, desc, null, statuses.get(endpoint.id));
 			next.set(endpoint.id, status);
@@ -335,11 +335,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 
 	async function probeAllLive(): Promise<void> {
 		const settings = readConfig();
-		const activeIds = new Set(settings.endpoints.map((ep) => ep.id));
+		const activeIds = new Set(settings.targets.map((ep) => ep.id));
 		for (const id of Array.from(statuses.keys())) {
 			if (!activeIds.has(id)) statuses.delete(id);
 		}
-		await Promise.all(settings.endpoints.map((ep) => probeEndpointInternal(ep, true)));
+		await Promise.all(settings.targets.map((ep) => probeEndpointInternal(ep, true)));
 	}
 
 	const extension: DomainExtension = {
@@ -372,7 +372,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		},
 		getEndpoint(id) {
 			const settings = readConfig();
-			return settings.endpoints.find((ep) => ep.id === id) ?? null;
+			return settings.targets.find((ep) => ep.id === id) ?? null;
 		},
 		getRuntime(id) {
 			return registry.get(id);
@@ -381,13 +381,13 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		probeAllLive,
 		async probeEndpoint(id) {
 			const settings = readConfig();
-			const endpoint = settings.endpoints.find((ep) => ep.id === id);
+			const endpoint = settings.targets.find((ep) => ep.id === id);
 			if (!endpoint) return null;
 			return probeEndpointInternal(endpoint, true);
 		},
 		disconnectEndpoint(id) {
 			const settings = readConfig();
-			const endpoint = settings.endpoints.find((ep) => ep.id === id);
+			const endpoint = settings.targets.find((ep) => ep.id === id);
 			if (!endpoint) return null;
 			for (const key of Array.from(reasoningCache.keys())) {
 				if (key.startsWith(`${id}:`)) reasoningCache.delete(key);

@@ -74,8 +74,8 @@ function renderStatusRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
 
 function defaultAuthTarget(rows: ReadonlyArray<ConnectableProviderRow>): string | undefined {
 	const settings = readSettings();
-	const activeTarget = settings.orchestrator.endpoint
-		? settings.endpoints.find((entry) => entry.id === settings.orchestrator.endpoint)
+	const activeTarget = settings.orchestrator.target
+		? settings.targets.find((entry) => entry.id === settings.orchestrator.target)
 		: undefined;
 	if (activeTarget && rows.some((row) => row.entry.runtimeId === activeTarget.runtime)) {
 		return activeTarget.runtime;

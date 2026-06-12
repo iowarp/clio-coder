@@ -10,15 +10,15 @@ import { buildWelcomeDashboardLines, deriveWelcomeDashboardStats } from "../../s
 const mockSettings: ClioSettings = {
 	autonomy: "auto-edit",
 	orchestrator: {
-		endpoint: "mock-endpoint",
+		target: "mock-endpoint",
 		model: "gemini-3.5-flash",
 		thinkingLevel: "high",
 	},
 	scope: ["src/"],
-	endpoints: [],
+	targets: [],
 	workers: {
 		default: {
-			endpoint: "mock-endpoint",
+			target: "mock-endpoint",
 			model: "gemini-3.5-flash",
 		},
 		profiles: {},
@@ -29,13 +29,7 @@ const mockSettings: ClioSettings = {
 	compaction: {
 		auto: true,
 		excludeLastTurns: 3,
-		thresholds: {
-			warning: 0.7,
-			maskObservations: 0.8,
-			pruneObservations: 0.85,
-			maskDialogue: 0.9,
-			llmSummary: 0.95,
-		},
+		threshold: 0.8,
 	},
 	retry: {
 		enabled: true,

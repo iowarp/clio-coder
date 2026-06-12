@@ -26,7 +26,7 @@ import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { EndpointStatus, ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
-import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
+import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
@@ -93,20 +93,20 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 
 function stubContext(
 	options: {
-		endpoint?: EndpointDescriptor;
+		endpoint?: TargetDescriptor;
 		runtime?: RuntimeDescriptor;
 		recipes?: ReadonlyArray<AgentRecipe>;
 		status?: Partial<EndpointStatus>;
 	} = {},
 ): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	const endpoint: EndpointDescriptor = options.endpoint ?? {
+	const endpoint: TargetDescriptor = options.endpoint ?? {
 		id: "default",
 		runtime: "openai",
 		defaultModel: "gpt-4o",
 	};
-	settings.endpoints = [endpoint];
-	settings.workers.default.endpoint = endpoint.id;
+	settings.targets = [endpoint];
+	settings.workers.default.target = endpoint.id;
 	settings.workers.default.model = endpoint.defaultModel ?? "gpt-4o";
 
 	const runtime: RuntimeDescriptor = options.runtime ?? {
@@ -281,8 +281,8 @@ describe("contracts/dispatch", () => {
 		// The session view (what the running terminal shows in /settings) points
 		// the fleet default at a different model than the shared config snapshot.
 		const sessionView = structuredClone(DEFAULT_SETTINGS);
-		sessionView.endpoints = [{ id: "default", runtime: "openai", defaultModel: "gpt-4o" }];
-		sessionView.workers.default = { endpoint: "default", model: "session-model", thinkingLevel: "off" };
+		sessionView.targets = [{ id: "default", runtime: "openai", defaultModel: "gpt-4o" }];
+		sessionView.workers.default = { target: "default", model: "session-model", thinkingLevel: "off" };
 
 		const bundle = createDispatchBundle(context, {
 			getSettings: () => sessionView,
@@ -312,7 +312,7 @@ describe("contracts/dispatch", () => {
 	it("canonicalizes worker spec and receipt model ids against a live catalog", async () => {
 		const requested = "AgenticQwen-30B-A3B-i1-Q4_K_M";
 		const canonical = "AgenticQwen-30B-A3B-i1-Q4_K_M-262K";
-		const endpoint: EndpointDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: requested };
+		const endpoint: TargetDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: requested };
 		const runtime: RuntimeDescriptor = {
 			id: "llamacpp",
 			displayName: "llama.cpp",
@@ -358,7 +358,7 @@ describe("contracts/dispatch", () => {
 
 	it("dispatch serializes the resolved http runtime onto the worker spec", async () => {
 		const id = "http-worker";
-		const endpoint: EndpointDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };
+		const endpoint: TargetDescriptor = { id: `${id}-target`, runtime: id, defaultModel: "worker-model" };
 		const runtime: RuntimeDescriptor = {
 			id,
 			displayName: id,

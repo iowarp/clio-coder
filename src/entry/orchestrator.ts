@@ -6,7 +6,7 @@ import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
-import { listRecentModels, rememberRecentModel } from "../core/recent-models.js";
+import { rememberRecentModel } from "../core/recent-models.js";
 import {
 	applyRoutingPatch,
 	applySessionRouting,
@@ -41,7 +41,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import type { EndpointDescriptor, ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
+import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	applyModelCapabilityPatch,
 	isTargetEligibleRuntime,
@@ -167,11 +167,11 @@ function applyHeadlessSettingsOverlay(
 ): ClioSettings {
 	const next = structuredClone(settings);
 	if (!overrides) return next;
-	const previousEndpoint = next.orchestrator.endpoint;
+	const previousEndpoint = next.orchestrator.target;
 	if (overrides.target !== undefined) {
-		next.orchestrator.endpoint = overrides.target;
+		next.orchestrator.target = overrides.target;
 		if (overrides.model === undefined && (previousEndpoint !== overrides.target || !next.orchestrator.model)) {
-			const endpoint = next.endpoints.find((entry) => entry.id === overrides.target);
+			const endpoint = next.targets.find((entry) => entry.id === overrides.target);
 			if (endpoint) next.orchestrator.model = endpoint.defaultModel ?? null;
 		}
 	}
@@ -186,10 +186,7 @@ interface CompactionResolution {
 	apiKey?: string;
 }
 
-function resolveEndpoint(
-	providers: ProvidersContract,
-	endpointId: string | null | undefined,
-): EndpointDescriptor | null {
+function resolveEndpoint(providers: ProvidersContract, endpointId: string | null | undefined): TargetDescriptor | null {
 	if (!endpointId) return null;
 	return providers.getEndpoint(endpointId);
 }
@@ -203,7 +200,7 @@ export function advanceThinkingLevel(current: ThinkingLevel, available: Readonly
 }
 
 async function resolveApiKeyForEndpoint(
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	providers: ProvidersContract,
 ): Promise<string | undefined> {
 	const runtime = providers.getRuntime(endpoint.runtime);
@@ -215,7 +212,7 @@ async function resolveApiKeyForEndpoint(
 
 export function synthesizeOrchestratorModel(
 	providers: ProvidersContract,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	wireModelId: string,
 ): Model<never> | null {
 	const runtime = providers.getRuntime(endpoint.runtime);
@@ -246,7 +243,7 @@ async function resolveCompactionModel(
 	settings: ClioSettings,
 	providers: ProvidersContract,
 ): Promise<CompactionResolution | null> {
-	const endpointId = settings.orchestrator?.endpoint ?? null;
+	const endpointId = settings.orchestrator?.target ?? null;
 	const wireModelId = settings.orchestrator?.model ?? null;
 	if (!endpointId || !wireModelId) return null;
 	const endpoint = resolveEndpoint(providers, endpointId);
@@ -319,7 +316,7 @@ async function runCompactionFlow(
 	}
 	const resolved = await resolveCompactionModel(settings, providers);
 	if (!resolved) {
-		throw new Error("no model configured; set orchestrator.endpoint + orchestrator.model");
+		throw new Error("no model configured; set orchestrator.target + orchestrator.model");
 	}
 	const entries = readSessionEntriesForCompact(meta.id);
 	if (entries.length === 0) return null;
@@ -381,20 +378,20 @@ function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, res
 export function advanceScopedTarget(
 	settings: Readonly<ClioSettings>,
 	direction: "forward" | "backward",
-): { endpoint: string; model: string | null } | null {
+): { target: string; model: string | null } | null {
 	const scope = settings.scope ?? [];
 	if (scope.length === 0) return null;
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const filteredScope = scope.filter((entry) => {
 		const [endpointId] = entry.split("/");
-		const endpoint = settings.endpoints.find((e) => e.id === endpointId);
+		const endpoint = settings.targets.find((e) => e.id === endpointId);
 		if (!endpoint) return false;
 		const runtime = registry.get(endpoint.runtime);
 		return runtime !== null && isTargetEligibleRuntime(runtime);
 	});
 	if (filteredScope.length === 0) return null;
-	const activeEndpoint = settings.orchestrator.endpoint ?? "";
+	const activeEndpoint = settings.orchestrator.target ?? "";
 	const activeModel = settings.orchestrator.model ?? "";
 	const activeCombinedRef =
 		activeEndpoint.length > 0 && activeModel.length > 0 ? `${activeEndpoint}/${activeModel}` : "";
@@ -402,16 +399,16 @@ export function advanceScopedTarget(
 	const base = idx === -1 ? 0 : idx + (direction === "forward" ? 1 : filteredScope.length - 1);
 	const next = filteredScope[base % filteredScope.length];
 	if (!next) return null;
-	const [endpoint, ...modelParts] = next.split("/");
-	if (!endpoint) return null;
+	const [targetId, ...modelParts] = next.split("/");
+	if (!targetId) return null;
 	if (modelParts.length > 0) {
-		return { endpoint, model: modelParts.join("/") };
+		return { target: targetId, model: modelParts.join("/") };
 	}
-	if (activeEndpoint === endpoint) {
-		return { endpoint, model: activeModel || null };
+	if (activeEndpoint === targetId) {
+		return { target: targetId, model: activeModel || null };
 	}
-	const endpointDescriptor = settings.endpoints.find((entry) => entry.id === endpoint);
-	return { endpoint, model: endpointDescriptor?.defaultModel ?? null };
+	const descriptor = settings.targets.find((entry) => entry.id === targetId);
+	return { target: targetId, model: descriptor?.defaultModel ?? null };
 }
 
 export async function bootOrchestrator(options: BootOptions = {}): Promise<BootResult> {
@@ -488,7 +485,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			process.stderr.write("Clio Coder: --api-key supplied but providers domain unavailable; ignoring.\n");
 		} else {
 			const settingsNow = applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless);
-			const activeEndpointId = settingsNow.orchestrator?.endpoint;
+			const activeEndpointId = settingsNow.orchestrator?.target;
 			const endpoint = resolveEndpoint(providers, activeEndpointId);
 			const runtime = endpoint ? providers.getRuntime(endpoint.runtime) : null;
 			if (endpoint && runtime) {
@@ -613,16 +610,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless),
 	);
 	const getCurrentSettings = (): ClioSettings => {
-		const view = applySessionRouting(config?.get() ?? readSettings(), sessionRouting);
-		// Recents live in the data dir (core/recent-models.ts), not in
-		// settings.yaml, so an Alt+L pick in another session no longer churns
-		// the config watcher here. The overlay keeps state.recentModels readable
-		// for every existing consumer and migrates a legacy settings list once.
-		view.state.recentModels = listRecentModels({
-			migrateFrom: view.state.recentModels ?? [],
-			limit: view.modelSelector.recentLimit,
-		});
-		return view;
+		// Recents live in the data dir (core/recent-models.ts), never in
+		// settings.yaml; consumers that need them call listRecentModels
+		// directly, so an Alt+L pick in another session does not churn the
+		// config watcher here.
+		return applySessionRouting(config?.get() ?? readSettings(), sessionRouting);
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
 
@@ -689,7 +681,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const cycleScopedSession = (direction: "forward" | "backward"): void => {
 		const next = advanceScopedTarget(getCurrentSettings(), direction);
 		if (!next) return;
-		updateSessionRouting({ orchestrator: { endpoint: next.endpoint, model: next.model } });
+		updateSessionRouting({ orchestrator: { target: next.target, model: next.model } });
 	};
 
 	const readCurrentSessionEntries = (): ReadonlyArray<SessionEntry> => {
@@ -860,7 +852,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getWorkerDefault: () => {
 			const workerDefault = getCurrentSettings().workers.default;
 			const result: { endpoint?: string; model?: string } = {};
-			if (workerDefault.endpoint) result.endpoint = workerDefault.endpoint;
+			if (workerDefault.target) result.endpoint = workerDefault.target;
 			if (workerDefault.model) result.model = workerDefault.model;
 			return result;
 		},
@@ -922,7 +914,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const nextLevel =
 				resolveModelRuntimeCapabilitiesForProviders(
 					providers,
-					current.orchestrator.endpoint,
+					current.orchestrator.target,
 					current.orchestrator.model,
 					level,
 				)?.thinking.effectiveLevel ?? "off";
@@ -932,7 +924,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const current = getCurrentSettings();
 			const thinking = resolveModelRuntimeCapabilitiesForProviders(
 				providers,
-				current.orchestrator.endpoint,
+				current.orchestrator.target,
 				current.orchestrator.model,
 				current.orchestrator.thinkingLevel ?? "off",
 			)?.thinking;
@@ -946,7 +938,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onSelectModel: ({ endpoint, model }) => {
 			const registry = getRuntimeRegistry();
 			const settings = getCurrentSettings();
-			const target = settings.endpoints.find((e) => e.id === endpoint);
+			const target = settings.targets.find((e) => e.id === endpoint);
 			if (target) {
 				const runtime = registry.get(target.runtime);
 				if (!runtime) {
@@ -960,7 +952,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					);
 				}
 			}
-			updateSessionRouting({ orchestrator: { endpoint, model } });
+			updateSessionRouting({ orchestrator: { target: endpoint, model } });
 			rememberRecentModel(`${endpoint}/${model}`, getCurrentSettings().modelSelector.recentLimit);
 		},
 		onSetScope: (scope) => {

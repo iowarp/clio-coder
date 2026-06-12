@@ -1,10 +1,8 @@
-import { Value } from "typebox/value";
 import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings, updateSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
-import { SettingsSchema } from "./schema.js";
 import { type ConfigWatcher, startConfigWatcher } from "./watcher.js";
 
 type ChangeListener = (payload: ConfigChangePayload) => void;
@@ -17,14 +15,6 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		["nextTurn", new Set()],
 		["restartRequired", new Set()],
 	]);
-
-	function validate(candidate: ClioSettings): void {
-		if (Value.Check(SettingsSchema, candidate)) return;
-		const first = [...Value.Errors(SettingsSchema, candidate)][0];
-		throw new Error(
-			`settings.yaml failed schema validation at ${first?.instancePath || "(root)"}: ${first?.message ?? "unknown"}`,
-		);
-	}
 
 	function dispatch(kind: ChangeKind, payload: ConfigChangePayload): void {
 		const bus = context.bus;
@@ -48,7 +38,6 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		let next: ClioSettings;
 		try {
 			next = readSettings();
-			validate(next);
 		} catch (err) {
 			console.error("[clio:config] reload rejected:", err);
 			return;
@@ -65,7 +54,6 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 	const extension: DomainExtension = {
 		async start() {
 			snapshot = readSettings();
-			validate(snapshot);
 			watcher = startConfigWatcher(() => onWatcherFire());
 		},
 		async stop() {
@@ -86,7 +74,6 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
 			const normalized = updateSettings(mutate);
-			validate(normalized);
 			snapshot = normalized;
 			const diff = diffSettings(previous, normalized);
 			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });

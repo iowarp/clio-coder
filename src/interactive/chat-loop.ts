@@ -16,13 +16,13 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import {
 	applyModelCapabilityPatch,
-	type EndpointDescriptor,
 	firstRuntimeResolutionError,
 	type ProvidersContract,
 	type ResolvedRuntimeTarget,
 	type RuntimeDescriptor,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
+	type TargetDescriptor,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
@@ -227,7 +227,7 @@ export interface CreateChatLoopDeps {
 	/**
 	 * Whitelist of target ids that the chat-loop is allowed to drive. The
 	 * orchestrator composes this from `providers.list()` so an unknown
-	 * `settings.orchestrator.endpoint` surfaces a configuration error before
+	 * `settings.orchestrator.target` surfaces a configuration error before
 	 * the agent is constructed.
 	 */
 	knownEndpoints: () => ReadonlySet<string>;
@@ -306,7 +306,7 @@ export interface CreateChatLoopDeps {
 }
 
 interface ChatLoopTarget {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	runtime: RuntimeDescriptor;
 	wireModelId: string;
 	runtimeResolution: ResolvedRuntimeTarget;
@@ -588,7 +588,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!deps.session.current()) {
 			const settings = deps.getSettings();
 			const input: { cwd: string; endpoint?: string; model?: string } = { cwd: process.cwd() };
-			if (settings.orchestrator.endpoint) input.endpoint = settings.orchestrator.endpoint;
+			if (settings.orchestrator.target) input.endpoint = settings.orchestrator.target;
 			if (settings.orchestrator.model) input.model = settings.orchestrator.model;
 			deps.session.create(input);
 		}
@@ -870,7 +870,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
-		const endpointId = settings.orchestrator.endpoint?.trim();
+		const endpointId = settings.orchestrator.target?.trim();
 		const wireModelId = settings.orchestrator.model?.trim();
 		if (!endpointId || !wireModelId) return null;
 		const resolved = resolveRuntimeTarget(deps.providers, {
@@ -904,7 +904,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let lastEndpointProbe: { key: string; at: number } | null = null;
 	const ensureLiveCapabilitiesForSelectedModel = async (): Promise<void> => {
 		const settings = deps.getSettings();
-		const endpointId = settings.orchestrator.endpoint?.trim();
+		const endpointId = settings.orchestrator.target?.trim();
 		const wireModelId = settings.orchestrator.model?.trim();
 		if (!endpointId || !wireModelId) return;
 		const endpoint = deps.providers.getEndpoint(endpointId);
@@ -2092,7 +2092,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const compactionAuto = settings.compaction?.auto !== false;
 			if (!runtime) {
 				return buildContextLedger({
-					provider: settings.orchestrator?.endpoint ?? null,
+					provider: settings.orchestrator?.target ?? null,
 					model: settings.orchestrator?.model ?? null,
 					contextWindow: 0,
 					compactionThreshold,
@@ -2101,7 +2101,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			const effectiveWindow = runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 
-			const provider = runtime.endpointId ?? settings.orchestrator?.endpoint ?? null;
+			const provider = runtime.endpointId ?? settings.orchestrator?.target ?? null;
 			const model = runtime.wireModelId ?? settings.orchestrator?.model ?? null;
 
 			if (!currentContextSnapshot) {

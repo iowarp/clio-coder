@@ -19,8 +19,8 @@ import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolu
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
 import { synthesizeOpenAICompatModel } from "../../src/domains/providers/runtimes/protocol/openai-compat.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
-import type { EndpointDescriptor } from "../../src/domains/providers/types/endpoint-descriptor.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import {
 	parseWorkerSpec,
 	WORKER_RUNTIME_DESCRIPTOR_VERSION,
@@ -45,7 +45,7 @@ function fakeLiveStatus(
 	overrides: Partial<EndpointStatus> = {},
 ): EndpointStatus {
 	const runtime = fakeDescriptor("llamacpp");
-	const endpoint: EndpointDescriptor = {
+	const endpoint: TargetDescriptor = {
 		id: "mini",
 		runtime: runtime.id,
 		defaultModel: "AgenticQwen-30B-A3B-i1-Q4_K_M",
@@ -79,7 +79,7 @@ describe("contracts/providers", () => {
 	});
 
 	it("resolves runtime targets with default capabilities", () => {
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "my-endpoint",
 			runtime: "test-runtime",
 			defaultModel: "my-model",
@@ -120,7 +120,7 @@ describe("contracts/providers", () => {
 	});
 
 	it("uses live probe capabilities for the selected LM Studio model, not only the endpoint default", () => {
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "zbook",
 			runtime: "lmstudio-native",
 			defaultModel: "qwopus3.5-9b-coder",
@@ -225,7 +225,7 @@ describe("contracts/providers", () => {
 	});
 
 	it("produces diagnostics when target is missing or runtime is not registered", () => {
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "err-endpoint",
 			runtime: "missing-runtime",
 			defaultModel: "model",
@@ -254,7 +254,7 @@ describe("contracts/providers", () => {
 	});
 
 	it("evaluates auth status and fallback criteria", () => {
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "custom-auth",
 			runtime: "openai",
 			auth: { apiKeyEnvVar: "CUSTOM_KEY" },
@@ -280,7 +280,7 @@ describe("contracts/providers", () => {
 	});
 
 	it("synthesizes local/openai-compatible provider request shapes correctly", () => {
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "local-endpoint",
 			runtime: "openai-compat",
 			url: "http://localhost:1234/v1/",
@@ -308,7 +308,7 @@ describe("contracts/providers", () => {
 
 	it("treats a live model catalog as authoritative over stale configured names", () => {
 		const runtime = fakeDescriptor("llamacpp");
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "mini",
 			runtime: runtime.id,
 			defaultModel: "old-default",
@@ -385,7 +385,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 
 	it("rejects non-http runtime targets cleanly for orchestrator, print, and dispatch", () => {
 		const runtime = { ...fakeDescriptor("legacy-subprocess"), kind: "subprocess" } as unknown as RuntimeDescriptor;
-		const endpoint: EndpointDescriptor = { id: "legacy-target", runtime: "legacy-subprocess", defaultModel: "m" };
+		const endpoint: TargetDescriptor = { id: "legacy-target", runtime: "legacy-subprocess", defaultModel: "m" };
 		const mockProviders: ProvidersContract = {
 			list: () => [],
 			getEndpoint: (id: string) => (id === "legacy-target" ? endpoint : null),
@@ -405,7 +405,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 
 	it("accepts an http runtime as a dispatch worker target", () => {
 		const runtime = fakeDescriptor("http-worker", { auth: "api-key" });
-		const endpoint: EndpointDescriptor = {
+		const endpoint: TargetDescriptor = {
 			id: "http-worker-target",
 			runtime: "http-worker",
 			defaultModel: "worker-model",

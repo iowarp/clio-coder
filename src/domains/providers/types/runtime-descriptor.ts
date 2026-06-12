@@ -1,9 +1,9 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import type { CapabilityFlags } from "./capability-flags.js";
-import type { EndpointDescriptor } from "./endpoint-descriptor.js";
 import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, RerankResult } from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
+import type { TargetDescriptor } from "./target-descriptor.js";
 
 export type RuntimeKind = "http";
 export type RuntimeTier = "protocol" | "cloud" | "local-native";
@@ -109,8 +109,8 @@ export interface RuntimeDescriptor {
 	 * composite descriptor takes over the user-visible slot.
 	 */
 	hidden?: boolean;
-	probe?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
-	probeModels?(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<string[]>;
+	probe?(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
+	probeModels?(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<string[]>;
 	/**
 	 * Optional per-model reasoning capability probe. Protocol-compatible local
 	 * servers (LM Studio, llama.cpp, Ollama, ...) advertise an OpenAI or
@@ -120,10 +120,10 @@ export interface RuntimeDescriptor {
 	 * Result is cached per (endpoint, model) by the providers domain so
 	 * /thinking can surface the correct level set.
 	 */
-	probeReasoning?(endpoint: EndpointDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult>;
-	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;
-	complete?(endpoint: EndpointDescriptor, opts: CompleteOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
-	infill?(endpoint: EndpointDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
-	embed?(endpoint: EndpointDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult>;
-	rerank?(endpoint: EndpointDescriptor, query: string, documents: string[], ctx: ProbeContext): Promise<RerankResult>;
+	probeReasoning?(endpoint: TargetDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult>;
+	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;
+	complete?(endpoint: TargetDescriptor, opts: CompleteOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
+	infill?(endpoint: TargetDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
+	embed?(endpoint: TargetDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult>;
+	rerank?(endpoint: TargetDescriptor, query: string, documents: string[], ctx: ProbeContext): Promise<RerankResult>;
 }

@@ -2,10 +2,10 @@ import type { AnthropicMessagesCompat, Api, Model, OpenAICompletionsCompat } fro
 
 import { mergeCapabilities } from "../../capabilities.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import { extractLocalModelQuirks, type LocalModelQuirks } from "../../types/local-model-quirks.js";
 import type { RuntimeApiFamily } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 export type LocalModelLifecycle = "user-managed" | "clio-managed";
 
@@ -21,7 +21,7 @@ export interface ClioLocalModelMetadata {
 }
 
 export interface LocalSynthesisInput {
-	endpoint: EndpointDescriptor;
+	endpoint: TargetDescriptor;
 	wireModelId: string;
 	kb: KnowledgeBaseHit | null;
 	defaultCapabilities: CapabilityFlags;
@@ -30,7 +30,7 @@ export interface LocalSynthesisInput {
 	baseUrlForEndpoint: (endpointUrl: string) => string;
 }
 
-export function endpointLifecycle(endpoint: EndpointDescriptor): LocalModelLifecycle {
+export function endpointLifecycle(endpoint: TargetDescriptor): LocalModelLifecycle {
 	return endpoint.lifecycle ?? "user-managed";
 }
 
@@ -127,6 +127,6 @@ export function stripTrailingSlash(url: string): string {
 export const withV1 = (url: string): string => `${stripTrailingSlash(url)}/v1`;
 export const withAsIs = (url: string): string => stripTrailingSlash(url);
 
-export function endpointBase(endpoint: EndpointDescriptor): string | null {
+export function endpointBase(endpoint: TargetDescriptor): string | null {
 	return endpoint.url ? stripTrailingSlash(endpoint.url) : null;
 }

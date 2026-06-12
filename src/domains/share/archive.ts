@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, type Stats, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { type ClioSettings, readSettings, writeSettings } from "../../core/config.js";
+import { type ClioSettings, readSettings, settingsPath, updateSettings } from "../../core/config.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { readClioVersion } from "../../core/package-root.js";
 import {
@@ -594,26 +594,29 @@ export function planShareImport(filePath: string, options: ShareImportOptions = 
 	return publicImportPlan(prepareShareImport(filePath, options));
 }
 
-function mergeSettingsFragment(buffer: Buffer): SafeResourceWriteResult {
+function mergeSettingsFragment(buffer: Buffer): string {
 	const parsed = parseYaml(buffer.toString("utf8")) as unknown;
 	if (!isRecord(parsed)) throw new Error("settings fragment must be a YAML object");
-	const current = readSettings();
-	const next = structuredClone(current) as ClioSettings;
-	for (const key of [
-		"autonomy",
-		"scope",
-		"budget",
-		"theme",
-		"terminal",
-		"keybindings",
-		"compaction",
-		"retry",
-	] as const) {
-		if (key in parsed) {
-			(next as unknown as Record<string, unknown>)[key] = parsed[key];
+	// Single-writer rule: the merge goes through updateSettings (lock + strict
+	// re-validation), so an invalid fragment throws here instead of landing on
+	// disk. No backup sidecar: settings.yaml is machine-owned and versioned by
+	// the importer's own plan/diagnostics flow.
+	updateSettings((settings) => {
+		const next = settings as unknown as Record<string, unknown>;
+		for (const key of [
+			"autonomy",
+			"scope",
+			"budget",
+			"theme",
+			"terminal",
+			"keybindings",
+			"compaction",
+			"retry",
+		] as const) {
+			if (key in parsed) next[key] = parsed[key];
 		}
-	}
-	return writeSettings(next, { backup: true });
+	});
+	return settingsPath();
 }
 
 export function importShareArchive(filePath: string, options: ShareImportOptions = {}): ShareImportPlan {
@@ -635,7 +638,8 @@ export function importShareArchive(filePath: string, options: ShareImportOptions
 			if (!targetInfo || !action || action.action === "skip") continue;
 			failed = targetInfo.target;
 			if (targetInfo.entry.type === "settings") {
-				rememberWrite(mergeSettingsFragment(targetInfo.buffer));
+				const path = mergeSettingsFragment(targetInfo.buffer);
+				if (!written.includes(path)) written.push(path);
 				failed = undefined;
 				continue;
 			}

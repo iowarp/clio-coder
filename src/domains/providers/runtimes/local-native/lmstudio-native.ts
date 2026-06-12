@@ -4,10 +4,10 @@ import { LMStudioClient } from "@lmstudio/sdk";
 import { mergeCapabilities } from "../../capabilities.js";
 import { probeJson } from "../../probe/http.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../types/local-model-quirks.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { lmStudioQuietLogger } from "../common/lmstudio-logger.js";
 import { type ClioLocalModelMetadata, endpointLifecycle, stripTrailingSlash } from "../common/local-synth.js";
 
@@ -38,7 +38,7 @@ function toHttpUrl(url: string): string {
 	return `http://${trimmed}`;
 }
 
-function buildClient(endpoint: EndpointDescriptor, ctx: ProbeContext): LMStudioClient | { error: string } {
+function buildClient(endpoint: TargetDescriptor, ctx: ProbeContext): LMStudioClient | { error: string } {
 	if (!endpoint.url) return { error: "endpoint has no url" };
 	try {
 		const opts: ConstructorParameters<typeof LMStudioClient>[0] = {
@@ -208,7 +208,7 @@ function summaryFromV0(entry: LmStudioV0ModelEntry): LmStudioModelSummary | null
 
 function selectCapabilityEntry(
 	entries: ReadonlyArray<LmStudioModelSummary>,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 ): LmStudioModelSummary | null {
 	const configured = endpoint.defaultModel?.trim();
 	if (configured) {
@@ -245,7 +245,7 @@ function modelCapabilitiesFromSummaries(
 	return out;
 }
 
-function modelsProbeHeaders(endpoint: EndpointDescriptor, ctx: ProbeContext): Record<string, string> | undefined {
+function modelsProbeHeaders(endpoint: TargetDescriptor, ctx: ProbeContext): Record<string, string> | undefined {
 	const headers: Record<string, string> = { ...(endpoint.auth?.headers ?? {}) };
 	const envName = endpoint.auth?.apiKeyEnvVar;
 	if (envName && ctx.credentialsPresent.has(envName)) {
@@ -255,7 +255,7 @@ function modelsProbeHeaders(endpoint: EndpointDescriptor, ctx: ProbeContext): Re
 	return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
-async function probeApiModels(endpoint: EndpointDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+async function probeApiModels(endpoint: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 	if (!endpoint.url) return { ok: false, error: "endpoint has no url" };
 	const headers = modelsProbeHeaders(endpoint, ctx);
 	const v1 = await probeApiV1Models(endpoint, ctx, headers);
@@ -265,7 +265,7 @@ async function probeApiModels(endpoint: EndpointDescriptor, ctx: ProbeContext): 
 }
 
 async function probeApiV1Models(
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	ctx: ProbeContext,
 	headers: Record<string, string> | undefined,
 ): Promise<ProbeResult> {
@@ -285,7 +285,7 @@ async function probeApiV1Models(
 }
 
 async function probeApiV0Models(
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	ctx: ProbeContext,
 	headers: Record<string, string> | undefined,
 ): Promise<ProbeResult> {
@@ -306,7 +306,7 @@ async function probeApiV0Models(
 
 function probeResultFromSummaries(
 	entries: ReadonlyArray<LmStudioModelSummary>,
-	endpoint: EndpointDescriptor,
+	endpoint: TargetDescriptor,
 	latencyMs: number | undefined,
 ): ProbeResult {
 	const models = entries.map((entry) => entry.id);
@@ -375,7 +375,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			return [];
 		}
 	},
-	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		const caps = mergeCapabilities(
 			defaultCapabilities,
 			kb?.entry.capabilities ?? null,

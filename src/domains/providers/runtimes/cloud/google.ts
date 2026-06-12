@@ -1,7 +1,7 @@
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { EndpointDescriptor } from "../../types/endpoint-descriptor.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { synthesizeGoogleModel } from "../protocol/google.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -27,7 +27,7 @@ const googleRuntime: RuntimeDescriptor = {
 	auth: "api-key",
 	credentialsEnvVar: "GOOGLE_API_KEY",
 	defaultCapabilities,
-	synthesizeModel(endpoint: EndpointDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null) {
+	synthesizeModel(endpoint: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null) {
 		return synthesizeGoogleModel({
 			endpoint,
 			wireModelId,
