@@ -691,6 +691,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return null;
 	};
 
+	/**
+	 * Observe-only lifecycle point fired before each compaction stage, at the
+	 * existing CompactionBegin emit sites. Consumers record telemetry or state
+	 * ahead of context loss; returned effects are discarded by design.
+	 */
+	const fireCompactionHook = (
+		stage: "mask_observations" | "llm_summary",
+		trigger: CompactionTrigger,
+		tokensBefore?: number,
+	): void => {
+		if (!deps.middleware) return;
+		const sessionId = deps.session?.current()?.id;
+		const metadata: Record<string, MiddlewareMetadataValue> = { stage, trigger };
+		if (tokensBefore !== undefined) metadata.tokensBefore = tokensBefore;
+		runMiddlewareTurnHook({
+			hook: "on_compaction",
+			...(sessionId ? { sessionId } : {}),
+			...(activeUserTurnId ? { turnId: activeUserTurnId } : {}),
+			metadata,
+		});
+	};
+
 	const fireTurnEnd = (agentRuntime: AgentRuntime, messages: ReadonlyArray<AgentMessage>): void => {
 		if (!deps.middleware) return;
 		const message = lastAssistantMessage(messages);
@@ -1511,6 +1533,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
 				const masked = maskStaleObservations(deps.readSessionEntries() ?? [], cfg?.excludeLastTurns ?? 6);
 				if (masked.changed) {
+					fireCompactionHook("mask_observations", trigger, estimate.tokens);
 					deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 					deps.session.replaceEntries(masked.entries);
 					refreshAgentMessagesFromSession(agentRuntime);
@@ -1552,6 +1575,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 		}
 
+		fireCompactionHook("llm_summary", trigger);
 		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
 		let result: CompactResult | null = null;
 		const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;

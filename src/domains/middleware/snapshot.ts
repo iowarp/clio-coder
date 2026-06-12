@@ -2,6 +2,7 @@ import type { MiddlewareContract } from "./contract.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 import {
 	cloneMiddlewareEffect,
+	type MiddlewareDiagnosticSink,
 	type MiddlewareHookRegistration,
 	type MiddlewareRuleDefinition,
 	registrationFromRuleDefinition,
@@ -38,9 +39,14 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 	});
 	const registrations: MiddlewareHookRegistration[] = definitions.map(registrationFromRuleDefinition);
 	const registeredIds = new Set(registrations.map((registration) => registration.id));
+	let diagnosticSink: MiddlewareDiagnosticSink | undefined;
 	return {
 		runHook(input) {
-			return runMiddlewareRegistrations(input, registrations);
+			return runMiddlewareRegistrations(
+				input,
+				registrations,
+				diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {},
+			);
 		},
 		listRules() {
 			return definitions.map((definition) => cloneMiddlewareRule(definition.rule));
@@ -52,6 +58,9 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 			if (registeredIds.has(registration.id)) return;
 			registeredIds.add(registration.id);
 			registrations.push(registration);
+		},
+		setDiagnosticSink(sink) {
+			diagnosticSink = sink;
 		},
 	};
 }

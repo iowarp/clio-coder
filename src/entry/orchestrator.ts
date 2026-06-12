@@ -36,7 +36,7 @@ import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/ind
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
 import type { MiddlewareContract } from "../domains/middleware/index.js";
-import { MiddlewareDomainModule } from "../domains/middleware/index.js";
+import { MiddlewareDomainModule, writeMiddlewareDiagnosticToStderr } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -535,6 +535,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
+
+	// Q1 second half: hook diagnostics ride the typed bus. The domain loader
+	// constructed the bundle with the stderr default; swap in a sink that
+	// publishes middleware.hookFailed (the interactive warn notice consumes
+	// it) and keep stderr for non-interactive runs, which have no notice
+	// subscriber.
+	middleware.setDiagnosticSink((diagnostic) => {
+		bus.emit(BusChannels.MiddlewareHookFailed, {
+			kind: diagnostic.kind,
+			registrationId: diagnostic.registrationId,
+			hook: diagnostic.hook,
+			at: Date.now(),
+			...(diagnostic.kind === "hook_failed"
+				? { message: diagnostic.message }
+				: { elapsedMs: diagnostic.elapsedMs, budgetMs: diagnostic.budgetMs }),
+		});
+		if (!interactive) writeMiddlewareDiagnosticToStderr(diagnostic);
+	});
 
 	// Guard registrations on the middleware contract, in order: loop guard,
 	// protected artifacts (last among guards so it absorbs protect_path effects

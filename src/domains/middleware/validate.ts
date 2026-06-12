@@ -114,10 +114,6 @@ function readMiddlewareEffect(
 			return readBlockTool(value, path, issues);
 		case "protect_path":
 			return readProtectPath(value, path, issues);
-		case "require_validation":
-			return readRequireValidation(value, path, issues);
-		case "record_memory_candidate":
-			return readRecordMemoryCandidate(value, path, issues);
 	}
 }
 
@@ -180,29 +176,6 @@ function readProtectPath(
 	const reason = readRequiredString(record, `${path}.reason`, issues);
 	if (protectedPath === null || reason === null) return null;
 	return { kind: "protect_path", path: protectedPath, reason };
-}
-
-function readRequireValidation(
-	record: Record<string, unknown>,
-	path: string,
-	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
-	rejectUnexpectedFields(record, path, ["kind", "reason"], issues);
-	const reason = readRequiredString(record, `${path}.reason`, issues);
-	if (reason === null) return null;
-	return { kind: "require_validation", reason };
-}
-
-function readRecordMemoryCandidate(
-	record: Record<string, unknown>,
-	path: string,
-	issues: MiddlewareValidationIssue[],
-): MiddlewareEffect | null {
-	rejectUnexpectedFields(record, path, ["kind", "lesson", "evidenceRefs"], issues);
-	const lesson = readRequiredString(record, `${path}.lesson`, issues);
-	const evidenceRefs = readRequiredStringArray(record, `${path}.evidenceRefs`, issues);
-	if (lesson === null || evidenceRefs === null) return null;
-	return { kind: "record_memory_candidate", lesson, evidenceRefs };
 }
 
 function readRuleSource(
@@ -305,29 +278,6 @@ function readRequiredBoolean(
 		return null;
 	}
 	return value;
-}
-
-function readRequiredStringArray(
-	record: Record<string, unknown>,
-	path: string,
-	issues: MiddlewareValidationIssue[],
-): string[] | null {
-	const field = pathField(path);
-	const value = record[field];
-	if (!Array.isArray(value)) {
-		issues.push({ path, message: "expected string array" });
-		return null;
-	}
-	const strings: string[] = [];
-	for (let index = 0; index < value.length; index += 1) {
-		const item = value[index];
-		if (typeof item !== "string" || item.trim().length === 0) {
-			issues.push({ path: `${path}[${index}]`, message: "expected non-empty string" });
-			continue;
-		}
-		strings.push(item);
-	}
-	return strings;
 }
 
 function rejectUnexpectedFields(

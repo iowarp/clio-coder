@@ -1,4 +1,4 @@
-import type { MiddlewareHookRegistration } from "./runtime.js";
+import type { MiddlewareDiagnosticSink, MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareHookInput, MiddlewareHookResult, MiddlewareRule, MiddlewareSnapshot } from "./types.js";
 
 export interface MiddlewareContract {
@@ -13,4 +13,12 @@ export interface MiddlewareContract {
 	 * registration is dropped, first entry wins, matching bundle semantics.
 	 */
 	registerHook(registration: MiddlewareHookRegistration): void;
+	/**
+	 * Replace the diagnostic sink for hook isolation/budget reports. Exists
+	 * for the same reason as registerHook: the domain loader constructs the
+	 * bundle before the composition root can supply the bus-emitting sink
+	 * (Q1, `middleware.hookFailed`). Until called, diagnostics go to the
+	 * stderr writer default.
+	 */
+	setDiagnosticSink(sink: MiddlewareDiagnosticSink): void;
 }

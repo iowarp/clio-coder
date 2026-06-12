@@ -34,10 +34,14 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 	const ruleDefinitions = combineRuleDefinitions(listMiddlewareRuleDefinitions(), options.ruleDefinitions ?? []);
 	const registrations = combineRegistrations(ruleDefinitions, options.registrations ?? []);
 	const registeredIds = new Set(registrations.map((registration) => registration.id));
-	const runOptions = options.onDiagnostic !== undefined ? { onDiagnostic: options.onDiagnostic } : {};
+	let diagnosticSink = options.onDiagnostic;
 	const contract: MiddlewareContract = {
 		runHook(input) {
-			return runMiddlewareRegistrations(input, registrations, runOptions);
+			return runMiddlewareRegistrations(
+				input,
+				registrations,
+				diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {},
+			);
 		},
 		listRules() {
 			return ruleDefinitions.map((definition) => cloneMiddlewareRule(definition.rule));
@@ -49,6 +53,9 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 			if (registeredIds.has(registration.id)) return;
 			registeredIds.add(registration.id);
 			registrations.push(registration);
+		},
+		setDiagnosticSink(sink) {
+			diagnosticSink = sink;
 		},
 	};
 	return {
