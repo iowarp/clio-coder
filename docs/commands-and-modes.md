@@ -87,7 +87,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
 | `/quit` | - | `/quit` | Exit Clio Coder |
-| `/help` | - | `/help [command]` | Show slash-command help |
+| `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/context-init` | - | `/context-init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]` | Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff |
 | `/context-clear` | - | `/context-clear [--all] [--confirm] [--confirm-all]` | Clear accumulated project context artifacts |
 | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open interactive skill selector or invoke a skill |
@@ -114,7 +114,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/tree` | - | `/tree` | Open session tree navigator |
 | `/fork` | - | `/fork` | Fork from an assistant turn |
 | `/compact` | - | `/compact [instructions]` | Compact earlier context |
-| `/hotkeys` | - | `/hotkeys` | Show keyboard and command reference |
+
 
 ## Keybindings
 
@@ -273,6 +273,17 @@ Diagnostic writes in the transcript use the themed notice channel instead of raw
 | `success` | `✓` | `success` | Operation completed successfully |
 | `warn` | `!` | `warning` | Non-fatal issue or precaution |
 | `error` | `✗` | `error` | Fatal issue or operation failure |
+
+### ListOverlay Behavior
+The `ListOverlay` component provides a reusable kit for filterable, grouped, and selectable lists with an optional detail pane.
+
+Navigation keys include the up and down arrow keys, as well as the 'j' and 'k' keys when the filter input is not focused. These keys wrap selection around the ends of the list.
+
+The Tab key, or the Enter key when no primary action is defined, toggles the detail pane below the list.
+
+For filtering, typing in the input row dynamically filters items using a fuzzy search that matches both the item label and the group name. Group headers that have no matching items are hidden. The Escape key clears a non-empty filter, and pressing it again closes or cancels the overlay.
+
+The detail pane displays structured descriptions, usage, or state metadata using the Markdown component with the Clio markdown theme.
 
 ## Troubleshooting
 

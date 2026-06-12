@@ -23,7 +23,7 @@ import { matchFromSpec, usageLine } from "./slash-spec.js";
 
 export type SlashCommand =
 	| { kind: "quit" }
-	| { kind: "help" }
+	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
 	| { kind: "skills"; query?: string }
@@ -56,7 +56,6 @@ export type SlashCommand =
 	| { kind: "tree" }
 	| { kind: "fork" }
 	| { kind: "compact"; instructions: string | undefined }
-	| { kind: "hotkeys" }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -242,7 +241,11 @@ export interface SlashCommandContext {
 	startNewSession: () => void;
 	openTree: () => void;
 	openMessagePicker: () => void;
-	openHotkeys: () => void;
+	openHelp: (query?: string) => void;
+	openAgents: () => void;
+	openPrompts: () => void;
+	openExtensions: () => void;
+	setEditorText?: (text: string) => void;
 	/**
 	 * Run compaction for the current session. Handler resolves the target
 	 * model, reads session entries, calls session/compaction/compact, and
@@ -308,20 +311,16 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "help",
-		description: "Show slash-command help",
+		description: "Open the interactive help center showing commands and keys",
 		kinds: ["help"],
 		args: {
-			positionals: [{ name: "command", required: false, rest: true }],
+			positionals: [{ name: "query", required: false, rest: true }],
 		},
-		fromArgs() {
-			return { kind: "help" };
+		fromArgs(parsed) {
+			return { kind: "help", ...(parsed.rest ? { query: parsed.rest } : {}) };
 		},
-		handle(_command, ctx) {
-			const rows = commandReference().map((ref) => {
-				return `  ${ref.usage.padEnd(28)} ${ref.description}`;
-			});
-			// v023-M03
-			ctx.io.stdout(`\ncommands:\n${rows.join("\n")}\n\nRun /hotkeys for the full keyboard + slash-command reference.\n`);
+		handle(command, ctx) {
+			ctx.openHelp(command.kind === "help" ? command.query : undefined);
 		},
 	},
 	{
@@ -461,22 +460,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: {},
 		fromArgs: fromArgsOrUnknown({ kind: "prompts" }),
 		handle(_command, ctx) {
-			const list = ctx.listPrompts();
-			if (list.items.length === 0) {
-				// v023-M04
-				ctx.io.stdout("\nprompt templates: none\n");
-				return;
-			}
-			const rows = list.items.map((template) => {
-				const usage = `/${template.name}${template.argumentHint ? ` ${template.argumentHint}` : ""}`;
-				return `  ${usage.padEnd(28)} ${template.description}`;
-			});
-			const diagnostics =
-				list.diagnostics.length > 0
-					? `\n${list.diagnostics.length} prompt-template diagnostic(s) while loading resources.\n`
-					: "\n";
-			// v023-M04
-			ctx.io.stdout(`\nprompt templates:\n${rows.join("\n")}\n${diagnostics}`);
+			ctx.openPrompts();
 		},
 	},
 	{
@@ -486,22 +470,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: {},
 		fromArgs: fromArgsOrUnknown({ kind: "extensions" }),
 		handle(_command, ctx) {
-			const items = ctx.listExtensions?.() ?? [];
-			if (items.length === 0) {
-				// v023-M04
-				ctx.io.stdout("\nextensions: none\n");
-				return;
-			}
-			const rows = items.map((extension) => {
-				const state = !extension.enabled
-					? "disabled"
-					: extension.effective
-						? "active"
-						: `shadowed:${extension.overriddenBy ?? "higher"}`;
-				return `  ${extension.id.padEnd(22)} ${extension.scope.padEnd(7)} ${state.padEnd(15)} ${extension.version.padEnd(10)} ${extension.description}`;
-			});
-			// v023-M04
-			ctx.io.stdout(`\nextensions:\n${rows.join("\n")}\n`);
+			ctx.openExtensions?.();
 		},
 	},
 	{
@@ -701,34 +670,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: {},
 		fromArgs: fromArgsOrUnknown({ kind: "agents" }),
 		handle(_command, ctx) {
-			const sections: string[] = [];
-			const clioAgents = ctx.listAgents();
-			if (clioAgents.length > 0) {
-				const rows = clioAgents.map((agent) => {
-					const skills = agent.skills.length > 0 ? ` skills=${agent.skills.join(",")}` : "";
-					return `  ${agent.id.padEnd(16)} ${agent.audience.padEnd(6)} ${agent.category.padEnd(10)} ${agent.capabilityClass.padEnd(14)} ${agent.description}${skills}`;
-				});
-				sections.push(`Clio fleet agents:\n${rows.join("\n")}`);
-			} else {
-				sections.push("Clio fleet agents: none");
-			}
-			const delegationAgents = ctx.listDelegationAgents();
-			if (delegationAgents.length > 0) {
-				const rows = delegationAgents.map((agent) => {
-					const labels =
-						agent.labels && Object.keys(agent.labels).length > 0
-							? ` labels=${Object.entries(agent.labels)
-									.map(([key, value]) => `${key}:${value}`)
-									.join(",")}`
-							: "";
-					return `  ${agent.id.padEnd(18)} ${agent.command} ${agent.args.join(" ")} governance=${agent.toolGovernance ?? "clio-policy"}${labels}`;
-				});
-				sections.push(`ACP delegation agents:\n${rows.join("\n")}`);
-			} else {
-				sections.push("ACP delegation agents: none configured");
-			}
-			// v023-M04
-			ctx.io.stdout(`\n${sections.join("\n\n")}\n`);
+			ctx.openAgents();
 		},
 	},
 	{
@@ -959,16 +901,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind !== "compact") return;
 			ctx.runCompact(command.instructions);
-		},
-	},
-	{
-		name: "hotkeys",
-		description: "Show keyboard and command reference",
-		kinds: ["hotkeys"],
-		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "hotkeys" }),
-		handle(_command, ctx) {
-			ctx.openHotkeys();
 		},
 	},
 ];
