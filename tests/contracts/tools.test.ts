@@ -483,8 +483,12 @@ describe("contracts/tools result shaping and truncation", () => {
 		writeFileSync(first, `${"a".repeat(100)}\n`.repeat(420), "utf8");
 		writeFileSync(second, `${"b".repeat(100)}\n`.repeat(420), "utf8");
 
+		// Size the turn budget above the per-call cap so the first read takes a
+		// full per-call slice and the second read is the one bound by the
+		// aggregate per-turn budget.
+		const turnBudget = 20_480;
 		const previousBudget = process.env[READ_TURN_OBSERVATION_BUDGET_ENV];
-		process.env[READ_TURN_OBSERVATION_BUDGET_ENV] = "8192";
+		process.env[READ_TURN_OBSERVATION_BUDGET_ENV] = String(turnBudget);
 		try {
 			const options = { sessionId: "s-read-budget", turnId: `turn-${Date.now()}` };
 			const r1 = await readTool.run({ path: first }, options);
@@ -494,7 +498,7 @@ describe("contracts/tools result shaping and truncation", () => {
 			strictEqual(r2.kind, "ok");
 			if (r1.kind === "ok" && r2.kind === "ok") {
 				ok(Buffer.byteLength(r1.output, "utf8") > 4_000, "first read should use most of the per-call cap");
-				ok(Buffer.byteLength(r1.output + r2.output, "utf8") < 8_192 + 4_000);
+				ok(Buffer.byteLength(r1.output + r2.output, "utf8") < turnBudget + 4_000);
 				ok(r2.output.includes("Per-turn read observation budget"));
 				const budget = r2.details?.observationBudget as { limited?: unknown } | undefined;
 				strictEqual(budget?.limited, true);

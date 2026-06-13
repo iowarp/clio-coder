@@ -1,9 +1,12 @@
 // Per-observation source cap. One tool result must stay proportional to the
-// question asked: ~6k chars ≈ 1.5k tokens, which a local backend prefills in
-// seconds. Truncated output always says how to continue (offset/limit or a
-// narrower query), so bigger requests cost extra calls, not a blown context.
+// question asked: ~16k chars ≈ 4k tokens, enough to read a typical source file
+// or doc section in one call while a local backend still prefills it quickly.
+// Truncated output always says how to continue (offset/limit or a narrower
+// query), so larger requests cost extra calls, not a blown context. The
+// per-turn observation budget (see read.ts) bounds how much these calls add up
+// to within a single turn.
 export const DEFAULT_MAX_LINES = 2000;
-export const DEFAULT_MAX_BYTES = 6 * 1024;
+export const DEFAULT_MAX_BYTES = 16 * 1024;
 export const GREP_MAX_LINE_LENGTH = 500;
 
 export interface TruncationResult {

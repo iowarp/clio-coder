@@ -3,7 +3,19 @@ import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../do
 
 const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
-export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = 2048;
+
+/**
+ * Output ceiling applied to a llama.cpp tool-bearing turn when the caller did
+ * not request an explicit limit. It bounds a genuinely runaway local
+ * generation without muzzling real work: a single tool call that writes a
+ * sizable file (a full HTML page, a multi-function source module) needs far
+ * more than a few thousand tokens of argument, and the tool-call argument
+ * counts against this same response budget. Narration loops where a local
+ * model keeps saying it will call a tool without emitting one are caught
+ * separately by assessToolProseLoop, so this number only has to be large
+ * enough to let legitimate large outputs through.
+ */
+export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = 16384;
 
 /**
  * Tokens a preflight context check should hold back for the response: the
