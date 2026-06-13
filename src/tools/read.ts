@@ -6,7 +6,7 @@ import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
-export const DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES = 64 * 1024;
+export const DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES = 128 * 1024;
 export const READ_TURN_OBSERVATION_BUDGET_ENV = "CLIO_READ_TURN_OBSERVATION_BUDGET_BYTES";
 
 const MIN_READ_BUDGET_SLICE_BYTES = 1024;
