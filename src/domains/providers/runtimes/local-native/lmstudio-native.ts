@@ -6,7 +6,7 @@ import { probeJson } from "../../probe/http.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../types/local-model-quirks.js";
-import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { ProbeContext, ProbeModelStatus, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 import { lmStudioQuietLogger } from "../common/lmstudio-logger.js";
 import { type ClioLocalModelMetadata, stripTrailingSlash, targetLifecycle } from "../common/local-synth.js";
@@ -92,6 +92,7 @@ interface LmStudioV0ModelsResponse {
 
 interface LmStudioV0ModelEntry {
 	id?: unknown;
+	state?: unknown;
 	loaded_context_length?: unknown;
 	max_context_length?: unknown;
 	type?: unknown;
@@ -112,6 +113,7 @@ interface LmStudioV1ModelEntry {
 
 interface LmStudioModelSummary {
 	id: string;
+	loaded?: boolean;
 	loadedContextLength?: number;
 	maxContextLength?: number;
 	vision?: boolean;
@@ -179,6 +181,7 @@ function v1Reasoning(entry: LmStudioV1ModelEntry): boolean | undefined {
 function summaryFromV1(entry: LmStudioV1ModelEntry): LmStudioModelSummary | null {
 	if (typeof entry.key !== "string" || entry.key.trim().length === 0) return null;
 	const summary: LmStudioModelSummary = { id: entry.key };
+	if (Array.isArray(entry.loaded_instances)) summary.loaded = entry.loaded_instances.length > 0;
 	const loadedContextLength = firstLoadedContextFromV1(entry);
 	if (loadedContextLength !== undefined) summary.loadedContextLength = loadedContextLength;
 	const maxContextLength = positiveNumber(entry.max_context_length);
@@ -196,6 +199,8 @@ function summaryFromV0(entry: LmStudioV0ModelEntry): LmStudioModelSummary | null
 	if (typeof entry.id !== "string" || entry.id.trim().length === 0) return null;
 	const summary: LmStudioModelSummary = { id: entry.id };
 	const loadedContextLength = positiveNumber(entry.loaded_context_length);
+	if (typeof entry.state === "string") summary.loaded = entry.state === "loaded";
+	else if (loadedContextLength !== undefined) summary.loaded = true;
 	if (loadedContextLength !== undefined) summary.loadedContextLength = loadedContextLength;
 	const maxContextLength = positiveNumber(entry.max_context_length);
 	if (maxContextLength !== undefined) summary.maxContextLength = maxContextLength;
@@ -243,6 +248,17 @@ function modelCapabilitiesFromSummaries(
 		out[entry.id] = caps;
 	}
 	return out;
+}
+
+function modelStatesFromSummaries(
+	entries: ReadonlyArray<LmStudioModelSummary>,
+): Record<string, ProbeModelStatus> | undefined {
+	const out: Record<string, ProbeModelStatus> = {};
+	for (const entry of entries) {
+		if (entry.loaded === undefined) continue;
+		out[entry.id] = { state: entry.loaded ? "loaded" : "unloaded" };
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function modelsProbeHeaders(target: TargetDescriptor, ctx: ProbeContext): Record<string, string> | undefined {
@@ -313,8 +329,10 @@ function probeResultFromSummaries(
 	const capabilityEntry = selectCapabilityEntry(entries, target);
 	const discoveredCapabilities = capabilitiesFromModelEntry(capabilityEntry);
 	const modelCapabilities = modelCapabilitiesFromSummaries(entries);
+	const modelStates = modelStatesFromSummaries(entries);
 	const out: ProbeResult = { ok: true, models };
 	if (typeof latencyMs === "number") out.latencyMs = latencyMs;
+	if (modelStates) out.modelStates = modelStates;
 	if (Object.keys(modelCapabilities).length > 0) out.modelCapabilities = modelCapabilities;
 	if (discoveredCapabilities) {
 		out.discoveredCapabilities = discoveredCapabilities;
@@ -345,6 +363,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			const result: ProbeResult = { ok: true, latencyMs, serverVersion: version.version };
 			if (apiModels.ok) {
 				if (apiModels.models) result.models = apiModels.models;
+				if (apiModels.modelStates) result.modelStates = apiModels.modelStates;
 				if (apiModels.discoveredCapabilities) result.discoveredCapabilities = apiModels.discoveredCapabilities;
 				if (apiModels.modelCapabilities) result.modelCapabilities = apiModels.modelCapabilities;
 				if (apiModels.capabilityModelId) result.capabilityModelId = apiModels.capabilityModelId;

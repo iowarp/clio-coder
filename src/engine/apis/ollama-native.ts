@@ -34,6 +34,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { calculateEngineCost } from "../ai.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
+import type { ResidentModelInfo, ResidentModelManager } from "./resident-models.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
@@ -200,6 +201,10 @@ function buildRequest(
 export interface EvictResidentEntry {
 	readonly model: string;
 	readonly name: string;
+	/** GPU-resident bytes, when Ollama reports it on `/api/ps`. */
+	readonly size_vram?: number;
+	/** Total resident bytes (GPU + host), when reported. */
+	readonly size?: number;
 }
 
 export interface EvictResidentResponse {
@@ -218,34 +223,36 @@ export interface OllamaEvictClient {
 	generate(req: EvictGenerateRequest): Promise<unknown>;
 }
 
-/**
- * Eviction sweep for an Ollama server: queries `/api/ps` for all currently
- * resident models and fires `keep_alive: 0` against any that are not the
- * keep target. Used by chat-loop on hot-swap so the prior pinned model
- * releases VRAM instead of lingering forever (`-1` keep_alive).
- */
-export async function evictOtherOllamaModels(
-	baseUrl: string,
-	keepModelId: string,
-	headers?: Record<string, string>,
-	client?: OllamaEvictClient,
-): Promise<void> {
-	const evictClient: OllamaEvictClient = client ?? new Ollama({ host: baseUrl, ...(headers ? { headers } : {}) });
-	let resident: EvictResidentResponse;
-	try {
-		resident = await evictClient.ps();
-	} catch {
-		return;
-	}
-	const stale = resident.models.filter((entry) => entry.model !== keepModelId && entry.name !== keepModelId);
-	await Promise.all(
-		stale.map((entry) =>
-			evictClient
-				.generate({ model: entry.model || entry.name, prompt: "", keep_alive: 0, stream: false })
-				.catch(() => undefined),
-		),
-	);
+function ollamaEvictClient(baseUrl: string, headers?: Record<string, string>): OllamaEvictClient {
+	return new Ollama({ host: baseUrl, ...(headers ? { headers } : {}) });
 }
+
+/**
+ * Map an Ollama `/api/ps` response to the runtime-agnostic resident shape,
+ * preserving the GPU/total footprint when the server reports it.
+ */
+export async function listResidentOllamaModels(client: OllamaEvictClient): Promise<ResidentModelInfo[]> {
+	const resident = await client.ps();
+	return resident.models.map((entry) => {
+		const info: ResidentModelInfo = { modelId: entry.model || entry.name };
+		if (typeof entry.size_vram === "number") info.sizeVramBytes = entry.size_vram;
+		if (typeof entry.size === "number") info.sizeBytes = entry.size;
+		return info;
+	});
+}
+
+/**
+ * Resident-model lifecycle for Ollama. Ollama pins the active model with
+ * `keep_alive: -1`, so eviction fires `keep_alive: 0` against a model to let
+ * its weights release. Wired into the shared resident abstraction so chat-loop
+ * never branches on the runtime id.
+ */
+export const ollamaResidentManager: ResidentModelManager = {
+	listResident: (baseUrl, headers) => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)),
+	async unload(baseUrl, modelId, headers): Promise<void> {
+		await ollamaEvictClient(baseUrl, headers).generate({ model: modelId, prompt: "", keep_alive: 0, stream: false });
+	},
+};
 
 function mapStopReason(reason: string | undefined, hadToolCall: boolean): AssistantMessage["stopReason"] {
 	if (hadToolCall) return "toolUse";
