@@ -51,6 +51,14 @@ export type ProbeModelLoadState = "loaded" | "loading" | "unloaded" | "failed" |
 export interface ProbeModelStatus {
 	state: ProbeModelLoadState;
 	detail?: string;
+	/**
+	 * Resident footprint reported by the runtime when a model is loaded. Ollama
+	 * exposes both via `/api/ps` (`size_vram` is the GPU-resident portion,
+	 * `size` the total). Captured here so the picker and any future VRAM-fit
+	 * hinting have a real number to work with instead of re-probing.
+	 */
+	sizeVramBytes?: number;
+	sizeBytes?: number;
 }
 
 export interface ProbeResult {
