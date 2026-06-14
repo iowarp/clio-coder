@@ -1,13 +1,11 @@
 /**
  * Unified loop guard, packaged as a middleware hook registration.
  *
- * Replaces the former pair of guards (interactive-loop-guard.ts at the
- * registry's `loopGuard` dep, and createWorkerLoopGuard at pi-agent-core's
- * beforeToolCall): both orchestrator and worker registries now register this
- * single module on `before_tool`, so there is exactly one observation seam
- * and the double-count hazard between the two former seams is gone
- * structurally. The registry feeds it every tool-call attempt, including
- * safety-blocked ones, via `metadata.callFingerprint`.
+ * Both the orchestrator and worker registries register this single module on
+ * `before_tool`, so there is exactly one observation seam and no double-count
+ * hazard from separate interactive and worker guards. The registry feeds it
+ * every tool-call attempt, including safety-blocked ones, via
+ * `metadata.callFingerprint`.
  *
  * Parameterization covers both deployments: the orchestrator passes a bus
  * (LoopBlocked visibility) and the per-turn block budget; workers pass the
