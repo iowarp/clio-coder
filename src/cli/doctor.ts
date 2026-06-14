@@ -3,9 +3,11 @@ import { printError } from "./shared.js";
 
 const HELP = `clio doctor [--fix] [--json]
 
-Diagnose Clio Coder state without creating files. Use --fix to repair structure only:
-missing directories, missing template files, and credential permissions. --fix never
-rewrites an existing settings.yaml, valid or not.
+Diagnose Clio Coder state without creating files. Use --fix to repair structure:
+missing directories, missing template files, and credential permissions. --fix also
+repairs the known legacy keys older Clio versions wrote into settings.yaml (renamed
+and removed keys), preserving your targets and other configuration; a settings.yaml
+with none of those keys is never rewritten.
 Pass --json to emit a machine-readable report on stdout.
 `;
 
