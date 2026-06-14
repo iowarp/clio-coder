@@ -303,7 +303,43 @@ describe("contracts/providers", () => {
 		ok(model.compat);
 	});
 
-	it("keeps configured models selectable alongside a live catalog, labeled by source", () => {
+	it("keeps configured and default model candidates until a live catalog exists", () => {
+		const runtime = fakeDescriptor("llamacpp");
+		const target: TargetDescriptor = {
+			id: "mini",
+			runtime: runtime.id,
+			defaultModel: "old-default",
+			wireModels: ["old-curated"],
+		};
+		const status: TargetStatus = {
+			target,
+			runtime,
+			available: true,
+			reason: "ready",
+			health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+			capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			discoveredModels: [],
+			discoveredModelsSource: "none",
+		};
+		const providers: ProvidersContract = {
+			list: () => [status],
+			getTarget: (id: string) => (id === target.id ? target : null),
+			getRuntime: (id: string) => (id === runtime.id ? runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		deepStrictEqual(modelCandidatesForStatus(status), [
+			{ id: "old-curated", source: "configured" },
+			{ id: "old-default", source: "default" },
+		]);
+		deepStrictEqual(resolveModelReference("old-default", providers).ref, {
+			target: "mini",
+			model: "old-default",
+		});
+	});
+
+	it("treats a returned live catalog as authoritative for model selection and resolution", () => {
 		const runtime = fakeDescriptor("llamacpp");
 		const target: TargetDescriptor = {
 			id: "mini",
@@ -330,18 +366,9 @@ describe("contracts/providers", () => {
 			knowledgeBase: null,
 		} as never;
 
-		// Live models are authoritative for what is loaded, but a configured model
-		// the live catalog does not currently list stays selectable with its
-		// configured/default source rather than disappearing.
-		deepStrictEqual(modelCandidatesForStatus(status), [
-			{ id: "old-curated", source: "configured" },
-			{ id: "old-default", source: "default" },
-			{ id: "new-live-model", source: "live", loadState: "loaded" },
-		]);
-		deepStrictEqual(resolveModelReference("old-default", providers).ref, {
-			target: "mini",
-			model: "old-default",
-		});
+		deepStrictEqual(modelCandidatesForStatus(status), [{ id: "new-live-model", source: "live", loadState: "loaded" }]);
+		strictEqual(resolveModelReference("old-default", providers).ref, null);
+		strictEqual(resolveModelReference("old-curated", providers).ref, null);
 		deepStrictEqual(resolveModelReference("new-live", providers).ref, {
 			target: "mini",
 			model: "new-live-model",

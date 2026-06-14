@@ -36,12 +36,8 @@ export function hasLiveModelCatalog(status: TargetStatus): boolean {
 /**
  * Enumerate selectable wire model ids for a target. Before a live catalog is
  * known, Clio keeps useful configured/default/catalog hints. Once the target
- * returns a live catalog, live models are labeled `live`; configured and
- * default models the live catalog does not currently list stay selectable but
- * keep their `configured`/`default` source so callers can tell "you pinned this
- * but it is not loaded right now" (a configured-but-unresident Ollama model)
- * apart from "currently live". This keeps `/model <configured-id>` working
- * instead of failing the moment a probe returns a partial catalog.
+ * returns a live catalog, that catalog is authoritative: configured and default
+ * model ids that the provider no longer returns stop resolving.
  */
 export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCandidate[] {
 	const configured = uniqueModels(status.target.wireModels ?? []);
@@ -63,9 +59,6 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 	};
 
 	if (hasLiveModelCatalog(status)) {
-		const liveSet = new Set(discovered);
-		for (const id of configured) add(id, liveSet.has(id) ? "live" : "configured");
-		if (defaultModel) add(defaultModel, liveSet.has(defaultModel) ? "live" : "default");
 		for (const id of discovered) add(id, "live");
 		return out;
 	}
@@ -97,9 +90,7 @@ export function canonicalizeWireModelId(status: TargetStatus, requested: string)
 	const trimmedRequested = requested.trim();
 	if (trimmedRequested.length === 0) return requested;
 	// Canonicalize against the authoritative wire ids: the live catalog when one
-	// exists, otherwise the configured wire models. Configured-but-unlisted names
-	// (kept selectable by modelCandidatesForStatus) are deliberately excluded so a
-	// configured short alias still resolves to its unique live long id.
+	// exists, otherwise the configured wire models.
 	const candidates = uniqueModels(
 		hasLiveModelCatalog(status) ? status.discoveredModels : (status.target.wireModels ?? []),
 	);

@@ -1,8 +1,17 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { buildSlashAutocompleteCommands } from "../../src/interactive/slash-autocomplete.js";
-import { BUILTIN_SLASH_COMMANDS, commandReference, parseSlashCommand } from "../../src/interactive/slash-commands.js";
+import {
+	BUILTIN_SLASH_COMMANDS,
+	commandReference,
+	dispatchSlashCommand,
+	parseSlashCommand,
+	type SlashCommandContext,
+} from "../../src/interactive/slash-commands.js";
 import { usageLine } from "../../src/interactive/slash-spec.js";
 
 function splitMarkdownTableRow(line: string): string[] {
@@ -52,7 +61,59 @@ function commandDocsRows(): CommandDocsRow[] {
 }
 
 describe("contracts/slash-spec", () => {
-	it("parses all slash commands correctly matching v0.2.2 behavior", () => {
+	it("routes typed slash commands through the registry to the interactive overlay actions", () => {
+		const opened: string[] = [];
+		const submitted: string[] = [];
+		const ctx: SlashCommandContext = {
+			io: { stdout: () => undefined, stderr: () => undefined },
+			notice: () => undefined,
+			dispatch: {} as DispatchContract,
+			bus: createSafeEventBus(),
+			workerDefault: () => undefined,
+			shutdown: () => undefined,
+			runInit: () => undefined,
+			runContextClear: () => undefined,
+			openSkillsHub: () => opened.push("skills-hub"),
+			listPrompts: () => ({ items: [], diagnostics: [] }),
+			listExtensions: () => [],
+			listAgents: () => [],
+			listDelegationAgents: () => [],
+			openProviders: () => opened.push("targets"),
+			openCost: () => opened.push("cost"),
+			openContextView: () => opened.push("context"),
+			openFleet: () => opened.push("fleet"),
+			openView: (filter) => opened.push(filter ? `view:${filter}` : "view"),
+			openThinking: () => opened.push("thinking"),
+			openModel: () => opened.push("model"),
+			providers: {} as ProvidersContract,
+			applyModelRef: () => undefined,
+			openScopedModels: () => opened.push("scoped-models"),
+			openSettings: () => opened.push("settings"),
+			openResume: () => opened.push("resume"),
+			startNewSession: () => opened.push("new"),
+			openTree: () => opened.push("tree"),
+			openMessagePicker: () => opened.push("fork"),
+			openHelp: (query) => opened.push(query ? `help:${query}` : "help"),
+			openAgents: () => opened.push("agents"),
+			openPrompts: () => opened.push("prompts"),
+			openExtensions: () => opened.push("extensions"),
+			setEditorText: (text) => opened.push(`editor:${text}`),
+			runCompact: () => undefined,
+			verifyReceipt: () => ({ ok: false, reason: "missing" }),
+			submitChat: (text) => submitted.push(text),
+			render: () => undefined,
+		};
+
+		for (const input of ["/help routing", "/settings", "/targets", "/model", "/models", "/view run-123"]) {
+			dispatchSlashCommand(parseSlashCommand(input), ctx);
+		}
+		dispatchSlashCommand(parseSlashCommand("/not-a-command"), ctx);
+
+		deepStrictEqual(opened, ["help:routing", "settings", "targets", "model", "model", "view:run-123"]);
+		deepStrictEqual(submitted, ["/not-a-command"]);
+	});
+
+	it("parses all slash commands according to the v0.2.3 registry contract", () => {
 		const testCases: Array<[string, unknown]> = [
 			// Empty and whitespace inputs
 			["", { kind: "empty" }],
