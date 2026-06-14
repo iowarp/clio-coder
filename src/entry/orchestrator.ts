@@ -8,14 +8,20 @@ import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { rememberRecentModel } from "../core/recent-models.js";
 import {
+	applyOverrides,
 	applyRoutingPatch,
 	applySessionRouting,
 	diffRouting,
+	getAtPath,
+	isRoutingPath,
 	mergeRoutingPatchIntoSettings,
 	type RoutingPatch,
 	restoreRoutingFields,
 	routingChangeNotices,
+	routingPatchForId,
+	type SessionOverrides,
 	seedSessionRouting,
+	setAtPath,
 } from "../core/session-routing.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { StartupTimer } from "../core/startup-timer.js";
@@ -608,12 +614,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const sessionRouting = seedSessionRouting(
 		applyHeadlessSettingsOverlay(config?.get() ?? readSettings(), options.headless),
 	);
+	// Non-routing settings a session changed "for this session only" via the
+	// /settings overlay. Layered under the routing overlay in the effective
+	// view, so the live session reflects them immediately while settings.yaml
+	// (the global default for new sessions) stays untouched until the operator
+	// chooses to save globally.
+	const sessionOverrides: SessionOverrides = new Map();
 	const getCurrentSettings = (): ClioSettings => {
 		// Recents live in the data dir (core/recent-models.ts), never in
 		// settings.yaml; consumers that need them call listRecentModels
 		// directly, so an Alt+L pick in another session does not churn the
 		// config watcher here.
-		return applySessionRouting(config?.get() ?? readSettings(), sessionRouting);
+		return applySessionRouting(applyOverrides(config?.get() ?? readSettings(), sessionOverrides), sessionRouting);
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
 
@@ -672,9 +684,45 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		persistSavedMutation((fresh) => {
 			const persisted = structuredClone(next);
 			restoreRoutingFields(persisted, fresh);
+			// A whole-blob write (providers, favorites) must not globalize a
+			// session-only override: restore every overridden leaf from the
+			// fresh file so it stays session-local until explicitly saved.
+			for (const path of sessionOverrides.keys()) setAtPath(persisted, path, getAtPath(fresh, path));
 			if (patch) mergeRoutingPatchIntoSettings(persisted, patch);
 			return persisted;
 		});
+	};
+	/**
+	 * Commit a single /settings edit, keyed by its config-path id. `next` is the
+	 * effective view with the one leaf already changed.
+	 *   - scope "session": apply live only. Routing ids feed the routing state;
+	 *     every other id becomes a session override. settings.yaml is untouched.
+	 *   - scope "global": apply live and persist just that leaf as the new
+	 *     default, clearing any prior session override for it.
+	 * Restart-required ids (budget.concurrency, runtimePlugins) cannot apply
+	 * live, so the overlay only offers "global" for them; the file write is what
+	 * a later restart picks up.
+	 */
+	const commitSetting = (id: string, next: ClioSettings, scope: "session" | "global"): void => {
+		if (isRoutingPath(id)) {
+			// Build the patch from `next` keyed by the edited id, not by diffing
+			// against the live view: a prior session-only apply already moved the
+			// routing state, so a diff would be empty and the global save would
+			// silently no-op. Only the touched fields are persisted, so concurrent
+			// sessions never clobber each other's saved routing.
+			const patch = routingPatchForId(id, next);
+			if (!patch) return;
+			applyRoutingPatch(sessionRouting, patch);
+			if (scope === "global") persistSavedMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch));
+			return;
+		}
+		const value = getAtPath(next, id);
+		if (scope === "session") {
+			sessionOverrides.set(id, value);
+			return;
+		}
+		sessionOverrides.delete(id);
+		persistSavedMutation((saved) => setAtPath(saved, id, value));
 	};
 	/** Alt+J / Alt+K: step this session's orchestrator through the scope list. */
 	const cycleScopedSession = (direction: "forward" | "backward"): void => {
@@ -959,6 +1007,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			updateSessionRouting({ scope: Array.from(scope) });
 		},
 		writeSettings: (next) => applySettingsBlob(next),
+		commitSetting: (id, next, scope) => commitSetting(id, next, scope),
 		...(session
 			? {
 					onResumeSession: (sessionId) => {

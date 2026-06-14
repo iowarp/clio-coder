@@ -86,11 +86,100 @@ export function applyRoutingPatch(routing: SessionRoutingState, patch: RoutingPa
 	if (patch.scope) routing.scope = [...patch.scope];
 }
 
+/**
+ * Session-local overrides for the non-routing settings surface (autonomy,
+ * budget, compaction, retry, …). Routing has its own dedicated state above;
+ * everything else a session changes "for this session only" lives here as a
+ * sparse map of dotted config paths to values. The /settings overlay edits one
+ * leaf at a time and every editable id equals its config path, so the keys are
+ * always object paths (never array indices). A value of `undefined` represents
+ * "delete this optional leaf in the effective view" (e.g. clearing
+ * compaction.model).
+ */
+export type SessionOverrides = Map<string, unknown>;
+
+/** True for the dotted paths owned by the session routing state (never overrides). */
+export function isRoutingPath(path: string): boolean {
+	return path === "scope" || path.startsWith("orchestrator.") || path.startsWith("workers.default.");
+}
+
+/** Read a leaf from a settings blob by dotted object path. Missing ⇒ undefined. */
+export function getAtPath(source: Readonly<ClioSettings>, path: string): unknown {
+	let cursor: unknown = source;
+	for (const key of path.split(".")) {
+		if (cursor === null || typeof cursor !== "object") return undefined;
+		cursor = (cursor as Record<string, unknown>)[key];
+	}
+	return cursor;
+}
+
+/**
+ * Set (or, when `value === undefined`, delete) a leaf on a settings blob by
+ * dotted object path. Intermediate objects must already exist — every editable
+ * id targets a leaf under a known schema object, so this never has to create
+ * containers.
+ */
+export function setAtPath(target: ClioSettings, path: string, value: unknown): void {
+	const keys = path.split(".");
+	const last = keys.pop();
+	if (last === undefined) return;
+	let cursor: Record<string, unknown> = target as unknown as Record<string, unknown>;
+	for (const key of keys) {
+		const nextCursor = cursor[key];
+		if (nextCursor === null || typeof nextCursor !== "object") return;
+		cursor = nextCursor as Record<string, unknown>;
+	}
+	if (value === undefined) delete cursor[last];
+	else cursor[last] = value;
+}
+
+/**
+ * Effective non-routing view: the shared snapshot with the session's overrides
+ * applied. Returns the base untouched when there are no overrides so the common
+ * (no session-only edits) path stays allocation-free.
+ */
+export function applyOverrides(base: Readonly<ClioSettings>, overrides: SessionOverrides): ClioSettings {
+	if (overrides.size === 0) return base as ClioSettings;
+	const view = structuredClone(base) as ClioSettings;
+	for (const [path, value] of overrides) setAtPath(view, path, value);
+	return view;
+}
+
 /** Write-through of a routing patch onto a (cloned) saved-settings blob. */
 export function mergeRoutingPatchIntoSettings(settings: ClioSettings, patch: RoutingPatch): void {
 	if (patch.orchestrator) Object.assign(settings.orchestrator, patch.orchestrator);
 	if (patch.workersDefault) Object.assign(settings.workers.default, patch.workersDefault);
 	if (patch.scope) settings.scope = [...patch.scope];
+}
+
+/**
+ * Build the routing patch for a single /settings edit, keyed by its config-path
+ * id and read from the supplied (already-changed) settings blob. Used by the
+ * scoped /settings commit instead of a live diff: a session-only apply moves the
+ * routing state first, which would zero out a subsequent diff and make a global
+ * save no-op. Only the touched fields are included, so a global save never
+ * rewrites routing fields the operator did not change. Changing a target also
+ * carries its rebased model. Returns null for non-routing ids.
+ */
+export function routingPatchForId(path: string, settings: Readonly<ClioSettings>): RoutingPatch | null {
+	switch (path) {
+		case "orchestrator.target":
+			return { orchestrator: { target: settings.orchestrator.target, model: settings.orchestrator.model } };
+		case "orchestrator.model":
+			return { orchestrator: { model: settings.orchestrator.model } };
+		case "orchestrator.thinkingLevel":
+			return { orchestrator: { thinkingLevel: settings.orchestrator.thinkingLevel } };
+		case "workers.default.target":
+			return { workersDefault: { target: settings.workers.default.target, model: settings.workers.default.model } };
+		case "workers.default.model":
+			return { workersDefault: { model: settings.workers.default.model } };
+		case "workers.default.thinkingLevel":
+			return { workersDefault: { thinkingLevel: settings.workers.default.thinkingLevel } };
+		case "scope":
+			return { scope: [...(settings.scope ?? [])] };
+		default:
+			return null;
+	}
 }
 
 function diffTarget(

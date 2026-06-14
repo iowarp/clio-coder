@@ -21,9 +21,10 @@ export interface ConfigDiff {
 	restartRequired: string[];
 }
 
-const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "autonomy"]);
+const HOT_RELOAD_FIELDS = new Set<string>(["theme", "keybindings", "autonomy", "modelSelector"]);
 
 const NEXT_TURN_FIELDS = new Set<string>([
+	"identity",
 	"targets",
 	"orchestrator.target",
 	"orchestrator.model",
@@ -36,6 +37,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"workers.onPermission",
 	"scope",
 	"budget.sessionCeilingUsd",
+	"defaults",
 	"terminal",
 	"skills",
 	"delegation",
@@ -43,7 +45,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"retry",
 ]);
 
-const RESTART_REQUIRED_FIELDS = new Set<string>(["budget.concurrency"]);
+const RESTART_REQUIRED_FIELDS = new Set<string>(["budget.concurrency", "runtimePlugins"]);
 
 function matchesPrefix(path: string, fields: Set<string>): boolean {
 	if (fields.has(path)) return true;
