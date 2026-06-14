@@ -97,9 +97,13 @@ export function buildDiagnosticItems(list: ResourceList<Skill>): ListOverlayItem
 
 export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {
 	const lifecycle = new AbortController();
-	const fetchMarketplace = deps.fetchMarketplace ?? ((cacheDir: string) => fetchRemoteMarketplace(cacheDir));
+	// Thread the overlay lifecycle signal into the live fetches so closing the
+	// hub aborts in-flight requests; the fetchers also apply their own timeout.
+	const fetchMarketplace =
+		deps.fetchMarketplace ?? ((cacheDir: string) => fetchRemoteMarketplace(cacheDir, { signal: lifecycle.signal }));
 	const fetchDetail =
-		deps.fetchSkillDetail ?? ((cacheDir: string, name: string) => fetchRemoteSkillDetail(cacheDir, name));
+		deps.fetchSkillDetail ??
+		((cacheDir: string, name: string) => fetchRemoteSkillDetail(cacheDir, name, { signal: lifecycle.signal }));
 
 	// The view reads this array by reference on every render, so hydration and
 	// install refreshes mutate it in place and request a render.

@@ -36,8 +36,12 @@ export function hasLiveModelCatalog(status: TargetStatus): boolean {
 /**
  * Enumerate selectable wire model ids for a target. Before a live catalog is
  * known, Clio keeps useful configured/default/catalog hints. Once the target
- * has returned a live catalog, that catalog is authoritative so stale
- * configured model names do not keep resolving after a provider removes them.
+ * returns a live catalog, live models are labeled `live`; configured and
+ * default models the live catalog does not currently list stay selectable but
+ * keep their `configured`/`default` source so callers can tell "you pinned this
+ * but it is not loaded right now" (a configured-but-unresident Ollama model)
+ * apart from "currently live". This keeps `/model <configured-id>` working
+ * instead of failing the moment a probe returns a partial catalog.
  */
 export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCandidate[] {
 	const configured = uniqueModels(status.target.wireModels ?? []);
@@ -60,10 +64,8 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 
 	if (hasLiveModelCatalog(status)) {
 		const liveSet = new Set(discovered);
-		for (const id of configured) {
-			if (liveSet.has(id)) add(id, "live");
-		}
-		if (defaultModel && liveSet.has(defaultModel)) add(defaultModel, "live");
+		for (const id of configured) add(id, liveSet.has(id) ? "live" : "configured");
+		if (defaultModel) add(defaultModel, liveSet.has(defaultModel) ? "live" : "default");
 		for (const id of discovered) add(id, "live");
 		return out;
 	}
@@ -94,8 +96,12 @@ export function modelIdsForStatus(status: TargetStatus): string[] {
 export function canonicalizeWireModelId(status: TargetStatus, requested: string): string {
 	const trimmedRequested = requested.trim();
 	if (trimmedRequested.length === 0) return requested;
+	// Canonicalize against the authoritative wire ids: the live catalog when one
+	// exists, otherwise the configured wire models. Configured-but-unlisted names
+	// (kept selectable by modelCandidatesForStatus) are deliberately excluded so a
+	// configured short alias still resolves to its unique live long id.
 	const candidates = uniqueModels(
-		hasLiveModelCatalog(status) ? modelIdsForStatus(status) : (status.target.wireModels ?? []),
+		hasLiveModelCatalog(status) ? status.discoveredModels : (status.target.wireModels ?? []),
 	);
 	if (candidates.includes(trimmedRequested)) return trimmedRequested;
 

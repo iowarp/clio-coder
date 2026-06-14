@@ -234,7 +234,14 @@ function ollamaEvictClient(baseUrl: string, headers?: Record<string, string>): O
 export async function listResidentOllamaModels(client: OllamaEvictClient): Promise<ResidentModelInfo[]> {
 	const resident = await client.ps();
 	return resident.models.map((entry) => {
-		const info: ResidentModelInfo = { modelId: entry.model || entry.name };
+		const primary = entry.model || entry.name;
+		// Ollama reports both `model` and `name`; keep the other one as an alias so
+		// a keep target that matches either field is never evicted.
+		const aliases = [entry.model, entry.name].filter(
+			(id): id is string => typeof id === "string" && id.length > 0 && id !== primary,
+		);
+		const info: ResidentModelInfo = { modelId: primary };
+		if (aliases.length > 0) info.aliasIds = aliases;
 		if (typeof entry.size_vram === "number") info.sizeVramBytes = entry.size_vram;
 		if (typeof entry.size === "number") info.sizeBytes = entry.size;
 		return info;

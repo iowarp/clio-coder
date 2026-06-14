@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { getMarketplaceSkills } from "./skills/marketplace.js";
 
 /**
@@ -28,12 +29,17 @@ export interface RemoteSkillDetail {
 }
 
 interface CacheData {
-	timestamp: number;
+	/** Epoch ms of the last successful listing fetch; absent until one succeeds. */
+	listingTimestamp?: number;
+	/** Epoch ms of the last successful detail fetch; absent until one succeeds. */
+	detailTimestamp?: number;
 	skills: RemoteSkill[];
 	details: Record<string, { description?: string; version?: string; body: string }>;
 }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Hard ceiling on any single marketplace request so the hub never hangs. */
+const FETCH_TIMEOUT_MS = 10_000;
 const CACHE_FILENAME = "marketplace-cache.json";
 const LISTING_URL = "https://api.github.com/repos/iowarp/clio-coder/contents/skills?ref=main";
 
@@ -41,6 +47,14 @@ export interface RemoteMarketplaceOptions {
 	fetchFn?: typeof fetch;
 	nowFn?: () => number;
 	forceRefresh?: boolean;
+	/** Caller lifecycle signal (e.g. the overlay aborts it on close). */
+	signal?: AbortSignal;
+}
+
+/** Combine the caller's lifecycle signal with a hard per-request timeout. */
+function requestSignal(signal?: AbortSignal): AbortSignal {
+	const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+	return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 function cachePath(cacheDir: string): string {
@@ -54,10 +68,16 @@ function loadCache(cacheDir: string): CacheData | null {
 		const data: unknown = JSON.parse(readFileSync(file, "utf8"));
 		if (typeof data !== "object" || data === null) return null;
 		const record = data as Record<string, unknown>;
-		if (typeof record.timestamp !== "number" || !Array.isArray(record.skills)) return null;
+		if (!Array.isArray(record.skills)) return null;
 		const details = typeof record.details === "object" && record.details !== null ? record.details : {};
+		// Legacy caches used one shared `timestamp` for both listing and details;
+		// map it onto both so older cache files keep working after the upgrade.
+		const legacy = typeof record.timestamp === "number" ? record.timestamp : undefined;
+		const listingTimestamp = typeof record.listingTimestamp === "number" ? record.listingTimestamp : legacy;
+		const detailTimestamp = typeof record.detailTimestamp === "number" ? record.detailTimestamp : legacy;
 		return {
-			timestamp: record.timestamp,
+			...(listingTimestamp !== undefined ? { listingTimestamp } : {}),
+			...(detailTimestamp !== undefined ? { detailTimestamp } : {}),
 			skills: record.skills.filter(isRemoteSkill),
 			details: details as CacheData["details"],
 		};
@@ -69,9 +89,11 @@ function loadCache(cacheDir: string): CacheData | null {
 
 function saveCache(cacheDir: string, cache: CacheData): void {
 	try {
-		writeFileSync(cachePath(cacheDir), JSON.stringify(cache, null, 2), "utf8");
+		// Atomic temp-file + rename so a concurrent reader or a second writer never
+		// sees a half-written cache file.
+		safeResourceWrite(cachePath(cacheDir), `${JSON.stringify(cache, null, 2)}\n`, { encoding: "utf8" });
 	} catch {
-		// Cache persistence is best-effort; the listing already succeeded.
+		// Cache persistence is best-effort; the fetch already succeeded.
 	}
 }
 
@@ -108,12 +130,20 @@ export async function fetchRemoteMarketplace(
 ): Promise<RemoteSkill[]> {
 	const now = options.nowFn?.() ?? Date.now();
 	const cache = loadCache(cacheDir);
-	if (!options.forceRefresh && cache && now - cache.timestamp < CACHE_TTL_MS) {
+	if (
+		!options.forceRefresh &&
+		cache &&
+		cache.listingTimestamp !== undefined &&
+		now - cache.listingTimestamp < CACHE_TTL_MS
+	) {
 		return cache.skills;
 	}
 	const fetcher = options.fetchFn ?? fetch;
 	try {
-		const res = await fetcher(LISTING_URL, { headers: { "User-Agent": "clio-coder" } });
+		const res = await fetcher(LISTING_URL, {
+			headers: { "User-Agent": "clio-coder" },
+			signal: requestSignal(options.signal),
+		});
 		if (!res.ok) throw new Error(`GitHub API returned status ${res.status}`);
 		const payload: unknown = await res.json();
 		if (!Array.isArray(payload)) throw new Error("GitHub API returned a non-array contents payload");
@@ -124,7 +154,12 @@ export async function fetchRemoteMarketplace(
 				name: entry.name,
 				repoUrl: entry.html_url ?? `https://github.com/iowarp/clio-coder/tree/main/skills/${entry.name}`,
 			}));
-		saveCache(cacheDir, { timestamp: now, skills, details: cache?.details ?? {} });
+		saveCache(cacheDir, {
+			listingTimestamp: now,
+			...(cache?.detailTimestamp !== undefined ? { detailTimestamp: cache.detailTimestamp } : {}),
+			skills,
+			details: cache?.details ?? {},
+		});
 		return skills;
 	} catch {
 		if (cache) return cache.skills;
@@ -166,17 +201,27 @@ export async function fetchRemoteSkillDetail(
 	const now = options.nowFn?.() ?? Date.now();
 	const cache = loadCache(cacheDir);
 	const cached = cache?.details[name];
-	if (!options.forceRefresh && cache && cached && now - cache.timestamp < CACHE_TTL_MS) {
+	if (
+		!options.forceRefresh &&
+		cache &&
+		cached &&
+		cache.detailTimestamp !== undefined &&
+		now - cache.detailTimestamp < CACHE_TTL_MS
+	) {
 		return { ...cached, source: "cache" };
 	}
 	const fetcher = options.fetchFn ?? fetch;
 	try {
 		const rawUrl = `https://raw.githubusercontent.com/iowarp/clio-coder/main/skills/${name}/SKILL.md`;
-		const res = await fetcher(rawUrl, { headers: { "User-Agent": "clio-coder" } });
+		const res = await fetcher(rawUrl, { headers: { "User-Agent": "clio-coder" }, signal: requestSignal(options.signal) });
 		if (!res.ok) throw new Error(`Failed to fetch SKILL.md: ${res.status}`);
 		const detail = parseSkillMarkdown(await res.text());
-		const next = cache ?? { timestamp: now, skills: [], details: {} };
+		// A detail fetch owns only the detail timestamp; it must never stamp the
+		// listing timestamp, or a cold-cache detail fetch would publish an empty
+		// `skills` listing that looks fresh for the full TTL.
+		const next: CacheData = cache ?? { skills: [], details: {} };
 		next.details[name] = detail;
+		next.detailTimestamp = now;
 		saveCache(cacheDir, next);
 		return { ...detail, source: "remote" };
 	} catch (err) {

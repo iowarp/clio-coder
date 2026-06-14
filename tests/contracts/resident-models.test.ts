@@ -5,7 +5,12 @@ import {
 	listResidentOllamaModels,
 	type OllamaEvictClient,
 } from "../../src/engine/apis/ollama-native.js";
-import { evictOtherResidentModels, residentModelManagerFor } from "../../src/engine/apis/resident-models.js";
+import {
+	evictOtherResidentModels,
+	type ResidentModelInfo,
+	residentMatchesKeep,
+	residentModelManagerFor,
+} from "../../src/engine/apis/resident-models.js";
 
 function fakeOllamaClient(resident: EvictResidentResponse, calls: { unloaded: string[] }): OllamaEvictClient {
 	return {
@@ -39,6 +44,24 @@ describe("ollama resident listing", () => {
 		const client = fakeOllamaClient({ models: [{ model: "m", name: "m" }] }, { unloaded: [] });
 		const resident = await listResidentOllamaModels(client);
 		deepStrictEqual(resident, [{ modelId: "m" }]);
+	});
+
+	it("records a divergent model/name pair as aliases", async () => {
+		const client = fakeOllamaClient(
+			{ models: [{ model: "registry/qwen:latest", name: "qwen:latest" }] },
+			{ unloaded: [] },
+		);
+		const resident = await listResidentOllamaModels(client);
+		deepStrictEqual(resident, [{ modelId: "registry/qwen:latest", aliasIds: ["qwen:latest"] }]);
+	});
+});
+
+describe("resident keep matching", () => {
+	it("keeps a model when the keep target matches modelId or any alias", () => {
+		const entry: ResidentModelInfo = { modelId: "registry/qwen:latest", aliasIds: ["qwen:latest"] };
+		strictEqual(residentMatchesKeep(entry, "registry/qwen:latest"), true);
+		strictEqual(residentMatchesKeep(entry, "qwen:latest"), true, "matching the name alias must keep the model");
+		strictEqual(residentMatchesKeep(entry, "something-else"), false);
 	});
 });
 
