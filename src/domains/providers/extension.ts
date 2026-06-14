@@ -113,6 +113,58 @@ function sameProbeIdentity(previous: TargetDescriptor, next: TargetDescriptor): 
 	);
 }
 
+export interface ProbeMerge {
+	discoveredModels: string[];
+	discoveredModelsSource: "probe" | "cache" | "runtime" | "none";
+	discoveredModelStates: NonNullable<TargetStatus["discoveredModelStates"]> | null;
+	probeCapabilities: NonNullable<TargetStatus["probeCapabilities"]> | null;
+	probeModelCapabilities: NonNullable<TargetStatus["probeModelCapabilities"]> | null;
+	probeModelId: NonNullable<TargetStatus["probeModelId"]> | null;
+	probeNotes?: ReadonlyArray<string>;
+}
+
+/**
+ * Merge a fresh probe result with the previous known status. A probe that was
+ * not attempted (`probe === null`) or that failed (`probe.ok === false`) must
+ * not discard the last successful catalog and load states for an unchanged
+ * target: a transient outage keeps the known models selectable, sourced from
+ * `cache`, while health and availability (decided by the caller from `probe`)
+ * reflect the failure. Only a successful probe replaces the catalog.
+ */
+export function mergeProbeResult(
+	desc: RuntimeDescriptor,
+	target: TargetDescriptor,
+	probe: ProbeResult | null,
+	previous: TargetStatus | undefined,
+): ProbeMerge {
+	const probeSucceeded = probe?.ok ?? false;
+	const preservePrevious = !probeSucceeded && previous !== undefined && sameProbeIdentity(previous.target, target);
+	const probeCapabilities =
+		probe?.discoveredCapabilities ?? (preservePrevious ? previous.probeCapabilities : null) ?? null;
+	const probeModelCapabilities =
+		probe?.modelCapabilities ?? (preservePrevious ? previous.probeModelCapabilities : null) ?? null;
+	const probeModelId =
+		probe?.discoveredCapabilities !== undefined
+			? (probe.capabilityModelId ?? null)
+			: ((preservePrevious ? previous.probeModelId : null) ?? null);
+	const probeNotes =
+		probe?.notes && probe.notes.length > 0 ? probe.notes : preservePrevious ? previous.probeNotes : undefined;
+	const discoveredModels = uniqueModels(
+		probe?.models ?? (preservePrevious ? previous.discoveredModels : undefined) ?? desc.knownModels ?? [],
+	);
+	const discoveredModelStates = probe?.modelStates ?? (preservePrevious ? previous.discoveredModelStates : null) ?? null;
+	const merge: ProbeMerge = {
+		discoveredModels,
+		discoveredModelsSource: discoveredModelsSource(probe, preservePrevious, previous, desc),
+		discoveredModelStates,
+		probeCapabilities,
+		probeModelCapabilities,
+		probeModelId,
+	};
+	if (probeNotes && probeNotes.length > 0) merge.probeNotes = probeNotes;
+	return merge;
+}
+
 export function createProvidersBundle(context: DomainContext): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
@@ -183,22 +235,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		const availability = availabilityFor(desc, target, authStatusFor);
 		const capabilities = capabilitiesFor(desc, target, probe, kb);
-		const preservePreviousProbe = probe === null && previous !== undefined && sameProbeIdentity(previous.target, target);
-		const probeCapabilities =
-			probe?.discoveredCapabilities ?? (preservePreviousProbe ? previous.probeCapabilities : null) ?? null;
-		const probeModelCapabilities =
-			probe?.modelCapabilities ?? (preservePreviousProbe ? previous.probeModelCapabilities : null) ?? null;
-		const probeModelId =
-			probe?.discoveredCapabilities !== undefined
-				? (probe.capabilityModelId ?? null)
-				: ((preservePreviousProbe ? previous.probeModelId : null) ?? null);
-		const probeNotes =
-			probe?.notes && probe.notes.length > 0 ? probe.notes : preservePreviousProbe ? previous.probeNotes : undefined;
-		const discoveredModels = uniqueModels(
-			probe?.models ?? (preservePreviousProbe ? previous.discoveredModels : undefined) ?? desc.knownModels ?? [],
-		);
-		const modelStates = probe?.modelStates ?? (preservePreviousProbe ? previous.discoveredModelStates : null) ?? null;
-		const modelSource = discoveredModelsSource(probe, preservePreviousProbe, previous, desc);
+		const merge = mergeProbeResult(desc, target, probe, previous);
 		const healthy = probe !== null ? probe.ok : null;
 		const health: TargetHealth =
 			probe === null
@@ -218,14 +255,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			reason,
 			health,
 			capabilities,
-			probeCapabilities,
-			probeModelCapabilities,
-			probeModelId,
-			discoveredModels,
-			discoveredModelsSource: modelSource,
-			discoveredModelStates: modelStates,
+			probeCapabilities: merge.probeCapabilities,
+			probeModelCapabilities: merge.probeModelCapabilities,
+			probeModelId: merge.probeModelId,
+			discoveredModels: merge.discoveredModels,
+			discoveredModelsSource: merge.discoveredModelsSource,
+			discoveredModelStates: merge.discoveredModelStates,
 		};
-		if (probeNotes && probeNotes.length > 0) out.probeNotes = probeNotes;
+		if (merge.probeNotes && merge.probeNotes.length > 0) out.probeNotes = merge.probeNotes;
 		return out;
 	}
 

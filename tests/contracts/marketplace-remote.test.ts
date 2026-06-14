@@ -113,6 +113,77 @@ describe("contracts/marketplace-remote", () => {
 		ok(cacheRaw.includes("Search arXiv"));
 	});
 
+	it("threads an abort signal into the listing fetch and falls back when it is already aborted", async () => {
+		const cacheDir = tempDataDir();
+		const controller = new AbortController();
+		controller.abort();
+		let sawSignal: AbortSignal | undefined;
+		const fetchFn = (async (_url: unknown, init?: RequestInit) => {
+			sawSignal = init?.signal ?? undefined;
+			if (sawSignal?.aborted) throw new DOMException("aborted", "AbortError");
+			return jsonResponse(LISTING_FIXTURE);
+		}) as typeof fetch;
+		const skills = await fetchRemoteMarketplace(cacheDir, { fetchFn, signal: controller.signal });
+		ok(sawSignal instanceof AbortSignal, "a signal must be threaded into fetch");
+		ok(sawSignal.aborted, "the caller's aborted signal must propagate through the combined signal");
+		ok(Array.isArray(skills), "an aborted listing with no cache falls back to the pinned list");
+	});
+
+	it("falls back to the cached listing when an in-flight detail fetch aborts", async () => {
+		const cacheDir = tempDataDir();
+		const skillMd = "---\ndescription: cached desc\n---\nbody";
+		await fetchRemoteSkillDetail(cacheDir, "arxiv-literature", {
+			fetchFn: (async () => new Response(skillMd, { status: 200 })) as typeof fetch,
+			nowFn: () => 0,
+		});
+		const controller = new AbortController();
+		controller.abort();
+		const aborting = (async (_url: unknown, init?: RequestInit) => {
+			if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+			return new Response("---\ndescription: fresh\n---\nnew", { status: 200 });
+		}) as typeof fetch;
+		const detail = await fetchRemoteSkillDetail(cacheDir, "arxiv-literature", {
+			fetchFn: aborting,
+			signal: controller.signal,
+			nowFn: () => 1,
+		});
+		strictEqual(detail.source, "cache");
+		strictEqual(detail.description, "cached desc");
+	});
+
+	it("does not let a cold detail fetch publish an empty skills listing", async () => {
+		const cacheDir = tempDataDir();
+		// Detail fetched before any listing ever succeeded (cold cache).
+		await fetchRemoteSkillDetail(cacheDir, "arxiv-literature", {
+			fetchFn: (async () => new Response("---\ndescription: hi\n---\nbody", { status: 200 })) as typeof fetch,
+			nowFn: () => 5,
+		});
+		// The listing must still fetch rather than serving the empty skills array
+		// the detail write left behind, even well inside the TTL window.
+		let listingCalls = 0;
+		const listingFetch = (async () => {
+			listingCalls += 1;
+			return jsonResponse(LISTING_FIXTURE);
+		}) as typeof fetch;
+		const skills = await fetchRemoteMarketplace(cacheDir, { fetchFn: listingFetch, nowFn: () => 6 });
+		strictEqual(listingCalls, 1, "the listing must fetch, not serve the poisoned empty listing");
+		deepStrictEqual(
+			skills.map((skill) => skill.name),
+			["arxiv-literature", "data-pipelines"],
+		);
+		// The detail written before the listing is still cached and fresh.
+		let detailCalls = 0;
+		const detail = await fetchRemoteSkillDetail(cacheDir, "arxiv-literature", {
+			fetchFn: (async () => {
+				detailCalls += 1;
+				return new Response("x", { status: 200 });
+			}) as typeof fetch,
+			nowFn: () => 7,
+		});
+		strictEqual(detailCalls, 0, "the detail cached before the listing must survive");
+		strictEqual(detail.source, "cache");
+	});
+
 	it("rejects unsafe skill names before any network call", async () => {
 		const cacheDir = tempDataDir();
 		let rejected = false;

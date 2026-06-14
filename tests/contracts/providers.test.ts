@@ -303,7 +303,7 @@ describe("contracts/providers", () => {
 		ok(model.compat);
 	});
 
-	it("treats a live model catalog as authoritative over stale configured names", () => {
+	it("keeps configured models selectable alongside a live catalog, labeled by source", () => {
 		const runtime = fakeDescriptor("llamacpp");
 		const target: TargetDescriptor = {
 			id: "mini",
@@ -330,8 +330,18 @@ describe("contracts/providers", () => {
 			knowledgeBase: null,
 		} as never;
 
-		deepStrictEqual(modelCandidatesForStatus(status), [{ id: "new-live-model", source: "live", loadState: "loaded" }]);
-		strictEqual(resolveModelReference("old-default", providers).ref, null);
+		// Live models are authoritative for what is loaded, but a configured model
+		// the live catalog does not currently list stays selectable with its
+		// configured/default source rather than disappearing.
+		deepStrictEqual(modelCandidatesForStatus(status), [
+			{ id: "old-curated", source: "configured" },
+			{ id: "old-default", source: "default" },
+			{ id: "new-live-model", source: "live", loadState: "loaded" },
+		]);
+		deepStrictEqual(resolveModelReference("old-default", providers).ref, {
+			target: "mini",
+			model: "old-default",
+		});
 		deepStrictEqual(resolveModelReference("new-live", providers).ref, {
 			target: "mini",
 			model: "new-live-model",
