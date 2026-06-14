@@ -105,6 +105,21 @@ describe("contracts/config", () => {
 		strictEqual(result.settings.budget.concurrency, "auto");
 	});
 
+	it("validates defaults.maxTokens and rejects bad values and unknown subkeys", () => {
+		const ok = validateSettings({ defaults: { maxTokens: 16384 } });
+		deepStrictEqual(ok.issues, []);
+		strictEqual(ok.settings.defaults.maxTokens, 16384);
+
+		// 0 is a valid sentinel meaning "fall back to per-model caps".
+		strictEqual(validateSettings({ defaults: { maxTokens: 0 } }).settings.defaults.maxTokens, 0);
+
+		const bad = validateSettings({ defaults: { maxTokens: -1, foo: 1 } });
+		const paths = bad.issues.map((issue) => issue.path).sort();
+		deepStrictEqual(paths, ["defaults.foo", "defaults.maxTokens"]);
+		// Invalid value falls back to the shipped default.
+		strictEqual(bad.settings.defaults.maxTokens, DEFAULT_SETTINGS.defaults.maxTokens);
+	});
+
 	it("rejects duplicate target ids and duplicate delegation agent ids", () => {
 		const result = validateSettings({
 			targets: [

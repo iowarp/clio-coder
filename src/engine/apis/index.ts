@@ -7,6 +7,7 @@ import { openAICompletionsApiProvider } from "./openai-completions.js";
 export { lmstudioNativeApiProvider } from "./lmstudio-native.js";
 export { ollamaNativeApiProvider } from "./ollama-native.js";
 export { openAICompletionsApiProvider } from "./openai-completions.js";
+export { setGlobalDefaultMaxOutputTokens } from "./output-budget.js";
 
 let registered = false;
 

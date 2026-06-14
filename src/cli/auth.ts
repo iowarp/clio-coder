@@ -13,7 +13,7 @@ import {
 	renderConnectableProviderRows,
 	resolveCliProviderReference,
 } from "./provider-target.js";
-import { formatColumns, printError, printOk } from "./shared.js";
+import { formatColumns, printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
 
 const USAGE = `usage: clio auth list
        clio auth status [target-or-runtime]
@@ -271,6 +271,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		}
 		auth.setApiKey(resolved.authTarget.providerId, apiKey);
 		printOk(`authenticated ${resolved.authTarget.providerId}`);
+		printPlaintextCredentialWarning();
 		return 0;
 	} finally {
 		rl.close();

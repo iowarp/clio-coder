@@ -2,7 +2,7 @@ import { BusChannels } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { ensurePiAiRegistered } from "../../engine/ai.js";
-import { registerClioApiProviders } from "../../engine/apis/index.js";
+import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
 import type { ConfigContract } from "../config/contract.js";
 
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
@@ -344,6 +344,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			registerClioApiProviders();
 			registerBuiltinRuntimes(registry);
 			const settings = readConfig();
+			setGlobalDefaultMaxOutputTokens(settings.defaults.maxTokens);
 			await loadPluginRuntimes(registry, settings);
 			await probeAll();
 			const config = context.getContract<ConfigContract>("config");
