@@ -23,7 +23,7 @@ import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/pr
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
-import { printError, printOk } from "./shared.js";
+import { printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
 import { validateModelChoice } from "./validate-model.js";
 
 const HELP = `clio configure
@@ -673,7 +673,10 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	if (args.apiKey) auth.setApiKey(runtime.id, args.apiKey);
+	if (args.apiKey) {
+		auth.setApiKey(runtime.id, args.apiKey);
+		printPlaintextCredentialWarning();
+	}
 	const setWorkerDefault = args.setWorkerDefault || (args.workerProfile === undefined && args.workerModel !== undefined);
 	const applyConfiguration = (target: ClioSettings): void => {
 		applyTarget(target, descriptor);
@@ -792,6 +795,12 @@ export type ConfigureCategory = "local-app" | "local-http" | "chatgpt" | "cloud-
 
 const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama-native", "lmstudio-native"]);
 
+// Generic protocol-compatible runtimes. They are classified local-http (they
+// carry a probe and no cloud catalog entry), but a hosted endpoint such as
+// Inception/Mercury is exactly an OpenAI-compatible cloud API, so the wizard
+// also surfaces them under the Cloud API path.
+const PROTOCOL_COMPAT_RUNTIME_IDS: ReadonlySet<string> = new Set(["openai-compat", "anthropic-compat"]);
+
 export function runtimesForCategory(
 	entries: ReadonlyArray<ProviderSupportEntry>,
 	category: ConfigureCategory,
@@ -803,11 +812,21 @@ export function runtimesForCategory(
 			return entries.filter((entry) => entry.group === "local-http" && !LOCAL_APP_RUNTIME_IDS.has(entry.runtimeId));
 		case "chatgpt":
 			return entries.filter((entry) => entry.runtimeId === "openai-codex");
-		case "cloud-api":
-			return entries
+		case "cloud-api": {
+			const byLabel = (a: ProviderSupportEntry, b: ProviderSupportEntry) =>
+				a.label.localeCompare(b.label) || a.runtimeId.localeCompare(b.runtimeId);
+			const named = entries
 				.filter((entry) => entry.group === "cloud-api")
 				.slice()
-				.sort((a, b) => a.label.localeCompare(b.label) || a.runtimeId.localeCompare(b.runtimeId));
+				.sort(byLabel);
+			// Surface the generic OpenAI/Anthropic-compatible runtimes here too,
+			// shown last and under the cloud heading rather than their native group.
+			const compat = entries
+				.filter((entry) => PROTOCOL_COMPAT_RUNTIME_IDS.has(entry.runtimeId))
+				.map((entry) => ({ ...entry, group: "cloud-api" as const }))
+				.sort(byLabel);
+			return [...named, ...compat];
+		}
 		case "all":
 			return entries.slice();
 	}
@@ -819,7 +838,8 @@ async function pickCategory(rl: ReturnType<typeof createInterface>): Promise<Con
 	process.stdout.write("  2. Local HTTP server  llama.cpp / vLLM / SGLang / OpenAI/Anthropic-compatible\n");
 	process.stdout.write("  3. ChatGPT plan       Plus or Pro via Codex OAuth\n");
 	process.stdout.write(
-		"  4. Cloud API key      Anthropic, OpenAI, OpenRouter, Groq, Google, DeepSeek, Mistral, Bedrock\n\n",
+		"  4. Cloud API key      Anthropic, OpenAI, OpenRouter, Groq, Google, DeepSeek, Mistral,\n" +
+			"                        Bedrock, or any OpenAI/Anthropic-compatible endpoint (e.g. Inception)\n\n",
 	);
 	process.stdout.write("  5. All runtimes       advanced (full list)\n");
 	for (;;) {
@@ -959,12 +979,14 @@ async function runInteractive(
 		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.id) : undefined;
 	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	if (runtime.auth === "api-key") {
+		// Default to the env-var path: it keeps the key off disk. "stored" remains
+		// available but is no longer the suggested choice.
 		const defaultSource =
 			authStatus.source === "stored-api-key"
 				? "keep"
 				: authStatus.source === "environment" || existing?.auth?.apiKeyEnvVar
 					? "env"
-					: "stored";
+					: "env";
 		const choice = await ask(rl, "Credential source [env|stored|keep|skip]", defaultSource);
 		if (choice === null) return 0;
 		const normalized = choice.trim().toLowerCase();
@@ -1042,7 +1064,34 @@ async function runInteractive(
 			if (!model) break;
 		}
 	}
-	if (!validateContextWindowOverride(runtime, model, defaults.contextWindow, defaults.force)) return 2;
+	let contextWindowChoice = defaults.contextWindow;
+	let reasoningChoice = defaults.reasoning;
+	// Generic OpenAI/Anthropic-compatible endpoints have no cloud catalog and
+	// their /v1/models rarely reports a context window or reasoning support, so
+	// ask for the two capabilities that cannot be probed reliably. Output budget
+	// is intentionally not asked: defaults.maxTokens applies globally and is
+	// clamped down to the model at request time.
+	if (PROTOCOL_COMPAT_RUNTIME_IDS.has(runtime.id)) {
+		if (contextWindowChoice === undefined) {
+			const cwDefault = existing?.capabilities?.contextWindow ?? runtime.defaultCapabilities.contextWindow;
+			const cwAnswer = await ask(
+				rl,
+				"Context window in tokens (blank for runtime default)",
+				cwDefault > 0 ? String(cwDefault) : "",
+			);
+			if (cwAnswer === null) return 0;
+			if (cwAnswer.length > 0) {
+				const parsed = Number(cwAnswer);
+				if (Number.isInteger(parsed) && parsed > 0) contextWindowChoice = parsed;
+				else process.stderr.write(`ignoring invalid context window: ${cwAnswer}\n`);
+			}
+		}
+		if (reasoningChoice === undefined) {
+			const reasoningDefault = existing?.capabilities?.reasoning ?? runtime.defaultCapabilities.reasoning === true;
+			reasoningChoice = await askYesNo(rl, "Does this model support reasoning / thinking?", reasoningDefault);
+		}
+	}
+	if (!validateContextWindowOverride(runtime, model, contextWindowChoice, defaults.force)) return 2;
 
 	const gatewayDefault = defaults.gateway || existing?.gateway === true;
 	const gatewayAnswer = gatewayDefault ? true : await askYesNo(rl, "Mark as gateway?", false);
@@ -1060,9 +1109,9 @@ async function runInteractive(
 			: existing?.lifecycle !== undefined
 				? { lifecycle: existing.lifecycle }
 				: {}),
-		...(defaults.contextWindow !== undefined ? { contextWindow: defaults.contextWindow } : {}),
+		...(contextWindowChoice !== undefined ? { contextWindow: contextWindowChoice } : {}),
 		...(defaults.maxTokens !== undefined ? { maxTokens: defaults.maxTokens } : {}),
-		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
+		...(reasoningChoice !== undefined ? { reasoning: reasoningChoice } : {}),
 	});
 	try {
 		assertOrchestratorReplacementEligible(settings, descriptor);
@@ -1070,7 +1119,10 @@ async function runInteractive(
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	if (apiKeyLiteral) auth.setApiKey(runtime.id, apiKeyLiteral);
+	if (apiKeyLiteral) {
+		auth.setApiKey(runtime.id, apiKeyLiteral);
+		printPlaintextCredentialWarning();
+	}
 
 	const probe = await runtimeProbe(runtime, descriptor);
 	if (probe) {

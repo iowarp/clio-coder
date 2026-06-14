@@ -149,6 +149,9 @@ budget:
   sessionCeilingUsd: 5
   concurrency: auto
 
+defaults:
+  maxTokens: 32768            # global output budget; clamped per model at request time
+
 theme: default
 terminal:
   showTerminalProgress: false
@@ -169,6 +172,8 @@ retry:
 ```
 
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
+
+`defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
 
 ---
 
@@ -370,7 +375,14 @@ Auth types come from runtime descriptors:
 | `aws-sdk` / `vertex-adc` | Uses platform SDK/application credentials. |
 | `none` | No credential required. |
 
-Prefer `--api-key-env` for shared config and CI. Avoid committing literal secrets in settings or share archives.
+### Credential storage and its limits
+
+You have two ways to give Clio an API key:
+
+- **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default and what the wizard now suggests first.
+- **Stored credential** (`--api-key <literal>`, or `clio auth login`). The key is written to `credentials.yaml` (see directory locations) as **plaintext**, protected only by file mode `0600`. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.
+
+Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio auth status`, `clio targets`, or `clio configure`; only the source (env var name or `stored-api-key`) is shown.
 
 For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio auth logout <target-or-runtime>`; for a live session disconnect without deleting credentials, press `d` in `/targets`.
 

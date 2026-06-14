@@ -15,7 +15,7 @@ export function createMemoryAuthStorage(data: AuthStorageData = {}): AuthStorage
 	return storage;
 }
 
-export { FileAuthStorageBackend } from "./backend-file.js";
+export { authStoragePath, FileAuthStorageBackend } from "./backend-file.js";
 export { InMemoryAuthStorageBackend } from "./backend-memory.js";
 export type {
 	ApiKeyCredential,

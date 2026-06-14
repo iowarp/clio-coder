@@ -5,6 +5,25 @@ const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 
 /**
+ * Process-wide default output budget requested per turn, sourced from
+ * settings.defaults.maxTokens at session start (see
+ * {@link setGlobalDefaultMaxOutputTokens}). 0 means unset: callers fall back to
+ * the model's advertised cap as before.
+ */
+let globalDefaultMaxOutputTokens = 0;
+
+/**
+ * Install the global default output budget. {@link remainingContextMaxTokens}
+ * uses it as the requested value when the caller passes no explicit maxTokens
+ * and no more-specific tool-turn limit applies. The value is always clamped
+ * down to the model's cap and the remaining context window, so a model that
+ * supports less still gets less. Non-positive values disable the default.
+ */
+export function setGlobalDefaultMaxOutputTokens(value: number): void {
+	globalDefaultMaxOutputTokens = Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+/**
  * Output ceiling applied to a llama.cpp tool-bearing turn when the caller did
  * not request an explicit limit. It bounds a genuinely runaway local
  * generation without muzzling real work: a single tool call that writes a
@@ -56,8 +75,17 @@ export function remainingContextMaxTokens(
 		? Math.max(1, contextWindow - inputTokens - safety)
 		: Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
+	// Precedence for the requested ceiling when the caller gave no explicit
+	// maxTokens: a more-specific tool-turn limit, then the global default, then
+	// the model's advertised cap. Math.min below clamps the result down to the
+	// model cap and the remaining context budget regardless, so the global
+	// default never lets a small model overshoot what it supports.
 	const defaultLimit =
-		limits?.maxOutputTokens !== undefined && limits.maxOutputTokens > 0 ? limits.maxOutputTokens : modelLimit;
+		limits?.maxOutputTokens !== undefined && limits.maxOutputTokens > 0
+			? limits.maxOutputTokens
+			: globalDefaultMaxOutputTokens > 0
+				? globalDefaultMaxOutputTokens
+				: modelLimit;
 	const requested = options?.maxTokens ?? defaultLimit;
 	const resolved = Math.min(requested, modelLimit, budget);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;

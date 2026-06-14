@@ -573,6 +573,7 @@ const TOP_LEVEL_KEYS = [
 	"scope",
 	"modelSelector",
 	"budget",
+	"defaults",
 	"theme",
 	"terminal",
 	"skills",
@@ -737,6 +738,18 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					const v = expectInteger(issues, "budget.concurrency", raw.budget.concurrency, { min: 1 });
 					if (v !== undefined) settings.budget.concurrency = v;
 				}
+			}
+		}
+	}
+
+	if ("defaults" in raw) {
+		if (!isPlainObject(raw.defaults)) {
+			issues.add("defaults", `expected a map, got ${describe(raw.defaults)}`);
+		} else {
+			issues.unknownKeys("defaults", raw.defaults, ["maxTokens"]);
+			if ("maxTokens" in raw.defaults) {
+				const v = expectInteger(issues, "defaults.maxTokens", raw.defaults.maxTokens, { min: 0 });
+				if (v !== undefined) settings.defaults.maxTokens = v;
 			}
 		}
 	}

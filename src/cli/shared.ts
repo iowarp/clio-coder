@@ -1,5 +1,22 @@
 import chalk from "chalk";
 
+import { authStoragePath } from "../domains/providers/auth/index.js";
+
+/**
+ * Warn that an API key was just written to the credentials file in plaintext.
+ * Clio protects the file with mode 0600 but does not encrypt it, so a key on
+ * disk is readable by any process running as the user. Callers invoke this
+ * right after persisting a literal key; the env-var path stores nothing and
+ * stays silent.
+ */
+export function printPlaintextCredentialWarning(): void {
+	process.stderr.write(
+		`${chalk.yellow("warning:")} API key stored unencrypted at ${authStoragePath()} (mode 0600).\n` +
+			"  It is readable by any process running as you. To keep the key off disk, configure the\n" +
+			"  target with an environment variable instead: clio configure ... --api-key-env <VAR>.\n",
+	);
+}
+
 export function printError(message: string, detail?: string): void {
 	const head = chalk.red("error:");
 	process.stderr.write(`${head} ${message}\n`);

@@ -8,6 +8,7 @@
  * is an HTTP/native/pi-ai-backed adapter driven through pi-agent-core.
  */
 
+import { validateSettingsFile } from "../core/config.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
@@ -29,7 +30,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
-import { registerClioApiProviders } from "./apis/index.js";
+import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
 import { createLoopGuardRegistration, readToolCallCap } from "./loop-guard.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
@@ -173,6 +174,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// so it must register them here before any agent.prompt() touches a local
 	// runtime (lmstudio-native, ollama-native).
 	registerClioApiProviders();
+	// The worker is a fresh process; mirror the orchestrator's global output
+	// budget so dispatched runs honor settings.defaults.maxTokens too. Use the
+	// non-throwing read: a worker must not abort over a settings issue the parent
+	// already surfaced.
+	setGlobalDefaultMaxOutputTokens(validateSettingsFile().settings.defaults.maxTokens);
 	const fauxModel = registerFauxFromEnv();
 	// Workers are bounded runs against an admission-verified recipe surface.
 	// They have no operator to widen a missing tool, so the active surface is

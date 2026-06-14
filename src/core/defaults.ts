@@ -156,6 +156,14 @@ export const DEFAULT_SETTINGS = {
 		sessionCeilingUsd: 5,
 		concurrency: "auto" as "auto" | number,
 	},
+	defaults: {
+		// Output tokens requested per turn, applied to every target. The value is
+		// always clamped down to the model's known max-output cap and the
+		// remaining context window at request time, so a model that supports less
+		// automatically gets less. 0 disables the global default and falls back to
+		// per-model caps only.
+		maxTokens: 32768,
+	},
 	theme: "default",
 	terminal: {
 		showTerminalProgress: false,
@@ -288,6 +296,14 @@ modelSelector:
 budget:
   sessionCeilingUsd: 5
   concurrency: auto           # auto or a positive integer
+
+# Global request defaults applied to every target.
+#   maxTokens  output tokens requested per turn. Always clamped down to the
+#              model's known max-output cap and the remaining context window,
+#              so models that support less automatically get less. Set 0 to
+#              fall back to per-model caps only.
+defaults:
+  maxTokens: 32768
 
 theme: default
 terminal:
