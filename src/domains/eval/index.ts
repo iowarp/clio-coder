@@ -14,7 +14,7 @@ export {
 	sumEvalHarnessMetrics,
 	ZERO_EVAL_HARNESS_METRICS,
 } from "./metrics.js";
-export { renderEvalReport, renderSummaryLines } from "./report.js";
+export { renderEvalReport, renderSummaryLines, renderSweJsonl } from "./report.js";
 export { runEvalTasks, summarizeEvalResults } from "./runner.js";
 export {
 	createEvalId,

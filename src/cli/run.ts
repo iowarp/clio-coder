@@ -24,6 +24,7 @@ import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { buildInitialMessage, readPipedStdin, shouldReadPipedStdin } from "./initial-message.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
+import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
 	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--json] [--agent <recipe-id>] "<task>"\n';
@@ -111,6 +112,12 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
+	if (parsed.maxContextTokens !== undefined) {
+		process.env.CLIO_MAX_CONTEXT_TOKENS = String(parsed.maxContextTokens);
+	}
+	if (parsed.kvCacheMode !== undefined) {
+		process.env.CLIO_KV_CACHE_MODE = parsed.kvCacheMode;
+	}
 	if (parsed.help) {
 		process.stdout.write(HELP);
 		return 0;
@@ -162,6 +169,7 @@ export async function runClioRun(
 					...(parsed.model !== undefined ? { model: parsed.model } : {}),
 					...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
 					...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
+					...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 				},
 			});
 			await flushRawStdout();
@@ -288,8 +296,18 @@ async function runDispatch(
 	}
 	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
 
+	let cleanupSteer: (() => void) | undefined;
 	try {
 		const handle = await dispatch.dispatch(dispatchReq);
+		if (parsed.steerChannel) {
+			cleanupSteer = setupSteerChannel(parsed.steerChannel, (line) => {
+				try {
+					dispatch.steer(handle.runId, line);
+				} catch {
+					// Ignore delivery errors (e.g., run already finished)
+				}
+			});
+		}
 		const onSignal = (): void => dispatch.abort(handle.runId);
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
@@ -315,6 +333,10 @@ async function runDispatch(
 		}
 
 		const receipt = await handle.finalPromise;
+		if (cleanupSteer) {
+			cleanupSteer();
+			cleanupSteer = undefined;
+		}
 		if (parsed.json) {
 			process.stdout.write(`\n${JSON.stringify(receipt, null, 2)}\n`);
 		} else {
@@ -330,6 +352,9 @@ async function runDispatch(
 		await loaded.stop();
 		return mapExitCode(receipt);
 	} catch (err) {
+		if (cleanupSteer) {
+			cleanupSteer();
+		}
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`clio run failed: ${msg}\n`);
 		await loaded.stop();

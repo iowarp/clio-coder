@@ -29,6 +29,9 @@ export interface RunCliArgs {
 	required: string[];
 	noSkills: boolean;
 	skillPaths: string[];
+	maxContextTokens?: number;
+	kvCacheMode?: string;
+	steerChannel?: string;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -156,6 +159,32 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		if (arg === "--skill") {
 			const value = need(arg);
 			if (value !== null) parsed.skillPaths.push(value);
+			continue;
+		}
+		if (arg === "--max-context-tokens") {
+			const value = need(arg);
+			if (value !== null) {
+				const n = Number(value);
+				if (Number.isInteger(n) && n > 0) {
+					parsed.maxContextTokens = n;
+				} else {
+					parsed.diagnostics.push({ type: "error", message: "--max-context-tokens must be a positive integer" });
+				}
+			}
+			continue;
+		}
+		if (arg === "--kv-cache-mode") {
+			const value = need(arg);
+			if (value !== null) {
+				parsed.kvCacheMode = value;
+			}
+			continue;
+		}
+		if (arg === "--steer-channel") {
+			const value = need(arg);
+			if (value !== null) {
+				parsed.steerChannel = value;
+			}
 			continue;
 		}
 		if (arg?.startsWith("-")) {

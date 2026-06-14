@@ -3,6 +3,7 @@ import { CLIO_SAMPLING_OVERRIDES_ENV } from "../../engine/apis/sampling-override
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
+import { setupSteerChannel } from "../steer-channel.js";
 import { serializeJsonLine } from "./jsonl.js";
 
 export interface HeadlessSamplingOverrides {
@@ -21,6 +22,7 @@ export interface HeadlessMainAgentOptions {
 	sampling?: HeadlessSamplingOverrides;
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	mode?: "text" | "json";
+	steerChannel?: string;
 	getSessionHeader?: () => unknown | null;
 }
 
@@ -86,6 +88,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	if (options.sampling && Object.keys(options.sampling).length > 0) {
 		process.env[CLIO_SAMPLING_OVERRIDES_ENV] = JSON.stringify(options.sampling);
 	}
+	let cleanupSteer: (() => void) | undefined;
+	if (options.steerChannel) {
+		cleanupSteer = setupSteerChannel(options.steerChannel, (line) => {
+			chat.steer(line);
+		});
+	}
 	try {
 		const submitOptions = {
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
@@ -95,6 +103,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		};
 		await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
 	} finally {
+		if (cleanupSteer) {
+			cleanupSteer();
+		}
 		if (previousSamplingOverride === undefined) delete process.env[CLIO_SAMPLING_OVERRIDES_ENV];
 		else process.env[CLIO_SAMPLING_OVERRIDES_ENV] = previousSamplingOverride;
 		unsubscribe();

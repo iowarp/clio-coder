@@ -727,7 +727,12 @@ export function createDispatchBundle(
 	const startAcpRun = options?.startAcpDelegationRun ?? startAcpDelegationRun;
 	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;
 	const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
-	const resilienceCooldownMs = options?.resilienceCooldownMs ?? DEFAULT_RESILIENCE_COOLDOWN_MS;
+	const getResilienceCooldownMs = (): number => {
+		if (options?.resilienceCooldownMs !== undefined) return options.resilienceCooldownMs;
+		const settingsVal = config?.get().workers?.resilienceCooldownMs;
+		if (settingsVal !== undefined && settingsVal >= 0) return settingsVal;
+		return DEFAULT_RESILIENCE_COOLDOWN_MS;
+	};
 	const now = options?.now ?? (() => Date.now());
 
 	let ledger: Ledger | null = null;
@@ -1005,8 +1010,9 @@ export function createDispatchBundle(
 			targetCooldowns.delete(key);
 			return;
 		}
-		if (resilienceCooldownMs <= 0) return;
-		targetCooldowns.set(key, { until: now() + resilienceCooldownMs, reason: status });
+		const cooldownMs = getResilienceCooldownMs();
+		if (cooldownMs <= 0) return;
+		targetCooldowns.set(key, { until: now() + cooldownMs, reason: status });
 	}
 
 	async function resolveLifecycle(req: DispatchRequest): Promise<DispatchLifecycleStage> {

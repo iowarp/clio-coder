@@ -460,9 +460,29 @@ function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
 	};
 	const kvCache = clioQuirks(model)?.kvCache;
 	if (kvCache) {
-		if (kvCache.kQuant !== undefined) config.llamaKCacheQuantizationType = kvCache.kQuant;
-		if (kvCache.vQuant !== undefined) config.llamaVCacheQuantizationType = kvCache.vQuant;
+		if (kvCache.kQuant !== undefined && kvCache.kQuant !== false) config.llamaKCacheQuantizationType = kvCache.kQuant;
+		if (kvCache.vQuant !== undefined && kvCache.vQuant !== false) config.llamaVCacheQuantizationType = kvCache.vQuant;
 		if (kvCache.useFp16 !== undefined) config.useFp16ForKVCache = kvCache.useFp16;
+	}
+	const envKvCacheMode = process.env.CLIO_KV_CACHE_MODE;
+	if (envKvCacheMode) {
+		if (envKvCacheMode === "f16") {
+			config.llamaKCacheQuantizationType = "f16";
+			config.llamaVCacheQuantizationType = "f16";
+			config.useFp16ForKVCache = true;
+		} else if (envKvCacheMode === "f32") {
+			config.llamaKCacheQuantizationType = "f32";
+			config.llamaVCacheQuantizationType = "f32";
+			config.useFp16ForKVCache = false;
+		} else if (envKvCacheMode === "none" || envKvCacheMode === "false") {
+			delete config.llamaKCacheQuantizationType;
+			delete config.llamaVCacheQuantizationType;
+			delete config.useFp16ForKVCache;
+		} else {
+			config.llamaKCacheQuantizationType = envKvCacheMode as any;
+			config.llamaVCacheQuantizationType = envKvCacheMode as any;
+			config.useFp16ForKVCache = false;
+		}
 	}
 	return config;
 }

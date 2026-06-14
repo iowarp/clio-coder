@@ -53,3 +53,21 @@ function uniqueEvidenceIds(artifact: EvalRunArtifact): string[] {
 		...new Set(artifact.results.flatMap((result) => (result.evidenceId === undefined ? [] : [result.evidenceId]))),
 	].sort((left, right) => left.localeCompare(right));
 }
+
+export function renderSweJsonl(artifact: EvalRunArtifact): string {
+	const lines: string[] = [];
+	for (const run of artifact.results) {
+		const entry = {
+			instance_id: run.taskId,
+			model_patch: "", // Local eval runs do not store the full patch inside the artifact
+			model_name_or_path: artifact.evalId,
+			status: run.pass ? "pass" : "fail",
+			pass: run.pass,
+			tokens: run.tokens,
+			wall_time_ms: run.wallTimeMs,
+			cost_usd: run.costUsd,
+		};
+		lines.push(JSON.stringify(entry));
+	}
+	return `${lines.join("\n")}\n`;
+}

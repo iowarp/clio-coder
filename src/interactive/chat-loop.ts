@@ -185,6 +185,7 @@ export interface ChatSubmitOptions {
 
 export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
+	steer(text: string): boolean;
 	queueFollowUp(text: string): boolean;
 	clearQueuedFollowUps(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
@@ -1794,6 +1795,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const api: ChatLoop = {
+		steer(text: string): boolean {
+			const trimmed = text.trim();
+			if (trimmed.length === 0 || !streaming || !runtime) return false;
+			const message = {
+				role: "user",
+				content: trimmed,
+				timestamp: Date.now(),
+			} as AgentMessage;
+			queuedMirror.push({ text: trimmed, kind: "steer" });
+			runtime.agent.steer(message);
+			emitQueueUpdate();
+			emitNotice("[Clio Coder] steering the active run; lands before the next model turn. Press Esc to cancel.");
+			return true;
+		},
 		queueFollowUp(text: string): boolean {
 			const trimmed = text.trim();
 			if (trimmed.length === 0 || !streaming || !runtime) return false;

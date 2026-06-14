@@ -659,7 +659,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.workers)) {
 			issues.add("workers", `expected a map, got ${describe(raw.workers)}`);
 		} else {
-			issues.unknownKeys("workers", raw.workers, ["default", "profiles", "maxRetries", "onPermission"]);
+			issues.unknownKeys("workers", raw.workers, [
+				"default",
+				"profiles",
+				"maxRetries",
+				"onPermission",
+				"resilienceCooldownMs",
+			]);
 			if ("default" in raw.workers) {
 				settings.workers.default = validateWorkerTarget(
 					issues,
@@ -700,6 +706,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("onPermission" in raw.workers) {
 				const v = expectEnum(issues, "workers.onPermission", raw.workers.onPermission, ["deny", "fail"] as const);
 				if (v !== undefined) settings.workers.onPermission = v;
+			}
+			if ("resilienceCooldownMs" in raw.workers) {
+				const v = expectInteger(issues, "workers.resilienceCooldownMs", raw.workers.resilienceCooldownMs, { min: 0 });
+				if (v !== undefined) settings.workers.resilienceCooldownMs = v;
 			}
 		}
 	}
