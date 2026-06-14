@@ -12,16 +12,22 @@ import {
 	resetRecentModelsCache,
 } from "../../src/core/recent-models.js";
 import {
+	applyOverrides,
 	applyRoutingPatch,
 	applySessionRouting,
 	diffRouting,
 	externalRoutingDivergence,
+	getAtPath,
+	isRoutingPath,
 	mergeRoutingPatchIntoSettings,
 	type RoutingPatch,
 	restoreRoutingFields,
 	routingChangeNotices,
+	routingPatchForId,
+	type SessionOverrides,
 	type SessionRoutingState,
 	seedSessionRouting,
+	setAtPath,
 } from "../../src/core/session-routing.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
@@ -367,5 +373,99 @@ describe("contracts/session-routing recents", () => {
 		writeFileSync(recentModelsPath(), "{not json", "utf8");
 		resetRecentModelsCache();
 		deepStrictEqual(listRecentModels({ limit: 12 }), []);
+	});
+});
+
+describe("contracts/session-routing overrides", () => {
+	it("reads and writes leaves by dotted object path and deletes on undefined", () => {
+		const settings = settingsWithTargets();
+		strictEqual(getAtPath(settings, "compaction.threshold"), settings.compaction.threshold);
+		strictEqual(getAtPath(settings, "delegation.defaults.connectTimeoutMs"), 30000);
+		strictEqual(getAtPath(settings, "missing.key"), undefined);
+
+		setAtPath(settings, "budget.concurrency", 4);
+		strictEqual(settings.budget.concurrency, 4);
+		settings.compaction.model = "x/y";
+		setAtPath(settings, "compaction.model", undefined);
+		strictEqual("model" in settings.compaction, false);
+	});
+
+	it("marks only the routing surface as routing paths", () => {
+		for (const path of ["orchestrator.target", "workers.default.model", "scope"]) {
+			ok(isRoutingPath(path), `${path} is routing`);
+		}
+		for (const path of ["workers.maxRetries", "budget.concurrency", "compaction.auto", "autonomy"]) {
+			ok(!isRoutingPath(path), `${path} is not routing`);
+		}
+	});
+
+	it("overlays session overrides on the shared snapshot without mutating it", () => {
+		const base = settingsWithTargets();
+		const overrides: SessionOverrides = new Map<string, unknown>([
+			["autonomy", "full-auto"],
+			["retry.maxRetries", 8],
+		]);
+		const view = applyOverrides(base, overrides);
+		strictEqual(view.autonomy, "full-auto");
+		strictEqual(view.retry.maxRetries, 8);
+		// the shared snapshot is untouched: the override is session-local
+		strictEqual(base.autonomy, "auto-edit");
+		strictEqual(base.retry.maxRetries, DEFAULT_SETTINGS.retry.maxRetries);
+	});
+
+	it("returns the base object unchanged when there are no overrides", () => {
+		const base = settingsWithTargets();
+		strictEqual(applyOverrides(base, new Map()), base);
+	});
+
+	it("derives a minimal routing patch per edited id, carrying a rebased model on target change", () => {
+		const settings = settingsWithTargets();
+		settings.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "high" };
+		deepStrictEqual(routingPatchForId("orchestrator.target", settings), {
+			orchestrator: { target: "target-b", model: "model-b" },
+		});
+		deepStrictEqual(routingPatchForId("orchestrator.thinkingLevel", settings), {
+			orchestrator: { thinkingLevel: "high" },
+		});
+		deepStrictEqual(routingPatchForId("scope", settings), { scope: settings.scope });
+		strictEqual(routingPatchForId("autonomy", settings), null);
+	});
+
+	it("globalizes a routing edit even after it was applied to the session", () => {
+		// Mirrors the orchestrator commit path: a session-only apply moves the
+		// routing state first, so a later diff would be empty; routingPatchForId
+		// must still produce the patch that the global save persists.
+		const file = { current: settingsWithTargets() };
+		const routing: SessionRoutingState = seedSessionRouting(file.current);
+		const next = structuredClone(file.current);
+		next.orchestrator = { target: "target-b", model: "model-b", thinkingLevel: "off" };
+
+		// session apply
+		const patch = routingPatchForId("orchestrator.target", next);
+		ok(patch, "routing id yields a patch");
+		applyRoutingPatch(routing, patch);
+		strictEqual(applySessionRouting(file.current, routing).orchestrator.target, "target-b");
+		// the file (global default) is still untouched
+		strictEqual(file.current.orchestrator.target, "target-a");
+
+		// global save of the same edit, after the session already moved
+		const saved = structuredClone(file.current);
+		mergeRoutingPatchIntoSettings(saved, routingPatchForId("orchestrator.target", next) as RoutingPatch);
+		file.current = saved;
+		strictEqual(file.current.orchestrator.target, "target-b");
+		strictEqual(file.current.orchestrator.model, "model-b");
+	});
+
+	it("a global save supersedes a prior session override on the same leaf", () => {
+		// Session-only override, then global save of the same leaf: the override
+		// is cleared and the file becomes authoritative.
+		const overrides: SessionOverrides = new Map<string, unknown>([["retry.maxRetries", 8]]);
+		const file = { current: settingsWithTargets() };
+		// global save path: persist the leaf, drop the override
+		setAtPath(file.current, "retry.maxRetries", 5);
+		overrides.delete("retry.maxRetries");
+		const view = applyOverrides(file.current, overrides);
+		strictEqual(view.retry.maxRetries, 5);
+		strictEqual(overrides.size, 0);
 	});
 });

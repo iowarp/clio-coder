@@ -206,6 +206,13 @@ export interface InteractiveDeps {
 	onSetScope?: (scope: string[]) => void;
 	/** Write handler the /settings overlay uses to persist cycled values. */
 	writeSettings?: (next: ClioSettings) => void;
+	/**
+	 * Scoped commit for a single /settings edit. `id` is the config-path id, `next`
+	 * the effective view with that one leaf changed. scope "session" applies live
+	 * only; "global" also persists it as the default. Absent ⇒ the overlay falls
+	 * back to writeSettings (global-only).
+	 */
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
 	/** Resume a past session id. Called from the /resume overlay. */
 	onResumeSession?: (sessionId: string) => void;
 	/** Start a fresh session. Called from /new. */
@@ -2408,6 +2415,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayState = "settings";
 		const getSettings = deps.getSettings;
 		const writeSettingsOut = deps.writeSettings;
+		const commitSettingOut = deps.commitSetting;
 		const handle = openSettingsOverlay(tui, {
 			getSettings,
 			providers: deps.providers,
@@ -2415,6 +2423,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				writeSettingsOut(next);
 				footer.refresh();
 			},
+			...(commitSettingOut
+				? {
+						commitSetting: (id, next, scope) => {
+							commitSettingOut(id, next, scope);
+							footer.refresh();
+						},
+					}
+				: {}),
 			notice: notify,
 			onClose: () => {
 				settingsOverlayRefresh = null;
