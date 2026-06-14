@@ -4,6 +4,7 @@ import { readSettings, validateSettingsFile } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
+import { repairLegacySettingsFile, type SettingsRepairOutcome } from "./settings-repair.js";
 import { readStateInfo } from "./state.js";
 import { getVersionInfo } from "./version.js";
 
@@ -21,12 +22,17 @@ export interface DoctorOptions {
 }
 
 export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
+	let repair: SettingsRepairOutcome | undefined;
 	if (options.fix) {
 		initializeClioHome();
 		const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
 		if (existsSync(credentialsPath)) {
 			chmodSync(credentialsPath, 0o600);
 		}
+		// Repair legacy keys older Clio versions wrote so an upgraded install
+		// boots instead of failing strict validation. Scoped to known
+		// removed/renamed keys; a valid file is left untouched.
+		repair = repairLegacySettingsFile();
 	}
 	const findings: DoctorFinding[] = [];
 	const version = getVersionInfo();
@@ -68,10 +74,17 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			accessSync(settings, constants.R_OK);
 			const validation = validateSettingsFile();
 			if (validation.issues.length === 0) {
-				findings.push({ ok: true, name: "settings.yaml", detail: settings });
+				const repaired = repair?.status === "repaired" ? ` (repaired legacy keys: ${repair.transforms.join("; ")})` : "";
+				findings.push({ ok: true, name: "settings.yaml", detail: `${settings}${repaired}` });
 			} else {
 				const detail = validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
-				findings.push({ ok: false, name: "settings.yaml", detail: `invalid: ${detail}` });
+				// After --fix the legacy keys are gone, so anything left is a typo or
+				// an unsupported key the user must remove by hand; without --fix point
+				// at the repair that fixes settings written by older Clio versions.
+				const hint = options.fix
+					? " (remaining keys are unrecognized; remove them by hand)"
+					: " (run `clio doctor --fix` to repair settings written by older Clio versions)";
+				findings.push({ ok: false, name: "settings.yaml", detail: `invalid: ${detail}${hint}` });
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

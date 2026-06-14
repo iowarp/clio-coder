@@ -36,7 +36,10 @@ export class SettingsValidationError extends Error {
 
 	constructor(issues: ReadonlyArray<SettingsIssue>) {
 		const lines = issues.map((issue) => `  ${issue.path}: ${issue.message}`);
-		super(`settings.yaml failed validation:\n${lines.join("\n")}`);
+		super(
+			`settings.yaml failed validation:\n${lines.join("\n")}\n` +
+				"Run `clio doctor --fix` to repair settings written by older Clio versions, then retry.",
+		);
 		this.name = "SettingsValidationError";
 		this.issues = issues;
 	}
