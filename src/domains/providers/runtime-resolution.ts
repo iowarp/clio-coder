@@ -551,6 +551,15 @@ export function resolveContextWindowDetails(
 		source = "descriptor-default";
 	}
 
+	const envMaxTokensVal = process.env.CLIO_MAX_CONTEXT_TOKENS;
+	if (envMaxTokensVal) {
+		const envMaxTokens = Number(envMaxTokensVal);
+		if (Number.isInteger(envMaxTokens) && envMaxTokens > 0) {
+			effective = envMaxTokens;
+			source = "target-override";
+		}
+	}
+
 	let warning: string | null = null;
 	if (runtime.tier === "local-native" && effective < LOCAL_NATIVE_DESIRED_CONTEXT_WINDOW) {
 		warning = `Connected target offers ${effective} tokens, which is below the recommended 128k for local coding.`;

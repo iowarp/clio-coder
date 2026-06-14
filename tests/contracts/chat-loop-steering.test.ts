@@ -447,4 +447,36 @@ describe("contracts/chat-loop steering queue routing", () => {
 		runGate.release();
 		await firstRun;
 	});
+
+	it("allows programmatic steering of the loop", async () => {
+		const log = emptyLog();
+		const runGate = gate();
+		const loop = createLoop(log, async (agent, _input, call) => {
+			if (call > 1) return;
+			await runGate.wait;
+			for (const message of [...log.steered]) {
+				await agent.emit({ type: "message_start", message });
+				await agent.emit({ type: "message_end", message });
+			}
+			const done = assistantDone("pivoted");
+			await agent.emit({ type: "message_end", message: done });
+			await agent.emit({ type: "agent_end", messages: [done] });
+		});
+
+		const firstRun = loop.submit("start a long task");
+		await settle();
+		strictEqual(loop.isStreaming(), true);
+
+		const steered = loop.steer("programmatic correction");
+		strictEqual(steered, true);
+		strictEqual(log.steered.length, 1, "programmatic steer must ride the steering queue");
+		deepStrictEqual(loop.queuedMessages(), {
+			steer: ["programmatic correction"],
+			followUp: [],
+		});
+
+		runGate.release();
+		await firstRun;
+		deepStrictEqual(loop.queuedMessages(), { steer: [], followUp: [] });
+	});
 });

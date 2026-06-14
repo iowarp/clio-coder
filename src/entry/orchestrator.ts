@@ -137,6 +137,7 @@ export interface BootOptions {
 		sampling?: HeadlessSamplingOverrides;
 		noSkills?: boolean;
 		skillPaths?: ReadonlyArray<string>;
+		steerChannel?: string;
 	};
 	/** Serve Clio as an Agent Client Protocol v1 agent over JSON-RPC stdio. */
 	acp?: {
@@ -865,6 +866,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					? { pendingSkillRequests: parsedSkillRequest.pendingSkillRequests }
 					: {}),
 				mode: options.headless.mode ?? "text",
+				...(options.headless.steerChannel ? { steerChannel: options.headless.steerChannel } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
 			await termination.shutdown(code);

@@ -509,8 +509,14 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			strictEqual("endpoints" in afterConfigure, false, "settings must use target vocabulary, not legacy endpoints");
 			strictEqual((afterConfigure.orchestrator as Record<string, unknown>).target, "fixture-openai");
 			strictEqual((afterConfigure.orchestrator as Record<string, unknown>).model, "fixture-alpha");
-			strictEqual(((afterConfigure.workers as Record<string, unknown>).default as Record<string, unknown>).target, "fixture-openai");
-			strictEqual(((afterConfigure.workers as Record<string, unknown>).default as Record<string, unknown>).model, "fixture-beta");
+			strictEqual(
+				((afterConfigure.workers as Record<string, unknown>).default as Record<string, unknown>).target,
+				"fixture-openai",
+			);
+			strictEqual(
+				((afterConfigure.workers as Record<string, unknown>).default as Record<string, unknown>).model,
+				"fixture-beta",
+			);
 
 			const targetsJson = await runCli(["targets", "--json"], { env });
 			strictEqual(targetsJson.code, 0, `stderr=${targetsJson.stderr}`);
@@ -583,8 +589,14 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			const afterUse = parseYaml(readFileSync(settingsFile, "utf8")) as Record<string, unknown>;
 			strictEqual((afterUse.orchestrator as Record<string, unknown>).target, "fixture-openai");
 			strictEqual((afterUse.orchestrator as Record<string, unknown>).model, "fixture-beta");
-			strictEqual(((afterUse.workers as Record<string, unknown>).default as Record<string, unknown>).target, "fixture-openai");
-			strictEqual(((afterUse.workers as Record<string, unknown>).default as Record<string, unknown>).model, "fixture-beta");
+			strictEqual(
+				((afterUse.workers as Record<string, unknown>).default as Record<string, unknown>).target,
+				"fixture-openai",
+			);
+			strictEqual(
+				((afterUse.workers as Record<string, unknown>).default as Record<string, unknown>).model,
+				"fixture-beta",
+			);
 		} finally {
 			await closeServer(fixture.server);
 		}

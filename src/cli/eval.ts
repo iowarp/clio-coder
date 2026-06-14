@@ -9,6 +9,7 @@ import {
 	loadEvalTaskFile,
 	renderEvalComparison,
 	renderEvalReport,
+	renderSweJsonl,
 	runEvalTasks,
 	writeEvalArtifact,
 } from "../domains/eval/index.js";
@@ -16,7 +17,7 @@ import { buildEvalEvidence, evalEvidenceId } from "../domains/evidence/index.js"
 import { printError } from "./shared.js";
 
 const HELP = `clio eval run --task-file <tasks.yaml> [--repeat <n>]
-clio eval report <evalId>
+clio eval report <evalId> [--format swe-jsonl]
 clio eval compare <baselineEvalId> <candidateEvalId>
 
 Run repo-local YAML eval tasks, reports, or baseline/candidate comparisons.
@@ -29,6 +30,7 @@ interface ParsedEvalArgs {
 	taskFile?: string;
 	repeat: number;
 	evalId?: string;
+	format?: "swe-jsonl";
 	compareIds: string[];
 	help: boolean;
 }
@@ -71,6 +73,13 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 			throw new Error(`unknown eval run argument: ${arg}`);
 		}
 		if (parsed.command === "report") {
+			if (arg === "--format") {
+				const value = args[index + 1];
+				if (value !== "swe-jsonl") throw new Error("--format must be 'swe-jsonl'");
+				parsed.format = value;
+				index += 1;
+				continue;
+			}
 			if (parsed.evalId === undefined && !arg.startsWith("-")) {
 				parsed.evalId = arg;
 				continue;
@@ -164,7 +173,11 @@ async function runEvalReportCommand(parsed: ParsedEvalArgs): Promise<number> {
 	try {
 		const dataDir = clioDataDir();
 		const artifact = await loadEvalArtifact(dataDir, evalId);
-		process.stdout.write(renderEvalReport(artifact, evalArtifactPath(dataDir, evalId)));
+		if (parsed.format === "swe-jsonl") {
+			process.stdout.write(renderSweJsonl(artifact));
+		} else {
+			process.stdout.write(renderEvalReport(artifact, evalArtifactPath(dataDir, evalId)));
+		}
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));

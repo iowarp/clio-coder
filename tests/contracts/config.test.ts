@@ -243,4 +243,21 @@ describe("contracts/config", () => {
 			"/tmp/repo/local/skills",
 		);
 	});
+
+	it("validates workers resilience configuration", () => {
+		const result = validateSettings({
+			workers: {
+				default: {
+					target: null,
+					model: null,
+					thinkingLevel: "off",
+				},
+				maxRetries: 4,
+				resilienceCooldownMs: 8000,
+			},
+		});
+		deepStrictEqual(result.issues, []);
+		strictEqual(result.settings.workers.maxRetries, 4);
+		strictEqual(result.settings.workers.resilienceCooldownMs, 8000);
+	});
 });

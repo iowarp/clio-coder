@@ -34,6 +34,7 @@ export interface WorkersSettings {
 	/** Bounded automatic retries for retryable run outcomes. 0 disables. */
 	maxRetries: number;
 	onPermission: WorkerPermissionMode;
+	resilienceCooldownMs?: number;
 }
 
 /**
@@ -146,6 +147,7 @@ export const DEFAULT_SETTINGS = {
 		profiles: {} as WorkerProfiles,
 		maxRetries: 2,
 		onPermission: "deny" as WorkerPermissionMode,
+		resilienceCooldownMs: 15000,
 	} as WorkersSettings,
 	scope: [] as string[],
 	modelSelector: {
@@ -277,6 +279,8 @@ workers:
     model: null
     thinkingLevel: off
   profiles: {}
+  maxRetries: 2
+  resilienceCooldownMs: 15000
   # fast-local:
   #   target: local-lmstudio
   #   model: your-model-id

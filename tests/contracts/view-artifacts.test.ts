@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { rm, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -251,7 +251,10 @@ describe("contracts/view-artifacts", () => {
 			await writeFile(receiptFilePath(stateDir, corrupted.id), "{not json");
 
 			const withCorrupt = await receiptProvider.list();
-			ok(withCorrupt.some((artifact) => artifact.id === created.id), "valid receipt remains listed");
+			ok(
+				withCorrupt.some((artifact) => artifact.id === created.id),
+				"valid receipt remains listed",
+			);
 			const corruptedArtifact = withCorrupt.find((artifact) => artifact.id === corrupted.id);
 			ok(corruptedArtifact, "corrupted receipt is isolated to its own artifact row");
 			const verification = await corruptedArtifact.verify?.();
