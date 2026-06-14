@@ -758,6 +758,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		knownTargets: () => new Set(providers.list().map((entry) => entry.target.id)),
 		observability,
 		bus,
+		interactiveTui: interactive,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: () => {
