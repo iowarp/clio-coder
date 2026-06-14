@@ -1,11 +1,11 @@
 # Clio Coder Architecture and Boundaries
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/architecture_blueprint.html](html/architecture_blueprint.html) (Version: 0.2.3).
 
-Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
+Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.
 
-This page is source-code aligned for the current `v0.2.2` development line.
+This page is source-code aligned for the current `v0.2.3` development line.
 
 ---
 
@@ -87,7 +87,7 @@ graph TD
 
 Core data paths:
 
-1. CLI or TUI boot initializes config/data/cache directories through `src/core/init.ts`.
+1. CLI or TUI boot initializes config, data, state, and cache directories through `src/core/init.ts`.
 2. The domain loader starts domains according to each `manifest.ts` dependency list.
 3. The chat loop resolves model/runtime state and visible tools for the selected target and request intent.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.

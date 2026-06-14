@@ -6,9 +6,6 @@
   <title>Clio Coder Skills Hub & Marketplace</title>
   
   <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -31,8 +28,8 @@
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
 
-      --font-sans: 'Plus Jakarta Sans', sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
 
     * {
@@ -395,7 +392,7 @@
     <header>
       <div class="header-logo">
         <div class="logo-box">
-          <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="32" height="32" />
+          <svg viewBox="0 0 64 64" width="32" height="32" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
         <div>
           <h1>Skills Marketplace</h1>
@@ -438,7 +435,7 @@
           </div>
           <!-- Marketplace Group -->
           <div style="margin-top: 1rem;">
-            <div class="group-title">Marketplace (github.com/iowarp/skills)</div>
+            <div class="group-title">Marketplace (github.com/iowarp/clio-coder/skills)</div>
             <div id="group-market"></div>
           </div>
         </div>
@@ -529,7 +526,7 @@
         name: "netcdf-check",
         scope: "market",
         scopeClass: "scope-market",
-        provenance: "Live GitHub raw.githubusercontent.com (Miss Cached -> Pinned Fallback)",
+        provenance: "GitHub raw detail with cache/local fallback",
         provDot: "provenance-pinned",
         license: "MIT",
         version: "1.0.1",
@@ -545,7 +542,7 @@
         name: "vtk-render",
         scope: "market",
         scopeClass: "scope-market",
-        provenance: "Live GitHub Content API (Hit Live)",
+        provenance: "GitHub contents API listing",
         provDot: "provenance-live",
         license: "BSD-3-Clause",
         version: "2.0.0",

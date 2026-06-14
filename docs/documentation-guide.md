@@ -1,7 +1,7 @@
 # Documentation Standards and Codebase Alignment
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive documentation link linter, phrasing/claim evaluator, and alignment portal is located at [docs/html/documentation_blueprint.html](html/documentation_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive documentation link linter, phrasing/claim evaluator, and alignment portal is located at [docs/html/documentation_blueprint.html](html/documentation_blueprint.html) (Version: 0.2.3).
 
 Clio Coder is an experimental community alpha. Documentation should help contributors and early users work from the source of truth without overstating maturity. When docs drift, prefer the current source and tests over older prose or aspirational roadmap notes.
 
@@ -40,7 +40,9 @@ Classify claims clearly:
 | [safety-model.md](safety-model.md) | `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/validate-frontend.ts` | Operating posture, tool visibility, project policy, damage control, typed validation. |
 | [prompt-envelope-and-tools.md](prompt-envelope-and-tools.md) | `src/domains/prompts/compiler.ts`, `src/interactive/chat-loop.ts`, `src/tools/registry.ts`, `src/engine/worker-tools.ts` | Prompt envelope reuse, provider tool delivery, bounded results, registry enforcement. |
 | [built-in-agents.md](built-in-agents.md) | `src/domains/agents/**`, `src/domains/agents/builtins/*.md`, `src/domains/dispatch/**` | Agent recipe schema, discovery roots, fleet dispatch. |
+| [observability.md](observability.md) | `src/domains/observability/**`, `src/interactive/view/**`, `src/domains/dispatch/**`, `src/core/bus-events.ts` | `/view` artifact browsing, receipt verification, worker diagnostics, event routing, and cost snapshots. |
 | [extensions-and-sharing.md](extensions-and-sharing.md) | `src/domains/extensions/**`, `src/domains/resources/**`, `src/domains/share/**`, `src/cli/extensions.ts`, `src/cli/share.ts` | Extension manifests, prompts, skills, share archives. |
+| [skills-marketplace.md](skills-marketplace.md) | `src/interactive/overlays/skills-hub.ts`, `src/domains/resources/marketplace-remote.ts`, `src/domains/resources/skills/**` | Skills Hub marketplace listing, cache/fallback behavior, install actions, and publishing flow. |
 | [model-catalog.md](model-catalog.md) | `src/domains/providers/catalog.ts`, `src/domains/providers/models/**`, `src/domains/providers/probe/**` | Model catalog, live probes, field-note promotion. |
 | [eval-runner.md](eval-runner.md) | `src/domains/eval/**`, `src/cli/eval.ts` | Local YAML eval tasks, artifact reports, comparisons. |
 | [evidence-and-memory.md](evidence-and-memory.md) | `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, `src/cli/memory.ts` | Evidence corpus layout, memory lifecycle and prompt injection. |

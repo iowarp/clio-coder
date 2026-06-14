@@ -1,7 +1,7 @@
 # Commands and Modes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/commands_blueprint.html](html/commands_blueprint.html) (Version: 0.2.3).
 
 
 Clio Coder is a terminal-first alpha harness. This page keeps the command
@@ -29,7 +29,8 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
 | `clio targets remove <id>` | Remove a target. |
 | `clio targets rename <old> <new>` | Rename a target id. |
-| `clio models [search] [--target <id>] [--json] [--probe]` | List known or discovered models. |
+| `clio models [search] [--target <id>] [--json] [--offline] [--probe]` | List models. Live probing is the default; `--offline` skips it and `--probe` is accepted for compatibility. |
+| `clio paths [--json]` | Print the resolved config, data, state, and cache directories. |
 | `clio auth list` | Show known auth entries. |
 | `clio auth status [target-or-runtime]` | Inspect auth state. |
 | `clio auth login <target-or-runtime>` | Add credentials through the supported flow. |
@@ -60,6 +61,8 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
+| `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
 | `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
 | `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
@@ -143,6 +146,24 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Esc` | Cancel a stream, close an active overlay, or collapse the dashboard. |
 
 When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
+
+## Live Steering
+
+During an active assistant stream, pressing `Enter` sends the current editor
+text as steering for the active run instead of waiting for the turn to finish.
+The input is delivered through `agent.steer` before the next model turn.
+`Alt+Enter` keeps the after-run follow-up behavior.
+
+For running dispatches, the editor also accepts:
+
+```text
+@<agentId-or-runId-prefix> <steering text>
+```
+
+Clio resolves the token to an exact agent id first, then to a run-id prefix,
+and forwards the text to the native worker's steering channel. File-looking
+tokens such as `@package.json` are rejected so ordinary repository references
+do not accidentally become steering requests.
 
 ## Operating Posture and Autonomy
 
@@ -251,7 +272,7 @@ The Clio TUI has been enhanced to maximize readability and command discovery:
 
 - **Redesigned Compact Footer:** The footer dashboard displays real-time token, cost, and target indicators in a single-row layout. Use `Alt+U` to toggle the footer between compact and expanded widgets.
 - **Relocated Telemetry:** Per-turn telemetry is surfaced in the footer activity area, keeping token consumption and execution costs visible without adding extra transcript noise.
-- **Overlay Navigation:** Standardized overlays are available for settings, model selection, hotkey references, target health, and session tracking.
+- **Overlay Navigation:** Standardized overlays are available for settings, model selection, `/help` key reference, target health, and session tracking.
 
 ## Overlay and Presentation Conventions
 

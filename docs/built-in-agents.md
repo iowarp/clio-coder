@@ -3,7 +3,7 @@
 Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, mode, tools, optional target/model hints, and thinking level; the Markdown body is the agent instruction text.
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard for the agent registry and dispatch admission check gates is located at [docs/html/agents_blueprint.html](html/agents_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive dashboard for the agent registry and dispatch admission check gates is located at [docs/html/agents_blueprint.html](html/agents_blueprint.html) (Version: 0.2.3).
 
 The source of truth is `src/domains/agents/**`.
 

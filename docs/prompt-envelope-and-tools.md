@@ -1,5 +1,8 @@
 # Prompt Envelope and Tools
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/tools_blueprint.html](html/tools_blueprint.html) (Version: 0.2.3).
+
 Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 
 ## One system prompt per session
@@ -22,8 +25,8 @@ Providers that cannot call tools receive no schemas, and the prompt tells the mo
 
 Clio uses two context-protection mechanisms.
 
-1. Tool results are capped at the source. The default tool-result source cap is 6KB with continuation text for offset and limit style follow-up. Result shaping has an 8KB backstop. Summary-kind tools such as `bash`, `run_task`, `validate_frontend`, `dispatch`, and `web_fetch` have explicit 16KB policies. `ask_user` has a 20KB policy.
-2. Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first masks stale tool observations older than `excludeLastTurns`. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view.
+1. Tool results are capped at the source. The default tool-result source cap is 6KB with continuation text for offset and limit style follow-up. Result shaping has an 8KB backstop. Summary-kind tools such as `bash`, `run_task`, `validate_frontend`, `dispatch`, and `web_fetch` have explicit 16KB policies. `ask_user` has a 20KB policy. Over-cap generic results are shown briefly and, when possible, saved under `<stateDir>/scratch/<sessionId>/<toolCallId>.txt` with an `offloadPath` detail and a 10MB scratch-file cap.
+2. Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first masks stale tool observations and stale thinking older than `excludeLastTurns`. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view.
 
 Manual `/compact`, `CLIO_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly.
 
@@ -38,3 +41,13 @@ node scripts/turn-report.mjs --session <id>
 ```
 
 The report prints per-call `ttft`, `api`, input, cache read, cache write, backend cache verdict, and expected cold reasons. Cache verdicts are `hot`, `partial`, `cold`, or `small`.
+
+## Edit matching safety
+
+The `edit` tool first attempts exact matching. If the model's old text differs
+only by normalized quote, dash, whitespace, or indentation details, Clio maps
+the normalized match back to the original line span and splices only the
+intended replacement. Unchanged spans keep their original bytes, including
+smart punctuation and CRLF line endings. Ambiguous duplicate matches,
+overlapping hunks, empty changes, and no-op edits are rejected instead of
+guessing.

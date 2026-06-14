@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Context Engine Blueprint (v0.2.3)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -33,8 +30,8 @@
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
       
       --glass-blur: blur(12px);
     }
@@ -502,8 +499,8 @@
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Single-Threshold Compaction</h3>
         <p>Auto-compaction resolves in two tiers to avoid calling the model when cheap edits work:</p>
         <ol style="margin-left: 2rem; margin-bottom: 1.5rem; color:var(--text-muted)">
-          <li style="margin-bottom:0.5rem;"><strong>Tier 1: Tool Masking (Local)</strong>: Clio first scans tool results older than <code>excludeLastTurns</code> (default: 6) and replaces their body contents with a compact marker segment, maintaining tool structures but recovering significant context tokens locally.</li>
-          <li style="margin-bottom:0.5rem;"><strong>Tier 2: LLM Summary (Model)</strong>: If pressure remains above the threshold after tool masking, the engine executes a summary compaction call, folding older chat segments into a single compact ledger summary turn.</li>
+          <li style="margin-bottom:0.5rem;"><strong>Tier 1: Observation and thinking masking (local)</strong>: Clio first scans stale tool results and stale assistant thinking older than <code>excludeLastTurns</code> (default: 6), replaces observation bodies with compact markers, and drops stale thinking while preserving replay structures.</li>
+          <li style="margin-bottom:0.5rem;"><strong>Tier 2: LLM Summary (Model)</strong>: If pressure remains above the threshold after local masking, the engine executes a summary compaction call, folding older chat segments into a single compact ledger summary turn.</li>
         </ol>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Cache-Divergence Honesty</h3>
@@ -577,17 +574,17 @@
         vDesc.innerText = `Pressure (${pressure.toFixed(2)}) is below threshold (${threshold.toFixed(2)}). History fits in window.`;
         previewBox.style.display = 'none';
       } else {
-        // threshold crossed: simulate Tool Masking first
-        const savedByMasking = tools * 0.85; // assume 85% of tool token is saved by masking
+        // threshold crossed: simulate local masking first
+        const savedByMasking = tools * 0.85; // approximate savings from observation and thinking masking
         const pressureAfterMasking = (total - savedByMasking) / windowSize;
 
         if (pressureAfterMasking < threshold) {
           vBox.className = "verdict-box warn";
-          vTitle.innerText = "CHEAP TOOL MASKING TRIGGERED";
-          vDesc.innerText = `Pressure (${pressure.toFixed(2)}) crossed threshold. Masking old tool observations recovered ${Math.round(savedByMasking).toLocaleString()} tokens, dropping pressure to ${pressureAfterMasking.toFixed(2)} and avoiding LLM compaction.`;
+          vTitle.innerText = "LOCAL MASKING TRIGGERED";
+          vDesc.innerText = `Pressure (${pressure.toFixed(2)}) crossed threshold. Masking stale observations and dropping stale thinking recovered ${Math.round(savedByMasking).toLocaleString()} tokens, dropping pressure to ${pressureAfterMasking.toFixed(2)} and avoiding LLM compaction.`;
           
           previewBox.style.display = 'block';
-          document.getElementById('maskedPreviewText').innerText = `[Observation masked: read output was 320 lines, 12800 chars - contents masked to save context. Re-run tool for current contents.] Preview: export default class ConfigResolver { ... }`;
+          document.getElementById('maskedPreviewText').innerText = `[Observation masked: read output was 320 lines, 12800 chars - contents masked to save context. Re-run tool for current contents.] Preview: export default class ConfigResolver { ... }\n[Stale thinking dropped from assistant replay]`;
         } else {
           vBox.className = "verdict-box error";
           vTitle.innerText = "LLM SUMMARY COMPACTION TRIGGERED";

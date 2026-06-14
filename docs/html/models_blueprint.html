@@ -6,9 +6,6 @@
   <title>Clio Coder Model Catalog & Probing Blueprint</title>
   
   <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -34,8 +31,8 @@
       --color-blue-rgb: 59, 130, 246;
       
       --gradient-cyan-purple: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
 
     * {
@@ -898,7 +895,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+        <svg viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <h1>Model Catalog & Routing Blueprint</h1>
       <div class="subtitle">Interactive visual specifications for model target configurations, runtime detection, dynamic capability badging, and routing resolution in Clio Coder.</div>
@@ -1394,12 +1391,12 @@
                 .node-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 8; ry: 8; }
                 .node-box-cyan { fill: rgba(0, 240, 255, 0.03); stroke: #00f0ff; stroke-width: 2; rx: 10; ry: 10; }
                 .node-box-purple { fill: rgba(189, 0, 255, 0.03); stroke: #bd00ff; stroke-width: 1.5; rx: 8; ry: 8; }
-                .node-title { fill: #f3f4f6; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 13px; font-weight: 700; }
-                .node-text { fill: #9ca3af; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-                .node-text-bold { fill: #f3f4f6; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: bold; }
+                .node-title { fill: #f3f4f6; font-family: var(--font-sans); font-size: 13px; font-weight: 700; }
+                .node-text { fill: #9ca3af; font-family: var(--font-mono); font-size: 11px; }
+                .node-text-bold { fill: #f3f4f6; font-family: var(--font-mono); font-size: 11px; font-weight: bold; }
                 .arrow-line { fill: none; stroke: rgba(255, 255, 255, 0.2); stroke-width: 1.5; }
                 .arrow-line-cyan { fill: none; stroke: #00f0ff; stroke-width: 2; }
-                .label-text { fill: #9ca3af; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 10px; }
+                .label-text { fill: #9ca3af; font-family: var(--font-sans); font-size: 10px; }
               </style>
 
               <!-- Layer 1 -->
@@ -1455,7 +1452,7 @@
             </svg>
           </div>
           <div class="svg-desc">
-            <strong>Hierarchical Priority:</strong> Lower levels provide base definitions, which are progressively layered and overwritten by higher levels. The live connection probe outcomes (Layer 4) verify runtime reality, and user constraints in settings.yaml (Layer 5) act as the final absolute authority.
+            <strong>Hierarchical Priority:</strong> Lower levels provide base definitions, which are progressively layered and overwritten by higher levels. Live probe outcomes verify runtime reality, while configured and default models remain selectable with explicit source labels when a live catalog omits them.
           </div>
         </div>
 
@@ -1470,8 +1467,8 @@
               <style>
                 .step-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
                 .step-box-hit { fill: rgba(16, 185, 129, 0.03); stroke: #10b981; stroke-width: 2; rx: 8; ry: 8; }
-                .step-title { fill: #f3f4f6; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 700; }
-                .step-desc { fill: #9ca3af; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 11px; }
+                .step-title { fill: #f3f4f6; font-family: var(--font-sans); font-size: 12px; font-weight: 700; }
+                .step-desc { fill: #9ca3af; font-family: var(--font-sans); font-size: 11px; }
                 .decision-diamond { fill: #1f2937; stroke: #3b82f6; stroke-width: 1.5; }
               </style>
 
@@ -1534,7 +1531,7 @@
               <!-- Final result success -->
               <rect x="540" y="140" width="280" height="80" class="step-box-hit" />
               <text x="555" y="165" class="step-title" fill="#10b981">Resolved Target Reference</text>
-              <text x="555" y="185" class="step-desc" fill="#f3f4f6">Returns endpoint ID + wire model ID</text>
+              <text x="555" y="185" class="step-desc" fill="#f3f4f6">Returns target ID + wire model ID</text>
               <text x="555" y="200" class="step-desc" fill="#f3f4f6">Applies thinking level target settings</text>
 
               <path d="M 100 200 L 100 100 L 680 100 L 680 140" class="arrow-line" marker-end="url(#arrow-white)" />
@@ -1557,20 +1554,20 @@
               <style>
                 .flow-box { fill: #111827; stroke: rgba(255, 255, 255, 0.08); stroke-width: 1.5; rx: 6; ry: 6; }
                 .flow-box-active { fill: rgba(0, 240, 255, 0.02); stroke: #00f0ff; stroke-width: 1.5; rx: 6; ry: 6; }
-                .flow-title { fill: #f3f4f6; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 700; }
-                .flow-desc { fill: #9ca3af; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 11px; }
+                .flow-title { fill: #f3f4f6; font-family: var(--font-sans); font-size: 12px; font-weight: 700; }
+                .flow-desc { fill: #9ca3af; font-family: var(--font-sans); font-size: 11px; }
               </style>
 
               <!-- Start -->
               <rect x="20" y="150" width="120" height="60" class="flow-box-active" />
               <text x="35" y="175" class="flow-title">1. Trigger Probe</text>
-              <text x="35" y="192" class="flow-desc">clio --probe / TUI</text>
+              <text x="35" y="192" class="flow-desc">clio models / TUI</text>
 
               <path d="M 140 180 L 180 180" class="arrow-line" marker-end="url(#arrow-white)" />
 
               <!-- Liveness check -->
               <rect x="180" y="140" width="150" height="80" class="flow-box" />
-              <text x="195" y="165" class="flow-title">2. Endpoint Ping</text>
+              <text x="195" y="165" class="flow-title">2. Target Ping</text>
               <text x="195" y="185" class="flow-desc">Ping HTTP URL / WS</text>
               <text x="195" y="200" class="flow-desc">Verifies liveness</text>
 

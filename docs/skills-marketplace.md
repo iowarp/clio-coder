@@ -1,5 +1,8 @@
 # Skills Marketplace
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html) (Version: 0.2.3).
+
 The Skills Hub (`/skill`) shows three groups: project skills, user skills, and the marketplace. The marketplace group is backed by the `skills/` tree of [github.com/iowarp/clio-coder](https://github.com/iowarp/clio-coder/tree/main/skills) on `main`.
 
 ## How the hub reaches the marketplace
@@ -7,8 +10,8 @@ The Skills Hub (`/skill`) shows three groups: project skills, user skills, and t
 The hub opens instantly on local data and never blocks on the network. Marketplace rows hydrate in three layers:
 
 1. **Live listing.** The GitHub contents API lists `skills/` directories. Each selected row lazily fetches its `SKILL.md` from `raw.githubusercontent.com` for the detail pane.
-2. **Disk cache.** Listings and details are cached at `<dataDir>/marketplace-cache.json` with a 24-hour TTL, which also keeps the unauthenticated GitHub rate limit (60 requests/hour) comfortable. A corrupt cache file is treated as a miss.
-3. **Pinned fallback.** Offline or rate-limited sessions fall back first to the stale cache, then to the pinned local marketplace list maintained by `npm run skills:pin`. Detail panes label cached or pinned content.
+2. **Disk cache.** Listings and details are cached at `<cacheDir>/marketplace-cache.json` with a 24-hour TTL, which also keeps the unauthenticated GitHub rate limit comfortable. A corrupt cache file is treated as a miss.
+3. **Pinned fallback.** Offline or rate-limited sessions fall back first to the stale cache, then to the pinned local marketplace list maintained by `npm run skills:pin`. The default fetcher performs that fallback internally, so the hub may still show the marketplace section even when the backing source was cache or local metadata.
 
 ## Using the hub
 
@@ -21,6 +24,11 @@ The hub opens instantly on local data and never blocks on the network. Marketpla
 | `PgUp`/`PgDn` | Scroll the detail pane |
 
 Invoking an uninstalled marketplace skill with `/skill:<name>` still installs it on first use; `i` simply does it eagerly from the hub.
+
+The CLI `clio skills` commands manage local skill discovery, validation, and
+creation. Extension resource roots and share archives are documented in
+[extensions-and-sharing.md](extensions-and-sharing.md); this page owns the TUI
+Hub and marketplace behavior.
 
 ## Publishing a skill
 
