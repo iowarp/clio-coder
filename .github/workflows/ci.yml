@@ -18,17 +18,21 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: ${{ matrix.node-version }}
           cache: npm
       - name: Install fd-find and ripgrep
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fd-find ripgrep
       - run: npm ci --prefer-offline --no-audit --no-fund
-      - run: npm run ci
+      - run: npm run ci:release

@@ -1,10 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { parse as parseYaml } from "yaml";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
@@ -109,20 +110,46 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
 	});
 }
 
-async function startOpenAICompatFixture(reply: string): Promise<{
+interface OpenAICompatFixtureOptions {
+	models?: Array<Record<string, unknown> & { id: string }>;
+}
+
+async function startOpenAICompatFixture(
+	reply: string,
+	options: OpenAICompatFixtureOptions = {},
+): Promise<{
 	server: Server;
 	url: string;
 	requests: Array<Record<string, unknown>>;
 }> {
+	const models = options.models ?? [{ id: "mock-model", object: "model" }];
 	const requests: Array<Record<string, unknown>> = [];
 	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+		if (req.method === "GET" && req.url === "/v1/models") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ object: "list", data: models }));
+			return;
+		}
 		if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
 			res.writeHead(404);
 			res.end("not found");
 			return;
 		}
 		const raw = await readRequestBody(req);
-		requests.push(JSON.parse(raw) as Record<string, unknown>);
+		const request = JSON.parse(raw) as Record<string, unknown>;
+		requests.push(request);
+		if (request.stream === false) {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(
+				JSON.stringify({
+					id: "chatcmpl-clio-probe",
+					object: "chat.completion",
+					model: request.model ?? "mock-model",
+					choices: [{ index: 0, message: { role: "assistant", content: reply }, finish_reason: "stop" }],
+				}),
+			);
+			return;
+		}
 		res.writeHead(200, {
 			"content-type": "text/event-stream",
 			"cache-control": "no-cache",
@@ -320,6 +347,84 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		strictEqual(existsSync(dirs.cache), false);
 	});
 
+	it("reset requires --force and removes only the selected root", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const dataMarker = join(scratch.dir, "data", "marker.txt");
+		const stateMarker = join(scratch.dir, "state", "marker.txt");
+		writeFileSync(dataMarker, "data marker\n", "utf8");
+		writeFileSync(stateMarker, "state marker\n", "utf8");
+
+		const denied = await runCli(["reset", "--data"], { env: scratch.env });
+		strictEqual(denied.code, 2);
+		match(denied.stderr, /requires --force/);
+		ok(existsSync(dataMarker), "force-gated reset must not remove data");
+
+		const preview = await runCli(["reset", "--data", "--dry-run"], { env: scratch.env });
+		strictEqual(preview.code, 0, `stderr=${preview.stderr}`);
+		match(preview.stdout, /reset preview complete/);
+		ok(existsSync(dataMarker), "dry-run reset must not remove data");
+
+		const forced = await runCli(["reset", "--data", "--force"], { env: scratch.env });
+		strictEqual(forced.code, 0, `stderr=${forced.stderr}`);
+		match(forced.stdout, /reset complete/);
+		strictEqual(existsSync(dataMarker), false, "forced --data reset removes data contents");
+		ok(existsSync(join(scratch.dir, "data", "memory")), "reset reinitializes the data root structure");
+		ok(existsSync(stateMarker), "reset --data must not touch state contents");
+	});
+
+	it("uninstall requires --force and removes all four roots only when forced", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const dirs = ["config", "data", "state", "cache"].map((name) => join(scratch.dir, name));
+
+		const denied = await runCli(["uninstall"], { env: scratch.env });
+		strictEqual(denied.code, 2);
+		match(denied.stderr, /requires --force/);
+		ok(
+			dirs.every((dir) => existsSync(dir)),
+			"force-gated uninstall must not remove roots",
+		);
+
+		const preview = await runCli(["uninstall", "--dry-run"], { env: scratch.env });
+		strictEqual(preview.code, 0, `stderr=${preview.stderr}`);
+		match(preview.stdout, /uninstall preview complete/);
+		ok(
+			dirs.every((dir) => existsSync(dir)),
+			"dry-run uninstall must not remove roots",
+		);
+
+		const forced = await runCli(["uninstall", "--force"], { env: scratch.env });
+		strictEqual(forced.code, 0, `stderr=${forced.stderr}`);
+		match(forced.stdout, /removed Clio Coder state/);
+		for (const dir of dirs) {
+			strictEqual(existsSync(dir), false, `uninstall --force removed ${dir}`);
+		}
+	});
+
+	it("uninstall --remove-binary preserves real files and removes only clio dist symlinks", async () => {
+		const binDir = join(scratch.dir, "bin");
+		const launcher = join(binDir, "clio");
+		mkdirSync(binDir, { recursive: true });
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+
+		writeFileSync(launcher, "#!/bin/sh\nexit 0\n", { encoding: "utf8", mode: 0o755 });
+		const keepRealFile = await runCli(["uninstall", "--remove-binary", "--force"], {
+			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+		});
+		strictEqual(keepRealFile.code, 0, `stderr=${keepRealFile.stderr}`);
+		match(keepRealFile.stdout, /binary\s+keep/);
+		ok(existsSync(launcher), "a real launcher file must be left for the package manager");
+
+		rmSync(launcher, { force: true });
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		symlinkSync(CLI_ENTRY, launcher);
+		const removeSymlink = await runCli(["uninstall", "--remove-binary", "--force"], {
+			env: { ...scratch.env, CLIO_BIN_DIR: binDir },
+		});
+		strictEqual(removeSymlink.code, 0, `stderr=${removeSymlink.stderr}`);
+		match(removeSymlink.stdout, /binary\s+remove/);
+		strictEqual(existsSync(launcher), false, "a launcher symlink into dist/cli/index.js is removed");
+	});
+
 	it("targets --json returns an object with a targets array", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const result = await runCli(["targets", "--json"], { env: scratch.env });
@@ -327,6 +432,162 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const parsed = JSON.parse(result.stdout) as { targets: unknown[] };
 		ok(parsed && typeof parsed === "object");
 		ok(Array.isArray(parsed.targets));
+	});
+
+	it("configures an openai-compat target and lists fixture-backed models through the built CLI", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("probe reply", {
+			models: [
+				{
+					id: "fixture-alpha",
+					object: "model",
+					status: "loaded",
+					context_window: 32768,
+					max_output_tokens: 2048,
+					tools: true,
+					reasoning: true,
+				},
+				{
+					id: "fixture-beta",
+					object: "model",
+					status: { state: "unloaded", detail: "cold" },
+					context_window: 16384,
+					max_output_tokens: 1024,
+					tools: false,
+					reasoning: false,
+				},
+			],
+		});
+		try {
+			const env = { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const configured = await runCli(
+				[
+					"configure",
+					"--id",
+					"fixture-openai",
+					"--runtime",
+					"openai-compat",
+					"--url",
+					fixture.url,
+					"--model",
+					"fixture-alpha",
+					"--api-key-env",
+					"CLIO_TEST_OPENAI_KEY",
+					"--set-orchestrator",
+					"--orchestrator-model",
+					"fixture-alpha",
+					"--set-fleet-default",
+					"--fleet-model",
+					"fixture-beta",
+					"--context-window",
+					"32768",
+					"--max-tokens",
+					"2048",
+					"--reasoning",
+					"true",
+				],
+				{ env, timeoutMs: 20_000 },
+			);
+			strictEqual(configured.code, 0, `stderr=${configured.stderr}`);
+			match(configured.stdout, /saved target fixture-openai/);
+
+			const settingsFile = join(scratch.dir, "config", "settings.yaml");
+			const afterConfigure = parseYaml(readFileSync(settingsFile, "utf8")) as Record<string, unknown>;
+			const configuredTargets = afterConfigure.targets as Array<Record<string, unknown>>;
+			const configuredTarget = configuredTargets.find((target) => target.id === "fixture-openai");
+			ok(configuredTarget, "configured target persisted in settings.yaml");
+			strictEqual(configuredTarget.runtime, "openai-compat");
+			strictEqual(configuredTarget.url, fixture.url);
+			strictEqual(configuredTarget.defaultModel, "fixture-alpha");
+			deepStrictEqual(configuredTarget.wireModels, ["fixture-alpha", "fixture-beta"]);
+			deepStrictEqual(configuredTarget.auth, { apiKeyEnvVar: "CLIO_TEST_OPENAI_KEY" });
+			deepStrictEqual(configuredTarget.capabilities, {
+				contextWindow: 32768,
+				maxTokens: 2048,
+				reasoning: true,
+			});
+			strictEqual("endpoints" in afterConfigure, false, "settings must use target vocabulary, not legacy endpoints");
+			strictEqual((afterConfigure.orchestrator as Record<string, unknown>).target, "fixture-openai");
+			strictEqual((afterConfigure.orchestrator as Record<string, unknown>).model, "fixture-alpha");
+			strictEqual(((afterConfigure.workers as Record<string, unknown>).default as Record<string, unknown>).target, "fixture-openai");
+			strictEqual(((afterConfigure.workers as Record<string, unknown>).default as Record<string, unknown>).model, "fixture-beta");
+
+			const targetsJson = await runCli(["targets", "--json"], { env });
+			strictEqual(targetsJson.code, 0, `stderr=${targetsJson.stderr}`);
+			const targets = JSON.parse(targetsJson.stdout) as {
+				targets: Array<{
+					target: {
+						id: string;
+						runtime: string;
+						url?: string;
+						defaultModel?: string;
+						wireModels?: string[];
+						auth?: { apiKeyEnvVar?: string };
+					};
+					available: boolean;
+					health: { status: string };
+					discoveredModels: string[];
+				}>;
+			};
+			const listedTarget = targets.targets.find((target) => target.target.id === "fixture-openai");
+			ok(listedTarget, `targets --json did not list fixture-openai: ${targetsJson.stdout}`);
+			strictEqual(listedTarget.target.runtime, "openai-compat");
+			strictEqual(listedTarget.target.defaultModel, "fixture-alpha");
+			deepStrictEqual(listedTarget.target.wireModels, ["fixture-alpha", "fixture-beta"]);
+			strictEqual(listedTarget.target.auth?.apiKeyEnvVar, "CLIO_TEST_OPENAI_KEY");
+
+			const offlineModels = await runCli(["models", "--offline", "--json"], { env });
+			strictEqual(offlineModels.code, 0, `stderr=${offlineModels.stderr}`);
+			const offlineRows = JSON.parse(offlineModels.stdout) as Array<{ modelId: string; state: string }>;
+			deepStrictEqual(
+				offlineRows.map((row) => [row.modelId, row.state]),
+				[
+					["fixture-alpha", "-"],
+					["fixture-beta", "-"],
+				],
+			);
+
+			const noMatch = await runCli(["models", "missing-model", "--offline"], { env });
+			strictEqual(noMatch.code, 0, `stderr=${noMatch.stderr}`);
+			match(noMatch.stdout, /no models matched "missing-model" across 1 target\./);
+			ok(!noMatch.stdout.includes("no targets configured"), noMatch.stdout);
+
+			const liveModels = await runCli(["models", "--target", "fixture-openai", "--json"], {
+				env,
+				timeoutMs: 20_000,
+			});
+			strictEqual(liveModels.code, 0, `stderr=${liveModels.stderr}`);
+			const liveRows = JSON.parse(liveModels.stdout) as Array<{
+				targetId: string;
+				runtimeId: string;
+				modelId: string;
+				state: string;
+				contextWindow: number;
+				maxTokens: number;
+				reasoning: boolean;
+			}>;
+			deepStrictEqual(
+				liveRows.map((row) => [row.targetId, row.runtimeId, row.modelId, row.state]),
+				[
+					["fixture-openai", "openai-compat", "fixture-alpha", "loaded"],
+					["fixture-openai", "openai-compat", "fixture-beta", "unloaded"],
+				],
+			);
+			strictEqual(liveRows[0]?.contextWindow, 32768);
+			strictEqual(liveRows[0]?.maxTokens, 2048);
+
+			const selected = await runCli(["targets", "use", "fixture-openai", "--model", "fixture-beta"], { env });
+			strictEqual(selected.code, 0, `stderr=${selected.stderr}`);
+			match(selected.stdout, /using target fixture-openai/);
+
+			const afterUse = parseYaml(readFileSync(settingsFile, "utf8")) as Record<string, unknown>;
+			strictEqual((afterUse.orchestrator as Record<string, unknown>).target, "fixture-openai");
+			strictEqual((afterUse.orchestrator as Record<string, unknown>).model, "fixture-beta");
+			strictEqual(((afterUse.workers as Record<string, unknown>).default as Record<string, unknown>).target, "fixture-openai");
+			strictEqual(((afterUse.workers as Record<string, unknown>).default as Record<string, unknown>).model, "fixture-beta");
+		} finally {
+			await closeServer(fixture.server);
+		}
 	});
 
 	it("agents --json lists built-in recipes", async () => {

@@ -1,15 +1,18 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { rm, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { SessionMeta } from "../../src/domains/session/index.js";
 import {
 	CompactionArtifactProvider,
 	DispatchArtifactProvider,
+	listViewArtifacts,
 	loadJsonFileLines,
 	ReceiptArtifactProvider,
 	receiptFilePath,
@@ -21,6 +24,30 @@ import {
 
 async function scratchDir(): Promise<string> {
 	return mkdtemp(join(tmpdir(), "clio-view-artifacts-"));
+}
+
+async function withIsolatedLedgerState<T>(fn: (stateDir: string) => Promise<T>): Promise<T> {
+	const originalEnv = { ...process.env };
+	const root = await mkdtemp(join(tmpdir(), "clio-view-ledger-"));
+	const stateDir = join(root, "state");
+	process.env.CLIO_HOME = root;
+	process.env.CLIO_CONFIG_DIR = join(root, "config");
+	process.env.CLIO_DATA_DIR = join(root, "data");
+	process.env.CLIO_STATE_DIR = stateDir;
+	process.env.CLIO_CACHE_DIR = join(root, "cache");
+	resetXdgCache();
+	try {
+		return await fn(stateDir);
+	} finally {
+		for (const key of Object.keys(process.env)) {
+			if (!(key in originalEnv)) Reflect.deleteProperty(process.env, key);
+		}
+		for (const [key, value] of Object.entries(originalEnv)) {
+			if (value !== undefined) process.env[key] = value;
+		}
+		resetXdgCache();
+		await rm(root, { recursive: true, force: true });
+	}
 }
 
 function fixtureEnvelope(stateDir: string, runId = "run-view-1"): RunEnvelope {
@@ -163,6 +190,74 @@ describe("contracts/view-artifacts", () => {
 		strictEqual(artifacts[0]?.id, envelope.id);
 		const verify = await artifacts[0]?.verify?.();
 		deepStrictEqual(verify, { ok: true, detail: "integrity verified" });
+	});
+
+	it("reloads disk-written ledger receipts and keeps corrupted artifacts from poisoning /view listings", async () => {
+		await withIsolatedLedgerState(async (stateDir) => {
+			const staleDispatch = { listRuns: () => [], getRun: () => null };
+			const receiptProvider = new ReceiptArtifactProvider({ stateDir, dispatch: staleDispatch });
+			const dispatchProvider = new DispatchArtifactProvider({ stateDir, dispatch: staleDispatch });
+			deepStrictEqual(await listViewArtifacts([receiptProvider, dispatchProvider]), []);
+
+			const ledger = openLedger({ maxRuns: 10 });
+			const created = ledger.create({
+				agentId: "coder",
+				task: "persist across reload",
+				targetId: "fixture-openai",
+				wireModelId: "fixture-alpha",
+				runtimeId: "openai-compat",
+				runtimeKind: "http",
+				sessionId: "session-persist",
+				cwd: "/workspace",
+			});
+			const completed = ledger.update(created.id, {
+				status: "completed",
+				outcome: "succeeded",
+				outcomeDetail: null,
+				endedAt: "2026-06-11T12:00:05.000Z",
+				exitCode: 0,
+				tokenCount: 42,
+				inputTokenCount: 20,
+				outputTokenCount: 22,
+				cacheReadTokenCount: 0,
+				cacheWriteTokenCount: 0,
+				reasoningTokenCount: 0,
+				costUsd: 0.01,
+			});
+			ok(completed, "completed ledger row exists");
+			ledger.recordReceipt(created.id, fixtureReceiptDraft(completed));
+			await ledger.persist();
+
+			const freshLedger = openLedger({ maxRuns: 10 });
+			const freshRun = freshLedger.get(created.id);
+			ok(freshRun, "fresh ledger instance discovers the persisted run");
+			strictEqual(freshRun.receiptPath, receiptFilePath(stateDir, created.id));
+			deepStrictEqual(verifyReceiptFile(stateDir, created.id), { ok: true });
+
+			const artifacts = await listViewArtifacts([receiptProvider, dispatchProvider]);
+			ok(
+				artifacts.some((artifact) => artifact.category === "receipt" && artifact.id === created.id),
+				"receipt provider sees disk-written receipt despite stale in-memory dispatch",
+			);
+			ok(
+				artifacts.some((artifact) => artifact.category === "dispatch" && artifact.id === created.id),
+				"dispatch provider sees disk-written ledger row despite stale in-memory dispatch",
+			);
+
+			const corrupted = fixtureEnvelope(stateDir, "run-corrupt");
+			corrupted.receiptPath = receiptFilePath(stateDir, corrupted.id);
+			await writeFile(runLedgerPath(stateDir), JSON.stringify([corrupted, ...freshLedger.list()], null, 2));
+			await mkdir(join(stateDir, "receipts"), { recursive: true });
+			await writeFile(receiptFilePath(stateDir, corrupted.id), "{not json");
+
+			const withCorrupt = await receiptProvider.list();
+			ok(withCorrupt.some((artifact) => artifact.id === created.id), "valid receipt remains listed");
+			const corruptedArtifact = withCorrupt.find((artifact) => artifact.id === corrupted.id);
+			ok(corruptedArtifact, "corrupted receipt is isolated to its own artifact row");
+			const verification = await corruptedArtifact.verify?.();
+			strictEqual(verification?.ok, false);
+			ok(verification?.detail.startsWith("invalid json:"), verification?.detail);
+		});
 	});
 
 	it("merges in-memory and disk ledgers without duplicating shared runs", async () => {
