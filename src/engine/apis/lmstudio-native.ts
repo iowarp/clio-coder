@@ -35,7 +35,12 @@ import {
 import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
 import { lmStudioQuietLogger } from "../../domains/providers/runtimes/common/lmstudio-logger.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
-import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
+import {
+	asKvCacheQuant,
+	KV_CACHE_QUANTS,
+	type LocalModelQuirks,
+	type SamplingProfile,
+} from "../../domains/providers/types/local-model-quirks.js";
 import { ceilChars } from "../../domains/session/context-accounting.js";
 import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJson } from "../ai.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
@@ -444,7 +449,9 @@ function thinkingLevelFromHintOrModel(hints: RunStreamHints, model: Model<"lmstu
 	return model.reasoning === true ? "medium" : "off";
 }
 
-function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
+const VALID_ENV_KV_CACHE_QUANTS: ReadonlySet<string> = new Set(KV_CACHE_QUANTS);
+
+export function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
 	// LM Studio's REST `/api/v1/models/load` does not expose KV cache quant or
 	// fp16 KV options; those only round-trip through the SDK's WebSocket
 	// protocol (LLMLoadModelConfig.llama{K,V}CacheQuantizationType,
@@ -479,9 +486,14 @@ function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelConfig {
 			delete config.llamaVCacheQuantizationType;
 			delete config.useFp16ForKVCache;
 		} else {
-			config.llamaKCacheQuantizationType = envKvCacheMode as any;
-			config.llamaVCacheQuantizationType = envKvCacheMode as any;
-			config.useFp16ForKVCache = false;
+			const quant = asKvCacheQuant(envKvCacheMode);
+			if (quant !== undefined && quant !== false && VALID_ENV_KV_CACHE_QUANTS.has(quant)) {
+				config.llamaKCacheQuantizationType = quant;
+				config.llamaVCacheQuantizationType = quant;
+				config.useFp16ForKVCache = false;
+			} else {
+				process.stderr.write(`clio: ignoring invalid CLIO_KV_CACHE_MODE '${envKvCacheMode}'\n`);
+			}
 		}
 	}
 	return config;

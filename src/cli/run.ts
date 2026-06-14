@@ -44,7 +44,10 @@ Flags:
   --presence-penalty <N>    one-run presence penalty override
   --frequency-penalty <N>   one-run frequency penalty override
   --repeat-penalty <N>      one-run repeat penalty override
+  --max-context-tokens <N>  one-run context-window override for supported local runtimes
+  --kv-cache-mode <mode>    one-run KV-cache mode override: f16|f32|none|false|q8_0|q4_0|q4_1|iq4_nl|q5_0|q5_1
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
+  --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
@@ -112,78 +115,87 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
-	if (parsed.maxContextTokens !== undefined) {
-		process.env.CLIO_MAX_CONTEXT_TOKENS = String(parsed.maxContextTokens);
-	}
-	if (parsed.kvCacheMode !== undefined) {
-		process.env.CLIO_KV_CACHE_MODE = parsed.kvCacheMode;
-	}
-	if (parsed.help) {
-		process.stdout.write(HELP);
-		return 0;
-	}
-	for (const diagnostic of parsed.diagnostics) {
-		process.stderr.write(`clio run: ${diagnostic.message}\n`);
-	}
-	if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
-		process.stderr.write(USAGE);
-		return 2;
-	}
-	if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
-		process.stderr.write("clio run: fleet dispatch flags require --agent <recipe-id>\n");
-		process.stderr.write(USAGE);
-		return 2;
-	}
-
-	const noSkills = options.noSkills === true || parsed.noSkills === true;
-	const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
-	// An explicit --skill path is a contract: a path that is missing or loads
-	// no valid skill fails the run before any model invocation instead of
-	// silently degrading to whatever skills discovery finds.
-	const skillPathErrors = explicitSkillPathErrors(skillPaths);
-	if (skillPathErrors.length > 0) {
-		for (const message of skillPathErrors) {
-			process.stderr.write(`clio run: --skill ${message}\n`);
+	const previousMaxContextTokens = process.env.CLIO_MAX_CONTEXT_TOKENS;
+	const previousKvCacheMode = process.env.CLIO_KV_CACHE_MODE;
+	try {
+		if (parsed.maxContextTokens !== undefined) {
+			process.env.CLIO_MAX_CONTEXT_TOKENS = String(parsed.maxContextTokens);
 		}
-		return 2;
-	}
+		if (parsed.kvCacheMode !== undefined) {
+			process.env.CLIO_KV_CACHE_MODE = parsed.kvCacheMode;
+		}
+		if (parsed.help) {
+			process.stdout.write(HELP);
+			return 0;
+		}
+		for (const diagnostic of parsed.diagnostics) {
+			process.stderr.write(`clio run: ${diagnostic.message}\n`);
+		}
+		if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
+			process.stderr.write(USAGE);
+			return 2;
+		}
+		if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
+			process.stderr.write("clio run: fleet dispatch flags require --agent <recipe-id>\n");
+			process.stderr.write(USAGE);
+			return 2;
+		}
 
-	const assembled = await assemblePrompt(parsed);
-	if (!assembled) return 2;
+		const noSkills = options.noSkills === true || parsed.noSkills === true;
+		const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
+		// An explicit --skill path is a contract: a path that is missing or loads
+		// no valid skill fails the run before any model invocation instead of
+		// silently degrading to whatever skills discovery finds.
+		const skillPathErrors = explicitSkillPathErrors(skillPaths);
+		if (skillPathErrors.length > 0) {
+			for (const message of skillPathErrors) {
+				process.stderr.write(`clio run: --skill ${message}\n`);
+			}
+			return 2;
+		}
 
-	if (parsed.agentId === undefined) {
-		takeOverStdout();
-		try {
-			const code = await runClioCommand({
-				...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
-				...(options.noContextFiles ? { noContextFiles: true } : {}),
-				...(noSkills ? { noSkills: true } : {}),
-				...(skillPaths.length > 0 ? { skillPaths } : {}),
-				headless: {
-					prompt: assembled.prompt,
-					mode: parsed.json ? "json" : "text",
+		const assembled = await assemblePrompt(parsed);
+		if (!assembled) return 2;
+
+		if (parsed.agentId === undefined) {
+			takeOverStdout();
+			try {
+				const code = await runClioCommand({
+					...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
+					...(options.noContextFiles ? { noContextFiles: true } : {}),
 					...(noSkills ? { noSkills: true } : {}),
 					...(skillPaths.length > 0 ? { skillPaths } : {}),
-					...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
-					...(parsed.target !== undefined ? { target: parsed.target } : {}),
-					...(parsed.model !== undefined ? { model: parsed.model } : {}),
-					...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
-					...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
-					...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
-				},
-			});
-			await flushRawStdout();
-			return code;
-		} finally {
-			restoreStdout();
+					headless: {
+						prompt: assembled.prompt,
+						mode: parsed.json ? "json" : "text",
+						...(noSkills ? { noSkills: true } : {}),
+						...(skillPaths.length > 0 ? { skillPaths } : {}),
+						...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
+						...(parsed.target !== undefined ? { target: parsed.target } : {}),
+						...(parsed.model !== undefined ? { model: parsed.model } : {}),
+						...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
+						...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
+						...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
+					},
+				});
+				await flushRawStdout();
+				return code;
+			} finally {
+				restoreStdout();
+			}
 		}
-	}
 
-	return runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
-		...options,
-		noSkills,
-		skillPaths,
-	});
+		return await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
+			...options,
+			noSkills,
+			skillPaths,
+		});
+	} finally {
+		if (previousMaxContextTokens === undefined) delete process.env.CLIO_MAX_CONTEXT_TOKENS;
+		else process.env.CLIO_MAX_CONTEXT_TOKENS = previousMaxContextTokens;
+		if (previousKvCacheMode === undefined) delete process.env.CLIO_KV_CACHE_MODE;
+		else process.env.CLIO_KV_CACHE_MODE = previousKvCacheMode;
+	}
 }
 
 async function runDispatch(

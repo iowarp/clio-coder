@@ -304,6 +304,8 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: () => string;
+	/** True when an interactive TUI can handle Esc cancellation notices. */
+	interactiveTui?: boolean;
 }
 
 interface ChatLoopTarget {
@@ -336,6 +338,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const persistedAssistantMessages = new WeakSet<object>();
 	let currentContextSnapshot: ContextSnapshot | null = null;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
+	const steerNotice =
+		deps.interactiveTui === false
+			? "[Clio Coder] steering the active run; lands before the next model turn."
+			: "[Clio Coder] steering the active run; lands before the next model turn. Press Esc to cancel.";
 	// Last settled run's provider cache usage plus whether the compiled system
 	// prompt was reused. Shown together in /context so "prompt reused" can
 	// never imply provider cache reuse the backend did not report.
@@ -1806,7 +1812,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queuedMirror.push({ text: trimmed, kind: "steer" });
 			runtime.agent.steer(message);
 			emitQueueUpdate();
-			emitNotice("[Clio Coder] steering the active run; lands before the next model turn. Press Esc to cancel.");
+			emitNotice(steerNotice);
 			return true;
 		},
 		queueFollowUp(text: string): boolean {
@@ -1848,7 +1854,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					queuedMirror.push({ text: trimmed, kind: "steer" });
 					runtime.agent.steer(message);
 					emitQueueUpdate();
-					emitNotice("[Clio Coder] steering the active run; lands before the next model turn. Press Esc to cancel.");
+					emitNotice(steerNotice);
 					return;
 				}
 				emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");

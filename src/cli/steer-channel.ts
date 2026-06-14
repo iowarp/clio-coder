@@ -23,19 +23,27 @@ export function setupSteerChannel(filePath: string, onLine: (line: string) => vo
 		} else {
 			// Regular file: read current contents, and watch for appends
 			let bytesRead = 0;
+			let leftover = "";
 			const readNewContent = () => {
+				if (closed) return;
 				try {
 					const currentStats = fs.statSync(filePath);
 					if (currentStats.size > bytesRead) {
-						const fd = fs.openSync(filePath, "r");
+						let fd: number | undefined;
 						const buffer = Buffer.alloc(currentStats.size - bytesRead);
-						fs.readSync(fd, buffer, 0, buffer.length, bytesRead);
-						fs.closeSync(fd);
+						try {
+							fd = fs.openSync(filePath, "r");
+							fs.readSync(fd, buffer, 0, buffer.length, bytesRead);
+						} finally {
+							if (fd !== undefined) fs.closeSync(fd);
+						}
 						bytesRead = currentStats.size;
 
-						const text = buffer.toString("utf-8");
+						const text = `${leftover}${buffer.toString("utf-8")}`;
 						const lines = text.split(/\r?\n/);
+						leftover = lines.pop() ?? "";
 						for (const line of lines) {
+							if (closed) return;
 							const trimmed = line.trim();
 							if (trimmed.length > 0) {
 								onLine(trimmed);

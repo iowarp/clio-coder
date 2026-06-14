@@ -79,7 +79,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function asKvCacheQuant(value: unknown): KvCacheQuant | false | undefined {
+export function asKvCacheQuant(value: unknown): KvCacheQuant | false | undefined {
 	if (value === false) return false;
 	if (typeof value !== "string") return undefined;
 	return (KV_CACHE_QUANTS as ReadonlyArray<string>).includes(value) ? (value as KvCacheQuant) : undefined;

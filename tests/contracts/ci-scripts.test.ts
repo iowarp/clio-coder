@@ -71,7 +71,7 @@ describe("contracts/ci scripts", () => {
 		);
 
 		deepStrictEqual(matrixValues(".github/workflows/ci.yml", "ci", "node-version"), [22, 24]);
-		strictEqual(setupNode?.with?.["node-version"], "${{ matrix.node-version }}");
+		strictEqual(setupNode?.with?.["node-version"], "$" + "{{ matrix.node-version }}");
 		ok(commands.includes("npm run ci:release"), commands.join("\n"));
 		ok(!commands.includes("npm run test:live"), "ordinary CI must not run live/model-dependent smoke tests");
 	});
