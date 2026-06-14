@@ -1,5 +1,8 @@
 # Context Engine
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/context_blueprint.html](html/context_blueprint.html) (Version: 0.2.3).
+
 Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.
 
 Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domains/session/context-ledger.ts`, `src/domains/session/compaction/`, and the chat-loop integration in `src/interactive/chat-loop.ts`.
@@ -22,7 +25,7 @@ The `/context-view` overlay and footer meter read the same ledger categories: `s
 
 Auto-compaction is controlled by one pressure threshold. Pressure is `estimated_tokens / context_window`. The default threshold is `0.8`.
 
-When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio first masks stale tool observations older than `excludeLastTurns`. This is a cheap local rewrite. Tool call and result structure remain present, but the observation body is replaced with a marker.
+When `compaction.auto` is enabled and pressure crosses the threshold before a request, Clio first masks stale tool observations and stale thinking older than `excludeLastTurns`. This is a cheap local rewrite. Tool call and result structure remain present, but the observation body is replaced with a marker and stale assistant thinking content is dropped from replay.
 
 Marker format:
 
@@ -30,7 +33,7 @@ Marker format:
 [Observation masked: <tool> output was <lines> lines, <chars> chars - contents masked to save context. Re-run the tool for current content.] Preview: <preview>
 ```
 
-Already-compacted entries are not masked again. If masking drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes replay messages from the session, and continues.
+Already-compacted entries are not masked again. Recent turns keep their full observations and thinking. If masking drops pressure below the threshold, Clio sends the request without an LLM summary. If pressure remains above the threshold, Clio runs the summary compaction path, appends a compaction summary entry, refreshes replay messages from the session, and continues.
 
 Manual `/compact`, `CLIO_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
 
@@ -57,4 +60,4 @@ compaction:
 
 `auto` controls the pre-request trigger. Manual `/compact` still runs when `auto` is false. `model` optionally selects a dedicated summarization model. `systemPrompt` optionally points at a prompt override file for compaction.
 
-Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path, and must be updated to this shape by hand.
+Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Run `clio doctor --fix` to repair known legacy compaction shapes, or update unrelated unknown keys by hand.

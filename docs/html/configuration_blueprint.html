@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Configuration Blueprint (v0.2.3)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -33,8 +30,8 @@
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
       
       --glass-blur: blur(12px);
     }
@@ -530,11 +527,11 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
               settings.yaml Validator (v0.2.3 Schema)
             </h2>
-            <p>Paste or edit your <code>settings.yaml</code> configuration file below. The validator checks schema version, target mapping links, target IDs, budget structures, and flags stale v0.2.2 properties like <code>safetyLevel</code> or <code>defaultMode</code>.</p>
+            <p>Paste or edit your <code>settings.yaml</code> configuration file below. The validator checks schema version, target mapping links, target IDs, budget structures, and flags legacy properties such as <code>defaultMode</code> or misplaced state fields.</p>
             
             <div class="presets-list">
               <span class="preset-btn" onclick="loadYamlPreset('valid')">Load Valid v0.2.3 Config</span>
-              <span class="preset-btn" onclick="loadYamlPreset('stale')">Load Stale v0.2.2 Config (Triggers Warnings)</span>
+              <span class="preset-btn" onclick="loadYamlPreset('stale')">Load Legacy Config (Triggers Warnings)</span>
               <span class="preset-btn" onclick="loadYamlPreset('invalid')">Load Invalid Config</span>
             </div>
 
@@ -686,7 +683,7 @@
           <tbody>
             <tr>
               <td><code>CLIO_HOME</code></td>
-              <td>Single-tree override: config at <code>$CLIO_HOME</code>, data at <code>$CLIO_HOME/data</code>, cache at <code>$CLIO_HOME/cache</code>.</td>
+              <td>Single-tree override: config at <code>$CLIO_HOME/config</code>, data at <code>$CLIO_HOME/data</code>, state at <code>$CLIO_HOME/state</code>, and cache at <code>$CLIO_HOME/cache</code>.</td>
             </tr>
             <tr>
               <td><code>CLIO_CONFIG_DIR</code></td>
@@ -694,7 +691,11 @@
             </tr>
             <tr>
               <td><code>CLIO_DATA_DIR</code></td>
-              <td>Overrides data directory only. Contains sessions, audit log, receipts, and memories.</td>
+              <td>Overrides data directory only. Contains durable artifacts such as memory, evidence, and evals.</td>
+            </tr>
+            <tr>
+              <td><code>CLIO_STATE_DIR</code></td>
+              <td>Overrides state directory only. Contains sessions, audit logs, receipts, runs.json, recent models, install metadata, interviews, and scratch output.</td>
             </tr>
             <tr>
               <td><code>CLIO_CACHE_DIR</code></td>
@@ -703,8 +704,8 @@
           </tbody>
         </table>
 
-        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Autonomy Dial (v0.2.3 Upgrade)</h3>
-        <p>Historically, Clio had a <code>safetyLevel</code> config key. This is replaced in v0.2.3 by the <code>autonomy</code> dial, controlling immediate execution vs approvals vs auto-denials:</p>
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Autonomy Dial</h3>
+        <p>Clio v0.2.3 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. <code>clio doctor --fix</code> can repair known legacy settings into this shape and backs up the original file first.</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
           <li style="margin-bottom: 0.3rem;"><strong><code>read-only</code></strong>: Clio inspects and answers. Write/execute tools are auto-denied.</li>
           <li style="margin-bottom: 0.3rem;"><strong><code>suggest</code></strong>: Every mutating action parks for operator confirmation.</li>
@@ -725,7 +726,7 @@ clio configure \
 
 # Probe registered targets and models
 clio targets --probe
-clio models --probe --target local-ollama
+clio models --target local-ollama
 clio</code></pre>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Live Routing vs Saved Defaults</h3>
@@ -798,9 +799,7 @@ retry:
 
     const sampleStale = `version: 1
 identity: clio
-# STALE: safetyLevel is deprecated in v0.2.3, replace with 'autonomy'
-safetyLevel: auto-edit
-# STALE: defaultMode is deprecated, remove this key
+# LEGACY: defaultMode is no longer part of the schema
 defaultMode: default
 
 targets:
@@ -811,7 +810,16 @@ targets:
 
 orchestrator:
   target: local-llamacpp
-  model: qwen-coder-32b`;
+  model: qwen-coder-32b
+
+state:
+  recentModels:
+    - qwen-coder-32b
+
+compaction:
+  thresholds:
+    warning: 0.7
+    critical: 0.9`;
 
     const sampleInvalid = `version: 2                  # Error: version must be exactly 1
 identity: clio
@@ -883,11 +891,14 @@ orchestrator:
           }
 
           // Flag stale fields
-          if (key === 'safetyLevel') {
-            warnings.push(`[Line ${idx+1}] Deprecated key "safetyLevel" found. Replace with "autonomy" in Clio Coder v0.2.3.`);
-          }
           if (key === 'defaultMode') {
             warnings.push(`[Line ${idx+1}] Deprecated key "defaultMode" found. Configuration routing has been migrated in v0.2.3.`);
+          }
+          if (key === 'state') {
+            warnings.push(`[Line ${idx+1}] Legacy runtime state found in settings.yaml. Current Clio stores recent models under the state directory.`);
+          }
+          if (key === 'thresholds') {
+            warnings.push(`[Line ${idx+1}] Legacy compaction thresholds block found. Use compaction.threshold with a single numeric pressure value.`);
           }
 
           // Targets parsing

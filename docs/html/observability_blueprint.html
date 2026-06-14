@@ -6,9 +6,6 @@
   <title>Clio Coder Observability & Receipt Viewer</title>
   
   <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -31,8 +28,8 @@
       --color-rose: #ef4444;
       --color-rose-rgb: 239, 68, 68;
 
-      --font-sans: 'Plus Jakarta Sans', sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
 
     * {
@@ -371,7 +368,7 @@
     <header>
       <div class="header-logo">
         <div class="logo-box">
-          <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="32" height="32" />
+          <svg viewBox="0 0 64 64" width="32" height="32" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
         <div>
           <h1>Observability Viewer</h1>
@@ -448,7 +445,7 @@
 
         <div class="viewer-body">
           <div class="path-bar">
-            <span id="backing-path-display">~/.gemini/antigravity-cli/receipts/run-9a3c9f28.json</span>
+            <span id="backing-path-display">~/.local/state/clio/receipts/run-9a3c9f28.json</span>
             <span style="font-size:0.7rem; color:var(--text-dark);" id="capped-indicator">Lines: 12</span>
           </div>
           
@@ -471,7 +468,7 @@
       "receipts-1": {
         name: "run-9a3c9f28.json",
         category: "Receipts",
-        path: "~/.gemini/antigravity-cli/receipts/run-9a3c9f28.json",
+        path: "~/.local/state/clio/receipts/run-9a3c9f28.json",
         badge: "Receipt",
         badgeClass: "status-info",
         content: `{
@@ -487,12 +484,12 @@
   ]
 }`,
         verifySuccess: true,
-        verifyLog: `[INFO] Read ~/.gemini/antigravity-cli/receipts/run-9a3c9f28.json
+        verifyLog: `[INFO] Read ~/.local/state/clio/receipts/run-9a3c9f28.json
 [INFO] Validating required receipt fields and value ranges:
   - runId: run-9a3c9f28 (VALID)
   - command: 'npm run build && node scripts/compile.js' (VALID)
   - exitCode: 0 (VALID)
-[INFO] Read ~/.gemini/antigravity-cli/state/runs.json
+[INFO] Read ~/.local/state/clio/runs.json
 [INFO] Found matching run envelope in global runs ledger.
 [INFO] Recomputing receipt integrity checksum:
   - Expected: sha256-abc874fde3c99a0042188ffabec12530164c676643
@@ -502,7 +499,7 @@
       "receipts-2": {
         name: "run-0428fa8e.json",
         category: "Receipts",
-        path: "~/.gemini/antigravity-cli/receipts/run-0428fa8e.json",
+        path: "~/.local/state/clio/receipts/run-0428fa8e.json",
         badge: "Receipt",
         badgeClass: "status-info",
         content: `{
@@ -515,12 +512,12 @@
   "filesCreated": []
 }`,
         verifySuccess: false,
-        verifyLog: `[INFO] Read ~/.gemini/antigravity-cli/receipts/run-0428fa8e.json
+        verifyLog: `[INFO] Read ~/.local/state/clio/receipts/run-0428fa8e.json
 [INFO] Validating required receipt fields and value ranges:
   - runId: run-0428fa8e (VALID)
   - command: 'sbatch run_sim.sh' (VALID)
   - exitCode: 1 (WARNING: non-zero exit code)
-[INFO] Read ~/.gemini/antigravity-cli/state/runs.json
+[INFO] Read ~/.local/state/clio/runs.json
 [ERROR] Missing or unmatched run envelope in global runs ledger runs.json.
 [ERROR] Receipt integrity checksum mismatch:
   - Expected: sha256-fffffffffffffffff99999999999999999999999
@@ -532,7 +529,7 @@
         category: "Dispatch",
         badge: "Ledger",
         badgeClass: "status-success",
-        path: "~/.gemini/antigravity-cli/state/runs.json",
+        path: "~/.local/state/clio/runs.json",
         content: `[
   {
     "runId": "run-9a3c9f28",
@@ -568,7 +565,7 @@
         category: "Compaction",
         badge: "Summary",
         badgeClass: "status-info",
-        path: "~/.gemini/antigravity-cli/sessions/cwd_hash_a9e3/sess_7a3d90f/current.jsonl",
+        path: "~/.local/state/clio/sessions/cwd_hash_a9e3/sess_7a3d90f/current.jsonl",
         content: `{"turn": 1, "compactionSummary": "Initialized project with local settings targets: deepseek-r1:8b"}
 {"turn": 4, "compactionSummary": "Masked 6 stale tool observations older than excludeLastTurns."}
 {"turn": 5, "compactionSummary": "LLM summary compaction executed: compressed 15,200 tokens into 1,200 summary tokens."}`,

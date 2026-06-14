@@ -1,7 +1,7 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive dashboard mapping capabilities, probe discovery, and target resolution is located at [docs/html/models_blueprint.html](html/models_blueprint.html) (Version: 0.2.3).
 
 Clio Coder treats a selectable model as the intersection of three sources:
 
@@ -13,11 +13,25 @@ Clio Coder treats a selectable model as the intersection of three sources:
 
 - `/targets`: `r` probes the selected target; `R` probes all targets.
 - `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
-- `clio models --probe`: refreshes targets before printing the CLI model list.
+- `clio models`: probes live targets before printing the CLI model list. Use `--offline` to skip live probing. `--probe` is still accepted for compatibility.
 
-The model overlay keeps configured `wireModels` first, then appends live probe discoveries. This preserves operator-curated defaults while allowing newly installed local models or newly entitled cloud models to appear without restarting Clio. A refresh also reloads the local YAML knowledge base when the bundled `FileKnowledgeBase` is active, so capability/quirk edits are visible during development.
+Configured `wireModels` and a target `defaultModel` remain selectable even when
+a live catalog does not list them; Clio labels those rows as `configured` or
+`default`. Live probe discoveries are labeled `live` and carry load-state
+metadata when the runtime exposes it. This preserves operator-curated defaults
+while allowing newly installed local models or newly entitled cloud models to
+appear without restarting Clio. A refresh also reloads the local YAML knowledge
+base when the bundled `FileKnowledgeBase` is active, so capability and quirk
+edits are visible during development.
 
 Live provider probes are the preferred source for loaded context and per-model metadata. Clio keeps a 128k local-coding context recommendation, but it no longer treats that recommendation as provider truth for unknown local models: effective context comes from live probe data, an explicit target override, a model catalog/KB entry, or the runtime descriptor default. If the live target is below the recommendation, Clio reports a warning rather than silently inflating the displayed window.
+
+Transient probe failures preserve the last-good catalog, load states,
+capabilities, and notes for the same target identity, but the target health is
+reported as down or unavailable with the probe error as the reason. Worker
+dispatch canonicalizes requested model ids against the live catalog when one is
+available, so a short alias can resolve to the canonical live id before the
+worker spec and receipt are written.
 
 ## First benchmark harness
 

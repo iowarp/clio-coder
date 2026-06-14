@@ -3,7 +3,7 @@
 Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). The supported alpha install path is a source checkout with a deterministic local symlink, not a fragile npm-global prefix link.
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html). You can open it directly in any web browser to view details dynamically.
+> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.2.3). You can open it directly in any web browser to view details dynamically.
 
 ---
 
@@ -103,7 +103,7 @@ Runs a series of health sweeps across the environment:
 *   Validates `settings.yaml` against the strict schema, reporting exact key paths, read-only.
 *   Asserts owner-only permissions on credentials (`0o600`).
 *   Checks for version updates or environment configuration drifts.
-*   *Recovery:* Run `clio doctor --fix` to repair structure only: missing directories, missing template files, and credential permissions. `--fix` never rewrites an existing `settings.yaml`, valid or invalid.
+*   *Recovery:* Run `clio doctor --fix` to create missing directories and templates, repair credential permissions, refresh install metadata, and repair known legacy settings keys. The settings repair path rewrites `settings.yaml` only when those legacy keys are present, backs up the original as `settings.yaml.bak`, and leaves unrelated unknown keys for deliberate operator cleanup.
 
 ### B. Upgrades (`clio upgrade`)
 Refreshes state metadata and applies pending data-dir migrations.
@@ -121,7 +121,8 @@ Selective recovery wipes:
 ```bash
 clio reset [--state | --data | --cache | --auth | --config | --all] --force
 ```
-Each level clears exactly the root (or file) it names and nothing else:
+Each level clears exactly the root or file it names and nothing else, then
+bootstraps the missing structure again:
 *   `--state` *(Default)*: Deletes the state root only: sessions, audit logs, receipts, run ledger, install metadata.
 *   `--data`: Deletes the data root only: memory, evidence, evals (durable products).
 *   `--cache`: Deletes the cache root only.

@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Extensions & Skills Subsystem Blueprint</title>
   <!-- Modern Google Font -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -30,8 +27,8 @@
       
       --gradient-main: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
       --shadow-glow: 0 0 20px rgba(var(--color-primary-rgb), 0.15);
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
 
     * {
@@ -672,7 +669,7 @@
   <div class="container">
     <header>
       <div class="header-logo">
-        <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+        <svg viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <h1>Extensions & Custom Skills Spec</h1>
       <p class="subtitle">Architectural design and verification testing suite for Clio Coder's resource packaging, registries injection, and sharing archive subsystems.</p>

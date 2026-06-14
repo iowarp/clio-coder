@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Prompt Envelope & Tools Blueprint</title>
   <!-- Typography Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -32,8 +29,8 @@
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 20px rgba(var(--color-cyan-rgb), 0.15);
-      --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
 
     * {
@@ -701,7 +698,7 @@
     <div class="header-top">
       <div class="logo-area">
         <div class="logo-hex">
-          <img src="../../assets/clio-coder-logo-128.webp" alt="Clio Coder logo" width="64" height="64" />
+          <svg viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
         <div>
           <h1>Prompt Envelopes & Tools Spec</h1>
@@ -917,11 +914,11 @@
             <text x="710" y="195" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Checks byte size of result against tool limit.</text>
             
             <rect x="595" y="210" width="230" height="40" rx="4" fill="rgba(0,0,0,0.3)" stroke="var(--border-card)" />
-            <text x="710" y="226" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">Is Size &gt; maxBytes (Default 60KB)?</text>
+            <text x="710" y="226" fill="var(--color-amber)" font-family="var(--font-sans)" font-size="10" font-weight="600" text-anchor="middle">Is Size &gt; maxBytes? 8KB backstop</text>
             <text x="710" y="238" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">UTF-8 Safe Truncation</text>
             
             <text x="710" y="270" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10" text-anchor="middle">Appends follow-up hint + details metadata</text>
-            <text x="710" y="285" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">resultSize: {bytes, truncated: true}</text>
+            <text x="710" y="285" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9" text-anchor="middle">resultSize: {truncated, offloadPath?}</text>
 
             <!-- Arrow 4 -> 5 -->
             <path d="M580 220 H340" stroke="var(--color-cyan)" stroke-width="1.5" />
@@ -934,8 +931,9 @@
             <rect x="55" y="200" width="250" height="75" rx="4" fill="#04070e" stroke="var(--border-card)" />
             <text x="65" y="218" fill="var(--color-emerald)" font-family="var(--font-mono)" font-size="10">kind: "ok"</text>
             <text x="65" y="234" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">output: "...[truncated]\n\n[Use a narrower query...]"</text>
-            <text x="65" y="250" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">details: { resultSize: { truncated: true } }</text>
-            <text x="65" y="265" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9">terminate: true/false</text>
+            <text x="65" y="250" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">details: { resultSize: { truncated: true, offloadPath } }</text>
+            <text x="65" y="265" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9">scratch cap: 10MB under state/scratch</text>
+            <text x="65" y="280" fill="var(--color-cyan)" font-family="var(--font-mono)" font-size="9">terminate: true/false</text>
 
           </svg>
         </div>
@@ -1217,7 +1215,7 @@
           System Prompt Recompile Simulator
         </h3>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-          Clio Coder compiles one provider-facing system prompt per session. It recompiles only when the compile key (<code style="font-family: var(--font-mono); color: var(--color-purple);">endpoint|model|autonomy|sessionId</code>) changes or configuration is hot-reloaded.
+          Clio Coder compiles one provider-facing system prompt per session. It recompiles only when the compile key (<code style="font-family: var(--font-mono); color: var(--color-purple);">target|model|autonomy|sessionId</code>) changes or configuration is hot-reloaded.
         </p>
 
         <div class="form-group" style="margin-bottom: 1rem;">
@@ -1351,7 +1349,7 @@
 
   // --- SCENARIO DATA & CALCULATOR STATE ---
   const MOCK_FRAGMENTS = {
-    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.2.2.`,
+    identity: `You are Clio Coder, an advanced AI coding assistant engineered for scientific software development, high-performance computing (HPC), and numerical simulation workflows. Your goal is to guide the user in designing, compiling, testing, and debugging complex source code repositories while maintaining safety boundary restrictions. You are running as Clio Coder version 0.2.3.`,
     
     mode_default: `Advisory: You are in default mode. Edits within the workspace are permitted. You have access to active inspection, modification, and execution tools. Ensure that you run tests to verify compilation.`,
     mode_advise: `Advisory: You are in advise mode. You may NOT edit codebase files directly, and you may NOT run execution tools (like bash). You can inspect files, write reviews, and write plans. Output an advisory markdown report as your final step.`,
@@ -1513,11 +1511,12 @@
     staticText += `[Fragment: modes/${scenario.mode}.md]\n${MOCK_FRAGMENTS[`mode_${scenario.mode}`]}\n\n`;
     
     // Set appropriate safety fragment based on mode
-    let safetyLevel = 'suggest';
-    if (scenario.mode === 'default') safetyLevel = 'auto-edit';
-    if (scenario.mode === 'super') safetyLevel = 'full-auto';
+    let autonomyLevel = 'suggest';
+    if (scenario.mode === 'default') autonomyLevel = 'auto-edit';
+    if (scenario.mode === 'super') autonomyLevel = 'full-auto';
+    const safetyFragmentKey = autonomyLevel.replace(/-/g, '_');
     
-    staticText += `[Fragment: safety/${safetyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyLevel}`]}`;
+    staticText += `[Fragment: safety/${autonomyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyFragmentKey}`]}`;
     
     document.getElementById('static-shell-input').value = staticText;
     document.getElementById('dynamic-memory-input').value = scenario.memory;
@@ -1562,11 +1561,12 @@
     let staticText = `[Fragment: identity/clio.md]\n${MOCK_FRAGMENTS.identity}\n\n`;
     staticText += `[Fragment: modes/${mode}.md]\n${MOCK_FRAGMENTS[`mode_${mode}`]}\n\n`;
     
-    let safetyLevel = 'suggest';
-    if (mode === 'default') safetyLevel = 'auto-edit';
-    if (mode === 'super') safetyLevel = 'full-auto';
+    let autonomyLevel = 'suggest';
+    if (mode === 'default') autonomyLevel = 'auto-edit';
+    if (mode === 'super') autonomyLevel = 'full-auto';
+    const safetyFragmentKey = autonomyLevel.replace(/-/g, '_');
     
-    staticText += `[Fragment: safety/${safetyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyLevel}`]}`;
+    staticText += `[Fragment: safety/${autonomyLevel}.md]\n${MOCK_FRAGMENTS[`safety_${safetyFragmentKey}`]}`;
     document.getElementById('static-shell-input').value = staticText;
 
     calculateTokenPressure();

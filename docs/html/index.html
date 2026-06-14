@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Documentation Hub (v0.2.3)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -33,8 +30,8 @@
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
       
       --glass-blur: blur(12px);
     }
@@ -500,7 +497,7 @@
                 <h3 class="card-title">Installation &amp; Lifecycle</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
-              <p class="card-desc">Checkout and build setups, local install scripts, directory locations (cache, data, configs), doctor check flows, and session cleanup lifecycles.</p>
+              <p class="card-desc">Checkout and build setup, local install scripts, four-root directory resolution, doctor repair semantics, reset, upgrade, and uninstall lifecycles.</p>
               <div class="card-meta">
                 <span class="path">installation-and-lifecycle.md</span>
                 <span class="interactive-feature">Command Builder</span>
@@ -533,7 +530,7 @@
                 <h3 class="card-title">Context Engine</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
-              <p class="card-desc">Sliding window mechanics, token accounting, per-turn snapshot records, historical compaction thresholds, and context priming configurations.</p>
+              <p class="card-desc">Context-window resolution, token accounting, per-turn snapshots, single-threshold compaction, stale observation and thinking masking, and cache-divergence notices.</p>
               <div class="card-meta">
                 <span class="path">context-engine.md</span>
                 <span class="interactive-feature">Compaction Calculator</span>
@@ -545,7 +542,7 @@
                 <h3 class="card-title">Prompt Envelope &amp; Tools</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
-              <p class="card-desc">Tool registry admission rules, provider envelopes, call translation formats, and structured response parsing definitions.</p>
+              <p class="card-desc">Prompt envelope reuse, provider tool delivery, registry admission rules, bounded result shaping, scratch offloads, and conservative edit matching.</p>
               <div class="card-meta">
                 <span class="path">prompt-envelope-and-tools.md</span>
                 <span class="interactive-feature">Registry Inspector</span>
@@ -557,7 +554,7 @@
                 <h3 class="card-title">Middleware &amp; Components</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
-              <p class="card-desc">Interactive terminal UI component rendering, middleware hooks registry, execution pipelines, and snapshot lifecycle contracts.</p>
+              <p class="card-desc">Component snapshots, five middleware hooks, consumed effect kinds, guard registrations, reminder flow, and hook pipeline diagnostics.</p>
               <div class="card-meta">
                 <span class="path">middleware-and-components.md</span>
                 <span class="interactive-feature">Hook Flow Simulator</span>
@@ -602,7 +599,7 @@
                 <h3 class="card-title">Skills Marketplace</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
-              <p class="card-desc">Custom reusable skill scripts, registry trust compat roots, sharing format, and skills lookup engine.</p>
+              <p class="card-desc">Skills Hub discovery, GitHub marketplace hydration, cache and local fallback behavior, install actions, and publishing flow.</p>
               <div class="card-meta">
                 <span class="path">skills-marketplace.md</span>
                 <span class="interactive-feature">Marketplace Search</span>
@@ -614,7 +611,7 @@
                 <h3 class="card-title">Model Catalog &amp; Routing</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
-              <p class="card-desc">Configured targets, runtime dynamic probes, providers capabilities matching, and Thinking Replay Semantics routing (Ollama/LM Studio/OpenAI).</p>
+              <p class="card-desc">Live model probing, configured/default fallback labels, runtime capability matching, canonical worker model IDs, and thinking replay semantics.</p>
               <div class="card-meta">
                 <span class="path">model-catalog.md</span>
                 <span class="interactive-feature">Target Prober</span>
@@ -675,21 +672,33 @@
             Guides &amp; Diagnostics
           </h2>
           <div class="category-grid">
+            <a href="commands_blueprint.html" class="doc-card flagship" data-title="Commands and Modes" data-tags="commands cli slash tui keybindings steering run targets model settings">
+              <div class="card-header">
+                <h3 class="card-title">Commands &amp; Modes</h3>
+                <span class="status-badge badge-flagship">v0.2.3 Upgrade</span>
+              </div>
+              <p class="card-desc">CLI commands, contract-tested slash commands, keybindings, live steering, target hubs, model selection, and verification lanes.</p>
+              <div class="card-meta">
+                <span class="path">commands-and-modes.md</span>
+                <span class="interactive-feature">Command Reference</span>
+              </div>
+            </a>
+
             <a href="observability_blueprint.html" class="doc-card" data-title="Observability" data-tags="observability receipts view status audit log telemetry logs">
               <div class="card-header">
                 <h3 class="card-title">Observability</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
-              <p class="card-desc">Live receipt inspection overlays, stats visualization, metrics payloads, telemetry suppression flags, and debug doctor utilities.</p>
+              <p class="card-desc">Artifact browsing for receipts, dispatch outputs, saved tool outputs, compaction summaries, receipt verification, and worker diagnostics.</p>
               <div class="card-meta">
                 <span class="path">observability.md</span>
                 <span class="interactive-feature">Receipt Inspector</span>
               </div>
             </a>
 
-            <a href="extensions_blueprint.html" class="doc-card" data-title="Extensions &amp; Custom Skills" data-tags="extensions custom skills manifest share export import zip JSON package">
+            <a href="extensions_blueprint.html" class="doc-card" data-title="Extensions &amp; Sharing" data-tags="extensions custom skills manifest share export import zip JSON package">
               <div class="card-header">
-                <h3 class="card-title">Extensions &amp; Custom Skills</h3>
+                <h3 class="card-title">Extensions &amp; Sharing</h3>
                 <span class="status-badge badge-active">v0.2.3 Active</span>
               </div>
               <p class="card-desc">Resource packaging roots precedence, custom prompt/skill manifests schema, and portable share archive packages (.json import/export).</p>

@@ -1,14 +1,14 @@
 # Middleware and Component Registry
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with an interactive component scanner and a dynamic hook-and-effect pipeline is located at [docs/html/middleware_blueprint.html](html/middleware_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive dashboard with an interactive component scanner and a dynamic hook-and-effect pipeline is located at [docs/html/middleware_blueprint.html](html/middleware_blueprint.html) (Version: 0.2.3).
 
 Clio Coder has two related but separate surfaces:
 
 1. **Components**: deterministic inventory of files that can affect harness behavior.
-2. **Middleware**: an experimental hook/effect contract around model/tool/session/dispatch lifecycle points.
+2. **Middleware**: an experimental hook/effect contract around tool, turn, and compaction lifecycle points.
 
-The components surface is active and user-facing through `clio components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types and validation helpers exist, but the built-in declarative rule list is empty and the default runtime returns no effects from rules. Enforcing guard registrations do ride the same hook runtime, registered at the composition root: the loop guard, the protected-artifacts guard, dispatch dedup, and the finish-contract assessor are `before_tool`/`turn_end` registrations and form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
+The components surface is active and user-facing through `clio components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types, validation helpers, declarative rule engine, and built-in registrations exist, but repository or user middleware packages are not yet a shipped public extension point. Enforcing guard registrations ride the same hook runtime at the composition root: the loop guard, protected-artifacts guard, dispatch dedup, file and skill observers, tool-prose checks, and finish-contract assessor form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
 
 ---
 
@@ -83,12 +83,13 @@ Source: `src/domains/middleware/types.ts`, `validate.ts`, and `runtime.ts`.
 
 Supported hooks:
 
-| Hook family | Hook IDs |
+| Hook ID | Current use |
 | --- | --- |
-| Model | `before_model`, `after_model` |
-| Tool | `before_tool`, `after_tool`, `on_blocked_tool` |
-| Finish/retry/compaction | `before_finish`, `after_finish`, `on_retry`, `on_compaction` |
-| Dispatch | `on_dispatch_start`, `on_dispatch_end` |
+| `before_tool` | Guard and annotate a tool call before execution. Rejected or parked attempts still reach loop detection. |
+| `after_tool` | Observe or annotate a completed tool result. File mutation and skill activation observers listen here and cannot change the result. |
+| `turn_start` | Inject visible `<system-reminder>` text into the accepted request. |
+| `turn_end` | Buffer reminders for the next request, including stalled-turn, tool-prose, and finish-contract advisories. |
+| `on_compaction` | Observe compaction events. Effects from this hook are discarded by design. |
 
 Supported effect kinds:
 
@@ -98,10 +99,11 @@ Supported effect kinds:
 | `annotate_tool_result` | Append deterministic annotation to a tool result. |
 | `block_tool` | Hard-block a tool before execution. |
 | `protect_path` | Register a protected artifact path in session state. |
-| `require_validation` | Validation requirement signal. |
-| `record_memory_candidate` | Candidate lesson plus evidence refs. |
+| `request_continuation` | Ask the chat loop for one bounded automatic continuation. |
 
-`src/tools/registry.ts` already knows how to consume `before_tool` and `after_tool` effects returned by a middleware contract. In the default alpha build, `runMiddlewareHook()` returns an empty effect list.
+Declarative rules run before coded registrations. Scoped registrations match by hook and, for tool hooks, by tool name. Hook failures emit diagnostics and later hooks still run. Soft-budget overruns are reported but do not abort the turn. The orchestrator and workers share the middleware contract, but worker guard state is process-local.
+
+Middleware reminders are visible request text, not hidden prompt state. `turn_start` reminders flush into the same accepted request; `turn_end` reminders flush once on the next request. The built-in stalled-turn rule can request one automatic continuation for a user prompt, then stops rather than looping forever.
 
 ---
 
@@ -115,8 +117,8 @@ Middleware validators enforce closed fields and known enum values. Minimal valid
   "source": "builtin",
   "description": "Require validation after generated artifact writes.",
   "enabled": true,
-  "hooks": ["after_tool"],
-  "effectKinds": ["require_validation"]
+  "hooks": ["turn_end"],
+  "effectKinds": ["request_continuation"]
 }
 ```
 

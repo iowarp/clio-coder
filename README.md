@@ -35,6 +35,11 @@ interactive TUI, typed tools instead of an unrestricted shell, a fleet of
 focused agents, durable sessions, and receipts that record what actually
 happened.
 
+CLIO stands for Context Layer for Input/Output. Clio Coder is part of
+IOWarp's agentic science ecosystem, named for the Greek muse of history and
+developed by the Gnosis Research Center at Illinois Tech under PI Alexandros
+Kougkas.
+
 It is built for developers working on research software and HPC codebases who
 want agentic help with inspection, planning, edits, reviews, and validation
 while keeping every privileged action gated and auditable.
@@ -51,9 +56,10 @@ while keeping every privileged action gated and auditable.
 - **A supervised tool surface.** Typed git, test, lint, build, package-script,
   and frontend-validation tools replace an unrestricted shell. Bash is
   default-deny, governed by damage-control rules and per-project policy.
-- **Built-in agent fleet.** Dispatch `scout`, `planner`, `reviewer`,
-  `implementer`, `debugger`, and other focused recipes as bounded workers with
-  explicit tool profiles and per-run receipts.
+- **Built-in agent fleet.** Dispatch `architect`, `coder`, `tester`,
+  `verifier`, `debugger`, `documenter`, `scout`, `researcher`, and
+  `provenance` recipes as bounded workers with explicit tool profiles and
+  per-run receipts.
 - **Receipts and audit logs.** Every run records token usage, cost, tool
   activity, safety decisions, and receipt integrity, so you can reconstruct
   what the agent did and why.

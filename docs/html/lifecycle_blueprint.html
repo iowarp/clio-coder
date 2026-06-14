@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Lifecycle Operations Blueprint (v0.2.3)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -33,8 +30,8 @@
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
       
       --glass-blur: blur(12px);
     }
@@ -447,7 +444,7 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
               Platform path overrides
             </h2>
-            <p>Simulate how environment variables redirect config, data, and cache folders.</p>
+            <p>Simulate how environment variables redirect config, data, state, and cache folders.</p>
             
             <div class="form-group">
               <label for="platformSelect">Target OS</label>
@@ -474,14 +471,29 @@
               </div>
             </div>
 
+            <div class="form-row">
+              <div class="form-group">
+                <label for="stateDirInput">CLIO_STATE_DIR</label>
+                <input type="text" id="stateDirInput" value="" placeholder="Default" oninput="resolvePaths()">
+              </div>
+              <div class="form-group">
+                <label for="cacheDirInput">CLIO_CACHE_DIR</label>
+                <input type="text" id="cacheDirInput" value="" placeholder="Default" oninput="resolvePaths()">
+              </div>
+            </div>
+
             <div class="resolved-paths-panel">
               <div class="path-row">
                 <strong>Config Directory (settings/keys)</strong>
                 <span id="resolvedConfig">~/.config/clio</span>
               </div>
               <div class="path-row">
-                <strong>Data Directory (sessions/logs)</strong>
+                <strong>Data Directory (memory/evidence/evals)</strong>
                 <span id="resolvedData">~/.local/share/clio</span>
+              </div>
+              <div class="path-row">
+                <strong>State Directory (sessions/audit/receipts)</strong>
+                <span id="resolvedState">~/.local/state/clio</span>
               </div>
               <div class="path-row">
                 <strong>Cache Directory</strong>
@@ -521,6 +533,7 @@
               <th>OS</th>
               <th>Config Directory</th>
               <th>Data Directory</th>
+              <th>State Directory</th>
               <th>Cache Directory</th>
             </tr>
           </thead>
@@ -529,19 +542,22 @@
               <td>Linux / Unix</td>
               <td><code>~/.config/clio</code></td>
               <td><code>~/.local/share/clio</code></td>
+              <td><code>~/.local/state/clio</code></td>
               <td><code>~/.cache/clio</code></td>
             </tr>
             <tr>
               <td>macOS</td>
-              <td><code>~/Library/Application Support/clio</code></td>
-              <td><code>~/Library/Application Support/clio</code></td>
+              <td><code>~/Library/Application Support/clio/config</code></td>
+              <td><code>~/Library/Application Support/clio/data</code></td>
+              <td><code>~/Library/Application Support/clio/state</code></td>
               <td><code>~/Library/Caches/clio</code></td>
             </tr>
             <tr>
               <td>Windows</td>
-              <td><code>%APPDATA%\clio</code></td>
-              <td><code>%APPDATA%\clio</code></td>
-              <td><code>%LOCALAPPDATA%\Temp\clio</code></td>
+              <td><code>%APPDATA%\clio\config</code></td>
+              <td><code>%APPDATA%\clio\data</code></td>
+              <td><code>%LOCALAPPDATA%\clio\state</code></td>
+              <td><code>%LOCALAPPDATA%\clio\cache</code></td>
             </tr>
           </tbody>
         </table>
@@ -584,6 +600,9 @@
           </tbody>
         </table>
 
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Doctor Repair Semantics</h3>
+        <p><code>clio doctor</code> is read-only. <code>clio doctor --fix</code> creates missing structure, repairs credential permissions, refreshes install metadata, and rewrites <code>settings.yaml</code> only when known legacy settings keys are present. That repair path creates <code>settings.yaml.bak</code> before writing the current schema.</p>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
         <pre><code># checkout repo
 git clone https://github.com/iowarp/clio-coder.git
@@ -621,32 +640,40 @@ clio --version</code></pre>
       const clioHome = document.getElementById('clioHomeInput').value.trim();
       const configOverride = document.getElementById('configDirInput').value.trim();
       const dataOverride = document.getElementById('dataDirInput').value.trim();
+      const stateOverride = document.getElementById('stateDirInput').value.trim();
+      const cacheOverride = document.getElementById('cacheDirInput').value.trim();
 
       let defConfig = '';
       let defData = '';
+      let defState = '';
       let defCache = '';
 
       if (platform === 'linux') {
         defConfig = '/home/user/.config/clio';
         defData = '/home/user/.local/share/clio';
+        defState = '/home/user/.local/state/clio';
         defCache = '/home/user/.cache/clio';
       } else if (platform === 'macos') {
-        defConfig = '/Users/user/Library/Application Support/clio';
-        defData = '/Users/user/Library/Application Support/clio';
+        defConfig = '/Users/user/Library/Application Support/clio/config';
+        defData = '/Users/user/Library/Application Support/clio/data';
+        defState = '/Users/user/Library/Application Support/clio/state';
         defCache = '/Users/user/Library/Caches/clio';
       } else {
-        defConfig = 'C:\\Users\\user\\AppData\\Roaming\\clio';
-        defData = 'C:\\Users\\user\\AppData\\Roaming\\clio';
-        defCache = 'C:\\Users\\user\\AppData\\Local\\Temp\\clio';
+        defConfig = 'C:\\Users\\user\\AppData\\Roaming\\clio\\config';
+        defData = 'C:\\Users\\user\\AppData\\Roaming\\clio\\data';
+        defState = 'C:\\Users\\user\\AppData\\Local\\clio\\state';
+        defCache = 'C:\\Users\\user\\AppData\\Local\\clio\\cache';
       }
 
       // apply overrides
-      const finalConfig = configOverride || (clioHome ? `${clioHome}` : defConfig);
+      const finalConfig = configOverride || (clioHome ? `${clioHome}/config` : defConfig);
       const finalData = dataOverride || (clioHome ? `${clioHome}/data` : defData);
-      const finalCache = clioHome ? `${clioHome}/cache` : defCache;
+      const finalState = stateOverride || (clioHome ? `${clioHome}/state` : defState);
+      const finalCache = cacheOverride || (clioHome ? `${clioHome}/cache` : defCache);
 
       document.getElementById('resolvedConfig').innerText = finalConfig;
       document.getElementById('resolvedData').innerText = finalData;
+      document.getElementById('resolvedState').innerText = finalState;
       document.getElementById('resolvedCache').innerText = finalCache;
     }
 
@@ -654,6 +681,7 @@ clio --version</code></pre>
       const consoleEl = document.getElementById('bootConsole');
       const conf = document.getElementById('resolvedConfig').innerText;
       const data = document.getElementById('resolvedData').innerText;
+      const state = document.getElementById('resolvedState').innerText;
       const cache = document.getElementById('resolvedCache').innerText;
 
       consoleEl.innerHTML = `[BOOT] Calling initializeClioHome()...`;
@@ -661,13 +689,17 @@ clio --version</code></pre>
       setTimeout(() => {
         consoleEl.innerHTML += `\n[BOOT] Resolving config root: ${conf}`;
         consoleEl.innerHTML += `\n[BOOT] Resolving data root: ${data}`;
+        consoleEl.innerHTML += `\n[BOOT] Resolving state root: ${state}`;
+        consoleEl.innerHTML += `\n[BOOT] Resolving cache root: ${cache}`;
       }, 300);
 
       setTimeout(() => {
         consoleEl.innerHTML += `\n[FS] Creating directory tree structure...`;
-        consoleEl.innerHTML += `\n[FS] -> ${data}/sessions/ (rw-r--r--)`;
-        consoleEl.innerHTML += `\n[FS] -> ${data}/audit/ (rw-r--r--)`;
         consoleEl.innerHTML += `\n[FS] -> ${data}/memory/ (rw-r--r--)`;
+        consoleEl.innerHTML += `\n[FS] -> ${data}/evidence/ (rw-r--r--)`;
+        consoleEl.innerHTML += `\n[FS] -> ${state}/sessions/ (rw-r--r--)`;
+        consoleEl.innerHTML += `\n[FS] -> ${state}/audit/ (rw-r--r--)`;
+        consoleEl.innerHTML += `\n[FS] -> ${state}/receipts/ (rw-r--r--)`;
       }, 600);
 
       setTimeout(() => {
@@ -677,7 +709,7 @@ clio --version</code></pre>
       }, 1000);
 
       setTimeout(() => {
-        consoleEl.innerHTML += `\n[METADATA] Writing install.json: { version: "0.2.3", node: "v20.10.0" }`;
+        consoleEl.innerHTML += `\n[METADATA] Writing ${state}/install.json: { version: "0.2.3", node: "v20.10.0" }`;
         consoleEl.innerHTML += `\n[BOOT] initializeClioHome() completed successfully.`;
       }, 1400);
     }

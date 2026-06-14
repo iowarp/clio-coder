@@ -1,7 +1,7 @@
 # Clio Coder Safety Model
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.3).
 
 Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by target capabilities, the tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.
 
@@ -171,6 +171,11 @@ Prefer typed tools over Bash:
 - `validate_frontend` validates frontend artifacts without granting arbitrary shell access.
 
 `validate_frontend` accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` under the workspace root. It checks HTML tag balance, local script/style references, JavaScript syntax, CSS brace/comment/string balance, and optionally loads HTML with an available headless Chromium/Chrome/Edge executable (`browser: auto|required|off`).
+
+The `edit` tool also carries conservative matching rules. It preserves
+unchanged bytes, handles common quote, dash, whitespace, and indentation drift
+for matching only, and rejects ambiguous or no-op edits rather than applying a
+guess.
 
 ---
 

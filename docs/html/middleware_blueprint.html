@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clio Coder Middleware &amp; Components Blueprint (v0.2.3)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -33,8 +30,8 @@
       
       --gradient-main: linear-gradient(135deg, var(--color-cyan), var(--color-purple));
       --shadow-glow: 0 0 25px rgba(0, 240, 255, 0.15);
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
       
       --glass-blur: blur(12px);
     }
@@ -501,6 +498,7 @@
               <select id="hookSelect" onchange="runPipelineSim()">
                 <option value="before_tool">before_tool (Registry call admission)</option>
                 <option value="after_tool">after_tool (Post tool execution)</option>
+                <option value="turn_end">turn_end (Turn completion reminder)</option>
                 <option value="on_compaction">on_compaction (Sliding window overflows)</option>
               </select>
             </div>
@@ -548,10 +546,10 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Middleware Hooks and Effects</h3>
-        <p>Middleware filters evaluate tool admission, model configurations, and dispatch scopes:</p>
+        <p>Middleware filters evaluate tool calls, turn lifecycle reminders, and compaction observation:</p>
         <ul style="margin-left: 2rem; margin-bottom: 1.5rem; color:var(--text-muted)">
-          <li style="margin-bottom:0.4rem;"><strong>Hook IDs</strong>: <code>before_model</code>, <code>after_model</code>, <code>before_tool</code>, <code>after_tool</code>, <code>on_compaction</code>, <code>on_dispatch_start</code>.</li>
-          <li style="margin-bottom:0.4rem;"><strong>Effect Kinds</strong>: <code>inject_reminder</code>, <code>annotate_tool_result</code>, <code>block_tool</code>, <code>protect_path</code>, <code>require_validation</code>.</li>
+          <li style="margin-bottom:0.4rem;"><strong>Hook IDs</strong>: <code>before_tool</code>, <code>after_tool</code>, <code>turn_start</code>, <code>turn_end</code>, <code>on_compaction</code>.</li>
+          <li style="margin-bottom:0.4rem;"><strong>Effect Kinds</strong>: <code>inject_reminder</code>, <code>annotate_tool_result</code>, <code>block_tool</code>, <code>protect_path</code>, <code>request_continuation</code>.</li>
         </ul>
       </div>
     </main>
@@ -628,12 +626,16 @@
         addStep("Consuming effect", "Registry blocks tool execution and throws safety exception.", "error");
       } else if (hook === 'after_tool') {
         addStep("Trigger: after_tool", "Tool Coder finishes execution of 'write src/index.ts'.", "info");
-        addStep("Rules scan: lab.require-validation", "Evaluating post-execution rules...", "info");
-        addStep("Effect generated: require_validation", "Validation required badge assigned. Triggering validate_frontend pipeline.", "success");
+        addStep("Observer notification", "File mutation and skill activation observers receive a best-effort event.", "info");
+        addStep("Effect generated: annotate_tool_result", "Tool result can receive deterministic metadata without changing the underlying file write.", "success");
+      } else if (hook === 'turn_end') {
+        addStep("Trigger: turn_end", "Assistant stops after announcing work without tool calls.", "info");
+        addStep("Rules scan: stalled-turn", "Checking whether one bounded continuation should be requested.", "info");
+        addStep("Effect generated: request_continuation", "Chat loop schedules one automatic continuation for the same user prompt.", "success");
       } else {
         addStep("Trigger: on_compaction", "Messages ledger pressure exceeds threshold (0.83 > 0.80).", "info");
-        addStep("Rules scan: compaction.auto", "Checking auto-compaction triggers...", "info");
-        addStep("Effect generated: protect_path", "Protected active working threads from summary overrides.", "success");
+        addStep("Observer notification", "Compaction event is available to middleware telemetry.", "info");
+        addStep("Effects discarded", "This hook observes state only; emitted effects are ignored by design.", "success");
       }
     }
 

@@ -1,7 +1,7 @@
 # Configuration, Targets, Runtimes, and Auth
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.2.2).
+> **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.2.3).
 
 Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat, print, and fleet dispatch targets are all HTTP/native/pi-ai-backed runtimes.
 
@@ -82,7 +82,7 @@ Use the id you chose, probe it, then launch the TUI:
 ```bash
 clio targets use local-lmstudio
 clio targets --probe
-clio models --probe --target local-lmstudio
+clio models --target local-lmstudio
 clio
 ```
 
@@ -177,6 +177,22 @@ Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reas
 
 ---
 
+## Strict validation and legacy repair
+
+Settings validation is strict. Unknown keys and type violations report exact
+paths and stop startup so stale configuration does not silently change runtime
+behavior.
+
+Plain `clio doctor` is read-only. `clio doctor --fix` creates missing
+structure, repairs credentials permissions, and rewrites `settings.yaml` only
+when it finds known legacy keys from older releases. That repair path backs up
+the original as `settings.yaml.bak`, moves retired routing and state fields
+into the current `targets`, `autonomy`, routing, recent-models, and compaction
+shape, and is idempotent after the file is current. A file with unrelated
+unknown keys remains a validation error for the operator to edit deliberately.
+
+---
+
 ## Live routing vs saved defaults
 
 The routing keys in `settings.yaml` (`orchestrator.*`, `workers.default.*`, `scope`) are **defaults**, not a live control surface. Each interactive session seeds its routing from them at launch and owns it from then on:
@@ -192,7 +208,7 @@ Supporting mechanics:
 
 - **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.target` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
 - **Saved-default writes are serialized across processes.** Every settings writer (interactive write-throughs, `clio targets`, `clio configure`) performs its read-modify-write under an advisory lock file (`settings.yaml.lock`) and lands the result via an atomic temp-file + rename. Two processes saving defaults at the same time can no longer drop each other's patches, readers never block and never see partial files, and a lock left behind by a dead process is taken over after a few seconds.
-- **Recently selected models are runtime state, not configuration.** They live in the state dir (`recent-models.json`), so an Alt+L pick never rewrites `settings.yaml` and never pings the config watcher in other running sessions. Settings validation is strict: a `state.recentModels` key in `settings.yaml` is an unknown-key error, not a migrated legacy input. `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
+- **Recently selected models are runtime state, not configuration.** They live in the state dir (`recent-models.json`), so an Alt+L pick never rewrites `settings.yaml` and never pings the config watcher in other running sessions. Settings validation is strict: a `state.recentModels` key in `settings.yaml` is an unknown-key error during normal startup. `clio doctor --fix` can move known legacy recent-model state into the state directory, while `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
 - **ACP sessions get the notices through the session ledger.** Sessions served over the Agent Client Protocol (`clio` in ACP mode) have the same routing isolation, but ACP v1 offers no agent-initiated advisory channel: its `session/update` union only carries prompt-turn content, and out-of-turn updates would break strict clients. The external-divergence and target-removed notices are therefore recorded as `custom` session-ledger entries (`customType: "clio.routing-notice"`), visible to `/resume` and session tooling.
 
 ---
@@ -379,7 +395,7 @@ Auth types come from runtime descriptors:
 
 You have two ways to give Clio an API key:
 
-- **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default and what the wizard now suggests first.
+- **Environment variable** (`--api-key-env <VAR>`, or the env choice in `clio configure`). Clio stores nothing and reads `$VAR` at call time. This is the recommended default. The wizard suggests it for new credentials and offers `keep` first when a stored credential already exists.
 - **Stored credential** (`--api-key <literal>`, or `clio auth login`). The key is written to `credentials.yaml` (see directory locations) as **plaintext**, protected only by file mode `0600`. There is no encryption and no OS-keychain integration. Any process running as your user, plus backups and dotfile sync, can read it. Clio prints a warning whenever it writes a literal key for this reason.
 
 Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio auth status`, `clio targets`, or `clio configure`; only the source (env var name or `stored-api-key`) is shown.
