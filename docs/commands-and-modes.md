@@ -53,6 +53,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio share import <path> [--dry-run] [--force]` | Import a share archive with conflict reporting. |
 | `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
 | `clio context-init [--yes] [--preview|--heuristic|--adopt]` | Explore the repo and bootstrap project context: `CLIO.md` and codewiki. |
+| `clio context-index [--json]` | Build the Stage 1 codewiki index without model calls; writes `.clio/codewiki.json` and `.clio/state.json` and prints coverage plus a structural hash. |
 
 ## Headless Run Flags
 
@@ -256,6 +257,36 @@ To skip project context for one invocation:
 clio --no-context-files
 clio -nc run --agent scout "..."
 ```
+
+### Codewiki index
+
+`clio context-index` builds the Stage 1 codewiki without any model calls and writes
+`.clio/codewiki.json` plus `.clio/state.json`. Indexing is deterministic: the same tree
+produces the same structural hash on every run, so the index is safe to rebuild in CI and
+compare across machines. Extraction runs through web-tree-sitter WASM grammars and covers
+TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and Ruby, with a fallback
+extractor for trees the grammars do not parse. The v3 schema records files (path, language,
+line count, role), symbols (name, kind, line, signature), and import edges (internal file
+links and external modules). `clio context-init` builds the same index while bootstrapping
+`CLIO.md`, and it no longer seeds a starter handoff file.
+
+### code_nav modes
+
+Agents query the codewiki through the read-only `code_nav` tool instead of grepping the
+tree. Every mode reads the persisted index, so lookups are local and fast.
+
+| Mode | Arguments | Returns |
+|------|-----------|---------|
+| `symbol` | `query=<name>` | Files that declare the symbol. |
+| `path` | `query=<glob \| /regex/ \| substring>` | Files whose path matches the pattern. |
+| `entries` | `[limit=<n>]` | Likely entry points from file roles and `package.json` main/bin. |
+| `outline` | `query=<path>` | Symbols declared in the file with kinds and line numbers. |
+| `deps` | `query=<path>` | The file's imports: internal file paths and external modules. |
+| `dependents` | `query=<path>` | Files that import the given file. |
+
+`entries` defaults to 25 results and caps at 200. `path` accepts a `/pattern/flags` regex,
+a glob using `*`, `?`, or `[...]`, or a plain substring. `outline`, `deps`, and
+`dependents` resolve an exact indexed path or a unique suffix match.
 
 ## Reasoning and Live Thinking Controls
 
