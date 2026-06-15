@@ -238,12 +238,18 @@ export async function createTreeSitterExtractor(): Promise<LanguageExtractor> {
 			if (!grammar || text.trim().length === 0) return { symbols: [], imports: [], exports: [] };
 			const parser = parsers.get(grammar);
 			if (!parser) return { symbols: [], imports: [], exports: [] };
-			const tree = parser.parse(text);
+			let tree: Parser.Tree | null = null;
 			try {
+				tree = parser.parse(text);
 				const symbols = sortSymbols(extractByGrammar(grammar, tree.rootNode));
 				return { symbols, imports: [], exports: symbols.map((symbol) => symbol.name) };
+			} catch {
+				// A grammar that crashes on one file (some web-tree-sitter grammars throw on
+				// otherwise valid input) must degrade to no extraction for that file, never
+				// abort the whole codewiki build.
+				return { symbols: [], imports: [], exports: [] };
 			} finally {
-				tree.delete();
+				tree?.delete();
 			}
 		},
 	};
