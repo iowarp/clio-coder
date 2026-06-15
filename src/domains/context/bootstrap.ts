@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
@@ -160,14 +160,22 @@ function projectTypeLabel(projectType: ProjectType): string {
 	switch (projectType) {
 		case "typescript":
 			return "TypeScript/Node.js";
+		case "javascript":
+			return "JavaScript/Node.js";
 		case "python":
 			return "Python";
 		case "rust":
 			return "Rust";
 		case "go":
 			return "Go";
+		case "c":
+			return "C";
 		case "c++":
 			return "C++";
+		case "java":
+			return "Java";
+		case "ruby":
+			return "Ruby";
 		case "polyglot":
 			return "polyglot";
 		case "dotfiles":
@@ -299,10 +307,15 @@ function topTwoSegments(path: string): string {
 	return dirParts.slice(0, 2).join("/");
 }
 
+function indexedSourceFileCount(codewiki: Codewiki): number {
+	return codewiki.files.filter((file) => file.lang !== "config").length;
+}
+
 function topCodewikiDirectories(codewiki: Codewiki, limit = 8): string[] {
 	const dirCounts = new Map<string, number>();
-	for (const entry of codewiki.entries) {
-		const top = topTwoSegments(entry.path);
+	for (const file of codewiki.files) {
+		if (file.lang === "config") continue;
+		const top = topTwoSegments(file.path);
 		dirCounts.set(top, (dirCounts.get(top) ?? 0) + 1);
 	}
 	return [...dirCounts.entries()]
@@ -412,11 +425,12 @@ function stabilizeGeneratedOutput(
 function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
 	const sections: ClioMdSection[] = [];
 	const entryPoints = codewikiEntryPoints(input.codewiki, 8);
+	const indexedCount = indexedSourceFileCount(input.codewiki);
 	if (entryPoints.length > 0) {
 		sections.push({
 			title: "Context retrieval",
 			body: [
-				`The codewiki currently indexes ${input.codewiki.entries.length} module${input.codewiki.entries.length === 1 ? "" : "s"}.`,
+				`The codewiki currently indexes ${indexedCount} source file${indexedCount === 1 ? "" : "s"}.`,
 				`Start orientation with these indexed entry points: ${entryPoints.map((entry) => `\`${entry}\``).join(", ")}.`,
 				"Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.",
 			].join(" "),
@@ -755,55 +769,23 @@ function summarizeAdoption(
  * imported modules (highest in-degree) stand in as the structural anchors.
  */
 export function codewikiEntryPoints(codewiki: Codewiki, limit = 6): string[] {
-	const tagged = codewiki.entries.filter((entry) => entry.kind === "entry-point").map((entry) => entry.path);
+	const fileById = new Map(codewiki.files.map((file) => [file.id, file] as const));
+	const tagged = codewiki.files
+		.filter((file) => file.lang !== "config" && file.role === "entry")
+		.map((file) => file.path)
+		.sort((a, b) => a.localeCompare(b));
 	if (tagged.length >= limit) return tagged.slice(0, limit);
 	const inDegree = new Map<string, number>();
-	for (const entry of codewiki.entries) {
-		for (const target of entry.imports) inDegree.set(target, (inDegree.get(target) ?? 0) + 1);
+	for (const edge of codewiki.edges) {
+		if (!("toFileId" in edge)) continue;
+		inDegree.set(edge.toFileId, (inDegree.get(edge.toFileId) ?? 0) + 1);
 	}
 	const ranked = [...inDegree.entries()]
 		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-		.map(([path]) => path)
+		.map(([fileId]) => fileById.get(fileId)?.path)
+		.filter((path): path is string => typeof path === "string")
 		.filter((path) => !tagged.includes(path));
 	return [...tagged, ...ranked].slice(0, limit);
-}
-
-/**
- * Seed the context engine's read side. Writes a starter handoff that
- * `context-prime` consumes on the next session so a fresh agent reconstructs
- * intent instead of cold-starting. Never clobbers handoffs written by
- * `context-handoff`: it only seeds when no handoff exists yet.
- */
-function seedInitialHandoff(cwd: string, output: BootstrapStructuredOutput, codewiki: Codewiki, now: Date): void {
-	const dir = join(cwd, ".clio", "handoffs");
-	try {
-		if (existsSync(dir) && readdirSync(dir).some((name) => /^handoff-.*\.md$/.test(name))) return;
-	} catch {
-		// Unreadable dir is treated as empty; the write below recreates it.
-	}
-	const date = now.toISOString().slice(0, 10);
-	const entryPoints = codewikiEntryPoints(codewiki);
-	const lines = [
-		`# Handoff ${date}: context-init`,
-		"",
-		`**Project:** ${output.projectName}`,
-		"",
-		"## Focus",
-		"Fresh repository orientation. No work in progress yet; CLIO.md and the codewiki were just bootstrapped.",
-		"",
-		"## Where things stand",
-		`- Identity: ${output.identity}`,
-		`- Codewiki indexed ${codewiki.entries.length} module${codewiki.entries.length === 1 ? "" : "s"} (use code_nav).`,
-		...(entryPoints.length > 0 ? ["- Entry points:", ...entryPoints.map((path) => `  - ${path}`)] : []),
-		"",
-		"## Suggested first step",
-		"Read CLIO.md for conventions and invariants, then state the task before changing code.",
-		"",
-		"_Seeded by /context-init. context-handoff overwrites this with a real brief at the end of a working session._",
-		"",
-	];
-	mkdirSync(dir, { recursive: true });
-	writeFileSync(join(dir, `handoff-${date}-context-init.md`), lines.join("\n"), "utf8");
 }
 
 export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBootstrapResult> {
@@ -837,12 +819,13 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	// in the real structure (entry points, key modules), not just sibling prose.
 	progress(input, { phase: "codewiki", status: "started", message: "building codewiki index" });
 	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	const codewikiEntryCount = indexedSourceFileCount(codewiki);
 	progress(input, {
 		phase: "codewiki",
 		status: "completed",
-		message: `indexed ${codewiki.entries.length} module${codewiki.entries.length === 1 ? "" : "s"}`,
-		current: codewiki.entries.length,
-		total: codewiki.entries.length,
+		message: `indexed ${codewikiEntryCount} source file${codewikiEntryCount === 1 ? "" : "s"}`,
+		current: codewikiEntryCount,
+		total: codewikiEntryCount,
 	});
 	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
@@ -905,7 +888,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			action: "previewed",
 			contextFileCount: readNames.length,
 			contextFileNames: readNames,
-			codewikiEntries: codewiki.entries.length,
+			codewikiEntries: codewikiEntryCount,
 			dirtyFiles: countStatusLines(previewStatus),
 			adoption: summarizeAdoption(adoption, "preview"),
 		};
@@ -962,18 +945,15 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	progress(input, {
 		phase: "state",
 		status: "completed",
-		message: `state updated; ${codewiki.entries.length} codewiki entr${codewiki.entries.length === 1 ? "y" : "ies"}`,
+		message: `state updated; ${codewikiEntryCount} codewiki entr${codewikiEntryCount === 1 ? "y" : "ies"}`,
 	});
-	progress(input, { phase: "handoff", status: "started", message: "seeding initial handoff" });
-	seedInitialHandoff(cwd, output, codewiki, now);
-	progress(input, { phase: "handoff", status: "completed", message: "handoff ready" });
 
 	const postStatus = gitStatus(cwd);
 	const summary: RunBootstrapSummary = {
 		action,
 		contextFileCount: readNames.length,
 		contextFileNames: readNames,
-		codewikiEntries: codewiki.entries.length,
+		codewikiEntries: codewikiEntryCount,
 		dirtyFiles: countStatusLines(postStatus),
 		adoption: summarizeAdoption(adoption, input.adopt === true ? "adopt" : "scan"),
 		...(proposalPath ? { proposalPath } : {}),

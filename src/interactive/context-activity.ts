@@ -25,22 +25,13 @@ export interface ContextActivitySnapshot {
 interface ContextActivityEntry extends ContextActivitySnapshot {}
 
 export const CONTEXT_ISLAND_WIDTH = 52;
-const PHASES: ReadonlyArray<ContextActivityPhase> = [
-	"scan",
-	"codewiki",
-	"generate",
-	"clio-md",
-	"state",
-	"handoff",
-	"done",
-];
+const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "generate", "clio-md", "state", "done"];
 const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	scan: "scan",
 	codewiki: "wiki",
 	generate: "scout",
 	"clio-md": "CLIO.md",
 	state: "state",
-	handoff: "handoff",
 	done: "done",
 };
 const TERMINAL_RETENTION_MS = 4_000;
