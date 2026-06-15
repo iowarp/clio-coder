@@ -228,7 +228,7 @@ function roleFor(relPath: string, language: CodewikiLanguage): CodewikiFileRole 
 	) {
 		return "test";
 	}
-	if (/(^|\/)(index|main|cli|orchestrator|bootstrap)\.[^.]+$/.test(lower) || lower.endsWith("/__main__.py")) {
+	if (/(^|\/)(index|main|server|cli|orchestrator|bootstrap)\.[^.]+$/.test(lower) || lower.endsWith("/__main__.py")) {
 		return "entry";
 	}
 	return "module";
