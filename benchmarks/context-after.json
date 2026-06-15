@@ -1,6 +1,6 @@
 {
-	"sourceReport": ".clio-benchmark/context/bench-context-1781490134627.json",
-	"generatedAt": "2026-06-15T02:22:14.626Z",
+	"sourceReport": ".clio-benchmark/context/bench-context-1781524708425.json",
+	"generatedAt": "2026-06-15T11:58:28.425Z",
 	"corpus": [
 		{
 			"name": "rendergit",
@@ -34,9 +34,11 @@
 		}
 	],
 	"cli": "/home/akougkas/iowarp/clio-coder/dist/cli/index.js",
+	"baselineReport": "benchmarks/context-baseline-main.json",
 	"results": [
 		{
 			"name": "rendergit",
+			"sourcePath": "/home/akougkas/tmp/clio-ctxtest/rendergit",
 			"expectedLanguage": "python",
 			"mode": "context-index",
 			"sourceFiles": 1,
@@ -48,6 +50,15 @@
 			"promptTokens": 1689,
 			"promptPayloadTokens": 493,
 			"promptTokenBasis": "v3-codewikiDigest",
+			"scout": {
+				"digestTokens": 415,
+				"entryFiles": 1,
+				"entryReadTokens": 4342,
+				"fullSourceFiles": 1,
+				"fullSourceTokens": 4342,
+				"digestVsEntryPct": 9.6,
+				"digestVsFullPct": 9.6
+			},
 			"navLatency": null,
 			"contextInit": {
 				"clioMdBytes": 1513,
@@ -75,30 +86,40 @@
 		},
 		{
 			"name": "quipslop",
+			"sourcePath": "/home/akougkas/tmp/clio-ctxtest/quipslop",
 			"expectedLanguage": "typescript",
 			"mode": "context-index",
 			"sourceFiles": 12,
 			"indexedFiles": 12,
 			"coverage": 1,
 			"language": "typescript",
-			"structuralHash": "5a0895c29fe1ff3e2c635f41cebd57ecbc2ffb21427d6e094a556401cc0938b2",
-			"digestTokens": 575,
-			"promptTokens": 2577,
-			"promptPayloadTokens": 1381,
+			"structuralHash": "477ad5374ad909f05704fc3c89bf850176d252722e253d08d23a8c1eca3d382f",
+			"digestTokens": 586,
+			"promptTokens": 2588,
+			"promptPayloadTokens": 1392,
 			"promptTokenBasis": "v3-codewikiDigest",
+			"scout": {
+				"digestTokens": 586,
+				"entryFiles": 4,
+				"entryReadTokens": 23833,
+				"fullSourceFiles": 12,
+				"fullSourceTokens": 46070,
+				"digestVsEntryPct": 2.5,
+				"digestVsFullPct": 1.3
+			},
 			"navLatency": null,
 			"contextInit": {
-				"clioMdBytes": 2314,
-				"clioMdHash": "5871fe1aea903e75a6f73a9b561691d078369a8d12ef267bd7efa3f12778ae55",
+				"clioMdBytes": 2327,
+				"clioMdHash": "5277fffe0ffc737e71f57207486a27e3de998d0cfb95c42ba773721d1853f33c",
 				"handoffFiles": [],
 				"handoffCount": 0,
 				"quality": {
-					"score": 2,
+					"score": 3,
 					"maxScore": 3,
 					"checks": {
 						"languageMention": true,
 						"indexedContext": true,
-						"entryPointMention": false
+						"entryPointMention": true
 					}
 				}
 			},
@@ -113,6 +134,7 @@
 		},
 		{
 			"name": "mac-mini-agent",
+			"sourcePath": "/home/akougkas/tmp/clio-ctxtest/mac-mini-agent",
 			"expectedLanguage": "python",
 			"mode": "context-index",
 			"sourceFiles": 17,
@@ -124,10 +146,19 @@
 			"promptTokens": 2180,
 			"promptPayloadTokens": 984,
 			"promptTokenBasis": "v3-codewikiDigest",
+			"scout": {
+				"digestTokens": 901,
+				"entryFiles": 3,
+				"entryReadTokens": 1362,
+				"fullSourceFiles": 17,
+				"fullSourceTokens": 8839,
+				"digestVsEntryPct": 66.2,
+				"digestVsFullPct": 10.2
+			},
 			"navLatency": null,
 			"contextInit": {
 				"clioMdBytes": 3030,
-				"clioMdHash": "e83a1a224af93d6ee8dc5795d0c975e7ff86786c1b57da436baf75653912f202",
+				"clioMdHash": "3661650f604f83fbdab390f42eab49416d4ff5be6b5f1dcb8844c12720d9936d",
 				"handoffFiles": [],
 				"handoffCount": 0,
 				"quality": {
@@ -151,17 +182,27 @@
 		},
 		{
 			"name": "clio-coder",
+			"sourcePath": "/home/akougkas/iowarp/clio-coder",
 			"expectedLanguage": "typescript",
 			"mode": "context-index",
 			"sourceFiles": 584,
 			"indexedFiles": 584,
 			"coverage": 1,
 			"language": "typescript",
-			"structuralHash": "b333d64e4dd9dcb20abf38f5ea3c919524b53d82841f1b450be27ca73922e321",
+			"structuralHash": "22bc11a3669b40352da5d5d98bc56882111ad9669bf6fb37174641b2b6378223",
 			"digestTokens": 1195,
 			"promptTokens": 2476,
 			"promptPayloadTokens": 1280,
 			"promptTokenBasis": "v3-codewikiDigest",
+			"scout": {
+				"digestTokens": 1195,
+				"entryFiles": 12,
+				"entryReadTokens": 12655,
+				"fullSourceFiles": 584,
+				"fullSourceTokens": 1034154,
+				"digestVsEntryPct": 9.4,
+				"digestVsFullPct": 0.1
+			},
 			"navLatency": null,
 			"contextInit": {
 				"clioMdBytes": 2614,
@@ -181,6 +222,7 @@
 		},
 		{
 			"name": "once",
+			"sourcePath": "/home/akougkas/tools/once",
 			"expectedLanguage": "go",
 			"mode": "context-index",
 			"sourceFiles": 146,
@@ -192,10 +234,19 @@
 			"promptTokens": 3552,
 			"promptPayloadTokens": 2356,
 			"promptTokenBasis": "v3-codewikiDigest",
+			"scout": {
+				"digestTokens": 1205,
+				"entryFiles": 2,
+				"entryReadTokens": 656,
+				"fullSourceFiles": 146,
+				"fullSourceTokens": 139157,
+				"digestVsEntryPct": 183.7,
+				"digestVsFullPct": 0.9
+			},
 			"navLatency": null,
 			"contextInit": {
 				"clioMdBytes": 2948,
-				"clioMdHash": "67a6a3f0764b16080bcc3e5d215ab1a47b462e2013397c3e00b5f20be39e0bff",
+				"clioMdHash": "56351c88bfe5f34a8e5f7efa6af6e286b0befa0360179f2d756c9c9da4a252ec",
 				"handoffFiles": [],
 				"handoffCount": 0,
 				"quality": null
@@ -211,27 +262,37 @@
 		},
 		{
 			"name": "opentui",
+			"sourcePath": "/home/akougkas/tools/opentui",
 			"expectedLanguage": "typescript",
 			"mode": "context-index",
 			"sourceFiles": 676,
 			"indexedFiles": 676,
 			"coverage": 1,
 			"language": "typescript",
-			"structuralHash": "eb9a28adb80fe225b8cfa5b703dd4bda7b0e876b2e2c8f9b4685529f620771e1",
-			"digestTokens": 1201,
-			"promptTokens": 3314,
-			"promptPayloadTokens": 2118,
+			"structuralHash": "1006d1ef627a774d9290b45d4837eca87526ed2b2f8d92a3d8278299fc93d4af",
+			"digestTokens": 1204,
+			"promptTokens": 3317,
+			"promptPayloadTokens": 2121,
 			"promptTokenBasis": "v3-codewikiDigest",
+			"scout": {
+				"digestTokens": 1204,
+				"entryFiles": 12,
+				"entryReadTokens": 21692,
+				"fullSourceFiles": 676,
+				"fullSourceTokens": 1969137,
+				"digestVsEntryPct": 5.6,
+				"digestVsFullPct": 0.1
+			},
 			"navLatency": {
 				"iterations": 200,
-				"p50Ms": 0.000132,
-				"p99Ms": 1.182635,
+				"p50Ms": 0.000114,
+				"p99Ms": 0.967474,
 				"paths": 687,
 				"symbols": 44527
 			},
 			"contextInit": {
-				"clioMdBytes": 3508,
-				"clioMdHash": "3a62c668e411b16d443cdee24b0149449696bf090b980cd7194705e7e2074301",
+				"clioMdBytes": 3509,
+				"clioMdHash": "0453fe1bdb3f17126ee8dca5181d97cc91507388f69fabba874c1930e0228b58",
 				"handoffFiles": [],
 				"handoffCount": 0,
 				"quality": null
@@ -264,12 +325,12 @@
 			"name": "quipslop",
 			"coverageDelta": 1,
 			"indexedFilesDelta": 12,
-			"digestTokensDelta": 575,
-			"promptTokensDelta": 596,
-			"promptPayloadTokensDelta": 596,
+			"digestTokensDelta": 586,
+			"promptTokensDelta": 607,
+			"promptPayloadTokensDelta": 607,
 			"qualityScoreBefore": 1,
-			"qualityScoreAfter": 2,
-			"qualityScoreDelta": 1,
+			"qualityScoreAfter": 3,
+			"qualityScoreDelta": 2,
 			"languageBefore": "unknown",
 			"languageAfter": "typescript"
 		},
@@ -316,9 +377,9 @@
 			"name": "opentui",
 			"coverageDelta": 1,
 			"indexedFilesDelta": 676,
-			"digestTokensDelta": 1201,
-			"promptTokensDelta": 1224,
-			"promptPayloadTokensDelta": 1224,
+			"digestTokensDelta": 1204,
+			"promptTokensDelta": 1227,
+			"promptPayloadTokensDelta": 1227,
 			"qualityScoreBefore": null,
 			"qualityScoreAfter": null,
 			"qualityScoreDelta": null,
