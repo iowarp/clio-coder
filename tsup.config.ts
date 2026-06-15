@@ -23,5 +23,7 @@ export default defineConfig({
 		"@earendil-works/pi-tui",
 		"@silvia-odwyer/photon-node",
 		"typescript",
+		"tree-sitter-wasms",
+		"web-tree-sitter",
 	],
 });

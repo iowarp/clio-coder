@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	buildCodewiki,
+	buildCodewikiWithTreeSitter,
 	readCodewiki,
 	renderCodewikiDigest,
 	structuralCodewikiHash,
@@ -115,6 +116,20 @@ describe("contracts/codewiki", () => {
 		ok(codewiki.symbols.some((symbol) => symbol.name === "render" && symbol.kind === "func"));
 		ok(codewiki.symbols.some((symbol) => symbol.name === "main" && symbol.kind === "func"));
 		ok(codewiki.symbols.some((symbol) => symbol.name === "run" && symbol.kind === "func"));
+	});
+
+	it("uses web-tree-sitter WASM extraction before regex fallback", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "stream.ts"), "export function* stream() {\n  yield 1;\n}\n", "utf8");
+
+		const fallback = buildCodewiki({ cwd: scratch, language: "typescript" });
+		const wasm = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "typescript" });
+
+		strictEqual(
+			fallback.symbols.some((symbol) => symbol.name === "stream"),
+			false,
+		);
+		ok(wasm.symbols.some((symbol) => symbol.name === "stream" && symbol.kind === "func"));
 	});
 
 	it("records empty source package markers as files with zero symbols", () => {
