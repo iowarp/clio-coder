@@ -162,7 +162,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
-		codewikiCount = codewiki.entries.length;
+		codewikiCount = codewiki.files.filter((file) => file.lang !== "config").length;
 	}
 
 	const handoffsDir = join(cwd, ".clio", "handoffs");
