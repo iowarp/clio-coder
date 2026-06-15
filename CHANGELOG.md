@@ -148,6 +148,21 @@ the roots, and uninstall removes everything it installed.
 - Added parked-call loop observation. Denied or cancelled permission-parked
   calls are observed by the loop guard, so a headless model retrying a denied
   call gets recovery guidance instead of looping until timeout.
+- Added `clio context-index`, a model-free Stage 1 indexer that writes the
+  `.clio/codewiki.json` codewiki and `.clio/state.json` fingerprint, then prints
+  source coverage and a deterministic structural hash. `--json` emits the same
+  data machine-readably for CI and benchmarks.
+- Added a deterministic multi-language codewiki built through web-tree-sitter
+  WASM grammars for TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and
+  Ruby, with a regex fallback for trees the grammars do not parse. The v3 schema
+  records files with roles, symbols with kinds and signatures, and import edges
+  as internal file links or external modules, and the same tree always produces
+  the same structural hash.
+- Added `code_nav` lookups over the v3 codewiki with six modes: `symbol` finds
+  declaring files, `path` matches by glob, regex, or substring, `entries` lists
+  likely entry points, `outline` lists a file's symbols, `deps` lists a file's
+  imports, and `dependents` lists its importers. Every mode reads the persisted
+  index without a model call.
 
 ### Changed
 
@@ -206,6 +221,12 @@ the roots, and uninstall removes everything it installed.
 - Changed codewiki mutation observation so successful edit paths batch off the
   `after_tool` middleware hot path. Middleware budget notices now warn once
   per registration and hook while telemetry still records every exceedance.
+- Changed project-language detection to read a whole-tree source census instead
+  of root manifests alone, so nested, polyglot, and single-file repositories
+  resolve to a real language and index their source rather than falling through
+  to `unknown` with zero coverage. Conventional backend entry filenames such as
+  `server.*` now register as entry points alongside `index`, `main`, `cli`,
+  `bootstrap`, and `__main__`.
 - Changed model discovery so a live provider catalog is authoritative once a
   target has returned one: stale configured or default model names stop
   resolving after the provider removes them. One shared discovery path now
@@ -314,6 +335,10 @@ the roots, and uninstall removes everything it installed.
   endpoints/targets duality (the canonical key is `targets`), the
   `state.recentModels` settings key, and the `--keep-config`/`--keep-data`
   uninstall flags whose platform-conditional path kept data behind on macOS.
+- Removed handoff seeding from `context-init`. Bootstrapping a repository writes
+  `CLIO.md` and the codewiki only and no longer plants a starter
+  `.clio/handoffs/` file that pointed later sessions at an index they had not
+  built yet.
 - Removed the `/status` slash command. Live status moved into footer/dashboard
   surfaces and command output notices.
 - Removed the `/hotkeys` slash command and the static `SLASH_HOTKEYS` table.
