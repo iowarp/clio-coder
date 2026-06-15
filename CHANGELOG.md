@@ -263,6 +263,11 @@ the roots, and uninstall removes everything it installed.
 
 ### Fixed
 
+- Fixed a codewiki build abort when a tree-sitter grammar crashed on a single
+  file. Some web-tree-sitter grammars throw inside `parse` on otherwise valid
+  input, and the unguarded call let one file abort indexing for the whole
+  repository. Extraction now degrades to no symbols for the offending file and
+  the rest of the tree still indexes.
 - Fixed the audit log recording non-final outcomes as final. Engine rows are
   now `classified`, the tool registry writes `denied` and
   `permission_requested`, and a confirmed grant produces the single final
