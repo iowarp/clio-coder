@@ -172,7 +172,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 			const updated = updateCodewikiPaths(cwd, codewiki, rel);
 			if (updated === codewiki) return; // No indexable file actually changed.
 			writeCodewiki(cwd, updated);
-			persistState(cwd, computeFingerprint(cwd), updated.generatedAt, readClioState(cwd));
+			persistState(cwd, computeFingerprint(cwd), new Date().toISOString(), readClioState(cwd));
 			contextState.invalidate(cwd);
 		} catch {
 			// Best-effort: never let incremental indexing surface as a tool error.
