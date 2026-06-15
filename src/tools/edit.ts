@@ -87,7 +87,7 @@ export const editTool: ToolSpec = {
 			if (code === "ENOENT") {
 				return {
 					kind: "error",
-					message: `edit: ${msg}. File not found at ${pathArg}. The path may be wrong (e.g. wrong extension; codewiki indexes only .ts/.tsx). Try: code_nav, find, glob, or ls to locate it.`,
+					message: `edit: ${msg}. File not found at ${pathArg}. The path may be wrong. Try: code_nav, find, glob, or ls to locate it.`,
 				};
 			}
 			return { kind: "error", message: `edit: ${msg}` };

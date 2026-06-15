@@ -122,7 +122,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		"Prefer workspace_context, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
 	];
 	if (activeToolNames.includes("code_nav")) {
-		lines.push("Use code_nav for indexed TypeScript navigation (modes: symbol, path, entries).");
+		lines.push("Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).");
 	}
 	if (activeToolNames.includes("read_skill")) {
 		lines.push(

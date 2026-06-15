@@ -1,6 +1,7 @@
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionScanResult } from "./adoption.js";
-import { type BootstrapStructuredOutput, codewikiEntryPoints } from "./bootstrap.js";
+import type { BootstrapStructuredOutput } from "./bootstrap.js";
+import { renderCodewikiDigest } from "./codewiki/digest.js";
 import type { Codewiki } from "./codewiki/indexer.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 
@@ -53,38 +54,6 @@ export interface BootstrapPromptInput {
 	codewiki?: Codewiki;
 }
 
-/**
- * Compact structural digest of the codewiki for the bootstrap prompt: module
- * count, entry points, and the top directories by file count. Grounds the model
- * in the real source tree without dumping the full index.
- */
-function topTwoSegments(path: string): string {
-	const dirParts = path.split("/").slice(0, -1);
-	if (dirParts.length === 0) return ".";
-	return dirParts.slice(0, 2).join("/");
-}
-
-function summarizeCodewiki(codewiki: Codewiki): Record<string, unknown> {
-	const dirCounts = new Map<string, number>();
-	for (const entry of codewiki.entries) {
-		const top = topTwoSegments(entry.path);
-		dirCounts.set(top, (dirCounts.get(top) ?? 0) + 1);
-	}
-	const topDirs = [...dirCounts.entries()]
-		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-		.slice(0, 8)
-		.map(([dir, count]) => `${dir} (${count})`);
-	return {
-		moduleCount: codewiki.entries.length,
-		entryPoints: codewikiEntryPoints(codewiki, 8),
-		entryPointSummaries: codewiki.entries
-			.filter((entry) => entry.kind === "entry-point" && entry.summary)
-			.slice(0, 8)
-			.map((entry) => ({ path: entry.path, summary: entry.summary })),
-		topDirectories: topDirs,
-	};
-}
-
 function truncate(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, max)}\n[truncated]`;
 }
@@ -102,7 +71,7 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 		cwd: input.cwd,
 		projectType: input.projectType,
 		...(input.existingClioMdText ? { existingClioMd: truncate(input.existingClioMdText, 8000) } : {}),
-		...(input.codewiki ? { structure: summarizeCodewiki(input.codewiki) } : {}),
+		...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
 		siblingFiles: input.siblingFiles.map(sourceSummary),
 		adoption: {
 			includeGlobal: input.adoption.includeGlobal,

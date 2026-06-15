@@ -1,10 +1,4 @@
-import {
-	buildCodewiki,
-	type Codewiki,
-	type CodewikiEntry,
-	readCodewiki,
-	writeCodewiki,
-} from "../../domains/context/codewiki/indexer.js";
+import { buildCodewiki, type Codewiki, readCodewiki, writeCodewiki } from "../../domains/context/codewiki/indexer.js";
 import { computeFingerprint } from "../../domains/context/fingerprint.js";
 import { readClioState, writeClioState } from "../../domains/context/state.js";
 import { detectProjectType } from "../../domains/session/workspace/project-type.js";
@@ -37,6 +31,6 @@ export function loadCodewikiForTool(
 	}
 }
 
-export function renderEntries(entries: ReadonlyArray<CodewikiEntry>): string {
-	return JSON.stringify({ entries }, null, 2);
+export function renderJson(value: unknown): string {
+	return JSON.stringify(value, null, 2);
 }
