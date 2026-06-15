@@ -1,0 +1,209 @@
+{
+	"sourceReport": ".clio-benchmark/context/bench-context-1781489248668.json",
+	"generatedAt": "2026-06-15T02:07:28.667Z",
+	"cli": "/home/akougkas/iowarp/clio-coder/dist/cli/index.js",
+	"corpus": [
+		{
+			"name": "rendergit",
+			"path": "~/tmp/clio-ctxtest/rendergit",
+			"expectedLanguage": "python"
+		},
+		{
+			"name": "quipslop",
+			"path": "~/tmp/clio-ctxtest/quipslop",
+			"expectedLanguage": "typescript"
+		},
+		{
+			"name": "mac-mini-agent",
+			"path": "~/tmp/clio-ctxtest/mac-mini-agent",
+			"expectedLanguage": "python"
+		},
+		{
+			"name": "clio-coder",
+			"path": "/home/akougkas/iowarp/clio-coder",
+			"expectedLanguage": "typescript"
+		},
+		{
+			"name": "once",
+			"path": "~/tools/once",
+			"expectedLanguage": "go"
+		},
+		{
+			"name": "opentui",
+			"path": "~/tools/opentui",
+			"expectedLanguage": "typescript"
+		}
+	],
+	"results": [
+		{
+			"name": "rendergit",
+			"expectedLanguage": "python",
+			"mode": "context-index",
+			"sourceFiles": 1,
+			"indexedFiles": 1,
+			"coverage": 1,
+			"language": "python",
+			"structuralHash": "dfb69518ae799e64e4f15888520e60afe2505598ae6e55568a8a4eaadb8d0e35",
+			"digestTokens": 282,
+			"navLatency": null,
+			"assertions": {
+				"hasFiles": true,
+				"coverageOk": true,
+				"languageOk": true,
+				"deterministic": true,
+				"noHandoffFromContextInit": true
+			}
+		},
+		{
+			"name": "quipslop",
+			"expectedLanguage": "typescript",
+			"mode": "context-index",
+			"sourceFiles": 12,
+			"indexedFiles": 12,
+			"coverage": 1,
+			"language": "typescript",
+			"structuralHash": "65591b0531c01e29e81d99f8a58941c4b1da9359bb6eb65b3876c7fc079a7938",
+			"digestTokens": 673,
+			"navLatency": null,
+			"assertions": {
+				"hasFiles": true,
+				"coverageOk": true,
+				"languageOk": true,
+				"deterministic": true,
+				"noHandoffFromContextInit": true
+			}
+		},
+		{
+			"name": "mac-mini-agent",
+			"expectedLanguage": "python",
+			"mode": "context-index",
+			"sourceFiles": 17,
+			"indexedFiles": 17,
+			"coverage": 1,
+			"language": "python",
+			"structuralHash": "fae054de7f322acfa16134256eb4ad2cebafa1d19fd596976db7bb5ee31e0e33",
+			"digestTokens": 963,
+			"navLatency": null,
+			"assertions": {
+				"hasFiles": true,
+				"coverageOk": true,
+				"languageOk": true,
+				"deterministic": true,
+				"noHandoffFromContextInit": true
+			}
+		},
+		{
+			"name": "clio-coder",
+			"expectedLanguage": "typescript",
+			"mode": "context-index",
+			"sourceFiles": 583,
+			"indexedFiles": 583,
+			"coverage": 1,
+			"language": "typescript",
+			"structuralHash": "0c37c4e4a5623c01fe290a39236f5e73ef5ac3af3c82f1240b96c7cc50db4ff7",
+			"digestTokens": 1295,
+			"navLatency": null,
+			"assertions": {
+				"hasFiles": true,
+				"coverageOk": true,
+				"languageOk": true,
+				"deterministic": true,
+				"noHandoffFromContextInit": true
+			}
+		},
+		{
+			"name": "once",
+			"expectedLanguage": "go",
+			"mode": "context-index",
+			"sourceFiles": 146,
+			"indexedFiles": 146,
+			"coverage": 1,
+			"language": "go",
+			"structuralHash": "df0308465ef750512d792786d24cd62ff1f02ad8ea8c25b930c98a8e5f81fb2d",
+			"digestTokens": 1176,
+			"navLatency": null,
+			"assertions": {
+				"hasFiles": true,
+				"coverageOk": true,
+				"languageOk": true,
+				"deterministic": true,
+				"noHandoffFromContextInit": true
+			}
+		},
+		{
+			"name": "opentui",
+			"expectedLanguage": "typescript",
+			"mode": "context-index",
+			"sourceFiles": 676,
+			"indexedFiles": 676,
+			"coverage": 1,
+			"language": "typescript",
+			"structuralHash": "1c2d24a5798062d62960c455e69485ac16b363e400931701823d300f01347875",
+			"digestTokens": 1523,
+			"navLatency": {
+				"iterations": 200,
+				"p50Ms": 0.000132,
+				"p99Ms": 0.80124,
+				"paths": 687,
+				"symbols": 38541
+			},
+			"assertions": {
+				"hasFiles": true,
+				"coverageOk": true,
+				"languageOk": true,
+				"deterministic": true,
+				"noHandoffFromContextInit": true
+			}
+		}
+	],
+	"delta": [
+		{
+			"name": "rendergit",
+			"coverageDelta": 1,
+			"indexedFilesDelta": 1,
+			"digestTokensDelta": 282,
+			"languageBefore": "unknown",
+			"languageAfter": "python"
+		},
+		{
+			"name": "quipslop",
+			"coverageDelta": 1,
+			"indexedFilesDelta": 12,
+			"digestTokensDelta": 673,
+			"languageBefore": "unknown",
+			"languageAfter": "typescript"
+		},
+		{
+			"name": "mac-mini-agent",
+			"coverageDelta": 1,
+			"indexedFilesDelta": 17,
+			"digestTokensDelta": 963,
+			"languageBefore": "unknown",
+			"languageAfter": "python"
+		},
+		{
+			"name": "clio-coder",
+			"coverageDelta": 1,
+			"indexedFilesDelta": 583,
+			"digestTokensDelta": 1295,
+			"languageBefore": "unknown",
+			"languageAfter": "typescript"
+		},
+		{
+			"name": "once",
+			"coverageDelta": 1,
+			"indexedFilesDelta": 146,
+			"digestTokensDelta": 1176,
+			"languageBefore": "unknown",
+			"languageAfter": "go"
+		},
+		{
+			"name": "opentui",
+			"coverageDelta": 1,
+			"indexedFilesDelta": 676,
+			"digestTokensDelta": 1523,
+			"languageBefore": "unknown",
+			"languageAfter": "typescript"
+		}
+	]
+}
