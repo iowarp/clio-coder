@@ -5,6 +5,7 @@ import { runClioCommand } from "./clio.js";
 import { runComponentsCommand } from "./components.js";
 import { runConfigureCommand } from "./configure.js";
 import { runContextClearCommand } from "./context-clear.js";
+import { runContextIndexCommand } from "./context-index.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runEvalCommand } from "./eval.js";
 import { runEvidenceCommand } from "./evidence.js";
@@ -50,6 +51,7 @@ Usage:
   clio paths [--json]       print resolved config/data/cache directories
   clio reset                recover or wipe Clio Coder state
   clio context-clear [--all]  clear accumulated project context artifacts
+  clio context-index [--json]  build the codewiki index without model calls
   clio uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
@@ -62,7 +64,7 @@ Usage:
   clio extensions           install, list, enable, disable, or remove extension packages
   clio skills               list, inspect, validate, or create skills
   clio share export|import  export or import Clio project/resource archives
-  clio context-init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md, codewiki, and handoff
+  clio context-init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki
   clio --help, -h           this message
 `;
 
@@ -127,6 +129,8 @@ async function main(argv: string[]): Promise<number> {
 			return runImportCommand(subArgs);
 		case "context-init":
 			return runInitCommand(subArgs);
+		case "context-index":
+			return runContextIndexCommand(subArgs);
 		case "context-clear":
 			return runContextClearCommand(subArgs);
 		case "run":
