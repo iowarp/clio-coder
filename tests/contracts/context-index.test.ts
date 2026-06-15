@@ -11,7 +11,10 @@ async function captureStdout<T>(fn: () => Promise<T>): Promise<{ output: string;
 	const originalWrite = process.stdout.write;
 	let output = "";
 	process.stdout.write = ((chunk: string | Uint8Array) => {
-		output += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : Buffer.from(chunk);
+		if (buffer.every((byte) => byte === 9 || byte === 10 || byte === 13 || (byte >= 32 && byte <= 126))) {
+			output += buffer.toString("utf8");
+		}
 		return true;
 	}) as typeof process.stdout.write;
 	try {

@@ -1,7 +1,6 @@
 {
-	"sourceReport": ".clio-benchmark/context/bench-context-1781489248668.json",
-	"generatedAt": "2026-06-15T02:07:28.667Z",
-	"cli": "/tmp/clio-main-cli",
+	"sourceReport": ".clio-benchmark/context/bench-context-1781490134627.json",
+	"generatedAt": "2026-06-15T02:22:14.626Z",
 	"corpus": [
 		{
 			"name": "rendergit",
@@ -34,6 +33,7 @@
 			"expectedLanguage": "typescript"
 		}
 	],
+	"cli": "/tmp/clio-main-cli",
 	"results": [
 		{
 			"name": "rendergit",
@@ -45,12 +45,32 @@
 			"language": "unknown",
 			"structuralHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
 			"digestTokens": 0,
+			"promptTokens": 1257,
+			"promptPayloadTokens": 61,
+			"promptTokenBasis": "none",
+			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 3090,
+				"clioMdHash": "ae274e9f9cd656b6f8a9ca62415bcde6a1465c6f32a31bdabc673dbf6ff4e4af",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": {
+					"score": 2,
+					"maxScore": 3,
+					"checks": {
+						"languageMention": true,
+						"indexedContext": false,
+						"entryPointMention": true
+					}
+				}
+			},
 			"assertions": {
 				"hasFiles": false,
 				"coverageOk": false,
 				"languageOk": false,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
@@ -63,12 +83,32 @@
 			"language": "unknown",
 			"structuralHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
 			"digestTokens": 0,
+			"promptTokens": 1981,
+			"promptPayloadTokens": 785,
+			"promptTokenBasis": "none",
+			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 3792,
+				"clioMdHash": "17d9c7337ec8964eaf4d9cf748e2a54c877145edaae4c9f76d639e8840368834",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": {
+					"score": 1,
+					"maxScore": 3,
+					"checks": {
+						"languageMention": true,
+						"indexedContext": false,
+						"entryPointMention": false
+					}
+				}
+			},
 			"assertions": {
 				"hasFiles": false,
 				"coverageOk": false,
 				"languageOk": false,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": false
 			}
 		},
 		{
@@ -81,30 +121,62 @@
 			"language": "unknown",
 			"structuralHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
 			"digestTokens": 0,
+			"promptTokens": 1258,
+			"promptPayloadTokens": 62,
+			"promptTokenBasis": "none",
+			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 6081,
+				"clioMdHash": "9b94ee5aefb50d0aa3c9f3407ad7c8e79ed0c697b35e9fed43f0bd1b3810d62d",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": {
+					"score": 1,
+					"maxScore": 3,
+					"checks": {
+						"languageMention": true,
+						"indexedContext": false,
+						"entryPointMention": false
+					}
+				}
+			},
 			"assertions": {
 				"hasFiles": false,
 				"coverageOk": false,
 				"languageOk": false,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": false
 			}
 		},
 		{
 			"name": "clio-coder",
 			"expectedLanguage": "typescript",
 			"mode": "context-init",
-			"sourceFiles": 583,
+			"sourceFiles": 584,
 			"indexedFiles": 0,
 			"coverage": 0,
 			"language": "unknown",
 			"structuralHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
 			"digestTokens": 0,
+			"promptTokens": 1257,
+			"promptPayloadTokens": 61,
+			"promptTokenBasis": "none",
+			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 4995,
+				"clioMdHash": "8e2e6a1091d26fdba40444eb93fdfa3e48f7e5920bfe50526fe25e11e82afbf0",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": null
+			},
 			"assertions": {
 				"hasFiles": false,
 				"coverageOk": false,
 				"languageOk": false,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
@@ -117,12 +189,24 @@
 			"language": "unknown",
 			"structuralHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
 			"digestTokens": 0,
+			"promptTokens": 2327,
+			"promptPayloadTokens": 1130,
+			"promptTokenBasis": "none",
+			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 0,
+				"clioMdHash": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": null
+			},
 			"assertions": {
 				"hasFiles": false,
 				"coverageOk": false,
 				"languageOk": false,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
@@ -135,12 +219,24 @@
 			"language": "unknown",
 			"structuralHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
 			"digestTokens": 0,
+			"promptTokens": 2090,
+			"promptPayloadTokens": 894,
+			"promptTokenBasis": "none",
+			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 0,
+				"clioMdHash": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": null
+			},
 			"assertions": {
 				"hasFiles": false,
 				"coverageOk": false,
 				"languageOk": false,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		}
 	]

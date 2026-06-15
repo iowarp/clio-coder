@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
+import { createTreeSitterExtractor } from "./tree-sitter.js";
 
 export type CodewikiLanguage = SourceProjectType | "config";
 export type CodewikiFileRole = "entry" | "test" | "module" | "config";
@@ -514,8 +515,30 @@ const fallbackExtractors: ReadonlyArray<LanguageExtractor> = [
 	rubyExtractor,
 ];
 
-function extractorFor(language: CodewikiLanguage): LanguageExtractor | null {
-	return fallbackExtractors.find((extractor) => extractor.langs.includes(language)) ?? null;
+function extractWithExtractors(
+	extractors: ReadonlyArray<LanguageExtractor>,
+	language: CodewikiLanguage,
+	relPath: string,
+	text: string,
+): LanguageExtraction {
+	const symbols = new Map<string, ExtractedSymbol>();
+	const imports: string[] = [];
+	const exports: string[] = [];
+	for (const extractor of extractors) {
+		if (!extractor.langs.includes(language)) continue;
+		const extracted = extractor.extract(relPath, text);
+		for (const symbol of extracted.symbols) {
+			const key = `${symbol.name}\0${symbol.kind}\0${symbol.line}`;
+			if (!symbols.has(key)) symbols.set(key, symbol);
+		}
+		imports.push(...extracted.imports);
+		exports.push(...extracted.exports);
+	}
+	return {
+		symbols: [...symbols.values()].sort(compareSymbols),
+		imports: uniqueSorted(imports),
+		exports: uniqueSorted(exports),
+	};
 }
 
 interface BuiltFile {
@@ -526,7 +549,7 @@ interface BuiltFile {
 	summary?: string;
 }
 
-function buildFile(cwd: string, relPath: string): BuiltFile | null {
+function buildFile(cwd: string, relPath: string, extractors: ReadonlyArray<LanguageExtractor>): BuiltFile | null {
 	const language = languageForPath(relPath);
 	if (!language) return null;
 	let text: string;
@@ -544,7 +567,7 @@ function buildFile(cwd: string, relPath: string): BuiltFile | null {
 	};
 	const isSource = language !== "config";
 	if (!isSource || text.trim().length === 0) return { file, symbols: [], imports: [], exports: [] };
-	const extracted = extractorFor(language)?.extract(relPath, text) ?? { symbols: [], imports: [], exports: [] };
+	const extracted = extractWithExtractors(extractors, language, relPath, text);
 	const symbols = extracted.symbols.map((symbol) => ({
 		name: symbol.name,
 		kind: symbol.kind,
@@ -650,10 +673,15 @@ function promoteSingleSourceEntry(files: CodewikiFile[]): CodewikiFile[] {
 	return files.map((file) => (file.id === only.id ? { ...file, role: "entry" } : file));
 }
 
-function buildFromPaths(cwd: string, language: ProjectType, relPaths: ReadonlyArray<string>): Codewiki {
+function buildFromPaths(
+	cwd: string,
+	language: ProjectType,
+	relPaths: ReadonlyArray<string>,
+	extractors: ReadonlyArray<LanguageExtractor>,
+): Codewiki {
 	const builtFiles: BuiltFile[] = [];
 	for (const relPath of [...relPaths].sort(compareStrings)) {
-		const built = buildFile(cwd, relPath);
+		const built = buildFile(cwd, relPath, extractors);
 		if (built) builtFiles.push(built);
 	}
 	const files = promoteSingleSourceEntry(builtFiles.map((item) => item.file).sort(compareFiles));
@@ -674,7 +702,14 @@ function buildFromPaths(cwd: string, language: ProjectType, relPaths: ReadonlyAr
 export function buildCodewiki(input: BuildCodewikiInput): Codewiki {
 	const files: string[] = [];
 	walkFiles(input.cwd, input.cwd, files);
-	return buildFromPaths(input.cwd, input.language, files);
+	return buildFromPaths(input.cwd, input.language, files, fallbackExtractors);
+}
+
+export async function buildCodewikiWithTreeSitter(input: BuildCodewikiInput): Promise<Codewiki> {
+	const files: string[] = [];
+	walkFiles(input.cwd, input.cwd, files);
+	const treeSitterExtractor = await createTreeSitterExtractor();
+	return buildFromPaths(input.cwd, input.language, files, [treeSitterExtractor, ...fallbackExtractors]);
 }
 
 /**
@@ -704,7 +739,7 @@ export function updateCodewikiPaths(cwd: string, codewiki: Codewiki, paths: Read
 			// deleted file: already removed from the set
 		}
 	}
-	return buildFromPaths(cwd, codewiki.language, [...allPaths]);
+	return buildFromPaths(cwd, codewiki.language, [...allPaths], fallbackExtractors);
 }
 
 export function codewikiPath(cwd: string): string {

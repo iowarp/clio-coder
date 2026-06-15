@@ -1,5 +1,6 @@
 import {
-	buildCodewiki,
+	buildCodewikiWithTreeSitter,
+	type Codewiki,
 	codewikiPath,
 	structuralCodewikiHash,
 	writeCodewiki,
@@ -35,7 +36,7 @@ function formatCounts(counts: Record<string, number>): string {
 	return parts.length > 0 ? parts.join(", ") : "none";
 }
 
-function indexedSourceCount(codewiki: ReturnType<typeof buildCodewiki>): number {
+function indexedSourceCount(codewiki: Codewiki): number {
 	return codewiki.files.filter((file) => file.lang !== "config").length;
 }
 
@@ -54,7 +55,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const cwd = process.cwd();
 	const now = new Date().toISOString();
 	const profile = detectProjectProfile(cwd);
-	const codewiki = buildCodewiki({ cwd, language: profile.projectType });
+	const codewiki = await buildCodewikiWithTreeSitter({ cwd, language: profile.projectType });
 	writeCodewiki(cwd, codewiki);
 	const prev = readClioState(cwd);
 	const fingerprint = computeFingerprint(cwd);

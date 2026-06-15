@@ -1,7 +1,6 @@
 {
-	"sourceReport": ".clio-benchmark/context/bench-context-1781489248668.json",
-	"generatedAt": "2026-06-15T02:07:28.667Z",
-	"cli": "/home/akougkas/iowarp/clio-coder/dist/cli/index.js",
+	"sourceReport": ".clio-benchmark/context/bench-context-1781490134627.json",
+	"generatedAt": "2026-06-15T02:22:14.626Z",
 	"corpus": [
 		{
 			"name": "rendergit",
@@ -34,6 +33,7 @@
 			"expectedLanguage": "typescript"
 		}
 	],
+	"cli": "/home/akougkas/iowarp/clio-coder/dist/cli/index.js",
 	"results": [
 		{
 			"name": "rendergit",
@@ -43,15 +43,34 @@
 			"indexedFiles": 1,
 			"coverage": 1,
 			"language": "python",
-			"structuralHash": "dfb69518ae799e64e4f15888520e60afe2505598ae6e55568a8a4eaadb8d0e35",
-			"digestTokens": 282,
+			"structuralHash": "f8dc0e68f9cb84de5d1fe6c567ab7f3a2cfc17d98c87188c5eb69298187583e2",
+			"digestTokens": 415,
+			"promptTokens": 1689,
+			"promptPayloadTokens": 493,
+			"promptTokenBasis": "v3-codewikiDigest",
 			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 1513,
+				"clioMdHash": "9679a807e97be4b83881f9fe2522771d1167f4159c3c52817eaca9d4b4fa0e5c",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": {
+					"score": 3,
+					"maxScore": 3,
+					"checks": {
+						"languageMention": true,
+						"indexedContext": true,
+						"entryPointMention": true
+					}
+				}
+			},
 			"assertions": {
 				"hasFiles": true,
 				"coverageOk": true,
 				"languageOk": true,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
@@ -62,15 +81,34 @@
 			"indexedFiles": 12,
 			"coverage": 1,
 			"language": "typescript",
-			"structuralHash": "65591b0531c01e29e81d99f8a58941c4b1da9359bb6eb65b3876c7fc079a7938",
-			"digestTokens": 673,
+			"structuralHash": "5a0895c29fe1ff3e2c635f41cebd57ecbc2ffb21427d6e094a556401cc0938b2",
+			"digestTokens": 575,
+			"promptTokens": 2577,
+			"promptPayloadTokens": 1381,
+			"promptTokenBasis": "v3-codewikiDigest",
 			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 2314,
+				"clioMdHash": "5871fe1aea903e75a6f73a9b561691d078369a8d12ef267bd7efa3f12778ae55",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": {
+					"score": 2,
+					"maxScore": 3,
+					"checks": {
+						"languageMention": true,
+						"indexedContext": true,
+						"entryPointMention": false
+					}
+				}
+			},
 			"assertions": {
 				"hasFiles": true,
 				"coverageOk": true,
 				"languageOk": true,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
@@ -81,34 +119,64 @@
 			"indexedFiles": 17,
 			"coverage": 1,
 			"language": "python",
-			"structuralHash": "fae054de7f322acfa16134256eb4ad2cebafa1d19fd596976db7bb5ee31e0e33",
-			"digestTokens": 963,
+			"structuralHash": "5f64dbc19537188ba674fb75198adbbc6838d508a9083e9ee8d863bc051015c2",
+			"digestTokens": 901,
+			"promptTokens": 2180,
+			"promptPayloadTokens": 984,
+			"promptTokenBasis": "v3-codewikiDigest",
 			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 3030,
+				"clioMdHash": "e83a1a224af93d6ee8dc5795d0c975e7ff86786c1b57da436baf75653912f202",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": {
+					"score": 3,
+					"maxScore": 3,
+					"checks": {
+						"languageMention": true,
+						"indexedContext": true,
+						"entryPointMention": true
+					}
+				}
+			},
 			"assertions": {
 				"hasFiles": true,
 				"coverageOk": true,
 				"languageOk": true,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
 			"name": "clio-coder",
 			"expectedLanguage": "typescript",
 			"mode": "context-index",
-			"sourceFiles": 583,
-			"indexedFiles": 583,
+			"sourceFiles": 584,
+			"indexedFiles": 584,
 			"coverage": 1,
 			"language": "typescript",
-			"structuralHash": "0c37c4e4a5623c01fe290a39236f5e73ef5ac3af3c82f1240b96c7cc50db4ff7",
-			"digestTokens": 1295,
+			"structuralHash": "b333d64e4dd9dcb20abf38f5ea3c919524b53d82841f1b450be27ca73922e321",
+			"digestTokens": 1195,
+			"promptTokens": 2476,
+			"promptPayloadTokens": 1280,
+			"promptTokenBasis": "v3-codewikiDigest",
 			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 2614,
+				"clioMdHash": "682632a7684d46f401920903172232a9d59f24eef2c2e2878f2805506ea636c4",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": null
+			},
 			"assertions": {
 				"hasFiles": true,
 				"coverageOk": true,
 				"languageOk": true,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
@@ -119,15 +187,26 @@
 			"indexedFiles": 146,
 			"coverage": 1,
 			"language": "go",
-			"structuralHash": "df0308465ef750512d792786d24cd62ff1f02ad8ea8c25b930c98a8e5f81fb2d",
-			"digestTokens": 1176,
+			"structuralHash": "5030403fad6c6f827bed5405dff0f6c42298fb54d8fb7415e8b54001a90e3353",
+			"digestTokens": 1205,
+			"promptTokens": 3552,
+			"promptPayloadTokens": 2356,
+			"promptTokenBasis": "v3-codewikiDigest",
 			"navLatency": null,
+			"contextInit": {
+				"clioMdBytes": 2948,
+				"clioMdHash": "67a6a3f0764b16080bcc3e5d215ab1a47b462e2013397c3e00b5f20be39e0bff",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": null
+			},
 			"assertions": {
 				"hasFiles": true,
 				"coverageOk": true,
 				"languageOk": true,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		},
 		{
@@ -138,21 +217,32 @@
 			"indexedFiles": 676,
 			"coverage": 1,
 			"language": "typescript",
-			"structuralHash": "1c2d24a5798062d62960c455e69485ac16b363e400931701823d300f01347875",
-			"digestTokens": 1523,
+			"structuralHash": "eb9a28adb80fe225b8cfa5b703dd4bda7b0e876b2e2c8f9b4685529f620771e1",
+			"digestTokens": 1201,
+			"promptTokens": 3314,
+			"promptPayloadTokens": 2118,
+			"promptTokenBasis": "v3-codewikiDigest",
 			"navLatency": {
 				"iterations": 200,
 				"p50Ms": 0.000132,
-				"p99Ms": 0.80124,
+				"p99Ms": 1.182635,
 				"paths": 687,
-				"symbols": 38541
+				"symbols": 44527
+			},
+			"contextInit": {
+				"clioMdBytes": 3508,
+				"clioMdHash": "3a62c668e411b16d443cdee24b0149449696bf090b980cd7194705e7e2074301",
+				"handoffFiles": [],
+				"handoffCount": 0,
+				"quality": null
 			},
 			"assertions": {
 				"hasFiles": true,
 				"coverageOk": true,
 				"languageOk": true,
 				"deterministic": true,
-				"noHandoffFromContextInit": true
+				"noHandoffFromContextInit": true,
+				"qualityOk": true
 			}
 		}
 	],
@@ -161,7 +251,12 @@
 			"name": "rendergit",
 			"coverageDelta": 1,
 			"indexedFilesDelta": 1,
-			"digestTokensDelta": 282,
+			"digestTokensDelta": 415,
+			"promptTokensDelta": 432,
+			"promptPayloadTokensDelta": 432,
+			"qualityScoreBefore": 2,
+			"qualityScoreAfter": 3,
+			"qualityScoreDelta": 1,
 			"languageBefore": "unknown",
 			"languageAfter": "python"
 		},
@@ -169,7 +264,12 @@
 			"name": "quipslop",
 			"coverageDelta": 1,
 			"indexedFilesDelta": 12,
-			"digestTokensDelta": 673,
+			"digestTokensDelta": 575,
+			"promptTokensDelta": 596,
+			"promptPayloadTokensDelta": 596,
+			"qualityScoreBefore": 1,
+			"qualityScoreAfter": 2,
+			"qualityScoreDelta": 1,
 			"languageBefore": "unknown",
 			"languageAfter": "typescript"
 		},
@@ -177,15 +277,25 @@
 			"name": "mac-mini-agent",
 			"coverageDelta": 1,
 			"indexedFilesDelta": 17,
-			"digestTokensDelta": 963,
+			"digestTokensDelta": 901,
+			"promptTokensDelta": 922,
+			"promptPayloadTokensDelta": 922,
+			"qualityScoreBefore": 1,
+			"qualityScoreAfter": 3,
+			"qualityScoreDelta": 2,
 			"languageBefore": "unknown",
 			"languageAfter": "python"
 		},
 		{
 			"name": "clio-coder",
 			"coverageDelta": 1,
-			"indexedFilesDelta": 583,
-			"digestTokensDelta": 1295,
+			"indexedFilesDelta": 584,
+			"digestTokensDelta": 1195,
+			"promptTokensDelta": 1219,
+			"promptPayloadTokensDelta": 1219,
+			"qualityScoreBefore": null,
+			"qualityScoreAfter": null,
+			"qualityScoreDelta": null,
 			"languageBefore": "unknown",
 			"languageAfter": "typescript"
 		},
@@ -193,7 +303,12 @@
 			"name": "once",
 			"coverageDelta": 1,
 			"indexedFilesDelta": 146,
-			"digestTokensDelta": 1176,
+			"digestTokensDelta": 1205,
+			"promptTokensDelta": 1225,
+			"promptPayloadTokensDelta": 1226,
+			"qualityScoreBefore": null,
+			"qualityScoreAfter": null,
+			"qualityScoreDelta": null,
 			"languageBefore": "unknown",
 			"languageAfter": "go"
 		},
@@ -201,7 +316,12 @@
 			"name": "opentui",
 			"coverageDelta": 1,
 			"indexedFilesDelta": 676,
-			"digestTokensDelta": 1523,
+			"digestTokensDelta": 1201,
+			"promptTokensDelta": 1224,
+			"promptPayloadTokensDelta": 1224,
+			"qualityScoreBefore": null,
+			"qualityScoreAfter": null,
+			"qualityScoreDelta": null,
 			"languageBefore": "unknown",
 			"languageAfter": "typescript"
 		}

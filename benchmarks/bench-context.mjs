@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
@@ -14,6 +14,18 @@ const DEFAULT_CORPUS = [
 	["clio-coder", ROOT, "typescript"],
 	["once", "~/tools/once", "go"],
 	["opentui", "~/tools/opentui", "typescript"],
+];
+const QUALITY_REPOS = new Set(["rendergit", "quipslop", "mac-mini-agent"]);
+const BOOTSTRAP_DIGEST_TOKEN_BUDGET = 1200;
+const CONTEXT_FILE_CANDIDATES = [
+	"AGENTS.md",
+	"CODEX.md",
+	"CLAUDE.md",
+	"GEMINI.md",
+	".codex/AGENTS.md",
+	".claude/CLAUDE.md",
+	".gemini/GEMINI.md",
+	".github/copilot-instructions.md",
 ];
 
 const SOURCE_EXTENSIONS = new Map([
@@ -200,39 +212,307 @@ function approxTokens(text) {
 	return Math.ceil(text.length / 4);
 }
 
-function digestFromCodewiki(codewiki) {
-	if (!codewiki) return "";
-	if (codewiki.version === 2) {
-		const entries = codewiki.entries ?? [];
-		return JSON.stringify({
-			version: 2,
-			language: codewiki.language,
-			moduleCount: entries.length,
-			entryPoints: entries
-				.filter((entry) => entry.kind === "entry-point")
-				.map((entry) => entry.path)
-				.slice(0, 12),
-			topPaths: entries.map((entry) => entry.path).slice(0, 80),
-		});
+function countBy(items) {
+	const counts = new Map();
+	for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
+	return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function topTwoSegments(path) {
+	const parts = path.split("/").slice(0, -1);
+	if (parts.length === 0) return ".";
+	return parts.slice(0, 2).join("/");
+}
+
+function sourceFilesFromV3(codewiki) {
+	return (codewiki.files ?? []).filter((file) => file.lang !== "config").sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function entryPointsFromV3(codewiki, limit) {
+	const files = sourceFilesFromV3(codewiki);
+	const tagged = files.filter((file) => file.role === "entry");
+	if (tagged.length >= limit) return tagged.slice(0, limit);
+	const fileById = new Map(files.map((file) => [file.id, file]));
+	const inDegree = new Map();
+	for (const edge of codewiki.edges ?? []) {
+		if (edge.toFileId) inDegree.set(edge.toFileId, (inDegree.get(edge.toFileId) ?? 0) + 1);
 	}
-	const files = (codewiki.files ?? [])
-		.filter((file) => file.lang !== "config")
-		.sort((a, b) => a.path.localeCompare(b.path));
+	const taggedIds = new Set(tagged.map((file) => file.id));
+	const ranked = [...inDegree.entries()]
+		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+		.map(([id]) => fileById.get(id))
+		.filter((file) => file && !taggedIds.has(file.id));
+	return [...tagged, ...ranked].slice(0, limit);
+}
+
+function keySymbolsFromV3(codewiki, limit) {
+	const rank = new Map([
+		["class", 0],
+		["trait", 1],
+		["iface", 2],
+		["type", 3],
+		["func", 4],
+		["method", 5],
+		["const", 6],
+		["var", 7],
+	]);
+	return [...(codewiki.symbols ?? [])]
+		.sort((a, b) => {
+			const rankCmp = (rank.get(a.kind) ?? 99) - (rank.get(b.kind) ?? 99);
+			return rankCmp || a.name.localeCompare(b.name) || a.fileId.localeCompare(b.fileId) || a.line - b.line;
+		})
+		.slice(0, limit);
+}
+
+function dependencyLinesFromV3(codewiki, limit) {
+	const fileById = new Map((codewiki.files ?? []).map((file) => [file.id, file]));
+	const byFile = new Map();
+	for (const edge of codewiki.edges ?? []) {
+		const deps = byFile.get(edge.fileId) ?? { internal: [], external: [] };
+		if (edge.toFileId) {
+			const target = fileById.get(edge.toFileId);
+			if (target) deps.internal.push(target.path);
+		} else if (edge.externalModule) {
+			deps.external.push(edge.externalModule);
+		}
+		byFile.set(edge.fileId, deps);
+	}
+	return [...byFile.entries()]
+		.map(([fileId, deps]) => {
+			const file = fileById.get(fileId);
+			if (!file) return "";
+			const internal = [...new Set(deps.internal)].sort((a, b) => a.localeCompare(b)).slice(0, 4);
+			const external = [...new Set(deps.external)].sort((a, b) => a.localeCompare(b)).slice(0, 4);
+			return `- ${file.path}: internal=[${internal.join(", ")}] external=[${external.join(", ")}]`;
+		})
+		.filter((line) => line.length > 0)
+		.sort((a, b) => a.localeCompare(b))
+		.slice(0, limit);
+}
+
+function fitLines(lines, tokenBudget) {
+	const maxChars = Math.max(256, Math.floor(tokenBudget * 4));
+	const out = [];
+	let used = 0;
+	for (const line of lines) {
+		const next = used + line.length + 1;
+		if (next > maxChars) {
+			out.push("[digest truncated]");
+			break;
+		}
+		out.push(line);
+		used = next;
+	}
+	return out.join("\n");
+}
+
+function renderV3Digest(codewiki, tokenBudget = BOOTSTRAP_DIGEST_TOKEN_BUDGET) {
+	const files = sourceFilesFromV3(codewiki);
+	const areaCounts = countBy(files.map((file) => topTwoSegments(file.path)))
+		.slice(0, 10)
+		.map(([area, count]) => `${area}=${count}`);
+	const languageCounts = countBy(files.map((file) => file.lang))
+		.map(([language, count]) => `${language}=${count}`)
+		.join(", ");
+	const roleCounts = countBy(files.map((file) => file.role))
+		.map(([role, count]) => `${role}=${count}`)
+		.join(", ");
 	const fileById = new Map((codewiki.files ?? []).map((file) => [file.id, file]));
 	const lines = [
-		`codewiki v3 language=${codewiki.language} files=${files.length} symbols=${codewiki.symbols?.length ?? 0} edges=${codewiki.edges?.length ?? 0}`,
+		`codewiki v${codewiki.version} language=${codewiki.language} files=${files.length} configs=${(codewiki.files ?? []).length - files.length} symbols=${(codewiki.symbols ?? []).length} edges=${(codewiki.edges ?? []).length}`,
+		`languages: ${languageCounts || "none"}`,
+		`roles: ${roleCounts || "none"}`,
+		`areas: ${areaCounts.join(", ") || "none"}`,
 		"entry points:",
-		...files
-			.filter((file) => file.role === "entry")
-			.slice(0, 12)
-			.map((file) => `- ${file.path}`),
+		...entryPointsFromV3(codewiki, 12).map((file) => `- ${file.path} (${file.lang}, ${file.loc} loc)`),
 		"key symbols:",
-		...(codewiki.symbols ?? []).slice(0, 80).map((symbol) => {
+		...keySymbolsFromV3(codewiki, 40).map((symbol) => {
 			const file = fileById.get(symbol.fileId);
-			return `- ${symbol.name} ${symbol.kind} ${file?.path ?? symbol.fileId}:${symbol.line}`;
+			const location = file ? `${file.path}:${symbol.line}` : `${symbol.fileId}:${symbol.line}`;
+			return `- ${symbol.name} ${symbol.kind} ${location}`;
 		}),
+		"dependencies:",
+		...dependencyLinesFromV3(codewiki, 24),
 	];
-	return lines.join("\n");
+	return fitLines(lines, tokenBudget);
+}
+
+function summarizeV2Codewiki(codewiki) {
+	const entries = codewiki.entries ?? [];
+	const dirCounts = new Map();
+	for (const entry of entries) {
+		const top = topTwoSegments(entry.path);
+		dirCounts.set(top, (dirCounts.get(top) ?? 0) + 1);
+	}
+	const topDirs = [...dirCounts.entries()]
+		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+		.slice(0, 8)
+		.map(([dir, count]) => `${dir} (${count})`);
+	const tagged = entries.filter((entry) => entry.kind === "entry-point").map((entry) => entry.path);
+	const inDegree = new Map();
+	for (const entry of entries) {
+		for (const target of entry.imports ?? []) inDegree.set(target, (inDegree.get(target) ?? 0) + 1);
+	}
+	const ranked = [...inDegree.entries()]
+		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+		.map(([path]) => path)
+		.filter((path) => !tagged.includes(path));
+	const entryPoints = [...tagged, ...ranked].slice(0, 8);
+	return {
+		moduleCount: entries.length,
+		entryPoints,
+		entryPointSummaries: entries
+			.filter((entry) => entry.kind === "entry-point" && entry.summary)
+			.slice(0, 8)
+			.map((entry) => ({ path: entry.path, summary: entry.summary })),
+		topDirectories: topDirs,
+	};
+}
+
+function digestFromCodewiki(codewiki) {
+	if (!codewiki) return "";
+	if (codewiki.version === 2) return JSON.stringify(summarizeV2Codewiki(codewiki));
+	if (codewiki.version === 3) return renderV3Digest(codewiki);
+	return JSON.stringify(codewiki);
+}
+
+function readBootstrapPromptPreamble() {
+	try {
+		const source = readFileSync(join(ROOT, "src", "domains", "context", "bootstrap-prompt.ts"), "utf8");
+		const match = /export const BOOTSTRAP_PROMPT = `([\s\S]*?)`;/m.exec(source);
+		if (match?.[1]) return match[1];
+	} catch {
+		// Keep benchmark usable from packaged dist-only trees.
+	}
+	return "You are the clio-coder bootstrap agent. Produce a single CLIO.md file from structured input.";
+}
+
+function truncate(value, max) {
+	return value.length <= max ? value : `${value.slice(0, max)}\n[truncated]`;
+}
+
+function collectPromptContextFiles(repo) {
+	const files = [];
+	for (const rel of CONTEXT_FILE_CANDIDATES) {
+		const full = join(repo, rel);
+		if (!existsSync(full)) continue;
+		try {
+			files.push({
+				source: "project",
+				path: rel,
+				content: truncate(readFileSync(full, "utf8"), 4000),
+			});
+		} catch {
+			// Ignore unreadable optional context files in the benchmark copy.
+		}
+	}
+	return files;
+}
+
+function promptPayloadFor(repo, codewiki) {
+	const contextFiles = collectPromptContextFiles(repo);
+	const payload = {
+		cwd: repo,
+		projectType: codewiki?.language ?? "unknown",
+		...(codewiki?.version === 3 ? { codewikiDigest: renderV3Digest(codewiki) } : {}),
+		...(codewiki?.version === 2 ? { structure: summarizeV2Codewiki(codewiki) } : {}),
+		siblingFiles: contextFiles.map((file) => ({
+			scope: file.source,
+			path: file.path,
+			content: file.content,
+		})),
+		adoption: {
+			includeGlobal: false,
+			sourceCount: contextFiles.length,
+			importedRules: [],
+			conflicts: [],
+			rejected: [],
+		},
+	};
+	return payload;
+}
+
+function promptMetrics(repo, codewiki) {
+	const payload = promptPayloadFor(repo, codewiki);
+	const prompt = `${readBootstrapPromptPreamble()}\n\n<bootstrap-input>\n${JSON.stringify(payload, null, 2)}\n</bootstrap-input>`;
+	return {
+		tokens: approxTokens(prompt),
+		payloadTokens: approxTokens(JSON.stringify(payload, null, 2)),
+		basis: codewiki?.version === 3 ? "v3-codewikiDigest" : codewiki?.version === 2 ? "v2-structure" : "none",
+	};
+}
+
+function handoffFiles(repo) {
+	const dir = join(repo, ".clio", "handoffs");
+	try {
+		return readdirSync(dir)
+			.filter((name) => /^handoff-.*\.md$/.test(name))
+			.sort((a, b) => a.localeCompare(b));
+	} catch {
+		return [];
+	}
+}
+
+function languageLabel(language) {
+	if (language === "typescript") return "TypeScript";
+	if (language === "javascript") return "JavaScript";
+	if (language === "python") return "Python";
+	if (language === "go") return "Go";
+	if (language === "rust") return "Rust";
+	if (language === "c") return "C";
+	if (language === "c++") return "C++";
+	if (language === "java") return "Java";
+	if (language === "ruby") return "Ruby";
+	return language;
+}
+
+function entryCandidates(codewiki, sources) {
+	if (codewiki?.version === 3) {
+		const entries = sourceFilesFromV3(codewiki)
+			.filter((file) => file.role === "entry")
+			.map((file) => file.path);
+		if (entries.length > 0) return entries;
+	}
+	if (codewiki?.version === 2) {
+		const entries = (codewiki.entries ?? []).filter((entry) => entry.kind === "entry-point").map((entry) => entry.path);
+		if (entries.length > 0) return entries;
+	}
+	return sources.map((source) => source.path).slice(0, 3);
+}
+
+function qualityScore({ clioMd, codewiki, expectedLanguage, sources }) {
+	const expected = languageLabel(expectedLanguage);
+	const languageMention =
+		expectedLanguage === "typescript" ? /\b(TypeScript|JavaScript)\b/.test(clioMd) : clioMd.includes(expected);
+	const indexed = fileCount(codewiki);
+	const indexedContext =
+		indexed > 0 && new RegExp(`\\b${indexed}\\s+(source file|source files|module|modules)\\b`, "i").test(clioMd);
+	const candidates = entryCandidates(codewiki, sources);
+	const entryPointMention = candidates.some((path) => clioMd.includes(path));
+	const checks = { languageMention, indexedContext, entryPointMention };
+	return {
+		score: Object.values(checks).filter(Boolean).length,
+		maxScore: Object.keys(checks).length,
+		checks,
+	};
+}
+
+async function contextInitProbe(cli, repo, name, expectedLanguage, sources) {
+	const result = await runCli(cli, ["context-init", "--heuristic", "--yes", "--rewrite"], repo);
+	if (result.code !== 0) {
+		throw new Error(`context-init probe failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+	}
+	const clioPath = join(repo, "CLIO.md");
+	const clioMd = existsSync(clioPath) ? readFileSync(clioPath, "utf8") : "";
+	const codewiki = readCodewiki(repo);
+	const handoffs = handoffFiles(repo);
+	return {
+		clioMdBytes: clioMd.length,
+		clioMdHash: hashJson(clioMd),
+		handoffFiles: handoffs,
+		handoffCount: handoffs.length,
+		quality: QUALITY_REPOS.has(name) ? qualityScore({ clioMd, codewiki, expectedLanguage, sources }) : null,
+	};
 }
 
 async function indexOnce(cli, repo) {
@@ -253,7 +533,7 @@ async function indexOnce(cli, repo) {
 		codewiki,
 		structuralHash: hashJson(structural),
 		digestTokens: approxTokens(digestFromCodewiki(codewiki)),
-		handoffExists: existsSync(join(repo, ".clio", "handoffs")),
+		handoffFiles: handoffFiles(repo),
 	};
 }
 
@@ -332,6 +612,8 @@ async function measureCli(cli, corpus) {
 			const indexed = fileCount(second.codewiki);
 			const coverage = sources.length === 0 ? 1 : indexed / sources.length;
 			const language = second.codewiki?.language ?? "unknown";
+			const prompt = promptMetrics(repo, second.codewiki);
+			const contextInit = await contextInitProbe(cli, repo, name, expectedLanguage, sources);
 			const assertions = {
 				hasFiles: indexed > 0,
 				coverageOk: sources.length === 0 || coverage >= 0.95,
@@ -340,7 +622,8 @@ async function measureCli(cli, corpus) {
 						? language === "typescript" || language === "javascript"
 						: language === expectedLanguage,
 				deterministic: first.structuralHash === second.structuralHash,
-				noHandoffFromContextInit: !second.handoffExists,
+				noHandoffFromContextInit: contextInit.handoffCount === 0,
+				qualityOk: !QUALITY_REPOS.has(name) || (contextInit.quality?.score ?? 0) >= 2,
 			};
 			results.push({
 				name,
@@ -353,7 +636,11 @@ async function measureCli(cli, corpus) {
 				language,
 				structuralHash: second.structuralHash,
 				digestTokens: second.digestTokens,
+				promptTokens: prompt.tokens,
+				promptPayloadTokens: prompt.payloadTokens,
+				promptTokenBasis: prompt.basis,
 				navLatency: name === "opentui" ? navLatency(second.codewiki) : null,
+				contextInit,
 				assertions,
 			});
 		}
@@ -367,11 +654,18 @@ function compare(before, after) {
 	const byName = new Map(before.map((item) => [item.name, item]));
 	return after.map((item) => {
 		const prev = byName.get(item.name);
+		const qualityBefore = prev?.contextInit?.quality?.score ?? null;
+		const qualityAfter = item.contextInit?.quality?.score ?? null;
 		return {
 			name: item.name,
 			coverageDelta: prev ? item.coverage - prev.coverage : null,
 			indexedFilesDelta: prev ? item.indexedFiles - prev.indexedFiles : null,
 			digestTokensDelta: prev ? item.digestTokens - prev.digestTokens : null,
+			promptTokensDelta: prev ? item.promptTokens - prev.promptTokens : null,
+			promptPayloadTokensDelta: prev ? item.promptPayloadTokens - prev.promptPayloadTokens : null,
+			qualityScoreBefore: qualityBefore,
+			qualityScoreAfter: qualityAfter,
+			qualityScoreDelta: qualityBefore === null || qualityAfter === null ? null : qualityAfter - qualityBefore,
 			languageBefore: prev?.language ?? null,
 			languageAfter: item.language,
 		};
@@ -383,13 +677,14 @@ async function main() {
 	const corpus = DEFAULT_CORPUS;
 	const after = await measureCli(resolve(opts.after), corpus);
 	const before = opts.before ? await measureCli(resolve(opts.before), corpus) : [];
+	const delta = before.length > 0 ? compare(before, after) : [];
 	const report = {
 		generatedAt: new Date().toISOString(),
 		corpus: corpus.map(([name, path, expectedLanguage]) => ({ name, path, expectedLanguage })),
 		afterCli: resolve(opts.after),
 		...(opts.before ? { beforeCli: resolve(opts.before) } : {}),
 		after,
-		...(before.length > 0 ? { before, delta: compare(before, after) } : {}),
+		...(before.length > 0 ? { before, delta } : {}),
 	};
 	mkdirSync(opts.outDir, { recursive: true });
 	const outPath = join(opts.outDir, `bench-context-${Date.now()}.json`);
@@ -398,12 +693,17 @@ async function main() {
 	for (const row of after) {
 		const status = Object.values(row.assertions).every(Boolean) ? "ok" : "FAIL";
 		console.log(
-			`${status} ${row.name}: lang=${row.language} files=${row.indexedFiles}/${row.sourceFiles} coverage=${(row.coverage * 100).toFixed(1)} hash=${row.structuralHash.slice(0, 12)} digestTokens=${row.digestTokens}`,
+			`${status} ${row.name}: lang=${row.language} files=${row.indexedFiles}/${row.sourceFiles} coverage=${(row.coverage * 100).toFixed(1)} hash=${row.structuralHash.slice(0, 12)} digestTokens=${row.digestTokens} promptTokens=${row.promptTokens}`,
 		);
 	}
 	const failed = after.filter((row) => !Object.values(row.assertions).every(Boolean));
+	const qualityRegressions = delta.filter((row) => (row.qualityScoreDelta ?? 0) < 0);
 	if (failed.length > 0) {
 		console.error(`bench-context failed assertions for ${failed.map((row) => row.name).join(", ")}`);
+		process.exitCode = 1;
+	}
+	if (qualityRegressions.length > 0) {
+		console.error(`bench-context quality regressed for ${qualityRegressions.map((row) => row.name).join(", ")}`);
 		process.exitCode = 1;
 	}
 }
