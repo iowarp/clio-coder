@@ -69,7 +69,7 @@ export function isCodewikiTool(tool: ToolName): boolean {
 
 export function isNavigationHeavyTask(task: string | undefined): boolean {
 	if (!task) return false;
-	return /\b(?:codewiki|symbol|symbols|entry\s*points?|where\s+is|code_nav|call\s*sites?|references?|imports?|exports?|map|mapping|navigate|navigation|topology|architecture|boundar(?:y|ies)|ownership|trace|locate|find\s+(?:the\s+)?(?:implementation|definition|module|file|path))\b|(?:^|\s)(?:src|tests?)\/|\.[cm]?[tj]sx?\b/i.test(
+	return /\b(?:codewiki|symbol|symbols|entry\s*points?|where\s+is|code_nav|call\s*sites?|references?|imports?|exports?|map|mapping|navigate|navigation|topology|architecture|boundar(?:y|ies)|ownership|trace|locate|find\s+(?:the\s+)?(?:implementation|definition|module|file|path))\b|(?:^|\s)(?:src|tests?|cmd|pkg|lib)\/|\.(?:[cm]?[tj]sx?|py|pyw|go|rs|c|h|cc|cpp|cxx|hpp|hh|hxx|java|rb)\b/i.test(
 		task,
 	);
 }

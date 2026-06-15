@@ -183,7 +183,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.CodeNav]: {
-		objective: "Navigate the codewiki TypeScript index by symbol, path, or entry points.",
+		objective: "Navigate the codewiki index by symbol, path, entry points, outline, imports, or importers.",
 		uiLabel: "Nav",
 		retrySafety: "idempotent",
 		resultSizePolicy: boundedSearchPolicy,
