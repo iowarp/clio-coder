@@ -58,6 +58,40 @@ describe("contracts/codewiki", () => {
 		ok(read.edges.some((edge) => edge.fileId === index.id && "toFileId" in edge && edge.toFileId === worker.id));
 	});
 
+	it("indexes the whole tree when a grammar crashes on one file", async () => {
+		// Some web-tree-sitter grammars throw on otherwise valid input. A single crashing
+		// file must degrade to no extraction for that file, never abort the whole build.
+		mkdirSync(join(scratch, "fixtures"), { recursive: true });
+		writeFileSync(
+			join(scratch, "app.py"),
+			["import json", "", "class ApiClient:", "    def get(self, path):", "        return path", ""].join("\n"),
+			"utf8",
+		);
+		writeFileSync(
+			join(scratch, "fixtures", "sample.rb"),
+			[
+				"require 'json'",
+				"",
+				"class ApiClient",
+				"  def initialize(base_url)",
+				"    @base_url = base_url",
+				"  end",
+				"",
+				"  def get(path)",
+				"    fetch(path, 'GET')",
+				"  end",
+				"end",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "python" });
+		ok(codewiki.files.some((file) => file.path === "app.py"));
+		ok(codewiki.files.some((file) => file.path === "fixtures/sample.rb"));
+		ok(codewiki.symbols.some((symbol) => symbol.name === "ApiClient"));
+	});
+
 	it("treats v1 codewiki files as stale instead of throwing", () => {
 		mkdirSync(join(scratch, ".clio"), { recursive: true });
 		writeFileSync(
