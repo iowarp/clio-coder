@@ -52,7 +52,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio share export --out <path>` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio share import <path> [--dry-run] [--force]` | Import a share archive with conflict reporting. |
 | `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
-| `clio context-init [--yes] [--preview|--heuristic|--adopt]` | Explore the repo and bootstrap project context: `CLIO.md`, codewiki, handoff. |
+| `clio context-init [--yes] [--preview|--heuristic|--adopt]` | Explore the repo and bootstrap project context: `CLIO.md` and codewiki. |
 
 ## Headless Run Flags
 
@@ -91,7 +91,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | --- | --- | --- | --- |
 | `/quit` | - | `/quit` | Exit Clio Coder |
 | `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
-| `/context-init` | - | `/context-init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]` | Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff |
+| `/context-init` | - | `/context-init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]` | Explore the repo and bootstrap project context: CLIO.md and codewiki |
 | `/context-clear` | - | `/context-clear [--all] [--confirm] [--confirm-all]` | Clear accumulated project context artifacts |
 | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
 | `/prompts` | - | `/prompts` | List prompt templates |

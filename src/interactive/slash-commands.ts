@@ -319,7 +319,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "context-init",
-		description: "Explore the repo and bootstrap project context: CLIO.md, codewiki, handoff",
+		description: "Explore the repo and bootstrap project context: CLIO.md and codewiki",
 		kinds: ["init"],
 		args: {
 			flags: [

@@ -136,10 +136,7 @@ describe("contracts/bootstrap", () => {
 		strictEqual(gitignore.includes(".clio/state.json"), false);
 		strictEqual(gitignore.includes(".clio/handoffs/"), false);
 
-		// context-init seeds a starter handoff so context-prime can orient a fresh session.
-		const handoff = join(scratch, ".clio", "handoffs", "handoff-2026-05-01-context-init.md");
-		ok(existsSync(handoff));
-		ok(readFileSync(handoff, "utf8").includes("Mock Project"));
+		strictEqual(existsSync(join(scratch, ".clio", "handoffs")), false);
 
 		strictEqual(result.projectType, "typescript");
 		strictEqual(result.summary.action, "wrote");
