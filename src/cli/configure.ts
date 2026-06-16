@@ -500,12 +500,13 @@ function describeAuthStatus(runtime: RuntimeDescriptor): string {
 
 async function loginOAuthRuntime(rl: ReturnType<typeof createInterface>, runtime: RuntimeDescriptor): Promise<boolean> {
 	const auth = openAuthStorage();
+	if (runtime.authNotice) process.stdout.write(`note: ${runtime.authNotice}\n`);
 	const manualCodeInput = createDelayedManualCodeInput(
 		rl,
 		"Paste verification code if browser callback does not complete automatically: ",
 	);
 	try {
-		await auth.login(runtime.id, {
+		await auth.login(runtime.oauthProviderId ?? runtime.id, {
 			onAuth: ({ url, instructions }) => {
 				process.stdout.write(`\nOpen: ${url}\n`);
 				if (instructions) process.stdout.write(`${instructions}\n`);
@@ -616,7 +617,8 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		runtime.auth === "api-key" && (args.apiKey || existing?.auth?.apiKeyRef || authStatus.source === "stored-api-key")
 			? runtime.id
 			: undefined;
-	const oauthProfile = runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.id) : undefined;
+	const oauthProfile =
+		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id) : undefined;
 	const seed = buildDescriptor(runtime, args.id, {
 		...(url !== undefined ? { url } : {}),
 		...(args.model !== undefined
@@ -976,7 +978,7 @@ async function runInteractive(
 	let apiKeyLiteral: string | undefined;
 	let apiKeyRef: string | undefined = existing?.auth?.apiKeyRef;
 	let oauthProfile: string | undefined =
-		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.id) : undefined;
+		runtime.auth === "oauth" ? (existing?.auth?.oauthProfile ?? runtime.oauthProviderId ?? runtime.id) : undefined;
 	const authStatus = auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	if (runtime.auth === "api-key") {
 		// Default to the env-var path: it keeps the key off disk. "stored" remains
@@ -1019,7 +1021,7 @@ async function runInteractive(
 			const connected = await loginOAuthRuntime(rl, runtime);
 			if (!connected) return 1;
 		}
-		oauthProfile = runtime.id;
+		oauthProfile = runtime.oauthProviderId ?? runtime.id;
 	}
 
 	let model: string | undefined = defaults.model;

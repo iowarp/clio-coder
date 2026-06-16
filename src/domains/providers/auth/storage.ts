@@ -171,7 +171,8 @@ function serializeStorageData(data: AuthStorageData): string {
 }
 
 export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeDescriptor): AuthTarget {
-	const providerId = target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.id;
+	const providerId =
+		target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.oauthProviderId || runtime.id;
 	const authTarget: AuthTarget = {
 		providerId,
 		targetId: target.id,
@@ -184,7 +185,7 @@ export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeDesc
 
 export function resolveRuntimeAuthTarget(runtime: RuntimeDescriptor): AuthTarget {
 	const target: AuthTarget = {
-		providerId: runtime.id,
+		providerId: runtime.oauthProviderId ?? runtime.id,
 		runtimeAuth: runtime.auth,
 	};
 	if (runtime.credentialsEnvVar) target.explicitEnvVar = runtime.credentialsEnvVar;

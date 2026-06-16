@@ -28,6 +28,7 @@ export interface ResolvedProviderReference {
 
 const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	anthropic: "Anthropic API",
+	"anthropic-max": "Claude Pro/Max subscription via Anthropic OAuth",
 	bedrock: "Amazon Bedrock",
 	deepseek: "DeepSeek API",
 	google: "Google Gemini API",

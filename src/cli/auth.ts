@@ -216,6 +216,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	const auth = openAuthStorage();
+	if (resolved.runtime.authNotice) process.stdout.write(`note: ${resolved.runtime.authNotice}\n`);
 	if (resolved.runtime.auth === "oauth") {
 		const rl = createInterface({ input, output });
 		const manualCodeInput = createDelayedManualCodeInput(
