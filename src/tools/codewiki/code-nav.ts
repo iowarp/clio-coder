@@ -163,7 +163,22 @@ function buildNavIndex(codewiki: Codewiki): NavIndex {
 function runSymbol(index: NavIndex, query: string): ToolResult {
 	const ids = index.symbolToFileIds.get(query) ?? [];
 	const files = ids.map((id) => index.filesById.get(id)).filter((file): file is CodewikiFile => Boolean(file));
-	return { kind: "ok", output: renderJson({ files: files.sort(comparePath).map(fileSummary) }) };
+	// Return the matching symbol records with their path, line, and signature so the model
+	// gets the exact definition site (file:line) from the index instead of grepping for it.
+	const matched: Array<{ file: CodewikiFile; symbol: CodewikiSymbol }> = [];
+	for (const file of files) {
+		for (const symbol of index.symbolsByFileId.get(file.id) ?? []) {
+			if (symbol.name === query) matched.push({ file, symbol });
+		}
+	}
+	matched.sort(
+		(a, b) =>
+			a.file.path.localeCompare(b.file.path) ||
+			a.symbol.line - b.symbol.line ||
+			a.symbol.kind.localeCompare(b.symbol.kind),
+	);
+	const symbols = matched.map(({ file, symbol }) => ({ ...symbolSummary(symbol), path: file.path }));
+	return { kind: "ok", output: renderJson({ symbols, files: files.sort(comparePath).map(fileSummary) }) };
 }
 
 function runPath(index: NavIndex, query: string): ToolResult {

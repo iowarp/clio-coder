@@ -221,6 +221,9 @@ the roots, and uninstall removes everything it installed.
 - Changed codewiki mutation observation so successful edit paths batch off the
   `after_tool` middleware hot path. Middleware budget notices now warn once
   per registration and hook while telemetry still records every exceedance.
+- Changed `code_nav` mode=symbol to return each match's path, line, kind, and
+  signature alongside the declaring files, so a caller gets the exact definition
+  site from the index instead of following up with a grep for the line.
 - Changed project-language detection to read a whole-tree source census instead
   of root manifests alone, so nested, polyglot, and single-file repositories
   resolve to a real language and index their source rather than falling through
