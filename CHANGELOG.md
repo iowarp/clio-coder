@@ -288,6 +288,19 @@ the roots, and uninstall removes everything it installed.
 
 ### Fixed
 
+- Fixed three high-severity esbuild advisories (GHSA-gv7w-rqvm-qjhr,
+  GHSA-g7r4-m6w7-qqqr) reported across the direct dependency, tsup, and tsx
+  (esbuild 0.17.0–0.28.0). An `overrides` entry pins esbuild to the patched
+  0.28.1 and the direct dependency is bumped to match, so a single esbuild
+  dedupes across tsup, tsx, and bundle-require without the tsup 6.5.0 downgrade
+  that `npm audit fix --force` would impose. `npm audit` now reports zero
+  vulnerabilities and the bundle output is unchanged.
+- Fixed the Claude worker `clio_tool_finish` telemetry reporting a contradictory
+  `reasonCode: allowed` on autonomy-axis denials. The event copied the safety
+  policy's own reason code, which describes the net pass, so a read-only write
+  block emitted `decision: blocked` next to `reasonCode: allowed`. Autonomy
+  denials now carry an explicit `autonomy:<level>` reason code in the worker
+  event, matching the native tool registry and the audit log.
 - Fixed a codewiki build abort when a tree-sitter grammar crashed on a single
   file. Some web-tree-sitter grammars throw inside `parse` on otherwise valid
   input, and the unguarded call let one file abort indexing for the whole
