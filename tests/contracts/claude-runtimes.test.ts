@@ -1,8 +1,12 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import { claudeSdkPermissionModeForAutonomy, claudeSdkToolsForAutonomy } from "../../src/engine/claude/sdk-runtime.js";
-import { claudeSubprocessPermissionConfigForAutonomy } from "../../src/engine/claude/subprocess-runtime.js";
+import {
+	buildClaudeCodeArgs,
+	claudeSubprocessPermissionConfigForAutonomy,
+} from "../../src/engine/claude/subprocess-runtime.js";
 import {
 	type EvaluateClaudeToolPermissionInput,
 	evaluateClaudeToolPermission,
@@ -67,15 +71,12 @@ describe("contracts/claude runtimes safety bridge", () => {
 		strictEqual(systemModify.decision.classification.actionClass, "system_modify");
 	});
 
-	it("keeps SDK permission mode mediated and constrains read-only tools", () => {
-		strictEqual(claudeSdkPermissionModeForAutonomy("read-only"), "plan");
+	it("keeps SDK permission mode open for the Clio all-tool gate", () => {
+		strictEqual(claudeSdkPermissionModeForAutonomy("read-only"), "default");
 		strictEqual(claudeSdkPermissionModeForAutonomy("suggest"), "default");
 		strictEqual(claudeSdkPermissionModeForAutonomy("auto-edit"), "default");
 		strictEqual(claudeSdkPermissionModeForAutonomy("full-auto"), "default");
-		const readOnlyTools = claudeSdkToolsForAutonomy("read-only");
-		ok(Array.isArray(readOnlyTools), "read-only SDK tools should be an explicit allow surface");
-		ok(readOnlyTools.includes("Read"));
-		ok(!readOnlyTools.includes("Bash"));
+		deepStrictEqual(claudeSdkToolsForAutonomy("read-only"), { type: "preset", preset: "claude_code" });
 		deepStrictEqual(claudeSdkToolsForAutonomy("auto-edit"), { type: "preset", preset: "claude_code" });
 	});
 });
@@ -103,5 +104,21 @@ describe("contracts/claude subprocess permission gate", () => {
 		strictEqual(fullAutoWithEnv.permissionMode, "bypassPermissions");
 		ok(fullAutoWithEnv.extraArgs.includes("--allow-dangerously-skip-permissions"));
 		ok(!fullAutoWithEnv.extraArgs.includes("--dangerously-skip-permissions"));
+	});
+
+	it("does not pass Clio session ids as Claude Code session ids", () => {
+		const base = {
+			systemPrompt: "",
+			agentId: "contract",
+			task: "hello",
+			target: { id: "contract", runtime: "claude-code" },
+			runtime: claudeCodeRuntime,
+			wireModelId: "sonnet",
+			allowedTools: [],
+		};
+		const invalid = buildClaudeCodeArgs({ ...base, sessionId: "clio-session-1" });
+		ok(!invalid.includes("--session-id"));
+		const valid = buildClaudeCodeArgs({ ...base, sessionId: "16046247-76ac-4095-8ed2-fcc4635e7334" });
+		ok(valid.includes("--session-id"));
 	});
 });
