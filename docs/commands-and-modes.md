@@ -210,7 +210,7 @@ user-origin `/run` and `clio run --agent` requests are rejected for them.
 Agent recipes are the Markdown source files. The normalized agent spec is the
 catalog/runtime view: category, capability class, latency class, tags, mode, and
 tool set. This keeps Clio's product vocabulary stable while dispatch continues
-to execute through the existing Pi-backed worker path.
+to execute through the existing Pi-backed worker path, the sanctioned Claude Code worker runtimes (`claude-sdk` and `claude-code`), or external ACP delegation agents.
 
 ## Verification Lanes
 

@@ -83,10 +83,31 @@ clio --version
 
 First-run target setup after install:
 
+**Option A: Local Model / API Key Target**
 ```bash
 clio configure --list
-clio configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator --set-fleet-default
-clio targets use <id>
+clio configure --id local-lmstudio --runtime lmstudio-native --url http://localhost:1234 --model your-model --set-orchestrator --set-fleet-default
+clio targets use local-lmstudio
+clio targets --probe
+clio
+```
+
+**Option B: Subscription Target (OAuth / Claude Code)**
+```bash
+# Authenticate ChatGPT Plus/Pro or Claude Pro/Max subscription
+clio auth login openai-codex
+clio auth login anthropic-max
+
+# Authenticate Claude CLI for worker targets
+claude auth login
+
+# Configure OAuth subscription target
+clio configure --id claude-sub --runtime anthropic-max --model sonnet --set-orchestrator
+
+# Configure Claude Code SDK worker target
+clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
+
+clio targets use claude-sub
 clio targets --probe
 clio
 ```
