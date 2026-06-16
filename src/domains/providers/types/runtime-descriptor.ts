@@ -104,6 +104,21 @@ export interface RuntimeDescriptor {
 	apiFamily: RuntimeApiFamily;
 	auth: RuntimeAuth;
 	credentialsEnvVar?: string;
+	/**
+	 * pi-ai OAuth provider id backing this runtime when `auth === "oauth"` and it
+	 * differs from `id`. `openai-codex` omits this because its registry id, target
+	 * `oauthProfile`, and pi-ai provider id all coincide. The Claude Pro/Max
+	 * runtime sets this to `"anthropic"` so login/refresh/credential storage key
+	 * on the pi-ai `anthropic` OAuth provider while keeping a distinct registry id
+	 * (`anthropic-max`) from the api-key `anthropic` runtime.
+	 */
+	oauthProviderId?: string;
+	/**
+	 * Optional one-line notice printed before an interactive `clio auth login` or
+	 * configure connect for this runtime. Used to surface subscription usage-terms
+	 * considerations so OAuth subscription paths are an explicit, informed opt-in.
+	 */
+	authNotice?: string;
 	knownModels?: string[];
 	binaryName?: string;
 	defaultBinaryPath?: string;

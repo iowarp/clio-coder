@@ -37,6 +37,18 @@ the roots, and uninstall removes everything it installed.
 
 ### Added
 
+- Added an `anthropic-max` runtime that powers Clio with a Claude Pro/Max
+  subscription over OAuth, mirroring the `openai-codex` subscription runtime. It
+  is an `anthropic-messages` HTTP runtime authenticated by a subscription OAuth
+  token rather than an API key; pi-ai runs the login/refresh flow and switches to
+  Bearer auth automatically. A new optional `RuntimeDescriptor.oauthProviderId`
+  bridges the runtime to the pi-ai `anthropic` OAuth provider so it shares
+  credential storage with that provider while keeping a distinct registry id from
+  the api-key `anthropic` runtime, which is unchanged. `clio auth login` and the
+  configure wizard print an `authNotice` flagging that subscription use outside
+  Anthropic's first-party apps may not align with their terms, making it an
+  explicit opt-in. The runtime is selectable as both an orchestrator and a worker
+  target.
 - Added `clio paths [--json]` as the read-only source of truth for Clio's
   resolved config, data, state, and cache directories. The local uninstall
   script and live session-reporting scripts now ask the built CLI for those

@@ -11,6 +11,7 @@
 import type { RuntimeRegistry } from "../registry.js";
 import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
 import anthropic from "./cloud/anthropic.js";
+import anthropicMax from "./cloud/anthropic-max.js";
 import bedrock from "./cloud/bedrock.js";
 import deepseek from "./cloud/deepseek.js";
 import google from "./cloud/google.js";
@@ -35,6 +36,7 @@ import openaiCompat from "./protocol/openai-compat.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	anthropic,
+	anthropicMax,
 	bedrock,
 	deepseek,
 	google,

@@ -5,11 +5,13 @@ import { describe, it } from "node:test";
 import {
 	createMemoryAuthStorage,
 	resolveAuthTarget,
+	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
 } from "../../src/domains/providers/auth/index.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
 import {
+	buildProviderSupportEntry,
 	canonicalizeWireModelId,
 	modelCandidatesForStatus,
 	resolveModelReference,
@@ -498,6 +500,60 @@ describe("contracts/providers/runtime-cleanup", () => {
 		for (const rel of removedPaths) {
 			ok(!existsSync(join(process.cwd(), rel)), `${rel} must stay removed`);
 		}
+	});
+
+	it("registers the Claude Pro/Max subscription runtime alongside the api-key Anthropic runtime", () => {
+		const apiKey = BUILTIN_RUNTIMES.find((r) => r.id === "anthropic");
+		const sub = BUILTIN_RUNTIMES.find((r) => r.id === "anthropic-max");
+		ok(apiKey, "api-key anthropic runtime must remain registered");
+		ok(sub, "subscription anthropic-max runtime must be registered");
+
+		// The api-key path is untouched.
+		strictEqual(apiKey?.auth, "api-key");
+		strictEqual(apiKey?.credentialsEnvVar, "ANTHROPIC_API_KEY");
+
+		// The subscription runtime mirrors openai-codex: an oauth anthropic-messages
+		// http runtime, bridged to the pi-ai "anthropic" OAuth provider.
+		strictEqual(sub?.auth, "oauth");
+		strictEqual(sub?.kind, "http");
+		strictEqual(sub?.tier, "cloud");
+		strictEqual(sub?.apiFamily, "anthropic-messages");
+		strictEqual(sub?.oauthProviderId, "anthropic");
+		ok(sub?.authNotice && sub.authNotice.length > 0, "subscription runtime must carry a usage-terms notice");
+	});
+
+	it("routes subscription auth to the pi-ai anthropic provider without colliding with the api-key runtime", () => {
+		const sub = BUILTIN_RUNTIMES.find((r) => r.id === "anthropic-max");
+		const apiKey = BUILTIN_RUNTIMES.find((r) => r.id === "anthropic");
+		ok(sub && apiKey);
+		if (!sub || !apiKey) return;
+
+		// Runtime-only login/status (e.g. `clio auth login anthropic-max`) keys on "anthropic".
+		strictEqual(resolveRuntimeAuthTarget(sub).providerId, "anthropic");
+		// The api-key runtime still keys on its own id.
+		strictEqual(resolveRuntimeAuthTarget(apiKey).providerId, "anthropic");
+
+		// A configured subscription target carries oauthProfile "anthropic".
+		const withProfile: TargetDescriptor = {
+			id: "claude-sub",
+			runtime: "anthropic-max",
+			auth: { oauthProfile: "anthropic" },
+		};
+		strictEqual(resolveAuthTarget(withProfile, sub).providerId, "anthropic");
+
+		// Even a target missing the oauthProfile block falls back through oauthProviderId.
+		const bare: TargetDescriptor = { id: "claude-sub-bare", runtime: "anthropic-max" };
+		strictEqual(resolveAuthTarget(bare, sub).providerId, "anthropic");
+	});
+
+	it("surfaces the subscription runtime as a connectable subscription provider and an eligible target", () => {
+		const sub = BUILTIN_RUNTIMES.find((r) => r.id === "anthropic-max");
+		ok(sub);
+		if (!sub) return;
+		const entry = buildProviderSupportEntry(sub);
+		strictEqual(entry.group, "subscription");
+		strictEqual(entry.connectable, true);
+		ok(isTargetEligibleRuntime(sub), "subscription runtime must be orchestrator/worker eligible");
 	});
 
 	it("keeps docs-sensitive runtime lists free of removed CLI and Claude Code support", () => {

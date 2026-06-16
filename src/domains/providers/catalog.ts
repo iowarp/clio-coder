@@ -9,6 +9,7 @@ const engineAi = createEngineAi();
 
 const CATALOG_PROVIDER_BY_RUNTIME_ID = new Map<string, KnownProvider>([
 	["anthropic", "anthropic"],
+	["anthropic-max", "anthropic"],
 	["bedrock", "amazon-bedrock"],
 	["deepseek", "deepseek"],
 	["google", "google"],
