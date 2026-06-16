@@ -54,7 +54,16 @@ describe("contracts/code_nav", () => {
 	it("supports symbol, path, entries, outline, deps, and dependents modes", async () => {
 		const symbol = await codeNavTool.run({ mode: "symbol", query: "worker" });
 		strictEqual(symbol.kind, "ok");
-		ok(pathsFromFiles(parseJsonOutput(symbol.output).files).includes("src/worker.ts"));
+		const symbolPayload = parseJsonOutput(symbol.output);
+		ok(pathsFromFiles(symbolPayload.files).includes("src/worker.ts"));
+		ok(
+			Array.isArray(symbolPayload.symbols) &&
+				symbolPayload.symbols.some((item) => {
+					if (typeof item !== "object" || item === null || Array.isArray(item)) return false;
+					const record = item as Record<string, unknown>;
+					return record.name === "worker" && record.path === "src/worker.ts" && typeof record.line === "number";
+				}),
+		);
 
 		const path = await codeNavTool.run({ mode: "path", query: "util.py" });
 		strictEqual(path.kind, "ok");

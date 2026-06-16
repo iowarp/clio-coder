@@ -277,7 +277,7 @@ tree. Every mode reads the persisted index, so lookups are local and fast.
 
 | Mode | Arguments | Returns |
 |------|-----------|---------|
-| `symbol` | `query=<name>` | Files that declare the symbol. |
+| `symbol` | `query=<name>` | Declaring files plus each match's path, line, kind, and signature. |
 | `path` | `query=<glob \| /regex/ \| substring>` | Files whose path matches the pattern. |
 | `entries` | `[limit=<n>]` | Likely entry points from file roles and `package.json` main/bin. |
 | `outline` | `query=<path>` | Symbols declared in the file with kinds and line numbers. |
