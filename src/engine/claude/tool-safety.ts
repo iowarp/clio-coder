@@ -24,12 +24,21 @@ export type ClaudeToolPermissionDecision =
 			mapped: MappedClaudeToolCall;
 			decision: SafetyDecision;
 			reason: string;
+			reasonCode?: string;
 	  }
 	| {
 			kind: "deny";
 			mapped: MappedClaudeToolCall;
 			decision: SafetyDecision;
 			reason: string;
+			/**
+			 * Reason code of the final decision when a later axis than the policy
+			 * engine denied the call. The carried policy's own reasonCode describes
+			 * the net pass ("allowed") and would misstate an autonomy denial, so
+			 * autonomy-axis denials set this to `autonomy:<level>` to match the
+			 * native registry audit convention (sd-01 §2.5).
+			 */
+			reasonCode?: string;
 			permissionRequired: boolean;
 	  };
 
@@ -139,7 +148,14 @@ export function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermission
 	if (decision.kind === "ask") {
 		if (level === "read-only") {
 			const blocked = toAutonomyBlock(decision, level, call);
-			return { kind: "deny", mapped, decision: blocked, reason: rejectionText(blocked), permissionRequired: false };
+			return {
+				kind: "deny",
+				mapped,
+				decision: blocked,
+				reason: rejectionText(blocked),
+				reasonCode: `autonomy:${level}`,
+				permissionRequired: false,
+			};
 		}
 		return { kind: "deny", mapped, decision, reason: rejectionText(decision), permissionRequired: true };
 	}
@@ -152,10 +168,24 @@ export function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermission
 	}
 	if (disposition === "deny") {
 		const blocked = toAutonomyBlock(decision, level, call);
-		return { kind: "deny", mapped, decision: blocked, reason: rejectionText(blocked), permissionRequired: false };
+		return {
+			kind: "deny",
+			mapped,
+			decision: blocked,
+			reason: rejectionText(blocked),
+			reasonCode: `autonomy:${level}`,
+			permissionRequired: false,
+		};
 	}
 	const ask = toAutonomyAsk(decision, level, call);
-	return { kind: "deny", mapped, decision: ask, reason: rejectionText(ask), permissionRequired: true };
+	return {
+		kind: "deny",
+		mapped,
+		decision: ask,
+		reason: rejectionText(ask),
+		reasonCode: `autonomy:${level}`,
+		permissionRequired: true,
+	};
 }
 
 function finishDecision(decision: SafetyDecision): NonNullable<ToolFinishEvent["decision"]> {
@@ -171,6 +201,7 @@ function emitToolFinish(
 	decision: SafetyDecision,
 	outcome: ToolFinishEvent["outcome"],
 	reason: string,
+	reasonCode?: string,
 ): void {
 	const event: ToolFinishEvent = {
 		tool: mapped.clioToolName,
@@ -182,7 +213,11 @@ function emitToolFinish(
 	};
 	if (reason.length > 0 && outcome !== "ok") event.reason = reason;
 	if (decision.policy?.ruleId !== undefined) event.ruleId = decision.policy.ruleId;
-	if (decision.policy?.reasonCode !== undefined) event.reasonCode = decision.policy.reasonCode;
+	// Prefer an explicit final reasonCode (later-axis denial) over the policy's
+	// own reasonCode, which describes the net pass ("allowed") and would
+	// misstate an autonomy denial. Mirrors audit.ts `reasonCode ?? policy`.
+	const finalReasonCode = reasonCode ?? decision.policy?.reasonCode;
+	if (finalReasonCode !== undefined) event.reasonCode = finalReasonCode;
 	if (decision.policy?.policySource !== undefined) event.policySource = decision.policy.policySource;
 	emit({ type: "clio_tool_finish", payload: event });
 }
@@ -197,7 +232,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	};
 	input.emit({ type: "clio_tool_start", payload: start });
 	if (decision.kind === "allow") {
-		emitToolFinish(input.emit, decision.mapped, startedAt, decision.decision, "ok", decision.reason);
+		emitToolFinish(input.emit, decision.mapped, startedAt, decision.decision, "ok", decision.reason, decision.reasonCode);
 		return decision;
 	}
 	if (decision.permissionRequired) {
@@ -215,7 +250,15 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 			},
 		});
 	}
-	emitToolFinish(input.emit, decision.mapped, startedAt, decision.decision, "blocked", decision.reason);
+	emitToolFinish(
+		input.emit,
+		decision.mapped,
+		startedAt,
+		decision.decision,
+		"blocked",
+		decision.reason,
+		decision.reasonCode,
+	);
 	return decision;
 }
 

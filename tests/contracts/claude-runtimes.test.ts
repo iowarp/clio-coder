@@ -9,8 +9,10 @@ import {
 } from "../../src/engine/claude/subprocess-runtime.js";
 import {
 	type EvaluateClaudeToolPermissionInput,
+	emitClaudeToolPermissionDecision,
 	evaluateClaudeToolPermission,
 } from "../../src/engine/claude/tool-safety.js";
+import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 
 describe("contracts/claude runtimes safety bridge", () => {
@@ -69,6 +71,41 @@ describe("contracts/claude runtimes safety bridge", () => {
 		strictEqual(systemModify.permissionRequired, true);
 		strictEqual(systemModify.decision.kind, "ask");
 		strictEqual(systemModify.decision.classification.actionClass, "system_modify");
+	});
+
+	it("emits autonomy:<level> reasonCode on the clio_tool_finish telemetry for read-only denials", () => {
+		const events: ClioWorkerEvent[] = [];
+		const decision = emitClaudeToolPermissionDecision({
+			toolName: "Write",
+			input: { file_path: "tmp/claude-test.txt", content: "x" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "read-only",
+			emit: (event) => events.push(event),
+		});
+		strictEqual(decision.kind, "deny");
+
+		const finish = events.find((event) => event.type === "clio_tool_finish");
+		ok(finish && finish.type === "clio_tool_finish");
+		strictEqual(finish.payload.decision, "blocked");
+		strictEqual(finish.payload.outcome, "blocked");
+		// The final reasonCode must describe the autonomy axis, not repeat the
+		// policy engine's net-pass "allowed". Matches the native registry audit.
+		strictEqual(finish.payload.reasonCode, "autonomy:read-only");
+
+		const allowEvents: ClioWorkerEvent[] = [];
+		emitClaudeToolPermissionDecision({
+			toolName: "Read",
+			input: { file_path: "README.md" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "read-only",
+			emit: (event) => allowEvents.push(event),
+		});
+		const allowFinish = allowEvents.find((event) => event.type === "clio_tool_finish");
+		ok(allowFinish && allowFinish.type === "clio_tool_finish");
+		strictEqual(allowFinish.payload.decision, "allowed");
+		strictEqual(allowFinish.payload.reasonCode, "allowed");
 	});
 
 	it("keeps SDK permission mode open for the Clio all-tool gate", () => {
