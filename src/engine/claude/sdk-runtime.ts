@@ -1,6 +1,7 @@
 import {
 	type CanUseTool,
 	type EffortLevel,
+	type HookCallback,
 	type Options,
 	type PermissionMode,
 	type PermissionResult,
@@ -16,41 +17,10 @@ import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
-import { coerceToolInput, emitClaudeToolPermissionDecision } from "./tool-safety.js";
+import { isClaudeCodeSessionId } from "./session-id.js";
+import { type ClaudeToolPermissionDecision, coerceToolInput, emitClaudeToolPermissionDecision } from "./tool-safety.js";
 
-const READ_ONLY_CLAUDE_TOOLS = ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch"] as const;
 const DEFAULT_CLAUDE_TOOLS = { type: "preset", preset: "claude_code" } as const;
-
-class AsyncPromptQueue implements AsyncIterable<SDKUserMessage> {
-	private readonly values: SDKUserMessage[] = [];
-	private readonly waiters: Array<(result: IteratorResult<SDKUserMessage>) => void> = [];
-	private closed = false;
-
-	push(value: SDKUserMessage): boolean {
-		if (this.closed) return false;
-		const waiter = this.waiters.shift();
-		if (waiter) waiter({ done: false, value });
-		else this.values.push(value);
-		return true;
-	}
-
-	close(): void {
-		if (this.closed) return;
-		this.closed = true;
-		for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: undefined });
-	}
-
-	[Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
-		return {
-			next: () => {
-				const value = this.values.shift();
-				if (value) return Promise.resolve({ done: false, value });
-				if (this.closed) return Promise.resolve({ done: true, value: undefined });
-				return new Promise<IteratorResult<SDKUserMessage>>((resolve) => this.waiters.push(resolve));
-			},
-		};
-	}
-}
 
 function sdkUserTextMessage(text: string, shouldQuery: boolean): SDKUserMessage {
 	return {
@@ -62,12 +32,22 @@ function sdkUserTextMessage(text: string, shouldQuery: boolean): SDKUserMessage 
 	};
 }
 
-export function claudeSdkPermissionModeForAutonomy(level: AutonomyLevel | undefined): PermissionMode {
-	return level === "read-only" ? "plan" : "default";
+function buildClaudeSdkPrompt(input: WorkerRunInput): string {
+	const parts = (input.dynamicPromptMessages ?? []).map((message) => message.body.trim()).filter(Boolean);
+	parts.push(input.task);
+	return parts.join("\n\n");
 }
 
-export function claudeSdkToolsForAutonomy(level: AutonomyLevel | undefined): NonNullable<Options["tools"]> {
-	return level === "read-only" ? [...READ_ONLY_CLAUDE_TOOLS] : DEFAULT_CLAUDE_TOOLS;
+async function* oneSdkUserMessage(message: SDKUserMessage): AsyncIterable<SDKUserMessage> {
+	yield message;
+}
+
+export function claudeSdkPermissionModeForAutonomy(_level: AutonomyLevel | undefined): PermissionMode {
+	return "default";
+}
+
+export function claudeSdkToolsForAutonomy(_level: AutonomyLevel | undefined): NonNullable<Options["tools"]> {
+	return DEFAULT_CLAUDE_TOOLS;
 }
 
 function effortForThinking(level: WorkerRunInput["thinkingLevel"] | undefined): EffortLevel | undefined {
@@ -301,47 +281,96 @@ function emitTextDelta(
 	} as AgentEvent);
 }
 
-function buildCanUseTool(input: {
+interface PermissionGateInput {
 	safety: ReturnType<typeof createWorkerSafety>;
 	cwd: string;
 	autonomy?: AutonomyLevel;
 	onPermission: "deny" | "fail";
 	emit: WorkerEventEmit;
 	onPermissionFailure(): void;
-}): CanUseTool {
+	handledToolDecisions: Map<string, ClaudeToolPermissionDecision>;
+}
+
+function permissionResultForDecision(
+	decision: ClaudeToolPermissionDecision,
+	toolUseID: string | undefined,
+	input: PermissionGateInput,
+): PermissionResult {
+	if (decision.kind === "allow") {
+		const result: PermissionResult = {
+			behavior: "allow",
+			decisionClassification: "user_temporary",
+		};
+		if (toolUseID !== undefined) result.toolUseID = toolUseID;
+		return result;
+	}
+	if (decision.permissionRequired && input.onPermission === "fail") {
+		input.onPermissionFailure();
+	}
+	const result: PermissionResult = {
+		behavior: "deny",
+		message: decision.reason,
+		interrupt: decision.permissionRequired && input.onPermission === "fail",
+		decisionClassification: "user_reject",
+	};
+	if (toolUseID !== undefined) result.toolUseID = toolUseID;
+	return result;
+}
+
+function decideToolUse(input: PermissionGateInput, toolName: string, toolInput: unknown): ClaudeToolPermissionDecision {
+	return emitClaudeToolPermissionDecision({
+		toolName,
+		input: coerceToolInput(toolInput),
+		safety: input.safety,
+		cwd: input.cwd,
+		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
+		onPermission: input.onPermission,
+		emit: input.emit,
+	});
+}
+
+function buildCanUseTool(input: PermissionGateInput): CanUseTool {
 	return async (toolName, toolInput, options): Promise<PermissionResult> => {
-		const decision = emitClaudeToolPermissionDecision({
-			toolName,
-			input: coerceToolInput(toolInput),
-			safety: input.safety,
-			cwd: input.cwd,
-			...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
-			onPermission: input.onPermission,
-			emit: input.emit,
-		});
+		const cached = input.handledToolDecisions.get(options.toolUseID);
+		if (cached) return permissionResultForDecision(cached, options.toolUseID, input);
+		const decision = decideToolUse(input, toolName, toolInput);
+		if (options.toolUseID) {
+			input.handledToolDecisions.set(options.toolUseID, decision);
+		}
+		return permissionResultForDecision(decision, options.toolUseID, input);
+	};
+}
+
+function buildPreToolUseHook(input: PermissionGateInput): HookCallback {
+	return async (hookInput, toolUseID) => {
+		if (hookInput.hook_event_name !== "PreToolUse") return { continue: true };
+		const decision = decideToolUse(input, hookInput.tool_name, hookInput.tool_input);
+		const id = hookInput.tool_use_id || toolUseID;
+		if (id) input.handledToolDecisions.set(id, decision);
 		if (decision.kind === "allow") {
 			return {
-				behavior: "allow",
-				toolUseID: options.toolUseID,
-				decisionClassification: "user_temporary",
+				continue: true,
+				hookSpecificOutput: {
+					hookEventName: "PreToolUse",
+					permissionDecision: "allow",
+					permissionDecisionReason: decision.reason,
+				},
 			};
 		}
-		if (decision.permissionRequired && input.onPermission === "fail") {
-			input.onPermissionFailure();
-		}
+		if (decision.permissionRequired && input.onPermission === "fail") input.onPermissionFailure();
 		return {
-			behavior: "deny",
-			message: decision.reason,
-			interrupt: decision.permissionRequired && input.onPermission === "fail",
-			toolUseID: options.toolUseID,
-			decisionClassification: "user_reject",
+			continue: true,
+			hookSpecificOutput: {
+				hookEventName: "PreToolUse",
+				permissionDecision: "deny",
+				permissionDecisionReason: decision.reason,
+			},
 		};
 	};
 }
 
 export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	const abortController = new AbortController();
-	const promptQueue = new AsyncPromptQueue();
 	let queryHandle: ReturnType<typeof query> | null = null;
 	let aborted = false;
 	let permissionFailure = false;
@@ -349,7 +378,6 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	const abort = (): void => {
 		aborted = true;
 		abortController.abort();
-		promptQueue.close();
 		void queryHandle?.interrupt().catch(() => {});
 		queryHandle?.close();
 	};
@@ -359,24 +387,22 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		else input.signal.addEventListener("abort", abort, { once: true });
 	}
 
-	for (const fragment of input.dynamicPromptMessages ?? []) {
-		promptQueue.push(sdkUserTextMessage(fragment.body, false));
-	}
-	promptQueue.push(sdkUserTextMessage(input.task, true));
-
 	const safety = createWorkerSafety({ cwd: process.cwd() });
 	const onPermission = input.onPermission ?? "deny";
-	const canUseTool = buildCanUseTool({
+	const permissionGate = {
 		safety,
 		cwd: process.cwd(),
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 		onPermission,
 		emit,
+		handledToolDecisions: new Map<string, ClaudeToolPermissionDecision>(),
 		onPermissionFailure() {
 			permissionFailure = true;
 			abort();
 		},
-	});
+	};
+	const canUseTool = buildCanUseTool(permissionGate);
+	const preToolUseHook = buildPreToolUseHook(permissionGate);
 
 	const options: Options = {
 		abortController,
@@ -386,15 +412,17 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		tools: claudeSdkToolsForAutonomy(input.autonomy),
 		permissionMode: claudeSdkPermissionModeForAutonomy(input.autonomy),
 		canUseTool,
+		hooks: { PreToolUse: [{ hooks: [preToolUseHook] }] },
 		includePartialMessages: true,
 		persistSession: false,
+		settingSources: [],
 		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "@iowarp/clio-coder/0.2.3" },
 	};
 	const thinking = thinkingForInput(input);
 	if (thinking !== undefined) options.thinking = thinking;
 	const effort = effortForThinking(input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel);
 	if (effort !== undefined) options.effort = effort;
-	if (input.sessionId) options.sessionId = input.sessionId;
+	if (isClaudeCodeSessionId(input.sessionId)) options.sessionId = input.sessionId.trim();
 
 	const promise = (async (): Promise<WorkerRunResult> => {
 		const messages: AgentMessage[] = [];
@@ -405,7 +433,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 
 		emit({ type: "agent_start" } as AgentEvent);
 		try {
-			queryHandle = query({ prompt: promptQueue, options });
+			queryHandle = query({ prompt: buildClaudeSdkPrompt(input), options });
 			for await (const sdkMessage of queryHandle) {
 				if (sdkMessage.type === "system" && (sdkMessage as { subtype?: string }).subtype === "init") {
 					const init = sdkMessage as { model?: string; session_id?: string; uuid?: string };
@@ -465,7 +493,6 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			if (!aborted) process.stderr.write(`[worker:claude-sdk] ${messageText}\n`);
 			return { messages, exitCode: 1 };
 		} finally {
-			promptQueue.close();
 			queryHandle?.close();
 		}
 	})();
@@ -477,7 +504,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			const trimmed = text.trim();
 			if (trimmed.length === 0) return;
 			emit({ type: "clio_steer_received", payload: { chars: trimmed.length } });
-			promptQueue.push(sdkUserTextMessage(trimmed, true));
+			void queryHandle?.streamInput(oneSdkUserMessage(sdkUserTextMessage(trimmed, true))).catch(() => {});
 		},
 	};
 }

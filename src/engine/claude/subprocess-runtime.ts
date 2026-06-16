@@ -5,6 +5,7 @@ import type { Readable } from "node:stream";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
+import { isClaudeCodeSessionId } from "./session-id.js";
 
 const READ_ONLY_CLAUDE_TOOLS = ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch"] as const;
 
@@ -68,7 +69,7 @@ export function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
 	if (input.wireModelId.trim().length > 0) args.push("--model", input.wireModelId);
 	const systemPrompt = input.systemPrompt.trim();
 	if (systemPrompt.length > 0) args.push("--append-system-prompt", systemPrompt);
-	if (input.sessionId && input.sessionId.trim().length > 0) args.push("--session-id", input.sessionId.trim());
+	if (isClaudeCodeSessionId(input.sessionId)) args.push("--session-id", input.sessionId.trim());
 	args.push(buildClaudeCodePrompt(input));
 	return args;
 }
