@@ -1261,7 +1261,7 @@ function readRunKind(record: Record<string, unknown>, source: string, field: str
 	// runtimeKind is digest-covered: returning anything other than the value as
 	// written would make integrity verification recompute a different payload.
 	const value = readString(record, source, field);
-	if (value !== "http" && value !== "acp-delegation") {
+	if (value !== "http" && value !== "sdk" && value !== "subprocess" && value !== "acp-delegation") {
 		throw new Error(`${source}.${field}: unexpected runtime kind`);
 	}
 	return value;

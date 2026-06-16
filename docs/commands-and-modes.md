@@ -24,7 +24,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio configure --list` | List user-facing runtime ids. |
 | `clio targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
 | `clio targets add` | Add a target interactively or through configure flags. |
-| `clio targets use <id>` | Set chat and fleet defaults to one target. |
+| `clio targets use <id>` | Set chat and fleet defaults to one orchestrator-capable target. |
 | `clio targets profile <name> <id>` | Register a named fleet profile. |
 | `clio targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
 | `clio targets remove <id>` | Remove a target. |
@@ -117,7 +117,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/compact` | - | `/compact [instructions]` | Compact earlier context |
 
 
-The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `c` to connect, `d` to disconnect, `r` to probe the selected target, and `R` to probe all targets.
+The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `c` to connect, `d` to disconnect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
 
 ## Keybindings
 

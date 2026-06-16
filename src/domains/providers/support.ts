@@ -30,6 +30,8 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	anthropic: "Anthropic API",
 	"anthropic-max": "Claude Pro/Max subscription via Anthropic OAuth",
 	bedrock: "Amazon Bedrock",
+	"claude-code": "Claude Code subscription via installed claude CLI",
+	"claude-sdk": "Claude Code subscription via Claude Agent SDK",
 	deepseek: "DeepSeek API",
 	google: "Google Gemini API",
 	groq: "Groq API",
@@ -72,7 +74,7 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 
 function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
-	if (runtime.auth === "oauth") return "subscription";
+	if (runtime.auth === "oauth" || runtime.auth === "claude-cli") return "subscription";
 	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
 		return "cloud-api";
 	}

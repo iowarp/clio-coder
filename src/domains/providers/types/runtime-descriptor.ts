@@ -5,8 +5,8 @@ import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, Rera
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 import type { TargetDescriptor } from "./target-descriptor.js";
 
-export type RuntimeKind = "http";
-export type RuntimeTier = "protocol" | "cloud" | "local-native";
+export type RuntimeKind = "http" | "sdk" | "subprocess";
+export type RuntimeTier = "protocol" | "cloud" | "local-native" | "subscription";
 
 export type RuntimeApiFamily =
 	| "openai-completions"
@@ -21,9 +21,11 @@ export type RuntimeApiFamily =
 	| "mistral-conversations"
 	| "ollama-native"
 	| "rerank-http"
-	| "embeddings-http";
+	| "embeddings-http"
+	| "claude-agent-sdk"
+	| "claude-code-subprocess";
 
-export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "none";
+export type RuntimeAuth = "api-key" | "oauth" | "aws-sdk" | "vertex-adc" | "claude-cli" | "none";
 
 export interface ProbeContext {
 	credentialsPresent: ReadonlySet<string>;

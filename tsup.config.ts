@@ -18,6 +18,7 @@ export default defineConfig({
 	outDir: "dist",
 	banner: ({ format }) => (format === "esm" ? { js: "#!/usr/bin/env node" } : {}),
 	external: [
+		"@anthropic-ai/claude-agent-sdk",
 		"@earendil-works/pi-agent-core",
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-tui",

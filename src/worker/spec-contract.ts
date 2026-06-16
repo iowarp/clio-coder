@@ -13,7 +13,7 @@ import type {
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export const WORKER_SPEC_VERSION = 1;
-export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 1;
+export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 
 /**
  * Exit code a native worker uses to report that the run ended because a tool
@@ -79,7 +79,7 @@ export interface WorkerPromptMessage {
 	contentHash: string;
 }
 
-const RUNTIME_KINDS = ["http"] as const satisfies ReadonlyArray<RuntimeKind>;
+const RUNTIME_KINDS = ["http", "sdk", "subprocess"] as const satisfies ReadonlyArray<RuntimeKind>;
 const RUNTIME_API_FAMILIES = [
 	"openai-completions",
 	"openai-responses",
@@ -94,12 +94,15 @@ const RUNTIME_API_FAMILIES = [
 	"ollama-native",
 	"rerank-http",
 	"embeddings-http",
+	"claude-agent-sdk",
+	"claude-code-subprocess",
 ] as const satisfies ReadonlyArray<RuntimeApiFamily>;
 const RUNTIME_AUTHS = [
 	"api-key",
 	"oauth",
 	"aws-sdk",
 	"vertex-adc",
+	"claude-cli",
 	"none",
 ] as const satisfies ReadonlyArray<RuntimeAuth>;
 const THINKING_LEVELS = [

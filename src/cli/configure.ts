@@ -9,7 +9,7 @@ import {
 	buildProviderSupportEntry,
 	configuredTargetsForRuntime,
 	defaultModelForRuntime,
-	isTargetEligibleRuntime,
+	isOrchestratorEligibleRuntime,
 	listKnownModelsForRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
@@ -384,7 +384,7 @@ function setOrchestratorPointer(settings: ClioSettings, descriptor: TargetDescri
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
 		);
 	}
-	if (!isTargetEligibleRuntime(runtime)) {
+	if (!isOrchestratorEligibleRuntime(runtime)) {
 		throw new Error(
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
@@ -406,7 +406,7 @@ function assertOrchestratorReplacementEligible(settings: ClioSettings, descripto
 			`cannot update orchestrator target '${descriptor.id}' because runtime '${descriptor.runtime}' is not registered`,
 		);
 	}
-	if (!isTargetEligibleRuntime(runtime)) {
+	if (!isOrchestratorEligibleRuntime(runtime)) {
 		throw new Error(`cannot update orchestrator target '${descriptor.id}' to non-HTTP/native runtime '${runtime.id}'`);
 	}
 }
@@ -663,7 +663,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
-	if (setOrchestrator && !isTargetEligibleRuntime(runtime)) {
+	if (setOrchestrator && !isOrchestratorEligibleRuntime(runtime)) {
 		printError(
 			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
@@ -1141,7 +1141,7 @@ async function runInteractive(
 		}
 	}
 
-	const setOrchestrator = !isTargetEligibleRuntime(runtime)
+	const setOrchestrator = !isOrchestratorEligibleRuntime(runtime)
 		? false
 		: defaults.setOrchestrator
 			? true

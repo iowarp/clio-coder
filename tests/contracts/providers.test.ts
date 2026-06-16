@@ -9,7 +9,7 @@ import {
 	targetRequiresAuth,
 } from "../../src/domains/providers/auth/index.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
-import { isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
+import { isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
 import {
 	buildProviderSupportEntry,
 	canonicalizeWireModelId,
@@ -381,10 +381,10 @@ describe("contracts/providers", () => {
 describe("contracts/providers/runtime-cleanup", () => {
 	const builtinIds = new Set(BUILTIN_RUNTIMES.map((r) => r.id));
 
-	it("does not register any Claude Code or removed CLI runtimes", () => {
+	it("registers only the sanctioned Claude Code runtimes and no removed CLI runtimes", () => {
 		for (const removed of [
-			"claude-code-sdk",
 			"claude-code-cli",
+			"claude-code-sdk",
 			"gemini-cli",
 			"copilot-cli",
 			"codex-cli",
@@ -392,13 +392,21 @@ describe("contracts/providers/runtime-cleanup", () => {
 		]) {
 			ok(!builtinIds.has(removed), `runtime '${removed}' must be absent from the builtin registry`);
 		}
-		// Every builtin runtime is an HTTP/native adapter; no Claude Code, agent-sdk,
-		// or subprocess/CLI families or kinds survive.
+		const sdk = BUILTIN_RUNTIMES.find((runtime) => runtime.id === "claude-sdk");
+		const code = BUILTIN_RUNTIMES.find((runtime) => runtime.id === "claude-code");
+		ok(sdk, "claude-sdk runtime must be registered");
+		ok(code, "claude-code runtime must be registered");
+		strictEqual(sdk?.kind, "sdk");
+		strictEqual(sdk?.apiFamily, "claude-agent-sdk");
+		strictEqual(sdk?.auth, "claude-cli");
+		strictEqual(sdk?.tier, "subscription");
+		strictEqual(code?.kind, "subprocess");
+		strictEqual(code?.apiFamily, "claude-code-subprocess");
+		strictEqual(code?.auth, "claude-cli");
+		strictEqual(code?.tier, "subscription");
 		for (const runtime of BUILTIN_RUNTIMES) {
-			ok(
-				!/claude|agent-sdk|subprocess/.test(runtime.apiFamily),
-				`runtime '${runtime.id}' must not use a removed apiFamily (${runtime.apiFamily})`,
-			);
+			if (runtime.id === "claude-sdk" || runtime.id === "claude-code") continue;
+			ok(!/agent-sdk|subprocess/.test(runtime.apiFamily), `runtime '${runtime.id}' must not use removed apiFamily`);
 			strictEqual(runtime.kind, "http", `runtime '${runtime.id}' must be an http runtime`);
 		}
 	});
@@ -413,19 +421,24 @@ describe("contracts/providers/runtime-cleanup", () => {
 		ok(builtinIds.has("openai-compat"), "openai-compat must remain registered");
 	});
 
-	it("treats every builtin runtime as one http target-eligibility class", () => {
+	it("treats builtins as either http orchestrator targets or sanctioned worker-only targets", () => {
 		for (const runtime of BUILTIN_RUNTIMES) {
 			ok(isTargetEligibleRuntime(runtime), `${runtime.id} should be target-eligible`);
+			if (runtime.id === "claude-sdk" || runtime.id === "claude-code") {
+				strictEqual(isOrchestratorEligibleRuntime(runtime), false, `${runtime.id} must be worker-only`);
+			} else {
+				strictEqual(isOrchestratorEligibleRuntime(runtime), true, `${runtime.id} must remain orchestrator-eligible`);
+			}
 		}
 	});
 
-	it("rejects non-http runtime targets cleanly for orchestrator, print, and dispatch", () => {
-		const runtime = { ...fakeDescriptor("legacy-subprocess"), kind: "subprocess" } as unknown as RuntimeDescriptor;
-		const target: TargetDescriptor = { id: "legacy-target", runtime: "legacy-subprocess", defaultModel: "m" };
+	it("rejects unknown non-http runtime targets cleanly for orchestrator, print, and dispatch", () => {
+		const runtime = { ...fakeDescriptor("legacy-native-cli"), kind: "native-cli" } as unknown as RuntimeDescriptor;
+		const target: TargetDescriptor = { id: "legacy-target", runtime: "legacy-native-cli", defaultModel: "m" };
 		const mockProviders: ProvidersContract = {
 			list: () => [],
 			getTarget: (id: string) => (id === "legacy-target" ? target : null),
-			getRuntime: (id: string) => (id === "legacy-subprocess" ? runtime : null),
+			getRuntime: (id: string) => (id === "legacy-native-cli" ? runtime : null),
 			getDetectedReasoning: () => null,
 			knowledgeBase: null,
 		} as never;
@@ -436,6 +449,28 @@ describe("contracts/providers/runtime-cleanup", () => {
 			if (!res.ok) {
 				ok(res.diagnostics.some((d) => d.code === "runtime-target-unsupported"));
 			}
+		}
+	});
+
+	it("accepts sanctioned Claude runtimes for dispatch and rejects them for orchestrator/print", () => {
+		const runtime = BUILTIN_RUNTIMES.find((r) => r.id === "claude-sdk");
+		ok(runtime);
+		if (!runtime) return;
+		const target: TargetDescriptor = { id: "claude-worker", runtime: "claude-sdk", defaultModel: "sonnet" };
+		const mockProviders: ProvidersContract = {
+			list: () => [],
+			getTarget: (targetId: string) => (targetId === target.id ? target : null),
+			getRuntime: (runtimeId: string) => (runtimeId === "claude-sdk" ? runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		const dispatch = resolveRuntimeTarget(mockProviders, { targetId: target.id, use: "dispatch" });
+		strictEqual(dispatch.ok, true, "claude-sdk target must be dispatch-eligible");
+		for (const use of ["orchestrator", "print"] as const) {
+			const res = resolveRuntimeTarget(mockProviders, { targetId: target.id, use });
+			strictEqual(res.ok, false, `${use} must reject worker-only Claude runtime`);
+			if (!res.ok) ok(res.diagnostics.some((diag) => diag.code === "runtime-use-unsupported"));
 		}
 	});
 
@@ -469,20 +504,48 @@ describe("contracts/providers/runtime-cleanup", () => {
 					target: { id: "target", runtime: "legacy-sdk" },
 					runtime: {
 						version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
-						id: "legacy-sdk",
-						kind: "sdk",
+						id: "legacy-cli",
+						kind: "native-cli",
 						apiFamily: "openai-responses",
 						auth: "none",
 					},
-					runtimeId: "legacy-sdk",
+					runtimeId: "legacy-cli",
 					wireModelId: "model",
 					allowedTools: [],
 				}),
-			/one of: http/,
+			/one of: http, sdk, subprocess/,
 		);
 	});
 
-	it("has no builtin Claude Code SDK/CLI, native CLI auth, or subprocess runtime paths", () => {
+	it("accepts sanctioned Claude runtime descriptors in the worker spec contract", () => {
+		for (const runtime of [
+			{ id: "claude-sdk", kind: "sdk", apiFamily: "claude-agent-sdk" },
+			{ id: "claude-code", kind: "subprocess", apiFamily: "claude-code-subprocess" },
+		] as const) {
+			const parsed = parseWorkerSpec({
+				specVersion: WORKER_SPEC_VERSION,
+				systemPrompt: "",
+				agentId: "coder",
+				task: "t",
+				target: { id: `${runtime.id}-target`, runtime: runtime.id },
+				runtime: {
+					version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+					id: runtime.id,
+					kind: runtime.kind,
+					apiFamily: runtime.apiFamily,
+					auth: "claude-cli",
+				},
+				runtimeId: runtime.id,
+				wireModelId: "sonnet",
+				allowedTools: [],
+			});
+			strictEqual(parsed.runtime.kind, runtime.kind);
+			strictEqual(parsed.runtime.apiFamily, runtime.apiFamily);
+			strictEqual(parsed.runtime.auth, "claude-cli");
+		}
+	});
+
+	it("keeps removed legacy Claude Code SDK/CLI, native CLI auth, and generic subprocess paths absent", () => {
 		const removedPaths = [
 			"src/engine/claude-code-sdk-runtime.ts",
 			"src/engine/sdk-policy-bridge.ts",
@@ -556,7 +619,22 @@ describe("contracts/providers/runtime-cleanup", () => {
 		ok(isTargetEligibleRuntime(sub), "subscription runtime must be orchestrator/worker eligible");
 	});
 
-	it("keeps docs-sensitive runtime lists free of removed CLI and Claude Code support", () => {
+	it("surfaces Claude Code runtimes as non-connectable subscription worker targets", () => {
+		for (const id of ["claude-sdk", "claude-code"]) {
+			const runtime = BUILTIN_RUNTIMES.find((r) => r.id === id);
+			ok(runtime, `${id} runtime must be registered`);
+			if (!runtime) continue;
+			const entry = buildProviderSupportEntry(runtime);
+			strictEqual(entry.group, "subscription");
+			strictEqual(entry.connectable, false);
+			ok(isTargetEligibleRuntime(runtime), `${id} must be target-eligible`);
+			strictEqual(isOrchestratorEligibleRuntime(runtime), false, `${id} must be worker-only`);
+			strictEqual(targetRequiresAuth({ id: `${id}-target`, runtime: id }, runtime), false);
+			strictEqual(resolveRuntimeAuthTarget(runtime).providerId, id);
+		}
+	});
+
+	it("keeps docs-sensitive runtime lists free of removed CLI support", () => {
 		const docs = [
 			"README.md",
 			"docs/configuration-and-targets.md",
@@ -564,8 +642,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 			"docs/safety-model.md",
 			"docs/built-in-agents.md",
 		];
-		const forbidden =
-			/claude-code-(?:sdk|cli)|gemini-cli|copilot-cli|codex-cli|opencode-cli|worker-only|Claude Code runtime|External CLI\/SDK|SDK-backed runtimes|native \| sdk \| cli/i;
+		const forbidden = /claude-code-(?:sdk|cli)|gemini-cli|copilot-cli|codex-cli|opencode-cli|native \| sdk \| cli/i;
 		for (const rel of docs) {
 			const text = readFileSync(join(process.cwd(), rel), "utf8");
 			ok(!forbidden.test(text), `${rel} must not advertise removed runtime support`);

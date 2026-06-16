@@ -240,7 +240,12 @@ export function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerif
 	if (!isNonEmptyString(r.runtimeId)) {
 		return { ok: false, reason: `runtimeId invalid: ${String(r.runtimeId)}` };
 	}
-	if (r.runtimeKind !== "http" && r.runtimeKind !== "subprocess" && r.runtimeKind !== "acp-delegation") {
+	if (
+		r.runtimeKind !== "http" &&
+		r.runtimeKind !== "sdk" &&
+		r.runtimeKind !== "subprocess" &&
+		r.runtimeKind !== "acp-delegation"
+	) {
 		return { ok: false, reason: `runtimeKind invalid: ${String(r.runtimeKind)}` };
 	}
 	const exitCode = r.exitCode;

@@ -61,10 +61,12 @@ export interface RunIdentity {
 
 /**
  * Runtime kind recorded on a run envelope/receipt. "http" covers Clio-owned
- * model runtimes; "acp-delegation" covers external Agent Client Protocol
- * harnesses that Clio supervises as delegated coding agents.
+ * pi-agent model runtimes; "sdk" and "subprocess" cover sanctioned worker
+ * runtimes with dedicated worker runners; "acp-delegation" covers external
+ * Agent Client Protocol harnesses that Clio supervises as delegated coding
+ * agents.
  */
-export type RunKind = "http" | "acp-delegation";
+export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 export interface RunReceiptIntegrity {
