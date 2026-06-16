@@ -105,6 +105,34 @@ function mapToolCall(toolCall: AcpToolCallUpdate | undefined, cwd: string): Mapp
 	if (rawTool && Object.values(ToolNames).includes(rawTool as (typeof ToolNames)[keyof typeof ToolNames])) {
 		return { tool: rawTool, args: rawInput, known: true, displayTool };
 	}
+	// Fallback: some ACP agents (notably @zed-industries/claude-code-acp) send a
+	// permission request carrying only rawInput + title, omitting both `kind` and
+	// the tool name. Infer the clio tool from the rawInput shape so the dangerous
+	// classes (shell, writes, edits) are still classified and gated instead of
+	// being blanket-denied as an unknown tool.
+	if (stringField(rawInput, "command", "cmd", "shell")) {
+		return { tool: ToolNames.Bash, args: commandArgs(rawInput, title, cwd), known: true, displayTool };
+	}
+	const inferredPattern = stringField(rawInput, "pattern");
+	if (inferredPattern) {
+		return { tool: ToolNames.Grep, args: { pattern: inferredPattern }, known: true, displayTool };
+	}
+	const inferredPath = stringField(rawInput, "file_path", "filePath", "path", "notebook_path");
+	if (inferredPath) {
+		const mutates =
+			"content" in rawInput ||
+			"new_string" in rawInput ||
+			"old_string" in rawInput ||
+			"new_str" in rawInput ||
+			"edits" in rawInput ||
+			"new_source" in rawInput ||
+			"replace_all" in rawInput;
+		return { tool: mutates ? ToolNames.Edit : ToolNames.Read, args: { path: inferredPath }, known: true, displayTool };
+	}
+	const inferredUrl = stringField(rawInput, "url");
+	if (inferredUrl) {
+		return { tool: ToolNames.WebFetch, args: { url: inferredUrl }, known: true, displayTool };
+	}
 	return { tool: displayTool, args: rawInput, known: false, displayTool };
 }
 

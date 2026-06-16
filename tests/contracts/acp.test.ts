@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
+import { ToolNames } from "../../src/core/tool-names.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
@@ -390,6 +391,33 @@ describe("contracts/acp", () => {
 		strictEqual(snapshot.toolCallsRequested, 1);
 		strictEqual(snapshot.toolCallsApproved, 1);
 		strictEqual(snapshot.toolCallLog[0]?.tool, "read");
+	});
+
+	it("classifies kind-less permission requests (claude-code-acp) from the rawInput shape", async () => {
+		// @zed-industries/claude-code-acp sends requestPermission with only
+		// rawInput + title and omits `kind`/tool name. The mediator must still map
+		// the dangerous classes to the right clio tool so safety gates them rather
+		// than blanket-denying every Claude Code tool call as unknown.
+		const options = [
+			{ optionId: "allow-once", name: "Allow", kind: "allow_once" },
+			{ optionId: "reject-once", name: "Reject", kind: "reject_once" },
+		];
+		const call = async (rawInput: Record<string, unknown>, title: string) => {
+			const mediator = new AcpToolMediator({ safety, cwd: process.cwd(), toolGovernance: "clio-policy" });
+			await mediator.handle({ sessionId: "s", toolCall: { toolCallId: "c", title, rawInput }, options });
+			return mediator.snapshot().toolCallLog[0];
+		};
+
+		strictEqual((await call({ command: "ls -la" }, "`ls -la`"))?.tool, ToolNames.Bash);
+		strictEqual((await call({ file_path: "src/x.ts", offset: 0 }, "Read File"))?.tool, ToolNames.Read);
+		strictEqual((await call({ file_path: "src/x.ts", content: "x" }, "Write"))?.tool, ToolNames.Edit);
+		strictEqual((await call({ file_path: "src/x.ts", old_string: "a", new_string: "b" }, "Edit"))?.tool, ToolNames.Edit);
+		strictEqual((await call({ pattern: "TODO", path: "src" }, "Grep"))?.tool, ToolNames.Grep);
+		strictEqual((await call({ url: "https://example.com" }, "Fetch"))?.tool, ToolNames.WebFetch);
+
+		// A genuinely unmapped tool (e.g. TodoWrite) stays unknown and is denied.
+		const todo = await call({ todos: [] }, "Update Todos");
+		strictEqual(todo?.decision, "denied");
 	});
 
 	it("runs a prompt turn against a stdio ACP agent", async () => {
