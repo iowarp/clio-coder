@@ -50,7 +50,7 @@ import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	applyModelCapabilityPatch,
-	isTargetEligibleRuntime,
+	isOrchestratorEligibleRuntime,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
@@ -395,7 +395,7 @@ export function advanceScopedTarget(
 		const target = settings.targets.find((e) => e.id === targetId);
 		if (!target) return false;
 		const runtime = registry.get(target.runtime);
-		return runtime !== null && isTargetEligibleRuntime(runtime);
+		return runtime !== null && isOrchestratorEligibleRuntime(runtime);
 	});
 	if (filteredScope.length === 0) return null;
 	const activeTarget = settings.orchestrator.target ?? "";
@@ -997,7 +997,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						`cannot use target '${target}' as orchestrator target because runtime '${descriptor.runtime}' is not registered`,
 					);
 				}
-				if (!isTargetEligibleRuntime(runtime)) {
+				if (!isOrchestratorEligibleRuntime(runtime)) {
 					throw new Error(
 						`cannot use target '${target}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 					);

@@ -273,7 +273,8 @@ function parseText(value: unknown, fallback: string): string {
 }
 
 function parseRuntimeKind(value: unknown): RunKind {
-	return value === "acp-delegation" ? "acp-delegation" : "http";
+	if (value === "sdk" || value === "subprocess" || value === "acp-delegation") return value;
+	return "http";
 }
 
 function parseAgentAudience(value: unknown, fallback: AgentAudience | undefined): AgentAudience | undefined {

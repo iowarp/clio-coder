@@ -4,6 +4,9 @@ import { pathToFileURL } from "node:url";
 
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
+const RUNTIME_KINDS = ["http", "sdk", "subprocess"] as const;
+const RUNTIME_AUTHS = ["api-key", "oauth", "aws-sdk", "vertex-adc", "claude-cli", "none"] as const;
+
 export interface RuntimeRegistry {
 	register(desc: RuntimeDescriptor): void;
 	get(id: string): RuntimeDescriptor | null;
@@ -130,14 +133,14 @@ function validateRuntimeDescriptor(value: unknown): RuntimeDescriptorValidation 
 	if (typeof v.displayName !== "string" || v.displayName.trim().length === 0) {
 		return { ok: false, reason: "displayName must be a non-empty string" };
 	}
-	if (v.kind !== "http") {
-		return { ok: false, reason: "kind must be http" };
+	if (typeof v.kind !== "string" || !RUNTIME_KINDS.includes(v.kind as (typeof RUNTIME_KINDS)[number])) {
+		return { ok: false, reason: `kind must be one of: ${RUNTIME_KINDS.join(", ")}` };
 	}
 	if (typeof v.apiFamily !== "string" || v.apiFamily.trim().length === 0) {
 		return { ok: false, reason: "apiFamily must be a non-empty string" };
 	}
-	if (typeof v.auth !== "string" || v.auth.trim().length === 0) {
-		return { ok: false, reason: "auth must be a non-empty string" };
+	if (typeof v.auth !== "string" || !RUNTIME_AUTHS.includes(v.auth as (typeof RUNTIME_AUTHS)[number])) {
+		return { ok: false, reason: `auth must be one of: ${RUNTIME_AUTHS.join(", ")}` };
 	}
 	if (
 		typeof v.defaultCapabilities !== "object" ||

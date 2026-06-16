@@ -183,7 +183,14 @@ guess.
 
 Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
 
-Dispatch workers run the same HTTP/native/pi-ai-backed runtimes as the orchestrator, driven through pi-agent-core. Clio observes and governs their tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
+Dispatch workers can run the same HTTP/native/pi-ai-backed runtimes as the orchestrator, driven through pi-agent-core. Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
+
+Two worker-only Claude Code subscription runtimes are also available:
+
+- `claude-sdk` uses `@anthropic-ai/claude-agent-sdk`. Claude Code still executes its own built-in tools, but every SDK `canUseTool` request is mapped into Clio's safety net and autonomy matrix before the SDK receives `allow` or `deny`. Clio `ask` outcomes resolve through the worker non-stall policy (`workers.onPermission=deny|fail`) because a dispatched worker has no interactive operator.
+- `claude-code` runs the installed `claude` binary with `claude -p --output-format stream-json`. The current CLI help does not expose a structured permission callback equivalent to the SDK `canUseTool` hook, so this path is constrained through Claude Code permission modes. Dangerous bypass posture is only passed when the worker autonomy is `full-auto` and `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`; otherwise the subprocess runner uses non-bypass modes.
+
+Both Claude Code runtimes rely on the user's existing `claude` login and store no credential in Clio.
 
 ---
 

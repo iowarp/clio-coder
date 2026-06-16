@@ -165,12 +165,14 @@ function defaultAuthDisplay(status: TargetStatus): TargetAuthDisplay {
 	if (!status.runtime) return { summary: "unknown", detail: "unknown-runtime" };
 	const auth = status.runtime.auth;
 	if (auth === "none") return { summary: "none", detail: "not-required" };
+	if (auth === "claude-cli") return { summary: "claude", detail: "claude-cli-login" };
 	return { summary: auth, detail: auth };
 }
 
 function authSummaryForRuntimeAuth(runtimeAuth: string): string {
 	if (runtimeAuth === "oauth") return "oauth";
 	if (runtimeAuth === "api-key") return "api-key";
+	if (runtimeAuth === "claude-cli") return "claude";
 	return runtimeAuth;
 }
 
@@ -198,6 +200,7 @@ export function formatTargetAuthDisplay(status: TargetStatus, auth: AuthStatus |
 				detail: `fallback:${auth.providerId}`,
 			};
 		case "not-required":
+			if (status.runtime.auth === "claude-cli") return { summary: "claude", detail: "claude-cli-login" };
 			return { summary: "none", detail: "not-required" };
 		case "none":
 			return { summary: "disconnected", detail: `missing ${status.runtime.auth} (${auth.providerId})` };

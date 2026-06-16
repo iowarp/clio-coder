@@ -1,12 +1,19 @@
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
 /**
- * Single target-eligibility policy shared by orchestrator, print, and dispatch
- * paths. Clio only drives HTTP/native/pi-ai-backed executable adapters; any
- * other runtime kind is rejected before it can be used as a target. Keeping one
- * predicate means configure, targets, the model selector, startup checks, and
- * dispatch admission all agree on what counts as a usable target.
+ * Target eligibility covers runtimes Clio can drive from at least one target
+ * surface. HTTP runtimes remain the only orchestrator/print runtimes; the
+ * Claude Code subscription runtimes are worker-dispatch targets with their own
+ * worker runners.
  */
 export function isTargetEligibleRuntime(runtime: RuntimeDescriptor): boolean {
+	return runtime.kind === "http" || runtime.id === "claude-sdk" || runtime.id === "claude-code";
+}
+
+export function isOrchestratorEligibleRuntime(runtime: RuntimeDescriptor): boolean {
 	return runtime.kind === "http";
+}
+
+export function isDispatchEligibleRuntime(runtime: RuntimeDescriptor): boolean {
+	return isTargetEligibleRuntime(runtime);
 }

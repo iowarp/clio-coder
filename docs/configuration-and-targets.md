@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive configuration validator, target resolver, and CLI command generator is located at [docs/html/configuration_blueprint.html](html/configuration_blueprint.html) (Version: 0.2.3).
 
-Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat, print, and fleet dispatch targets are all HTTP/native/pi-ai-backed runtimes.
+Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP/native/pi-ai-backed runtimes. Fleet dispatch can also target the sanctioned Claude Code subscription runtimes described below.
 
 Clio is built on top of pi-ai. Broad provider/model support comes from pi-ai-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every pi-ai provider.
 
@@ -108,11 +108,11 @@ Terminology used in code and receipts:
 
 | Term | Meaning |
 | --- | --- |
-| `RuntimeDescriptor` | HTTP/native/pi-ai-backed executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, or `llamacpp`. |
+| `RuntimeDescriptor` | Executable adapter, transport, or protocol implementation, for example `openai-codex`, `anthropic`, `openai-compat`, `llamacpp`, `claude-sdk`, or `claude-code`. |
 | Target / `TargetDescriptor` | Persisted user-configured target plus runtime id, model defaults, auth metadata, and capability overrides. |
 | Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
 | Orchestrator target | Main chat/print target. HTTP/native/pi-ai-backed. |
-| Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, resolved exactly like an orchestrator target. |
+| Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, or one of the sanctioned Claude Code subscription runtimes. |
 
 ```yaml
 version: 1
@@ -283,6 +283,23 @@ clio configure \
 
 Add capability overrides such as `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` only when live probes cannot infer the right values for your runtime/model.
 
+Claude Code subscription worker targets use the installed `claude` command and your existing Claude Code login. They do not use `clio auth login`, and Clio stores no Claude Code credential:
+
+```bash
+claude --help
+claude auth login
+
+clio configure \
+  --id claude-sdk-worker \
+  --runtime claude-sdk \
+  --model sonnet \
+  --set-fleet-default
+
+clio targets profile claude claude-sdk-worker --model sonnet
+```
+
+Use `claude-sdk` when you want the Claude Agent SDK worker runtime with `canUseTool` decisions routed through Clio safety. Use `claude-code` when you want Clio to run `claude -p --output-format stream-json` as a subprocess. Both are worker-dispatch targets, not chat/print orchestrator targets.
+
 Useful flags:
 
 | Flag | Meaning |
@@ -315,7 +332,7 @@ clio targets remove <id>
 clio targets rename <old> <new>
 ```
 
-`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime. Use profiles when dispatch should prefer different models or runtimes for specific jobs.
+`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat. Use `clio configure --set-fleet-default` or `clio targets profile` when dispatch should prefer worker-only runtimes such as `claude-sdk` or `claude-code`.
 
 Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio targets use`. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system. Press `d` to clear live connection state while leaving stored credentials unchanged.
 
@@ -364,12 +381,13 @@ Representative built-in runtime IDs:
 | --- | --- |
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
 | Cloud | `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex`, `openrouter` |
+| Subscription | `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers |
 | Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio configure --list --all` to see them.
 
 > [!NOTE]
-> Every runtime is an HTTP/native/pi-ai-backed adapter. Chat, print, and dispatch worker targets all resolve through the same target-eligibility policy.
+> Chat and print targets are HTTP/native/pi-ai-backed adapters. Dispatch workers also admit the sanctioned Claude Code subscription runtimes: `claude-sdk` and `claude-code`.
 
 ---
 
@@ -389,6 +407,7 @@ Auth types come from runtime descriptors:
 | `api-key` | Environment variable or stored credential. |
 | `oauth` | Browser/manual OAuth flow where implemented. |
 | `aws-sdk` / `vertex-adc` | Uses platform SDK/application credentials. |
+| `claude-cli` | Uses the installed `claude` command's existing Claude Code login; Clio stores no credential. |
 | `none` | No credential required. |
 
 ### Credential storage and its limits

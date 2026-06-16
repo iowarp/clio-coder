@@ -4,8 +4,9 @@
  * Owns the pi-agent-core Agent instance for a worker run and forwards every
  * AgentEvent to an emit callback (the worker entry serializes events to NDJSON
  * stdout). Post-W5 the surface takes a resolved TargetDescriptor +
- * RuntimeDescriptor + wire model id, not a provider/model pair. Every runtime
- * is an HTTP/native/pi-ai-backed adapter driven through pi-agent-core.
+ * RuntimeDescriptor + wire model id, not a provider/model pair. HTTP/native
+ * runtimes stay pi-agent-backed; sanctioned external runtimes branch to their
+ * own worker runners before pi-agent model synthesis.
  */
 
 import { validateSettingsFile } from "../core/config.js";
@@ -31,6 +32,8 @@ import { createProtectedArtifactsRegistration } from "../domains/safety/protecte
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
+import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
+import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
 import { createLoopGuardRegistration, readToolCallCap } from "./loop-guard.js";
 import { patchReasoningSummaryPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
@@ -169,6 +172,13 @@ function workerProviderSupportsTools(input: WorkerRunInput): boolean {
  * function; the promise resolves when `agent.waitForIdle()` returns.
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
+	if (input.runtime.id === "claude-sdk") {
+		return startClaudeSdkWorkerRun(input, emit);
+	}
+	if (input.runtime.id === "claude-code") {
+		return startClaudeCodeWorkerRun(input, emit);
+	}
+
 	// pi-ai is process-local. The orchestrator registers Clio API providers in
 	// providers/extension.ts, but the worker subprocess starts a fresh process,
 	// so it must register them here before any agent.prompt() touches a local

@@ -4,7 +4,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
-import { isTargetEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
+import { isOrchestratorEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
@@ -210,7 +210,7 @@ function runUse(args: ReadonlyArray<string>): number {
 		);
 		return 1;
 	}
-	if (!isTargetEligibleRuntime(runtime)) {
+	if (!isOrchestratorEligibleRuntime(runtime)) {
 		printError(
 			`cannot use target '${target.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
@@ -406,7 +406,7 @@ function runConvert(args: ReadonlyArray<string>): number {
 		printOk(`target ${id} already uses runtime ${runtimeId}`);
 		return 0;
 	}
-	if (settings.orchestrator.target === id && !isTargetEligibleRuntime(runtime)) {
+	if (settings.orchestrator.target === id && !isOrchestratorEligibleRuntime(runtime)) {
 		printError(`cannot convert orchestrator target '${id}' to non-HTTP/native runtime '${runtime.id}'`);
 		return 1;
 	}
@@ -511,6 +511,7 @@ function formatNotes(status: TargetStatus): string {
 	const parts: string[] = [];
 	if (status.target.gateway) parts.push("gateway");
 	if (status.runtime?.auth === "oauth") parts.push("oauth");
+	if (status.runtime?.auth === "claude-cli") parts.push("claude-cli");
 	if (status.capabilities.contextWindow > 0) parts.push(`ctx ${status.capabilities.contextWindow}`);
 	if (!status.available && status.reason) parts.push(status.reason);
 	if (status.probeNotes && status.probeNotes.length > 0) parts.push(`note: ${status.probeNotes.join("; ")}`);
@@ -527,6 +528,8 @@ function tierLabel(tier: ProviderOutputTier): string {
 			return "Protocol";
 		case "cloud":
 			return "Cloud";
+		case "subscription":
+			return "Subscription";
 		case "local-native":
 			return "Local native";
 		case "unknown":
@@ -540,10 +543,12 @@ function tierRank(tier: ProviderOutputTier): number {
 			return 0;
 		case "cloud":
 			return 1;
-		case "local-native":
+		case "subscription":
 			return 2;
-		case "unknown":
+		case "local-native":
 			return 3;
+		case "unknown":
+			return 4;
 	}
 }
 

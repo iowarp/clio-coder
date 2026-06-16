@@ -1,7 +1,7 @@
 import { targetRequiresAuth } from "./auth/index.js";
 import { getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
-import { isTargetEligibleRuntime } from "./eligibility.js";
+import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
@@ -159,8 +159,14 @@ function requiredCapabilitySupported(capabilities: CapabilityFlags, name: string
 }
 
 function streamingDecision(runtime: RuntimeDescriptor): boolean {
-	// HTTP/native runtimes stream through pi-ai/pi-agent-core.
-	return runtime.kind === "http";
+	// HTTP/native runtimes stream through pi-ai/pi-agent-core. The sanctioned
+	// Claude Code worker runtimes stream through their SDK/CLI worker runners.
+	return isTargetEligibleRuntime(runtime);
+}
+
+function runtimeSupportsUse(runtime: RuntimeDescriptor, use: RuntimeResolutionUse): boolean {
+	if (use === "dispatch") return isDispatchEligibleRuntime(runtime);
+	return isOrchestratorEligibleRuntime(runtime);
 }
 
 function capabilityDecisions(runtime: RuntimeDescriptor, capabilities: CapabilityFlags): RuntimeCapabilityDecision {
@@ -295,7 +301,21 @@ export function resolveRuntimeTarget(
 				diagnostic(
 					"error",
 					"runtime-target-unsupported",
-					`target '${targetId}' uses runtime '${runtime.id}' (${runtime.kind}); Clio only drives HTTP/native runtime targets`,
+					`target '${targetId}' uses runtime '${runtime.id}' (${runtime.kind}); Clio cannot drive this runtime as a target`,
+				),
+			],
+		};
+	}
+
+	const resolutionUse = input.use ?? "orchestrator";
+	if (!runtimeSupportsUse(runtime, resolutionUse)) {
+		return {
+			ok: false,
+			diagnostics: [
+				diagnostic(
+					"error",
+					"runtime-use-unsupported",
+					`target '${targetId}' uses runtime '${runtime.id}' (${runtime.kind}); this runtime is only supported for worker dispatch`,
 				),
 			],
 		};

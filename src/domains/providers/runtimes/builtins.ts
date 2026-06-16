@@ -10,6 +10,8 @@
 
 import type { RuntimeRegistry } from "../registry.js";
 import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
+import claudeCode from "./claude/claude-code.js";
+import claudeSdk from "./claude/claude-sdk.js";
 import anthropic from "./cloud/anthropic.js";
 import anthropicMax from "./cloud/anthropic-max.js";
 import bedrock from "./cloud/bedrock.js";
@@ -58,6 +60,8 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	openaiCompat,
 	sglang,
 	vllm,
+	claudeCode,
+	claudeSdk,
 ];
 
 export function registerBuiltinRuntimes(registry: RuntimeRegistry): void {

@@ -26,7 +26,7 @@ export {
 } from "./auth/index.js";
 export { mergeCapabilities } from "./capabilities.js";
 export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
-export { isTargetEligibleRuntime } from "./eligibility.js";
+export { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
 export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-capabilities.js";

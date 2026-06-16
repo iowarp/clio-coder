@@ -12,7 +12,7 @@ import type {
 	ThinkingLevel,
 } from "../../domains/providers/index.js";
 import {
-	isTargetEligibleRuntime,
+	isOrchestratorEligibleRuntime,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
 	type ProviderModelSource,
@@ -357,7 +357,7 @@ export function buildModelItems(deps: {
 	const recentSet = new Set(listRecentModels({ limit: deps.settings.modelSelector?.recentLimit ?? 12 }));
 	const list = [...deps.providers.list()]
 		.filter((status) => {
-			return status.runtime !== null && isTargetEligibleRuntime(status.runtime);
+			return status.runtime !== null && isOrchestratorEligibleRuntime(status.runtime);
 		})
 		.sort((a, b) => {
 			const aActive = a.target.id === activeTarget ? 0 : 1;

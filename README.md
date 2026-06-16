@@ -30,7 +30,8 @@
 
 Clio Coder is a supervised coding agent that runs inside your repository from
 the terminal. You bring a model: a local runtime such as llama.cpp, Ollama,
-LM Studio, vLLM, or SGLang, or a cloud API. Clio brings the harness: an
+LM Studio, vLLM, or SGLang, a cloud API, or an explicit Claude Code
+subscription worker target. Clio brings the harness: an
 interactive TUI, typed tools instead of an unrestricted shell, a fleet of
 focused agents, durable sessions, and receipts that record what actually
 happened.
@@ -85,7 +86,8 @@ the deterministic `npm run ci:release` suite.
 - Node.js `>=22.19.0` and npm
 - Linux or macOS (Windows is best effort until a stable release)
 - A model target: a local OpenAI-compatible server, Ollama, LM Studio,
-  llama.cpp, vLLM, SGLang, ChatGPT Codex OAuth, or a cloud API key
+  llama.cpp, vLLM, SGLang, ChatGPT Codex OAuth, a cloud API key, or an
+  installed `claude` command for Claude Code worker targets
 
 ## Install
 
@@ -148,6 +150,11 @@ can see. The full command and slash-command reference is in
 [docs/commands-and-modes.md](docs/commands-and-modes.md), and target
 configuration in depth is covered by
 [docs/configuration-and-targets.md](docs/configuration-and-targets.md).
+
+Claude Code subscription targets are worker-only: configure `claude-sdk` for
+the Claude Agent SDK runtime or `claude-code` for the `claude -p` subprocess
+runtime after authenticating with the installed `claude` command. Clio stores
+no Claude Code credential.
 
 ## Project Context: CLIO.md
 

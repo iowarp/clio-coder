@@ -445,10 +445,17 @@ function supportsRequiredCapabilities(
 	return true;
 }
 
-function runtimeLimitations(_runtimeKind: RunKind, _runtimeId: string): string[] {
-	// Clio only drives HTTP/native runtimes through pi-agent-core, which Clio
-	// observes and controls directly, so there are no runtime-imposed dispatch
-	// limitations to record.
+function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
+	if (runtimeKind === "sdk" && runtimeId === "claude-sdk") {
+		return ["Claude Agent SDK executes Claude Code tools; Clio mediates canUseTool decisions and records denials"];
+	}
+	if (runtimeKind === "subprocess" && runtimeId === "claude-code") {
+		return [
+			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
+		];
+	}
+	// HTTP/native runtimes run through pi-agent-core, which Clio observes and
+	// controls directly, so there are no runtime-imposed dispatch limitations.
 	return [];
 }
 
