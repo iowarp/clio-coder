@@ -185,12 +185,13 @@ Fleet dispatch is admitted only when the requested worker scope is a subset of t
 
 Dispatch workers can run the same HTTP/native/pi-ai-backed runtimes as the orchestrator, driven through pi-agent-core. Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
 
-Two worker-only Claude Code subscription runtimes are also available:
+Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
 
-- `claude-sdk` uses `@anthropic-ai/claude-agent-sdk`. Claude Code still executes its own built-in tools, but every SDK `canUseTool` request is mapped into Clio's safety net and autonomy matrix before the SDK receives `allow` or `deny`. Clio `ask` outcomes resolve through the worker non-stall policy (`workers.onPermission=deny|fail`) because a dispatched worker has no interactive operator.
-- `claude-code` runs the installed `claude` binary with `claude -p --output-format stream-json`. The current CLI help does not expose a structured permission callback equivalent to the SDK `canUseTool` hook, so this path is constrained through Claude Code permission modes. Dangerous bypass posture is only passed when the worker autonomy is `full-auto` and `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`; otherwise the subprocess runner uses non-bypass modes.
+- **`claude-sdk` (Enforced Safety):** Drives `@anthropic-ai/claude-agent-sdk` directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`workers.onPermission=deny` returns denial; `workers.onPermission=fail` terminates the run with a permission-required code).
+- **`claude-code` (Subprocess Gating):** Drives `claude -p` as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary's command-line parameters (such as `--permission-mode` and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. A dangerous bypass (`--allow-dangerously-skip-permissions`) is only sent when autonomy is `full-auto` and `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`.
+- **Claude Code over ACP (Advisory Gating):** Drives Zed's `@zed-industries/claude-code-acp` (or `@agentclientprotocol/claude-agent-acp`) bridge as an ACP delegation agent. Clio's ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately **advisory** as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, `claude-sdk` is preferred over ACP.
 
-Both Claude Code runtimes rely on the user's existing `claude` login and store no credential in Clio.
+All Claude Code runtimes rely on the user's existing CLI authentication and store no credentials in Clio.
 
 ---
 

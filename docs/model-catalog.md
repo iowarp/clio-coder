@@ -102,6 +102,17 @@ The Context Engine evaluates thinking mechanisms per model target and manages li
 - **Ollama Native (`ollama-native`):** Ollama utilizes the native `thinking` field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
 - **LM Studio Native (`lmstudio-native`):** Because LM Studio does not expose a native reasoning field, the engine replays prior thinking blocks by prepending them to assistant message payloads. These are formatted as a text-prepended part wrapped in `<think>` and `</think>` tags.
 - **OpenAI Completions (`openai-completions`):** The OpenAI-compatible completions provider preserves reasoning blocks within assistant messages. It replays thinking blocks via the `reasoning_content` parameter in the message history, ensuring that the model maintains its chain-of-thought across conversational turns without stripping the data.
+- **Anthropic OAuth / API (`anthropic-max`):** Uses the `anthropic-extended` thinking format. The engine supports Anthropic's native extended thinking block protocol, streaming thinking increments and outputting them wrapped appropriately or natively depending on target capabilities.
+
+---
+
+## Subscription Catalog Models
+
+Subscription models are registered and managed as standard HTTP/cloud targets:
+
+- **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to standard OpenAI models (like `gpt-4o`, `gpt-4o-mini`, `o1-mini`, `o3-mini`) via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
+- **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using Claude Pro models (like `claude-3-5-sonnet-latest`). It relies on pi-ai's `anthropic` OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
+  `Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.`
 
 ---
 

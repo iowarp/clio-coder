@@ -112,6 +112,12 @@ ACP delegation agents (registered under `delegation.agents` in `settings.yaml`) 
 To ensure security and proper boundary isolation, shadow and internal agents are restricted from being delegated:
 - **shadow/internal Restriction:** The dispatch engine rejects any attempt to run a shadow or internal agent on an external ACP delegation worker, throwing a validation error.
 
+### Subscription Worker Runtimes
+
+In addition to standard HTTP targets and ACP delegation agents, Clio dispatches subagents to sanctioned subscription worker runtimes:
+- **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. You can use it alongside Clio's native subagent workers (like a local `llama.cpp` or LM Studio fleet) to execute tasks under your Claude Pro/Max subscription. Since it routes tool calls through Clio safety, it behaves as a native worker.
+- **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes.
+
 Interactive TUI:
 
 ```text

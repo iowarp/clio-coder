@@ -898,6 +898,14 @@ commands:
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Typed validation tools</h3>
         <p>Prefer typed tools over Bash: <code>git</code> (status/diff/log), <code>run_task</code>, and <code>validate_frontend</code>. <code>validate_frontend</code> accepts <code>.html</code>, <code>.css</code>, <code>.js</code> under the workspace root, performing syntax checks and optionally validating references in headless browsers.</p>
 
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Dispatch and delegation runtimes</h3>
+        <p>Clio dispatches tasks to worker runtimes and delegation agents under different safety postures:</p>
+        <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
+          <li style="margin-bottom: 0.5rem;"><strong><code>claude-sdk</code> (Enforced Safety):</strong> The Claude Code SDK worker is the <strong>strong safety path</strong>. It gates every tool request through Clio's safety net and active autonomy dial before execution via PreToolUse hooks. Worker denials resolve non-interactively based on <code>workers.onPermission</code>.</li>
+          <li style="margin-bottom: 0.5rem;"><strong><code>claude-code</code> (Subprocess Gating):</strong> Drives <code>claude -p</code> as a subprocess. Gating is restricted to command-line parameters mapping the autonomy level to CLI permission modes, without per-tool callbacks.</li>
+          <li style="margin-bottom: 0.5rem;"><strong>Claude Code over ACP (Advisory Gating):</strong> Drives the agent over ACP delegation. Gating is <strong>advisory</strong> because Claude self-governs its tools; <code>claude-sdk</code> is preferred for fully enforced safety.</li>
+        </ul>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Receipts and evidence</h3>
         <p>Safety decisions feed receipts, audit rows, and evidence. The interactive <code>/view</code> surface can inspect receipt artifacts without mutating them, detailing rules matched, command hashes, and active decisions counts.</p>
       </div>

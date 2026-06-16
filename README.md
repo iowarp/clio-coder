@@ -151,10 +151,79 @@ can see. The full command and slash-command reference is in
 configuration in depth is covered by
 [docs/configuration-and-targets.md](docs/configuration-and-targets.md).
 
-Claude Code subscription targets are worker-only: configure `claude-sdk` for
-the Claude Agent SDK runtime or `claude-code` for the `claude -p` subprocess
-runtime after authenticating with the installed `claude` command. Clio stores
-no Claude Code credential.
+## Use Clio with a Subscription
+
+Clio can run on AI subscriptions, not just API keys. You can power Clio using your ChatGPT Plus/Pro subscription or drive Claude Code using your Claude Pro/Max subscription.
+
+### 1. Powering the Orchestrator with ChatGPT or Claude Pro
+
+You can use a ChatGPT Plus/Pro subscription (`openai-codex`) or a Claude Pro/Max subscription (`anthropic-max`) as a native Clio model to power the main orchestrator and chat sessions.
+
+To log in:
+```bash
+# Log in to your Claude Pro/Max subscription (OAuth)
+clio auth login anthropic-max
+
+# Log in to your ChatGPT Plus/Pro subscription (OAuth)
+clio auth login openai-codex
+```
+> [!NOTE]
+> Connecting with your Claude Pro/Max subscription via OAuth uses the same path as Claude Code. Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.
+
+Next, configure the orchestrator target:
+```bash
+# Configure Claude Pro/Max as your orchestrator target
+clio configure --id claude-sub --runtime anthropic-max --model sonnet --set-orchestrator
+
+# Configure ChatGPT Plus/Pro as your orchestrator target
+clio configure --id chatgpt-sub --runtime openai-codex --model gpt-4o --set-orchestrator
+```
+
+### 2. Gating and Driving Claude Code Workers
+
+The Claude Code SDK (runtime ID `claude-sdk`) is a main worker runtime that Clio can drive, usable alongside Clio's native subagent workers (like your local `llama.cpp` or LM Studio fleet). 
+
+To configure a Claude Code worker, first authenticate outside Clio via the official Claude CLI:
+```bash
+# Authenticate official Claude Code CLI
+claude auth login
+```
+Once logged in, register your Claude Code worker runtimes in Clio:
+```bash
+# Register the Claude Code SDK runtime (recommended: enforced per-tool safety)
+clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
+
+# Register the claude -p subprocess runtime (advisory/permission-mode gating only)
+clio configure --id claude-code-worker --runtime claude-code --model sonnet
+```
+
+### 3. Mixing Orchestrator and Worker Targets
+
+You can configure a premium subscription orchestrator and route intensive implementation tasks to a gated Claude Code worker or your local offline fleet.
+
+Example setup (ChatGPT orchestrator + Claude SDK worker + local Llama fleet):
+```bash
+# 1. Authenticate subscriptions
+clio auth login openai-codex
+claude auth login
+
+# 2. Configure ChatGPT orchestrator
+clio configure --id chatgpt-orch --runtime openai-codex --model gpt-4o --set-orchestrator
+
+# 3. Configure Claude SDK worker
+clio configure --id claude-worker --runtime claude-sdk --model sonnet
+
+# 4. Configure local model fleet default (e.g. LM Studio)
+clio configure --id local-fleet --runtime lmstudio-native --url http://localhost:1234 --model qwen-7b --set-fleet-default
+
+# 5. Route specific tasks using named worker profiles
+clio targets profile claude-sdk claude-worker --model sonnet
+clio targets profile local-fleet local-fleet
+
+# 6. Run a coder subagent task directed to the Claude worker
+clio run --agent coder "Refactor src/engine/parser.ts"
+```
+
 
 ## Project Context: CLIO.md
 

@@ -943,6 +943,8 @@
               <option value="lmstudio">LM Studio (Local Native)</option>
               <option value="openai">OpenAI (Cloud)</option>
               <option value="bedrock">Amazon Bedrock (Cloud)</option>
+              <option value="anthropic-max">Anthropic Max (Claude Pro Subscription)</option>
+              <option value="openai-codex">OpenAI Codex (ChatGPT Subscription)</option>
             </select>
           </div>
 
@@ -1323,6 +1325,7 @@
               <option value="ollama-native">Ollama Native (ollama-native)</option>
               <option value="lmstudio-native">LM Studio Native (lmstudio-native)</option>
               <option value="openai-completions">OpenAI Completions (openai-completions)</option>
+              <option value="anthropic-max">Anthropic OAuth / API (anthropic-max)</option>
             </select>
           </div>
           <div class="form-group">
@@ -1660,6 +1663,14 @@
         { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", name: "Claude 3.5 Sonnet v2", chat: true, tools: true, reasoning: false, vision: true, context: 200000, format: "anthropic" },
         { id: "us.amazon.nova-pro-v1:0", name: "Amazon Nova Pro", chat: true, tools: true, reasoning: false, vision: true, context: 300000, format: "openai" },
         { id: "anthropic.claude-3-5-haiku-20241022-v1:0", name: "Claude 3.5 Haiku", chat: true, tools: true, reasoning: false, vision: false, context: 200000, format: "anthropic" }
+      ],
+      'anthropic-max': [
+        { id: "claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet (Subscription)", chat: true, tools: true, reasoning: true, vision: true, context: 200000, format: "anthropic" },
+        { id: "claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", chat: true, tools: true, reasoning: false, vision: false, context: 200000, format: "anthropic" }
+      ],
+      'openai-codex': [
+        { id: "gpt-4o", name: "GPT-4o (ChatGPT Pro)", chat: true, tools: true, reasoning: false, vision: true, context: 272000, format: "openai" },
+        { id: "o1-mini", name: "o1 Mini (ChatGPT Pro)", chat: true, tools: false, reasoning: true, vision: false, context: 272000, format: "harmony" }
       ]
     };
 
@@ -1694,6 +1705,16 @@
         urlInput.value = "aws-sdk://us-east-1";
         authInput.value = "••••••••••••••••";
         authInput.placeholder = "Resolved from AWS Profile envs";
+        authInput.disabled = false;
+      } else if (target === 'anthropic-max') {
+        urlInput.value = "https://api.anthropic.com";
+        authInput.value = "••••••••••••••••";
+        authInput.placeholder = "OAuth Subscription Token (automatically managed)";
+        authInput.disabled = false;
+      } else if (target === 'openai-codex') {
+        urlInput.value = "https://chatgpt.com/backend-api";
+        authInput.value = "••••••••••••••••";
+        authInput.placeholder = "OAuth Subscription Token (automatically managed)";
         authInput.disabled = false;
       }
 
@@ -2262,6 +2283,47 @@
           <div style="display:flex; flex-direction:column; gap:0.5rem;">
             <div style="font-size:0.75rem; color:var(--text-muted);">Preserves reasoning blocks using reasoning_content parameter, ensuring the model maintains CoT across turns:</div>
             <div style="border-left: 2px solid var(--color-emerald); padding-left: 0.75rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">${cot.replace(/\n/g, '<br>')}</div>
+            <div style="font-weight: 500; margin-top: 0.25rem;">${answer}</div>
+          </div>
+        `;
+      } else if (provider === "anthropic-max") {
+        badgeText = "Anthropic Extended Thinking";
+        badge.style.color = "var(--color-amber)";
+        badge.style.borderColor = "var(--color-amber)";
+        badge.style.background = "rgba(245, 158, 11, 0.1)";
+
+        const payload = {
+          model: "claude-3-5-sonnet-latest",
+          max_tokens: 8192,
+          thinking: {
+            type: "enabled",
+            budget_tokens: 2048
+          },
+          messages: [
+            {
+              role: "user",
+              content: "What is 2 + 2?"
+            },
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "thinking",
+                  thinking: cot
+                },
+                {
+                  type: "text",
+                  text: answer
+                }
+              ]
+            }
+          ]
+        };
+        jsonContent = JSON.stringify(payload, null, 2);
+        uiContent = `
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Uses Anthropic's extended thinking blocks payload format:</div>
+            <div style="border-left: 2px solid var(--color-amber); padding-left: 0.75rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">${cot.replace(/\n/g, '<br>')}</div>
             <div style="font-weight: 500; margin-top: 0.25rem;">${answer}</div>
           </div>
         `;

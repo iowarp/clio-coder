@@ -283,22 +283,65 @@ clio configure \
 
 Add capability overrides such as `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` only when live probes cannot infer the right values for your runtime/model.
 
-Claude Code subscription worker targets use the installed `claude` command and your existing Claude Code login. They do not use `clio auth login`, and Clio stores no Claude Code credential:
+## Subscription-based Targets and Runtimes
 
+Clio supports running on AI subscriptions rather than API keys, both for orchestrators and workers:
+
+### 1. OAuth Subscription Runtimes (Orchestrator + Worker)
+
+These runtimes use your personal subscription credentials via OAuth, minting tokens to power standard HTTP execution. They are eligible to run as both the main orchestrator (chat/print) and worker targets.
+
+- **`openai-codex`**: Powers the orchestrator or workers using a ChatGPT Plus/Pro subscription.
+- **`anthropic-max`**: Powers the orchestrator or workers using a Claude Pro/Max subscription.
+  - *Terms of Service Caveat:* During login (`clio auth login anthropic-max`), Clio displays this warning notice:
+    > [!WARNING]
+    > Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.
+
+**Login and Configuration Examples:**
 ```bash
-claude --help
-claude auth login
+# Authenticate
+clio auth login openai-codex
+clio auth login anthropic-max
 
-clio configure \
-  --id claude-sdk-worker \
-  --runtime claude-sdk \
-  --model sonnet \
-  --set-fleet-default
-
-clio targets profile claude claude-sdk-worker --model sonnet
+# Configure orchestrator targets
+clio configure --id chatgpt-sub --runtime openai-codex --model gpt-4o --set-orchestrator
+clio configure --id claude-sub --runtime anthropic-max --model sonnet --set-orchestrator
 ```
 
-Use `claude-sdk` when you want the Claude Agent SDK worker runtime with `canUseTool` decisions routed through Clio safety. Use `claude-code` when you want Clio to run `claude -p --output-format stream-json` as a subprocess. Both are worker-dispatch targets, not chat/print orchestrator targets.
+### 2. Sanctioned Claude Code Worker Runtimes (Worker-Only)
+
+These runtimes drive your local `claude` installation to execute subagent tasks. They are worker-only targets: they can be selected for dispatch via fleet defaults or profiles, but chat/print orchestration requires an HTTP target (like `anthropic-max` or `openai-codex`). They rely on your authenticated `claude` CLI and store no credentials in Clio.
+
+- **`claude-sdk`** (Claude Code SDK): The main worker runtime, usable alongside Clio's native subagent workers (e.g. `llama.cpp` or LM Studio fleet). It integrates with `@anthropic-ai/claude-agent-sdk` (v0.3.178) and is the **strong safety path** because it routes every tool execution through Clio's safety contract and autonomy matrix.
+- **`claude-code`**: Runs `claude -p --output-format stream-json` as a subprocess. Since the subprocess has no direct callback hook, it is restricted to command-line permission-mode gating.
+
+**Configuration Examples:**
+```bash
+# 1. Authenticate outside Clio using the official CLI
+claude auth login
+
+# 2. Configure the SDK worker target (enforced safety)
+clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
+
+# 3. Configure the subprocess worker target (advisory/permission-mode gating)
+clio configure --id claude-code-worker --runtime claude-code --model sonnet
+```
+
+### 3. Claude Code over ACP (Delegation-Only)
+
+You can drive Claude Code as an external delegation agent over the Agent Client Protocol (ACP). This relies on the Zed `@zed-industries/claude-code-acp` adapter to run over stdio under your existing Claude Code subscription.
+- **Advisory Gating:** Under ACP, gating is **advisory** because Claude self-governs its tools; prefer `claude-sdk` for **enforced** per-tool safety where Clio's safety net intercepts every action class.
+- **Configuration Recipe:** Configure by adding a delegation agent in `settings.yaml` (a commented recipe is included by default):
+```yaml
+delegation:
+  agents:
+    - id: claude-code
+      command: npx
+      args: ["-y", "@zed-industries/claude-code-acp"]
+      toolGovernance: clio-policy
+```
+Then invoke it using `/delegate claude-code <task>`.
+
 
 Useful flags:
 
