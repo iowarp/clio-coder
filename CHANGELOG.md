@@ -37,6 +37,16 @@ the roots, and uninstall removes everything it installed.
 
 ### Added
 
+- Added a Claude Code delegation path over ACP. Clio drives the user's Claude
+  Code through `@zed-industries/claude-code-acp` (the `claude` CLI has no ACP of
+  its own; the adapter bridges the Claude Code SDK and runs on the user's Claude
+  Pro/Max subscription), reusing Clio's existing ACP delegation client and tool
+  mediator. The settings template ships a commented `claude-code` delegation
+  recipe. The ACP tool mediator now infers the Clio tool from the permission
+  request's `rawInput` shape (`command`→bash, `file_path`+mutation→edit,
+  `file_path`→read, `pattern`→grep, `url`→web_fetch) so agents that omit the ACP
+  tool `kind` — claude-code-acp among them — still have their shell, write, and
+  edit calls classified and safety-gated instead of blanket-denied.
 - Added an `anthropic-max` runtime that powers Clio with a Claude Pro/Max
   subscription over OAuth, mirroring the `openai-codex` subscription runtime. It
   is an `anthropic-messages` HTTP runtime authenticated by a subscription OAuth

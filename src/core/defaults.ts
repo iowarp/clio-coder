@@ -347,6 +347,17 @@ delegation:
   #   toolGovernance: clio-policy
   #   labels:
   #     specialty: coding
+  #
+  # Claude Code via its ACP adapter (runs on your Claude Pro/Max subscription;
+  # the claude CLI has no ACP of its own, so this adapter bridges the Claude
+  # Code SDK). Tool calls are gated by Clio safety under clio-policy; switch to
+  # agent-managed to let Claude Code govern its own tools.
+  # - id: claude-code
+  #   command: npx
+  #   args: [-y, "@zed-industries/claude-code-acp"]
+  #   toolGovernance: clio-policy
+  #   labels:
+  #     specialty: coding
 
 keybindings: {}
 
