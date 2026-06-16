@@ -51,10 +51,10 @@ SWE-bench Lite evaluation (zbook local Docker):
     uv tool run --from swebench python -m swebench.harness.run_evaluation \
       --dataset_name princeton-nlp/SWE-bench_Lite \
       --predictions_path runs/calib/predictions.jsonl --run_id clio-calib --max_workers 4
-Terminal-Bench smoke (clio tarball served on the host LAN):
-    python3 -m http.server 8899 --bind 0.0.0.0   # in ~/tmp/clio-bench, serves the tgz
+Terminal-Bench smoke (clio tarball served on the host; run from terminal-bench/):
+    python3 -m http.server 8899 --bind 0.0.0.0   # in the dir holding iowarp-clio-coder-*.tgz
     CLIO_TARBALL_URL=http://host.docker.internal:8899/iowarp-clio-coder-0.2.3.tgz \
-    PYTHONPATH=~/tmp/clio-bench \
+    PYTHONPATH=$PWD \
     tb run -d terminal-bench-core==0.1.1 --n-tasks 1 --n-concurrent 1 \
       --agent-import-path "tb_clio_agent.clio_agent:ClioAgent" \
       --output-path runs/tb-smoke
