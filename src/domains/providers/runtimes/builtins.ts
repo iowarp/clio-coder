@@ -10,6 +10,7 @@
 
 import type { RuntimeRegistry } from "../registry.js";
 import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
+import antigravityCode from "./antigravity/antigravity-code.js";
 import claudeCode from "./claude/claude-code.js";
 import claudeSdk from "./claude/claude-sdk.js";
 import anthropic from "./cloud/anthropic.js";
@@ -62,6 +63,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	vllm,
 	claudeCode,
 	claudeSdk,
+	antigravityCode,
 ];
 
 export function registerBuiltinRuntimes(registry: RuntimeRegistry): void {
