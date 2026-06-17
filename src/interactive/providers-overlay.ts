@@ -8,7 +8,11 @@ import type {
 	RuntimeResolutionDiagnostic,
 	TargetStatus,
 } from "../domains/providers/index.js";
-import { modelLoadStateLabel } from "../domains/providers/index.js";
+import {
+	isDispatchEligibleRuntime,
+	isOrchestratorEligibleRuntime,
+	modelLoadStateLabel,
+} from "../domains/providers/index.js";
 import {
 	type Component,
 	Loader,
@@ -356,10 +360,24 @@ export function buildTargetHubUseSettings(settings: Readonly<ClioSettings>, targ
 	return next;
 }
 
+export function buildTargetHubFleetSettings(settings: Readonly<ClioSettings>, targetId: string): ClioSettings {
+	const next = structuredClone(settings) as ClioSettings;
+	applySettingChange(next, "workers.default.target", targetId);
+	return next;
+}
+
 export function applyTargetsHubUseAction(targetId: string, deps: TargetsHubUseDeps): ClioSettings | null {
 	const current = deps.getSettings();
 	if (!current) return null;
 	const next = buildTargetHubUseSettings(current, targetId);
+	deps.writeSettings(next);
+	return next;
+}
+
+export function applyTargetsHubFleetAction(targetId: string, deps: TargetsHubUseDeps): ClioSettings | null {
+	const current = deps.getSettings();
+	if (!current) return null;
+	const next = buildTargetHubFleetSettings(current, targetId);
 	deps.writeSettings(next);
 	return next;
 }
@@ -402,7 +420,6 @@ export interface OpenProvidersOverlayOptions {
 	getSettings?: () => Readonly<ClioSettings> | undefined;
 	writeSettings?: (next: ClioSettings) => void;
 	connectTarget?: (targetId: string) => Promise<void> | void;
-	disconnectTarget?: (targetId: string) => Promise<void> | void;
 	notice?: (level: TargetsHubNoticeLevel, text: string, key?: string) => void;
 }
 
@@ -499,12 +516,60 @@ export function openProvidersOverlay(
 				options?.notice?.("warning", "targets: settings writer unavailable", "targets:use");
 				return;
 			}
+			if (!status.runtime) {
+				options?.notice?.(
+					"warning",
+					`targets: ${status.target.id} runtime not registered`,
+					`targets:use:${status.target.id}`,
+				);
+				return;
+			}
+			if (!isOrchestratorEligibleRuntime(status.runtime)) {
+				options?.notice?.(
+					"warning",
+					`targets: ${status.target.id} runtime ${status.runtime.id} is not a chat (orchestrator) target`,
+					`targets:use:${status.target.id}`,
+				);
+				return;
+			}
 			const next = applyTargetsHubUseAction(status.target.id, {
 				getSettings: options.getSettings,
 				writeSettings: options.writeSettings,
 			});
 			const model = next?.orchestrator.model ?? "(no model)";
 			options.notice?.("success", `using target ${status.target.id} (${model})`, `targets:use:${status.target.id}`);
+			refreshState();
+			tui.requestRender();
+		},
+		fleetSelected: () => {
+			const status = selectedStatus();
+			if (!status) return;
+			if (!options?.getSettings || !options.writeSettings) {
+				options?.notice?.("warning", "targets: settings writer unavailable", "targets:fleet");
+				return;
+			}
+			if (!status.runtime) {
+				options?.notice?.(
+					"warning",
+					`targets: ${status.target.id} runtime not registered`,
+					`targets:fleet:${status.target.id}`,
+				);
+				return;
+			}
+			if (!isDispatchEligibleRuntime(status.runtime)) {
+				options?.notice?.(
+					"warning",
+					`targets: ${status.target.id} runtime ${status.runtime.id} is not a fleet-dispatch target`,
+					`targets:fleet:${status.target.id}`,
+				);
+				return;
+			}
+			const next = applyTargetsHubFleetAction(status.target.id, {
+				getSettings: options.getSettings,
+				writeSettings: options.writeSettings,
+			});
+			const model = next?.workers.default.model ?? "(no model)";
+			options.notice?.("success", `fleet default ${status.target.id} (${model})`, `targets:fleet:${status.target.id}`);
 			refreshState();
 			tui.requestRender();
 		},
@@ -518,17 +583,6 @@ export function openProvidersOverlay(
 			runAction("connect", async () => {
 				await options.connectTarget?.(status.target.id);
 				await providers.probeTarget(status.target.id);
-			});
-		},
-		disconnectSelected: () => {
-			const status = selectedStatus();
-			if (!status) return;
-			if (!options?.disconnectTarget) {
-				options?.notice?.("warning", "targets: disconnect flow unavailable", "targets:disconnect");
-				return;
-			}
-			runAction("disconnect", async () => {
-				await options.disconnectTarget?.(status.target.id);
 			});
 		},
 		probeSelected: () => {
@@ -571,12 +625,12 @@ export function openProvidersOverlay(
 				keys.useSelected();
 				return;
 			}
-			if (data === "c") {
-				keys.connectSelected();
+			if (data === "f") {
+				keys.fleetSelected();
 				return;
 			}
-			if (data === "d") {
-				keys.disconnectSelected();
+			if (data === "c") {
+				keys.connectSelected();
 				return;
 			}
 			if (data === "r") {
@@ -598,8 +652,8 @@ export function openProvidersOverlay(
 		footerHint: buildHint("browse", [
 			{ key: "Enter", verb: "detail" },
 			{ key: "u", verb: "use" },
+			{ key: "f", verb: "fleet" },
 			{ key: "c", verb: "connect" },
-			{ key: "d", verb: "disconnect" },
 			{ key: "r", verb: "probe" },
 			{ key: "R", verb: "probe all" },
 		]),
@@ -650,8 +704,8 @@ interface ProvidersOverlayKeys {
 	nextSelection(direction: "up" | "down"): void;
 	toggleDetail(): void;
 	useSelected(): void;
+	fleetSelected(): void;
 	connectSelected(): void;
-	disconnectSelected(): void;
 	probeSelected(): void;
 	probeAll(): void;
 }

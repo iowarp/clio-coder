@@ -1971,22 +1971,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		);
 	};
 
-	const performDisconnect = async (target: string): Promise<void> => {
-		const resolved = resolveConnectionReference(target);
-		if (!resolved?.target) {
-			notify("warning", `disconnect: unknown target ${target}`, `connect:${target}`);
-			return;
-		}
-		const status = deps.providers.disconnectTarget(resolved.target.id);
-		if (!status) {
-			notify("warning", `disconnect: unknown target ${target}`, `connect:${target}`);
-			return;
-		}
-		notify("info", `disconnected ${status.target.id}; credentials unchanged`, `connect:${status.target.id}`);
-		footer.refresh();
-		tui.requestRender();
-	};
-
 	const openConnectFlowState = async (reference: string): Promise<void> => {
 		if (overlayState !== "closed" && overlayState !== "providers") return;
 		const returnHandle = overlayState === "providers" ? overlayHandle : null;
@@ -2281,7 +2265,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					}
 				: {}),
 			connectTarget: (targetId) => openConnectFlowState(targetId),
-			disconnectTarget: (targetId) => performDisconnect(targetId),
 			notice: notify,
 		});
 		tui.requestRender();
