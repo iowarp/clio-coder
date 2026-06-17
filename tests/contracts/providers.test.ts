@@ -404,8 +404,16 @@ describe("contracts/providers/runtime-cleanup", () => {
 		strictEqual(code?.apiFamily, "claude-code-subprocess");
 		strictEqual(code?.auth, "claude-cli");
 		strictEqual(code?.tier, "subscription");
+		const antigravity = BUILTIN_RUNTIMES.find((runtime) => runtime.id === "antigravity-code");
+		ok(antigravity, "antigravity-code runtime must be registered");
+		strictEqual(antigravity?.kind, "subprocess");
+		strictEqual(antigravity?.apiFamily, "google-generative-ai");
+		strictEqual(antigravity?.auth, "none");
+		strictEqual(antigravity?.tier, "subscription");
+		strictEqual(antigravity?.binaryName, "agy");
+		const sanctionedWorkerIds = new Set(["claude-sdk", "claude-code", "antigravity-code"]);
 		for (const runtime of BUILTIN_RUNTIMES) {
-			if (runtime.id === "claude-sdk" || runtime.id === "claude-code") continue;
+			if (sanctionedWorkerIds.has(runtime.id)) continue;
 			ok(!/agent-sdk|subprocess/.test(runtime.apiFamily), `runtime '${runtime.id}' must not use removed apiFamily`);
 			strictEqual(runtime.kind, "http", `runtime '${runtime.id}' must be an http runtime`);
 		}
@@ -422,9 +430,10 @@ describe("contracts/providers/runtime-cleanup", () => {
 	});
 
 	it("treats builtins as either http orchestrator targets or sanctioned worker-only targets", () => {
+		const workerOnlyIds = new Set(["claude-sdk", "claude-code", "antigravity-code"]);
 		for (const runtime of BUILTIN_RUNTIMES) {
 			ok(isTargetEligibleRuntime(runtime), `${runtime.id} should be target-eligible`);
-			if (runtime.id === "claude-sdk" || runtime.id === "claude-code") {
+			if (workerOnlyIds.has(runtime.id)) {
 				strictEqual(isOrchestratorEligibleRuntime(runtime), false, `${runtime.id} must be worker-only`);
 			} else {
 				strictEqual(isOrchestratorEligibleRuntime(runtime), true, `${runtime.id} must remain orchestrator-eligible`);

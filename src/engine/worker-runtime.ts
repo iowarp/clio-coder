@@ -31,6 +31,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
+import { startAntigravityWorkerRun } from "./antigravity/subprocess-runtime.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
 import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
 import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
@@ -177,6 +178,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	}
 	if (input.runtime.id === "claude-code") {
 		return startClaudeCodeWorkerRun(input, emit);
+	}
+	if (input.runtime.id === "antigravity-code") {
+		return startAntigravityWorkerRun(input, emit);
 	}
 
 	// pi-ai is process-local. The orchestrator registers Clio API providers in

@@ -7,7 +7,12 @@ import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
  * worker runners.
  */
 export function isTargetEligibleRuntime(runtime: RuntimeDescriptor): boolean {
-	return runtime.kind === "http" || runtime.id === "claude-sdk" || runtime.id === "claude-code";
+	return (
+		runtime.kind === "http" ||
+		runtime.id === "claude-sdk" ||
+		runtime.id === "claude-code" ||
+		runtime.id === "antigravity-code"
+	);
 }
 
 export function isOrchestratorEligibleRuntime(runtime: RuntimeDescriptor): boolean {
