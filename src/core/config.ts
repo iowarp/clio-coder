@@ -662,6 +662,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			issues.unknownKeys("workers", raw.workers, [
 				"default",
 				"profiles",
+				"agentBindings",
 				"maxRetries",
 				"onPermission",
 				"resilienceCooldownMs",
@@ -697,6 +698,23 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						profiles[name] = profile;
 					}
 					settings.workers.profiles = profiles;
+				}
+			}
+			if ("agentBindings" in raw.workers) {
+				if (!isPlainObject(raw.workers.agentBindings)) {
+					issues.add("workers.agentBindings", `expected a map, got ${describe(raw.workers.agentBindings)}`);
+				} else {
+					const agentBindings: ClioSettings["workers"]["agentBindings"] = {};
+					for (const [rawAgentId, rawProfileName] of Object.entries(raw.workers.agentBindings)) {
+						const agentId = rawAgentId.trim();
+						if (!agentId) {
+							issues.add("workers.agentBindings", "empty agent id");
+							continue;
+						}
+						const profileName = expectString(issues, `workers.agentBindings.${agentId}`, rawProfileName);
+						if (profileName !== undefined) agentBindings[agentId] = profileName;
+					}
+					settings.workers.agentBindings = agentBindings;
 				}
 			}
 			if ("maxRetries" in raw.workers) {

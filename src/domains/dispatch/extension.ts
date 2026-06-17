@@ -35,6 +35,7 @@ import {
 	type CapabilityFlags,
 	canonicalizeWireModelId,
 	firstRuntimeResolutionError,
+	isDispatchEligibleRuntime,
 	type ProvidersContract,
 	type ResolvedRuntimeTarget,
 	type RuntimeDescriptor,
@@ -42,6 +43,7 @@ import {
 	resolveRuntimeTarget,
 	runtimeTargetSnapshot,
 	type TargetDescriptor,
+	type TargetStatus,
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
@@ -271,6 +273,11 @@ function mergeWorkerDiagnosticFailure(
 	return base !== undefined && base.length > 0 ? `${base}; ${diagnostics}` : diagnostics;
 }
 
+function mergeRouteWarningDetail(routeWarning: string | undefined, base: string | null): string | null {
+	if (!routeWarning) return base;
+	return base !== null && base.length > 0 ? `${routeWarning}; ${base}` : routeWarning;
+}
+
 const DISPATCH_TASK_CONTRACT = [
 	"# Dispatch Task Contract",
 	"The assigned task is authoritative. The role guidance below is not itself a task.",
@@ -340,6 +347,7 @@ interface ResolvedTarget {
 	capabilities: CapabilityFlags | null;
 	modelCapabilities: CapabilityFlags | null;
 	runtimeResolution: ResolvedRuntimeTarget;
+	routeWarning?: string;
 }
 
 interface WorkerTargetConfig {
@@ -349,10 +357,40 @@ interface WorkerTargetConfig {
 }
 
 type WorkerProfileMap = Record<string, WorkerTargetConfig>;
+type WorkerAgentBindingMap = Record<string, string>;
 
 interface WorkerTargets {
 	workerDefault: WorkerTargetConfig | null;
 	workerProfiles: WorkerProfileMap;
+	agentBindings: WorkerAgentBindingMap;
+	targetOrder: string[];
+}
+
+interface TargetResolutionSuccess {
+	ok: true;
+	target: ResolvedTarget;
+}
+
+interface TargetResolutionFailure {
+	ok: false;
+	reason: string;
+	message: string;
+}
+
+type TargetResolutionAttempt = TargetResolutionSuccess | TargetResolutionFailure;
+
+interface RouteSelection {
+	label: string;
+	targetId: string | null;
+	selectedWorkerTarget: WorkerTargetConfig | null;
+	problem: string | null;
+}
+
+interface BestAvailableWorker {
+	workerTarget: WorkerTargetConfig;
+	status: TargetStatus;
+	order: number;
+	healthRank: number;
 }
 
 interface DispatchAdmissionStage {
@@ -415,6 +453,16 @@ function capabilityInfoForTarget(providers: ProvidersContract, targetId: string)
 	return providers.list().find((entry) => entry.target.id === targetId)?.capabilities ?? null;
 }
 
+function capabilityInfoForStatusModel(
+	providers: ProvidersContract,
+	status: TargetStatus,
+	wireModelId: string | null | undefined,
+): CapabilityFlags | null {
+	const modelId = wireModelId ?? status.target.defaultModel ?? null;
+	const detectedReasoning = modelId ? providers.getDetectedReasoning(status.target.id, modelId) : null;
+	return resolveModelCapabilities(status, modelId, providers.knowledgeBase, { detectedReasoning });
+}
+
 function capabilityInfoForModel(
 	providers: ProvidersContract,
 	targetId: string,
@@ -422,9 +470,7 @@ function capabilityInfoForModel(
 ): CapabilityFlags | null {
 	const status = providers.list().find((entry) => entry.target.id === targetId);
 	if (!status) return null;
-	const modelId = wireModelId ?? status.target.defaultModel ?? null;
-	const detectedReasoning = modelId ? providers.getDetectedReasoning(targetId, modelId) : null;
-	return resolveModelCapabilities(status, modelId, providers.knowledgeBase, { detectedReasoning });
+	return capabilityInfoForStatusModel(providers, status, wireModelId);
 }
 
 function runtimeIdForTarget(providers: ProvidersContract, targetId: string): string | null {
@@ -479,7 +525,14 @@ function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefin
 			thinkingLevel: (profile.thinkingLevel ?? "off") as ThinkingLevel,
 		};
 	}
-	return { workerDefault, workerProfiles };
+	const agentBindings: WorkerAgentBindingMap = {};
+	for (const [agentId, profileName] of Object.entries(settings?.workers?.agentBindings ?? {})) {
+		const id = agentId.trim();
+		const profile = profileName.trim();
+		if (id.length > 0 && profile.length > 0) agentBindings[id] = profile;
+	}
+	const targetOrder = settings?.targets?.map((target) => target.id) ?? [];
+	return { workerDefault, workerProfiles, agentBindings, targetOrder };
 }
 
 function resolveDispatchAdmissionStage(
@@ -617,54 +670,128 @@ function pickCapabilityMatchedWorker(
 	return null;
 }
 
-function resolveDispatchTarget(
+function targetUsabilityProblem(status: TargetStatus | null | undefined): string | null {
+	if (!status) return null;
+	if (!status.runtime) return `runtime '${status.target.runtime}' not registered`;
+	if (!isDispatchEligibleRuntime(status.runtime)) return `runtime '${status.runtime.id}' is not a fleet-dispatch target`;
+	if (!status.available) return status.reason.trim() || "unavailable";
+	if (status.health.status === "down") {
+		return status.health.lastError ? `health down: ${status.health.lastError}` : "health down";
+	}
+	return null;
+}
+
+function healthRankForBestAvailable(status: TargetStatus): number {
+	if (status.health.status === "healthy") return 0;
+	if (status.health.status === "unknown") return 1;
+	return 2;
+}
+
+function requiredCapabilityFailureDetail(
+	targetId: string,
+	capabilities: CapabilityFlags | null,
+	required: ReadonlyArray<string> | undefined,
+): string | null {
+	if (!required || required.length === 0) return null;
+	if (!capabilities) return `capability info unavailable for target '${targetId}'`;
+	const caps = capabilities as unknown as Record<string, unknown>;
+	for (const name of required) {
+		const value = caps[name];
+		if (value === undefined || value === false || value === 0 || value === "") {
+			return `capability '${name}' not supported by target '${targetId}'`;
+		}
+	}
+	return null;
+}
+
+function pickBestAvailableWorker(
+	providers: ProvidersContract,
+	targetOrder: ReadonlyArray<string>,
+	required: ReadonlyArray<string> | undefined,
+	runtimeId: string | undefined,
+	selectedModel: string | null,
+	selectedThinkingLevel: ThinkingLevel,
+): BestAvailableWorker | null {
+	const orderById = new Map(targetOrder.map((id, index) => [id, index]));
+	const statuses = providers.list();
+	const candidates: BestAvailableWorker[] = [];
+	for (const [index, status] of statuses.entries()) {
+		if (targetUsabilityProblem(status) !== null) continue;
+		if (!status.runtime) continue;
+		if (runtimeId && status.runtime.id !== runtimeId && status.target.runtime !== runtimeId) continue;
+		const requestedModel = selectedModel ?? status.target.defaultModel ?? null;
+		if (!requestedModel) continue;
+		const wireModelId = canonicalizeWireModelId(status, requestedModel);
+		const capabilities = capabilityInfoForStatusModel(providers, status, wireModelId);
+		if (capabilities?.chat !== true) continue;
+		if (!supportsRequiredCapabilities(capabilities, required)) continue;
+		candidates.push({
+			workerTarget: {
+				target: status.target.id,
+				model: wireModelId,
+				thinkingLevel: selectedThinkingLevel,
+			},
+			status,
+			order: orderById.get(status.target.id) ?? targetOrder.length + index,
+			healthRank: healthRankForBestAvailable(status),
+		});
+	}
+	candidates.sort((a, b) => a.healthRank - b.healthRank || a.order - b.order);
+	return candidates[0] ?? null;
+}
+
+function compactRouteReason(reason: string | null | undefined): string {
+	const compact = reason ? compactDiagnosticText(reason) : "";
+	return compact.length > 0 ? compact : "no usable target";
+}
+
+function resolveSelectedDispatchTarget(
 	req: DispatchRequest,
 	recipe: AgentRecipe,
 	workerDefault: WorkerTargetConfig | null,
-	workerProfiles: WorkerProfileMap,
+	selectedWorkerTarget: WorkerTargetConfig | null,
 	providers: ProvidersContract,
-): ResolvedTarget {
-	let selectedWorkerTarget: WorkerTargetConfig | null = null;
-	let targetId = req.target ?? null;
-	if (!targetId && req.workerProfile) {
-		const profile = workerProfiles[req.workerProfile];
-		if (!profile) throw new Error(`dispatch: fleet profile '${req.workerProfile}' not configured`);
-		if (!profile.target) throw new Error(`dispatch: fleet profile '${req.workerProfile}' has no target`);
-		selectedWorkerTarget = profile;
-		targetId = profile.target;
-	}
-	if (!targetId) targetId = recipe.target ?? null;
-	if (!targetId) {
-		selectedWorkerTarget = pickCapabilityMatchedWorker(
-			req.requiredCapabilities,
-			req.workerRuntime,
-			workerDefault,
-			workerProfiles,
-			providers,
-		);
-		targetId = selectedWorkerTarget?.target ?? null;
-	}
-	if (!targetId && req.workerRuntime) {
-		throw new Error(`dispatch: no worker target configured for runtime '${req.workerRuntime}'`);
-	}
-	if (!targetId) {
-		selectedWorkerTarget = workerDefault;
-		targetId = workerDefault?.target ?? null;
-	}
-	if (!targetId) {
-		throw new Error("dispatch: no target configured (set the fleet default, add a fleet profile, or pass target)");
-	}
+	targetId: string,
+	routeWarning?: string,
+): TargetResolutionAttempt {
 	const target = providers.getTarget(targetId);
-	if (!target) throw new Error(`dispatch: target '${targetId}' not found`);
+	if (!target) {
+		return { ok: false, reason: `target '${targetId}' not found`, message: `dispatch: target '${targetId}' not found` };
+	}
 	const runtime = providers.getRuntime(target.runtime);
-	if (!runtime) throw new Error(`dispatch: runtime '${target.runtime}' not registered`);
+	if (!runtime) {
+		return {
+			ok: false,
+			reason: `runtime '${target.runtime}' not registered`,
+			message: `dispatch: runtime '${target.runtime}' not registered`,
+		};
+	}
+	if (!isDispatchEligibleRuntime(runtime)) {
+		return {
+			ok: false,
+			reason: `runtime '${runtime.id}' is not a fleet-dispatch target`,
+			message: `dispatch: target '${targetId}' uses runtime '${runtime.id}' (${runtime.kind}); this runtime is not a fleet-dispatch target`,
+		};
+	}
+	const status = providers.list().find((entry) => entry.target.id === target.id);
+	const statusProblem = targetUsabilityProblem(status);
+	if (statusProblem !== null) {
+		return {
+			ok: false,
+			reason: statusProblem,
+			message: `dispatch: target '${targetId}' unavailable: ${statusProblem}`,
+		};
+	}
 	const matchingDefault = workerDefault?.target === targetId ? workerDefault : null;
 	const fallbackWorkerTarget = selectedWorkerTarget ?? matchingDefault;
 	const requestedWireModelId = req.model ?? recipe.model ?? fallbackWorkerTarget?.model ?? target.defaultModel;
 	if (!requestedWireModelId) {
-		throw new Error(`dispatch: no model for target '${targetId}' (set a fleet profile model or target.defaultModel)`);
+		return {
+			ok: false,
+			reason: `no model for target '${targetId}'`,
+			message: `dispatch: no model for target '${targetId}' (set a fleet profile model or target.defaultModel)`,
+		};
 	}
-	const status = providers.list().find((entry) => entry.target.id === target.id);
 	const wireModelId = status ? canonicalizeWireModelId(status, requestedWireModelId) : requestedWireModelId;
 	const thinkingLevel = (req.thinkingLevel ??
 		recipe.thinkingLevel ??
@@ -678,12 +805,24 @@ function resolveDispatchTarget(
 		requireOutputBudget: true,
 	});
 	if (!resolved.ok) {
-		throw new Error(
-			`dispatch: target resolution failed: ${firstRuntimeResolutionError(resolved.diagnostics) ?? resolved.diagnostics.map((entry) => entry.message).join("; ")}`,
-		);
+		const detail =
+			firstRuntimeResolutionError(resolved.diagnostics) ?? resolved.diagnostics.map((entry) => entry.message).join("; ");
+		return {
+			ok: false,
+			reason: detail,
+			message: `dispatch: target resolution failed: ${detail}`,
+		};
 	}
 	const modelCapabilities = resolved.target.capabilities;
-	return {
+	const capabilityFailure = requiredCapabilityFailureDetail(targetId, modelCapabilities, req.requiredCapabilities);
+	if (capabilityFailure !== null) {
+		return {
+			ok: false,
+			reason: capabilityFailure,
+			message: `dispatch: admission denied: ${capabilityFailure}`,
+		};
+	}
+	const resolvedTarget: ResolvedTarget = {
 		target,
 		runtime,
 		wireModelId,
@@ -692,6 +831,158 @@ function resolveDispatchTarget(
 		modelCapabilities,
 		runtimeResolution: resolved.target,
 	};
+	if (routeWarning) resolvedTarget.routeWarning = routeWarning;
+	return { ok: true, target: resolvedTarget };
+}
+
+function profileRouteSelection(
+	agentId: string,
+	profileName: string,
+	workerProfiles: WorkerProfileMap,
+): RouteSelection {
+	const profile = workerProfiles[profileName];
+	if (!profile) {
+		return {
+			label: `agent ${agentId} profile ${profileName}`,
+			targetId: null,
+			selectedWorkerTarget: null,
+			problem: `fleet profile '${profileName}' not configured`,
+		};
+	}
+	if (!profile.target) {
+		return {
+			label: `agent ${agentId} profile ${profileName}`,
+			targetId: null,
+			selectedWorkerTarget: profile,
+			problem: `fleet profile '${profileName}' has no target`,
+		};
+	}
+	return {
+		label: `agent ${agentId} profile ${profileName}`,
+		targetId: profile.target,
+		selectedWorkerTarget: profile,
+		problem: null,
+	};
+}
+
+function resolveDispatchTarget(
+	req: DispatchRequest,
+	recipe: AgentRecipe,
+	workerDefault: WorkerTargetConfig | null,
+	workerProfiles: WorkerProfileMap,
+	agentBindings: WorkerAgentBindingMap,
+	targetOrder: ReadonlyArray<string>,
+	providers: ProvidersContract,
+): ResolvedTarget {
+	const explicitTarget = req.target ?? null;
+	if (explicitTarget) {
+		const attempt = resolveSelectedDispatchTarget(req, recipe, workerDefault, null, providers, explicitTarget);
+		if (attempt.ok) return attempt.target;
+		throw new Error(attempt.message);
+	}
+
+	let selection: RouteSelection | null = null;
+	if (req.workerProfile) {
+		selection = profileRouteSelection(req.agentId, req.workerProfile, workerProfiles);
+	}
+
+	const boundProfile = agentBindings[req.agentId];
+	if (!selection && boundProfile) {
+		selection = profileRouteSelection(req.agentId, boundProfile, workerProfiles);
+	}
+
+	if (!selection && recipe.target) {
+		selection = {
+			label: `agent ${req.agentId} recipe target ${recipe.target}`,
+			targetId: recipe.target,
+			selectedWorkerTarget: null,
+			problem: null,
+		};
+	}
+
+	if (!selection) {
+		const capabilityMatchedWorker = pickCapabilityMatchedWorker(
+			req.requiredCapabilities,
+			req.workerRuntime,
+			workerDefault,
+			workerProfiles,
+			providers,
+		);
+		if (capabilityMatchedWorker?.target) {
+			selection = {
+				label: `capability/runtime matched target ${capabilityMatchedWorker.target}`,
+				targetId: capabilityMatchedWorker.target,
+				selectedWorkerTarget: capabilityMatchedWorker,
+				problem: null,
+			};
+		}
+	}
+
+	if (!selection) {
+		selection = {
+			label: "fleet default",
+			targetId: workerDefault?.target ?? null,
+			selectedWorkerTarget: workerDefault,
+			problem: workerDefault?.target ? null : "not configured",
+		};
+	}
+
+	if (selection.label === "fleet default" && req.workerRuntime && selection.targetId) {
+		const defaultRuntime = runtimeIdForTarget(providers, selection.targetId);
+		if (defaultRuntime !== null && defaultRuntime !== req.workerRuntime) {
+			selection = {
+				...selection,
+				targetId: null,
+				problem: `fleet default target '${selection.targetId}' does not use requested runtime '${req.workerRuntime}'`,
+			};
+		}
+	}
+
+	if (selection.targetId) {
+		const attempt = resolveSelectedDispatchTarget(
+			req,
+			recipe,
+			workerDefault,
+			selection.selectedWorkerTarget,
+			providers,
+			selection.targetId,
+		);
+		if (attempt.ok) return attempt.target;
+		selection = { ...selection, problem: attempt.reason };
+	}
+
+	const selectedModel = req.model ?? recipe.model ?? selection.selectedWorkerTarget?.model ?? null;
+	const selectedThinkingLevel = (selection.selectedWorkerTarget?.thinkingLevel ?? "off") as ThinkingLevel;
+	const fallback = pickBestAvailableWorker(
+		providers,
+		targetOrder,
+		req.requiredCapabilities,
+		req.workerRuntime,
+		selectedModel,
+		selectedThinkingLevel,
+	);
+	if (fallback) {
+		const reason = compactRouteReason(selection.problem);
+		const warning = `dispatch: ${selection.label} unavailable (${reason}); using best-available target ${fallback.status.target.id}`;
+		const attempt = resolveSelectedDispatchTarget(
+			req,
+			recipe,
+			workerDefault,
+			fallback.workerTarget,
+			providers,
+			fallback.status.target.id,
+			warning,
+		);
+		if (attempt.ok) return attempt.target;
+		throw new Error(`${warning}; fallback failed (${compactRouteReason(attempt.reason)})`);
+	}
+
+	const runtimeSuffix = req.workerRuntime ? ` for runtime '${req.workerRuntime}'` : "";
+	const base = `dispatch: ${selection.label} unavailable (${compactRouteReason(selection.problem)}); no best-available dispatch target found${runtimeSuffix}`;
+	if (selection.label === "fleet default" && selection.problem === "not configured") {
+		throw new Error(`${base} (set the fleet default, add a fleet profile, or pass target)`);
+	}
+	throw new Error(base);
 }
 
 function enforceCapabilityGate(
@@ -1035,7 +1326,15 @@ export function createDispatchBundle(
 		}
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
 		const targets = readWorkerTargets(options?.getSettings?.() ?? config?.get());
-		const target = resolveDispatchTarget(req, recipe, targets.workerDefault, targets.workerProfiles, providers);
+		const target = resolveDispatchTarget(
+			req,
+			recipe,
+			targets.workerDefault,
+			targets.workerProfiles,
+			targets.agentBindings,
+			targets.targetOrder,
+			providers,
+		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 
 		const cwd = req.cwd ?? process.cwd();
@@ -1591,6 +1890,9 @@ export function createDispatchBundle(
 		let failureMessage: string | undefined;
 		let runIdForPermissionAudit: string | null = null;
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
+			if (lifecycle.target.routeWarning) {
+				yield { type: "route_warning", level: "warning", message: lifecycle.target.routeWarning };
+			}
 			for await (const raw of workerEvents) {
 				const event = raw as {
 					type?: string;
@@ -1765,7 +2067,8 @@ export function createDispatchBundle(
 			// but the receipt must not stay silent about the empty trail.
 			const activityNote = outcome === "succeeded" ? zeroSuccessfulToolNote(toolActivity) : null;
 			const includeDiagnostics = outcome !== "succeeded";
-			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(outcomeDetail ?? activityNote, result, includeDiagnostics);
+			const routeOutcomeDetail = mergeRouteWarningDetail(lifecycle.target.routeWarning, outcomeDetail ?? activityNote);
+			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(routeOutcomeDetail, result, includeDiagnostics);
 			const finalFailureMessage = mergeWorkerDiagnosticFailure(failureMessage, result, includeDiagnostics);
 			const pricing = lifecycle.target.target.pricing;
 			const costUsd = pricing

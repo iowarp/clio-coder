@@ -19,6 +19,8 @@ export interface WorkerTarget {
 }
 
 export type WorkerProfiles = Record<string, WorkerTarget>;
+/** Map of agent id -> workers.profiles key. Empty means no agent is pinned to a profile. */
+export type WorkerAgentBindings = Record<string, string>;
 
 /**
  * Non-stall posture for dispatched native workers. A worker tool call that
@@ -31,6 +33,7 @@ export type WorkerPermissionMode = "deny" | "fail";
 export interface WorkersSettings {
 	default: WorkerTarget;
 	profiles: WorkerProfiles;
+	agentBindings: WorkerAgentBindings;
 	/** Bounded automatic retries for retryable run outcomes. 0 disables. */
 	maxRetries: number;
 	onPermission: WorkerPermissionMode;
@@ -145,6 +148,7 @@ export const DEFAULT_SETTINGS = {
 			thinkingLevel: "off" as ThinkingLevel,
 		} as WorkerTarget,
 		profiles: {} as WorkerProfiles,
+		agentBindings: {} as WorkerAgentBindings,
 		maxRetries: 2,
 		onPermission: "deny" as WorkerPermissionMode,
 		resilienceCooldownMs: 15000,
@@ -279,6 +283,8 @@ workers:
     model: null
     thinkingLevel: off
   profiles: {}
+  # agentBindings: map an agent id to a profiles key, e.g. scout: fast-local
+  agentBindings: {}
   maxRetries: 2
   resilienceCooldownMs: 15000
   # fast-local:

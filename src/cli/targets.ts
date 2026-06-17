@@ -1,10 +1,10 @@
 import chalk from "chalk";
-import { readSettings, updateSettings } from "../core/config.js";
+import { readSettings, type ClioSettings, updateSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
-import { isOrchestratorEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
+import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
@@ -25,7 +25,14 @@ Usage:
   clio targets add [configure flags]
   clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]
   clio targets fleet [--json]
+  clio targets profile list [--json]
+  clio targets profile set <name> <id> [--model <id>] [--thinking <level>]
   clio targets profile <name> <id> [--model <id>] [--thinking <level>]
+  clio targets profile remove <name> [--force]
+  clio targets profile rename <old> <new>
+  clio targets profile bind <agentId> <profileName>
+  clio targets profile unbind <agentId>
+  clio targets profile bindings [--json]
   clio targets convert <id> --runtime <runtimeId>
   clio targets remove <id>
   clio targets rename <old> <new>
@@ -55,6 +62,23 @@ interface WorkerProfileArgs {
 	model?: string;
 	thinkingLevel?: WorkerThinkingLevel;
 }
+
+interface ProfileRemoveArgs {
+	name: string;
+	force: boolean;
+}
+
+interface ProfileRenameArgs {
+	oldName: string;
+	newName: string;
+}
+
+interface ProfileBindArgs {
+	agentId: string;
+	profileName: string;
+}
+
+const PROFILE_SUBCOMMANDS = new Set(["list", "set", "remove", "rename", "bind", "unbind", "bindings"]);
 
 function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 	const parsed: ListArgs = { json: false, probe: false, help: false };
@@ -263,7 +287,75 @@ function parseWorkerArgs(args: ReadonlyArray<string>): WorkerProfileArgs | null 
 	return parsed;
 }
 
-function runProfile(args: ReadonlyArray<string>): number {
+function requireTrimmed(value: string | undefined, label: string): string {
+	const trimmed = value?.trim() ?? "";
+	if (trimmed.length === 0) throw new Error(`${label} must be non-empty`);
+	return trimmed;
+}
+
+function parseProfileRemoveArgs(args: ReadonlyArray<string>): ProfileRemoveArgs | null {
+	const name = args[0];
+	if (!name) return null;
+	const parsed: ProfileRemoveArgs = { name: name.trim(), force: false };
+	if (parsed.name.length === 0) throw new Error("profile name must be non-empty");
+	for (let i = 1; i < args.length; i += 1) {
+		const arg = args[i];
+		if (arg === "--force") {
+			parsed.force = true;
+			continue;
+		}
+		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
+		throw new Error(`unknown targets profile remove argument: ${arg}`);
+	}
+	return parsed;
+}
+
+function parseProfileRenameArgs(args: ReadonlyArray<string>): ProfileRenameArgs | null {
+	if (args.length !== 2) return null;
+	const oldName = requireTrimmed(args[0], "old profile name");
+	const newName = requireTrimmed(args[1], "new profile name");
+	return { oldName, newName };
+}
+
+function parseProfileBindArgs(args: ReadonlyArray<string>): ProfileBindArgs | null {
+	if (args.length !== 2) return null;
+	return {
+		agentId: requireTrimmed(args[0], "agent id"),
+		profileName: requireTrimmed(args[1], "profile name"),
+	};
+}
+
+function resolveDispatchProfileTarget(
+	settings: ClioSettings,
+	targetId: string,
+): { target: ClioSettings["targets"][number] } | { exitCode: number } {
+	const target = settings.targets.find((entry) => entry.id === targetId);
+	if (!target) {
+		printError(`no target with id ${targetId}`);
+		return { exitCode: 2 };
+	}
+	const registry = getRuntimeRegistry();
+	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
+	const runtime = registry.get(target.runtime);
+	if (!runtime) {
+		printError(
+			`cannot use target '${target.id}' as fleet profile target because runtime '${target.runtime}' is not registered`,
+		);
+		return { exitCode: 1 };
+	}
+	if (!isDispatchEligibleRuntime(runtime)) {
+		printError(
+			`cannot use target '${target.id}' as fleet profile target because runtime '${runtime.id}' is not a fleet-dispatch target`,
+		);
+		return { exitCode: 1 };
+	}
+	return { target };
+}
+
+function runProfileSet(
+	args: ReadonlyArray<string>,
+	usage = "clio targets profile <name> <id> [--model <id>] [--thinking <level>]",
+): number {
 	let parsed: WorkerProfileArgs | null;
 	try {
 		parsed = parseWorkerArgs(args);
@@ -272,16 +364,14 @@ function runProfile(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError("usage: clio targets profile <name> <id> [--model <id>] [--thinking <level>]");
+		printError(`usage: ${usage}`);
 		return 2;
 	}
 	ensureClioState();
 	const settings = readSettings();
-	const target = settings.targets.find((entry) => entry.id === parsed.targetId);
-	if (!target) {
-		printError(`no target with id ${parsed.targetId}`);
-		return 2;
-	}
+	const resolved = resolveDispatchProfileTarget(settings, parsed.targetId);
+	if ("exitCode" in resolved) return resolved.exitCode;
+	const { target } = resolved;
 	const existing = settings.workers.profiles[parsed.name];
 	const profileName = parsed.name;
 	const profile = {
@@ -296,7 +386,148 @@ function runProfile(args: ReadonlyArray<string>): number {
 	return 0;
 }
 
-function runFleet(args: ReadonlyArray<string>): number {
+function runProfileRemove(args: ReadonlyArray<string>): number {
+	let parsed: ProfileRemoveArgs | null;
+	try {
+		parsed = parseProfileRemoveArgs(args);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 2;
+	}
+	if (!parsed) {
+		printError("usage: clio targets profile remove <name> [--force]");
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	if (!settings.workers.profiles[parsed.name]) {
+		printError(`no fleet profile named ${parsed.name}`);
+		return 1;
+	}
+	const boundAgents = Object.entries(settings.workers.agentBindings)
+		.filter(([, profileName]) => profileName === parsed.name)
+		.map(([agentId]) => agentId);
+	if (boundAgents.length > 0 && !parsed.force) {
+		printError(
+			`fleet profile ${parsed.name} is bound to ${boundAgents.length} agent${boundAgents.length === 1 ? "" : "s"}; use --force to remove profile and bindings`,
+			boundAgents.join(", "),
+		);
+		return 1;
+	}
+	let removedBindings = 0;
+	updateSettings((fresh) => {
+		delete fresh.workers.profiles[parsed.name];
+		for (const [agentId, profileName] of Object.entries(fresh.workers.agentBindings)) {
+			if (profileName !== parsed.name) continue;
+			delete fresh.workers.agentBindings[agentId];
+			removedBindings += 1;
+		}
+	});
+	printOk(
+		`removed fleet profile ${parsed.name} (${removedBindings} binding${removedBindings === 1 ? "" : "s"} removed)`,
+	);
+	return 0;
+}
+
+function runProfileRename(args: ReadonlyArray<string>): number {
+	let parsed: ProfileRenameArgs | null;
+	try {
+		parsed = parseProfileRenameArgs(args);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 2;
+	}
+	if (!parsed) {
+		printError("usage: clio targets profile rename <old> <new>");
+		return 2;
+	}
+	if (parsed.oldName === parsed.newName) {
+		printError("old and new profile names are identical");
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	if (!settings.workers.profiles[parsed.oldName]) {
+		printError(`no fleet profile named ${parsed.oldName}`);
+		return 1;
+	}
+	if (settings.workers.profiles[parsed.newName]) {
+		printError(`fleet profile already exists: ${parsed.newName}`);
+		return 2;
+	}
+	let updatedBindings = 0;
+	updateSettings((fresh) => {
+		const profile = fresh.workers.profiles[parsed.oldName];
+		if (!profile) return;
+		fresh.workers.profiles[parsed.newName] = profile;
+		delete fresh.workers.profiles[parsed.oldName];
+		for (const [agentId, profileName] of Object.entries(fresh.workers.agentBindings)) {
+			if (profileName !== parsed.oldName) continue;
+			fresh.workers.agentBindings[agentId] = parsed.newName;
+			updatedBindings += 1;
+		}
+	});
+	printOk(
+		`renamed fleet profile ${parsed.oldName} to ${parsed.newName} (${updatedBindings} binding${updatedBindings === 1 ? "" : "s"} updated)`,
+	);
+	return 0;
+}
+
+function runProfileBind(args: ReadonlyArray<string>): number {
+	let parsed: ProfileBindArgs | null;
+	try {
+		parsed = parseProfileBindArgs(args);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 2;
+	}
+	if (!parsed) {
+		printError("usage: clio targets profile bind <agentId> <profileName>");
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	if (settings.delegation.agents.some((agent) => agent.id === parsed.agentId)) {
+		printError(
+			`cannot bind ACP delegation agent '${parsed.agentId}' to a fleet profile; ACP agents use their own runner and ignore native target routing`,
+		);
+		return 1;
+	}
+	if (!settings.workers.profiles[parsed.profileName]) {
+		process.stderr.write(
+			`${chalk.yellow("warning:")} fleet profile '${parsed.profileName}' is not configured; binding will resolve after the profile exists\n`,
+		);
+	}
+	updateSettings((fresh) => {
+		fresh.workers.agentBindings[parsed.agentId] = parsed.profileName;
+	});
+	printOk(`bound agent ${parsed.agentId} -> fleet profile ${parsed.profileName}`);
+	return 0;
+}
+
+function runProfileUnbind(args: ReadonlyArray<string>): number {
+	let parsed: string;
+	try {
+		if (args.length !== 1) throw new Error("usage: clio targets profile unbind <agentId>");
+		parsed = requireTrimmed(args[0], "agent id");
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	if (!settings.workers.agentBindings[parsed]) {
+		printError(`agent ${parsed} is not bound to a fleet profile`);
+		return 1;
+	}
+	updateSettings((fresh) => {
+		delete fresh.workers.agentBindings[parsed];
+	});
+	printOk(`unbound agent ${parsed}`);
+	return 0;
+}
+
+function runProfileBindings(args: ReadonlyArray<string>): number {
 	let json = false;
 	for (const arg of args) {
 		if (arg === "--json") {
@@ -304,7 +535,80 @@ function runFleet(args: ReadonlyArray<string>): number {
 			continue;
 		}
 		if (arg === "--help" || arg === "-h") {
-			process.stdout.write("usage: clio targets fleet [--json]\n");
+			process.stdout.write("usage: clio targets profile bindings [--json]\n");
+			return 0;
+		}
+		printError(`unknown targets profile bindings argument: ${arg}`);
+		return 2;
+	}
+	ensureClioState();
+	const settings = readSettings();
+	const rows = Object.entries(settings.workers.agentBindings)
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([agentId, profileName]) => {
+			const profile = settings.workers.profiles[profileName];
+			return {
+				agentId,
+				profile: profileName,
+				target: profile?.target ?? null,
+				model: profile?.model ?? null,
+				warning: profile ? null : "missing profile",
+			};
+		});
+	if (json) {
+		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+		return 0;
+	}
+	if (rows.length === 0) {
+		process.stdout.write("no agent profile bindings configured. run `clio targets profile bind <agentId> <profile>` to add one.\n");
+		return 0;
+	}
+	process.stdout.write(`${pad("agent", 18)}${pad("profile", 20)}${pad("target", 16)}${pad("model", 30)}warning\n`);
+	for (const row of rows) {
+		process.stdout.write(
+			`${pad(row.agentId, 18)}${pad(row.profile, 20)}${pad(row.target ?? "-", 16)}${pad(row.model ?? "-", 30)}${row.warning ?? "-"}\n`,
+		);
+	}
+	return 0;
+}
+
+function runProfile(args: ReadonlyArray<string>): number {
+	const subcommand = args[0];
+	// Ambiguity: a profile literally named like a subcommand must use
+	// `clio targets profile set <name> ...`.
+	if (subcommand && PROFILE_SUBCOMMANDS.has(subcommand)) {
+		switch (subcommand) {
+			case "list":
+				return runFleet(args.slice(1), "clio targets profile list [--json]");
+			case "set":
+				return runProfileSet(
+					args.slice(1),
+					"clio targets profile set <name> <id> [--model <id>] [--thinking <level>]",
+				);
+			case "remove":
+				return runProfileRemove(args.slice(1));
+			case "rename":
+				return runProfileRename(args.slice(1));
+			case "bind":
+				return runProfileBind(args.slice(1));
+			case "unbind":
+				return runProfileUnbind(args.slice(1));
+			case "bindings":
+				return runProfileBindings(args.slice(1));
+		}
+	}
+	return runProfileSet(args);
+}
+
+function runFleet(args: ReadonlyArray<string>, usage = "clio targets fleet [--json]"): number {
+	let json = false;
+	for (const arg of args) {
+		if (arg === "--json") {
+			json = true;
+			continue;
+		}
+		if (arg === "--help" || arg === "-h") {
+			process.stdout.write(`usage: ${usage}\n`);
 			return 0;
 		}
 		printError(`unknown targets fleet argument: ${arg}`);
