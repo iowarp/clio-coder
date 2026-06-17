@@ -5,7 +5,7 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## 0.2.3 - 2026-06-12
+## 0.2.3 - 2026-06-17
 
 Clio Coder 0.2.3 is a TUI command-surface sprint. It moves the interactive
 experience away from transcript dumps and one-off command handlers toward a
@@ -35,6 +35,17 @@ its own XDG state root alongside config, data, and cache, and the lifecycle
 verbs were made honest: doctor only reports, reset levels map one-to-one onto
 the roots, and uninstall removes everything it installed.
 
+The release also stands up a model-free context engine and reopens external
+runtimes after 0.2.2 retired the CLI-subprocess era. `clio context-index` builds
+a deterministic multi-language codewiki through web-tree-sitter grammars and
+answers structural `code_nav` queries without a model call, now covering C#
+alongside the existing nine languages. Subscription and delegation runtimes
+return as first-class targets: an `anthropic-max` OAuth runtime, `claude-code`
+and `claude-sdk` workers that drive the user's Claude Code on their
+subscription, a Claude Code delegation path over ACP, and an `antigravity-code`
+worker that drives Google's `agy` CLI. Each maps Clio autonomy onto the
+runtime's own permission surface and keeps the always-on safety net in front.
+
 ### Added
 
 - Added a Claude Code delegation path over ACP. Clio drives the user's Claude
@@ -59,6 +70,30 @@ the roots, and uninstall removes everything it installed.
   Anthropic's first-party apps may not align with their terms, making it an
   explicit opt-in. The runtime is selectable as both an orchestrator and a worker
   target.
+- Added `claude-code` and `claude-sdk` worker runtimes that drive the user's
+  Claude Code on a Claude Pro/Max subscription as a Clio worker. `claude-code`
+  spawns the `claude` CLI as a subprocess (`claude -p --output-format
+  stream-json`, parsed as stream-json); `claude-sdk` drives
+  `@anthropic-ai/claude-agent-sdk query()`. Both authenticate through the local
+  `claude` CLI login, carry the same Claude model set, and mediate Claude's own
+  tool calls against Clio's autonomy level and always-on safety net through a
+  shared tool-safety bridge. Autonomy maps onto Claude permission modes:
+  `read-only` runs `plan` mode restricted to read-only tools, `suggest` runs
+  `dontAsk` over the same read-only set, `auto-edit` runs `acceptEdits`, ungated
+  `full-auto` runs `default`, and only `full-auto` plus
+  `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` reaches `bypassPermissions`. Both are
+  selectable as worker/dispatch targets.
+- Added `antigravity-code`, a subprocess worker runtime peer to `claude-code`
+  that drives Google's Antigravity CLI (`agy --print`), bringing Gemini 3.x and
+  hosted Claude/GPT-OSS models with up to ~1M tokens of context to the worker
+  fleet. Clio spawns the binary, streams its plain-text output as assistant text
+  deltas, and maps autonomy onto agy's coarse permission flags: `read-only` and
+  `suggest` run `--sandbox`, `auto-edit` and ungated `full-auto` defer to agy's
+  own `settings.json`, and `full-auto` plus `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`
+  opens `--dangerously-skip-permissions`. Because `agy --print` emits no
+  structured event stream, Clio cannot mediate individual agy tool calls, so the
+  runtime is a worker/dispatch target only, never an orchestrator. It reuses the
+  existing Antigravity login and stores no Antigravity credentials.
 - Added `clio paths [--json]` as the read-only source of truth for Clio's
   resolved config, data, state, and cache directories. The local uninstall
   script and live session-reporting scripts now ask the built CLI for those
@@ -185,6 +220,10 @@ the roots, and uninstall removes everything it installed.
   likely entry points, `outline` lists a file's symbols, `deps` lists a file's
   imports, and `dependents` lists its importers. Every mode reads the persisted
   index without a model call.
+- Added C# as a recognized source project type. Whole-tree language detection
+  counts `.cs` sources and `*.csproj` manifests, the codewiki indexer indexes
+  `.cs` files and registers `.csproj` files as config, and the bootstrap
+  project-type label reports C#.
 
 ### Changed
 
