@@ -115,6 +115,7 @@ const SOURCE_EXTENSIONS = new Map<string, SourceProjectType>([
 	[".hxx", "c++"],
 	[".java", "java"],
 	[".rb", "ruby"],
+	[".cs", "c#"],
 ]);
 
 const CONFIG_FILE_NAMES = new Set([
@@ -151,6 +152,7 @@ const RESOLUTION_EXTENSIONS = [
 	".hxx",
 	".java",
 	".rb",
+	".cs",
 ];
 
 function compareStrings(a: string, b: string): number {
@@ -183,7 +185,7 @@ function languageForPath(relPath: string): CodewikiLanguage | null {
 	const source = sourceLanguageForPath(relPath);
 	if (source) return source;
 	const name = relPath.split("/").pop() ?? relPath;
-	return CONFIG_FILE_NAMES.has(name) ? "config" : null;
+	return CONFIG_FILE_NAMES.has(name) || name.endsWith(".csproj") ? "config" : null;
 }
 
 function isIndexablePath(relPath: string): boolean {
@@ -895,6 +897,7 @@ const CODEWIKI_LANGUAGES = new Set<CodewikiLanguage>([
 	"c++",
 	"java",
 	"ruby",
+	"c#",
 	"config",
 ]);
 const FILE_ROLES = new Set<CodewikiFileRole>(["entry", "test", "module", "config"]);

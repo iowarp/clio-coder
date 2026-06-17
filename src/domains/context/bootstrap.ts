@@ -176,6 +176,8 @@ function projectTypeLabel(projectType: ProjectType): string {
 			return "Java";
 		case "ruby":
 			return "Ruby";
+		case "c#":
+			return "C#";
 		case "polyglot":
 			return "polyglot";
 		case "dotfiles":

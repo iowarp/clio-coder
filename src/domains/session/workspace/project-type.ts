@@ -1,7 +1,17 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-export type SourceProjectType = "typescript" | "javascript" | "python" | "rust" | "go" | "c" | "c++" | "java" | "ruby";
+export type SourceProjectType =
+	| "typescript"
+	| "javascript"
+	| "python"
+	| "rust"
+	| "go"
+	| "c"
+	| "c++"
+	| "java"
+	| "ruby"
+	| "c#";
 
 export type ProjectType = SourceProjectType | "polyglot" | "dotfiles" | "unknown";
 
@@ -24,6 +34,7 @@ const SOURCE_LANGUAGES: ReadonlyArray<SourceProjectType> = [
 	"c++",
 	"java",
 	"ruby",
+	"c#",
 ];
 
 const EXCLUDED_DIRS = new Set([
@@ -65,6 +76,7 @@ const EXTENSION_LANGUAGES = new Map<string, SourceProjectType>([
 	[".hxx", "c++"],
 	[".java", "java"],
 	[".rb", "ruby"],
+	[".cs", "c#"],
 ]);
 
 const MANIFEST_LANGUAGES: ReadonlyArray<{ name: string; type: SourceProjectType }> = [
@@ -77,6 +89,7 @@ const MANIFEST_LANGUAGES: ReadonlyArray<{ name: string; type: SourceProjectType 
 	{ name: "CMakeLists.txt", type: "c++" },
 	{ name: "compile_commands.json", type: "c++" },
 	{ name: "Gemfile", type: "ruby" },
+	{ name: "*.csproj", type: "c#" },
 ];
 
 function emptyLanguageCounts(): Record<SourceProjectType, number> {
@@ -90,6 +103,7 @@ function emptyLanguageCounts(): Record<SourceProjectType, number> {
 		"c++": 0,
 		java: 0,
 		ruby: 0,
+		"c#": 0,
 	};
 }
 
@@ -100,8 +114,15 @@ function extensionOf(name: string): string {
 
 function countManifest(name: string, manifestCounts: Partial<Record<SourceProjectType, number>>): void {
 	for (const marker of MANIFEST_LANGUAGES) {
-		if (name !== marker.name) continue;
-		manifestCounts[marker.type] = (manifestCounts[marker.type] ?? 0) + 1;
+		if (marker.name.startsWith("*.")) {
+			const ext = marker.name.slice(1);
+			if (name.endsWith(ext)) {
+				manifestCounts[marker.type] = (manifestCounts[marker.type] ?? 0) + 1;
+			}
+		} else {
+			if (name !== marker.name) continue;
+			manifestCounts[marker.type] = (manifestCounts[marker.type] ?? 0) + 1;
+		}
 	}
 }
 
