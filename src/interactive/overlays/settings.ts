@@ -234,7 +234,7 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 	},
 };
 
-type SettingSubmenuBuilder = NonNullable<SettingItem["submenu"]>;
+export type SettingSubmenuBuilder = NonNullable<SettingItem["submenu"]>;
 type SettingsCenterLane = "sections" | "rows";
 
 export interface SettingsCenterItem extends SettingItem {
@@ -275,7 +275,7 @@ interface BuildSettingItemsOptions {
 	getSettings?: () => Readonly<ClioSettings>;
 }
 
-class SubmenuWrapper implements Component {
+export class SubmenuWrapper implements Component {
 	constructor(
 		private readonly title: string,
 		private readonly child: Component,
@@ -308,7 +308,7 @@ class SubmenuWrapper implements Component {
 	}
 }
 
-function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
+export function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const input = new Input();
 		input.setValue(currentValue);
@@ -319,7 +319,7 @@ function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	};
 }
 
-function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
+export function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const statuses = providers.list();
 		if (statuses.length === 0) {
@@ -336,7 +336,7 @@ function selectTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilde
 	};
 }
 
-function selectModelSubmenu(
+export function selectModelSubmenu(
 	providers: ProvidersContract,
 	getActiveTarget: () => string | undefined,
 ): SettingSubmenuBuilder {
@@ -610,7 +610,7 @@ export function buildSettingItems(
 			affordance: "free text",
 		}),
 		settingItem("targets", settings.targets.length > 0 ? `${settings.targets.length} configured` : "(none)", {
-			affordance: "manage in /providers",
+			affordance: "manage in /targets and /fleet",
 			readOnly: true,
 		}),
 		settingItem("keybindings", keybindingCount > 0 ? `${keybindingCount} override(s)` : "(defaults)", {

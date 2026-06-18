@@ -818,9 +818,8 @@ export function routeOverlayKey(
 		return true;
 	}
 	if (overlayState === "fleet") {
-		// Read-only overlay; same policy as /cost: Esc closes, all else swallowed.
-		routeCostOverlayKey(data, deps);
-		return true;
+		// The overlay body owns all keys, including Esc (cancel submenu/confirm, else close).
+		return false;
 	}
 	if (overlayState === "view") {
 		// The viewer owns Esc, filter editing, pane focus, verification, and pager keys.
@@ -2298,7 +2297,22 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const openFleetOverlayState = (): void => {
 		if (overlayState !== "closed") return;
 		overlayState = "fleet";
-		overlayHandle = openFleetOverlay(tui, deps.dispatch, { bus: deps.bus });
+		overlayHandle = openFleetOverlay(tui, deps.dispatch, {
+			bus: deps.bus,
+			providers: deps.providers,
+			...(deps.agents ? { agents: deps.agents } : {}),
+			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+			...(deps.writeSettings
+				? {
+						writeSettings: (next) => {
+							deps.writeSettings?.(next);
+							footer.refresh();
+						},
+					}
+				: {}),
+			notice: notify,
+			onClose: () => closeOverlay(),
+		});
 		tui.requestRender();
 	};
 

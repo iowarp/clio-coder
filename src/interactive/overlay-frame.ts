@@ -170,14 +170,15 @@ function fitDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: numbe
 export class ClioOverlayFrame implements Component {
 	constructor(
 		private readonly child: Component,
-		private readonly title: string,
+		private readonly title: string | (() => string),
 		private readonly footerHint?: string | (() => string | undefined),
 	) {}
 
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, width - 4);
 		const childLines = this.child.render(contentWidth);
-		const label = this.title.length > 0 ? `─ ${this.title} ` : "─ ";
+		const titleText = typeof this.title === "function" ? this.title() : this.title;
+		const label = titleText.length > 0 ? `─ ${titleText} ` : "─ ";
 		const hint = typeof this.footerHint === "function" ? this.footerHint() : this.footerHint;
 		return [
 			brandedTopBorder(label, contentWidth + 2),
@@ -198,7 +199,7 @@ export class ClioOverlayFrame implements Component {
 export function showClioOverlayFrame(
 	tui: TUI,
 	child: Component,
-	options: OverlayOptions & { title: string; footerHint?: string | (() => string | undefined) },
+	options: OverlayOptions & { title: string | (() => string); footerHint?: string | (() => string | undefined) },
 ): OverlayHandle {
 	const { title, footerHint, ...overlayOptions } = options;
 	return tui.showOverlay(new ClioOverlayFrame(child, title, footerHint), overlayOptions);
