@@ -1330,6 +1330,29 @@ rl.once("line", () => {
 		});
 	});
 
+	it("closes abandoned non-terminal rows whose worker process is gone", async () => {
+		await withIsolatedClioHome(async () => {
+			const ledger = openLedger({ maxRuns: 10 });
+			const env = ledger.create({
+				agentId: "coder",
+				task: "abandoned task",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/none",
+			});
+			const summary = recoverOrphanReceipts(ledger);
+			strictEqual(summary.abandoned, 1);
+			strictEqual(summary.recovered, 0);
+			const row = ledger.get(env.id);
+			strictEqual(row?.status, "dead");
+			strictEqual(row?.outcome, "stalled");
+			match(row?.outcomeDetail ?? "", /abandoned/);
+		});
+	});
+
 	it("native workers resolve permission requests without stalling and audit the denial", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
