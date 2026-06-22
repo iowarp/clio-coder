@@ -2,7 +2,7 @@ import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/st
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
@@ -276,7 +276,40 @@ function makeDispatchBundle(
 	return createDispatchBundle(ctx, { collectReproducibility: () => FAST_REPRODUCIBILITY, ...options });
 }
 
+// Every bundle's extension.start() opens the run ledger and scans the receipts
+// directory under CLIO_STATE_DIR. Without isolation these tests read, lock, and
+// (on recovery or run completion) rewrite the developer's real multi-megabyte
+// ledger: both a state leak and the dominant cost of the contracts lane. Pin a
+// fresh scratch state root around each test.
+let dispatchEnvBackup: NodeJS.ProcessEnv = {};
+let dispatchStateScratch = "";
+
+function isolateDispatchState(): void {
+	dispatchEnvBackup = { ...process.env };
+	dispatchStateScratch = mkdtempSync(join(tmpdir(), "clio-dispatch-state-"));
+	process.env.CLIO_HOME = dispatchStateScratch;
+	process.env.CLIO_DATA_DIR = join(dispatchStateScratch, "data");
+	process.env.CLIO_CONFIG_DIR = join(dispatchStateScratch, "config");
+	process.env.CLIO_STATE_DIR = join(dispatchStateScratch, "state");
+	process.env.CLIO_CACHE_DIR = join(dispatchStateScratch, "cache");
+	resetXdgCache();
+}
+
+function restoreDispatchState(): void {
+	for (const key of Object.keys(process.env)) {
+		if (!(key in dispatchEnvBackup)) Reflect.deleteProperty(process.env, key);
+	}
+	for (const [key, value] of Object.entries(dispatchEnvBackup)) {
+		if (value !== undefined) process.env[key] = value;
+	}
+	rmSync(dispatchStateScratch, { recursive: true, force: true });
+	resetXdgCache();
+}
+
 describe("contracts/dispatch", () => {
+	beforeEach(isolateDispatchState);
+	afterEach(restoreDispatchState);
+
 	it("dispatches single task using a fake worker and returns exit receipt", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
@@ -1695,6 +1728,9 @@ rl.once("line", () => {
 });
 
 describe("contracts/dispatch tool activity honesty", () => {
+	beforeEach(isolateDispatchState);
+	afterEach(restoreDispatchState);
+
 	function instantWorker() {
 		return {
 			pid: 8100,
