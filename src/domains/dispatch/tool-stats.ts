@@ -7,8 +7,11 @@
  * blocked admissions, and parallel-batch tool calls all flow through one
  * code path that unit tests can pin.
  *
- * Invariants (asserted by tests/contracts/dispatch.test.ts):
- *   - count == ok + errors + blocked for every tool entry.
+ * Invariants (pinned by tests/contracts/dispatch.test.ts):
+ *   - Each recognized outcome (ok|error|blocked) increments its own bucket and
+ *     count, so count == ok + errors + blocked whenever every recorded finish
+ *     carried an outcome. The worker ToolFinishEvent always does; a synthetic
+ *     finish without an outcome increments count only.
  *   - totalDurationMs accumulates only finite non-negative durations.
  *   - snapshot is sorted by tool-name UTF-16 code unit ascending so receipt
  *     digests stay deterministic across runs and host locales.
