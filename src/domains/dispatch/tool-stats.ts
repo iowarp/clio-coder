@@ -10,8 +10,8 @@
  * Invariants (asserted by tests/contracts/dispatch.test.ts):
  *   - count == ok + errors + blocked for every tool entry.
  *   - totalDurationMs accumulates only finite non-negative durations.
- *   - snapshot is sorted by tool-name code point ascending so receipt digests
- *     stay deterministic across runs and host locales.
+ *   - snapshot is sorted by tool-name UTF-16 code unit ascending so receipt
+ *     digests stay deterministic across runs and host locales.
  *   - countToolCalls returns the sum of count across every entry.
  */
 
