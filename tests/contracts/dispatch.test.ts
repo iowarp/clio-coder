@@ -1353,6 +1353,177 @@ rl.once("line", () => {
 		});
 	});
 
+	it("persist caps the ledger to maxRuns, keeping the newest rows", async () => {
+		await withIsolatedClioHome(async () => {
+			const ledger = openLedger({ maxRuns: 3 });
+			for (let i = 0; i < 5; i += 1) {
+				const created = ledger.create({
+					agentId: "coder",
+					task: `task ${i}`,
+					targetId: "default",
+					wireModelId: "model",
+					runtimeId: "runtime",
+					runtimeKind: "http",
+					sessionId: null,
+					cwd: "/tmp/none",
+				});
+				// Distinct, increasing timestamps make the ring cap deterministic
+				// regardless of same-millisecond create() ties.
+				ledger.update(created.id, { startedAt: `2026-06-10T00:00:0${i}.000Z` });
+			}
+			await ledger.persist();
+
+			// persist() caps the active in-memory ring too, not only the disk copy,
+			// so the same process cannot keep serving evicted rows.
+			const live = ledger.list();
+			strictEqual(live.length, 3);
+			deepStrictEqual(
+				live.map((row) => row.task),
+				["task 4", "task 3", "task 2"],
+			);
+
+			const reopened = openLedger({ maxRuns: 3 });
+			const rows = reopened.list();
+			strictEqual(rows.length, 3);
+			deepStrictEqual(
+				rows.map((row) => row.task),
+				["task 4", "task 3", "task 2"],
+			);
+		});
+	});
+
+	it("persist globally sorts merged disk and memory rows before applying the cap", async () => {
+		await withIsolatedClioHome(async () => {
+			// A sibling seeds the newest and oldest rows on disk.
+			const seed = openLedger({ maxRuns: 10 });
+			const newest = seed.create({
+				agentId: "coder",
+				task: "newest",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/none",
+			});
+			seed.update(newest.id, { startedAt: "2026-06-10T00:00:09.000Z" });
+			const oldest = seed.create({
+				agentId: "coder",
+				task: "oldest",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/none",
+			});
+			seed.update(oldest.id, { startedAt: "2026-06-10T00:00:01.000Z" });
+			await seed.persist();
+
+			// A stale ledger reopens with both disk rows, inserts a middle-aged row,
+			// and persists under a cap of 2. The cap must keep the two newest by
+			// timestamp, which only holds if the merged set is sorted before slicing.
+			const stale = openLedger({ maxRuns: 2 });
+			const middle = stale.create({
+				agentId: "coder",
+				task: "middle",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/none",
+			});
+			stale.update(middle.id, { startedAt: "2026-06-10T00:00:05.000Z" });
+			await stale.persist();
+
+			const reopened = openLedger({ maxRuns: 10 });
+			deepStrictEqual(
+				reopened.list().map((row) => row.task),
+				["newest", "middle"],
+			);
+		});
+	});
+
+	it("persist preserves sibling disk rows and lets in-memory writes win on id", async () => {
+		await withIsolatedClioHome(async () => {
+			const ledgerA = openLedger({ maxRuns: 10 });
+			const shared = ledgerA.create({
+				agentId: "coder",
+				task: "shared",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/none",
+			});
+			ledgerA.update(shared.id, { startedAt: "2026-06-10T00:00:01.000Z" });
+			await ledgerA.persist();
+
+			// A sibling process opens the same ledger, appends its own run, and
+			// persists, leaving both rows on disk.
+			const ledgerB = openLedger({ maxRuns: 10 });
+			const sibling = ledgerB.create({
+				agentId: "coder",
+				task: "sibling",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/none",
+			});
+			ledgerB.update(sibling.id, { startedAt: "2026-06-10T00:00:02.000Z" });
+			await ledgerB.persist();
+
+			// A still holds only the shared row in memory. Its update must win the
+			// id conflict on persist, and the sibling's disk-only row must survive.
+			ledgerA.update(shared.id, { status: "completed" });
+			await ledgerA.persist();
+
+			const reopened = openLedger({ maxRuns: 10 });
+			strictEqual(reopened.get(shared.id)?.status, "completed");
+			strictEqual(reopened.get(sibling.id)?.task, "sibling");
+			strictEqual(reopened.list().length, 2);
+		});
+	});
+
+	it("adopt refuses a duplicate id and inserts recovered rows newest-first", async () => {
+		await withIsolatedClioHome(() => {
+			const ledger = openLedger({ maxRuns: 10 });
+			const live = ledger.create({
+				agentId: "coder",
+				task: "live",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: "/tmp/none",
+			});
+			ledger.update(live.id, { startedAt: "2026-06-10T00:00:05.000Z", status: "completed" });
+
+			// Re-adopting an id already in the ledger is a strict crash-recovery
+			// no-op: a stale receipt envelope must not roll back or mutate the live
+			// row, even when its fields conflict.
+			const conflicting = { ...live, task: "tampered", status: "failed" as const };
+			strictEqual(ledger.adopt(conflicting), false);
+			strictEqual(ledger.list().length, 1);
+			const preserved = ledger.get(live.id);
+			strictEqual(preserved?.task, "live");
+			strictEqual(preserved?.status, "completed");
+
+			// A newer recovered envelope is accepted and sorted ahead of the live row.
+			const recovered = { ...live, id: "recovered000", startedAt: "2026-06-10T00:00:09.000Z" };
+			strictEqual(ledger.adopt(recovered), true);
+			deepStrictEqual(
+				ledger.list().map((row) => row.id),
+				["recovered000", live.id],
+			);
+		});
+	});
+
 	it("native workers resolve permission requests without stalling and audit the denial", async () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
