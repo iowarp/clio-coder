@@ -14,7 +14,7 @@ import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { buildStableSystemPrompt, createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
-import { resolveRunOutcome } from "../../src/domains/dispatch/outcome.js";
+import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
 	recordToolFinish,
@@ -1024,10 +1024,26 @@ rl.once("line", () => {
 				outcome: "canceled",
 				detail: "peer cancelled",
 			},
+			{
+				name: "nonzero exit carries peer stopReason suffix",
+				evidence: { ...base, exitCode: 2, stopReason: "error" },
+				outcome: "failed",
+				detail: "exit code 2 (stopReason=error)",
+			},
 		] as const;
 		for (const c of cases) {
 			deepStrictEqual(resolveRunOutcome(c.evidence), { outcome: c.outcome, detail: c.detail }, c.name);
 		}
+	});
+
+	it("maps every outcome to its backward-compatible ledger status", () => {
+		strictEqual(runStatusForOutcome("succeeded"), "completed");
+		strictEqual(runStatusForOutcome("canceled"), "interrupted");
+		strictEqual(runStatusForOutcome("stalled"), "dead");
+		strictEqual(runStatusForOutcome("timed_out"), "failed");
+		strictEqual(runStatusForOutcome("denied_by_policy"), "failed");
+		strictEqual(runStatusForOutcome("spawn_failed"), "failed");
+		strictEqual(runStatusForOutcome("failed"), "failed");
 	});
 
 	it("kills dead workers and schedules a bounded retry", async () => {
