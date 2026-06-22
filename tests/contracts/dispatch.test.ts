@@ -18,6 +18,7 @@ import { resolveRunOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
 	recordToolFinish,
+	snapshotToolStats,
 	summarizeToolActivity,
 	zeroSuccessfulToolNote,
 } from "../../src/domains/dispatch/tool-stats.js";
@@ -1017,6 +1018,12 @@ rl.once("line", () => {
 				outcome: "timed_out",
 				detail: "turn timeout exceeded",
 			},
+			{
+				name: "peer cancelled via stopReason",
+				evidence: { ...base, exitCode: 1, stopReason: "cancelled" },
+				outcome: "canceled",
+				detail: "peer cancelled",
+			},
 		] as const;
 		for (const c of cases) {
 			deepStrictEqual(resolveRunOutcome(c.evidence), { outcome: c.outcome, detail: c.detail }, c.name);
@@ -1583,6 +1590,39 @@ describe("contracts/dispatch tool activity honesty", () => {
 		strictEqual(
 			zeroSuccessfulToolNote({ calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false }),
 			"completed without executing any tools",
+		);
+	});
+
+	it("recordToolFinish ignores negative and non-finite durations", () => {
+		const stats = new Map();
+		recordToolFinish(stats, { tool: "read", durationMs: 5, outcome: "ok" });
+		recordToolFinish(stats, { tool: "read", durationMs: -3, outcome: "ok" });
+		recordToolFinish(stats, { tool: "read", durationMs: Number.NaN, outcome: "ok" });
+		recordToolFinish(stats, { tool: "read", durationMs: Number.POSITIVE_INFINITY, outcome: "ok" });
+		const stat = stats.get("read");
+		strictEqual(stat?.totalDurationMs, 5);
+		strictEqual(stat?.count, 4);
+	});
+
+	it("summarizeToolActivity flags mutatingSucceeded only on a successful mutating call", () => {
+		const classify = (tool: string) => (tool === "write" ? ("write" as const) : ("read" as const));
+		const failedWrite = new Map();
+		recordToolFinish(failedWrite, { tool: "write", durationMs: 1, outcome: "error" });
+		recordToolFinish(failedWrite, { tool: "write", durationMs: 1, outcome: "blocked" });
+		strictEqual(summarizeToolActivity(failedWrite, classify).mutatingSucceeded, false);
+		const okWrite = new Map();
+		recordToolFinish(okWrite, { tool: "write", durationMs: 1, outcome: "ok" });
+		strictEqual(summarizeToolActivity(okWrite, classify).mutatingSucceeded, true);
+	});
+
+	it("snapshotToolStats returns entries sorted by tool name for deterministic digests", () => {
+		const stats = new Map();
+		recordToolFinish(stats, { tool: "write", durationMs: 1, outcome: "ok" });
+		recordToolFinish(stats, { tool: "bash", durationMs: 1, outcome: "ok" });
+		recordToolFinish(stats, { tool: "read", durationMs: 1, outcome: "ok" });
+		deepStrictEqual(
+			snapshotToolStats(stats).map((entry) => entry.tool),
+			["bash", "read", "write"],
 		);
 	});
 });
