@@ -8,6 +8,7 @@ import { readClioVersion } from "../../src/core/package-root.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	type ClioShareArchive,
+	createShareArchive,
 	importShareArchive,
 	type ShareArchiveFile,
 	type ShareEntryType,
@@ -88,6 +89,24 @@ describe("contracts/share archive import", () => {
 		}
 		rmSync(scratch, { recursive: true, force: true });
 		resetXdgCache();
+	});
+
+	it("createShareArchive includes everything by default and switches to opt-in when any flag is set", () => {
+		const projectDir = path.join(scratch, "proj");
+		mkdirSync(projectDir, { recursive: true });
+		writeFileSync(path.join(projectDir, "CLIO.md"), "# ctx\n", "utf8");
+
+		const all = createShareArchive({ cwd: projectDir, scope: "project" });
+		ok(
+			all.files.some((file) => file.type === "project-context"),
+			"with no include flags, context is included by default",
+		);
+
+		const optIn = createShareArchive({ cwd: projectDir, scope: "project", includeSkills: true });
+		ok(
+			!optIn.files.some((file) => file.type === "project-context"),
+			"once any include flag is set, unrequested context is excluded",
+		);
 	});
 
 	it("rejects an absolute relativePath before writing any archive entry", () => {
