@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -10,7 +10,6 @@ import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
-import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import { spawnNativeWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
@@ -20,6 +19,7 @@ import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
+import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -305,12 +305,15 @@ rl.on("line", (line) => {
 	});
 
 	describe("dispatch contract steer", () => {
+		beforeEach(isolateDispatchState);
+		afterEach(restoreDispatchState);
+
 		it("forwards a trimmed steer line to the active native worker", async () => {
 			const context = stubContext();
 			const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 			const sent: unknown[] = [];
 
-			const bundle = createDispatchBundle(context, {
+			const bundle = makeDispatchBundle(context, {
 				spawnWorker: () => ({
 					pid: 9999,
 					promise: exit.promise,
@@ -341,7 +344,7 @@ rl.on("line", (line) => {
 			const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 			let sendAlive = true;
 
-			const bundle = createDispatchBundle(context, {
+			const bundle = makeDispatchBundle(context, {
 				spawnWorker: () => ({
 					pid: 9999,
 					promise: exit.promise,
@@ -374,7 +377,7 @@ rl.on("line", (line) => {
 			const context = stubContext();
 			const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 
-			const bundle = createDispatchBundle(context, {
+			const bundle = makeDispatchBundle(context, {
 				spawnWorker: () => ({
 					pid: 9999,
 					promise: exit.promise,
