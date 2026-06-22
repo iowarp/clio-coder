@@ -1664,4 +1664,16 @@ describe("contracts/dispatch tool activity honesty", () => {
 			["bash", "read", "write"],
 		);
 	});
+
+	it("snapshotToolStats orders by code point, not locale, for stable digests", () => {
+		const stats = new Map();
+		recordToolFinish(stats, { tool: "apply", durationMs: 1, outcome: "ok" });
+		recordToolFinish(stats, { tool: "Bash", durationMs: 1, outcome: "ok" });
+		// Uppercase B (code point 66) sorts before lowercase a (97); a locale
+		// comparator would interleave by case and vary across hosts.
+		deepStrictEqual(
+			snapshotToolStats(stats).map((entry) => entry.tool),
+			["Bash", "apply"],
+		);
+	});
 });
