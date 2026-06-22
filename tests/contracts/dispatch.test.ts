@@ -12,7 +12,7 @@ import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
-import { buildStableSystemPrompt, createDispatchBundle } from "../../src/domains/dispatch/extension.js";
+import { buildStableSystemPrompt } from "../../src/domains/dispatch/extension.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
@@ -23,7 +23,7 @@ import {
 	summarizeToolActivity,
 	zeroSuccessfulToolNote,
 } from "../../src/domains/dispatch/tool-stats.js";
-import type { RunLineage, RunReceiptDraft, RunReceiptReproducibility } from "../../src/domains/dispatch/types.js";
+import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
@@ -36,6 +36,7 @@ import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -252,60 +253,6 @@ function stubContext(
 	return { bus, getContract };
 }
 
-// The real reproducibility collector shells out to three git subprocesses per
-// receipt, which dominated the contracts lane. Tests do not assert git metadata
-// on bundle-produced receipts, so inject a fixed stub by default; a test that
-// needs the real collector can override collectReproducibility in its options.
-const FAST_REPRODUCIBILITY: RunReceiptReproducibility = {
-	cwd: "/repo",
-	git: { branch: null, commit: null, dirty: null, dirtyEntries: null, statusHash: null },
-	safetyPolicy: {
-		version: 1,
-		rulePackHash: null,
-		rulePackVersion: null,
-		projectPolicyPath: null,
-		projectPolicyHash: null,
-		projectPolicyValid: null,
-	},
-};
-
-function makeDispatchBundle(
-	ctx: Parameters<typeof createDispatchBundle>[0],
-	options: Parameters<typeof createDispatchBundle>[1] = {},
-): ReturnType<typeof createDispatchBundle> {
-	return createDispatchBundle(ctx, { collectReproducibility: () => FAST_REPRODUCIBILITY, ...options });
-}
-
-// Every bundle's extension.start() opens the run ledger and scans the receipts
-// directory under CLIO_STATE_DIR. Without isolation these tests read, lock, and
-// (on recovery or run completion) rewrite the developer's real multi-megabyte
-// ledger: both a state leak and the dominant cost of the contracts lane. Pin a
-// fresh scratch state root around each test.
-let dispatchEnvBackup: NodeJS.ProcessEnv = {};
-let dispatchStateScratch = "";
-
-function isolateDispatchState(): void {
-	dispatchEnvBackup = { ...process.env };
-	dispatchStateScratch = mkdtempSync(join(tmpdir(), "clio-dispatch-state-"));
-	process.env.CLIO_HOME = dispatchStateScratch;
-	process.env.CLIO_DATA_DIR = join(dispatchStateScratch, "data");
-	process.env.CLIO_CONFIG_DIR = join(dispatchStateScratch, "config");
-	process.env.CLIO_STATE_DIR = join(dispatchStateScratch, "state");
-	process.env.CLIO_CACHE_DIR = join(dispatchStateScratch, "cache");
-	resetXdgCache();
-}
-
-function restoreDispatchState(): void {
-	for (const key of Object.keys(process.env)) {
-		if (!(key in dispatchEnvBackup)) Reflect.deleteProperty(process.env, key);
-	}
-	for (const [key, value] of Object.entries(dispatchEnvBackup)) {
-		if (value !== undefined) process.env[key] = value;
-	}
-	rmSync(dispatchStateScratch, { recursive: true, force: true });
-	resetXdgCache();
-}
-
 describe("contracts/dispatch", () => {
 	beforeEach(isolateDispatchState);
 	afterEach(restoreDispatchState);
@@ -339,6 +286,34 @@ describe("contracts/dispatch", () => {
 			strictEqual(receipt.agentId, "coder");
 			strictEqual(receipt.task, "single dispatch");
 			ok(receipt.integrity?.digest);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("forwards the run cwd through the reproducibility seam onto the receipt", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 9999,
+				promise: exit.promise,
+				events: emptyEvents(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cwd flow", cwd: "/work/project" });
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			// The fast collector preserves its cwd argument, so a regression that
+			// wires the wrong cwd into collectReproducibility still fails here. cwd
+			// also feeds the integrity digest and orphan-recovery row rebuild.
+			strictEqual(receipt.reproducibility?.cwd, "/work/project");
+			strictEqual(bundle.contract.getRun(handle.runId)?.cwd, "/work/project");
 		} finally {
 			await bundle.extension.stop?.();
 		}
