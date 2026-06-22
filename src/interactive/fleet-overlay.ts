@@ -15,10 +15,10 @@ import {
 } from "../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "./overlay-frame.js";
 import {
-	selectModelSubmenu,
-	selectTargetSubmenu,
 	type SettingSubmenuBuilder,
 	SubmenuWrapper,
+	selectModelSubmenu,
+	selectTargetSubmenu,
 	textInputSubmenu,
 } from "./overlays/settings.js";
 
@@ -229,13 +229,7 @@ function normalizeSettingValue(value: string | null | undefined): string {
 
 function profileHeader(width: number): string {
 	return fitContentLine(
-		[
-			fitLeft("profile", 20),
-			fitLeft("target", 18),
-			fitLeft("model", 26),
-			fitLeft("thinking", 8),
-			"warning",
-		].join(" "),
+		[fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), fitLeft("thinking", 8), "warning"].join(" "),
 		width,
 	);
 }
@@ -257,9 +251,7 @@ function profileLine(row: ProfileRow, selected: boolean, width: number): string 
 
 function bindingHeader(width: number): string {
 	return fitContentLine(
-		[fitLeft("agent", 20), fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), "warning"].join(
-			" ",
-		),
+		[fitLeft("agent", 20), fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), "warning"].join(" "),
 		width,
 	);
 }
@@ -476,13 +468,16 @@ class FleetOverlayBody implements Component {
 			lines.push(fitContentLine("no fleet profiles configured. press n to create one", width));
 		} else {
 			const selected = Math.min(this.selectedByMode.profiles, rows.length - 1);
-			rows.forEach((row, index) => lines.push(profileLine(row, index === selected, width)));
+			rows.forEach((row, index) => {
+				lines.push(profileLine(row, index === selected, width));
+			});
 		}
 		if (this.confirmDeleteProfileName) {
 			const settings = this.currentSettings();
 			const bindingCount = settings
-				? Object.values(settings.workers.agentBindings).filter((profileName) => profileName === this.confirmDeleteProfileName)
-						.length
+				? Object.values(settings.workers.agentBindings).filter(
+						(profileName) => profileName === this.confirmDeleteProfileName,
+					).length
 				: 0;
 			const prompt =
 				bindingCount > 0
@@ -501,7 +496,9 @@ class FleetOverlayBody implements Component {
 			lines.push(fitContentLine("no agent bindings configured. press b to bind one", width));
 		} else {
 			const selected = Math.min(this.selectedByMode.bindings, rows.length - 1);
-			rows.forEach((row, index) => lines.push(bindingLine(row, index === selected, width)));
+			rows.forEach((row, index) => {
+				lines.push(bindingLine(row, index === selected, width));
+			});
 		}
 		return lines;
 	}
@@ -616,7 +613,10 @@ class FleetOverlayBody implements Component {
 			return;
 		}
 		this.openSubmenu(
-			selectModelSubmenu(this.options.providers, () => this.currentSettings()?.workers.profiles[row.name]?.target ?? undefined),
+			selectModelSubmenu(
+				this.options.providers,
+				() => this.currentSettings()?.workers.profiles[row.name]?.target ?? undefined,
+			),
 			this.currentSettings()?.workers.profiles[row.name]?.model ?? "",
 			(value) => {
 				const model = value.trim();

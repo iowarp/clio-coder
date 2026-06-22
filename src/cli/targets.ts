@@ -1,10 +1,14 @@
 import chalk from "chalk";
-import { readSettings, type ClioSettings, updateSettings } from "../core/config.js";
+import { type ClioSettings, readSettings, updateSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
-import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, ProvidersDomainModule } from "../domains/providers/index.js";
+import {
+	isDispatchEligibleRuntime,
+	isOrchestratorEligibleRuntime,
+	ProvidersDomainModule,
+} from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
@@ -560,7 +564,9 @@ function runProfileBindings(args: ReadonlyArray<string>): number {
 		return 0;
 	}
 	if (rows.length === 0) {
-		process.stdout.write("no agent profile bindings configured. run `clio targets profile bind <agentId> <profile>` to add one.\n");
+		process.stdout.write(
+			"no agent profile bindings configured. run `clio targets profile bind <agentId> <profile>` to add one.\n",
+		);
 		return 0;
 	}
 	process.stdout.write(`${pad("agent", 18)}${pad("profile", 20)}${pad("target", 16)}${pad("model", 30)}warning\n`);
@@ -581,10 +587,7 @@ function runProfile(args: ReadonlyArray<string>): number {
 			case "list":
 				return runFleet(args.slice(1), "clio targets profile list [--json]");
 			case "set":
-				return runProfileSet(
-					args.slice(1),
-					"clio targets profile set <name> <id> [--model <id>] [--thinking <level>]",
-				);
+				return runProfileSet(args.slice(1), "clio targets profile set <name> <id> [--model <id>] [--thinking <level>]");
 			case "remove":
 				return runProfileRemove(args.slice(1));
 			case "rename":

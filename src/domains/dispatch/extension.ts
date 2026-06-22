@@ -835,11 +835,7 @@ function resolveSelectedDispatchTarget(
 	return { ok: true, target: resolvedTarget };
 }
 
-function profileRouteSelection(
-	agentId: string,
-	profileName: string,
-	workerProfiles: WorkerProfileMap,
-): RouteSelection {
+function profileRouteSelection(agentId: string, profileName: string, workerProfiles: WorkerProfileMap): RouteSelection {
 	const profile = workerProfiles[profileName];
 	if (!profile) {
 		return {
