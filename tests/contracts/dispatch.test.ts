@@ -17,6 +17,7 @@ import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recover
 import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
+	countToolCalls,
 	recordToolFinish,
 	snapshotToolStats,
 	summarizeToolActivity,
@@ -1840,6 +1841,31 @@ describe("contracts/dispatch tool activity honesty", () => {
 		const stat = stats.get("read");
 		strictEqual(stat?.totalDurationMs, 5);
 		strictEqual(stat?.count, 4);
+	});
+
+	it("recordToolFinish sorts each outcome into its own bucket and counts every finish", () => {
+		const stats = new Map();
+		recordToolFinish(stats, { tool: "edit", durationMs: 1, outcome: "ok" });
+		recordToolFinish(stats, { tool: "edit", durationMs: 1, outcome: "error" });
+		recordToolFinish(stats, { tool: "edit", durationMs: 1, outcome: "blocked" });
+		// An outcome-less finish still counts toward count but lands in no bucket,
+		// so count == ok + errors + blocked only when every finish carried an
+		// outcome (the worker ToolFinishEvent always does).
+		recordToolFinish(stats, { tool: "edit", durationMs: 1 });
+		const stat = stats.get("edit");
+		deepStrictEqual(
+			{ count: stat?.count, ok: stat?.ok, errors: stat?.errors, blocked: stat?.blocked },
+			{ count: 4, ok: 1, errors: 1, blocked: 1 },
+		);
+		strictEqual((stat?.ok ?? 0) + (stat?.errors ?? 0) + (stat?.blocked ?? 0), (stat?.count ?? 0) - 1);
+	});
+
+	it("countToolCalls returns the total finish count across every tool entry", () => {
+		const stats = new Map();
+		recordToolFinish(stats, { tool: "read", durationMs: 1, outcome: "ok" });
+		recordToolFinish(stats, { tool: "read", durationMs: 1, outcome: "error" });
+		recordToolFinish(stats, { tool: "write", durationMs: 1, outcome: "blocked" });
+		strictEqual(countToolCalls(stats), 3);
 	});
 
 	it("summarizeToolActivity flags mutatingSucceeded only on a successful mutating call", () => {
