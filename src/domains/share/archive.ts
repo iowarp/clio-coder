@@ -209,18 +209,21 @@ function defaultedIncludes(
 		"includeContext" | "includePrompts" | "includeSkills" | "includeSettings" | "includeExtensions"
 	>
 > {
-	const any =
+	// True when the caller named at least one include flag explicitly. In that
+	// mode each section is opt-in (an unset flag means exclude); with no flags
+	// named at all we default to including everything.
+	const hasExplicitInclude =
 		options.includeContext !== undefined ||
 		options.includePrompts !== undefined ||
 		options.includeSkills !== undefined ||
 		options.includeSettings !== undefined ||
 		options.includeExtensions !== undefined;
 	return {
-		includeContext: any ? options.includeContext === true : true,
-		includePrompts: any ? options.includePrompts === true : true,
-		includeSkills: any ? options.includeSkills === true : true,
-		includeSettings: any ? options.includeSettings === true : true,
-		includeExtensions: any ? options.includeExtensions === true : true,
+		includeContext: hasExplicitInclude ? options.includeContext === true : true,
+		includePrompts: hasExplicitInclude ? options.includePrompts === true : true,
+		includeSkills: hasExplicitInclude ? options.includeSkills === true : true,
+		includeSettings: hasExplicitInclude ? options.includeSettings === true : true,
+		includeExtensions: hasExplicitInclude ? options.includeExtensions === true : true,
 	};
 }
 
