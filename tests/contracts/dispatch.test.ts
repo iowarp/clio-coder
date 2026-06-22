@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -1350,6 +1350,34 @@ rl.once("line", () => {
 			strictEqual(row?.status, "dead");
 			strictEqual(row?.outcome, "stalled");
 			match(row?.outcomeDetail ?? "", /abandoned/);
+		});
+	});
+
+	it("skips a verifiable orphan receipt that lacks a reproducibility cwd", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const receiptsDir = join(scratch, "state", "receipts");
+			mkdirSync(receiptsDir, { recursive: true });
+			const orphanPath = join(receiptsDir, "no-cwd.json");
+			// Shape-valid integrity but no reproducibility block: cwd is part of the
+			// ledger digest, so the sealed row cannot be reconstructed. Such a receipt
+			// must be left in place and counted as skipped, never quarantined, because
+			// quarantining an unverifiable-but-possibly-valid artifact destroys evidence.
+			writeFileSync(
+				orphanPath,
+				JSON.stringify({
+					runId: "nocwd0000001",
+					integrity: { version: 2, algorithm: "sha256", digest: "a".repeat(64) },
+				}),
+				"utf8",
+			);
+
+			const ledger = openLedger({ maxRuns: 10 });
+			const summary = recoverOrphanReceipts(ledger);
+			strictEqual(summary.skipped, 1);
+			strictEqual(summary.corrupt, 0);
+			strictEqual(summary.recovered, 0);
+			ok(existsSync(orphanPath), "skipped receipt is preserved in place");
+			ok(!existsSync(`${orphanPath}.corrupt`), "skipped receipt is not quarantined");
 		});
 	});
 
