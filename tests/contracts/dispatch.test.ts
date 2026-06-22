@@ -23,7 +23,7 @@ import {
 	summarizeToolActivity,
 	zeroSuccessfulToolNote,
 } from "../../src/domains/dispatch/tool-stats.js";
-import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import type { RunLineage, RunReceiptDraft, RunReceiptReproducibility } from "../../src/domains/dispatch/types.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
@@ -252,13 +252,37 @@ function stubContext(
 	return { bus, getContract };
 }
 
+// The real reproducibility collector shells out to three git subprocesses per
+// receipt, which dominated the contracts lane. Tests do not assert git metadata
+// on bundle-produced receipts, so inject a fixed stub by default; a test that
+// needs the real collector can override collectReproducibility in its options.
+const FAST_REPRODUCIBILITY: RunReceiptReproducibility = {
+	cwd: "/repo",
+	git: { branch: null, commit: null, dirty: null, dirtyEntries: null, statusHash: null },
+	safetyPolicy: {
+		version: 1,
+		rulePackHash: null,
+		rulePackVersion: null,
+		projectPolicyPath: null,
+		projectPolicyHash: null,
+		projectPolicyValid: null,
+	},
+};
+
+function makeDispatchBundle(
+	ctx: Parameters<typeof createDispatchBundle>[0],
+	options: Parameters<typeof createDispatchBundle>[1] = {},
+): ReturnType<typeof createDispatchBundle> {
+	return createDispatchBundle(ctx, { collectReproducibility: () => FAST_REPRODUCIBILITY, ...options });
+}
+
 describe("contracts/dispatch", () => {
 	it("dispatches single task using a fake worker and returns exit receipt", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let spawned = false;
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
 				spawned = true;
 				return {
@@ -292,7 +316,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({ budgetVerdict: "at", auditSink: auditRows });
 		let spawned = false;
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
 				spawned = true;
 				throw new Error("worker must not spawn past a budget denial");
@@ -331,7 +355,7 @@ describe("contracts/dispatch", () => {
 		sessionView.targets = [{ id: "default", runtime: "openai", defaultModel: "gpt-4o" }];
 		sessionView.workers.default = { target: "default", model: "session-model", thinkingLevel: "off" };
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			getSettings: () => sessionView,
 			spawnWorker: (spec) => {
 				capturedSpec = spec;
@@ -377,7 +401,7 @@ describe("contracts/dispatch", () => {
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let capturedSpec: WorkerSpec | null = null;
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				capturedSpec = spec;
 				return {
@@ -419,7 +443,7 @@ describe("contracts/dispatch", () => {
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let capturedSpec: WorkerSpec | null = null;
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				capturedSpec = spec;
 				return {
@@ -458,7 +482,7 @@ describe("contracts/dispatch", () => {
 		const exitQueue = [...exits];
 		const spawnedTasks: string[] = [];
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				spawnedTasks.push(spec.task);
 				const exit = exitQueue.shift();
@@ -520,7 +544,7 @@ describe("contracts/dispatch", () => {
 				},
 			],
 		});
-		const bundle = createDispatchBundle(context);
+		const bundle = makeDispatchBundle(context);
 		await bundle.extension.start();
 		try {
 			await rejects(
@@ -549,7 +573,7 @@ describe("contracts/dispatch", () => {
 		});
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let spawned = false;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
 				spawned = true;
 				return {
@@ -606,7 +630,7 @@ describe("contracts/dispatch", () => {
 	it("releases the gate and creates receipt with exit code on worker failure", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
 				pid: 1003,
 				promise: exit.promise,
@@ -649,7 +673,7 @@ describe("contracts/dispatch", () => {
 		let capturedTask = "";
 		let capturedCommand = "";
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			startAcpDelegationRun: (input) => {
 				capturedTask = input.task;
 				capturedCommand = input.agent.command;
@@ -769,7 +793,7 @@ rl.once("line", () => {
 		const unsubscribeFailed = context.bus.on(BusChannels.DispatchFailed, (payload) => {
 			failedEvents.push(payload);
 		});
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec, opts) =>
 				spawnNativeWorker(spec, {
 					...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
@@ -802,7 +826,7 @@ rl.once("line", () => {
 		const secondExit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let spawnCount = 0;
 		let now = 1000;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			now: () => now,
 			resilienceCooldownMs: 500,
 			spawnWorker: () => ({
@@ -900,7 +924,7 @@ rl.once("line", () => {
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let capturedSpec: WorkerSpec | null = null;
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				capturedSpec = spec;
 				return {
@@ -945,7 +969,7 @@ rl.once("line", () => {
 			configContract.get().skills.trustProjectCompatRoots = true;
 		}
 
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				capturedSpec = spec;
 				return {
@@ -1053,7 +1077,7 @@ rl.once("line", () => {
 		if (configContract) configContract.get().workers.maxRetries = 1;
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let abortCalled = false;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			now: () => 1000,
 			heartbeatSpec: { windowMs: 1, graceMs: 1 },
 			heartbeatIntervalMs: 5,
@@ -1093,7 +1117,7 @@ rl.once("line", () => {
 			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
 		];
 		let spawnCount = 0;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			resilienceCooldownMs: 0,
 			spawnWorker: () => {
 				const idx = spawnCount++;
@@ -1157,7 +1181,7 @@ rl.once("line", () => {
 		};
 		const exits = Array.from({ length: 5 }, () => deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>());
 		let spawnCount = 0;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
 				const idx = spawnCount++;
 				const exit = exits[idx];
@@ -1203,7 +1227,7 @@ rl.once("line", () => {
 			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
 		];
 		let spawnCount = 0;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				const idx = spawnCount++;
 				if (spec.task === "fail for retry") {
@@ -1563,7 +1587,7 @@ rl.once("line", () => {
 		});
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		let capturedSpec: WorkerSpec | null = null;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				capturedSpec = spec;
 				return {
@@ -1614,7 +1638,7 @@ rl.once("line", () => {
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) configContract.get().workers.onPermission = "fail";
 		let capturedSpec: WorkerSpec | null = null;
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec) => {
 				capturedSpec = spec;
 				return {
@@ -1687,7 +1711,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 		const unsubscribe = context.bus.on(BusChannels.DispatchCompleted, (payload) => {
 			completed.push(payload);
 		});
-		const bundle = createDispatchBundle(context, { spawnWorker: instantWorker });
+		const bundle = makeDispatchBundle(context, { spawnWorker: instantWorker });
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "impossible write task" });
@@ -1717,7 +1741,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 
 	it("dispatch tool summary surfaces the zero-tool note to the calling model", async () => {
 		const context = stubContext();
-		const bundle = createDispatchBundle(context, { spawnWorker: instantWorker });
+		const bundle = makeDispatchBundle(context, { spawnWorker: instantWorker });
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({ dispatch: bundle.contract });
@@ -1734,7 +1758,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	it("keeps outcomeDetail null when at least one tool call succeeded", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
 				pid: 8101,
 				promise: exit.promise,
@@ -1771,7 +1795,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	it("notes a succeeded run whose tool calls all failed or were blocked", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
-		const bundle = createDispatchBundle(context, {
+		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
 				pid: 8102,
 				promise: exit.promise,

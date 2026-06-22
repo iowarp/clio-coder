@@ -150,6 +150,12 @@ export interface DispatchBundleOptions {
 	 * when absent (headless boots, tests).
 	 */
 	getSettings?: () => Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+	/**
+	 * Reproducibility collector seam. Defaults to the real git-backed collector,
+	 * which shells out to three synchronous `git` subprocesses per receipt.
+	 * Tests inject a fixed stub to keep the receipt path off the process spawner.
+	 */
+	collectReproducibility?: typeof collectReproducibilityMetadata;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -1019,6 +1025,7 @@ export function createDispatchBundle(
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 	const startAcpRun = options?.startAcpDelegationRun ?? startAcpDelegationRun;
+	const collectReproducibility = options?.collectReproducibility ?? collectReproducibilityMetadata;
 	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;
 	const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
 	const getResilienceCooldownMs = (): number => {
@@ -1687,7 +1694,7 @@ export function createDispatchBundle(
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,
 				},
-				reproducibility: collectReproducibilityMetadata(lifecycle.cwd, safetyMetadata),
+				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
 				delegation: {
 					agentConfigId: lifecycle.agentConfig.id,
 					command: lifecycle.agentConfig.command,
@@ -2124,7 +2131,7 @@ export function createDispatchBundle(
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,
 				},
-				reproducibility: collectReproducibilityMetadata(lifecycle.cwd, safetyMetadata),
+				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
 				runtimeResolution: runtimeTargetSnapshot(lifecycle.target.runtimeResolution),
 				sessionId: null,
 			};
