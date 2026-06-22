@@ -10,8 +10,8 @@
  * Invariants (asserted by tests/contracts/dispatch.test.ts):
  *   - count == ok + errors + blocked for every tool entry.
  *   - totalDurationMs accumulates only finite non-negative durations.
- *   - snapshot is sorted by tool name ascending so receipt digests stay
- *     deterministic across runs.
+ *   - snapshot is sorted by tool-name code point ascending so receipt digests
+ *     stay deterministic across runs and host locales.
  *   - countToolCalls returns the sum of count across every entry.
  */
 
@@ -48,7 +48,7 @@ export function countToolCalls(stats: Map<string, ToolCallStat>): number {
 }
 
 export function snapshotToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
-	return [...stats.values()].sort((a, b) => a.tool.localeCompare(b.tool));
+	return [...stats.values()].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
 }
 
 /** Action classes that can change state outside the worker's own context. */
