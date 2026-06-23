@@ -5,12 +5,18 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## 0.2.4 - Unreleased
+## 0.2.4 - 2026-06-23
 
-Clio Coder 0.2.4 is an internal hardening pass. It isolates the dispatch test
-suite from the real run ledger, pins previously-unasserted dispatch invariants,
-makes receipt digests deterministic across hosts, and refreshes the engine and
-SDK dependencies. It carries no user-facing feature changes.
+Clio Coder 0.2.4 brings agent fleet management on top of an internal hardening
+pass. It adds agent-to-profile bindings and a multi-mode `/fleet` overlay,
+isolates the dispatch test suite from the real run ledger, pins
+previously-unasserted dispatch invariants, makes receipt digests deterministic
+across hosts, and refreshes the engine and SDK dependencies.
+
+### Added
+
+- Agent fleet management: agent-to-profile bindings, a multi-mode `/fleet`
+  overlay for profiles and bindings, fault-tolerant dispatch, and profile CRUD.
 
 ### Fixed
 
@@ -26,6 +32,8 @@ SDK dependencies. It carries no user-facing feature changes.
 
 ### Changed
 
+- Targets: dropped the `disconnect` verb, guarded chat use during a run, and
+  added a fleet-default action.
 - Pinned previously-unasserted dispatch invariants, each sabotage-verified: the
   ledger ring cap, global sort before cap, merge disk-preservation with
   memory-wins, adopt dedup/sort/no-op, orphan recovery for abandoned rows and the
