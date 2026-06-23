@@ -1,7 +1,7 @@
 # Documentation Standards and Codebase Alignment
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive documentation link linter, phrasing/claim evaluator, and alignment portal is located at [docs/html/documentation_blueprint.html](html/documentation_blueprint.html) (Version: 0.2.3).
+> **Interactive Spec Available:** An interactive documentation link linter, phrasing/claim evaluator, and alignment portal is located at [docs/html/documentation_blueprint.html](html/documentation_blueprint.html) (Version: 0.2.4).
 
 Clio Coder is an experimental community alpha. Documentation should help contributors and early users work from the source of truth without overstating maturity. When docs drift, prefer the current source and tests over older prose or aspirational roadmap notes.
 

@@ -416,7 +416,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		includePartialMessages: true,
 		persistSession: false,
 		settingSources: [],
-		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "@iowarp/clio-coder/0.2.3" },
+		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "@iowarp/clio-coder/0.2.4" },
 	};
 	const thinking = thinkingForInput(input);
 	if (thinking !== undefined) options.thinking = thinking;
