@@ -5,6 +5,43 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## 0.2.4 - Unreleased
+
+Clio Coder 0.2.4 is an internal hardening pass. It isolates the dispatch test
+suite from the real run ledger, pins previously-unasserted dispatch invariants,
+makes receipt digests deterministic across hosts, and refreshes the engine and
+SDK dependencies. It carries no user-facing feature changes.
+
+### Fixed
+
+- Dispatch contract tests never isolated `CLIO_STATE_DIR`, so `extension.start()`
+  read and rewrote the developer's real run ledger. Because `persist()` caps the
+  ledger to 1000 rows, a single test run could truncate real history. Tests now
+  isolate state per-test through `tests/harness/dispatch.ts`, and the same leak
+  is closed in worker-steer. The contracts lane dropped from 13.7s to 7.1s while
+  gaining 15 tests.
+- Receipt digest ordering was locale-dependent. `snapshotToolStats` now orders by
+  UTF-16 code unit instead of `localeCompare`, so digests match across hosts.
+- Restored a green Biome check on the baseline.
+
+### Changed
+
+- Pinned previously-unasserted dispatch invariants, each sabotage-verified: the
+  ledger ring cap, global sort before cap, merge disk-preservation with
+  memory-wins, adopt dedup/sort/no-op, orphan recovery for abandoned rows and the
+  no-`cwd` skip, tool-stats outcome buckets and `countToolCalls`, and the
+  `runStatusForOutcome` map with its `stopReason` suffix.
+- Added a `collectReproducibility` dependency-injection seam for tests. The
+  production default is unchanged.
+- Renamed the share/archive export include flag to `hasExplicitInclude`.
+- Refreshed dependencies. The pi engine (`@earendil-works/pi-agent-core`,
+  `pi-ai`, `pi-tui`) moved to 0.79.10, the Claude Agent SDK to 0.3.186, the
+  Anthropic SDK override to 0.105.0, Biome to 2.5.1, TypeBox to 1.3.0, undici to
+  8.5.0, uuid to 14.0.1, and tsx to 4.22.4. `@types/node` stays on the 24.x line
+  to match the Node `>=22.19.0` support floor, and `web-tree-sitter` stays at
+  0.20.8 because the `tree-sitter-wasms` grammars are ABI 13 while 0.25 and later
+  require ABI 14.
+
 ## 0.2.3 - 2026-06-17
 
 Clio Coder 0.2.3 is a TUI command-surface sprint. It moves the interactive
