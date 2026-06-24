@@ -124,3 +124,12 @@ clio eval compare eval-baseline eval-candidate
 Comparisons match results by `taskId + repeatIndex`. They report pass-rate, wall-time, token, cost, and harness-metric deltas, plus missing/added result rows when task sets differ.
 
 For useful comparisons, run baseline and candidate from the same task file content and repeat count.
+
+---
+
+## Scientific Context and SWE-bench Evaluation
+
+Clio Coder incorporates local task-runner metrics to evaluate performance changes in subagent behaviors. This design is inspired by agent benchmarks like [SWE-bench](https://www.swebench.com), which evaluate AI systems on their ability to resolve real-world software engineering issues in python codebases. 
+
+The evaluation runner collects execution details, token totals, and cost data. Combined with the `--format swe-jsonl` report option, it outputs standardized evaluations suitable for comparing model improvements, tool utility changes, and system prompt effectiveness in scientific software repositories.
+
