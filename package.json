@@ -54,6 +54,7 @@
 		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",
 		"docs/*.md",
+		"docs/html/**",
 		"README.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",

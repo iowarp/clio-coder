@@ -7,6 +7,7 @@ import { runConfigCommand } from "./config.js";
 import { runConfigureCommand } from "./configure.js";
 import { runContextClearCommand } from "./context-clear.js";
 import { runContextIndexCommand } from "./context-index.js";
+import { runDocsCommand } from "./docs.js";
 import { runDoctorCommand } from "./doctor.js";
 import { runEvalCommand } from "./eval.js";
 import { runEvidenceCommand } from "./evidence.js";
@@ -64,6 +65,7 @@ Usage:
   clio evolve manifest      create, validate, or summarize change manifests
   clio extensions           install, list, enable, disable, or remove extension packages
   clio skills               list, inspect, validate, or create skills
+  clio docs [topic]         serve bundled HTML docs on 127.0.0.1 (--no-open to skip browser)
   clio share export|import  export or import Clio project/resource archives
   clio context-init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki
   clio --help, -h           this message
@@ -124,6 +126,8 @@ async function main(argv: string[]): Promise<number> {
 			return runFleetCommand(subArgs);
 		case "skills":
 			return runSkillsCommand(subArgs);
+		case "docs":
+			return runDocsCommand(subArgs);
 		case "share":
 			return runShareCommand(subArgs);
 		case "export":
