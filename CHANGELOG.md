@@ -7,6 +7,14 @@ interfaces.
 
 ## [Unreleased]
 
+### Added
+
+- Phase 1 (model residency): a `runtime.notice` event-bus channel and an
+  operator-facing notice taxonomy (`will-not-fit`, `about-to-evict`,
+  `foreign-backoff`, `stress`) emitted by the new VRAM-aware residency
+  reconciler. Notices are informational and never cancel a turn; the
+  interactive layer renders them and the worker writes them to stderr.
+
 ### Changed
 
 - Phase 0 (lint cleanup): converted 13 null-guard conditionals to optional
@@ -18,6 +26,24 @@ interfaces.
   semantics: a falsy base still triggers the guard, and multi-clause conditions
   optional-chain every property access so correctness does not depend on
   narrowing propagating through `||`. No runtime behavior changes.
+- Phase 1 (model residency): one runtime-agnostic residency reconciler
+  (`src/engine/apis/residency.ts`) now decides model load and evict for every
+  manageable local runtime from the shared stream path, so the interactive and
+  headless paths reconcile identically. It evicts only Clio-loaded models, backs
+  off to observe-only when a foreign-loaded model is present, and is VRAM-aware:
+  it weighs the requested footprint against free VRAM where the runtime exposes
+  it and declines a load that still will not fit after reclaiming Clio-loaded
+  VRAM. Residency defaults to Clio-managed for manageable runtimes with one
+  explicit opt-out, `CLIO_RESIDENCY=observe`. The LM Studio `gpuStrictVramCap`
+  no-spill guard stays; an oversized load now surfaces a `will-not-fit` notice
+  instead of a bare SDK error.
+
+### Fixed
+
+- Phase 1 (model residency): the headless and worker activation path never
+  reconciled Ollama residency, so a dispatched run could leave a previously
+  pinned model resident and overflow VRAM when a second model loaded. Both
+  paths now reconcile through the single reconciler.
 
 ## 0.2.5 - 2026-06-23
 

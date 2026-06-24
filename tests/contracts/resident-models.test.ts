@@ -5,12 +5,7 @@ import {
 	listResidentOllamaModels,
 	type OllamaEvictClient,
 } from "../../src/engine/apis/ollama-native.js";
-import {
-	evictOtherResidentModels,
-	type ResidentModelInfo,
-	residentMatchesKeep,
-	residentModelManagerFor,
-} from "../../src/engine/apis/resident-models.js";
+import { type ResidentModelInfo, residentMatchesKeep } from "../../src/engine/apis/resident-models.js";
 
 function fakeOllamaClient(resident: EvictResidentResponse, calls: { unloaded: string[] }): OllamaEvictClient {
 	return {
@@ -62,22 +57,5 @@ describe("resident keep matching", () => {
 		strictEqual(residentMatchesKeep(entry, "registry/qwen:latest"), true);
 		strictEqual(residentMatchesKeep(entry, "qwen:latest"), true, "matching the name alias must keep the model");
 		strictEqual(residentMatchesKeep(entry, "something-else"), false);
-	});
-});
-
-describe("resident manager dispatch", () => {
-	it("exposes a manager for ollama-native and nothing for runtimes that self-manage residency", () => {
-		strictEqual(residentModelManagerFor("ollama-native") !== undefined, true);
-		strictEqual(residentModelManagerFor("lmstudio-native"), undefined);
-		strictEqual(residentModelManagerFor("llamacpp"), undefined);
-	});
-
-	it("is a no-op for an unmanaged runtime", async () => {
-		// Resolves without throwing and without needing a reachable server.
-		await evictOtherResidentModels("lmstudio-native", "http://127.0.0.1:1234", "model", undefined);
-	});
-
-	it("is a no-op when the target has no url", async () => {
-		await evictOtherResidentModels("ollama-native", undefined, "model", undefined);
 	});
 });

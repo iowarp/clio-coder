@@ -9,6 +9,7 @@
  */
 
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
+import { setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
@@ -17,6 +18,12 @@ import { validateRehydratedWorkerRuntime } from "./spec-contract.js";
 import { createWorkerStdinDemux } from "./stdin-demux.js";
 
 async function main(): Promise<number> {
+	// A worker has no TUI, so residency notices go to stderr (the parent
+	// captures it for diagnostics) instead of the shared bus, keeping headless
+	// reconciliation parity with the interactive path.
+	setResidencyNoticeSink((notice) => {
+		process.stderr.write(`[worker] residency ${notice.kind}: ${notice.message}\n`);
+	});
 	const demux = createWorkerStdinDemux();
 	process.stdin.setEncoding("utf8");
 	process.stdin.on("data", (chunk: string) => demux.feed(chunk));

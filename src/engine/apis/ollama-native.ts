@@ -34,6 +34,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { calculateEngineCost } from "../ai.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
+import { type ResidencyAdapter, reconcileResidency, residencyManaged } from "./residency.js";
 import type { ResidentModelInfo, ResidentModelManager } from "./resident-models.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 
@@ -52,6 +53,37 @@ interface ClioRuntimeMetadata {
 
 function clioQuirks(model: Model<"ollama-native">): LocalModelQuirks | undefined {
 	return (model as Model<"ollama-native"> & ClioRuntimeMetadata).clio?.quirks;
+}
+
+function ollamaTargetId(model: Model<"ollama-native">): string {
+	return (model as Model<"ollama-native"> & ClioRuntimeMetadata).clio?.targetId ?? model.provider;
+}
+
+/**
+ * Reconcile Ollama residency before a turn streams. Both the interactive and
+ * headless paths reach here through runStream, so this is the single place that
+ * decides Ollama load and evict. Ollama pins the active model with
+ * `keep_alive: -1`, so a prior Clio-pinned model lingers until evicted; the
+ * reconciler releases Clio-loaded stragglers and backs off when a foreign model
+ * is present. Best-effort: a failure never blocks the turn.
+ */
+async function reconcileOllamaResidency(model: Model<"ollama-native">, headers: Record<string, string>): Promise<void> {
+	const baseUrl = model.baseUrl;
+	if (!baseUrl) return;
+	const adapter: ResidencyAdapter = {
+		targetKey: `ollama-native|${baseUrl}`,
+		targetId: ollamaTargetId(model),
+		runtimeId: "ollama-native",
+		keepModelId: model.id,
+		managed: residencyManaged(),
+		listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)),
+		unload: (id) => ollamaResidentManager.unload(baseUrl, id, headers),
+	};
+	try {
+		await reconcileResidency(adapter);
+	} catch {
+		// Reconciliation is best-effort; a failure must never block the turn.
+	}
 }
 
 function pickSamplingProfile(
@@ -335,6 +367,8 @@ function runStream(
 	if (signal && !signal.aborted) signal.addEventListener("abort", onAbort, { once: true });
 	(async () => {
 		try {
+			if (aborted) throw new Error("Request was aborted");
+			await reconcileOllamaResidency(model, headers);
 			if (aborted) throw new Error("Request was aborted");
 			const iterator = await client.chat(buildRequest(model, context, options, thinkingLevel));
 			stream.push({ type: "start", partial: output });

@@ -43,6 +43,7 @@ export const BusChannels = {
 	SafetyAllowed: "safety.allowed",
 	LoopBlocked: "safety.loopBlocked",
 	ProviderHealth: "provider.health",
+	RuntimeNotice: "runtime.notice",
 	DispatchEnqueued: "dispatch.enqueued",
 	DispatchStarted: "dispatch.started",
 	DispatchProgress: "dispatch.progress",
@@ -64,6 +65,28 @@ export const BusChannels = {
 } as const;
 
 export type BusChannel = (typeof BusChannels)[keyof typeof BusChannels];
+
+/** Collision or stress category for a {@link RuntimeNoticePayload}. */
+export type RuntimeNoticeKind = "will-not-fit" | "about-to-evict" | "foreign-backoff" | "stress";
+
+/**
+ * Model-residency notice published on {@link BusChannels.RuntimeNotice} by the
+ * VRAM-aware reconciler (src/engine/apis/residency.ts). Notices are
+ * informational and non-blocking: a notice never cancels a turn. `kind` is the
+ * collision or stress category, `detail` carries the numeric VRAM and footprint
+ * facts when the runtime exposed them, and `message` is the rendered
+ * operator-facing line. A genuine VRAM miss surfaces a `will-not-fit` notice
+ * carrying the same content the turn fails with, instead of a bare SDK error.
+ */
+export interface RuntimeNoticePayload {
+	kind: RuntimeNoticeKind;
+	level: "info" | "warning" | "error";
+	targetId: string;
+	runtimeId: string;
+	model: string;
+	message: string;
+	detail?: Record<string, number | string | boolean>;
+}
 
 /**
  * Window-resolution warning published on {@link BusChannels.ContextWarning}.
@@ -519,6 +542,7 @@ export type BusPayloadMap = {
 	[BusChannels.SafetyAllowed]: SafetyAllowedPayload;
 	[BusChannels.LoopBlocked]: LoopBlockedPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
+	[BusChannels.RuntimeNotice]: RuntimeNoticePayload;
 	[BusChannels.DispatchEnqueued]: DispatchEnqueuedPayload;
 	[BusChannels.DispatchStarted]: DispatchStartedPayload;
 	[BusChannels.DispatchProgress]: DispatchProgressPayload;
