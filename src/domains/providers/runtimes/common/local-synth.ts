@@ -17,6 +17,7 @@ export interface ClioLocalModelMetadata {
 		gateway?: boolean;
 		family?: string;
 		quirks?: LocalModelQuirks;
+		chatTemplateKwargsUnsupported?: boolean;
 	};
 }
 

@@ -44,7 +44,12 @@ interface ClioRuntimeMetadata {
 		lifecycle: "user-managed" | "clio-managed";
 		gateway?: boolean;
 		quirks?: LocalModelQuirks;
+		chatTemplateKwargsUnsupported?: boolean;
 	};
+}
+
+function chatTemplateKwargsUnsupported(model: Model<Api>): boolean {
+	return (model as Model<Api> & ClioRuntimeMetadata).clio?.chatTemplateKwargsUnsupported === true;
 }
 
 function clioQuirks(model: Model<"openai-completions">): LocalModelQuirks | undefined {
@@ -109,6 +114,7 @@ function applyThinkingPayload(
 	payload: Record<string, unknown>,
 	applied: AppliedThinking,
 	resolved: ResolvedModelRuntimeCapabilities,
+	model: Model<Api>,
 ): Record<string, unknown> {
 	if (applied.mechanism === "always-on" || applied.mechanism === "none") return payload;
 	const next: Record<string, unknown> = { ...payload };
@@ -118,7 +124,7 @@ function applyThinkingPayload(
 	) {
 		next.reasoning_effort = resolved.request.reasoningEffort;
 	}
-	if (resolved.request.chatTemplateKwargs) {
+	if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
 		const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
 		next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
 	}
@@ -169,7 +175,7 @@ function composeSamplingOnPayload(
 			return base ? await base(payload, model) : undefined;
 		}
 		let next = applyLlamaCppPromptCachePayload(applyOpenAISamplingProfile(payload, profile), model);
-		if (resolved) next = applyThinkingPayload(next, resolved.thinking, resolved);
+		if (resolved) next = applyThinkingPayload(next, resolved.thinking, resolved, model);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -190,7 +196,12 @@ function composeThinkingOnPayload(
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
-		const next = applyThinkingPayload(applyLlamaCppPromptCachePayload(payload, model), resolved.thinking, resolved);
+		const next = applyThinkingPayload(
+			applyLlamaCppPromptCachePayload(payload, model),
+			resolved.thinking,
+			resolved,
+			model,
+		);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;

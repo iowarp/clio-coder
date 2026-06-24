@@ -1,0 +1,40 @@
+# ALCF (Argonne) inference-gateway model knowledge base.
+#
+# GPT-OSS models served through ALCF are already covered by the existing
+# openai-gpt-oss family in local-models/clio-local-coding-targets.yaml.
+
+- family: meta-llama-4-maverick
+  matchPatterns:
+    - meta-llama/llama-4-maverick
+    - llama-4-maverick
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: false
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 8192
+
+- family: meta-llama-4-scout
+  matchPatterns:
+    - meta-llama/llama-4-scout
+    - llama-4-scout
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: false
+    structuredOutputs: json-schema
+    vision: false
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 131072
+    maxTokens: 8192

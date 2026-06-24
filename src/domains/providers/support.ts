@@ -27,6 +27,7 @@ export interface ResolvedProviderReference {
 }
 
 const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
+	alcf: "ALCF inference gateway (Sophia/Metis) via Globus",
 	anthropic: "Anthropic API",
 	"anthropic-max": "Claude Pro/Max subscription via Anthropic OAuth",
 	bedrock: "Amazon Bedrock",
@@ -74,6 +75,7 @@ export function supportGroupLabel(group: ProviderSupportGroup): string {
 
 function classifyGroup(runtime: RuntimeDescriptor): ProviderSupportGroup {
 	if (runtime.id === "openai-codex") return "featured";
+	if (runtime.id === "alcf") return "cloud-api";
 	if (runtime.auth === "oauth" || runtime.auth === "claude-cli") return "subscription";
 	if (catalogProviderForRuntime(runtime.id) || (runtime.auth === "api-key" && !runtime.probe)) {
 		return "cloud-api";
@@ -116,7 +118,10 @@ export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderS
 		connectable: runtime.auth === "oauth" || runtime.auth === "api-key",
 		supportsCustomUrl:
 			runtime.kind === "http" &&
-			(classifyGroup(runtime) === "local-http" || runtime.id === "openai-compat" || runtime.id === "anthropic-compat"),
+			(classifyGroup(runtime) === "local-http" ||
+				runtime.id === "openai-compat" ||
+				runtime.id === "anthropic-compat" ||
+				runtime.id === "alcf"),
 	};
 }
 

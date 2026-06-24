@@ -2,7 +2,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { type ClioSettings, readSettings, settingsPath, updateSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
-import { openAuthStorage } from "../domains/providers/auth/index.js";
+import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import { getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
 import {
@@ -21,6 +21,7 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
+import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import { printError, printOk, printPlaintextCredentialWarning } from "./shared.js";
@@ -221,6 +222,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 }
 
 function ensureRegistryPopulated(): void {
+	registerClioOAuthProviders();
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 }
@@ -297,11 +299,21 @@ function deriveTargetId(runtimeId: string, existing: ReadonlyArray<TargetDescrip
 	return `${base}-${Date.now()}`;
 }
 
-function buildProbeContext(): ProbeContext {
-	return {
+async function buildProbeContext(runtime?: RuntimeDescriptor, target?: TargetDescriptor): Promise<ProbeContext> {
+	const probeCtx: ProbeContext = {
 		credentialsPresent: credentialsPresent(),
 		httpTimeoutMs: 5000,
 	};
+	if (!runtime || !target || !targetRequiresAuth(target, runtime)) return probeCtx;
+	try {
+		const resolution = await openAuthStorage().resolveForTarget(resolveAuthTarget(target, runtime), {
+			includeFallback: false,
+		});
+		if (resolution.apiKey) probeCtx.authToken = resolution.apiKey;
+	} catch {
+		// Let the runtime's probe report its own missing-auth diagnostic.
+	}
+	return probeCtx;
 }
 
 function runtimeKnownModelsFor(runtimeId: string): ReadonlyArray<string> {
@@ -356,7 +368,7 @@ function validateContextWindowOverride(
 async function runtimeProbe(runtime: RuntimeDescriptor, target: TargetDescriptor): Promise<ProbeResult | null> {
 	if (typeof runtime.probe !== "function") return null;
 	try {
-		return await runtime.probe(target, buildProbeContext());
+		return await runtime.probe(target, await buildProbeContext(runtime, target));
 	} catch (err) {
 		return { ok: false, error: err instanceof Error ? err.message : String(err) };
 	}
@@ -365,7 +377,7 @@ async function runtimeProbe(runtime: RuntimeDescriptor, target: TargetDescriptor
 async function runtimeProbeModels(runtime: RuntimeDescriptor, target: TargetDescriptor): Promise<string[]> {
 	if (typeof runtime.probeModels !== "function") return [];
 	try {
-		return await runtime.probeModels(target, buildProbeContext());
+		return await runtime.probeModels(target, await buildProbeContext(runtime, target));
 	} catch {
 		return [];
 	}

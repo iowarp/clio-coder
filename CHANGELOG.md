@@ -5,6 +5,15 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## Unreleased
+
+### Added
+
+- Added the `alcf` runtime for Argonne ALCF Sophia/Metis inference targets over
+  Globus OAuth, including authenticated live model discovery, ALCF model
+  metadata, and a strict-gateway OpenAI-compatible payload flag that suppresses
+  `chat_template_kwargs` while preserving top-level `reasoning_effort`.
+
 ## 0.2.4 - 2026-06-23
 
 Clio Coder 0.2.4 brings agent fleet management on top of an internal hardening

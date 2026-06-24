@@ -13,6 +13,7 @@ import type { RuntimeDescriptor } from "../types/runtime-descriptor.js";
 import antigravityCode from "./antigravity/antigravity-code.js";
 import claudeCode from "./claude/claude-code.js";
 import claudeSdk from "./claude/claude-sdk.js";
+import alcf from "./cloud/alcf.js";
 import anthropic from "./cloud/anthropic.js";
 import anthropicMax from "./cloud/anthropic-max.js";
 import bedrock from "./cloud/bedrock.js";
@@ -38,6 +39,7 @@ import anthropicCompat from "./protocol/anthropic-compat.js";
 import openaiCompat from "./protocol/openai-compat.js";
 
 const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
+	alcf,
 	anthropic,
 	anthropicMax,
 	bedrock,

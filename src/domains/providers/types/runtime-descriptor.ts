@@ -31,6 +31,13 @@ export interface ProbeContext {
 	credentialsPresent: ReadonlySet<string>;
 	httpTimeoutMs: number;
 	signal?: AbortSignal;
+	/**
+	 * Resolved bearer/API token for the target being probed, when one is
+	 * available from stored auth, environment, or refreshed OAuth credentials.
+	 * Auth-gated discovery endpoints can use this instead of reaching into auth
+	 * storage directly.
+	 */
+	authToken?: string;
 }
 
 /**
