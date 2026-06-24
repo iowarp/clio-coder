@@ -360,14 +360,29 @@ npm run ci
 Security reports go through the channels described in
 [SECURITY.md](SECURITY.md), not public issues.
 
-## Lineage
+## Project Heritage, Lineage, and Funding
 
-Clio Coder is part of the IOWarp CLIO family:
+Clio Coder is an open-source orchestrator coding agent developed under the [IOWarp](https://iowarp.ai) project. It is created by the [Gnosis Research Center](https://grc.iit.edu) at the [Illinois Institute of Technology](https://www.iit.edu) in collaboration with the University of Utah.
 
-- [clio-core](https://github.com/iowarp/clio-core): Chimaera-based context
-  storage runtime.
-- [clio-kit](https://github.com/iowarp/clio-kit): MCP servers for scientific
-  data, including HDF5, Slurm, ParaView, Pandas, ArXiv, NetCDF, FITS, and
-  Zarr.
+The development of the IOWarp platform and the CLIO (Context Layer for Input/Output) architecture is funded by the National Science Foundation (NSF) under [Award #2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318) for the 2024–2029 period. The project is led by Principal Investigator Dr. Xian-He Sun and Co-Principal Investigators Dr. Anthony Kougkas, Dr. Jake Hochhalter, and Dr. Vivek Srikumar.
+
+Clio Coder operates as the interactive coding orchestrator within the broader IOWarp ecosystem:
+- [clio-core](https://github.com/iowarp/clio-core): The foundational storage layer utilizing Chimaera-based tiered data and context storage.
+- [clio-kit](https://github.com/iowarp/clio-kit): A suite of over 15 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers exposing 150+ tools designed specifically for scientific computing domains, including HDF5, Slurm, ParaView, Pandas, ArXiv, NetCDF, FITS, and Zarr.
+
+### Dependency Stack and Industry Standards
+
+Clio Coder is built on top of robust frameworks and adheres to emerging industry protocols for AI agents:
+- **Pi Agent Framework:** It leverages the modular packages developed by [Earendil Works](https://github.com/earendil-works), including the core LLM execution engine [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai), the terminal rendering components [@earendil-works/pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui), and the subagent orchestrator [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core).
+- **Anthropic Claude Agent SDK:** For specialized agent behaviors, it integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk), enabling high-performance coding agent runs that run under Claude Pro/Max subscriptions.
+- **Agent Client Protocol (ACP):** Clio implements and interoperates with the [Agent Client Protocol](https://agentclientprotocol.com) to decouple the agent engine from IDE frontends, exposing standard JSON-RPC endpoints for terminal and file actions.
+- **Globus and ALCF:** For secure high-performance computing access, Clio integrates with [Globus Auth](https://www.globus.org) to authenticate against the [Argonne Leadership Computing Facility (ALCF)](https://www.alcf.anl.gov) inference gateways Sophia and Metis.
+
+### Scientific Evaluation and Reproducibility
+
+Clio Coder is designed to support the rigorous evaluation standards of scientific software engineering:
+- **SWE-bench:** Subagents and prompt techniques are evaluated against the [SWE-bench](https://www.swebench.com) benchmark datasets to assess their ability to resolve real-world software engineering issues.
+- **Durable Validation Evidence:** Every subagent run generates structured execution evidence. These artifacts are matched against baseline and candidate evaluations to guarantee mathematical reproducibility and prevent silent code regressions.
 
 Licensed under Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
