@@ -6,6 +6,7 @@ import {
 	type ContextPrunedPayload,
 	type ContextWarningPayload,
 	type LoopBlockedPayload,
+	type RuntimeNoticePayload,
 } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -1227,6 +1228,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				"compaction-notice",
 			);
 		}
+		footer.refresh();
+		tui.requestRender();
+	});
+	// Model-residency visibility. The VRAM-aware reconciler (engine/residency.ts)
+	// emits over the bus instead of importing TUI code; this subscriber renders
+	// each will-not-fit, about-to-evict, foreign-backoff, or stress notice. The
+	// key folds repeats of the same kind for one target so turns do not spam.
+	const unsubscribeRuntimeNotice = deps.bus.on(BusChannels.RuntimeNotice, (payload) => {
+		const evt = payload as RuntimeNoticePayload | null | undefined;
+		if (!evt || typeof evt !== "object" || typeof evt.message !== "string" || typeof evt.kind !== "string") return;
+		notify(evt.level, evt.message, `runtime-notice:${evt.kind}:${evt.targetId}`);
 		footer.refresh();
 		tui.requestRender();
 	});
@@ -2745,6 +2757,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeFooterTokens();
 		unsubscribeContextPressure();
 		unsubscribeContextPruned();
+		unsubscribeRuntimeNotice();
 		unsubscribeLoopBlocked();
 		unsubscribeConfigRouting();
 		unsubscribeConfigHotReloadOverlay();

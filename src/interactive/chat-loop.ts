@@ -65,7 +65,6 @@ import {
 import { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
-import { evictOtherResidentModels } from "../engine/apis/resident-models.js";
 import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import type { resolveAgentTools } from "../engine/worker-tools.js";
@@ -1073,12 +1072,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtime.runtimeResolution = target.runtimeResolution;
 			appendModelChangeEntry(target);
 			ensureReasoningProbe(target);
-			// Some local runtimes pin the active model in VRAM (Ollama uses
-			// keep_alive=-1), so a prior model lingers after a hot-swap. Ask the
-			// shared resident abstraction to release any other resident model;
-			// it is a no-op for runtimes that manage their own residency.
-			// Fire-and-forget so a slow server never blocks the model swap.
-			void evictOtherResidentModels(target.runtime.id, target.target.url, target.wireModelId, target.target.auth?.headers);
+			// Residency reconciliation now lives in the shared engine stream path
+			// (src/engine/apis/residency.ts), which both the interactive and
+			// headless paths drive, so the hot-swap no longer evicts here. The
+			// reconciler releases any Clio-loaded straggler just-in-time on the
+			// next turn, backs off on a foreign-loaded model, and is VRAM-aware.
 			return runtime;
 		}
 

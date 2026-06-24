@@ -46,6 +46,13 @@ import { calculateEngineCost, parseEngineJsonWithRepair, parseEngineStreamingJso
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
+import {
+	emitResidencyNotice,
+	type ResidencyAdapter,
+	type ResidencyPlan,
+	reconcileResidency,
+	residencyManaged,
+} from "./residency.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 import { formatThinkingForReplay } from "./thinking-replay.js";
 
@@ -80,59 +87,11 @@ function normalizeHttpBaseUrl(url: string): string {
 	return `http://${trimmed}`;
 }
 
-// Per-runtime cache: when a (baseUrl, modelId) pair was last confirmed to be
-// the sole resident model, skip the listLoaded round-trip on the next prompt
-// inside the TTL. Eviction races (another client mutates LM Studio's resident
-// set) self-heal on the first request after the TTL expires.
-export const RESIDENT_TTL_MS = 60_000;
-const residentCache = new Map<string, { modelId: string; at: number }>();
-
+// One loaded model in LM Studio's resident set, as the SDK socket reports it.
+// The reconciler (residency.ts) drives load and evict through these entries.
 export interface ResidentModelEntry {
 	readonly modelKey: string;
 	unload(): Promise<void>;
-}
-
-export interface ResidentModelStatus {
-	readonly state: "unknown" | "loaded" | "not-loaded";
-}
-
-export interface ResidentModelClient {
-	llm: {
-		listLoaded(): Promise<ReadonlyArray<ResidentModelEntry>>;
-	};
-}
-
-export interface EnsureResidentOptions {
-	lifecycle?: RuntimeLifecycle;
-}
-
-export async function ensureResidentModel(
-	client: ResidentModelClient,
-	baseUrl: string,
-	modelId: string,
-	options: EnsureResidentOptions = {},
-	now: () => number = Date.now,
-): Promise<ResidentModelStatus> {
-	if (options.lifecycle !== "clio-managed") return { state: "unknown" };
-	const cached = residentCache.get(baseUrl);
-	if (cached && cached.modelId === modelId && now() - cached.at < RESIDENT_TTL_MS) return { state: "loaded" };
-	let loaded: ReadonlyArray<ResidentModelEntry>;
-	try {
-		loaded = await client.llm.listLoaded();
-	} catch {
-		return { state: "unknown" };
-	}
-	const targetLoaded = loaded.some((entry) => entry.modelKey === modelId);
-	const stale = loaded.filter((entry) => entry.modelKey !== modelId);
-	if (stale.length > 0) {
-		await Promise.all(stale.map((entry) => entry.unload().catch(() => undefined)));
-	}
-	if (targetLoaded) {
-		residentCache.set(baseUrl, { modelId, at: now() });
-		return { state: "loaded" };
-	}
-	residentCache.delete(baseUrl);
-	return { state: "not-loaded" };
 }
 
 function toolToLmStudio(tool: Tool): LLMTool {
@@ -181,12 +140,7 @@ interface LmStudioRunClient {
 
 export interface LmStudioRunDeps {
 	createClient(opts: ConstructorParameters<typeof LMStudioClient>[0]): LmStudioRunClient;
-	ensureResident(
-		client: ResidentModelClient,
-		baseUrl: string,
-		modelId: string,
-		options?: EnsureResidentOptions,
-	): Promise<ResidentModelStatus | undefined>;
+	reconcile(adapter: ResidencyAdapter): Promise<ResidencyPlan>;
 	discoverLoadedContext(baseUrl: string, modelId: string, signal: AbortSignal): Promise<number | undefined>;
 }
 
@@ -255,7 +209,7 @@ function getOrCreateLmStudioClient(
 const defaultRunDeps: LmStudioRunDeps = {
 	createClient: (opts) =>
 		getOrCreateLmStudioClient(opts, (o) => new LMStudioClient({ ...(o ?? {}), logger: lmStudioQuietLogger })),
-	ensureResident: ensureResidentModel,
+	reconcile: reconcileResidency,
 	discoverLoadedContext: discoverLoadedContextLength,
 };
 
@@ -692,28 +646,52 @@ export function runStream(
 			if (passkey) clientOpts.clientPasskey = passkey;
 			const client = deps.createClient(clientOpts);
 			const metadata = runtimeMetadata(model);
-			const residentStatus = await deps.ensureResident(client, baseUrl, model.id, { lifecycle: metadata.lifecycle });
 			const verbose = process.env.CLIO_RUNTIME_VERBOSE === "1";
 			const loadedContextWindow = await deps.discoverLoadedContext(baseUrl, model.id, controller.signal);
 			const budgetLimits = loadedContextWindow !== undefined ? { contextWindow: loadedContextWindow } : undefined;
 			const requestedMaxTokens = remainingContextMaxTokens(model, context, options, budgetLimits);
 			const loadConfig = loadModelConfig(model);
 			const requestedLoadContext = loadConfig.contextLength ?? model.contextWindow;
+			// One reconciler decides LM Studio load and evict for both the
+			// interactive and headless paths. It releases Clio-loaded stragglers,
+			// backs off to observe-only on a foreign-loaded model, and declines up
+			// front when it already knows the model will not fit. `loadedEntries`
+			// captures the SDK handles so eviction reuses one listLoaded round-trip.
+			let loadedEntries: ReadonlyArray<ResidentModelEntry> = [];
+			const plan = await deps.reconcile({
+				targetKey: `lmstudio-native|${baseUrl}`,
+				targetId: metadata.targetId,
+				runtimeId: "lmstudio-native",
+				keepModelId: model.id,
+				managed: residencyManaged(),
+				contextLength: requestedLoadContext,
+				...(model.contextWindow > 0 ? { modelMaxContext: model.contextWindow } : {}),
+				listResident: async () => {
+					loadedEntries = await client.llm.listLoaded();
+					return loadedEntries.map((entry) => ({ modelId: entry.modelKey }));
+				},
+				unload: async (id) => {
+					await loadedEntries.find((entry) => entry.modelKey === id)?.unload();
+				},
+			});
+			if (plan.decision === "decline") {
+				// A known VRAM miss fails with the reconciler's notice content rather
+				// than a bare SDK error; the reconciler already emitted the notice.
+				const reason = plan.notices.find((n) => n.kind === "will-not-fit")?.message;
+				throw new Error(
+					reason ?? describeLoadFailure(baseUrl, model, loadConfig, requestedMaxTokens, "VRAM fit check failed"),
+				);
+			}
 			// Skip passing `config` to client.llm.model when the model is already
-			// resident. LM Studio can report residency through listLoaded while the
-			// REST model metadata still omits context length; passing config in that
-			// state triggers a no-progress reload wait in the SDK.
-			const residentModelLoaded = residentStatus?.state === "loaded";
-			const clioManagedLoadedUnknownContext =
-				metadata.lifecycle === "clio-managed" && residentModelLoaded && loadedContextWindow === undefined;
-			const clioManagedLoadedWithEnoughContext =
-				metadata.lifecycle === "clio-managed" &&
-				loadedContextWindow !== undefined &&
-				loadedContextWindow >= requestedLoadContext;
-			const modelOpenConfig =
-				metadata.lifecycle === "user-managed" || clioManagedLoadedUnknownContext || clioManagedLoadedWithEnoughContext
-					? undefined
-					: loadConfig;
+			// resident, or when Clio is observing a foreign/opt-out server. LM Studio
+			// can report residency through listLoaded while the REST model metadata
+			// still omits context length; passing config in that state triggers a
+			// no-progress reload wait in the SDK.
+			const observeOnly = plan.decision === "observe";
+			const residentModelLoaded = plan.keepResident;
+			const loadedUnknownContext = residentModelLoaded && loadedContextWindow === undefined;
+			const loadedWithEnoughContext = loadedContextWindow !== undefined && loadedContextWindow >= requestedLoadContext;
+			const modelOpenConfig = observeOnly || loadedUnknownContext || loadedWithEnoughContext ? undefined : loadConfig;
 			const modelOpenOpts: { signal: AbortSignal; verbose: boolean; config?: LLMLoadModelConfig } = {
 				signal: controller.signal,
 				verbose,
@@ -723,7 +701,18 @@ export function runStream(
 			try {
 				llm = await client.llm.model(model.id, modelOpenOpts);
 			} catch (err) {
-				throw new Error(describeLoadFailure(baseUrl, model, modelOpenConfig, requestedMaxTokens, err));
+				const message = describeLoadFailure(baseUrl, model, modelOpenConfig, requestedMaxTokens, err);
+				// gpuStrictVramCap turns an oversized load into a failure; surface it
+				// as a will-not-fit notice so it reads like every other VRAM miss.
+				emitResidencyNotice({
+					kind: "will-not-fit",
+					level: "error",
+					targetId: metadata.targetId,
+					runtimeId: "lmstudio-native",
+					model: model.id,
+					message,
+				});
+				throw new Error(message);
 			}
 			stream.push({ type: "start", partial: output });
 			// LM Studio's `result.stats.predictedTokensCount` is the total of all generated
