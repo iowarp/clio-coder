@@ -308,7 +308,34 @@ clio configure --id chatgpt-sub --runtime openai-codex --model gpt-4o --set-orch
 clio configure --id claude-sub --runtime anthropic-max --model sonnet --set-orchestrator
 ```
 
-### 2. Sanctioned Claude Code Worker Runtimes (Worker-Only)
+### 2. ALCF Globus Runtime (Orchestrator + Worker)
+
+The `alcf` runtime targets Argonne's ALCF Sophia and Metis inference gateway
+through Globus OAuth. It is a scientific cloud target rather than a consumer
+subscription, but it uses the same `clio auth login <runtime>` workflow:
+
+```bash
+clio auth login alcf
+
+clio configure \
+  --id alcf-sophia \
+  --runtime alcf \
+  --url https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1 \
+  --model openai/gpt-oss-120b \
+  --max-tokens 4096
+
+clio configure \
+  --id alcf-metis \
+  --runtime alcf \
+  --url https://inference-api.alcf.anl.gov/resource_server/metis/api/v1 \
+  --model gpt-oss-120b \
+  --max-tokens 4096
+```
+
+See [alcf-provider.md](alcf-provider.md) for the Globus login and ALCF discovery
+details.
+
+### 3. Sanctioned Claude Code Worker Runtimes (Worker-Only)
 
 These runtimes drive your local `claude` installation to execute subagent tasks. They are worker-only targets: they can be selected for dispatch via fleet defaults or profiles, but chat/print orchestration requires an HTTP target (like `anthropic-max` or `openai-codex`). They rely on your authenticated `claude` CLI and store no credentials in Clio.
 
@@ -327,7 +354,7 @@ clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-
 clio configure --id claude-code-worker --runtime claude-code --model sonnet
 ```
 
-### 3. Claude Code over ACP (Delegation-Only)
+### 4. Claude Code over ACP (Delegation-Only)
 
 You can drive Claude Code as an external delegation agent over the Agent Client Protocol (ACP). This relies on the Zed `@zed-industries/claude-code-acp` adapter to run over stdio under your existing Claude Code subscription.
 - **Advisory Gating:** Under ACP, gating is **advisory** because Claude self-governs its tools; prefer `claude-sdk` for **enforced** per-tool safety where Clio's safety net intercepts every action class.
@@ -423,7 +450,7 @@ Representative built-in runtime IDs:
 | Category | Runtime IDs |
 | --- | --- |
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
-| Cloud | `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex`, `openrouter` |
+| Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex`, `openrouter` |
 | Subscription | `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers |
 | Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 

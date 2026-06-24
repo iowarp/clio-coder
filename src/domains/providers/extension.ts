@@ -3,6 +3,7 @@ import { type ClioSettings, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
+import { registerClioOAuthProviders } from "../../engine/oauth.js";
 import type { ConfigContract } from "../config/contract.js";
 
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
@@ -183,6 +184,21 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return readSettings();
 	}
 
+	async function buildProbeContextForTarget(target: TargetDescriptor, desc: RuntimeDescriptor): Promise<ProbeContext> {
+		const probeCtx: ProbeContext = {
+			credentialsPresent: credentialsPresent(),
+			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
+		};
+		if (!targetRequiresAuth(target, desc)) return probeCtx;
+		try {
+			const resolution = await authStore.resolveForTarget(resolveAuthTarget(target, desc), { includeFallback: false });
+			if (resolution.apiKey) probeCtx.authToken = resolution.apiKey;
+		} catch {
+			// Authenticated probes should still return a runtime-specific missing-auth error.
+		}
+		return probeCtx;
+	}
+
 	function authStatusFor(target: TargetDescriptor, runtime: RuntimeDescriptor): { available: boolean; reason: string } {
 		const authTarget = resolveAuthTarget(target, runtime);
 		if (!targetRequiresAuth(target, runtime)) {
@@ -280,10 +296,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			statuses.set(target.id, status);
 			return status;
 		}
-		const probeCtx: ProbeContext = {
-			credentialsPresent: credentialsPresent(),
-			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
-		};
+		const probeCtx = await buildProbeContextForTarget(target, desc);
 		let probeResult: ProbeResult;
 		try {
 			probeResult = await desc.probe(target, probeCtx);
@@ -338,10 +351,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		if (!target) return null;
 		const desc = registry.get(target.runtime);
 		if (!desc || typeof desc.probeReasoning !== "function") return null;
-		const probeCtx: ProbeContext = {
-			credentialsPresent: credentialsPresent(),
-			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
-		};
+		const probeCtx = await buildProbeContextForTarget(target, desc);
 		try {
 			const result = await desc.probeReasoning(target, modelId, probeCtx);
 			reasoningCache.set(reasoningCacheKey(targetId, modelId), result.reasoning);
@@ -379,6 +389,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		async start() {
 			ensurePiAiRegistered();
 			registerClioApiProviders();
+			registerClioOAuthProviders();
 			registerBuiltinRuntimes(registry);
 			const settings = readConfig();
 			setGlobalDefaultMaxOutputTokens(settings.defaults.maxTokens);

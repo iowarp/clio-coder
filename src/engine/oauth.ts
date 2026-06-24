@@ -18,7 +18,11 @@ import {
 	getOAuthProvider as piGetOAuthProvider,
 	getOAuthProviders as piGetOAuthProviders,
 	loginOpenAICodex as piLoginOpenAICodex,
+	registerOAuthProvider as piRegisterOAuthProvider,
+	resetOAuthProviders as piResetOAuthProviders,
+	unregisterOAuthProvider as piUnregisterOAuthProvider,
 } from "@earendil-works/pi-ai/oauth";
+import { alcfOAuthProvider } from "./alcf-oauth.js";
 
 export type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderId, OAuthProviderInterface, OAuthSelectPrompt };
 
@@ -44,6 +48,27 @@ export function getEngineOAuthProvider(providerId: string): OAuthProviderInterfa
 
 export function listEngineOAuthProviders(): OAuthProviderInterface[] {
 	return piGetOAuthProviders();
+}
+
+export function registerEngineOAuthProvider(provider: OAuthProviderInterface): void {
+	piRegisterOAuthProvider(provider);
+}
+
+export function unregisterEngineOAuthProvider(providerId: string): void {
+	piUnregisterOAuthProvider(providerId);
+}
+
+export function resetEngineOAuthProviders(): void {
+	clioOAuthProvidersRegistered = false;
+	piResetOAuthProviders();
+}
+
+let clioOAuthProvidersRegistered = false;
+
+export function registerClioOAuthProviders(): void {
+	if (clioOAuthProvidersRegistered) return;
+	clioOAuthProvidersRegistered = true;
+	registerEngineOAuthProvider(alcfOAuthProvider);
 }
 
 export async function loginWithEngineOAuthProvider(
