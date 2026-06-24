@@ -626,6 +626,9 @@ netcdf-c/4.9</textarea>
           HPC Validation Contract Workflow
         </div>
         <div class="flowchart-container">
+          <p style="margin-bottom:1.5rem; font-size:0.925rem; color:var(--text-muted);">
+            Scientific validations execute in four distinct stages. The Slurm/MPI queue manager submits jobs to execute the simulations. Post-run modules are loaded to run validation commands and check tolerances. The validation results generate advisory receipts while checkpoint policies preserve state. Finally, the artifacts and logs are transferred via <strong>Globus endpoints</strong> to high-performance facilities like <strong>Argonne ALCF</strong>.
+          </p>
           <svg aria-hidden="true" width="850" height="420" viewBox="0 0 850 420" style="background:#020408; border-radius:10px;"><title>Icon</title>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -675,20 +678,35 @@ netcdf-c/4.9</textarea>
             <g transform="translate(430, 40)">
               <rect x="10" y="20" width="180" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
               <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">3. RECEIPT</text>
-
+ 
               <rect x="25" y="80" width="150" height="60" rx="6" fill="rgba(16, 185, 129, 0.05)" stroke="var(--color-emerald)" stroke-width="1" />
               <text x="100" y="105" fill="var(--color-emerald)" font-size="11" font-weight="700" text-anchor="middle">Advisory Receipt</text>
               <text x="100" y="123" fill="var(--text-muted)" font-size="9" text-anchor="middle">Validates dimensions & grid</text>
-
+ 
               <!-- Preserve Checkpoint -->
               <rect x="25" y="170" width="150" height="60" rx="6" fill="rgba(189, 0, 255, 0.05)" stroke="var(--color-purple)" stroke-width="1" />
               <text x="100" y="195" fill="var(--color-purple)" font-size="11" font-weight="700" text-anchor="middle">Safe Checkpoint</text>
               <text x="100" y="213" fill="var(--text-muted)" font-size="9" text-anchor="middle">Preserves state from cleanups</text>
             </g>
+ 
+            <!-- STAGE 4: ARCHIVE & PROVENANCE -->
+            <g transform="translate(640, 40)">
+              <rect x="10" y="20" width="180" height="280" rx="8" fill="rgba(255,255,255,0.01)" stroke="rgba(255,255,255,0.05)" />
+              <text x="100" y="45" fill="var(--text-dark)" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">4. ARCHIVE</text>
+
+              <rect x="25" y="80" width="150" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
+              <text x="100" y="105" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">Globus Transfer</text>
+              <text x="100" y="123" fill="var(--text-muted)" font-size="9" text-anchor="middle">Secure cluster endpoints</text>
+
+              <rect x="25" y="170" width="150" height="60" rx="6" fill="#111827" stroke="rgba(255,255,255,0.1)" />
+              <text x="100" y="195" fill="#fff" font-size="11" font-weight="600" text-anchor="middle">ALCF Catalog</text>
+              <text x="100" y="213" fill="var(--text-muted)" font-size="9" text-anchor="middle">Science model provenance</text>
+            </g>
 
             <!-- Connections -->
             <path d="M 180 140 L 210 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
             <path d="M 410 140 L 440 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
+            <path d="M 620 140 L 650 140" stroke="#00f0ff" stroke-width="1.5" marker-end="url(#arrow)" fill="none" />
           </svg>
         </div>
       </div>
