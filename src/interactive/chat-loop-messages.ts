@@ -437,7 +437,7 @@ function textFromToolResultContent(content: unknown): string {
 	return content
 		.map((block) => {
 			const item = recordValue(block);
-			if (!item || item.type !== "text" || typeof item.text !== "string") return "";
+			if (item?.type !== "text" || typeof item?.text !== "string") return "";
 			return item.text;
 		})
 		.join("");

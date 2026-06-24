@@ -608,7 +608,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// snapshot. Render dispatch picks up the new buffer on the next
 				// frame via `renderToolSegmentLines`.
 				const assistant = transcript[transcript.length - 1];
-				if (!assistant || assistant.role !== "assistant") {
+				if (assistant?.role !== "assistant") {
 					markDirty();
 					return;
 				}

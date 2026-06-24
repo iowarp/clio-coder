@@ -5,6 +5,20 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## [Unreleased]
+
+### Changed
+
+- Phase 0 (lint cleanup): converted 13 null-guard conditionals to optional
+  chaining, clearing every `lint/complexity/useOptionalChain` warning. The
+  sites span the interactive chat loop and panel, session context accounting,
+  the compaction token scan, provider auth storage and credentials, the Claude
+  SDK runtime result reader, the CodeWiki indexer, and the context benchmark
+  script. Each transformation preserves the original null-versus-shape
+  semantics: a falsy base still triggers the guard, and multi-clause conditions
+  optional-chain every property access so correctness does not depend on
+  narrowing propagating through `||`. No runtime behavior changes.
+
 ## 0.2.5 - 2026-06-23
 
 Clio Coder 0.2.5 adds first-class support for Argonne ALCF inference targets

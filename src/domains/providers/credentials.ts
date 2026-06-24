@@ -29,7 +29,7 @@ export function openCredentialStore(): CredentialStore {
 	return {
 		get(providerId: string): CredentialEntry | null {
 			const credential = auth.get(providerId);
-			if (!credential || credential.type !== "api_key") return null;
+			if (credential?.type !== "api_key") return null;
 			return {
 				providerId,
 				key: credential.key,

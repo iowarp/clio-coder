@@ -544,7 +544,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const appendAssistantTurn = (message: AgentMessage, timing?: AssistantCallTiming | null): void => {
-		if (!message || message.role !== "assistant") return;
+		if (message?.role !== "assistant") return;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
 		if (timing) payload.timing = timing;
@@ -584,7 +584,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const appendQueuedUserTurn = (message: AgentMessage): void => {
-		if (!message || message.role !== "user") return;
+		if (message?.role !== "user") return;
 		const text = extractUserText(message).trim();
 		if (text.length === 0) return;
 		const persistedEchoIdx = persistedUserEchoes.indexOf(text);

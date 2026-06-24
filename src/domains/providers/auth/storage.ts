@@ -397,7 +397,7 @@ export class AuthStorage {
 			const currentData = parseStorageData(current);
 			this.data = currentData;
 			const stored = currentData[providerId];
-			if (!stored || stored.type !== "oauth") {
+			if (stored?.type !== "oauth") {
 				return { result: null };
 			}
 			if (Date.now() < stored.expires) {

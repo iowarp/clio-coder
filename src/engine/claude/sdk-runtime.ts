@@ -214,7 +214,7 @@ function extractStreamDelta(message: SDKMessage): string {
 }
 
 function resultText(message: SDKResultMessage | null): string {
-	if (!message || message.subtype !== "success") return "";
+	if (message?.subtype !== "success") return "";
 	return typeof message.result === "string" ? message.result : "";
 }
 
