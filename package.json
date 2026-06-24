@@ -79,6 +79,8 @@
 		"test:smoke": "node --import tsx --test 'tests/smoke/**/*.test.ts'",
 		"test:contracts": "node --import tsx --test 'tests/contracts/**/*.test.ts'",
 		"test": "node --import tsx --test 'tests/contracts/**/*.test.ts' 'tests/smoke/**/*.test.ts' 'tests/boundaries/**/*.test.ts'",
+		"test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' 'tests/contracts/**/*.test.ts' 'tests/smoke/**/*.test.ts' 'tests/boundaries/**/*.test.ts'",
+		"test:repeat": "node tests/harness/repeat-tests.mjs",
 		"ci": "npm run typecheck && npm run lint && npm run build && npm run test",
 		"ci:release": "npm run ci && node scripts/check-dist.mjs",
 		"test:live": "node scripts/live-smoke.mjs",
