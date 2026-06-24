@@ -162,7 +162,7 @@ function usageInvalidated(message: AgentMessage): boolean {
 function latestUsableAssistantUsage(messages: ReadonlyArray<AgentMessage>): { index: number; tokens: number } | null {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const message = messages[i] as AgentMessage | undefined;
-		if (!message || message.role !== "assistant") continue;
+		if (message?.role !== "assistant") continue;
 		if (usageInvalidated(message)) continue;
 		const stopReason = (message as { stopReason?: unknown }).stopReason;
 		if (stopReason === "error" || stopReason === "aborted") continue;

@@ -671,7 +671,7 @@ function promoteSingleSourceEntry(files: CodewikiFile[]): CodewikiFile[] {
 	const sourceFiles = files.filter((file) => file.lang !== "config");
 	if (sourceFiles.length !== 1) return files;
 	const only = sourceFiles[0];
-	if (!only || only.role !== "module") return files;
+	if (only?.role !== "module") return files;
 	return files.map((file) => (file.id === only.id ? { ...file, role: "entry" } : file));
 }
 

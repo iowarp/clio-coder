@@ -409,7 +409,7 @@ function fileReadTokens(repo, relPaths) {
 // open them even if you are handed the list), and the full source tree is the ceiling
 // (read everything). The digest delivers full coverage for far fewer tokens than either.
 function scoutEstimate(repo, codewiki) {
-	if (!codewiki || codewiki.version !== 3) return null;
+	if (codewiki?.version !== 3) return null;
 	const allSource = sourceFilesFromV3(codewiki).map((file) => file.path);
 	const entryFiles = entryPointsFromV3(codewiki, 12).map((file) => file.path);
 	const digestTokens = approxTokens(digestFromCodewiki(codewiki));
@@ -595,7 +595,7 @@ function fileCount(codewiki) {
 }
 
 function navLatency(codewiki, iterations = 200) {
-	if (!codewiki || codewiki.version !== 3) return null;
+	if (codewiki?.version !== 3) return null;
 	const files = codewiki.files ?? [];
 	const symbols = codewiki.symbols ?? [];
 	const edges = codewiki.edges ?? [];

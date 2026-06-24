@@ -104,7 +104,7 @@ function extractUsage(payload: unknown): Usage | undefined {
 export function getLastAssistantUsage(entries: ReadonlyArray<SessionEntry>): Usage | undefined {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		if (!entry || entry.kind !== "message" || entry.role !== "assistant") continue;
+		if (entry?.kind !== "message" || entry?.role !== "assistant") continue;
 		const usage = extractUsage(entry.payload);
 		if (usage) return usage;
 	}
@@ -114,7 +114,7 @@ export function getLastAssistantUsage(entries: ReadonlyArray<SessionEntry>): Usa
 function findLastAssistantUsageIndex(entries: ReadonlyArray<SessionEntry>): number {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		if (!entry || entry.kind !== "message" || entry.role !== "assistant") continue;
+		if (entry?.kind !== "message" || entry?.role !== "assistant") continue;
 		if (extractUsage(entry.payload)) return i;
 	}
 	return -1;
