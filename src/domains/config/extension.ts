@@ -1,6 +1,7 @@
 import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings, updateSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { readLayeredSettings } from "../../core/settings-layers.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
 import { type ConfigWatcher, startConfigWatcher } from "./watcher.js";
@@ -37,7 +38,10 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 	function onWatcherFire(): void {
 		let next: ClioSettings;
 		try {
-			next = readSettings();
+			// readSettings keeps the strict throw-on-invalid-user-settings gate; the
+			// layered read then overlays project .clio/settings(.local).yaml.
+			readSettings();
+			next = readLayeredSettings(process.cwd()).settings;
 		} catch (err) {
 			console.error("[clio:config] reload rejected:", err);
 			return;
@@ -53,7 +57,8 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 
 	const extension: DomainExtension = {
 		async start() {
-			snapshot = readSettings();
+			readSettings();
+			snapshot = readLayeredSettings(process.cwd()).settings;
 			watcher = startConfigWatcher(() => onWatcherFire());
 		},
 		async stop() {
@@ -73,7 +78,10 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		update(mutate) {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
-			const normalized = updateSettings(mutate);
+			// updateSettings writes the user layer; re-layer so project overlays
+			// stay applied in the refreshed snapshot.
+			updateSettings(mutate);
+			const normalized = readLayeredSettings(process.cwd()).settings;
 			snapshot = normalized;
 			const diff = diffSettings(previous, normalized);
 			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });

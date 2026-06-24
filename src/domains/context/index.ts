@@ -42,4 +42,17 @@ export {
 } from "./codewiki/indexer.js";
 export type { ContextContract, ContextState, ProjectPromptContext } from "./contract.js";
 export { computeFingerprint, isStale } from "./fingerprint.js";
+export {
+	type LoadedOperatorProfile,
+	loadOperatorProfile,
+	OPERATOR_PROFILE_MAX_CHARS,
+	type OperatorProfile,
+	renderOperatorProfile,
+} from "./operator-profile.js";
+export {
+	loadProjectRules,
+	type ProjectRule,
+	type ProjectRulesLoad,
+	selectActiveRules,
+} from "./project-rules.js";
 export { readClioState, writeClioState } from "./state.js";
