@@ -1,7 +1,7 @@
 # Middleware and Component Registry
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with an interactive component scanner and a dynamic hook-and-effect pipeline is located at [docs/html/middleware_blueprint.html](html/middleware_blueprint.html) (Version: 0.2.5).
+> **Interactive Spec Available:** An interactive dashboard with an interactive component scanner and a dynamic hook-and-effect pipeline is located at [docs/html/middleware_blueprint.html](html/middleware_blueprint.html) (Version: 0.2.6).
 
 Clio Coder has two related but separate surfaces:
 

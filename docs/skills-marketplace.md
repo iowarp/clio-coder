@@ -1,7 +1,7 @@
 # Skills Marketplace
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html) (Version: 0.2.5).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html) (Version: 0.2.6).
 
 The Skills Hub (`/skill`) shows three groups: project skills, user skills, and the marketplace. The marketplace group is backed by the `skills/` tree of [github.com/iowarp/clio-coder](https://github.com/iowarp/clio-coder/tree/main/skills) on `main`.
 
