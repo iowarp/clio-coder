@@ -66,9 +66,11 @@ function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 	);
 }
 
-async function assemblePrompt(
-	parsed: RunCliArgs,
-): Promise<{ prompt: string; images?: ReadonlyArray<ImageContent> } | null> {
+async function assemblePrompt(parsed: RunCliArgs): Promise<{
+	prompt: string;
+	images?: ReadonlyArray<ImageContent>;
+	workingContextPaths?: ReadonlyArray<string>;
+} | null> {
 	const messages = parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [];
 	const stdinContent = shouldReadPipedStdin(messages) ? await readPipedStdin() : undefined;
 	const fileRefs = await readFileArgsAsync(parsed.fileArgs, { cwd: process.cwd(), missing: "error" });
@@ -90,6 +92,7 @@ async function assemblePrompt(
 	return {
 		prompt: initial.initialMessage,
 		...(initial.initialImages && initial.initialImages.length > 0 ? { images: initial.initialImages } : {}),
+		...(fileRefs.referencedPaths.length > 0 ? { workingContextPaths: fileRefs.referencedPaths } : {}),
 	};
 }
 
@@ -171,6 +174,9 @@ export async function runClioRun(
 						...(noSkills ? { noSkills: true } : {}),
 						...(skillPaths.length > 0 ? { skillPaths } : {}),
 						...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
+						...(assembled.workingContextPaths && assembled.workingContextPaths.length > 0
+							? { workingContextPaths: assembled.workingContextPaths }
+							: {}),
 						...(parsed.target !== undefined ? { target: parsed.target } : {}),
 						...(parsed.model !== undefined ? { model: parsed.model } : {}),
 						...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),

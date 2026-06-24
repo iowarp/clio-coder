@@ -69,6 +69,14 @@ describe("contracts/3a scoped settings layering", () => {
 		strictEqual(result.settings.identity, "user-id");
 		ok(result.issues.length >= 1);
 	});
+
+	it("attributes project validation failures to the project layer", () => {
+		const { cwd, userPath } = scratch();
+		write(userPath, "identity: user-id\n");
+		write(join(cwd, ".clio", "settings.yaml"), "targets:\n  - id: 7\n    runtime: ollama\n");
+		const result = readLayeredSettings(cwd, { userPath });
+		ok(result.issues.some((issue) => issue.origin === "project" && issue.path === "targets[0].id"));
+	});
 });
 
 describe("contracts/3b path-scoped rules", () => {
@@ -111,6 +119,16 @@ describe("contracts/3b path-scoped rules", () => {
 		write(join(cwd, ".clio", "rules", "off.md"), "---\nenabled: false\n---\n# Off\n");
 		const loaded = loadProjectRules(cwd);
 		strictEqual(selectActiveRules(loaded.rules, []).length, 0);
+	});
+
+	it("skips malformed frontmatter instead of loading it unconditionally", () => {
+		const { cwd } = scratch();
+		write(join(cwd, ".clio", "rules", "bad.md"), "---\npaths: '**/*.ts'\n---\n# Bad\nDo not load this.\n");
+		write(join(cwd, ".clio", "rules", "unclosed.md"), "---\npaths:\n  - '**/*.ts'\n# Missing close\n");
+		const loaded = loadProjectRules(cwd);
+		strictEqual(loaded.rules.length, 0);
+		ok(loaded.issues.some((issue) => issue.includes("frontmatter paths")));
+		ok(loaded.issues.some((issue) => issue.includes("missing closing marker")));
 	});
 });
 

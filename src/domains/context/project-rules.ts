@@ -60,6 +60,30 @@ function readStringArray(value: unknown): string[] | undefined {
 	return out.length > 0 ? out : undefined;
 }
 
+function validateGlobArray(
+	value: unknown,
+	field: "paths" | "excludes",
+	id: string,
+	issues: string[],
+): string[] | undefined {
+	const parsed = readStringArray(value);
+	if (parsed === undefined) {
+		issues.push(`${id}: frontmatter ${field} must be a non-empty string array`);
+		return undefined;
+	}
+	for (const pattern of parsed) {
+		try {
+			compileGlobRegex(pattern);
+		} catch (err) {
+			issues.push(
+				`${id}: invalid ${field} glob ${JSON.stringify(pattern)}: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return undefined;
+		}
+	}
+	return parsed;
+}
+
 function walkMarkdown(dir: string, root: string, out: string[]): void {
 	let entries: import("node:fs").Dirent[];
 	try {
@@ -88,6 +112,7 @@ function parseRule(filePath: string, root: string, issues: string[]): { rule?: P
 	let excludes: string[] = [];
 	let enabled = true;
 	let description: string | undefined;
+	let invalidFrontmatter = false;
 
 	const match = FRONTMATTER_RE.exec(text);
 	if (match) {
@@ -95,15 +120,43 @@ function parseRule(filePath: string, root: string, issues: string[]): { rule?: P
 		try {
 			const front = parseYaml(match[1] ?? "");
 			if (isRecord(front)) {
-				paths = readStringArray(front.paths);
-				excludes = readStringArray(front.excludes) ?? [];
-				if (typeof front.enabled === "boolean") enabled = front.enabled;
-				if (typeof front.description === "string") description = front.description;
+				if (Object.hasOwn(front, "paths")) {
+					const parsedPaths = validateGlobArray(front.paths, "paths", id, issues);
+					if (parsedPaths === undefined) invalidFrontmatter = true;
+					else paths = parsedPaths;
+				}
+				if (Object.hasOwn(front, "excludes")) {
+					const parsedExcludes = validateGlobArray(front.excludes, "excludes", id, issues);
+					if (parsedExcludes === undefined) invalidFrontmatter = true;
+					else excludes = parsedExcludes;
+				}
+				if (Object.hasOwn(front, "enabled")) {
+					if (typeof front.enabled === "boolean") enabled = front.enabled;
+					else {
+						issues.push(`${id}: frontmatter enabled must be a boolean`);
+						invalidFrontmatter = true;
+					}
+				}
+				if (Object.hasOwn(front, "description")) {
+					if (typeof front.description === "string") description = front.description;
+					else {
+						issues.push(`${id}: frontmatter description must be a string`);
+						invalidFrontmatter = true;
+					}
+				}
+			} else if (front !== null && front !== undefined) {
+				issues.push(`${id}: frontmatter must be a mapping`);
+				invalidFrontmatter = true;
 			}
 		} catch (err) {
 			issues.push(`${id}: invalid frontmatter: ${err instanceof Error ? err.message : String(err)}`);
+			invalidFrontmatter = true;
 		}
+	} else if (text.startsWith("---\n")) {
+		issues.push(`${id}: invalid frontmatter: missing closing marker`);
+		invalidFrontmatter = true;
 	}
+	if (invalidFrontmatter) return { excludes: [] };
 
 	const trimmedBody = body.trim();
 	const hash = createHash("sha256").update(trimmedBody).digest("hex").slice(0, 16);

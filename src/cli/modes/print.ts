@@ -19,6 +19,7 @@ export interface HeadlessSamplingOverrides {
 export interface HeadlessMainAgentOptions {
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
+	workingContextPaths?: ReadonlyArray<string>;
 	sampling?: HeadlessSamplingOverrides;
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	mode?: "text" | "json";
@@ -97,6 +98,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	try {
 		const submitOptions = {
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
+			...(options.workingContextPaths && options.workingContextPaths.length > 0
+				? { workingContextPaths: options.workingContextPaths }
+				: {}),
 			...(options.pendingSkillRequests && options.pendingSkillRequests.length > 0
 				? { pendingSkillRequests: options.pendingSkillRequests }
 				: {}),

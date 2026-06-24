@@ -12,6 +12,8 @@ import {
 	type MiddlewareHookRegistration,
 	normalizeUserHook,
 	runMiddlewareRegistrations,
+	spawnSyncCommandRunner,
+	USER_HOOK_COMMAND_OUTPUT_MAX_CHARS,
 	type UserHookCommandResult,
 	type UserHookDeclarationBatch,
 	type UserHookSource,
@@ -83,6 +85,15 @@ describe("contracts/middleware user-hook normalization", () => {
 		ok(result.hook);
 		strictEqual(result.hook.spec.kind, "command");
 		if (result.hook.spec.kind === "command") strictEqual(result.hook.spec.timeoutMs, 5_000);
+	});
+
+	it("defaults command cwd to the workspace root", () => {
+		const result = normalizeUserHook({ on: "before_tool", kind: "command", argv: ["pwd"] }, PROJECT, {
+			workspaceRoot: WORKSPACE,
+		});
+		ok(result.hook, result.issues.join("; "));
+		strictEqual(result.hook.spec.kind, "command");
+		if (result.hook.spec.kind === "command") strictEqual(result.hook.spec.cwd, WORKSPACE);
 	});
 });
 
@@ -165,6 +176,33 @@ describe("contracts/middleware user-hook execution and receipts", () => {
 		strictEqual(result.effects[0]?.kind, "annotate_tool_result");
 		strictEqual(receipts[0]?.outcome, "command-ok");
 		strictEqual(receipts[0]?.exitCode, 0);
+	});
+
+	it("truncates oversized command output before injecting it", () => {
+		const receipts: HookReceipt[] = [];
+		const output = "x".repeat(USER_HOOK_COMMAND_OUTPUT_MAX_CHARS + 50);
+		const registration = registrationFor({ on: "before_tool", kind: "command", argv: ["verbose"] }, receipts, () => ({
+			code: 0,
+			timedOut: false,
+			stdout: output,
+			stderr: "",
+		}));
+		const result = runMiddlewareRegistrations(beforeToolInput("Bash"), [registration]);
+		strictEqual(result.effects[0]?.kind, "annotate_tool_result");
+		if (result.effects[0]?.kind === "annotate_tool_result") {
+			strictEqual(result.effects[0].message.length, USER_HOOK_COMMAND_OUTPUT_MAX_CHARS);
+		}
+		strictEqual(receipts[0]?.outputChars, output.length);
+	});
+
+	it("runs production command hooks without a shell", () => {
+		const dir = scratch();
+		const result = spawnSyncCommandRunner()(
+			[process.execPath, "-e", "console.log(process.argv[1])", "literal;echo shell-ran"],
+			{ cwd: dir, timeoutMs: 1_000 },
+		);
+		strictEqual(result.code, 0);
+		strictEqual(result.stdout.trim(), "literal;echo shell-ran");
 	});
 
 	it("receipts a command timeout and emits no effect", () => {

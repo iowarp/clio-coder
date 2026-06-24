@@ -87,6 +87,35 @@ async function compileProjectPrompt(cwd: string) {
 	}
 }
 
+async function compileProjectPromptWithWorkingPaths(cwd: string, workingContextPaths: ReadonlyArray<string>) {
+	const bus = createSafeEventBus();
+	const contracts = new Map<string, DomainContract>();
+	const domainContext: DomainContext = {
+		bus,
+		getContract<T extends DomainContract>(name: string): T | undefined {
+			return contracts.get(name) as T | undefined;
+		},
+	};
+	const contextBundle = await ContextDomainModule.createExtension(domainContext);
+	contracts.set("context", contextBundle.contract);
+	const promptsBundle = createPromptsBundle(domainContext);
+	await promptsBundle.extension.start();
+	try {
+		return await promptsBundle.contract.compileSessionPrompt({
+			cwd,
+			workingContextPaths,
+			sessionInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				activeToolNames: ["workspace_context", "grep", "read"],
+			},
+		});
+	} finally {
+		await promptsBundle.extension.stop?.();
+	}
+}
+
 describe("contracts/prompts hash", () => {
 	it("sha256 returns stable, correct hashes", () => {
 		strictEqual(sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -403,6 +432,25 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		ok(systemPrompt.includes("# Retrieval Hints"));
 		ok(systemPrompt.includes("inspect with code_nav, workspace_context, grep, or read before answering"));
 		ok(systemPrompt.includes("Never invent file paths, automatic tool behavior, or mutable repo details"));
+	});
+
+	it("activates path-scoped project rules from prompt working paths", async () => {
+		const cwd = scratchProject();
+		mkdirSync(join(cwd, ".clio", "rules"), { recursive: true });
+		writeFileSync(join(cwd, ".clio", "rules", "always.md"), "# Always\nKeep generated files small.\n", "utf8");
+		writeFileSync(
+			join(cwd, ".clio", "rules", "typescript.md"),
+			"---\npaths:\n  - 'src/**/*.ts'\n---\n# TypeScript\nPrefer explicit exports for fixture modules.\n",
+			"utf8",
+		);
+
+		const withoutWorkingPath = await compileProjectPromptWithWorkingPaths(cwd, []);
+		ok(withoutWorkingPath.systemPrompt.includes("Keep generated files small."));
+		ok(!withoutWorkingPath.systemPrompt.includes("Prefer explicit exports for fixture modules."));
+
+		const withWorkingPath = await compileProjectPromptWithWorkingPaths(cwd, [join(cwd, "src", "index.ts")]);
+		ok(withWorkingPath.systemPrompt.includes("Keep generated files small."));
+		ok(withWorkingPath.systemPrompt.includes("Prefer explicit exports for fixture modules."));
 	});
 
 	it("workspace_context is not described as automatic and is explicit/manual", () => {
