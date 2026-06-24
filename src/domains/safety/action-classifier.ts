@@ -61,6 +61,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Git:
 		case ToolNames.WorkspaceContext:
 		case ToolNames.CodeNav:
+		case ToolNames.DocsSearch:
 		case ToolNames.AskUser:
 		case ToolNames.ReadSkill:
 			return "read";
