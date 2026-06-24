@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
@@ -41,8 +42,13 @@ import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
-import type { MiddlewareContract } from "../domains/middleware/index.js";
-import { MiddlewareDomainModule, writeMiddlewareDiagnosticToStderr } from "../domains/middleware/index.js";
+import type { ExtensionHookRoot, MiddlewareContract } from "../domains/middleware/index.js";
+import {
+	createHookReceiptLog,
+	installUserHooks,
+	MiddlewareDomainModule,
+	writeMiddlewareDiagnosticToStderr,
+} from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -580,6 +586,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
 		);
 	}
+	// User-defined hooks: extensions and the project (.clio/hooks.yaml,
+	// .clio/hooks.local.yaml) declare a conservative, receipted hook set on the
+	// same effect machinery. They register after the guards, so safety stays
+	// authoritative: a hook may add effects (including request block_tool) but
+	// cannot grant a permission safety would deny. Loading is best-effort.
+	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
+	const extensionHookRoots: ExtensionHookRoot[] = (extensions?.list(process.cwd()) ?? [])
+		.filter((ext) => ext.enabled && ext.effective)
+		.map((ext) => ({ id: ext.id, rootPath: ext.rootPath }));
+	const userHooks = installUserHooks({
+		cwd: process.cwd(),
+		extensions: extensionHookRoots,
+		registerHook: (registration) => middleware.registerHook(registration),
+		recordReceipt: (receipt) => hookReceiptLog.record(receipt),
+	});
+	if (!interactive) {
+		for (const issue of userHooks.fileIssues) {
+			process.stderr.write(`[clio:hooks] ${issue.message}\n`);
+		}
+		for (const issue of userHooks.issues) {
+			process.stderr.write(`[clio:hooks] ${issue.source.sourcePath}#${issue.index}: ${issue.issues.join("; ")}\n`);
+		}
+	}
+	termination.onDrain(() => hookReceiptLog.flush());
 	// Autonomy is a hot-reload field: read it per admission from the freshest
 	// config snapshot so a /settings change applies to the next tool call.
 	const toolRegistry = createRegistry({

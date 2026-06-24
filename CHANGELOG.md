@@ -14,6 +14,18 @@ interfaces.
   `foreign-backoff`, `stress`) emitted by the new VRAM-aware residency
   reconciler. Notices are informational and never cancel a turn; the
   interactive layer renders them and the worker writes them to stderr.
+- Phase 2 (user hooks): extensions and the project can declare conservative,
+  receipted middleware hooks on top of the existing effect machinery. Hooks are
+  read from `.clio/hooks.yaml`, `.clio/hooks.local.yaml`, and an installed
+  extension's `hooks.yaml`, and are limited to three closed kinds: `prompt` (one
+  injected reminder), `effect` (one existing closed middleware effect), and
+  `command` (an explicit argv run with no shell, under the workspace, with a
+  timeout and bounded output). Each hook carries source attribution and a
+  content hash, every execution writes a `HookReceipt` to a capped log persisted
+  through safeResourceWrite, and a malformed hook is rejected without aborting a
+  turn. Hooks register after the safety guards and can only add effects; the
+  safety policy stays authoritative and a hook cannot grant a permission safety
+  would deny.
 
 ### Changed
 
