@@ -453,7 +453,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.2.5</span>
+        <span class="version-badge">Clio Coder v0.2.6</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -669,7 +669,23 @@
       { cmd: "/view", usage: "/view [filter] | /view verify <runId>", desc: "Browses receipts, dispatch outputs, durable tool output, and compaction summaries." },
       { cmd: "/context-view", usage: "/context-view", desc: "Visualizes token sliding window and compaction breakdown." },
       { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
-      { cmd: "/quit", usage: "/quit", desc: "Exits clio process cleanly." }
+      { cmd: "/quit", usage: "/quit", desc: "Exits clio process cleanly." },
+      { cmd: "/context-init", usage: "/context-init", desc: "Explore the repo and bootstrap project context: CLIO.md and codewiki." },
+      { cmd: "/context-clear", usage: "/context-clear", desc: "Clear accumulated project context artifacts." },
+      { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates." },
+      { cmd: "/extensions", usage: "/extensions", desc: "List installed extensions." },
+      { cmd: "/share", usage: "/share export <path> | /share import <path>", desc: "Export or import Clio archives." },
+      { cmd: "/delegate", usage: "/delegate <agent-id> <task>", desc: "Run an ACP delegation agent." },
+      { cmd: "/agents", usage: "/agents", desc: "List Clio agents and ACP delegation agents." },
+      { cmd: "/cost", usage: "/cost", desc: "Show session token and cost totals." },
+      { cmd: "/fleet", usage: "/fleet", desc: "Show in-process dispatch running/retry status." },
+      { cmd: "/thinking", usage: "/thinking", desc: "Open thinking-level selector." },
+      { cmd: "/scoped-models", usage: "/scoped-models", desc: "Edit the Alt+J / Alt+K model cycle set." },
+      { cmd: "/resume", usage: "/resume", desc: "Resume a past session." },
+      { cmd: "/new", usage: "/new", desc: "Start a fresh session." },
+      { cmd: "/tree", usage: "/tree", desc: "Open session tree navigator." },
+      { cmd: "/fork", usage: "/fork", desc: "Fork from an assistant turn." },
+      { cmd: "/compact", usage: "/compact [instructions]", desc: "Compact earlier context." }
     ];
 
     let selectedIndex = 0;
