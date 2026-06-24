@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.2.6). Use it to design, validate, and simulate memory proposals, approval loops, pruning rules, and token budgets.
 
-Clio Coder treats run claims and agent lessons as artifacts that should be inspectable. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use [`/view`](observability.md) for interactive inspection of receipts, dispatch output, durable tool output, and compaction summaries before building or citing evidence.
+Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. In evaluations such as [SWE-bench](https://www.swebench.com), capturing granular execution evidence is essential for validating agent claims. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, and compaction summaries before building or citing evidence.
 
 Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, and `src/cli/memory.ts`.
 
