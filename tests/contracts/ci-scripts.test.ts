@@ -61,6 +61,9 @@ describe("contracts/ci scripts", () => {
 
 		strictEqual(scripts.ci, "npm run typecheck && npm run lint && npm run build && npm run test");
 		strictEqual(scripts["ci:release"], "npm run ci && node scripts/check-dist.mjs");
+		strictEqual(scripts["test:repeat"], "node tests/harness/repeat-tests.mjs");
+		ok(scripts["test:coverage"]?.includes("--experimental-test-coverage"));
+		ok(scripts["test:coverage"]?.includes("--test-coverage-include='src/**/*.ts'"));
 		strictEqual(scripts.prepublishOnly, "npm run ci:release");
 	});
 
@@ -73,6 +76,11 @@ describe("contracts/ci scripts", () => {
 		deepStrictEqual(matrixValues(".github/workflows/ci.yml", "ci", "node-version"), [22, 24]);
 		strictEqual(setupNode?.with?.["node-version"], "$" + "{{ matrix.node-version }}");
 		ok(commands.includes("npm run ci:release"), commands.join("\n"));
+		ok(commands.includes("npm run test:repeat"), commands.join("\n"));
+		ok(
+			commands.some((command) => command.includes("npm run test:coverage")),
+			commands.join("\n"),
+		);
 		ok(!commands.includes("npm run test:live"), "ordinary CI must not run live/model-dependent smoke tests");
 	});
 

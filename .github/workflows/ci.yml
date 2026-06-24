@@ -17,7 +17,7 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -36,3 +36,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends fd-find ripgrep
       - run: npm ci --prefer-offline --no-audit --no-fund
       - run: npm run ci:release
+      - name: Repeat smoke and boundary lane
+        if: matrix.node-version == 24
+        run: npm run test:repeat
+      - name: Coverage summary
+        if: matrix.node-version == 24
+        run: |
+          npm run test:coverage | tee coverage.txt
+          {
+            echo "### Coverage summary"
+            echo '```'
+            sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
