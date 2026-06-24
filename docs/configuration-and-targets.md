@@ -140,6 +140,9 @@ workers:
     model: your-model-id
     thinkingLevel: off
   profiles: {}
+  maxRetries: 2
+  resilienceCooldownMs: 15000
+
 
 scope: []
 modelSelector:
@@ -174,6 +177,9 @@ retry:
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
 
 `defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
+
+The setting `workers.maxRetries` controls the maximum number of automated retries for retryable failures during fleet dispatch. Setting this value to `0` disables retries entirely. The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
+
 
 ---
 
@@ -369,6 +375,20 @@ delegation:
 ```
 Then invoke it using `/delegate claude-code <task>`.
 
+### 5. Google Antigravity CLI Runtime (Worker-Only)
+
+The `antigravity-code` runtime drives your local Google Antigravity CLI (`agy`) installation to execute subagent tasks. It runs the CLI as a subprocess using the `agy --print` command and maps Clio autonomy levels onto the CLI's permission flags.
+
+Google Antigravity supports a context window of up to 1,000,000 tokens and is suitable for large-context codebase reasoning. Because `agy` emits plain text without structured events, Clio cannot perform fine-grained tool call interception. Gating is applied coarsely by passing the `--sandbox` flag for read-only autonomy levels or `--dangerously-skip-permissions` for the full-auto autonomy level when the environment variable `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` is explicitly set.
+
+Configured targets use your existing local `agy` login and credentials. Supported model names include `Gemini 3.5 Flash (High)` as the default tier, `Gemini 3.5 Flash (Medium)`, `Gemini 3.5 Flash (Low)`, `Gemini 3.1 Pro (High)`, `Gemini 3.1 Pro (Low)`, `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, and `GPT-OSS 120B (Medium)`.
+
+**Configuration Example:**
+```bash
+clio configure --id agy-worker --runtime antigravity-code --model "Gemini 3.5 Flash (High)"
+```
+
+
 
 Useful flags:
 
@@ -404,7 +424,46 @@ clio targets rename <old> <new>
 
 `clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat. Use `clio configure --set-fleet-default` or `clio targets profile` when dispatch should prefer worker-only runtimes such as `claude-sdk` or `claude-code`.
 
+### Target-Profile Subcommands
+
+The command `clio targets profile` supports several subcommands to manage fleet worker profiles and agent bindings:
+
+- **list**: Show configured fleet profiles. Use `clio targets profile list [--json]` to output details in JSON format.
+- **remove**: Remove a profile from settings. Use `clio targets profile remove <name> [--force]`. The `--force` flag is required if the profile has active agent bindings.
+- **rename**: Rename a fleet profile. Use `clio targets profile rename <old> <new>`. Active agent bindings are updated to point to the new profile name automatically.
+- **bind**: Bind an agent to a fleet profile. Use `clio targets profile bind <agentId> <profileName>`. Active ACP delegation agents are rejected.
+- **unbind**: Unbind an agent from its profile. Use `clio targets profile unbind <agentId>`.
+- **bindings**: List active agent-to-profile bindings. Use `clio targets profile bindings [--json]` to output details in JSON format.
+
 Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio targets use`. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system. Press `d` to clear live connection state while leaving stored credentials unchanged.
+
+---
+
+## Local Model Quirks
+
+Local models often require specific engine configurations to perform optimally. Clio parses local model quirks from catalog entries and applies them during target execution:
+
+### 1. KV-Cache Quantization
+You can optimize the GPU memory usage of the key and value caches for local inference engines. Quirks parameters include:
+- `kQuant`: Quantization type for the key cache. Supported values are `f32`, `f16`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, and `q5_1`. Set to `false` to disable quantization and run in full precision.
+- `vQuant`: Quantization type for the value cache. This requires flash attention to take effect.
+- `useFp16`: Force fp16 precision for key and value caches.
+
+### 2. Sampling Profiles
+You can configure different sampling settings for the subagent depending on whether thinking is active:
+- `thinking`: Sampler profile applied when the thinking level is not `off`.
+- `instruct`: Sampler profile applied when the thinking level is `off`.
+
+Each profile can configure overrides for `temperature`, `topP`, `topK`, `minP`, `repeatPenalty` (or `repetitionPenalty`), `presencePenalty`, `frequencyPenalty`, and `maxTokens`.
+
+### 3. Thinking Mechanisms
+Local models use different mechanisms to control and parse reasoning steps. The supported mechanisms are:
+- `effort-levels`: The engine accepts a discrete reasoning effort parameter.
+- `budget-tokens`: The engine enforces a numeric thinking token budget.
+- `on-off`: The chat template toggles thinking on or off.
+- `always-on`: The model emits chain-of-thought tokens unconditionally.
+- `none`: The model does not support thinking or reasoning states.
+
 
 ### Local reasoning-token budgets
 

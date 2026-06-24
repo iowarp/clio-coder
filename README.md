@@ -193,7 +193,17 @@ clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-
 clio configure --id claude-code-worker --runtime claude-code --model sonnet
 ```
 
-### 3. Mixing Orchestrator and Worker Targets
+### 3. Driving Google Antigravity Workers
+
+The Google Antigravity CLI (runtime ID `antigravity-code`) runs `agy --print` as a subprocess worker to execute subagent tasks under your existing Antigravity subscription.
+
+To configure an Antigravity worker target, register it in Clio:
+```bash
+# Register the Antigravity subprocess worker runtime (uses your existing agy login)
+clio configure --id agy-worker --runtime antigravity-code --model "Gemini 3.5 Flash (High)"
+```
+
+### 4. Mixing Orchestrator and Worker Targets
 
 You can configure a premium subscription orchestrator and route intensive implementation tasks to a gated Claude Code worker or your local offline fleet.
 
@@ -219,6 +229,7 @@ clio targets profile local-fleet local-fleet
 # 6. Run a coder subagent task directed to the Claude worker
 clio run --agent coder "Refactor src/engine/parser.ts"
 ```
+
 
 
 ## Project Context: CLIO.md
@@ -261,6 +272,7 @@ The README is the entry point; the full documentation set lives under
 | --- | --- |
 | Commands, slash commands, keybindings, dispatch, troubleshooting | [commands-and-modes.md](docs/commands-and-modes.md) |
 | Runtime targets, local model configuration, fleet profiles, auth | [configuration-and-targets.md](docs/configuration-and-targets.md) |
+| Argonne ALCF Globus/Sophia/Metis target configuration, login, and discovery | [alcf-provider.md](docs/alcf-provider.md) |
 | Install, upgrade, reset, uninstall, state layout | [installation-and-lifecycle.md](docs/installation-and-lifecycle.md) |
 | Autonomy levels, approvals, the safety net, project policy | [safety-model.md](docs/safety-model.md) |
 | Context window resolution, compaction, token accounting | [context-engine.md](docs/context-engine.md) |
@@ -269,6 +281,7 @@ The README is the entry point; the full documentation set lives under
 | Sessions, receipts, evidence, memory | [evidence-and-memory.md](docs/evidence-and-memory.md) |
 | Extension packages and share archives | [extensions-and-sharing.md](docs/extensions-and-sharing.md) |
 | Source layout and boundary invariants | [architecture.md](docs/architecture.md) |
+
 
 ## Local Model Performance
 

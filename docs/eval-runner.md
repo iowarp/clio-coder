@@ -13,11 +13,14 @@ Source of truth: `src/domains/eval/**` and `src/cli/eval.ts`.
 
 ```bash
 clio eval run --task-file tasks.yaml [--repeat <n>]
-clio eval report <evalId>
+clio eval report <evalId> [--format swe-jsonl]
 clio eval compare <baselineEvalId> <candidateEvalId>
 ```
 
 `clio eval run` writes an eval artifact under `<dataDir>/evals/` and also builds deterministic eval evidence under `<dataDir>/evidence/eval-<evalId>/`.
+
+The option `--format swe-jsonl` for `clio eval report` generates reports in a newline-separated JSONL format. Each line represents a task run containing `instance_id` (the taskId), `model_patch` (the resolved git diff or patch), `model_name_or_path` (the evalId), `status` (pass or fail), `pass`, `tokens`, `wall_time_ms`, and `cost_usd`.
+
 
 Exit codes:
 
