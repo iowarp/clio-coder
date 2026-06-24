@@ -4,7 +4,7 @@
 
 # Clio Coder Documentation
 
-These pages document the current `v0.2.4` release of Clio Coder, IOWarp's
+These pages document the current `v0.2.5` release of Clio Coder, IOWarp's
 terminal-first coding agent for HPC and scientific-software repositories.
 They are source-aligned guides: when prose and source disagree, prefer the
 current source, tests, and `CHANGELOG.md`.
@@ -54,7 +54,7 @@ under `src/`, run `npm run build` again or keep `npm run dev` running.
 ## Release Notes
 
 The release entry point is [../README.md](../README.md); detailed release
-history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.2.4 the supported
+history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.2.5 the supported
 install path is a source checkout through `npm run install:local`, the
 deterministic release gate is `npm run ci:release`, live model smoke
 validation is manual and opt-in through `npm run test:live`, and the package
