@@ -527,6 +527,13 @@
         <h2>Clio Coder Eval Runner Specifications</h2>
         <p>The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows without requiring the runner itself to call a model.</p>
         
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">CLI and Report Formats</h3>
+        <p>Run task suites, build reports, and compare evaluation results across runs:</p>
+        <pre><code>clio eval run --task-file tasks.yaml [--repeat &lt;n&gt;]
+clio eval report &lt;evalId&gt; [--format swe-jsonl]
+clio eval compare &lt;baselineEvalId&gt; &lt;candidateEvalId&gt;</code></pre>
+        <p>The option <code>--format swe-jsonl</code> generates reports in a newline-separated JSONL format matching benchmark schemas (containing <code>instance_id</code>, <code>model_patch</code>, <code>model_name_or_path</code>, <code>status</code>, <code>pass</code>, <code>tokens</code>, <code>wall_time_ms</code>, and <code>cost_usd</code>) suitable for scientific evaluations such as <strong>SWE-bench</strong>.</p>
+
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Task-file schema</h3>
         <p>Parsed by <code>src/domains/eval/task-file.ts</code>. Enforces relative cwd paths inside the task folder to prevent absolute escapes.</p>
         <pre><code>version: 1
