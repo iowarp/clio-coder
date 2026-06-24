@@ -5,7 +5,7 @@ Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are da
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard for the agent registry and dispatch admission check gates is located at [docs/html/agents_blueprint.html](html/agents_blueprint.html) (Version: 0.2.6).
 
-The source of truth is `src/domains/agents/**`.
+The source of truth is `src/domains/agents/**`. Clio's agent dispatch engine and execution boundaries are built upon the [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) library.
 
 ---
 
@@ -114,8 +114,8 @@ To ensure security and proper boundary isolation, shadow and internal agents are
 
 ### Subscription Worker Runtimes
 
-In addition to standard HTTP targets and ACP delegation agents, Clio dispatches subagents to sanctioned subscription worker runtimes:
-- **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. You can use it alongside Clio's native subagent workers (like a local `llama.cpp` or LM Studio fleet) to execute tasks under your Claude Pro/Max subscription. Since it routes tool calls through Clio safety, it behaves as a native worker.
+In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agents, Clio dispatches subagents to sanctioned subscription worker runtimes:
+- **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. It integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) alongside Clio's native subagent workers (like a local [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or [SGLang](https://github.com/sgl-project/sglang) fleet) to execute tasks under a Claude subscription. Since it routes tool calls through Clio safety, it behaves as a native worker.
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes.
 
 Interactive TUI:
