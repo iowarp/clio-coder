@@ -5,7 +5,7 @@
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 
-Clio Coder introduces **Scientific Validation Contracts**: declarative, typed YAML documents that declare the exact expected dimensions, attributes, numerical tolerances, and verification checks for scientific artifacts.
+Clio Coder introduces **Scientific Validation Contracts**: declarative, typed YAML documents that declare the exact expected dimensions, attributes, numerical tolerances, and verification checks for scientific artifacts. Developed at the [Gnosis Research Center (GRC)](https://grc.iit.edu) at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318)), these contracts link execution metadata with physical output checks.
 
 ---
 
@@ -93,4 +93,5 @@ Clio Coder’s domain logic categorizes scientific output files into a set of ca
 Scheduler-driven runs require distinct validation handling compared to local unit tests:
 - **Queue status is not validation:** Checking if `sbatch` exits successfully only proves that the Slurm scheduler accepted the script. The validation contract is designed to execute *post-completion*, checking the actual simulation artifacts inside `out/` or `ckpt/`.
 - **Environment module loading:** The `runtime.modules` array lists the exact software stack dependencies (e.g., `intel/2024`, `openmpi/5.0`) that must be loaded before running the validators.
+- **HPC and Data Integration:** For large-scale allocations such as those at the [Argonne Leadership Computing Facility (ALCF)](https://www.alcf.anl.gov), verification logs can be transferred and archived via [Globus](https://www.globus.org) endpoints, allowing provenance collection across distributed scientific clusters.
 - **Validator execution:** In the current alpha version, contract validation is **advisory**. Quality/verification agents (such as the base `verifier` agent or custom project-level agents) read the contract to guide developers and write out verification receipts. Automated in-harness contract execution is not implemented yet.
