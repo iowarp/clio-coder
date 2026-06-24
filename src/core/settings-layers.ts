@@ -180,7 +180,7 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
 	const { merged, sources } = mergeLayersWithSources([user, project, local]);
 	const validation = validateSettings(merged);
 	for (const issue of validation.issues) {
-		issues.push({ origin: "user", path: issue.path, message: issue.message });
+		issues.push({ origin: settingsSourceFor(sources, issue.path), path: issue.path, message: issue.message });
 	}
 
 	return {
@@ -202,13 +202,19 @@ export function readLayeredSettings(cwd: string, options: ReadLayeredSettingsOpt
  * individually tracked.
  */
 export function settingsSourceFor(sources: Record<string, SettingsOrigin>, keyPath: string): SettingsOrigin {
-	const direct = sources[keyPath];
-	if (direct) return direct;
 	let prefix = keyPath;
-	while (prefix.includes(".")) {
-		prefix = prefix.slice(0, prefix.lastIndexOf("."));
-		const hit = sources[prefix];
-		if (hit) return hit;
+	while (prefix.length > 0) {
+		const direct = sources[prefix];
+		if (direct) return direct;
+		const bracket = prefix.lastIndexOf("[");
+		if (bracket >= 0) {
+			const arrayKey = prefix.slice(0, bracket);
+			const hit = sources[arrayKey];
+			if (hit) return hit;
+		}
+		const dot = prefix.lastIndexOf(".");
+		if (dot < 0) break;
+		prefix = prefix.slice(0, dot);
 	}
 	return "built-in";
 }

@@ -176,6 +176,8 @@ export type ChatLoopEvent =
 
 export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
+	/** Files already expanded into this session's working context. */
+	workingContextPaths?: ReadonlyArray<string>;
 	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until read_skill succeeds. */
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	/** Internal middleware resubmit; does not reset the per-user-prompt stalled-turn nudge cap. */
@@ -353,6 +355,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// ledger entry so a cold provider cache is always explainable.
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
+	const sessionWorkingContextPaths = new Set<string>();
 	let pendingPromptLogEntry: { previousHash: string | null; hash: string; tokenEstimate: number } | null = null;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
@@ -1455,7 +1458,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const settings = deps.getSettings();
 		const autonomy = settings.autonomy ?? "auto-edit";
 		const sessionId = deps.session?.current()?.id ?? "";
-		const key = `${agentRuntime.targetId}|${agentRuntime.wireModelId}|${autonomy}|${sessionId}`;
+		const workingContextKey = [...sessionWorkingContextPaths].sort().join("\0");
+		const key = `${agentRuntime.targetId}|${agentRuntime.wireModelId}|${autonomy}|${sessionId}|${workingContextKey}`;
 		if (sessionPrompt && sessionPromptKey === key) {
 			lastSystemPromptReused = true;
 			return sessionPrompt;
@@ -1488,6 +1492,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				sessionInputs,
 				autonomy,
 				cwd: process.cwd(),
+				workingContextPaths: [...sessionWorkingContextPaths],
 			});
 			const previousHash = sessionPrompt?.systemPromptHash ?? null;
 			const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
@@ -1875,6 +1880,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (options.requestContinuation !== true) stalledTurnNudgeSpent = false;
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 			const pendingSkillRequests = options.pendingSkillRequests ?? [];
+			for (const path of options.workingContextPaths ?? []) sessionWorkingContextPaths.add(path);
 			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
 			// turn_start: the prompt is accepted; registrations may inject
 			// context for this request. Accumulated reminders (turn_end
@@ -2174,6 +2180,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			lastPromptCache = null;
 			lastSystemPromptReused = false;
 			sessionPromptKey = null;
+			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;

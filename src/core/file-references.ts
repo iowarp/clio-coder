@@ -14,6 +14,8 @@ export interface FileReferenceResult {
 	text: string;
 	images: ImageContent[];
 	diagnostics: FileReferenceDiagnostic[];
+	/** Absolute files that were actually expanded into text or image context. */
+	referencedPaths: string[];
 }
 
 export interface FileReferenceOptions {
@@ -38,8 +40,9 @@ function result(
 	text: string,
 	diagnostics: FileReferenceDiagnostic[] = [],
 	images: ImageContent[] = [],
+	referencedPaths: string[] = [],
 ): FileReferenceResult {
-	return { text, diagnostics, images };
+	return { text, diagnostics, images, referencedPaths };
 }
 
 function detectSupportedImageMimeType(bytes: Buffer): string | null {
@@ -77,7 +80,7 @@ function readFileReference(fileArg: string, options: FileReferenceOptions): File
 	if (!stat.isFile()) {
 		return result("", [{ type: "error", message: `not a file: ${filePath}`, path: filePath }]);
 	}
-	if (stat.size === 0) return result("");
+	if (stat.size === 0) return result("", [], [], [filePath]);
 	try {
 		const bytes = readFileSync(filePath);
 		const imageMimeType = detectSupportedImageMimeType(bytes);
@@ -87,9 +90,10 @@ function readFileReference(fileArg: string, options: FileReferenceOptions): File
 				renderImageFile(filePath),
 				[],
 				[{ type: "image", mimeType: imageMimeType, data: bytes.toString("base64") }],
+				[filePath],
 			);
 		}
-		return result(renderTextFile(filePath, bytes.toString("utf8")));
+		return result(renderTextFile(filePath, bytes.toString("utf8")), [], [], [filePath]);
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		return result("", [{ type: "error", message: `file could not be read: ${reason}`, path: filePath }]);
@@ -112,7 +116,7 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 	if (!stat.isFile()) {
 		return result("", [{ type: "error", message: `not a file: ${filePath}`, path: filePath }]);
 	}
-	if (stat.size === 0) return result("");
+	if (stat.size === 0) return result("", [], [], [filePath]);
 	try {
 		const bytes = readFileSync(filePath);
 		const imageMimeType = detectSupportedImageMimeType(bytes);
@@ -125,16 +129,19 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 				data: bytes.toString("base64"),
 			};
 			if (options.autoResizeImages === false) {
-				return result(renderImageFile(filePath), [], [originalImage]);
+				return result(renderImageFile(filePath), [], [originalImage], [filePath]);
 			}
 
 			const resized = await resizeImage(originalImage);
 			if (!resized) {
 				if (Buffer.byteLength(originalImage.data, "utf-8") < DEFAULT_IMAGE_MAX_BASE64_BYTES) {
-					return result(renderImageFile(filePath), [], [originalImage]);
+					return result(renderImageFile(filePath), [], [originalImage], [filePath]);
 				}
 				return result(
 					renderImageFile(filePath, "[Image omitted: could not be resized below the inline image size limit.]"),
+					[],
+					[],
+					[filePath],
 				);
 			}
 
@@ -142,9 +149,10 @@ async function readFileReferenceAsync(fileArg: string, options: FileReferenceOpt
 				renderImageFile(filePath, formatDimensionNote(resized)),
 				[],
 				[{ type: "image", mimeType: resized.mimeType, data: resized.data }],
+				[filePath],
 			);
 		}
-		return result(renderTextFile(filePath, bytes.toString("utf8")));
+		return result(renderTextFile(filePath, bytes.toString("utf8")), [], [], [filePath]);
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		return result("", [{ type: "error", message: `file could not be read: ${reason}`, path: filePath }]);
@@ -157,6 +165,7 @@ export async function readFileArgsAsync(
 ): Promise<FileReferenceResult> {
 	const diagnostics: FileReferenceDiagnostic[] = [];
 	const images: ImageContent[] = [];
+	const referencedPaths: string[] = [];
 	let text = "";
 	for (const fileArg of fileArgs) {
 		const ref = await readFileReferenceAsync(fileArg, {
@@ -167,8 +176,9 @@ export async function readFileArgsAsync(
 		text += ref.text;
 		images.push(...ref.images);
 		diagnostics.push(...ref.diagnostics);
+		referencedPaths.push(...ref.referencedPaths);
 	}
-	return { text, images, diagnostics };
+	return { text, images, diagnostics, referencedPaths };
 }
 
 function splitTrailingPunctuation(token: string): { fileArg: string; suffix: string } {
@@ -184,6 +194,7 @@ function splitTrailingPunctuation(token: string): { fileArg: string; suffix: str
 export function expandInlineFileReferences(input: string, options: FileReferenceOptions = {}): FileReferenceResult {
 	const diagnostics: FileReferenceDiagnostic[] = [];
 	const images: ImageContent[] = [];
+	const referencedPaths: string[] = [];
 	const text = input.replace(FILE_REF, (match: string, prefix: string, token: string) => {
 		const direct = readFileReference(token, {
 			...options,
@@ -193,6 +204,7 @@ export function expandInlineFileReferences(input: string, options: FileReference
 		if (direct.text !== `@${token}`) {
 			diagnostics.push(...direct.diagnostics);
 			images.push(...direct.images);
+			referencedPaths.push(...direct.referencedPaths);
 			return `${prefix}${direct.text}`;
 		}
 
@@ -206,9 +218,10 @@ export function expandInlineFileReferences(input: string, options: FileReference
 		if (stripped.text === `@${fileArg}`) return match;
 		diagnostics.push(...stripped.diagnostics);
 		images.push(...stripped.images);
+		referencedPaths.push(...stripped.referencedPaths);
 		return `${prefix}${stripped.text}${suffix}`;
 	});
-	return { text, images, diagnostics };
+	return { text, images, diagnostics, referencedPaths };
 }
 
 export async function expandInlineFileReferencesAsync(
@@ -217,6 +230,7 @@ export async function expandInlineFileReferencesAsync(
 ): Promise<FileReferenceResult> {
 	const diagnostics: FileReferenceDiagnostic[] = [];
 	const images: ImageContent[] = [];
+	const referencedPaths: string[] = [];
 	let text = "";
 	let lastIndex = 0;
 	for (const match of input.matchAll(FILE_REF)) {
@@ -234,6 +248,7 @@ export async function expandInlineFileReferencesAsync(
 		if (direct.text !== `@${token}`) {
 			diagnostics.push(...direct.diagnostics);
 			images.push(...direct.images);
+			referencedPaths.push(...direct.referencedPaths);
 			text += `${prefix}${direct.text}`;
 			lastIndex = index + full.length;
 			continue;
@@ -258,9 +273,10 @@ export async function expandInlineFileReferencesAsync(
 		}
 		diagnostics.push(...stripped.diagnostics);
 		images.push(...stripped.images);
+		referencedPaths.push(...stripped.referencedPaths);
 		text += `${prefix}${stripped.text}${suffix}`;
 		lastIndex = index + full.length;
 	}
 	text += input.slice(lastIndex);
-	return { text, images, diagnostics };
+	return { text, images, diagnostics, referencedPaths };
 }

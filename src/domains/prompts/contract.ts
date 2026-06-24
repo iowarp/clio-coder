@@ -4,6 +4,11 @@ export interface CompileSessionPromptInput {
 	sessionInputs: SessionPromptInputs;
 	autonomy?: string;
 	cwd?: string;
+	/**
+	 * Files already present in the session's working context. Project rules with
+	 * `paths:` frontmatter are selected from this set.
+	 */
+	workingContextPaths?: ReadonlyArray<string>;
 }
 
 export interface PromptsContract {

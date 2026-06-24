@@ -251,6 +251,7 @@ const EDITOR_BASH_TIMEOUT_MS = 300_000;
 export interface InteractiveSubmitExpansion {
 	text: string;
 	images: ImageContent[];
+	workingContextPaths: string[];
 	pendingSkillRequests: PendingSkillRequest[];
 }
 
@@ -266,7 +267,12 @@ export function expandInteractiveSubmit(
 	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
 	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
 	const fileExpansion = expandInlineFileReferences(promptText, { cwd, includeImages: true, missing: "leave" });
-	return { text: fileExpansion.text, images: fileExpansion.images, pendingSkillRequests: parsed.pendingSkillRequests };
+	return {
+		text: fileExpansion.text,
+		images: fileExpansion.images,
+		workingContextPaths: fileExpansion.referencedPaths,
+		pendingSkillRequests: parsed.pendingSkillRequests,
+	};
 }
 
 export async function expandInteractiveSubmitAsync(
@@ -285,7 +291,12 @@ export async function expandInteractiveSubmitAsync(
 		includeImages: true,
 		missing: "leave",
 	});
-	return { text: fileExpansion.text, images: fileExpansion.images, pendingSkillRequests: parsed.pendingSkillRequests };
+	return {
+		text: fileExpansion.text,
+		images: fileExpansion.images,
+		workingContextPaths: fileExpansion.referencedPaths,
+		pendingSkillRequests: parsed.pendingSkillRequests,
+	};
 }
 
 export type OverlayState =
@@ -1567,6 +1578,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 						tui.requestRender();
 						await deps.chat.submit(sub.text, {
 							...(sub.images.length > 0 ? { images: sub.images } : {}),
+							...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 							...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
 						});
 					} catch (err) {

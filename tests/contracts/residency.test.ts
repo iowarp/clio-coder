@@ -189,6 +189,30 @@ describe("contracts/model residency reconciler", () => {
 		);
 	});
 
+	it("uses adapter VRAM probes and declines without unloading when still too large", async () => {
+		const notices: ResidencyNotice[] = [];
+		const unloaded: string[] = [];
+		markClioLoaded("target", "old-model");
+		setResidencyNoticeSink((notice) => notices.push(notice));
+		const result = await reconcileResidency(
+			baseAdapter({
+				targetKey: "target",
+				contextLength: 65_536,
+				listResident: async () => [{ modelId: "old-model", sizeVramBytes: 2 * GIB }],
+				detectVram: async () => ({ freeBytes: 1 * GIB }),
+				estimateFootprintBytes: async () => 8 * GIB,
+				unload: async (modelId) => {
+					unloaded.push(modelId);
+				},
+			}),
+		);
+
+		strictEqual(result.decision, "decline");
+		strictEqual(result.fits, false);
+		deepStrictEqual(unloaded, []);
+		strictEqual(notices.at(-1)?.kind, "will-not-fit");
+	});
+
 	it("uses the CLIO_RESIDENCY opt-out as the single observe-only switch", () => {
 		strictEqual(residencyManaged({}), true);
 		strictEqual(residencyManaged({ CLIO_RESIDENCY: "observe" }), false);

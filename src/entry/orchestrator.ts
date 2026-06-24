@@ -136,6 +136,7 @@ export interface BootOptions {
 	headless?: {
 		prompt: string;
 		images?: ReadonlyArray<ImageContent>;
+		workingContextPaths?: ReadonlyArray<string>;
 		mode?: "text" | "json";
 		target?: string;
 		model?: string;
@@ -889,9 +890,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				},
 			);
 			const images = [...(options.headless.images ?? []), ...fileExpansion.images];
+			const workingContextPaths = [...(options.headless.workingContextPaths ?? []), ...fileExpansion.referencedPaths];
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
 				...(images.length > 0 ? { images } : {}),
+				...(workingContextPaths.length > 0 ? { workingContextPaths } : {}),
 				...(options.headless.sampling ? { sampling: options.headless.sampling } : {}),
 				...(parsedSkillRequest.pendingSkillRequests.length > 0
 					? { pendingSkillRequests: parsedSkillRequest.pendingSkillRequests }

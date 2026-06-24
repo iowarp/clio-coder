@@ -141,6 +141,7 @@ function normalizeCommandSpec(
 	const spec: NormalizedCommandHook = {
 		kind: "command",
 		argv,
+		cwd: resolve(options.workspaceRoot),
 		timeoutMs: USER_HOOK_COMMAND_TIMEOUT_DEFAULT_MS,
 		as: "annotate",
 	};

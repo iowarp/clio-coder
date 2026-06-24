@@ -1,3 +1,4 @@
+import { isAbsolute, relative } from "node:path";
 import { BusChannels } from "../../core/bus-events.js";
 import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
@@ -9,6 +10,7 @@ import {
 	loadProjectRules,
 	type ProjectPromptContext,
 	renderOperatorProfile,
+	selectActiveRules,
 } from "../context/index.js";
 import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileSessionPromptInput, PromptsContract } from "./contract.js";
@@ -80,7 +82,10 @@ export function createPromptsBundle(
 				operatingContract: "operating.contract",
 				safety: `safety.${safety}`,
 				sessionInputs,
-				additionalFragments: [...clioRepoAwarenessFragments(cwd), ...customizationFragments(cwd)],
+				additionalFragments: [
+					...clioRepoAwarenessFragments(cwd),
+					...customizationFragments(cwd, input.workingContextPaths ?? []),
+				],
 			});
 		},
 		reload,
@@ -120,13 +125,13 @@ export function createPromptsBundle(
  * section. Both are deterministic (rules sort by id), so a local model's cached
  * prompt prefix stays stable. Best-effort: a load failure injects nothing.
  */
-function customizationFragments(cwd: string): RenderedPromptFragment[] {
+function customizationFragments(cwd: string, workingContextPaths: ReadonlyArray<string>): RenderedPromptFragment[] {
 	const fragments: RenderedPromptFragment[] = [];
 	try {
 		const loaded = loadProjectRules(cwd);
-		const unconditional = loaded.rules.filter((rule) => rule.enabled && rule.paths === undefined);
-		if (unconditional.length > 0) {
-			const body = ["# Project rules", ...unconditional.map((rule) => rule.body)].join("\n\n");
+		const active = selectActiveRules(loaded.rules, normalizeWorkingContextPaths(cwd, workingContextPaths));
+		if (active.length > 0) {
+			const body = ["# Project rules", ...active.map((rule) => rule.body)].join("\n\n");
 			fragments.push({
 				id: "context.project-rules",
 				relPath: "inline/project-rules",
@@ -154,6 +159,16 @@ function customizationFragments(cwd: string): RenderedPromptFragment[] {
 		// The operator profile is best-effort; a load failure injects nothing.
 	}
 	return fragments;
+}
+
+function normalizeWorkingContextPaths(cwd: string, paths: ReadonlyArray<string>): string[] {
+	const normalized = new Set<string>();
+	for (const filePath of paths) {
+		const rel = isAbsolute(filePath) ? relative(cwd, filePath) : filePath;
+		if (!rel || rel.startsWith("..") || isAbsolute(rel)) continue;
+		normalized.add(rel.replace(/\\/g, "/"));
+	}
+	return [...normalized].sort();
 }
 
 function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
