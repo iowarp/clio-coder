@@ -55,7 +55,14 @@ clio doctor --fix
 clio configure --list
 ```
 
-Start one local runtime and register exactly one target first. Common local runtime ids and default URLs are:
+Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:
+- **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio-native`.
+- **[Ollama](https://ollama.com):** A lightweight, extensible framework for building and running LLMs locally. Target runtime ID: `ollama-native`.
+- **[llama.cpp](https://github.com/ggerganov/llama.cpp):** A minimal C/C++ implementation for local LLM inference. Target runtime ID: `llamacpp`.
+- **[vLLM](https://github.com/vllm-project/vllm):** A high-throughput and memory-efficient LLM serving engine. Target runtime ID: `vllm`.
+- **[SGLang](https://github.com/sgl-project/sglang):** A fast serving framework for large language models. Target runtime ID: `sglang`.
+
+Common local runtime IDs and default URLs are:
 
 | Runtime | Target runtime id | Example local URL |
 | --- | --- | --- |
@@ -64,6 +71,7 @@ Start one local runtime and register exactly one target first. Common local runt
 | llama.cpp server | `llamacpp` | `http://127.0.0.1:8080` |
 | vLLM | `vllm` | `http://localhost:8000` |
 | SGLang | `sglang` | `http://localhost:30000` |
+
 
 Example registration:
 
@@ -316,9 +324,8 @@ clio configure --id claude-sub --runtime anthropic-max --model sonnet --set-orch
 
 ### 2. ALCF Globus Runtime (Orchestrator + Worker)
 
-The `alcf` runtime targets Argonne's ALCF Sophia and Metis inference gateway
-through Globus OAuth. It is a scientific cloud target rather than a consumer
-subscription, but it uses the same `clio auth login <runtime>` workflow:
+The `alcf` runtime targets the inference gateway of the [Argonne Leadership Computing Facility (ALCF)](https://www.alcf.anl.gov), specifically accessing the Sophia and Metis clusters. Sophia runs vLLM on NVIDIA A100 GPU nodes while Metis serves model requests using SambaNova SN40L hardware. The authentication flow uses [Globus Auth](https://www.globus.org) PKCE OAuth. It is a scientific cloud target rather than a consumer subscription, but it uses the same `clio auth login <runtime>` workflow:
+
 
 ```bash
 clio auth login alcf
@@ -345,8 +352,9 @@ details.
 
 These runtimes drive your local `claude` installation to execute subagent tasks. They are worker-only targets: they can be selected for dispatch via fleet defaults or profiles, but chat/print orchestration requires an HTTP target (like `anthropic-max` or `openai-codex`). They rely on your authenticated `claude` CLI and store no credentials in Clio.
 
-- **`claude-sdk`** (Claude Code SDK): The main worker runtime, usable alongside Clio's native subagent workers (e.g. `llama.cpp` or LM Studio fleet). It integrates with `@anthropic-ai/claude-agent-sdk` (v0.3.178) and is the **strong safety path** because it routes every tool execution through Clio's safety contract and autonomy matrix.
-- **`claude-code`**: Runs `claude -p --output-format stream-json` as a subprocess. Since the subprocess has no direct callback hook, it is restricted to command-line permission-mode gating.
+- **`claude-sdk`** (Claude Code SDK): The main worker runtime, usable alongside Clio's native subagent workers (e.g. `llama.cpp` or LM Studio fleet). It integrates with the official [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) library and is the **strong safety path** because it routes every tool execution through Clio's safety contract and autonomy matrix.
+- **`claude-code`**: Runs the CLI tool `claude -p --output-format stream-json` as a subprocess. Since the subprocess has no direct callback hook, it is restricted to command-line permission-mode gating.
+
 
 **Configuration Examples:**
 ```bash
