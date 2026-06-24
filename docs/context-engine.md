@@ -61,3 +61,22 @@ compaction:
 `auto` controls the pre-request trigger. Manual `/compact` still runs when `auto` is false. `model` optionally selects a dedicated summarization model. `systemPrompt` optionally points at a prompt override file for compaction.
 
 Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Run `clio doctor --fix` to repair known legacy compaction shapes, or update unrelated unknown keys by hand.
+
+---
+
+## Codewiki Indexing and Navigation
+
+The command `clio context-index` builds the Stage 1 codewiki index without invoking any models. It writes the results to `.clio/codewiki.json` and updates the fingerprint state in `.clio/state.json`. Indexing is deterministic. The same tree produces the identical structural hash on every run, making it safe to run in CI pipelines or compare across environments. Extraction is powered by web-tree-sitter WASM grammars. It supports TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and Ruby, with a fallback plain-text parser for unsupported file types. The schema tracks:
+- Files: path, language, line count, and role.
+- Symbols: name, kind, line number, and signature.
+- Import edges: internal path links and external modules.
+
+### code_nav Modes
+Subagents query the compiled codewiki using the read-only `code_nav` tool instead of performing recursive grep searches. All lookups read the persisted index files locally for high performance. The tool supports the following modes:
+- **symbol**: Find defining files, lines, and signatures for a specific symbol name.
+- **path**: Search files using a glob pattern, regex pattern, or plain substring match.
+- **entries**: List entry points based on file roles and package definitions up to a hard cap of 200 results.
+- **outline**: Outline all symbols declared within a specific file path.
+- **deps**: List internal and external import dependencies for a specific file.
+- **dependents**: List all workspace files that import a specific target path.
+

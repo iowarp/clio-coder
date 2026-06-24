@@ -72,6 +72,8 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `--agent-runtime <id>` | Pick the first fleet profile whose target uses this runtime. |
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
 | `--require <capability>` | Require a target capability for dispatch. Repeatable. |
+| `--steer-channel <path>` | Read live steering lines from a FIFO or an appended regular file to steer the active run. |
+
 
 Example:
 
@@ -118,6 +120,9 @@ The registry table below lists the available interactive slash commands. The "Al
 
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `c` to connect, `d` to disconnect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
+
+The `/fleet` overlay displays live running, retrying, and completed fleet dispatch subagents in the current TUI process. It includes three distinct tabs: Status, Profiles, and Bindings. You can cycle between these tabs by pressing `Tab`. The Status tab shows active runs, their execution stats, and scheduled retries with backoff times. The Profiles tab allows creating, editing, renaming, and deleting worker profiles. The Bindings tab supports binding or unbinding specific agents to profiles.
+
 
 ## Keybindings
 

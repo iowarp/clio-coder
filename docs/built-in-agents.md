@@ -140,6 +140,29 @@ Dispatch admission enforces three gates:
 
 ---
 
+## Fleet Management and Fault Tolerance
+
+Clio manages running subagent tasks, tracks token costs, and handles task failures. It operates under specific safety, concurrency, and retry limits:
+
+### 1. In-Memory Retry Queue
+Subagent runs that terminate with retryable outcomes are placed in an in-memory retry queue. The queue does not survive process restarts. The retryable outcomes are:
+- `failed`: The subagent process exited non-zero or returned an error receipt.
+- `timed_out`: The run or delegation turn exceeded its timeout limit.
+- `stalled`: The run exceeded the event-inactivity window without progress or stopped responding to heartbeats.
+- `spawn_failed`: The runtime failed to spawn the subprocess or establish connection.
+
+### 2. Backoff and Cooldown
+Scheduled retries use an exponential backoff state to calculate subsequent retry delays. Furthermore, targets that fail are subject to a cooldown period. The retry engine ensures that a retried task waits for the maximum of the exponential backoff delay or the remaining target cooldown duration. Retries are brand-new runs that must re-pass all admission checks. If target policies or budgets deny a retry, the task chain terminates as denied.
+
+### 3. Concurrency Limits
+The setting `budget.concurrency` restricts the number of concurrent subagent tasks. Setting it to `auto` determines the concurrency limit dynamically based on system capabilities.
+
+### 4. Heartbeats and Reconciler
+For native subprocess workers, Clio uses a heartbeat mechanism. The reconciler monitors the active heartbeat timestamp. If a worker stops responding and updates no heartbeats, the reconciler terminates the stalled subprocess automatically.
+
+---
+
+
 ## Adding a project agent
 
 Create `.clio/agents/my-agent.md`:
