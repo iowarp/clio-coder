@@ -13,6 +13,8 @@ community-benchmarks/
     recompute_patches.py            re-derive clean patches from existing checkouts
   terminal-bench/
     tb_clio_agent/                  Terminal-Bench 2.0 agent (AbstractInstalledAgent)
+  scicode/
+    scicode_clio.py                 SciCode eval task generator and grader
 ```
 
 ## Fleet and machine layout
@@ -93,9 +95,40 @@ uses `apiKeyEnvVar` and the agent exports a dummy `CLIO_LLAMACPP_KEY` / `CLIO_LM
 Override fleet endpoints, models, and the per-task timeout with `--agent-kwarg` or the
 `CLIO_*` env vars documented in `clio_agent.py`.
 
+## SciCode
+
+`scicode/scicode_clio.py` wires SciCode into Clio's existing eval domain. It emits a
+normal `clio eval` task file. Each task runs `run-problem` as setup, which drives `clio run`
+through the problem's sub-steps in order, then runs `grade-problem` as verifier.
+
+The adapter follows upstream SciCode scoring: generated Python is executed per sub-step
+against hidden numeric targets, and a main problem is solved only when every sub-step
+passes. The local prompt corpus under `benchmarks/data/science-problems/` does not include
+those target values. Upstream documents them as `eval/data/test_data.h5`, loaded through
+SciCode's `process_hdf5_to_tuple`.
+
+```sh
+# Readiness check. With only the local prompt corpus, faithful_scoring_ready is false.
+python scicode/scicode_clio.py inspect-data \
+  --data ../data/science-problems/problems_all.jsonl
+
+# Generate a small eval task file once the external target artifact is mounted.
+python scicode/scicode_clio.py generate-tasks \
+  --data ../data/science-problems/problems_all.jsonl \
+  --h5py-file /path/to/test_data.h5 \
+  --out runs/scicode/tasks.yaml \
+  --limit 3
+
+clio eval run --task-file runs/scicode/tasks.yaml
+```
+
+For smoke tests, the grader also accepts a small JSON target manifest through
+`--references`; this is for adapter validation only, not official SciCode scoring.
+
 ## Status of the first pass
 
 See `MANIFEST.md` for the measured calibration. In short: SWE-bench Lite 2/4 on a
 small-patch (easy-tail, selection-biased) calibration set, and Terminal-Bench 1/1 on
-`git-workflow-hack`, both with the local 27B fleet. Full runs are intentionally not part of
-this first pass.
+`git-workflow-hack`, both with the local 27B fleet. The v0.2.6 SciCode adapter is wired but
+data-blocked on the external HDF5 targets. Full runs are intentionally not part of this
+first pass.

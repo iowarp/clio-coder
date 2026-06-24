@@ -1,5 +1,27 @@
 # Clio Coder benchmark reproducibility manifest
 
+## v0.2.6 adapter refresh
+
+Updated 2026-06-24 on branch `v0.2.6`.
+
+- Existing SWE-bench Lite and Terminal-Bench adapters are still present and their
+  measured calibration below remains historical v0.2.3 data. No new v0.2.6
+  community benchmark run was executed in this refresh.
+- Added SciCode adapter at `scicode/scicode_clio.py`. It generates normal
+  `clio eval` task files, drives `clio run` through each SciCode problem's
+  sub-steps, and grades generated code with official-style target injection.
+- Verified SciCode provenance from `scicode-bench/SciCode` and
+  `SciCode1/SciCode`; both advertise Apache-2.0. Hugging Face revision checked:
+  `4510f6a6aa27c43fad7b43da2c59602a86e88480`.
+- Local SciCode prompt corpus status: 80 problems, 341 sub-steps, 1,082 visible
+  sub-step tests, 302 visible general tests. The official numeric targets are
+  absent. `inspect-data` reports `faithful_scoring_ready: false` until
+  `test_data.h5` or an explicit JSON target manifest is supplied.
+- Do not commit the official HDF5 target artifact or large run outputs here.
+  Mount or fetch them externally with checksums for official runs.
+
+## v0.2.3 calibration record
+
 Generated 2026-06-15. Covers the SWE-bench Lite and Terminal-Bench 2.0 adapters.
 
 ## Clio under test
