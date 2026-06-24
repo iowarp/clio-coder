@@ -8,6 +8,7 @@ import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
 import { codeNavTool } from "./codewiki/code-nav.js";
 import { createDispatchBatchTool, createDispatchTool } from "./dispatch.js";
+import { docsSearchTool } from "./docs-search.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { globTool } from "./glob.js";
@@ -189,6 +190,13 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: boundedSearchPolicy,
 		costLatency: "local_fast",
 	},
+	[ToolNames.DocsSearch]: {
+		objective: "Retrieve cited sections from Clio's bundled documentation by term-frequency match.",
+		uiLabel: "Docs",
+		retrySafety: "idempotent",
+		resultSizePolicy: boundedSearchPolicy,
+		costLatency: "local_fast",
+	},
 	[ToolNames.ReadSkill]: {
 		objective: "Read an available coding skill body.",
 		uiLabel: "Skill",
@@ -303,6 +311,9 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	});
 	registry.register({
 		...builtin(codeNavTool, { path: "src/tools/codewiki/code-nav.ts", scope: "core" }),
+	});
+	registry.register({
+		...builtin(docsSearchTool, { path: "src/tools/docs-search.ts", scope: "core" }),
 	});
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),

@@ -20,6 +20,7 @@ export const ToolNames = {
 	WriteReview: "write_review",
 	WorkspaceContext: "workspace_context",
 	CodeNav: "code_nav",
+	DocsSearch: "docs_search",
 	Dispatch: "dispatch",
 	DispatchBatch: "dispatch_batch",
 	AskUser: "ask_user",
