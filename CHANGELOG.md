@@ -52,6 +52,18 @@ interfaces.
   winners and losers), and the operator profile, each with scope, source path,
   hash, trust, precedence, reload class, and context cost where it enters the
   prompt.
+- Self-orientation surfaces: a `docs_search` read tool and a `clio docs`
+  viewer let Clio answer how it works, how it is configured, and how agents are
+  triggered from its own shipped documentation. The `docs_search` tool runs
+  model-free term-frequency retrieval over the bundled `docs/*.md` set, splits
+  each file into heading-delimited sections, scores them with a heading-match
+  boost, caches the parsed index in-module, and returns the top sections as JSON
+  with file, heading, snippet, and score so every answer carries a cited
+  passage. The `clio docs [topic]` command serves the bundled `docs/html`
+  blueprints over a Node built-in static server bound to 127.0.0.1 on an
+  ephemeral port with `--no-open` to suppress the browser; it keeps no state,
+  runs no daemon, and reaches no external network. Packaging now ships
+  `docs/html/**` so the viewer works from an installed package.
 
 ### Changed
 
