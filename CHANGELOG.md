@@ -5,14 +5,39 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## Unreleased
+## 0.2.5 - 2026-06-23
+
+Clio Coder 0.2.5 adds first-class support for Argonne ALCF inference targets
+without moving the integration into pi-ai. The release keeps the scientific
+site-specific behavior inside Clio's engine/provider boundary: Clio registers
+the ALCF Globus OAuth provider, resolves bearer tokens for authenticated
+probes, discovers Sophia/Metis endpoints, and adapts strict OpenAI-compatible
+payloads for the ALCF gateway.
 
 ### Added
 
 - Added the `alcf` runtime for Argonne ALCF Sophia/Metis inference targets over
-  Globus OAuth, including authenticated live model discovery, ALCF model
-  metadata, and a strict-gateway OpenAI-compatible payload flag that suppresses
-  `chat_template_kwargs` while preserving top-level `reasoning_effort`.
+  Globus OAuth, including authenticated model discovery through the ALCF
+  catalog and running-job endpoints.
+- Added a Clio-owned ALCF OAuth provider registration for the Globus native
+  paste-code flow, with the ALCF gateway scope and identity-domain guidance
+  kept in `src/engine/alcf-oauth.ts`.
+- Added ALCF model metadata for the Llama 4 Maverick and Scout gateway models,
+  plus documentation covering login, target setup, probing, and the gateway's
+  strict payload behavior.
+- Added mocked contract coverage for ALCF OAuth grant selection, ALCF runtime
+  discovery/synthesis, and OpenAI-compatible reasoning payloads against
+  strict gateways.
+
+### Changed
+
+- Provider probes can now receive a resolved OAuth bearer through
+  `ProbeContext.authToken`, so authenticated runtime discovery works from both
+  `clio configure` and live provider probes without embedding site-specific
+  token logic in pi-ai.
+- OpenAI-compatible runtimes can opt out of `chat_template_kwargs` while still
+  preserving top-level `reasoning_effort`; the ALCF runtime uses this for
+  strict gateway compatibility.
 
 ## 0.2.4 - 2026-06-23
 

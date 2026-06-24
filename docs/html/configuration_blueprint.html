@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Configuration Blueprint (v0.2.4)</title>
+  <title>Clio Coder Configuration Blueprint (v0.2.5)</title>
   
   <style>
     :root {
@@ -497,7 +497,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.2.4</span>
+        <span class="version-badge">Clio Coder v0.2.5</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -525,12 +525,12 @@
           <div class="glass-card">
             <h2>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Icon</title><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-              settings.yaml Validator (v0.2.4 Schema)
+              settings.yaml Validator (v0.2.5 Schema)
             </h2>
             <p>Paste or edit your <code>settings.yaml</code> configuration file below. The validator checks schema version, target mapping links, target IDs, budget structures, and flags legacy properties such as <code>defaultMode</code> or misplaced state fields.</p>
             
             <div class="presets-list">
-              <span class="preset-btn" onclick="loadYamlPreset('valid')">Load Valid v0.2.4 Config</span>
+              <span class="preset-btn" onclick="loadYamlPreset('valid')">Load Valid v0.2.5 Config</span>
               <span class="preset-btn" onclick="loadYamlPreset('stale')">Load Legacy Config (Triggers Warnings)</span>
               <span class="preset-btn" onclick="loadYamlPreset('invalid')">Load Invalid Config</span>
             </div>
@@ -705,7 +705,7 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Autonomy Dial</h3>
-        <p>Clio v0.2.4 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. <code>clio doctor --fix</code> can repair known legacy settings into this shape and backs up the original file first.</p>
+        <p>Clio v0.2.5 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. <code>clio doctor --fix</code> can repair known legacy settings into this shape and backs up the original file first.</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
           <li style="margin-bottom: 0.3rem;"><strong><code>read-only</code></strong>: Clio inspects and answers. Write/execute tools are auto-denied.</li>
           <li style="margin-bottom: 0.3rem;"><strong><code>suggest</code></strong>: Every mutating action parks for operator confirmation.</li>
@@ -736,7 +736,7 @@ clio</code></pre>
     </main>
 
     <footer>
-      <p>Clio Coder Configuration Specification Dashboard &bull; Version 0.2.4</p>
+      <p>Clio Coder Configuration Specification Dashboard &bull; Version 0.2.5</p>
     </footer>
   </div>
 
@@ -892,7 +892,7 @@ orchestrator:
 
           // Flag stale fields
           if (key === 'defaultMode') {
-            warnings.push(`[Line ${idx+1}] Deprecated key "defaultMode" found. Configuration routing has been migrated in v0.2.4.`);
+            warnings.push(`[Line ${idx+1}] Deprecated key "defaultMode" found. Configuration routing has been migrated in v0.2.5.`);
           }
           if (key === 'state') {
             warnings.push(`[Line ${idx+1}] Legacy runtime state found in settings.yaml. Current Clio stores recent models under the state directory.`);
@@ -942,7 +942,7 @@ orchestrator:
           warnings.map(warn => `<li>${warn}</li>`).join('') + `</ul>`;
       } else {
         output.className = 'status-panel success';
-        output.innerHTML = `<strong>Validation Success:</strong> settings.yaml is structurally valid and fully conforms to the Clio Coder v0.2.4 schema settings constraints.`;
+        output.innerHTML = `<strong>Validation Success:</strong> settings.yaml is structurally valid and fully conforms to the Clio Coder v0.2.5 schema settings constraints.`;
       }
     }
 
