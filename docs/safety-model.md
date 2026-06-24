@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.6).
 
-Clio Coder's safety posture is code-enforced, not prompt-only. Prompt text tells the model how to behave, but execution is gated by target capabilities, the tool registry, safety policy engine, project policy, protected-artifact checks, and receipts.
+Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
 Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, and `damage-control-rules.yaml`.
 
@@ -183,13 +183,13 @@ guess.
 
 Fleet dispatch is admitted only when the requested worker scope is a subset of the orchestrator scope and requested actions fit the worker scope.
 
-Dispatch workers can run the same HTTP/native/pi-ai-backed runtimes as the orchestrator, driven through pi-agent-core. Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
+Dispatch workers can run the same HTTP, native, or pi-ai-backed runtimes as the orchestrator, driven through the [pi SDK family](https://www.npmjs.com/package/@earendil-works/pi-agent-core) (including `@earendil-works/pi-agent-core` and its TUI and AI wrappers). Clio observes and governs those tool calls directly, so every worker run is subject to the same safety mapping and receipt accounting as an interactive turn.
 
 Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
 
-- **`claude-sdk` (Enforced Safety):** Drives `@anthropic-ai/claude-agent-sdk` directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`workers.onPermission=deny` returns denial; `workers.onPermission=fail` terminates the run with a permission-required code).
+- **`claude-sdk` (Enforced Safety):** Drives [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`workers.onPermission=deny` returns denial; `workers.onPermission=fail` terminates the run with a permission-required code).
 - **`claude-code` (Subprocess Gating):** Drives `claude -p` as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary's command-line parameters (such as `--permission-mode` and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. A dangerous bypass (`--allow-dangerously-skip-permissions`) is only sent when autonomy is `full-auto` and `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`.
-- **Claude Code over ACP (Advisory Gating):** Drives Zed's `@zed-industries/claude-code-acp` (or `@agentclientprotocol/claude-agent-acp`) bridge as an ACP delegation agent. Clio's ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately **advisory** as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, `claude-sdk` is preferred over ACP.
+- **Claude Code over ACP (Advisory Gating):** Drives Zed's `@zed-industries/claude-code-acp` (or `@agentclientprotocol/claude-agent-acp`) bridge as an [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agent. Clio's ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately **advisory** as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, `claude-sdk` is preferred over ACP.
 
 All Claude Code runtimes rely on the user's existing CLI authentication and store no credentials in Clio.
 
