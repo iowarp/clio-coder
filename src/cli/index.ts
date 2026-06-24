@@ -3,6 +3,7 @@ import { runAgentsCommand } from "./agents.js";
 import { runAuthCommand } from "./auth.js";
 import { runClioCommand } from "./clio.js";
 import { runComponentsCommand } from "./components.js";
+import { runConfigCommand } from "./config.js";
 import { runConfigureCommand } from "./configure.js";
 import { runContextClearCommand } from "./context-clear.js";
 import { runContextIndexCommand } from "./context-index.js";
@@ -96,6 +97,8 @@ async function main(argv: string[]): Promise<number> {
 			return runAcpCommand(subArgs, bootOptions);
 		case "auth":
 			return runAuthCommand(subArgs);
+		case "config":
+			return runConfigCommand(subArgs);
 		case "configure":
 			return runConfigureCommand(subArgs);
 		case "targets":

@@ -26,6 +26,32 @@ interfaces.
   turn. Hooks register after the safety guards and can only add effects; the
   safety policy stays authoritative and a hook cannot grant a permission safety
   would deny.
+- Phase 3a (scoped settings): `.clio/settings.yaml` (committed) and
+  `.clio/settings.local.yaml` (gitignored) now layer on top of user settings,
+  with precedence built-in < user < project < project.local < CLI flags. The
+  effective config domain applies the layers, each key is attributed to the
+  layer that set it, objects deep-merge while arrays and scalars replace, and
+  credential-bearing keys are stripped from project layers with a diagnostic so
+  secrets never live in committed configuration.
+- Phase 3b (path-scoped rules): `.clio/rules/**/*.md` load deterministically by
+  id for prompt-cache stability. A rule with no `paths:` frontmatter is
+  unconditional and loads with project context; a path-scoped rule activates
+  only when a matching file is already in working context. Every rule carries a
+  content hash and a token estimate for context-ledger accounting, and rule
+  frontmatter can contribute `context.excludes` globs.
+- Phase 3c (operator profile): a structured, budgeted operator profile
+  (`<configDir>/profile.yaml`, overridable per project at `.clio/profile.yaml`)
+  renders as one capped prompt section covering response posture, validation
+  preference, commit-message style, and optional local-only paths. Every field
+  is a closed enum or bounded list; durable learned preferences stay in approved
+  memory rather than this file.
+- Phase 3d (config inspect): `clio config inspect [--json]` prints the
+  effective-customization graph, the "why is Clio behaving this way" surface. It
+  reports per-key settings sources, loaded CLIO.md, path-scoped rules, skills and
+  prompt roots, extensions, safety autonomy, memory, user hooks (with precedence
+  winners and losers), and the operator profile, each with scope, source path,
+  hash, trust, precedence, reload class, and context cost where it enters the
+  prompt.
 
 ### Changed
 

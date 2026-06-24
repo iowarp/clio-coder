@@ -3,7 +3,13 @@ import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { ConfigContract } from "../config/contract.js";
-import type { ContextContract, ProjectPromptContext } from "../context/index.js";
+import {
+	type ContextContract,
+	loadOperatorProfile,
+	loadProjectRules,
+	type ProjectPromptContext,
+	renderOperatorProfile,
+} from "../context/index.js";
 import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileSessionPromptInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
@@ -74,7 +80,7 @@ export function createPromptsBundle(
 				operatingContract: "operating.contract",
 				safety: `safety.${safety}`,
 				sessionInputs,
-				additionalFragments: clioRepoAwarenessFragments(cwd),
+				additionalFragments: [...clioRepoAwarenessFragments(cwd), ...customizationFragments(cwd)],
 			});
 		},
 		reload,
@@ -104,6 +110,50 @@ export function createPromptsBundle(
 	};
 
 	return { extension, contract };
+}
+
+/**
+ * Inline prompt fragments for the project's customization surfaces. Unconditional
+ * `.clio/rules/**` rules load with project context here; path-scoped rules stay
+ * out of the base prompt and activate through the rule loader once a matching
+ * file is in working context. The operator profile renders as one capped
+ * section. Both are deterministic (rules sort by id), so a local model's cached
+ * prompt prefix stays stable. Best-effort: a load failure injects nothing.
+ */
+function customizationFragments(cwd: string): RenderedPromptFragment[] {
+	const fragments: RenderedPromptFragment[] = [];
+	try {
+		const loaded = loadProjectRules(cwd);
+		const unconditional = loaded.rules.filter((rule) => rule.enabled && rule.paths === undefined);
+		if (unconditional.length > 0) {
+			const body = ["# Project rules", ...unconditional.map((rule) => rule.body)].join("\n\n");
+			fragments.push({
+				id: "context.project-rules",
+				relPath: "inline/project-rules",
+				body,
+				contentHash: sha256(body),
+				dynamic: true,
+			});
+		}
+	} catch {
+		// Project rules are best-effort; a load failure must not block compilation.
+	}
+	try {
+		const profile = loadOperatorProfile(cwd);
+		const rendered = renderOperatorProfile(profile.profile);
+		if (rendered.text.length > 0) {
+			fragments.push({
+				id: "context.operator-profile",
+				relPath: "inline/operator-profile",
+				body: rendered.text,
+				contentHash: sha256(rendered.text),
+				dynamic: true,
+			});
+		}
+	} catch {
+		// The operator profile is best-effort; a load failure injects nothing.
+	}
+	return fragments;
 }
 
 function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
