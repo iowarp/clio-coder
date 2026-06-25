@@ -67,19 +67,69 @@ Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact 
 
 ---
 
-## Evidence tags
+## Evidence Tag Taxonomy and Failure Causes
 
-The closed tag set includes:
+Clio Coder classifies every run, session, and eval record using a closed set of 22 canonical tags. These tags distinguish general execution characteristics (such as lineage linkages) from actual failure causes.
 
-```text
-audit-linked | audit-missing | best-effort-link | timeout | context-overflow |
-provider-transient | missing-dependency | wrong-runtime | proxy-validation |
-no-validation | destructive-cleanup | blocked-tool | receipt-integrity |
-protected-artifact | tool-loop | test-failure | build-failure | cwd-missing |
-session-linked | session-missing | auth-failure | unknown
+### Complete Taxonomy
+
+| Tag | Category | Trigger / Meaning |
+| --- | --- | --- |
+| `audit-linked` | Provenance | Audit logs successfully linked to this run or session. |
+| `audit-missing` | Provenance | No matching audit logs were found. |
+| `best-effort-link` | Provenance | Inspection commands or logs linked via heuristics. |
+| `timeout` | Failure | Execution exceeded the maximum duration limit. |
+| `context-overflow` | Constraint | Model context limit was exceeded. |
+| `provider-transient` | Transient | Temporary API or model gateway connection error. |
+| `missing-dependency`| Failure | Python, Node, or system package dependency was missing. |
+| `wrong-runtime` | Configuration | Execution failed due to incorrect compiler or runtime environment. |
+| `proxy-validation` | Validation | Weak validation (e.g. only file-presence check rather than execution). |
+| `no-validation` | Validation | Succeeded turn or run did not execute any verification commands. |
+| `destructive-cleanup`| Precaution | Clean-up rules triggered to prevent workspace pollution or damage. |
+| `blocked-tool` | Failure | The safety net blocked a tool call requested by the model. |
+| `receipt-integrity` | Security | Forensic verification detected receipt modification or checksum mismatch. |
+| `protected-artifact`| Precaution | Mutating a path protected by project or system safety policies. |
+| `tool-loop` | Constraint | The model repeatedly called the same tool with identical arguments. |
+| `test-failure` | Failure | A verification command containing test/lint keywords exited non-zero. |
+| `build-failure` | Failure | A verification command containing build keywords exited non-zero. |
+| `cwd-missing` | Configuration | The directory target specified for execution did not exist. |
+| `session-linked` | Provenance | The run is linked back to its originating parent session. |
+| `session-missing` | Provenance | No parent session could be resolved for this run. |
+| `auth-failure` | Failure | Missing or invalid credentials/API keys. |
+| `unknown` | Undefined | Unclassified execution failure. |
+
+---
+
+### Failure-Cause Tag Subset
+
+A subset of the taxonomy represents actual failure causes (governed by the `FAILURE_CAUSE_TAG_ORDER` array). These are the only tags included in the receipt summaries and TUI observability histograms:
+
+1. **`timeout`**: Triggered if the run outcome is `"timed_out"` or `"stalled"`, or if the error/failure text contains `"timed out"` or `"timeout"`.
+2. **`auth-failure`**: Triggered if failure text contains keywords like `"auth"`, `"api key"`, `"credential"`, or `"unauthorized"`.
+3. **`missing-dependency`**: Triggered if failure logs contain `"module not found"`, `"missing package"`, or `"missing dependency"`.
+4. **`blocked-tool`**: Triggered if the tool execution statistics show a blocked count greater than `0`.
+5. **`build-failure`**: Triggered if a command exits with a non-zero status and matches build tool needles (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`).
+6. **`test-failure`**: Triggered if a command exits with a non-zero status and matches test/lint needles (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`).
+
+---
+
+## Receipt findingsSummary
+
+Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an optional `findingsSummary` block. This block provides a cheap, integrity-covered summary of the run's findings:
+
+```json
+"findingsSummary": {
+  "tags": ["test-failure"],
+  "firstPassSuccess": false,
+  "findingCount": 1
+}
 ```
 
-Findings are `info` or `warn`; the builder does not call a model to summarize evidence.
+### Computation and Lifecycle
+- **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
+- **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
+- **Cryptographic Coverage**: The `findingsSummary` is protected under version 3 of the receipt integrity digest (`RUN_RECEIPT_INTEGRITY_VERSION = 3`). Any attempt to alter the findings summary will invalidate the receipt's integrity check. Pre-existing v2 receipts remain valid without this summary.
+
 
 ---
 

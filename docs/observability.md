@@ -13,50 +13,150 @@
 
 `/view` opens a full-screen split viewer. The left pane groups artifacts by category and supports type-to-filter. The right pane renders the selected artifact with pager controls. `Tab` switches panes. `v` verifies a selected receipt. `o` shows the absolute backing path through the notice channel so the file can be opened outside the TUI.
 
-## Artifact Categories
+---
 
-| Category | Source | Backing path |
+## The Evidence Spine End-to-End
+
+Clio Coder operates on a single, unified accountability spine that connects in-loop execution diagnostics with durable forensic evidence. The spine operates at two distinct layers:
+
+1. **Live Layer (In-Loop Assessment)**: During a session, the safety domain executes a cheap in-memory scan over the last 80 entries on every `turn_end` hook. It detects validation commands, dispatch receipts, protected artifacts, and requested inspections to check if completion claims are backed by evidence. The live kinds are mapped to the canonical evidence taxonomy.
+2. **Forensic Layer (Post-Completion Aggregator)**: When a run completes, the observability domain aggregates the session ledger, receipts, transcripts, and audit logs into a rich forensic bundle.
+
+```mermaid
+graph TD
+    dispatch[Dispatch Completed/Failed Event] --> obs[Observability Bus Subscriber]
+    obs --> build[Asynchronous buildEvidence]
+    build --> bundle[Write Forensic Bundle to dataDir]
+    build --> index[Append row to evidence-index.json in stateDir]
+    index --> view[Surfaced in /view Accountability Panel]
+```
+
+### Auto-Build on Dispatch Completion
+
+The observability extension subscribes to the `dispatch.completed` and `dispatch.failed` channels via the `SafeEventBus` (in `src/domains/observability/extension.ts`). When a run terminates, the domain initiates the forensic builder without blocking the event bus or TUI rendering.
+
+The builder runs `buildEvidence({ dataDir, stateDir, runId })` to read the state files and compile a detailed bundle under `<dataDir>/evidence/run-<runId>/`. If a headless run is executing, the observability stop hook (`stop()`) flushes all in-flight build promises before the process exits, ensuring no data is lost. Any build failures are swallowed and logged to stderr to prevent compiler or file-lock issues from crashing the main run.
+
+### The Sidecar Index
+
+After building the forensic bundle, the domain appends a metadata row to the sidecar index file located at `<stateDir>/evidence-index.json`. The file is kept as a JSON array acting as a bounded ring (capped at 1000 rows). 
+
+To prevent concurrent Clio processes from corrupting the index, writes are queued within the process and serialize across processes using the shared state-file locking mechanism.
+
+An `EvidenceIndexRow` has the following schema:
+```json
+{
+  "runId": "run-4f89d2a",
+  "evidenceId": "run-run-4f89d2a",
+  "tags": ["test-failure", "session-linked"],
+  "firstPassSuccess": false,
+  "findingCount": 2,
+  "generatedAt": "2026-06-25T14:30:00.000Z"
+}
+```
+
+---
+
+## Artifact Categories and Path Layouts
+
+Clio resolves directories under platform-specific XDG defaults (on Linux, these default to `~/.config/clio/`, `~/.local/share/clio/`, and `~/.local/state/clio/`).
+
+| Category | Description | Backing Path |
 | --- | --- | --- |
-| Accountability | Session-level rolling first-pass-success rate and failure-cause tag histogram | `<stateDir>/evidence-index.json` |
-| Receipts | Dispatch ledger entries with completed receipt files | `<stateDir>/receipts/<runId>.json` |
-| Dispatch outputs | Dispatch ledger rows plus matching session dispatch tool results when present | `<stateDir>/runs.json`, receipt path, or the current session transcript |
-| Tool outputs | Current-session durable output references, including `bashExecution.fullOutputPath`, `resultSize.offloadPath`, and tool-result detail paths such as `outputPath` | The referenced absolute path |
-| Compaction summaries | Current-session `compactionSummary` entries | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
+| **Accountability** | Rolling first-pass-success rate and failure-cause histogram. | `<stateDir>/evidence-index.json` |
+| **Receipts** | Durable run receipts verified by integrity signatures. | `<stateDir>/receipts/<runId>.json` |
+| **Dispatch outputs** | Logs and ledger records detailing worker execution. | `<stateDir>/runs.json` and `<stateDir>/receipts/<runId>.json` |
+| **Tool outputs** | Offloaded large outputs or execution logs. | `<stateDir>/scratch/<sessionId>/<toolCallId>.txt` |
+| **Compaction** | Summaries of compacted history sessions. | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
 
-Accountability, receipts, and dispatch rows are global ledger artifacts so historical runs remain inspectable. Tool output and compaction categories are session-local because they are stored inside the active session transcript or referenced from it.
+---
 
-## Rendering
+## The Accountability Panel
 
-Receipt JSON is pretty-printed before rendering. Plain text is rendered without stripping ANSI sequences. Markdown summaries render through the shared TUI Markdown component. Large file-backed artifacts are read incrementally and capped at the first 50,000 lines with a footer that points to the original path.
+The first category in the TUI split viewer is **Accountability**. It reads the sidecar index directly to present a live summary without loading heavy forensic logs.
 
-The dispatch domain does not currently persist a separate worker terminal log. `/view` therefore renders the durable ledger and receipt metadata, then adds the matching dispatch tool result from the active session when that result is present.
+### First-Pass Success Rate
+A run is marked as a first-pass success when:
+- The terminal dispatch outcome succeeded.
+- The run had zero dispatch retries (attempt 0).
+- The built bundle contains validation evidence, meaning the `no-validation` tag is absent.
 
-The generic tool result shaper truncates oversized tool results in the
-transcript and saves a scratch copy under `<stateDir>/scratch/<sessionId>/`
-when possible. `/view` follows those offload paths plus durable output paths
-written by tools, especially `bashExecution.fullOutputPath` and tool-result
-detail paths.
+The TUI displays this rate as:
+`first-pass success: <succeeded-attempts>/<total-attempts> (<pct>%)`
 
-## Verification
+### Failure-Cause Histogram
+The TUI lists the top failure causes sorted by frequency (descending), then by tag name (ascending). The histogram filters out provenance and quality tags (such as `audit-linked`, `session-linked`, and `no-validation`) and displays only real failure causes:
+- `timeout`
+- `auth-failure`
+- `missing-dependency`
+- `build-failure`
+- `test-failure`
+- `blocked-tool`
 
-`/view verify <runId>` and `v` on a receipt both run the same read-only verification path:
+---
 
-1. Read `<stateDir>/receipts/<runId>.json`.
-2. Validate the required receipt fields and basic value ranges.
-3. Read `<stateDir>/runs.json` and find the matching run envelope.
-4. Recompute receipt integrity with the dispatch receipt integrity helper (using v3 digest which covers the new `findingsSummary` field). Pre-existing v2 receipts verify via the retained v2 branch; old receipts that do not verify are wiped (renamed to `<name>.json.corrupt`) on load rather than migrated.
+## Receipt v3 Verification
 
-Verification never mutates the receipt, ledger, or session transcript. It reports one success or failure notice in headless mode, and paints the result into the viewer header in interactive mode.
+Pressing `v` on a selected receipt or running `/view verify <runId>` performs cryptographic signature checks:
 
-## Minimal Transcript
+1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
+2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
+3. **Verify Integrity**: Recomputes the SHA256 digest using the version 3 fields. The v3 digest covers the new `findingsSummary` field (containing tags, firstPassSuccess, and findingCount) to prevent tampering.
+4. **Wipe Stale Receipts**: If a receipt fails verification, it is renamed to `<name>.json.corrupt` and wiped from active memory. Pre-existing v2 receipts continue to verify through the retained v2 digest branch.
 
-Clio keeps routine transcript output short so the active conversation stays readable and inexpensive to replay. `/view` is the detailed inspection surface: receipts, worker outputs, file-backed tool output, and compaction summaries remain available on demand without forcing every byte into the main chat panel.
+---
 
-## Diagnostics and telemetry routing
+## Worked Example: End-to-End Spine Flow
 
-Operational events are typed at the process boundary and routed to notices,
-status, audit, overlays, or read-only snapshots instead of dying on the event
-bus. Dispatch native worker failures include a bounded stderr tail and
-malformed-stdout diagnostics in failure payloads and receipts. Audit records
-distinguish safety classification from the final disposition, such as
-`allowed`, `blocked`, `permission_requested`, or `denied`.
+Here is a step-by-step trace of how a run passes through the spine.
+
+### 1. Dispatch Completion
+A dispatched task to execute tests finishes. The dispatch domain persists the run envelope and the receipt, then emits the completion event:
+```json
+{
+  "runId": "run-abc1234",
+  "status": "completed",
+  "exitCode": 0,
+  "lineage": { "attempt": 0 }
+}
+```
+
+### 2. Forensic Build
+The observability domain catches the event and triggers `buildAndIndexEvidence`. It generates the overview under `<dataDir>/evidence/run-abc1234/overview.json`:
+```json
+{
+  "version": 1,
+  "evidenceId": "run-abc1234",
+  "source": { "kind": "run", "runId": "abc1234" },
+  "tags": ["session-linked"],
+  "totals": {
+    "toolCalls": 5,
+    "toolErrors": 0
+  }
+}
+```
+
+### 3. Sidecar Append
+Observability maps the result into an index row and writes it to `<stateDir>/evidence-index.json`. Because there was a successful validation tool call, `firstPassSuccess` is `true`:
+```json
+{
+  "runId": "abc1234",
+  "evidenceId": "run-abc1234",
+  "tags": ["session-linked"],
+  "firstPassSuccess": true,
+  "findingCount": 0,
+  "generatedAt": "2026-06-25T14:31:00.000Z"
+}
+```
+
+### 4. Surfacing in /view
+When the operator opens the TUI split viewer `/view`, the Accountability panel reads the index and displays:
+```text
+# Accountability
+
+first-pass success: 1/1 (100%)
+
+## Top failure causes
+
+none
+```

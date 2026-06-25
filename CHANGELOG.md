@@ -98,11 +98,8 @@ interfaces.
   returned empty observations), so nothing changes for the operator. The source
   stays in the tree under `src/domains/intelligence/` with a `PARKED.md` that
   records the intent and the re-entry condition.
-- Documentation guides, the root README.md, and the agent handbook CLIO.md are
-  updated to reflect the shipped v0.2.7 behavior (including forensic auto-builds,
-  v3 receipt integrity checks, validation-rigor integration, TUI /view
-  accountability summaries, evidence-linked change manifests, and parked
-  intelligence domain status).
+- Documentation guides (docs/observability.md, docs/safety-model.md, docs/evidence-and-memory.md, docs/scientific-validation.md, docs/evolution.md, and docs/commands-and-modes.md) and the agent handbook CLIO.md are updated and verified against the implementation code to accurately reflect the shipped v0.2.7 behavior (including forensic auto-builds, v3 receipt integrity checks, validation-rigor integration, TUI /view accountability summaries, environment variable overrides, evidence-linked change manifests, and parked intelligence domain status).
+
 
 ## 0.2.6 - 2026-06-24
 

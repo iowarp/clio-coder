@@ -249,6 +249,27 @@ are useful for OpenAI-compatible local gateways such as llama.cpp, LM Studio
 with Dynamo-backed workers, vLLM, and SGLang, plus cloud targets when
 credentials are available.
 
+## Environment Variables
+
+Clio Coder's behavior can be customized or overridden using the following environment variables:
+
+| Variable | Accepted Values | Purpose |
+| --- | --- | --- |
+| `CLIO_RIGOR` | `normal` \| `high` | Overrides the resolved session rigor level (case-insensitive trimming). |
+| `CLIO_HOME` | Absolute directory path | Replaces the config, data, state, and cache roots symmetrically with subdirectories under the given path. |
+| `CLIO_CONFIG_DIR` | Absolute directory path | Overrides the user configuration directory path (highest priority). |
+| `CLIO_DATA_DIR` | Absolute directory path | Overrides the durable data directory path (highest priority). |
+| `CLIO_STATE_DIR` | Absolute directory path | Overrides the machine-produced state directory path (highest priority). |
+| `CLIO_CACHE_DIR` | Absolute directory path | Overrides the disposable cache directory path (highest priority). |
+| `CLIO_ALLOW_EXTERNAL_FULL_ACCESS` | `1` | Enables bypassing subprocess tool permission prompts for `claude-code` and `antigravity-code` worker runtimes under `full-auto` autonomy. |
+| `CLIO_LIVE_SMOKE` | `1` | Enables executing live model smoke tests (`npm run test:live`). |
+| `CLIO_LIVE_TARGET` | Target ID | Specifies the model target to use for live smoke tests. |
+| `CLIO_LIVE_RUNTIME` | Runtime ID | Specifies the runtime provider to use for live smoke tests. |
+| `CLIO_LIVE_MODEL` | Model ID | Specifies the model identifier to use for live smoke tests. |
+| `CLIO_LIVE_BASE_URL` | URL | Specifies the API base endpoint to use for live smoke tests. |
+
+---
+
 ## Project Context
 
 Clio uses the nearest checked-in `CLIO.md` as the canonical project guide. Run

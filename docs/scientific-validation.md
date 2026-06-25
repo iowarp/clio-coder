@@ -86,13 +86,18 @@ Clio Coder’s domain logic categorizes scientific output files into a set of ca
 - **`Checkpoint files` / `Simulation restart artifacts`:** Stateful binary dumps.
 - **`Plots and generated figures`:** Output graphics (verified via path + checksum metadata).
 
----
-
-## 🚀 HPC Schedulers & Validation Lifecycle
+## HPC Schedulers and Validation Lifecycle
 
 Scheduler-driven runs require distinct validation handling compared to local unit tests:
-- **Queue status is not validation:** Checking if `sbatch` exits successfully only proves that the Slurm scheduler accepted the script. The validation contract is designed to execute *post-completion*, checking the actual simulation artifacts inside `out/` or `ckpt/`.
-- **Environment module loading:** The `runtime.modules` array lists the exact software stack dependencies (e.g., `intel/2024`, `openmpi/5.0`) that must be loaded before running the validators.
-- **HPC and Data Integration:** For large-scale allocations such as those at the [Argonne Leadership Computing Facility (ALCF)](https://www.alcf.anl.gov), verification logs can be transferred and archived via [Globus](https://www.globus.org) endpoints, allowing provenance collection across distributed scientific clusters.
-- **Validator execution:** In the current alpha version, contract validation is **advisory**. Quality/verification agents (such as the base `verifier` agent or custom project-level agents) read the contract to guide developers and write out verification receipts. Automated in-harness contract execution is not implemented yet.
-- **Rigor default integration:** In `v0.2.7`, the presence of a scientific validation contract in the repository root (e.g., `VALIDATION.md`, `validation.yaml`, `validation.yml`, `.clio/validation.yaml`, or `.clio/validation.yml`) automatically escalates the default session rigor level to `high`. This enforces a hard re-prompt gate on completion claims if recent validation command evidence is missing.
+- **Queue status is not validation**: Checking if a Slurm command like `sbatch` exits successfully only proves that the Slurm scheduler accepted the job script. The validation contract is designed to execute post-completion, checking the actual simulation artifacts inside `out/` or `ckpt/`.
+- **Environment module loading**: The `runtime.modules` array lists the exact software stack dependencies (such as `intel/2024`, `openmpi/5.0`) that must be loaded before running the validators.
+- **HPC and Data Integration**: For large-scale allocations such as those at the Argonne Leadership Computing Facility (ALCF), verification logs can be transferred and archived via Globus endpoints, allowing provenance collection across distributed scientific clusters.
+- **Validator execution**: In the current alpha version, contract validation is advisory. Quality/verification agents (such as the base `verifier` agent or custom project-level agents) read the contract to guide developers and write out verification receipts. Automated in-harness contract execution is not implemented yet.
+
+### How a Validation Contract Raises Session Rigor
+
+Clio Coder integrates scientific validation contracts directly into its safety model to raise the evidence standard automatically:
+- **Automatic Escalation**: At startup, Clio scans the workspace root. The presence of any validation contract (e.g. `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md`) automatically escalates the session's rigor level from `normal` to `high`.
+- **High-Rigor Gate Requirements**: Once the rigor is raised to `high`, the finish gate is active. If the agent claims to be finished, the gate intercepts the turn-end event. If no recent validation evidence is found in the last 80 history entries, Clio blocks the completion claim:
+  - Clio issues a `request_continuation` middleware effect to keep the session running.
+  - Clio injects a dynamic warning reminder (`HIGH_RIGOR_REVALIDATION_MESSAGE`) instructing the agent to run a verification command or to declare a limitation before it can conclude the turn.
