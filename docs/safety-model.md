@@ -222,13 +222,54 @@ When executing tasks in headless mode through `clio run`, there is no terminal o
 
 ## Rigor Gate and Finish Contract
 
-In addition to tool-level safety gates, Clio enforces a completion boundary via the finish-contract assessor. This gate is governed by a single `rigor` setting (either `normal` or `high`), which is orthogonal to autonomy permission levels:
+In addition to tool-level safety gates, Clio Coder enforces a completion boundary via the finish-contract assessor. This gate is governed by a single `rigor` setting (either `normal` or `high`), which is completely orthogonal to the autonomy permission levels.
 
-- **Rigor Resolution**: Rigor is resolved from a `CLIO_RIGOR` environment override (case-insensitive trimming to `"normal"` or `"high"`) or a repository-derived default. The default is raised to `high` if a scientific validation contract is found in the workspace root (e.g., `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md`). Otherwise, it is `normal`.
-- **Gate Behavior**:
-  - **`normal` rigor**: When an assistant turn claims completion but lacks recent validation command evidence (and has no declared limitation), Clio issues a soft advisory `inject_reminder` warning.
-  - **`high` rigor**: The finish gate has teeth. Clio withholds completion by emitting a `request_continuation` along with a dynamic `inject_reminder` warning. This forces the model to run a verification-family command (e.g. `npm test`, `npm run build`) or state what could not be verified and why, before the turn settles.
-- **Dynamic Injection**: All gate directives are injected dynamically as reminders/actions to ensure the static system prompt prefix remains byte-stable. Read-only turns and turns with no completion claim are exempt.
+### Autonomy versus Rigor
+
+It is critical to distinguish these two control axes:
+- **Autonomy (Permission)**: Determines what files, directories, tools, or shell commands the agent is permitted to touch, and whether it must ask the operator for permission before executing them.
+- **Rigor (Evidence Bar)**: Determines the verification standard required to accept a task as "done". Autonomy gates what the agent *can do*; rigor gates what the agent must *verify* before it is allowed to finish.
+
+| Setting | Axis | Governed By | Handled In |
+| --- | --- | --- | --- |
+| **Autonomy** | Authority | `autonomy` settings dial, `CLIO_ALLOW_EXTERNAL_FULL_ACCESS` | `src/tools/registry.ts`, `src/domains/safety/` |
+| **Rigor** | Validation | `CLIO_RIGOR` override, workspace validation contracts | `src/domains/safety/rigor.ts`, `src/domains/safety/finish-contract-registration.ts` |
+
+---
+
+### Rigor Resolution
+
+The effective rigor level for a session or dispatch run is resolved at boot time using the following prioritization:
+
+1. **Explicit Override**: Checked via the `CLIO_RIGOR` environment variable. It is trimmed and parsed case-insensitively. A value of `"high"` or `"normal"` overrides any other setting.
+2. **Repository-Derived Default**: If no override is present, Clio checks the workspace root for the presence of any of the following validation contract files:
+   - `.clio/validation.yaml`
+   - `.clio/validation.yml`
+   - `validation.yaml`
+   - `validation.yml`
+   - `VALIDATION.md`
+   
+   If any of these files are present, the default rigor level is raised to `high`. Otherwise, the default is `normal`.
+
+---
+
+### The Finish Gate and Re-Prompt Behavior
+
+On every settled turn end (turns where the assistant has stopped speaking and is ready to yield control), the finish-contract assessor scans the last 80 entries in the session history.
+
+If the assistant's response contains a completion claim (matching patterns such as `done`, `complete`, `fixed`, `resolved`, `ready for review`) but the recent history contains **no validation evidence** (e.g. successful verification commands, validation tools, or dispatch receipts):
+
+- **Normal Rigor**: Clio issues a soft advisory warning (`FINISH_CONTRACT_ADVISORY_MESSAGE`) injected as a reminder for the next turn, but permits the turn to settle.
+- **High Rigor**: Clio withholds completion. The assessor emits two middleware effects:
+  - `request_continuation`: Forces the model to keep executing, preventing the turn from settling.
+  - `inject_reminder` (severity: `"warn"`): Injects the `HIGH_RIGOR_REVALIDATION_MESSAGE` directive to instruct the model to run a verification-family command (e.g. `npm test`, `npm run build`) or explicitly declare a limitation (matching patterns such as `could not`, `blocked by`, `unable to`) before claiming completion.
+
+#### Exemptions and Safety Precautions
+- **Read-Only Status Turns**: Status and alignment checks that do not request work are exempt from the rigor gate.
+- **Limitation Claims**: If the model explicitly states what could not be verified and why, the assessor accepts the statement as an explicit limitation and allows the turn to settle cleanly.
+- **Dynamic Injection**: All gate directives are injected dynamically through middleware effects. This ensures that the static system prompt prefix remains byte-stable, preserving prompt caches.
+- **Prior Hard-Block Preservation**: If a prior middleware hook has already emitted a hard block (e.g. tool-prose violation), the high-rigor continuation is suppressed so that critical error guidance is not overwritten.
+
 
 ---
 

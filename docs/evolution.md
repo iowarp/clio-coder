@@ -50,7 +50,29 @@ clio evolve manifest summarize change-manifest.json
 }
 ```
 
-Only `iterationId: "exploratory-1"` may use an empty `evidenceRefs` array. In `v0.2.7`, all non-empty `evidenceRefs` entries are resolved against the local evidence store during `validate` and `summarize` commands. They must follow the format `run-<id>` or `session-<id>` and point to folders that actually exist under `<dataDir>/evidence/`. Note that high-authority harness self-edit enforcement (Slice 5b) is currently deferred (see `src/domains/evolution/SELF_EDIT_GATE.md` for status and re-entry conditions).
+Only the first exploratory iteration (`iterationId: "exploratory-1"`) is permitted to use an empty `evidenceRefs` array. For all other iterations, the manifest must cite valid evidence of verification.
+
+### Evidence-Linked Validation (Slice 5a)
+
+During `clio evolve manifest validate` and `summarize` commands, Clio Coder validates the referenced evidence bundles:
+- **Format Verification**: Every reference in the `evidenceRefs` array must follow the format `run-<id>` or `session-<id>`.
+- **Durable Store Resolution**: Each reference must correspond to a folder that actually exists under `<dataDir>/evidence/`. If any referenced bundle is missing, validation fails and reports a dangling reference issue.
+- **Engine Boundaries**: To maintain domain boundaries (`check:boundaries`), the validation function `validateChangeManifest` is completely decoupled. It accepts a `resolveEvidenceRef` predicate option. The CLI passes a resolver connected to the evidence store, keeping the evolution domain from directly importing the evidence domain.
+
+### Self-Edit Gate Deferral (Slice 5b)
+
+Enforcement of high-authority self-edits (Slice 5b) is deferred per the status and design in `src/domains/evolution/SELF_EDIT_GATE.md`.
+
+#### Why it is Deferred
+To enforce that Clio Coder cannot modify its own codebase (specifically paths mapped to `HIGH_AUTHORITY_LEVELS` such as `src/engine/**` or `src/domains/safety/**`) without a validated change manifest, the harness must distinguish between:
+1. **Agent-Initiated Self-Edits**: Clio editing its own harness paths autonomously.
+2. **Operator-Requested Edits**: The developer instructing Clio to modify files in the repository.
+
+Currently, the middleware lacks a reliable signal to separate these two scenarios. Implementing a naive path-glob filter would block developers from making ordinary source changes, which is forbidden by the release specification.
+
+#### Concrete Gate Design and Re-entry
+When the required signal (`selfEditOrigin: "operator-requested" | "agent-initiated"`) is implemented, Slice 5b will run as a `before_tool` middleware registration. For any high-authority tool call classified as `agent-initiated`, it will require a change manifest whose `evidenceRefs` validate against the local evidence store, returning a `block_tool` effect if missing.
+
 
 ---
 
