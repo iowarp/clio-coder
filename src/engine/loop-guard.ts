@@ -14,10 +14,10 @@
  * nothing here imports TUI code.
  */
 
-import { BusChannels, type LoopBlockedPayload } from "../core/bus-events.js";
+import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
-import type { MiddlewareEffect } from "../domains/middleware/types.js";
+import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { createLoopState } from "../domains/safety/loop-detector.js";
 
@@ -31,6 +31,23 @@ export const DEFAULT_MAX_TOOL_CALLS = 50;
 /** Environment variable that overrides the per-run tool-call cap. */
 export const MAX_TOOL_CALLS_ENV = "CLIO_MAX_TOOL_CALLS";
 
+/**
+ * Default soft per-turn tool-call budget for the interactive orchestrator.
+ * Crossing it injects a re-plan directive; the orchestrator is otherwise
+ * uncapped on the premise that an operator can intervene, which fails for weak
+ * local models that spray distinct commands the identical-call detector never
+ * sees.
+ */
+export const DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET = 25;
+/**
+ * Hard ceiling sits this many calls above the soft budget. Reaching it
+ * interrupts the turn outright instead of merely nudging, bounding a model
+ * that ignores the directive to a small number of blocked retries.
+ */
+export const ORCH_TURN_TOOL_CALL_HARD_MARGIN = 15;
+/** Environment variable that overrides the soft per-turn tool-call budget. */
+export const ORCH_MAX_TOOL_CALLS_ENV = "CLIO_ORCH_MAX_TOOL_CALLS";
+
 /** Bounded turn-id memory, matching the registry's dispatch-guard policy. */
 const LOOP_GUARD_TURN_LIMIT = 32;
 
@@ -39,14 +56,31 @@ const NO_TURN_BUCKET = "no-turn";
 
 const LOOP_WINDOW_MS = createLoopState().windowMs;
 
-export function readToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
-	const raw = env[MAX_TOOL_CALLS_ENV];
-	if (raw === undefined || raw === "") return DEFAULT_MAX_TOOL_CALLS;
+function readPositiveIntEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+	const raw = env[name];
+	if (raw === undefined || raw === "") return fallback;
 	const normalized = raw.trim();
-	if (!/^[1-9]\d*$/.test(normalized)) return DEFAULT_MAX_TOOL_CALLS;
+	if (!/^[1-9]\d*$/.test(normalized)) return fallback;
 	const parsed = Number(normalized);
-	if (!Number.isSafeInteger(parsed)) return DEFAULT_MAX_TOOL_CALLS;
+	if (!Number.isSafeInteger(parsed)) return fallback;
 	return parsed;
+}
+
+export function readToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
+	return readPositiveIntEnv(env, MAX_TOOL_CALLS_ENV, DEFAULT_MAX_TOOL_CALLS);
+}
+
+/** Soft/hard per-turn tool-call budget for the interactive orchestrator. */
+export interface OrchTurnToolCallBudget {
+	/** Distinct calls in a turn that trigger the re-plan nudge. */
+	soft: number;
+	/** Distinct calls in a turn that interrupt the turn. */
+	hard: number;
+}
+
+export function readOrchTurnToolCallBudget(env: NodeJS.ProcessEnv = process.env): OrchTurnToolCallBudget {
+	const soft = readPositiveIntEnv(env, ORCH_MAX_TOOL_CALLS_ENV, DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET);
+	return { soft, hard: soft + ORCH_TURN_TOOL_CALL_HARD_MARGIN };
 }
 
 export interface CreateLoopGuardRegistrationOptions {
@@ -61,6 +95,13 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * operator who can intervene; workers do not).
 	 */
 	toolCallCap?: number;
+	/**
+	 * Orchestrator only: soft/hard per-turn tool-call budget. The soft budget
+	 * injects a re-plan directive (block this attempt with house-style guidance);
+	 * the hard ceiling additionally interrupts the turn over the bus. Absent for
+	 * workers, which rely on the lifetime {@link toolCallCap} instead.
+	 */
+	turnToolCallBudget?: OrchTurnToolCallBudget;
 	now?: () => number;
 }
 
@@ -72,20 +113,82 @@ export interface LoopGuardRegistration extends MiddlewareHookRegistration {
 export function createLoopGuardRegistration(options: CreateLoopGuardRegistrationOptions): LoopGuardRegistration {
 	const budget = options.turnBlockBudget ?? INTERACTIVE_LOOP_BLOCK_BUDGET;
 	const cap = options.toolCallCap;
+	const turnBudget = options.turnToolCallBudget;
 	const blocksByTurn = new Map<string, number>();
+	const callsByTurn = new Map<string, number>();
 	let count = 0;
 
-	const bumpTurnBlocks = (turnId: string): number => {
-		if (!blocksByTurn.has(turnId)) {
-			while (blocksByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
-				const oldest = blocksByTurn.keys().next().value;
+	const bumpBoundedCounter = (store: Map<string, number>, turnId: string): number => {
+		if (!store.has(turnId)) {
+			while (store.size >= LOOP_GUARD_TURN_LIMIT) {
+				const oldest = store.keys().next().value;
 				if (typeof oldest !== "string") break;
-				blocksByTurn.delete(oldest);
+				store.delete(oldest);
 			}
 		}
-		const next = (blocksByTurn.get(turnId) ?? 0) + 1;
-		blocksByTurn.set(turnId, next);
+		const next = (store.get(turnId) ?? 0) + 1;
+		store.set(turnId, next);
 		return next;
+	};
+
+	const bumpTurnBlocks = (turnId: string): number => bumpBoundedCounter(blocksByTurn, turnId);
+
+	const emitBudgetEvent = (
+		input: MiddlewareHookInput,
+		callsThisTurn: number,
+		interrupted: boolean,
+		at: number,
+	): void => {
+		if (turnBudget === undefined) return;
+		const payload: ToolBudgetExceededPayload = {
+			tool: input.toolName ?? "unknown",
+			callsThisTurn,
+			softBudget: turnBudget.soft,
+			hardCeiling: turnBudget.hard,
+			interrupted,
+			at,
+			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+		};
+		options.bus?.emit(BusChannels.ToolBudgetExceeded, payload);
+	};
+
+	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {
+		if (turnBudget === undefined) return null;
+		const turnKey = input.turnId ?? NO_TURN_BUCKET;
+		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
+		if (callsThisTurn >= turnBudget.hard) {
+			// Hard ceiling: interrupt the turn the same way the block budget does.
+			// The bus event drives chat.cancel() in the interactive layer; the
+			// block effect makes the in-flight attempt fail with the same reason.
+			if (callsThisTurn === turnBudget.hard) emitBudgetEvent(input, callsThisTurn, true, now);
+			return [
+				{
+					kind: "block_tool",
+					reason:
+						`tool-call budget exhausted: ${callsThisTurn} tool calls in this turn reached the hard ceiling ` +
+						`(${turnBudget.hard}); the turn is being stopped. Summarize what you found and wait for the operator.`,
+					severity: "hard-block",
+				},
+			];
+		}
+		if (callsThisTurn >= turnBudget.soft) {
+			// Soft budget: block this attempt and hand the model a re-plan
+			// directive. The operator sees one warn notice per turn (the first
+			// crossing); the model keeps getting the directive on every further
+			// over-budget attempt so it cannot quietly resume spraying calls.
+			if (callsThisTurn === turnBudget.soft) emitBudgetEvent(input, callsThisTurn, false, now);
+			return [
+				{
+					kind: "block_tool",
+					reason:
+						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}). ` +
+						`Stop exploring. Summarize what you have found so far, narrow to a single concrete next step, or ask the ` +
+						`operator a clarifying question before calling more tools.`,
+					severity: "hard-block",
+				},
+			];
+		}
+		return null;
 	};
 
 	return {
@@ -99,6 +202,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (cap !== undefined && count > cap) {
 				return [{ kind: "block_tool", reason: `tool-call cap reached (${cap}); abort turn`, severity: "hard-block" }];
 			}
+			const budgetEffects = evaluateTurnBudget(input, now);
+			if (budgetEffects !== null) return budgetEffects;
 			const fingerprint = input.metadata?.callFingerprint;
 			if (typeof fingerprint !== "string" || fingerprint.length === 0) return [];
 			const verdict = options.safety.observeLoop(fingerprint, now);

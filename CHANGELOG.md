@@ -100,6 +100,24 @@ interfaces.
   records the intent and the re-entry condition.
 - Documentation guides (docs/observability.md, docs/safety-model.md, docs/evidence-and-memory.md, docs/scientific-validation.md, docs/evolution.md, and docs/commands-and-modes.md) and the agent handbook CLIO.md are updated and verified against the implementation code to accurately reflect the shipped v0.2.7 behavior (including forensic auto-builds, v3 receipt integrity checks, validation-rigor integration, TUI /view accountability summaries, environment variable overrides, evidence-linked change manifests, and parked intelligence domain status).
 
+### Fixed
+
+- The interactive orchestrator now enforces a per-turn tool-call budget, closing
+  a gap where a weak local model asked to "audit the repo" sprayed roughly 40
+  distinct bash commands over six minutes before the loop guard stopped it. The
+  identical-call loop detector only catches verbatim repeats, and the
+  orchestrator is otherwise uncapped on the premise that an operator can
+  intervene, a premise that fails for weak models. The loop guard
+  (`src/engine/loop-guard.ts`) now counts every distinct tool-call attempt in a
+  user turn. At the soft budget (default 25, overridable via
+  `CLIO_ORCH_MAX_TOOL_CALLS`) it blocks the attempt and injects a re-plan
+  directive that tells the model to stop exploring and summarize, narrow, or ask;
+  at the hard ceiling (soft + 15) it interrupts the turn over the new
+  `safety.toolBudgetExceeded` bus event, the same way the per-turn loop-block
+  budget cancels a turn. Workers are unaffected: they keep relying on the
+  lifetime `CLIO_MAX_TOOL_CALLS` cap. The budget is delivered dynamically through
+  the effect machinery, so the static system-prompt prefix stays byte-stable.
+
 
 ## 0.2.6 - 2026-06-24
 

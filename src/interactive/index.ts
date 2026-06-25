@@ -7,6 +7,7 @@ import {
 	type ContextWarningPayload,
 	type LoopBlockedPayload,
 	type RuntimeNoticePayload,
+	type ToolBudgetExceededPayload,
 } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -1278,6 +1279,30 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			appendNotice(
 				"warn",
 				`[loop-guard] blocked ${evt.tool}: identical call repeated ${evt.repeatCount}x in window (block ${evt.blocksThisTurn}/${evt.budget} this turn).`,
+				busNoticeSink,
+			);
+		}
+		tui.requestRender();
+	});
+	// Tool-call budget visibility. The orchestrator loop guard counts every
+	// distinct tool call in a turn (the identical-call loop guard above misses
+	// near-duplicate sprays) and emits over the bus. The soft budget renders a
+	// warn nudge; the hard ceiling cancels the active turn with an error notice,
+	// matching the loop-budget interrupt path.
+	const unsubscribeToolBudget = deps.bus.on(BusChannels.ToolBudgetExceeded, (payload) => {
+		const evt = payload as ToolBudgetExceededPayload | null | undefined;
+		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.callsThisTurn !== "number") return;
+		if (evt.interrupted) {
+			appendNotice(
+				"error",
+				`[loop-guard] agent stopped: ${evt.callsThisTurn} tool calls this turn reached the hard ceiling (${evt.hardCeiling}).`,
+				busNoticeSink,
+			);
+			deps.chat.cancel();
+		} else {
+			appendNotice(
+				"warn",
+				`[loop-guard] tool-call budget reached: ${evt.callsThisTurn} calls this turn (soft budget ${evt.softBudget}); ${evt.tool} blocked, model asked to re-plan.`,
 				busNoticeSink,
 			);
 		}
@@ -2771,6 +2796,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeContextPruned();
 		unsubscribeRuntimeNotice();
 		unsubscribeLoopBlocked();
+		unsubscribeToolBudget();
 		unsubscribeConfigRouting();
 		unsubscribeConfigHotReloadOverlay();
 		unsubscribeConfigRestartRequired();
