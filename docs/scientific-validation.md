@@ -1,7 +1,7 @@
 # Clio Coder Scientific Validation Contracts
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive numerical tolerance calculator and HPC queue execution simulator is located at [docs/html/validation_blueprint.html](html/validation_blueprint.html) (Version: 0.2.6).
+> **Interactive Spec Available:** An interactive numerical tolerance calculator and HPC queue execution simulator is located at [docs/html/validation_blueprint.html](html/validation_blueprint.html) (Version: 0.2.7).
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 
@@ -95,3 +95,4 @@ Scheduler-driven runs require distinct validation handling compared to local uni
 - **Environment module loading:** The `runtime.modules` array lists the exact software stack dependencies (e.g., `intel/2024`, `openmpi/5.0`) that must be loaded before running the validators.
 - **HPC and Data Integration:** For large-scale allocations such as those at the [Argonne Leadership Computing Facility (ALCF)](https://www.alcf.anl.gov), verification logs can be transferred and archived via [Globus](https://www.globus.org) endpoints, allowing provenance collection across distributed scientific clusters.
 - **Validator execution:** In the current alpha version, contract validation is **advisory**. Quality/verification agents (such as the base `verifier` agent or custom project-level agents) read the contract to guide developers and write out verification receipts. Automated in-harness contract execution is not implemented yet.
+- **Rigor default integration:** In `v0.2.7`, the presence of a scientific validation contract in the repository root (e.g., `VALIDATION.md`, `validation.yaml`, `validation.yml`, `.clio/validation.yaml`, or `.clio/validation.yml`) automatically escalates the default session rigor level to `high`. This enforces a hard re-prompt gate on completion claims if recent validation command evidence is missing.

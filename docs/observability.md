@@ -1,7 +1,7 @@
 # Observability Viewer
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/observability_blueprint.html](html/observability_blueprint.html) (Version: 0.2.6).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/observability_blueprint.html](html/observability_blueprint.html) (Version: 0.2.7).
 
 `/view` is the interactive artifact viewer for a Clio session. It keeps the live transcript compact while preserving a full inspection path for durable artifacts.
 
@@ -17,12 +17,13 @@
 
 | Category | Source | Backing path |
 | --- | --- | --- |
+| Accountability | Session-level rolling first-pass-success rate and failure-cause tag histogram | `<stateDir>/evidence-index.json` |
 | Receipts | Dispatch ledger entries with completed receipt files | `<stateDir>/receipts/<runId>.json` |
 | Dispatch outputs | Dispatch ledger rows plus matching session dispatch tool results when present | `<stateDir>/runs.json`, receipt path, or the current session transcript |
 | Tool outputs | Current-session durable output references, including `bashExecution.fullOutputPath`, `resultSize.offloadPath`, and tool-result detail paths such as `outputPath` | The referenced absolute path |
 | Compaction summaries | Current-session `compactionSummary` entries | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
 
-Receipts and dispatch rows are global ledger artifacts so historical runs remain inspectable. Tool output and compaction categories are session-local because they are stored inside the active session transcript or referenced from it.
+Accountability, receipts, and dispatch rows are global ledger artifacts so historical runs remain inspectable. Tool output and compaction categories are session-local because they are stored inside the active session transcript or referenced from it.
 
 ## Rendering
 
@@ -43,7 +44,7 @@ detail paths.
 1. Read `<stateDir>/receipts/<runId>.json`.
 2. Validate the required receipt fields and basic value ranges.
 3. Read `<stateDir>/runs.json` and find the matching run envelope.
-4. Recompute receipt integrity with the dispatch receipt integrity helper.
+4. Recompute receipt integrity with the dispatch receipt integrity helper (using v3 digest which covers the new `findingsSummary` field). Pre-existing v2 receipts verify via the retained v2 branch; old receipts that do not verify are wiped (renamed to `<name>.json.corrupt`) on load rather than migrated.
 
 Verification never mutates the receipt, ledger, or session transcript. It reports one success or failure notice in headless mode, and paints the result into the viewer header in interactive mode.
 
