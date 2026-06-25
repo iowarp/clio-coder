@@ -5,7 +5,20 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## [Unreleased]
+## 0.2.6 - 2026-06-24
+
+Clio Coder 0.2.6 is a hardening and self-orientation release. It fixes model
+residency so a single VRAM-aware reconciler drives load and evict for every
+manageable local runtime from both the interactive and headless paths, replacing
+the fragmented logic that could overflow VRAM on a dispatched run. It promotes
+the customization substrate into first-class surfaces: layered project settings,
+path-scoped project rules that activate from working context, a budgeted operator
+profile, user-defined and receipted middleware hooks, and a `clio config inspect`
+graph that explains why Clio behaves the way it does. It adds self-orientation so
+Clio can answer questions about itself from its own shipped documentation through
+the `docs_search` tool and the `clio docs` viewer. The release also hardens the
+test and CI lanes with coverage and deterministic repeat runs, adds a SciCode
+scientific-coding eval adapter, and refreshes the guides and HTML blueprints.
 
 ### Added
 
