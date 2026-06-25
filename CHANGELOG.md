@@ -22,8 +22,10 @@ interfaces.
   right after the run still persists the bundle and index row instead of
   building nothing or abandoning the build mid-flight. Successful runs with no
   linked validation evidence are tagged `no-validation` and are not counted as
-  first-pass successes, and sidecar index writes are queued so concurrent
-  evidence builds preserve every completed run row.
+  first-pass successes. Sidecar index read/merge/write sections reuse the same
+  cross-process state-file lock as `runs.json`, with a local process queue to
+  reduce same-process contention, so concurrent Clio processes preserve every
+  completed run row.
 - Run receipts now carry a compact, integrity-covered `findingsSummary`
   (`tags`, `firstPassSuccess`, `findingCount`). It is computed cheaply at
   receipt-record time from the envelope, outcome, exit code, and tool stats,
@@ -75,7 +77,9 @@ interfaces.
   enforcement point today that can tell "Clio editing her own harness" apart
   from "the user asked Clio to edit this repo's source", and a path-glob gate
   would wrongly block ordinary user-requested edits. Per the release spec, 5a
-  ships now and 5b is tracked in `src/domains/evolution/SELF_EDIT_GATE.md`.
+  ships now and 5b is tracked in `src/domains/evolution/SELF_EDIT_GATE.md`,
+  including the concrete middleware gate design and the minimal missing
+  `selfEditOrigin` signal needed before enforcement can ship safely.
 
 ### Changed
 

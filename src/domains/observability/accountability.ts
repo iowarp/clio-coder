@@ -3,8 +3,12 @@
  * (see evidence-index.ts) that yields a rolling first-pass-success rate and a
  * failure-cause tag histogram for the session. This is presentation-grade
  * read-only data: it recomputes nothing, it only folds the rows that Slice 2
- * already wrote when each dispatch run finalized. The `/view` overlay and the
- * observability contract surface it without re-running `buildEvidence`.
+ * already wrote when each dispatch run finalized. Those rows are
+ * forensic-derived and are the authority for user-visible first-pass-success
+ * rates. The receipt summary is the conservative integrity-covered snapshot,
+ * so a false receipt summary and a true forensic row is an intentional
+ * divergence, not a contradiction. The `/view` overlay and the observability
+ * contract surface this without re-running `buildEvidence`.
  */
 
 import { type EvidenceTag, FAILURE_CAUSE_TAGS } from "../evidence/index.js";

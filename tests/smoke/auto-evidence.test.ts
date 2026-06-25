@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,8 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import { openLedger } from "../../src/domains/dispatch/state.js";
+import { readAccountabilitySummary } from "../../src/domains/observability/accountability.js";
 import { readEvidenceIndex } from "../../src/domains/observability/evidence-index.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
 
@@ -76,13 +79,17 @@ function seedRuns(stateDir: string, runIds: readonly string[]): void {
 }
 
 function seedValidationSession(stateDir: string, sessionId: string): void {
+	seedValidationSessionAt(stateDir, sessionId, "2026-06-24T00:00:00.500Z");
+}
+
+function seedValidationSessionAt(stateDir: string, sessionId: string, timestamp: string): void {
 	const sessionDir = join(stateDir, "sessions", "smoke-cwd", sessionId);
 	mkdirSync(sessionDir, { recursive: true });
 	const entry = {
 		kind: "bashExecution",
 		turnId: "turn-validation",
 		parentTurnId: null,
-		timestamp: "2026-06-24T00:00:00.500Z",
+		timestamp,
 		command: "npm test",
 		output: "ok",
 		exitCode: 0,
@@ -106,6 +113,97 @@ async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<bool
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 	return predicate();
+}
+
+function waitForChild(child: ReturnType<typeof spawn>): Promise<void> {
+	let stderr = "";
+	child.stderr?.on("data", (chunk: Buffer) => {
+		stderr += chunk.toString("utf8");
+	});
+	return new Promise((resolve, reject) => {
+		child.on("error", reject);
+		child.on("close", (code, signal) => {
+			if (code === 0) {
+				resolve();
+				return;
+			}
+			reject(new Error(`child exited code=${code ?? "null"} signal=${signal ?? "null"} stderr=${stderr}`));
+		});
+	});
+}
+
+async function sealRunWithConservativeReceiptSummary(input: { stateDir: string; sessionId: string }): Promise<string> {
+	const ledger = openLedger();
+	const envelope = ledger.create({
+		agentId: "agent-smoke",
+		task: "validate transcript-level evidence",
+		targetId: "target-smoke",
+		wireModelId: "model-smoke",
+		runtimeId: "runtime-smoke",
+		runtimeKind: "subprocess",
+		sessionId: input.sessionId,
+		cwd: "/tmp/smoke",
+	});
+	const validationTimestamp = new Date(Date.parse(envelope.startedAt) + 500).toISOString();
+	const validationTime = Date.parse(validationTimestamp);
+	const endedAt = new Date(validationTime + 1000).toISOString();
+	ledger.update(envelope.id, {
+		status: "completed",
+		outcome: "succeeded",
+		outcomeDetail: null,
+		endedAt,
+		exitCode: 0,
+		lineage: { parentRunId: null, rootRunId: envelope.id, attempt: 0, depth: 0 },
+		tokenCount: 0,
+		inputTokenCount: 0,
+		outputTokenCount: 0,
+		cacheReadTokenCount: 0,
+		cacheWriteTokenCount: 0,
+		reasoningTokenCount: 0,
+		staticShellHash: null,
+		sessionShellHash: null,
+		dynamicHash: null,
+		costUsd: 0,
+	});
+	const receipt = ledger.recordReceipt(envelope.id, {
+		runId: envelope.id,
+		agentId: "agent-smoke",
+		task: "validate transcript-level evidence",
+		targetId: "target-smoke",
+		wireModelId: "model-smoke",
+		runtimeId: "runtime-smoke",
+		runtimeKind: "subprocess",
+		outcome: "succeeded",
+		outcomeDetail: null,
+		lineage: { parentRunId: null, rootRunId: envelope.id, attempt: 0, depth: 0 },
+		startedAt: envelope.startedAt,
+		endedAt,
+		exitCode: 0,
+		tokenCount: 0,
+		inputTokenCount: 0,
+		outputTokenCount: 0,
+		cacheReadTokenCount: 0,
+		cacheWriteTokenCount: 0,
+		reasoningTokenCount: 0,
+		costUsd: 0,
+		compiledPromptHash: null,
+		staticCompositionHash: null,
+		staticShellHash: null,
+		sessionShellHash: null,
+		dynamicHash: null,
+		clioVersion: "test",
+		piMonoVersion: "test",
+		platform: process.platform,
+		nodeVersion: process.version,
+		toolCalls: 0,
+		toolStats: [],
+		toolActivity: { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false },
+		sessionId: input.sessionId,
+	});
+	strictEqual(receipt.findingsSummary?.firstPassSuccess, false);
+	await ledger.persist();
+	seedValidationSessionAt(input.stateDir, input.sessionId, validationTimestamp);
+	return envelope.id;
 }
 
 describe("auto-build evidence on dispatch completion", { concurrency: false }, () => {
@@ -222,6 +320,58 @@ describe("auto-build evidence on dispatch completion", { concurrency: false }, (
 		await bundle.extension.stop?.();
 	});
 
+	it("uses forensic validation as the user-visible first-pass authority when the receipt is conservative", async () => {
+		const sessionId = "session-forensic-authority";
+		const runId = await sealRunWithConservativeReceiptSummary({
+			stateDir: scratch.stateDir,
+			sessionId,
+		});
+		const context = makeContext();
+		const bundle = createObservabilityBundle(context);
+		await bundle.extension.start();
+
+		context.bus.emit(BusChannels.DispatchCompleted, {
+			runId,
+			agentId: "agent-smoke",
+			targetId: "target-smoke",
+			wireModelId: "model-smoke",
+			runtimeId: "runtime-smoke",
+			runtimeKind: "subprocess",
+			requestOrigin: "user",
+			outcome: "succeeded",
+			outcomeDetail: null,
+			lineage: { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
+			tokenCount: 0,
+			inputTokenCount: 0,
+			outputTokenCount: 0,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 0,
+			reasoningTokenCount: 0,
+			staticShellHash: null,
+			sessionShellHash: null,
+			dynamicHash: null,
+			costUsd: 0,
+			durationMs: 1000,
+			exitCode: 0,
+			toolActivity: null,
+		});
+
+		const built = await waitFor(() => readEvidenceIndex(scratch.stateDir).length === 1);
+		ok(built, "expected index row to appear");
+		const row = readEvidenceIndex(scratch.stateDir)[0];
+		ok(row !== undefined);
+		strictEqual(row.runId, runId);
+		strictEqual(row.firstPassSuccess, true);
+		strictEqual(row.tags.includes("no-validation"), false);
+
+		const summary = readAccountabilitySummary(scratch.stateDir);
+		strictEqual(summary.totalRuns, 1);
+		strictEqual(summary.firstPassRuns, 1);
+		strictEqual(summary.firstPassRate, 1);
+
+		await bundle.extension.stop?.();
+	});
+
 	it("flushes an in-flight build on stop so a headless run still persists the bundle", async () => {
 		const runId = "smoke-run-stop";
 		seedRun(scratch.stateDir, runId);
@@ -306,6 +456,27 @@ describe("auto-build evidence on dispatch completion", { concurrency: false }, (
 
 		const rows = readEvidenceIndex(scratch.stateDir);
 		strictEqual(rows.length, 2);
+		deepStrictEqual(rows.map((row) => row.runId).sort(), [...runIds].sort());
+	});
+
+	it("serializes sidecar index merges across Clio processes", async () => {
+		const startFile = join(scratch.dir, "start-index-writers");
+		const writerPath = join(process.cwd(), "tests", "fixtures", "evidence-index-writer.ts");
+		const runIds = Array.from({ length: 16 }, (_, index) => `process-run-${String(index).padStart(2, "0")}`);
+		const waits = runIds.map((runId) => {
+			const child = spawn(process.execPath, ["--import", "tsx", writerPath, scratch.stateDir, runId, startFile], {
+				cwd: process.cwd(),
+				env: { ...process.env },
+				stdio: ["ignore", "ignore", "pipe"],
+			});
+			return waitForChild(child);
+		});
+
+		writeFileSync(startFile, "go\n", "utf8");
+		await Promise.all(waits);
+
+		const rows = readEvidenceIndex(scratch.stateDir);
+		strictEqual(rows.length, runIds.length);
 		deepStrictEqual(rows.map((row) => row.runId).sort(), [...runIds].sort());
 	});
 
