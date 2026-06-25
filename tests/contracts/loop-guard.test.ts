@@ -1,7 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
-import { BusChannels, type LoopBlockedPayload } from "../../src/core/bus-events.js";
+import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
@@ -12,8 +12,11 @@ import { createLoopState, hashToolCall, observe } from "../../src/domains/safety
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import {
 	createLoopGuardRegistration,
+	DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
 	LOOP_GUARD_REGISTRATION_ID,
+	ORCH_TURN_TOOL_CALL_HARD_MARGIN,
+	readOrchTurnToolCallBudget,
 } from "../../src/engine/loop-guard.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -248,5 +251,102 @@ describe("unified loop guard registration", () => {
 		);
 		ok(hashToolCall("read", { path: "a" }) !== hashToolCall("read", { path: "b" }));
 		strictEqual(createLoopGuardRegistration({ safety: testSafety() }).id, LOOP_GUARD_REGISTRATION_ID);
+	});
+});
+
+describe("orchestrator per-turn tool-call budget", () => {
+	function budgetedRegistry(input: { soft: number; hard: number }): {
+		registry: ReturnType<typeof createRegistry>;
+		events: ToolBudgetExceededPayload[];
+	} {
+		const safety = testSafety();
+		const bus = createSafeEventBus();
+		const events: ToolBudgetExceededPayload[] = [];
+		bus.on(BusChannels.ToolBudgetExceeded, (payload) => {
+			events.push(payload);
+		});
+		const bundle = createMiddlewareBundle({
+			registrations: [
+				createLoopGuardRegistration({ safety, bus, turnToolCallBudget: { soft: input.soft, hard: input.hard } }),
+			],
+		});
+		return { registry: guardedRegistry({ safety, middleware: bundle.contract }), events };
+	}
+
+	it("nudges with a re-plan directive once it crosses the soft budget on DISTINCT calls", async () => {
+		const { registry, events } = budgetedRegistry({ soft: 3, hard: 5 });
+		// All-distinct arguments: the identical-call detector never fires here, so
+		// this is exactly the gap-1 spray the volume budget exists to catch.
+		for (let i = 1; i < 3; i++) {
+			const ok = await registry.invoke({ tool: ToolNames.Read, args: { path: `file-${i}.md` } }, { turnId: "t1" });
+			strictEqual(ok.kind, "ok", `distinct call ${i} below the soft budget must execute`);
+		}
+		const nudged = await registry.invoke({ tool: ToolNames.Read, args: { path: "file-3.md" } }, { turnId: "t1" });
+		strictEqual(nudged.kind, "blocked", "the soft-budget call is blocked with a re-plan directive");
+		ok(nudged.kind === "blocked" && nudged.reason.includes("tool-call budget"), "reason names the budget");
+		ok(
+			nudged.kind === "blocked" && nudged.reason.includes("Summarize"),
+			"reason tells the model to summarize/narrow/ask",
+		);
+		strictEqual(events.length, 1, "exactly one warn event at the first soft crossing");
+		strictEqual(events[0]?.interrupted, false);
+		strictEqual(events[0]?.callsThisTurn, 3);
+		strictEqual(events[0]?.softBudget, 3);
+		strictEqual(events[0]?.turnId, "t1");
+	});
+
+	it("interrupts the turn at the hard ceiling like the block budget does", async () => {
+		const { registry, events } = budgetedRegistry({ soft: 3, hard: 5 });
+		let lastReason = "";
+		for (let i = 1; i <= 5; i++) {
+			const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path: `file-${i}.md` } }, { turnId: "t1" });
+			if (verdict.kind === "blocked") lastReason = verdict.reason;
+		}
+		const interrupt = events.find((evt) => evt.interrupted);
+		ok(interrupt !== undefined, "a hard-ceiling interrupt event is published");
+		strictEqual(interrupt?.callsThisTurn, 5);
+		strictEqual(interrupt?.hardCeiling, 5);
+		ok(lastReason.includes("hard ceiling"), "the final block reason names the hard ceiling");
+		ok(lastReason.includes("stopped"), "the final block reason states the turn is being stopped");
+	});
+
+	it("counts the budget per turn, not globally", async () => {
+		const { registry, events } = budgetedRegistry({ soft: 3, hard: 5 });
+		for (let i = 1; i <= 3; i++) {
+			await registry.invoke({ tool: ToolNames.Read, args: { path: `a-${i}.md` } }, { turnId: "t1" });
+		}
+		strictEqual(events.length, 1, "t1 crossed the soft budget once");
+		// A fresh turn restarts the per-turn counter, so the first two calls run.
+		const first = await registry.invoke({ tool: ToolNames.Read, args: { path: "b-1.md" } }, { turnId: "t2" });
+		strictEqual(first.kind, "ok", "a new turn starts a fresh budget");
+		const second = await registry.invoke({ tool: ToolNames.Read, args: { path: "b-2.md" } }, { turnId: "t2" });
+		strictEqual(second.kind, "ok");
+		strictEqual(events.length, 1, "no new event until t2 also crosses the soft budget");
+	});
+
+	it("leaves a worker registration (no turn budget) unaffected by the orchestrator budget", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		for (let i = 0; i < DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET + ORCH_TURN_TOOL_CALL_HARD_MARGIN + 5; i++) {
+			const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path: `w-${i}.md` } }, { turnId: "t1" });
+			strictEqual(verdict.kind, "ok", `distinct worker call ${i} must execute without a per-turn budget`);
+		}
+	});
+
+	it("derives the budget from the environment with a hard margin above the soft value", () => {
+		strictEqual(readOrchTurnToolCallBudget({}).soft, DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET);
+		strictEqual(
+			readOrchTurnToolCallBudget({}).hard,
+			DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET + ORCH_TURN_TOOL_CALL_HARD_MARGIN,
+		);
+		const override = readOrchTurnToolCallBudget({ CLIO_ORCH_MAX_TOOL_CALLS: "8" });
+		strictEqual(override.soft, 8);
+		strictEqual(override.hard, 8 + ORCH_TURN_TOOL_CALL_HARD_MARGIN);
+		// Invalid values fall back to the default rather than throwing.
+		strictEqual(
+			readOrchTurnToolCallBudget({ CLIO_ORCH_MAX_TOOL_CALLS: "nope" }).soft,
+			DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET,
+		);
 	});
 });

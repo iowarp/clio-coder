@@ -42,6 +42,7 @@ export const BusChannels = {
 	SafetyBlocked: "safety.blocked",
 	SafetyAllowed: "safety.allowed",
 	LoopBlocked: "safety.loopBlocked",
+	ToolBudgetExceeded: "safety.toolBudgetExceeded",
 	ProviderHealth: "provider.health",
 	RuntimeNotice: "runtime.notice",
 	DispatchEnqueued: "dispatch.enqueued",
@@ -129,6 +130,31 @@ export interface LoopBlockedPayload {
 	/** Per-turn block budget, carried so renderers never hardcode the threshold. */
 	budget: number;
 	/** True when the per-turn block budget is exhausted and the turn must stop. */
+	interrupted: boolean;
+	at: number;
+	turnId?: string;
+}
+
+/**
+ * Payload published on {@link BusChannels.ToolBudgetExceeded} when the
+ * orchestrator loop guard observes too many tool calls inside a single user
+ * turn. Unlike {@link LoopBlockedPayload}, which fires only on verbatim-repeated
+ * calls, this counts every distinct tool-call attempt in the turn so a weak
+ * model spraying near-duplicate commands is caught. At the soft budget the
+ * guard injects a re-plan directive and the interactive layer renders a warn
+ * notice; when `interrupted` is true the hard ceiling is reached and the layer
+ * cancels the active turn with an error notice. The backend never imports TUI
+ * code; this event is the only seam between them.
+ */
+export interface ToolBudgetExceededPayload {
+	tool: string;
+	/** Distinct tool-call attempts observed in the current user turn, this one included. */
+	callsThisTurn: number;
+	/** Soft per-turn budget that triggers the re-plan nudge. */
+	softBudget: number;
+	/** Hard per-turn ceiling that interrupts the turn. */
+	hardCeiling: number;
+	/** True when the hard ceiling is reached and the turn must stop. */
 	interrupted: boolean;
 	at: number;
 	turnId?: string;
@@ -541,6 +567,7 @@ export type BusPayloadMap = {
 	[BusChannels.SafetyBlocked]: SafetyBlockedPayload;
 	[BusChannels.SafetyAllowed]: SafetyAllowedPayload;
 	[BusChannels.LoopBlocked]: LoopBlockedPayload;
+	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
 	[BusChannels.RuntimeNotice]: RuntimeNoticePayload;
 	[BusChannels.DispatchEnqueued]: DispatchEnqueuedPayload;

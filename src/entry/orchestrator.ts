@@ -90,7 +90,11 @@ import {
 	createStdioServerTransport,
 	type StdioServerTransportOptions,
 } from "../engine/acp/transport.js";
-import { createLoopGuardRegistration, INTERACTIVE_LOOP_BLOCK_BUDGET } from "../engine/loop-guard.js";
+import {
+	createLoopGuardRegistration,
+	INTERACTIVE_LOOP_BLOCK_BUDGET,
+	readOrchTurnToolCallBudget,
+} from "../engine/loop-guard.js";
 import { openSession } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
@@ -568,7 +572,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// loop guard and protected-artifacts instances inside their subprocess in
 	// worker-runtime.ts; the orchestrator instances carry the bus and the
 	// session persistence sink.
-	middleware.registerHook(createLoopGuardRegistration({ safety, bus, turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET }));
+	middleware.registerHook(
+		createLoopGuardRegistration({
+			safety,
+			bus,
+			turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
+			turnToolCallBudget: readOrchTurnToolCallBudget(),
+		}),
+	);
 	const protectedArtifactsGuard = createProtectedArtifactsRegistration({
 		...(session ? { initialState: protectedArtifactStateForCurrentSession(session) } : {}),
 		onProtect: (event) => appendProtectedArtifactRegistryEvent(session, event),
