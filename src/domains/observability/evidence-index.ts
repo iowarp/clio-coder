@@ -6,15 +6,17 @@
  * observability without re-running the heavy `buildEvidence` aggregator.
  *
  * The file is a JSON array kept as a bounded ring (newest rows win, capped at
- * MAX_EVIDENCE_INDEX_ROWS) mirroring the dispatch runs ledger. Writes are
- * atomic via safeResourceWrite (tmp + rename). Reads are tolerant: a missing or
- * malformed file yields an empty index rather than throwing, so a corrupt
- * sidecar never blocks a run or a view.
+ * MAX_EVIDENCE_INDEX_ROWS) mirroring the dispatch runs ledger. Read/merge/write
+ * sections use the same cross-process state-file lock as runs.json; writes are
+ * then atomic via safeResourceWrite (tmp + rename). Reads are tolerant: a
+ * missing or malformed file yields an empty index rather than throwing, so a
+ * corrupt sidecar never blocks a run or a view.
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { EvidenceTag } from "../evidence/index.js";
 
 /** Cap on retained index rows. Matches the dispatch runs ledger default. */
@@ -28,8 +30,11 @@ let evidenceIndexWriteQueue: Promise<void> = Promise.resolve();
 /**
  * One row of the sidecar evidence index, keyed by runId. Derived from the
  * `EvidenceBuildResult` produced by `buildEvidence` plus the terminal dispatch
- * payload. `tags` and `findingCount` come from the built bundle's findings;
- * `firstPassSuccess` is computed per the v0.2.7 spec (section 7).
+ * payload. `tags` and `findingCount` come from the built bundle's findings.
+ * `firstPassSuccess` is computed from forensic evidence and is the authority
+ * for user-visible accountability rates. The receipt's cheap findings summary
+ * is intentionally conservative and may be false when transcript-level
+ * validation evidence makes this value true.
  */
 export interface EvidenceIndexRow {
 	runId: string;
@@ -88,27 +93,29 @@ export function readEvidenceIndex(stateDir: string): EvidenceIndexRow[] {
  * ring keeps the most recently written entries when it is bounded. Returns the
  * full index as written.
  */
-export function writeEvidenceIndexRow(stateDir: string, row: EvidenceIndexRow): EvidenceIndexRow[] {
-	const existing = readEvidenceIndex(stateDir).filter((entry) => entry.runId !== row.runId);
-	existing.push(row);
-	const bounded = existing.length > MAX_EVIDENCE_INDEX_ROWS ? existing.slice(-MAX_EVIDENCE_INDEX_ROWS) : existing;
-	safeResourceWrite(indexPath(stateDir), `${JSON.stringify(bounded, null, 2)}\n`, { encoding: "utf8" });
+export async function writeEvidenceIndexRow(stateDir: string, row: EvidenceIndexRow): Promise<EvidenceIndexRow[]> {
+	let bounded: EvidenceIndexRow[] = [];
+	await withStateFileLock(indexPath(stateDir), () => {
+		const existing = readEvidenceIndex(stateDir).filter((entry) => entry.runId !== row.runId);
+		existing.push(row);
+		bounded = existing.length > MAX_EVIDENCE_INDEX_ROWS ? existing.slice(-MAX_EVIDENCE_INDEX_ROWS) : existing;
+		safeResourceWrite(indexPath(stateDir), `${JSON.stringify(bounded, null, 2)}\n`, { encoding: "utf8" });
+	});
 	return bounded;
 }
 
 /**
- * Queue index row merges within this process. Individual writes are atomic, but
- * terminal dispatch events may start several evidence builds in parallel; this
- * keeps their read/merge/write steps ordered so one completed row cannot
- * overwrite another in the sidecar.
+ * Queue index row merges within this process. The state-file lock serializes
+ * across processes; this queue avoids avoidable local lock contention when
+ * terminal dispatch events start several evidence builds in parallel.
  */
 export async function writeEvidenceIndexRowQueued(
 	stateDir: string,
 	row: EvidenceIndexRow,
 ): Promise<EvidenceIndexRow[]> {
 	let written: EvidenceIndexRow[] = [];
-	const write = evidenceIndexWriteQueue.then(() => {
-		written = writeEvidenceIndexRow(stateDir, row);
+	const write = evidenceIndexWriteQueue.then(async () => {
+		written = await writeEvidenceIndexRow(stateDir, row);
 	});
 	evidenceIndexWriteQueue = write.catch(() => undefined);
 	await write;

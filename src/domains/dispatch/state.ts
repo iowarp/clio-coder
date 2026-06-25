@@ -19,8 +19,9 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
@@ -108,130 +109,6 @@ function applyPatch(rec: RunEnvelope, patch: Partial<RunEnvelope>): RunEnvelope 
 
 function cloneEnvelope(envelope: RunEnvelope): RunEnvelope {
 	return structuredClone(envelope);
-}
-
-/**
- * Cross-process mutex for runs.json writes. A stress harness (scripts/stress.ts)
- * spawns N concurrent `clio run` subprocesses, each of which calls
- * ledger.persist(); without coordination the last writer clobbers the others
- * and the ledger only reflects one run.
- *
- * Lock protocol:
- * 1. Each waiter opens the lockfile with O_EXCL and writes its own PID into it.
- *    A successful create + write means the waiter owns the lock.
- * 2. On EEXIST, the waiter inspects the existing lockfile: it reads the PID,
- *    checks liveness with `process.kill(pid, 0)`, and also checks the file
- *    mtime. The lock is only deleted when the owner PID is dead OR when the
- *    lockfile is older than STALE_LOCK_MS. Otherwise the waiter backs off
- *    without touching the lock. This prevents the previous behavior where
- *    two concurrent waiters would each delete each other's live lock after
- *    the acquisition deadline.
- * 3. Exponential backoff with jitter, capped at 500ms per attempt. Total
- *    deadline is 60s; after that we throw and let the caller decide. Callers
- *    that hit this limit are expected to retry at a higher level rather than
- *    corrupt ledger state by racing.
- */
-const STALE_LOCK_MS = 30_000;
-const ACQUIRE_DEADLINE_MS = 60_000;
-
-function isProcessAlive(pid: number): boolean {
-	if (!Number.isFinite(pid) || pid <= 0) return false;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		const e = err as NodeJS.ErrnoException;
-		// EPERM means the PID exists but belongs to another user, so it is still alive.
-		if (e.code === "EPERM") return true;
-		return false;
-	}
-}
-
-function readLockPid(lockPath: string): number | null {
-	try {
-		const raw = readFileSync(lockPath, "utf8").trim();
-		if (raw.length === 0) return null;
-		const parsed = Number.parseInt(raw, 10);
-		return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-	} catch {
-		return null;
-	}
-}
-
-function lockfileAgeMs(lockPath: string): number | null {
-	try {
-		const st = statSync(lockPath);
-		return Date.now() - st.mtimeMs;
-	} catch {
-		return null;
-	}
-}
-
-async function withLedgerLock<T>(targetPath: string, fn: () => T | Promise<T>): Promise<T> {
-	const lockPath = `${targetPath}.lock`;
-	const dir = dirname(lockPath);
-	mkdirSync(dir, { recursive: true });
-	const deadlineMs = Date.now() + ACQUIRE_DEADLINE_MS;
-	let attempt = 0;
-	let held = false;
-	while (!held) {
-		try {
-			const fd = openSync(lockPath, "wx", 0o600);
-			try {
-				writeSync(fd, String(process.pid));
-			} finally {
-				closeSync(fd);
-			}
-			held = true;
-			break;
-		} catch (err) {
-			const e = err as NodeJS.ErrnoException;
-			if (e.code !== "EEXIST") throw err;
-
-			// Existing lock: inspect ownership before touching it.
-			const ownerPid = readLockPid(lockPath);
-			const ageMs = lockfileAgeMs(lockPath);
-			const ownerDead = ownerPid !== null && !isProcessAlive(ownerPid);
-			const expired = ageMs !== null && ageMs > STALE_LOCK_MS;
-			const unreadable = ownerPid === null && ageMs !== null && ageMs > STALE_LOCK_MS;
-
-			if (ownerDead || expired || unreadable) {
-				// Safe to reclaim. A concurrent waiter may win the race; that's fine,
-				// our next openSync attempt will retry.
-				try {
-					unlinkSync(lockPath);
-				} catch {
-					// Another waiter cleaned it first; fall through to retry.
-				}
-			}
-
-			if (Date.now() > deadlineMs) {
-				throw new Error(
-					`ledger lock timeout after ${ACQUIRE_DEADLINE_MS}ms at ${lockPath} (owner pid=${ownerPid ?? "?"}, age=${ageMs ?? "?"}ms)`,
-				);
-			}
-
-			attempt += 1;
-			const base = Math.min(500, 10 * 2 ** Math.min(attempt, 6));
-			const delay = base + Math.floor(Math.random() * base);
-			await new Promise((resolve) => setTimeout(resolve, delay));
-		}
-	}
-	try {
-		return await fn();
-	} finally {
-		// Only unlink if we still own the lock. If ours was reclaimed as stale
-		// by a sibling and they now hold a fresh one, deleting here would
-		// corrupt their critical section.
-		const ownerPid = readLockPid(lockPath);
-		if (ownerPid === process.pid) {
-			try {
-				unlinkSync(lockPath);
-			} catch {
-				// already gone; fine.
-			}
-		}
-	}
 }
 
 function mergeRunsById(disk: RunEnvelope[], memory: RunEnvelope[]): RunEnvelope[] {
@@ -350,7 +227,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 
 		async persist(): Promise<void> {
 			const target = runsPath();
-			await withLedgerLock(target, () => {
+			await withStateFileLock(target, () => {
 				const diskRuns = readRuns();
 				const merged = mergeRunsById(diskRuns, runs);
 				const capped = merged.slice(0, maxRuns);
