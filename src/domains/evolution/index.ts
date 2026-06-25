@@ -18,5 +18,9 @@ export {
 	MANIFEST_AUTHORITY_LEVELS,
 	summarizeChangeManifest,
 } from "./manifest.js";
-export type { ManifestValidationIssue, ManifestValidationResult } from "./validate.js";
+export type {
+	ManifestValidationIssue,
+	ManifestValidationResult,
+	ValidateChangeManifestOptions,
+} from "./validate.js";
 export { validateChangeManifest } from "./validate.js";

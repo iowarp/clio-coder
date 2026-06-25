@@ -37,7 +37,7 @@ describe("contracts/view-overlay", () => {
 		const rows = groupedViewRows(artifacts);
 		deepStrictEqual(
 			rows.filter((row) => row.type === "group").map((row) => row.category),
-			["receipt", "dispatch", "tool-output", "compaction"],
+			["accountability", "receipt", "dispatch", "tool-output", "compaction"],
 		);
 		deepStrictEqual(
 			rows.filter((row) => row.type === "item" && row.category === "receipt").map((row) => row.item?.id),

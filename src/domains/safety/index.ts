@@ -37,3 +37,4 @@ export {
 	type PathPolicyKind,
 	type PathPolicyOperation,
 } from "./path-policy.js";
+export { parseRigorOverride, type Rigor, resolveRigor } from "./rigor.js";

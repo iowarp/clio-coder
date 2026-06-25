@@ -1,3 +1,4 @@
+import type { AccountabilitySummary } from "./accountability.js";
 import type { CostEntry, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
 import type { TelemetrySnapshot } from "./telemetry.js";
@@ -23,6 +24,12 @@ export interface ObservabilityContract {
 	sessionTokens(): UsageBreakdown;
 	/** Running session cost log entries. */
 	costEntries(): ReadonlyArray<CostEntry>;
+	/**
+	 * Rolling first-pass-success rate and failure-cause histogram, aggregated
+	 * from the sidecar evidence index on call. Read-only: it folds rows Slice 2
+	 * already wrote and recomputes no evidence.
+	 */
+	accountability(): AccountabilitySummary;
 	/** Latest completed assistant stream throughput for compact footer display. */
 	latestTokenThroughput(): TokenThroughputSnapshot | null;
 	/** Reset the running session token and cost totals. */

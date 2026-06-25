@@ -5,6 +5,96 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## 0.2.7 - unreleased
+
+### Added
+
+- Dispatch runs now auto-produce a forensic evidence bundle and a sidecar
+  index on completion. When a run finalizes, the observability domain subscribes
+  to the `dispatch.completed` / `dispatch.failed` bus events and builds the full
+  evidence bundle under `<dataDir>/evidence/run-<id>/` plus a compact row in
+  `<stateDir>/evidence-index.json` keyed by runId (`evidenceId`, failure-cause
+  `tags`, `firstPassSuccess`, `findingCount`, `generatedAt`). No `clio evidence`
+  CLI call is needed. The build is best-effort: a failure is logged and
+  swallowed, never blocking or crashing a run. The headless `clio run` dispatch
+  path loads the observability domain too, and the domain tracks its in-flight
+  builds and flushes them on shutdown, so a one-shot dispatch that tears down
+  right after the run still persists the bundle and index row instead of
+  building nothing or abandoning the build mid-flight. Successful runs with no
+  linked validation evidence are tagged `no-validation` and are not counted as
+  first-pass successes, and sidecar index writes are queued so concurrent
+  evidence builds preserve every completed run row.
+- Run receipts now carry a compact, integrity-covered `findingsSummary`
+  (`tags`, `firstPassSuccess`, `findingCount`). It is computed cheaply at
+  receipt-record time from the envelope, outcome, exit code, and tool stats,
+  not by reading the receipt back through `buildEvidence`, so it is the durable
+  half of the "both sinks" findings decision. A conservative classifier maps
+  unambiguous signals to canonical evidence tags (a nonzero exit alongside a
+  build or test command, a blocked tool attempt, a timeout or auth failure in
+  the outcome detail). `firstPassSuccess` is true only for a succeeded outcome
+  with zero dispatch retries, a cheap positive validation signal in the receipt
+  tool stats, and no failure-cause tag; if a draft omits lineage, the classifier
+  falls back to the envelope retry state before treating it as attempt zero.
+- A single `rigor` attribute (`normal` | `high`) now decides how the finish-gate
+  behaves, orthogonal to the autonomy permission levels. Rigor resolves from a
+  `CLIO_RIGOR` env override layered over a repo-derived default: `high` when the
+  workspace declares a scientific-validation contract (any of
+  `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`,
+  `validation.yml`, or `VALIDATION.md` at the root), otherwise `normal`. At
+  `high` rigor, an unvalidated completion claim is re-prompted: the turn_end hook
+  withholds the completion with a `request_continuation` and a paired directive
+  reminder that tells the model to run a verification-family command
+  (`test*/lint*/build*/typecheck*/check*/format*/ci*`) or state what could not be
+  verified before claiming done. At `normal` rigor the soft `warn` advisory is
+  unchanged. Read-only / status-recall turns and turns with no completion claim
+  stay exempt at any rigor. All directive text is injected dynamically via
+  effects, never added to the static prompt prefix. A prior hard-block effect
+  from the tool-prose guard suppresses the high-rigor continuation so local
+  model recovery guidance is not overwritten by a finish-gate re-prompt.
+- Change manifests are now evidence-linked. `clio evolve manifest validate` and
+  `summarize` resolve each non-empty `evidenceRef` against the local evidence
+  store: a ref must be a well-formed `run-<id>` / `session-<id>` bundle id and
+  must point at a bundle that actually exists, otherwise validation fails with
+  the dangling ref named. The exploratory-1 empty-refs exemption is unchanged,
+  and both commands now print how many refs resolved against how many local
+  bundles. Resolution is injected into `validateChangeManifest` as a pure
+  predicate, so the evolution domain still never imports the evidence domain;
+  callers that pass no resolver keep the prior schema-only behavior.
+- The `/view` overlay now opens with an Accountability panel that surfaces the
+  session's rolling first-pass-success rate (`first-pass success: <n>/<total>
+  (<pct>%)`) and a top failure-cause tag histogram, aggregated read-only from the
+  `<stateDir>/evidence-index.json` sidecar without re-running `buildEvidence`. The
+  observability contract gains an `accountability()` read model
+  (`summarizeEvidenceIndex` / `readAccountabilitySummary`) backing it; a missing
+  or corrupt index renders the empty summary rather than failing. The failure
+  histogram filters through the canonical failure-cause subset only, so
+  provenance and quality tags such as `audit-linked`, `session-linked`, and
+  `no-validation` do not appear as failure causes.
+- Deferred (tracked, not shipped): gating high-authority harness self-edits on a
+  current validated, evidence-linked manifest (Slice 5b). There is no clean
+  enforcement point today that can tell "Clio editing her own harness" apart
+  from "the user asked Clio to edit this repo's source", and a path-glob gate
+  would wrongly block ordinary user-requested edits. Per the release spec, 5a
+  ships now and 5b is tracked in `src/domains/evolution/SELF_EDIT_GATE.md`.
+
+### Changed
+
+- Receipt integrity bumped from v2 to v3. The v3 digest additionally folds the
+  new `findingsSummary` so tampering with it is detected. Per the no-migrations
+  mandate there is no receipt migration: the v1 and v2 verification branches are
+  retained, so pre-existing v2 receipts still verify and pre-v2 stale receipts
+  still wipe on read. Breaking note: any in-flight, never-persisted v2 receipt
+  that has not yet been written is re-sealed at v3 on record; v2 receipts already
+  on disk remain valid and are read through the retained v2 branch. A v2 receipt
+  that carries the v3-only `findingsSummary` field is rejected so an
+  unauthenticated summary cannot be presented beside a verified v2 digest.
+- The `intelligence` domain is parked. It is no longer in the orchestrator's
+  domain load list, so each session loads one fewer domain. The domain was a
+  disabled types-only no-op (its extension threw if enabled and the contract
+  returned empty observations), so nothing changes for the operator. The source
+  stays in the tree under `src/domains/intelligence/` with a `PARKED.md` that
+  records the intent and the re-entry condition.
+
 ## 0.2.6 - 2026-06-24
 
 Clio Coder 0.2.6 is a hardening and self-orientation release. It fixes model

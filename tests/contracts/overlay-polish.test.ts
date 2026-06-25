@@ -209,6 +209,7 @@ function observability(entries: CostEntry[]): ObservabilityContract {
 	return {
 		sessionCost: () => entries.reduce((sum, entry) => sum + entry.usd, 0),
 		costEntries: () => entries,
+		accountability: () => ({ totalRuns: 0, firstPassRuns: 0, firstPassRate: 0, failureCauses: [] }),
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestTokenThroughput: () => null,
 		telemetry: () => ({}) as never,

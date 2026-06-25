@@ -14,7 +14,10 @@ import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { FINISH_CONTRACT_ADVISORY_MESSAGE } from "../../src/domains/safety/finish-contract.js";
-import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
+import {
+	createFinishContractRegistration,
+	HIGH_RIGOR_REVALIDATION_MESSAGE,
+} from "../../src/domains/safety/finish-contract-registration.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
@@ -713,6 +716,83 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 			],
 		});
 		strictEqual(withEvidence.evaluate(baseInput()).length, 0);
+	});
+
+	it("re-prompts with request_continuation at high rigor when a claim has no evidence", () => {
+		const registration = createFinishContractRegistration({
+			readSessionEntries: () => [],
+			resolveRigor: () => "high",
+		});
+		const effects = registration.evaluate(baseInput());
+		strictEqual(effects.length, 2);
+		const continuation = effects.find((effect) => effect.kind === "request_continuation");
+		ok(continuation, "high rigor must withhold completion with a request_continuation");
+		ok(continuation?.kind === "request_continuation" && continuation.message === HIGH_RIGOR_REVALIDATION_MESSAGE);
+		const reminder = effects.find((effect) => effect.kind === "inject_reminder");
+		ok(reminder?.kind === "inject_reminder" && reminder.severity === "warn");
+		ok(reminder?.kind === "inject_reminder" && reminder.message === HIGH_RIGOR_REVALIDATION_MESSAGE);
+	});
+
+	it("does not request high-rigor continuation after a prior hard-block effect", () => {
+		const finish = createFinishContractRegistration({
+			readSessionEntries: () => [],
+			resolveRigor: () => "high",
+		});
+		const result = runMiddlewareRegistrations(
+			baseInput({
+				text: `Done. Implemented the parser and updated the tests. ${"I will call the read tool now. ".repeat(8)}${"padding ".repeat(180)}`,
+				metadata: {
+					stopReason: "stop",
+					runtimeId: "lmstudio-native",
+					activeToolNames: "read",
+				},
+			}),
+			[createToolProseRegistration(), finish],
+		);
+
+		ok(result.effects.some((effect) => effect.kind === "inject_reminder" && effect.severity === "hard-block"));
+		ok(!result.effects.some((effect) => effect.kind === "request_continuation"));
+	});
+
+	it("keeps the soft warn advisory at normal rigor with no request_continuation", () => {
+		const registration = createFinishContractRegistration({
+			readSessionEntries: () => [],
+			resolveRigor: () => "normal",
+		});
+		const effects = registration.evaluate(baseInput());
+		strictEqual(effects.length, 1);
+		strictEqual(effects[0]?.kind, "inject_reminder");
+		ok(effects[0]?.kind === "inject_reminder" && effects[0].severity === "warn");
+		ok(!effects.some((effect) => effect.kind === "request_continuation"));
+	});
+
+	it("never gates read-only recall or no-claim turns, even at high rigor", () => {
+		const readOnly = createFinishContractRegistration({
+			readSessionEntries: () => [
+				{
+					kind: "message",
+					role: "user",
+					turnId: "turn-8",
+					payload: { text: "Use read only. Recall the sentinel and report status check only." },
+				},
+			],
+			resolveRigor: () => "high",
+		});
+		strictEqual(
+			readOnly.evaluate(baseInput({ text: "Reads complete; ready for next instruction." })).length,
+			0,
+			"read-only recall stays exempt at high rigor",
+		);
+
+		const noClaim = createFinishContractRegistration({
+			readSessionEntries: () => [],
+			resolveRigor: () => "high",
+		});
+		strictEqual(
+			noClaim.evaluate(baseInput({ text: "Here is what I found while looking around the repo." })).length,
+			0,
+			"a turn with no completion claim stays exempt at high rigor",
+		);
 	});
 });
 

@@ -1,8 +1,11 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "../dispatch/index.js";
 import { verifyReceiptIntegrity } from "../dispatch/index.js";
+import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import {
+	type BashExecutionEntry,
 	isSessionEntry,
 	type MessageEntry,
 	type MessageRole,
@@ -202,10 +205,22 @@ function buildFindings(
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
 ): EvidenceFinding[] {
 	const findings: EvidenceFinding[] = [];
+	const validationRunIds = validationEvidenceRunIds(sessionLinks.entries, runSources);
 	for (const source of runSources) {
 		if (source.receiptError !== null) {
 			const tag = source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
 			findings.push(finding(findings.length, "warn", tag, source.envelope.id, source.receiptError));
+		}
+		if (isSuccessfulRun(source) && !validationRunIds.has(source.envelope.id)) {
+			findings.push(
+				finding(
+					findings.length,
+					"warn",
+					"no-validation",
+					source.envelope.id,
+					"run completed without linked validation evidence",
+				),
+			);
 		}
 		if (source.envelope.cwd.trim().length === 0) {
 			findings.push(finding(findings.length, "warn", "cwd-missing", source.envelope.id, "run ledger cwd is empty"));
@@ -273,6 +288,108 @@ function buildFindings(
 		findings.push(finding(findings.length, "warn", "audit-missing", null, error));
 	}
 	return findings;
+}
+
+interface ValidationToolCallCandidate {
+	toolCallId: string;
+	runId: string | null;
+}
+
+function validationEvidenceRunIds(
+	entries: ReadonlyArray<LinkedSessionEntry>,
+	runSources: ReadonlyArray<EvidenceRunSource>,
+): Set<string> {
+	const runIds = new Set<string>();
+	const calls = new Map<string, ValidationToolCallCandidate>();
+	for (const linked of entries) {
+		const runId = validationRunIdFor(linked, runSources);
+		const entry = linked.entry;
+		if (entry.kind === "bashExecution") {
+			if (runId !== null && isSuccessfulValidationBashExecution(entry)) runIds.add(runId);
+			continue;
+		}
+		if (entry.kind === "protectedArtifact") {
+			if (runId !== null && isValidationProtectedArtifact(entry)) runIds.add(runId);
+			continue;
+		}
+		if (entry.kind !== "message") continue;
+		if (entry.role === "tool_call") {
+			const candidate = validationToolCallCandidate(entry, linked, runSources);
+			if (candidate !== null) calls.set(candidate.toolCallId, candidate);
+			continue;
+		}
+		if (entry.role !== "tool_result") continue;
+		const result = extractSessionToolResult(entry, linked);
+		if (result.id === null || !isSuccessfulSessionToolResult(result)) continue;
+		const candidate = calls.get(result.id);
+		if (candidate?.runId !== null && candidate?.runId !== undefined) runIds.add(candidate.runId);
+	}
+	return runIds;
+}
+
+function validationRunIdFor(linked: LinkedSessionEntry, runSources: ReadonlyArray<EvidenceRunSource>): string | null {
+	if (linked.runId !== null) return linked.runId;
+	if (runSources.length !== 1) return null;
+	return runSources[0]?.envelope.id ?? null;
+}
+
+function isSuccessfulRun(source: EvidenceRunSource): boolean {
+	const outcome = source.receipt?.outcome ?? source.envelope.outcome ?? null;
+	if (outcome !== null) return outcome === "succeeded";
+	const exitCode = source.receipt?.exitCode ?? source.envelope.exitCode;
+	return source.envelope.status === "completed" && exitCode === 0;
+}
+
+function isSuccessfulValidationBashExecution(entry: BashExecutionEntry): boolean {
+	if (entry.cancelled || entry.exitCode !== 0) return false;
+	return detectValidationCommand(entry.command).kind === "validation";
+}
+
+function isValidationProtectedArtifact(entry: ProtectedArtifactEntry): boolean {
+	const artifact = protectedArtifactFromSessionEntry(entry);
+	if (artifact.validationCommand === undefined || artifact.validationExitCode !== 0) return false;
+	return detectValidationCommand(artifact.validationCommand).kind === "validation";
+}
+
+function validationToolCallCandidate(
+	entry: MessageEntry,
+	linked: LinkedSessionEntry,
+	runSources: ReadonlyArray<EvidenceRunSource>,
+): ValidationToolCallCandidate | null {
+	const call = extractSessionToolCall(entry, linked);
+	if (validationToolCallSummary(call.tool, call.args) === null) return null;
+	return {
+		toolCallId: call.id,
+		runId: validationRunIdFor(linked, runSources),
+	};
+}
+
+function validationToolCallSummary(toolName: string, args: unknown): string | null {
+	const parsed = parseMaybeJson(args);
+	const argRecord = isRecord(parsed) ? parsed : null;
+	if (toolName === "bash") {
+		const command = readOptionalString(argRecord?.command);
+		if (command === null) return null;
+		const detected = detectValidationCommand(command);
+		return detected.kind === "validation" ? detected.matched : null;
+	}
+	if (toolName === "run_task") {
+		const task = readOptionalString(argRecord?.task);
+		if (task === null || !isVerificationScriptName(task)) return null;
+		return `npm run ${task}`;
+	}
+	if (toolName === "validate_frontend") {
+		const target = readOptionalString(argRecord?.path) ?? "artifact";
+		return `validate_frontend ${target}`;
+	}
+	return null;
+}
+
+function isSuccessfulSessionToolResult(result: SessionToolResult): boolean {
+	if (result.isError) return false;
+	const obj = isRecord(result.result) ? result.result : null;
+	const details = isRecord(obj?.details) ? obj.details : null;
+	return details?.kind !== "error";
 }
 
 function finding(

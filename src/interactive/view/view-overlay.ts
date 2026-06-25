@@ -83,6 +83,8 @@ function padAnsi(text: string, width: number): string {
 
 function categoryLabel(category: ViewArtifactCategory): string {
 	switch (category) {
+		case "accountability":
+			return "Accountability";
 		case "receipt":
 			return "Receipts";
 		case "dispatch":

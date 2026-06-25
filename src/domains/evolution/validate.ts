@@ -16,6 +16,21 @@ export interface ManifestValidationIssue {
 	message: string;
 }
 
+/**
+ * Optional knobs for {@link validateChangeManifest}.
+ *
+ * `resolveEvidenceRef` injects evidence-store resolution as a pure predicate so
+ * the evolution domain never imports the evidence domain. The CLI builds it from
+ * the local evidence store; when it is absent, the format and resolution checks
+ * on `evidenceRefs` are skipped entirely (preserving the prior schema-only
+ * behavior).
+ */
+export interface ValidateChangeManifestOptions {
+	resolveEvidenceRef?: (ref: string) => boolean;
+}
+
+const EVIDENCE_REF_PREFIXES = ["run-", "session-"] as const;
+
 export type ManifestValidationResult =
 	| {
 			valid: true;
@@ -28,7 +43,10 @@ export type ManifestValidationResult =
 			manifest?: undefined;
 	  };
 
-export function validateChangeManifest(value: unknown): ManifestValidationResult {
+export function validateChangeManifest(
+	value: unknown,
+	options?: ValidateChangeManifestOptions,
+): ManifestValidationResult {
 	const issues: ManifestValidationIssue[] = [];
 	if (!isRecord(value)) {
 		issues.push({ path: "$", message: "expected manifest object" });
@@ -41,7 +59,7 @@ export function validateChangeManifest(value: unknown): ManifestValidationResult
 	const iterationId = readRequiredString(value, "$.iterationId", issues);
 	const baseGitSha = readRequiredString(value, "$.baseGitSha", issues);
 	const createdAt = readRequiredString(value, "$.createdAt", issues);
-	const changes = readChanges(value, iterationId, issues);
+	const changes = readChanges(value, iterationId, issues, options);
 
 	if (issues.length > 0 || iterationId === null || baseGitSha === null || createdAt === null || changes === null) {
 		return invalid(issues);
@@ -63,6 +81,7 @@ function readChanges(
 	record: Record<string, unknown>,
 	iterationId: string | null,
 	issues: ManifestValidationIssue[],
+	options: ValidateChangeManifestOptions | undefined,
 ): ManifestChange[] | null {
 	const value = record.changes;
 	if (!Array.isArray(value)) {
@@ -71,7 +90,7 @@ function readChanges(
 	}
 	const changes: ManifestChange[] = [];
 	for (let index = 0; index < value.length; index += 1) {
-		const change = readChange(value[index], `$.changes[${index}]`, iterationId, issues);
+		const change = readChange(value[index], `$.changes[${index}]`, iterationId, issues, options);
 		if (change !== null) changes.push(change);
 	}
 	return changes;
@@ -82,6 +101,7 @@ function readChange(
 	path: string,
 	iterationId: string | null,
 	issues: ManifestValidationIssue[],
+	options: ValidateChangeManifestOptions | undefined,
 ): ManifestChange | null {
 	if (!isRecord(value)) {
 		issues.push({ path, message: "expected object" });
@@ -116,6 +136,9 @@ function readChange(
 			});
 		}
 	}
+	if (evidenceRefs !== null && evidenceRefs.length > 0 && options?.resolveEvidenceRef !== undefined) {
+		checkEvidenceRefs(evidenceRefs, `${path}.evidenceRefs`, options.resolveEvidenceRef, issues);
+	}
 
 	if (
 		id === null ||
@@ -147,6 +170,32 @@ function readChange(
 	};
 	if (expectedBudgetImpact !== undefined) change.expectedBudgetImpact = expectedBudgetImpact;
 	return change;
+}
+
+function checkEvidenceRefs(
+	evidenceRefs: ReadonlyArray<string>,
+	path: string,
+	resolveEvidenceRef: (ref: string) => boolean,
+	issues: ManifestValidationIssue[],
+): void {
+	for (let index = 0; index < evidenceRefs.length; index += 1) {
+		const ref = evidenceRefs[index];
+		if (ref === undefined) continue;
+		if (!isEvidenceRefFormat(ref)) {
+			issues.push({ path: `${path}[${index}]`, message: "expected a run-<id> or session-<id> bundle id" });
+			continue;
+		}
+		if (!resolveEvidenceRef(ref)) {
+			issues.push({ path: `${path}[${index}]`, message: `evidence bundle not found: ${ref}` });
+		}
+	}
+}
+
+function isEvidenceRefFormat(ref: string): boolean {
+	for (const prefix of EVIDENCE_REF_PREFIXES) {
+		if (ref.startsWith(prefix) && ref.length > prefix.length) return true;
+	}
+	return false;
 }
 
 function readRequiredString(

@@ -6,8 +6,12 @@
 
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { clioDataDir, clioStateDir } from "../../core/xdg.js";
+import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
+import { readAccountabilitySummary } from "./accountability.js";
 import type { ObservabilityContract, TokenThroughputSnapshot } from "./contract.js";
 import { createCostTracker } from "./cost.js";
+import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { aggregateMetrics } from "./metrics.js";
 import { createTelemetry } from "./telemetry.js";
 
@@ -38,11 +42,77 @@ function recordDispatchCost(
 	});
 }
 
+/**
+ * Build the forensic evidence bundle for a finalized run and record a compact
+ * sidecar index row. Best-effort: every failure (build throws, write throws) is
+ * logged to stderr and swallowed so a run completes normally regardless.
+ *
+ * `succeeded` distinguishes the DispatchCompleted channel (terminal success)
+ * from DispatchFailed; only a succeeded run is eligible for firstPassSuccess.
+ * `attempt` is the dispatch lineage attempt (0 = first try, increments per
+ * retry). A retry, a non-success outcome, or a bundle that shows no validation
+ * evidence all force firstPassSuccess to false. See section 7 of the spec.
+ */
+async function buildAndIndexEvidence(runId: string, succeeded: boolean, attempt: number | undefined): Promise<void> {
+	try {
+		const dataDir = clioDataDir();
+		const stateDir = clioStateDir();
+		const result = await buildEvidence({ dataDir, stateDir, runId });
+		const row = evidenceIndexRow(runId, result, succeeded, attempt);
+		await writeEvidenceIndexRowQueued(stateDir, row);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		process.stderr.write(`[clio:evidence] auto-build failed for run ${runId}: ${message}\n`);
+	}
+}
+
+/**
+ * firstPassSuccess is TRUE only when the terminal outcome succeeded, the run
+ * had zero dispatch retries (lineage attempt 0), and the built bundle carries
+ * validation evidence. We read validation evidence negatively: a bundle whose
+ * overview or findings tags include `no-validation` means the run produced no
+ * validation, so it cannot first-pass-succeed.
+ */
+function evidenceIndexRow(
+	runId: string,
+	result: EvidenceBuildResult,
+	succeeded: boolean,
+	attempt: number | undefined,
+): EvidenceIndexRow {
+	const tags = result.overview.tags;
+	const hasNoValidationTag =
+		tags.includes("no-validation") || result.findings.some((finding) => finding.tag === "no-validation");
+	const firstPassSuccess = succeeded && attempt === 0 && !hasNoValidationTag;
+	return {
+		runId,
+		evidenceId: result.evidenceId,
+		tags: [...tags],
+		firstPassSuccess,
+		findingCount: result.findings.length,
+		generatedAt: new Date().toISOString(),
+	};
+}
+
 export function createObservabilityBundle(context: DomainContext): DomainBundle<ObservabilityContract> {
 	const telemetry = createTelemetry();
 	const cost = createCostTracker();
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
+
+	// In-flight forensic builds. The terminal event is emitted after the receipt
+	// and ledger are persisted (dispatch finalizers persist before emit), so a
+	// build that starts here reads durable state. We keep the bus handler
+	// non-blocking by not awaiting the build inline, but a headless one-shot
+	// `clio run` tears the process down right after the run, which would abandon
+	// the build mid-flight. Tracking the promises lets stop() flush them so the
+	// bundle and index row reliably land on every path, not just long-lived
+	// interactive sessions.
+	const pendingBuilds = new Set<Promise<void>>();
+	const trackBuild = (runId: string, succeeded: boolean, attempt: number | undefined): void => {
+		const build = buildAndIndexEvidence(runId, succeeded, attempt);
+		pendingBuilds.add(build);
+		void build.finally(() => pendingBuilds.delete(build));
+	};
 
 	const extension: DomainExtension = {
 		async start() {
@@ -54,6 +124,11 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);
 					}
 					recordDispatchCost(telemetry, cost, payload);
+					// Kick off the heavy forensic build without blocking the bus.
+					// buildAndIndexEvidence swallows all failures; stop() flushes it.
+					if (typeof payload.runId === "string" && payload.runId.length > 0) {
+						trackBuild(payload.runId, true, payload.lineage?.attempt);
+					}
 				}),
 			);
 			unsubscribes.push(
@@ -64,6 +139,11 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 						telemetry.record("histogram", "dispatch.duration_ms", payload.durationMs);
 					}
 					recordDispatchCost(telemetry, cost, payload);
+					// A failed run is never a first-pass success; still build the
+					// bundle so its failure-cause tags exist for the index.
+					if (typeof payload.runId === "string" && payload.runId.length > 0) {
+						trackBuild(payload.runId, false, payload.lineage?.attempt);
+					}
 				}),
 			);
 			unsubscribes.push(
@@ -75,6 +155,13 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		async stop() {
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
+			// Flush any in-flight forensic builds so a headless run that shuts down
+			// immediately after dispatch still persists its bundle and index row.
+			// Best-effort and bounded by the shutdown hook budget; each build
+			// already swallows its own failures.
+			if (pendingBuilds.size > 0) {
+				await Promise.allSettled([...pendingBuilds]);
+			}
 		},
 	};
 
@@ -84,6 +171,7 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		sessionCost: () => cost.sessionTotal(),
 		sessionTokens: () => cost.sessionTokens(),
 		costEntries: () => cost.entries(),
+		accountability: () => readAccountabilitySummary(clioStateDir()),
 		latestTokenThroughput: () => latestThroughput,
 		resetSession() {
 			cost.reset();

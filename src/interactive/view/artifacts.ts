@@ -4,10 +4,11 @@ import { basename, join, resolve } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
+import { type AccountabilitySummary, readAccountabilitySummary } from "../../domains/observability/index.js";
 import type { BashExecutionEntry, MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import type { SessionMeta } from "../../domains/session/index.js";
 
-export type ViewArtifactCategory = "receipt" | "dispatch" | "tool-output" | "compaction";
+export type ViewArtifactCategory = "accountability" | "receipt" | "dispatch" | "tool-output" | "compaction";
 export type ViewArtifactFormat = "markdown" | "text" | "json";
 
 export interface ViewArtifactLoadResult {
@@ -40,11 +41,15 @@ export interface ArtifactProviderDeps {
 }
 
 export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
+	"accountability",
 	"receipt",
 	"dispatch",
 	"tool-output",
 	"compaction",
 ] as const;
+
+/** Cap on failure-cause tags rendered in the accountability artifact. */
+const ACCOUNTABILITY_TOP_CAUSES = 8;
 
 export const VIEW_ARTIFACT_LINE_CAP = 50_000;
 const JSON_PRETTY_MAX_BYTES = 10 * 1024 * 1024;
@@ -613,8 +618,51 @@ export class CompactionArtifactProvider implements ArtifactProvider {
 	}
 }
 
+function renderAccountabilitySummary(summary: AccountabilitySummary): string[] {
+	const pct = Math.round(summary.firstPassRate * 100);
+	const lines = [
+		"# Accountability",
+		"",
+		`first-pass success: ${summary.firstPassRuns}/${summary.totalRuns} (${pct}%)`,
+		"",
+		"## Top failure causes",
+		"",
+	];
+	if (summary.failureCauses.length === 0) {
+		lines.push("none");
+		return lines;
+	}
+	for (const { tag, count } of summary.failureCauses.slice(0, ACCOUNTABILITY_TOP_CAUSES)) {
+		lines.push(`- ${tag}: ${count}`);
+	}
+	return lines;
+}
+
+export class AccountabilityArtifactProvider implements ArtifactProvider {
+	readonly category = "accountability" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const stateDir = this.deps.stateDir;
+		return [
+			{
+				id: "session",
+				category: this.category,
+				title: "Session accountability",
+				timestamp: Date.now(),
+				load: async () => ({
+					format: "markdown" as const,
+					lines: renderAccountabilitySummary(readAccountabilitySummary(stateDir)),
+				}),
+			},
+		];
+	}
+}
+
 export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): ArtifactProvider[] {
 	return [
+		new AccountabilityArtifactProvider(deps),
 		new ReceiptArtifactProvider(deps),
 		new DispatchArtifactProvider(deps),
 		new ToolOutputArtifactProvider(deps),
