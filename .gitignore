@@ -11,6 +11,7 @@ coverage/
 .codex
 .codex/
 .tsbuildinfo
+__pycache__/
 
 # Orchestrator-of-orchestrators runtime scripts (not part of the product).
 scripts/orch/
