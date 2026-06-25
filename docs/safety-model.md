@@ -1,7 +1,7 @@
 # Clio Coder Safety Model
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.6).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.7).
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
@@ -217,6 +217,18 @@ When executing tasks in headless mode through `clio run`, there is no terminal o
 
 - **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `workers.onPermission`: `deny` continues the run with a rejection; `fail` ends it.
 - **Delegations (ACP)** under `clio-policy` governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.
+
+---
+
+## Rigor Gate and Finish Contract
+
+In addition to tool-level safety gates, Clio enforces a completion boundary via the finish-contract assessor. This gate is governed by a single `rigor` setting (either `normal` or `high`), which is orthogonal to autonomy permission levels:
+
+- **Rigor Resolution**: Rigor is resolved from a `CLIO_RIGOR` environment override (case-insensitive trimming to `"normal"` or `"high"`) or a repository-derived default. The default is raised to `high` if a scientific validation contract is found in the workspace root (e.g., `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md`). Otherwise, it is `normal`.
+- **Gate Behavior**:
+  - **`normal` rigor**: When an assistant turn claims completion but lacks recent validation command evidence (and has no declared limitation), Clio issues a soft advisory `inject_reminder` warning.
+  - **`high` rigor**: The finish gate has teeth. Clio withholds completion by emitting a `request_continuation` along with a dynamic `inject_reminder` warning. This forces the model to run a verification-family command (e.g. `npm test`, `npm run build`) or state what could not be verified and why, before the turn settles.
+- **Dynamic Injection**: All gate directives are injected dynamically as reminders/actions to ensure the static system prompt prefix remains byte-stable. Read-only turns and turns with no completion claim are exempt.
 
 ---
 

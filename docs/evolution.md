@@ -1,7 +1,7 @@
 # Evolution and Change Manifests
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive change manifest editor, authority risk assessor, and checklist workspace is located at [docs/html/evolution_blueprint.html](html/evolution_blueprint.html) (Version: 0.2.6).
+> **Interactive Spec Available:** An interactive change manifest editor, authority risk assessor, and checklist workspace is located at [docs/html/evolution_blueprint.html](html/evolution_blueprint.html) (Version: 0.2.7).
 
 Clio Coder uses change manifests to make harness changes reviewable, falsifiable, and rollback-friendly. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history. A manifest is JSON, generated or checked with `clio evolve manifest`, and should describe what changed, why, what evidence supports it, what could regress, how to validate it, and how to roll it back.
 
@@ -17,7 +17,7 @@ clio evolve manifest validate change-manifest.json
 clio evolve manifest summarize change-manifest.json
 ```
 
-`init` prints a template. `validate` exits non-zero and reports JSON paths when fields are missing or invalid. `summarize` prints the iteration id, base SHA, authority levels, components, files, predicted regressions, and validation-step count.
+`init` prints a template. `validate` exits non-zero and reports JSON paths when fields are missing or invalid. In `v0.2.7`, it additionally resolves each non-empty `evidenceRefs` entry (which must match `run-<id>` or `session-<id>` formatting) against the local evidence store, failing validation if a referenced bundle is not found. `summarize` prints the iteration id, base SHA, authority levels, components, files, predicted regressions, validation-step count, and reports evidence refs resolution.
 
 ---
 
@@ -50,7 +50,7 @@ clio evolve manifest summarize change-manifest.json
 }
 ```
 
-Only `iterationId: "exploratory-1"` may use an empty `evidenceRefs` array. Later iterations should cite evidence IDs, eval IDs, receipts, or other reviewable artifacts.
+Only `iterationId: "exploratory-1"` may use an empty `evidenceRefs` array. In `v0.2.7`, all non-empty `evidenceRefs` entries are resolved against the local evidence store during `validate` and `summarize` commands. They must follow the format `run-<id>` or `session-<id>` and point to folders that actually exist under `<dataDir>/evidence/`. Note that high-authority harness self-edit enforcement (Slice 5b) is currently deferred (see `src/domains/evolution/SELF_EDIT_GATE.md` for status and re-entry conditions).
 
 ---
 

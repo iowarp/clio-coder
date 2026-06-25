@@ -35,7 +35,7 @@ The installed `clio` symlink executes dist/cli/index.js, so TypeScript edits are
 
 ## Generated and local artifact policy
 
-CLIO.md is the versioned, human-owned project handbook; review intentional changes like source. `.clio/*` (codewiki.json, state.json, proposals, handoffs) is ignored local context-engine state and is never committed unless explicitly force-added. dist/ is generated build output. docs/.superpowers/ is ignored dev scratch. `clio init` regenerates or updates CLIO.md through the bootstrap agent: `--propose` writes ignored drafts, `--apply` updates from the existing handbook, `--rewrite` generates a fresh handbook from repository structure.
+CLIO.md is the versioned, human-owned project handbook; review intentional changes like source. `.clio/*` (codewiki.json, state.json, proposals, handoffs) is ignored local context-engine state and is never committed unless explicitly force-added. dist/ is generated build output. docs/.superpowers/ is ignored dev scratch. `clio context-init` regenerates or updates CLIO.md through the bootstrap agent: `--propose` writes ignored drafts, `--apply` updates from the existing handbook, `--rewrite` generates a fresh handbook from repository structure.
 
 ## Self-development boundary
 
