@@ -38,7 +38,6 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
-import { IntelligenceDomainModule } from "../domains/intelligence/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
@@ -68,7 +67,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import { createResourcesDomainModule, type ResourcesContract } from "../domains/resources/index.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { SafetyContract } from "../domains/safety/index.js";
-import { SafetyDomainModule } from "../domains/safety/index.js";
+import { parseRigorOverride, resolveRigor, SafetyDomainModule } from "../domains/safety/index.js";
 import {
 	createProtectedArtifactsRegistration,
 	type ProtectedArtifactProtectEvent,
@@ -465,7 +464,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// settings view once it exists (assigned below, after the config
 		// contract loads); until then it falls back to the shared snapshot.
 		createDispatchDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
-		IntelligenceDomainModule,
 		LifecycleDomainModule,
 	]);
 	timer.mark(`domains loaded (${result.loaded.length})`);
@@ -777,6 +775,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware.registerHook(
 			createFinishContractRegistration({
 				readSessionEntries: () => (session.current() ? readCurrentSessionEntries() : null),
+				resolveRigor: () => resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_RIGOR) }),
 			}),
 		);
 	}

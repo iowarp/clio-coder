@@ -31,6 +31,25 @@ export const EVIDENCE_TAGS = [
 
 export type EvidenceTag = (typeof EVIDENCE_TAGS)[number];
 
+/**
+ * Canonical failure-cause subset for receipt summaries and observability
+ * histograms. Provenance/quality tags such as `audit-linked`, `session-linked`,
+ * and `no-validation` remain evidence tags, but they are not failure causes.
+ */
+export const FAILURE_CAUSE_TAG_ORDER = [
+	"timeout",
+	"auth-failure",
+	"missing-dependency",
+	"build-failure",
+	"test-failure",
+	"blocked-tool",
+] as const satisfies readonly EvidenceTag[];
+
+export type FailureCauseTag = (typeof FAILURE_CAUSE_TAG_ORDER)[number];
+
+/** Fast membership test for the canonical failure-cause subset. */
+export const FAILURE_CAUSE_TAGS: ReadonlySet<EvidenceTag> = new Set(FAILURE_CAUSE_TAG_ORDER);
+
 export type EvidenceSource =
 	| { kind: "run"; runId: string }
 	| { kind: "session"; sessionId: string }

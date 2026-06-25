@@ -9,6 +9,7 @@
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { AgentAudience } from "../agents/spec.js";
+import type { EvidenceTag } from "../evidence/index.js";
 import type { RuntimeTargetSnapshot } from "../providers/index.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
@@ -70,9 +71,25 @@ export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 export interface RunReceiptIntegrity {
-	version: 1 | 2;
+	version: 1 | 2 | 3;
 	algorithm: "sha256";
 	digest: string;
+}
+
+/**
+ * Compact, durable, integrity-covered findings summary folded onto a receipt at
+ * record time (the durable half of the v0.2.7 "Both" findings-sink decision).
+ * It is computed cheaply from the envelope/outcome/exitCode/toolStats, never by
+ * calling buildEvidence (which reads the receipt and would create a cycle). The
+ * full forensic bundle is the enriched version; this is the always-present
+ * compact half. The v3 integrity branch folds it into the digest, so the
+ * payload must stay JSON-clean: tags is a stably ordered array, firstPassSuccess
+ * a boolean, findingCount a finite number. No undefined inside.
+ */
+export interface RunReceiptFindingsSummary {
+	tags: EvidenceTag[];
+	firstPassSuccess: boolean;
+	findingCount: number;
 }
 
 export interface RunEnvelope {
@@ -268,6 +285,8 @@ export interface RunReceipt {
 	/** Effective target/runtime/model/thinking/capability decision for this run. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	delegation?: RunReceiptDelegation;
+	/** Compact findings summary; absent on receipts written before v3 integrity. */
+	findingsSummary?: RunReceiptFindingsSummary;
 	sessionId: string | null;
 	integrity: RunReceiptIntegrity;
 }

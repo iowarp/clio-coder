@@ -1,4 +1,6 @@
 import { resolve } from "node:path";
+import { clioDataDir } from "../core/xdg.js";
+import { listEvidenceOverviews } from "../domains/evidence/index.js";
 import type { ChangeManifestSummary, ManifestValidationIssue } from "../domains/evolution/index.js";
 import {
 	createChangeManifestTemplate,
@@ -12,8 +14,44 @@ const HELP = `clio evolve manifest init
 clio evolve manifest validate <path>
 clio evolve manifest summarize <path>
 
-Create, validate, or summarize a Clio Coder change manifest.
+Create, validate, or summarize a Clio Coder change manifest. validate and
+summarize resolve each non-empty evidenceRef (run-<id> / session-<id>) against
+the local evidence store, so a manifest that points at a missing bundle fails.
 `;
+
+interface EvidenceRefResolver {
+	resolveEvidenceRef: (ref: string) => boolean;
+	knownCount: number;
+	resolvable: boolean;
+}
+
+/**
+ * Snapshot the local evidence-store bundle ids once and expose them as a pure
+ * predicate the evolution validator can call without importing the evidence
+ * domain. On any read failure the predicate rejects every ref and `resolvable`
+ * is false, so the caller can warn that refs could not be checked rather than
+ * silently passing.
+ */
+async function loadEvidenceRefResolver(): Promise<EvidenceRefResolver> {
+	let knownIds: Set<string>;
+	try {
+		const overviews = await listEvidenceOverviews(clioDataDir());
+		knownIds = new Set(overviews.map((overview) => overview.evidenceId));
+	} catch {
+		return { resolveEvidenceRef: () => false, knownCount: 0, resolvable: false };
+	}
+	return {
+		resolveEvidenceRef: (ref: string) => knownIds.has(ref),
+		knownCount: knownIds.size,
+		resolvable: true,
+	};
+}
+
+function countEvidenceRefs(changes: ReadonlyArray<{ evidenceRefs: ReadonlyArray<string> }>): number {
+	let total = 0;
+	for (const change of changes) total += change.evidenceRefs.length;
+	return total;
+}
 
 type ManifestCommand = "init" | "validate" | "summarize";
 
@@ -99,12 +137,15 @@ async function runValidate(parsed: ParsedEvolveArgs): Promise<number> {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	const result = validateChangeManifest(value);
+	const resolver = await loadEvidenceRefResolver();
+	const result = validateChangeManifest(value, { resolveEvidenceRef: resolver.resolveEvidenceRef });
 	if (!result.valid) {
 		renderInvalid(result.issues);
 		return 1;
 	}
+	const refCount = countEvidenceRefs(result.manifest.changes);
 	printOk(`manifest valid (${formatCount(result.manifest.changes.length, "change")})`);
+	reportRefResolution(refCount, resolver);
 	return 0;
 }
 
@@ -122,14 +163,31 @@ async function runSummarize(parsed: ParsedEvolveArgs): Promise<number> {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	const result = validateChangeManifest(value);
+	const resolver = await loadEvidenceRefResolver();
+	const result = validateChangeManifest(value, { resolveEvidenceRef: resolver.resolveEvidenceRef });
 	if (!result.valid) {
 		printError("manifest invalid; cannot summarize");
 		renderIssues(result.issues);
 		return 1;
 	}
+	const refCount = countEvidenceRefs(result.manifest.changes);
 	renderSummary(summarizeChangeManifest(result.manifest));
+	reportRefResolution(refCount, resolver);
 	return 0;
+}
+
+function reportRefResolution(refCount: number, resolver: EvidenceRefResolver): void {
+	if (!resolver.resolvable) {
+		process.stdout.write("evidence refs: could not read the local evidence store; refs were not resolved\n");
+		return;
+	}
+	if (refCount === 0) {
+		process.stdout.write("evidence refs: none to resolve\n");
+		return;
+	}
+	process.stdout.write(
+		`evidence refs: ${formatCount(refCount, "ref")} resolved against ${formatCount(resolver.knownCount, "local bundle")}\n`,
+	);
 }
 
 function renderInvalid(issues: ReadonlyArray<ManifestValidationIssue>): void {

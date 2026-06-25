@@ -23,6 +23,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unl
 import { dirname, join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
 
@@ -326,7 +327,15 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			if (!current) {
 				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
 			}
-			const receiptWithIntegrity = withReceiptIntegrity(receipt, current);
+			// Fold the durable findings summary onto the draft before sealing so both
+			// the ACP and worker finalizers get it for free and the v3 integrity
+			// digest covers it. Computed cheaply from in-memory fields; never reads
+			// disk or calls buildEvidence.
+			const draft: RunReceiptDraft =
+				receipt.findingsSummary === undefined
+					? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
+					: receipt;
+			const receiptWithIntegrity = withReceiptIntegrity(draft, current);
 			atomicWrite(target, JSON.stringify(receiptWithIntegrity, null, 2));
 			runs[idx] = { ...current, receiptPath: target };
 			return receiptWithIntegrity;

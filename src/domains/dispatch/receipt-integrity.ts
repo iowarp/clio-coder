@@ -3,15 +3,17 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } fr
 
 /**
  * Integrity versions. v1 predates the outcome/lineage/identity blocks; v2
- * folds them into the digest. Verification branches strictly on the version
- * recorded in the receipt's integrity block, never on field-presence
- * heuristics. Receipts written before the endpointId -> targetId rename are
- * stale dev state and no longer verify; per the no-migrations mandate they
- * are wiped, not read.
+ * folds them into the digest; v3 additionally folds the durable
+ * findingsSummary (tags / firstPassSuccess / findingCount). Verification
+ * branches strictly on the version recorded in the receipt's integrity block,
+ * never on field-presence heuristics, so a v2 receipt verifies via the
+ * retained v2 branch and a v3 receipt via the v3 branch. Receipts written
+ * before the endpointId -> targetId rename are stale dev state and no longer
+ * verify; per the no-migrations mandate they are wiped, not read.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION = 2;
-export type ReceiptIntegrityVersion = 1 | 2;
-const KNOWN_INTEGRITY_VERSIONS: ReadonlySet<number> = new Set([1, 2]);
+export const RUN_RECEIPT_INTEGRITY_VERSION = 3;
+export type ReceiptIntegrityVersion = 1 | 2 | 3;
+const KNOWN_INTEGRITY_VERSIONS: ReadonlySet<number> = new Set([1, 2, 3]);
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
 export type ReceiptIntegrityResult = { ok: true } | { ok: false; reason: string };
@@ -144,6 +146,9 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: Rec
 		if (receipt.lineage !== undefined) draft.lineage = receipt.lineage;
 		if (receipt.identity !== undefined) draft.identity = receipt.identity;
 	}
+	if (version >= 3) {
+		if (receipt.findingsSummary !== undefined) draft.findingsSummary = receipt.findingsSummary;
+	}
 	return draft;
 }
 
@@ -268,6 +273,9 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelope): ReceiptIntegrityResult {
 	if (!isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
+	}
+	if (receipt.integrity.version < 3 && receipt.findingsSummary !== undefined) {
+		return { ok: false, reason: "v3 findings summary on v2 receipt" };
 	}
 	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {

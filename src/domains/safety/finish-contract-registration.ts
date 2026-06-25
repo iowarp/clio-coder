@@ -10,10 +10,25 @@
  * request.
  */
 
+import { VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { assessFinishContract } from "./finish-contract.js";
+import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_REGISTRATION_ID = "assessor.finish-contract";
+
+/**
+ * High-rigor re-prompt directive. Injected dynamically via effects (never added
+ * to the static system prompt) so the prompt prefix stays byte-stable. It tells
+ * the model to validate with a verification-family command or to state what
+ * could not be verified before claiming done. The command hint mirrors the
+ * vocabulary `detectValidationCommand` and `isVerificationScriptName` accept.
+ */
+export const HIGH_RIGOR_REVALIDATION_MESSAGE =
+	`[Clio Coder] high-rigor finish gate: this completion claim has no validation evidence. ` +
+	`Before claiming done, run a verification command (the ${VERIFICATION_SCRIPT_FAMILY_HINT} family, ` +
+	`e.g. "npm run test", "npm run lint", "npm run build") or explicitly state what could not be verified ` +
+	`and why. Do not end the turn until you have validated or recorded the limitation.`;
 
 export interface CreateFinishContractRegistrationOptions {
 	/**
@@ -22,6 +37,13 @@ export interface CreateFinishContractRegistrationOptions {
 	 * former chat-loop guard (`!deps.session?.current()`).
 	 */
 	readSessionEntries: () => ReadonlyArray<unknown> | null;
+	/**
+	 * Resolve the effective rigor for the current turn. Optional; defaults to
+	 * `"normal"` (today's soft advisory) when absent. At `"high"` an
+	 * unvalidated completion claim re-prompts the model to validate or state a
+	 * limitation instead of merely warning.
+	 */
+	resolveRigor?: () => Rigor;
 }
 
 export function createFinishContractRegistration(
@@ -31,8 +53,9 @@ export function createFinishContractRegistration(
 		id: FINISH_CONTRACT_REGISTRATION_ID,
 		description: "advise when a completion claim lands without validation evidence or an explicit limitation",
 		hooks: ["turn_end"],
-		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
+		evaluate(input: MiddlewareHookInput, context): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
+			if (context?.priorEffects.some(isHardBlockEffect) === true) return [];
 			// Only settled stop turns make completion claims; aborted and error
 			// turns (including tool-prose interruptions) carry no finish contract.
 			// An absent stopReason is treated as "stop", mirroring
@@ -54,7 +77,21 @@ export function createFinishContractRegistration(
 				assistantTurnId: input.turnId ?? null,
 			});
 			if (assessment.kind !== "advisory") return [];
+			const rigor = options.resolveRigor?.() ?? "normal";
+			if (rigor === "high") {
+				// Withhold the completion and force a re-prompt: a continuation
+				// request carries the turn onward, and the paired reminder gives
+				// the directive its own visible system-reminder line.
+				return [
+					{ kind: "request_continuation", message: HIGH_RIGOR_REVALIDATION_MESSAGE },
+					{ kind: "inject_reminder", message: HIGH_RIGOR_REVALIDATION_MESSAGE, severity: "warn" },
+				];
+			}
 			return [{ kind: "inject_reminder", message: assessment.message, severity: "warn" }];
 		},
 	};
+}
+
+function isHardBlockEffect(effect: MiddlewareEffect): boolean {
+	return effect.kind === "block_tool" || (effect.kind === "inject_reminder" && effect.severity === "hard-block");
 }
