@@ -1,4 +1,9 @@
 import type { ThinkingLevel } from "../domains/providers/index.js";
+import {
+	defaultAnthropicBudgetForLevel,
+	defaultAnthropicEffortForLevel,
+	type ThinkingEffortByLevel,
+} from "../domains/providers/thinking-control-policy.js";
 import type { Model } from "./types.js";
 
 function reasoningSummaryForLevel(level: ThinkingLevel | undefined): "concise" | "detailed" | undefined {
@@ -11,28 +16,99 @@ function isOpenAIResponsesApi(api: string): boolean {
 	return api === "openai-codex-responses" || api === "openai-responses" || api === "azure-openai-responses";
 }
 
-/**
- * Force visible reasoning summaries for OpenAI Responses-family providers when
- * Clio enables thinking. pi-ai defaults the summary mode to "auto", which can
- * legitimately yield no visible thinking blocks; the TUI then looks broken even
- * though reasoning is enabled.
- */
-export function patchReasoningSummaryPayload(
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function numberValue(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function patchOpenAIReasoningSummaryPayload(
 	payload: unknown,
 	model: Model<never>,
 	thinkingLevel: ThinkingLevel | undefined,
 ): unknown | undefined {
 	if (!isOpenAIResponsesApi(model.api)) return undefined;
 	const summary = reasoningSummaryForLevel(thinkingLevel);
-	if (!summary || !payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
-	const record = payload as Record<string, unknown>;
+	if (!summary || !isRecord(payload)) return undefined;
+	const record = payload;
 	const reasoning = record.reasoning;
-	if (!reasoning || typeof reasoning !== "object" || Array.isArray(reasoning)) return undefined;
+	if (!isRecord(reasoning)) return undefined;
 	return {
 		...record,
 		reasoning: {
-			...(reasoning as Record<string, unknown>),
+			...reasoning,
 			summary,
 		},
 	};
+}
+
+function isAnthropicMessagesApi(api: string): boolean {
+	return api === "anthropic-messages";
+}
+
+function anthropicThinkingLevelMap(model: Model<never>): ThinkingEffortByLevel | undefined {
+	return model.thinkingLevelMap as ThinkingEffortByLevel | undefined;
+}
+
+function anthropicUsesAdaptiveThinking(model: Model<never>): boolean {
+	const compat = model.compat as { forceAdaptiveThinking?: boolean } | undefined;
+	return compat?.forceAdaptiveThinking === true;
+}
+
+function patchAnthropicThinkingPayload(
+	payload: unknown,
+	model: Model<never>,
+	thinkingLevel: ThinkingLevel | undefined,
+): unknown | undefined {
+	if (!isAnthropicMessagesApi(model.api) || model.reasoning !== true) return undefined;
+	if (!thinkingLevel || thinkingLevel === "off" || !isRecord(payload)) return undefined;
+	const record = payload;
+	const existingThinking = isRecord(record.thinking) ? record.thinking : {};
+	const display = typeof existingThinking.display === "string" ? existingThinking.display : "summarized";
+
+	if (anthropicUsesAdaptiveThinking(model)) {
+		const effort = defaultAnthropicEffortForLevel(thinkingLevel, anthropicThinkingLevelMap(model));
+		const existingOutputConfig = isRecord(record.output_config) ? record.output_config : {};
+		return {
+			...record,
+			thinking: { ...existingThinking, type: "adaptive", display },
+			...(effort ? { output_config: { ...existingOutputConfig, effort } } : {}),
+		};
+	}
+
+	const maxTokens = numberValue(record.max_tokens) ?? model.maxTokens;
+	const budgetTokens = defaultAnthropicBudgetForLevel(thinkingLevel, maxTokens);
+	if (budgetTokens === undefined) return undefined;
+	return {
+		...record,
+		thinking: { ...existingThinking, type: "enabled", budget_tokens: budgetTokens, display },
+	};
+}
+
+/**
+ * Align provider payloads with Clio's effective thinking level.
+ *
+ * OpenAI Responses defaults reasoning summaries to "auto", which can yield no
+ * visible thinking blocks. Anthropic's generic stream path can also under-map
+ * Clio levels when xhigh/adaptive metadata is available only on the model.
+ */
+export function patchProviderThinkingPayload(
+	payload: unknown,
+	model: Model<never>,
+	thinkingLevel: ThinkingLevel | undefined,
+): unknown | undefined {
+	return (
+		patchOpenAIReasoningSummaryPayload(payload, model, thinkingLevel) ??
+		patchAnthropicThinkingPayload(payload, model, thinkingLevel)
+	);
+}
+
+export function patchReasoningSummaryPayload(
+	payload: unknown,
+	model: Model<never>,
+	thinkingLevel: ThinkingLevel | undefined,
+): unknown | undefined {
+	return patchProviderThinkingPayload(payload, model, thinkingLevel);
 }

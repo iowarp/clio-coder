@@ -420,7 +420,8 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	};
 	const thinking = thinkingForInput(input);
 	if (thinking !== undefined) options.thinking = thinking;
-	const effort = effortForThinking(input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel);
+	const effort = (input.runtimeResolution?.request.reasoningEffort ??
+		effortForThinking(input.runtimeResolution?.effectiveThinkingLevel ?? input.thinkingLevel)) as EffortLevel | undefined;
 	if (effort !== undefined) options.effort = effort;
 	if (isClaudeCodeSessionId(input.sessionId)) options.sessionId = input.sessionId.trim();
 

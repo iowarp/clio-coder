@@ -36,7 +36,7 @@ import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./api
 import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
 import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
 import { createLoopGuardRegistration, readToolCallCap } from "./loop-guard.js";
-import { patchReasoningSummaryPayload } from "./provider-payload.js";
+import { patchProviderThinkingPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
@@ -266,7 +266,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			messages: [],
 		},
 		onPayload: async (payload, currentModel) =>
-			patchReasoningSummaryPayload(payload, currentModel as Model<never>, effectiveThinkingLevel),
+			patchProviderThinkingPayload(payload, currentModel as Model<never>, effectiveThinkingLevel),
 		getApiKey: async () => input.apiKey,
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;

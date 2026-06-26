@@ -1,7 +1,15 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { resolveModelCapabilities } from "./model-capabilities.js";
 import { inferLocalModelFamily, isHarmonyModelId } from "./model-family.js";
+import {
+	defaultAnthropicBudgetForLevel,
+	defaultAnthropicEffortForLevel,
+	type ThinkingEffortByLevel,
+	thinkingBudgetFromMap,
+	thinkingEffortFromMap,
+} from "./thinking-control-policy.js";
 import { availableThinkingLevels, type CapabilityFlags, type ThinkingLevel } from "./types/capability-flags.js";
 import type { KnowledgeBase, KnowledgeBaseHit } from "./types/knowledge-base.js";
 import {
@@ -69,17 +77,31 @@ export interface ResolveRuntimeCapabilitiesInput {
 	kbHit?: KnowledgeBaseHit | null;
 	quirks?: LocalModelQuirks;
 	configuredThinkingLevel?: ThinkingLevel;
+	adaptiveThinking?: boolean;
+	thinkingLevelMap?: ThinkingEffortByLevel;
 }
 
 interface CapabilityHints {
 	reasoning?: boolean;
 	thinkingFormat?: string;
+	maxTokens?: number | undefined;
+	adaptiveThinking?: boolean | undefined;
+	thinkingLevelMap?: ThinkingEffortByLevel | undefined;
 }
 
-function capabilityHints(reasoning: boolean | undefined, thinkingFormat: string | undefined): CapabilityHints {
+function capabilityHints(input: {
+	reasoning: boolean | undefined;
+	thinkingFormat: string | undefined;
+	maxTokens?: number | undefined;
+	adaptiveThinking?: boolean | undefined;
+	thinkingLevelMap?: ThinkingEffortByLevel | undefined;
+}): CapabilityHints {
 	const hints: CapabilityHints = {};
-	if (reasoning !== undefined) hints.reasoning = reasoning;
-	if (thinkingFormat !== undefined) hints.thinkingFormat = thinkingFormat;
+	if (input.reasoning !== undefined) hints.reasoning = input.reasoning;
+	if (input.thinkingFormat !== undefined) hints.thinkingFormat = input.thinkingFormat;
+	if (input.maxTokens !== undefined) hints.maxTokens = input.maxTokens;
+	if (input.adaptiveThinking !== undefined) hints.adaptiveThinking = input.adaptiveThinking;
+	if (input.thinkingLevelMap !== undefined) hints.thinkingLevelMap = input.thinkingLevelMap;
 	return hints;
 }
 
@@ -94,6 +116,7 @@ interface ClioRuntimeMetadata {
 	};
 	compat?: {
 		thinkingFormat?: string;
+		forceAdaptiveThinking?: boolean;
 	};
 }
 
@@ -103,30 +126,29 @@ const LEVELS_NONE: ReadonlyArray<ThinkingLevel> = ["off"];
 const LEVEL_ORDER: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const HARMONY_LEVELS: ReadonlyArray<ThinkingLevel> = ["low", "medium", "high"];
 
-function isLow(level: ThinkingLevel): level is "low" {
-	return level === "low";
-}
-
-function isMedium(level: ThinkingLevel): level is "medium" {
-	return level === "medium";
-}
-
-function isHigh(level: ThinkingLevel): level is "high" | "xhigh" {
-	return level === "high" || level === "xhigh";
-}
-
-function effortFor(quirks: ThinkingQuirks, level: ThinkingLevel): string | undefined {
-	if (isLow(level)) return quirks.effortByLevel?.low;
-	if (isMedium(level)) return quirks.effortByLevel?.medium;
-	if (isHigh(level)) return quirks.effortByLevel?.high;
-	if (level === "minimal") return quirks.effortByLevel?.low;
+function effortFor(
+	quirks: ThinkingQuirks | undefined,
+	level: ThinkingLevel,
+	caps?: CapabilityHints,
+): string | undefined {
+	const explicit = thinkingEffortFromMap(quirks?.effortByLevel, level);
+	if (explicit !== undefined) return explicit;
+	if (quirks?.effortByLevel) return undefined;
+	if (caps?.thinkingFormat === "anthropic-extended" && caps.adaptiveThinking === true) {
+		return defaultAnthropicEffortForLevel(level, caps.thinkingLevelMap);
+	}
 	return undefined;
 }
 
-function budgetFor(quirks: ThinkingQuirks, level: ThinkingLevel): number | undefined {
-	if (isLow(level) || level === "minimal") return quirks.budgetByLevel?.low;
-	if (isMedium(level)) return quirks.budgetByLevel?.medium;
-	if (isHigh(level)) return quirks.budgetByLevel?.high;
+function budgetFor(
+	quirks: ThinkingQuirks | undefined,
+	level: ThinkingLevel,
+	caps?: CapabilityHints,
+): number | undefined {
+	if (quirks?.budgetByLevel) return thinkingBudgetFromMap(quirks.budgetByLevel, level);
+	if (caps?.thinkingFormat === "anthropic-extended" && caps.adaptiveThinking !== true) {
+		return defaultAnthropicBudgetForLevel(level, caps.maxTokens);
+	}
 	return undefined;
 }
 
@@ -150,7 +172,7 @@ export function inferThinkingMechanism(
 	if (!caps?.reasoning) return "none";
 	switch (caps.thinkingFormat) {
 		case "anthropic-extended":
-			return "budget-tokens";
+			return caps.adaptiveThinking === true ? "effort-levels" : "budget-tokens";
 		case "openai-codex":
 		case "harmony":
 			return "effort-levels";
@@ -197,7 +219,7 @@ export function applyThinkingMechanism(
 			return result;
 		}
 		case "effort-levels": {
-			const effort = quirks?.thinking ? effortFor(quirks.thinking, level) : undefined;
+			const effort = effortFor(quirks?.thinking, level, caps);
 			const result: AppliedThinking = {
 				thinkingActive: requestedActive,
 				mechanism,
@@ -208,7 +230,7 @@ export function applyThinkingMechanism(
 			return result;
 		}
 		case "budget-tokens": {
-			const budget = quirks?.thinking ? budgetFor(quirks.thinking, level) : undefined;
+			const budget = budgetFor(quirks?.thinking, level, caps);
 			const result: AppliedThinking = {
 				thinkingActive: requestedActive,
 				mechanism,
@@ -233,9 +255,11 @@ function supportedBudgetLevels(
 	const budgets = quirks?.thinking?.budgetByLevel;
 	if (!budgets) return baseLevels;
 	const out: ThinkingLevel[] = ["off"];
+	if (budgets.minimal !== undefined) out.push("minimal");
 	if (budgets.low !== undefined) out.push("low");
 	if (budgets.medium !== undefined) out.push("medium");
 	if (budgets.high !== undefined) out.push("high");
+	if (budgets.xhigh !== undefined) out.push("xhigh");
 	return out;
 }
 
@@ -249,9 +273,11 @@ function supportedEffortLevels(
 	if (!efforts) return baseLevels;
 	const out: ThinkingLevel[] = [];
 	if (baseLevels.includes("off")) out.push("off");
+	if (efforts.minimal !== undefined) out.push("minimal");
 	if (efforts.low !== undefined) out.push("low");
 	if (efforts.medium !== undefined) out.push("medium");
 	if (efforts.high !== undefined) out.push("high");
+	if (efforts.xhigh !== undefined) out.push("xhigh");
 	return out.length > 0 ? out : baseLevels;
 }
 
@@ -311,8 +337,15 @@ export function thinkingLevelFromChoiceLabel(value: string): ThinkingLevel | nul
 }
 
 function acceptsBudgetTokensField(input: Pick<ResolveRuntimeCapabilitiesInput, "apiFamily" | "capabilities">): boolean {
-	if (input.apiFamily !== "openai-completions") return false;
 	const format = input.capabilities.thinkingFormat;
+	if (format === "anthropic-extended") {
+		return (
+			input.apiFamily === "anthropic-messages" ||
+			input.apiFamily === "bedrock-converse-stream" ||
+			input.apiFamily === "claude-agent-sdk"
+		);
+	}
+	if (input.apiFamily !== "openai-completions") return false;
 	return format === "openrouter" || format === "zai";
 }
 
@@ -356,18 +389,21 @@ function resolveThinkingCapability(
 	const configuredLevel = input.configuredThinkingLevel ?? "off";
 	const harmony = parser === "harmony";
 	const thinkingFormat = harmony ? "harmony" : input.capabilities.thinkingFormat;
-	const mechanism = inferThinkingMechanism(quirks, capabilityHints(input.capabilities.reasoning, thinkingFormat));
+	const hints = capabilityHints({
+		reasoning: input.capabilities.reasoning,
+		thinkingFormat,
+		maxTokens: input.capabilities.maxTokens,
+		adaptiveThinking: input.adaptiveThinking,
+		thinkingLevelMap: input.thinkingLevelMap,
+	});
+	const mechanism = inferThinkingMechanism(quirks, hints);
 	const baseLevels = availableThinkingLevels(input.capabilities, {
 		runtimeId: input.runtimeId,
 		modelId: input.modelId,
 	});
 	const supportedLevels = restrictThinkingLevelsByMechanism(baseLevels, mechanism, quirks, { harmony });
 	const effectiveLevel = effectiveThinkingLevel(configuredLevel, supportedLevels);
-	let applied = applyThinkingMechanism(
-		quirks,
-		effectiveLevel,
-		capabilityHints(input.capabilities.reasoning, thinkingFormat),
-	);
+	let applied = applyThinkingMechanism(quirks, effectiveLevel, hints);
 
 	if (harmony) {
 		const effort = harmonyReasoningEffort(effectiveLevel);
@@ -472,13 +508,15 @@ export function resolveModelRuntimeCapabilitiesForStatus(
 	const capabilities = resolveModelCapabilities(status, modelId, knowledgeBase, {
 		detectedReasoning: options?.detectedReasoning ?? null,
 	});
+	const runtimeId = status.runtime?.id ?? status.target.runtime;
 	return resolveModelRuntimeCapabilities({
 		targetId: status.target.id,
-		runtimeId: status.runtime?.id ?? status.target.runtime,
+		runtimeId,
 		apiFamily: status.runtime?.apiFamily ?? null,
 		modelId,
 		capabilities,
 		kbHit,
+		...thinkingHintsForCatalogModel(runtimeId, modelId),
 		...(options?.configuredThinkingLevel ? { configuredThinkingLevel: options.configuredThinkingLevel } : {}),
 	});
 }
@@ -502,8 +540,41 @@ export function resolveModelRuntimeCapabilitiesForProviders(
 	});
 }
 
+function thinkingHintsForModel(
+	model: Model<Api> | undefined,
+): Pick<ResolveRuntimeCapabilitiesInput, "adaptiveThinking" | "thinkingLevelMap"> {
+	const out: Pick<ResolveRuntimeCapabilitiesInput, "adaptiveThinking" | "thinkingLevelMap"> = {};
+	if (!model) return out;
+	const compat = model.compat as { forceAdaptiveThinking?: boolean } | undefined;
+	if (compat?.forceAdaptiveThinking !== undefined) out.adaptiveThinking = compat.forceAdaptiveThinking;
+	if (model.thinkingLevelMap) out.thinkingLevelMap = model.thinkingLevelMap as ThinkingEffortByLevel;
+	return out;
+}
+
+function thinkingHintsForCatalogModel(
+	runtimeId: string | null | undefined,
+	modelId: string,
+): Pick<ResolveRuntimeCapabilitiesInput, "adaptiveThinking" | "thinkingLevelMap"> {
+	if (!runtimeId || modelId.length === 0) return {};
+	return thinkingHintsForModel(getCatalogModelForRuntime(runtimeId, modelId));
+}
+
+function thinkingFormatFromModelApi(api: Api): CapabilityFlags["thinkingFormat"] | undefined {
+	switch (api) {
+		case "anthropic-messages":
+		case "bedrock-converse-stream":
+		case "claude-agent-sdk":
+		case "claude-code-subprocess":
+			return "anthropic-extended";
+		case "openai-codex-responses":
+			return "openai-codex";
+		default:
+			return undefined;
+	}
+}
+
 function capabilitiesFromModel(model: Model<Api> & ClioRuntimeMetadata): CapabilityFlags {
-	const format = model.compat?.thinkingFormat;
+	const format = model.compat?.thinkingFormat ?? thinkingFormatFromModelApi(model.api);
 	const caps: CapabilityFlags = {
 		chat: true,
 		tools: true,
@@ -542,6 +613,7 @@ export function resolveModelRuntimeCapabilitiesForModel<TApi extends Api>(
 		apiFamily: model.api,
 		modelId: model.id,
 		capabilities: caps,
+		...thinkingHintsForModel(model as unknown as Model<Api>),
 		...(metadata?.quirks ? { quirks: metadata.quirks } : {}),
 		kbHit: metadata?.family
 			? {
@@ -583,6 +655,7 @@ export function resolveTargetRuntimeCapabilities(
 		modelId: wireModelId,
 		capabilities,
 		kbHit,
+		...thinkingHintsForCatalogModel(runtime.id, wireModelId),
 		...(configuredThinkingLevel ? { configuredThinkingLevel } : {}),
 	});
 }
