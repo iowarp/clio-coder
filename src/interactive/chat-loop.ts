@@ -65,7 +65,7 @@ import {
 import { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
-import { patchReasoningSummaryPayload } from "../engine/provider-payload.js";
+import { patchProviderThinkingPayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import type { resolveAgentTools } from "../engine/worker-tools.js";
 import { finalizeAskUserInterview } from "../tools/ask-user.js";
@@ -1107,7 +1107,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			},
 			maxRetryDelayMs: retrySettings().maxDelayMs,
 			onPayload: async (payload, currentModel) =>
-				patchReasoningSummaryPayload(payload, currentModel as Model<never>, currentThinkingLevel),
+				patchProviderThinkingPayload(payload, currentModel as Model<never>, currentThinkingLevel),
 			getApiKey: async () => {
 				if (!targetRequiresAuth(target.target, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;

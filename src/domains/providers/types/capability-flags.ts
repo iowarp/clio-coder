@@ -91,7 +91,7 @@ export function availableThinkingLevels(
 		return availableOpenAICodexThinkingLevels(options?.modelId);
 	}
 	if (caps.thinkingFormat === "anthropic-extended") {
-		return VALID_THINKING_LEVELS;
+		return THINKING_LEVELS_WITHOUT_XHIGH;
 	}
 	return THINKING_LEVELS_WITHOUT_XHIGH;
 }

@@ -14,6 +14,8 @@
  *     `repeat_penalty`.
  */
 
+import type { ThinkingBudgetByLevel, ThinkingEffortByLevel } from "../thinking-control-policy.js";
+
 export const KV_CACHE_QUANTS = ["f32", "f16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"] as const;
 
 export type KvCacheQuant = (typeof KV_CACHE_QUANTS)[number];
@@ -62,9 +64,9 @@ export type ThinkingMechanism = "effort-levels" | "budget-tokens" | "on-off" | "
 export interface ThinkingQuirks {
 	mechanism: ThinkingMechanism;
 	/** Token budget for budget-tokens mechanism, keyed by Clio's thinking level. */
-	budgetByLevel?: { low?: number; medium?: number; high?: number };
+	budgetByLevel?: ThinkingBudgetByLevel;
 	/** Effort string for effort-levels mechanism, keyed by Clio's thinking level. */
-	effortByLevel?: { low?: string; medium?: string; high?: string };
+	effortByLevel?: ThinkingEffortByLevel;
 	/** 2-5 line free-text guidance rendered into the Runtime prompt block. */
 	guidance?: string;
 }
@@ -160,21 +162,27 @@ function asThinkingMechanism(value: unknown): ThinkingMechanism | undefined {
 function extractBudgetByLevel(raw: unknown): ThinkingQuirks["budgetByLevel"] | undefined {
 	if (!isRecord(raw)) return undefined;
 	const out: NonNullable<ThinkingQuirks["budgetByLevel"]> = {};
+	const minimal = asInteger(raw.minimal);
+	if (minimal !== undefined) out.minimal = minimal;
 	const low = asInteger(raw.low);
 	if (low !== undefined) out.low = low;
 	const medium = asInteger(raw.medium);
 	if (medium !== undefined) out.medium = medium;
 	const high = asInteger(raw.high);
 	if (high !== undefined) out.high = high;
+	const xhigh = asInteger(raw.xhigh);
+	if (xhigh !== undefined) out.xhigh = xhigh;
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function extractEffortByLevel(raw: unknown): ThinkingQuirks["effortByLevel"] | undefined {
 	if (!isRecord(raw)) return undefined;
 	const out: NonNullable<ThinkingQuirks["effortByLevel"]> = {};
+	if (typeof raw.minimal === "string" && raw.minimal.length > 0) out.minimal = raw.minimal;
 	if (typeof raw.low === "string" && raw.low.length > 0) out.low = raw.low;
 	if (typeof raw.medium === "string" && raw.medium.length > 0) out.medium = raw.medium;
 	if (typeof raw.high === "string" && raw.high.length > 0) out.high = raw.high;
+	if (typeof raw.xhigh === "string" && raw.xhigh.length > 0) out.xhigh = raw.xhigh;
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
