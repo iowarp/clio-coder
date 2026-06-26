@@ -449,7 +449,7 @@ Inside the TUI, `/targets` is the target management surface. The hub lists healt
 
 ## Local Model Quirks
 
-Local models often require specific engine configurations to perform optimally. Clio parses local model quirks from catalog entries and applies them during target execution:
+Local models often require specific engine configurations to perform optimally. Clio parses local model quirks from catalog entries and applies them during target execution. Keep target inventory in `settings.yaml` (`wireModels`, `defaultModel`, URL/auth), and keep per-model semantics in catalog YAML. For local experiments, use `$CLIO_CONFIG_DIR/model-catalog.d` or `.clio/model-catalog.d`; promote entries into the bundled source catalog only after the model family is verified for broader Clio use.
 
 ### 1. KV-Cache Quantization
 You can optimize the GPU memory usage of the key and value caches for local inference engines. Quirks parameters include:

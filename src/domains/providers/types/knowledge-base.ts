@@ -23,30 +23,37 @@ export interface KnowledgeBase {
 	entries(): ReadonlyArray<KnowledgeBaseEntry>;
 }
 
+export interface KnowledgeBaseRoot {
+	dir: string;
+	/** Human-readable label used in parse/validation diagnostics. */
+	label?: string;
+	/** Missing optional roots are ignored; non-optional roots must exist. */
+	optional?: boolean;
+}
+
 export class FileKnowledgeBase implements KnowledgeBase {
-	private readonly dir: string;
+	private readonly roots: KnowledgeBaseRoot[];
 	private loaded: KnowledgeBaseEntry[] = [];
 
-	constructor(dir: string) {
-		const stat = statSync(dir);
-		if (!stat.isDirectory()) {
-			throw new Error(`knowledge base path is not a directory: ${dir}`);
-		}
-		this.dir = dir;
+	constructor(root: string | ReadonlyArray<string | KnowledgeBaseRoot>) {
+		this.roots = normalizeRoots(root);
 		this.reload();
 	}
 
 	reload(): void {
 		const next: KnowledgeBaseEntry[] = [];
-		const files = collectYamlFiles(this.dir);
-		for (const entry of files) {
-			const raw = readFileSync(entry.path, "utf8");
-			const parsed = parseYaml(raw);
-			if (!Array.isArray(parsed)) {
-				throw new Error(`knowledge base file ${entry.name} must be a YAML list of KnowledgeBaseEntry`);
-			}
-			for (const item of parsed) {
-				next.push(normalizeEntry(item, entry.name));
+		for (const root of this.roots) {
+			const files = collectYamlFiles(root.dir);
+			for (const file of files) {
+				const name = root.label ? `${root.label}:${file.name}` : file.name;
+				const raw = readFileSync(file.path, "utf8");
+				const parsed = parseYaml(raw);
+				if (!Array.isArray(parsed)) {
+					throw new Error(`knowledge base file ${name} must be a YAML list of KnowledgeBaseEntry`);
+				}
+				for (const item of parsed) {
+					next.push(normalizeEntry(item, name));
+				}
 			}
 		}
 		this.loaded = next;
@@ -62,7 +69,7 @@ export class FileKnowledgeBase implements KnowledgeBase {
 		for (const entry of this.loaded) {
 			for (const pattern of entry.matchPatterns) {
 				if (!needle.includes(pattern.toLowerCase())) continue;
-				if (best === null || pattern.length > best.pattern.length) {
+				if (best === null || pattern.length >= best.pattern.length) {
 					best = { entry, pattern };
 				}
 			}
@@ -71,6 +78,33 @@ export class FileKnowledgeBase implements KnowledgeBase {
 		const isFamilyMatch = best.pattern.toLowerCase() === best.entry.family.toLowerCase();
 		return { entry: best.entry, matchKind: isFamilyMatch ? "family" : "alias" };
 	}
+}
+
+function normalizeRoots(root: string | ReadonlyArray<string | KnowledgeBaseRoot>): KnowledgeBaseRoot[] {
+	const rawRoots =
+		typeof root === "string"
+			? [{ dir: root }]
+			: root.map((entry) => (typeof entry === "string" ? { dir: entry } : entry));
+	const out: KnowledgeBaseRoot[] = [];
+	const seen = new Set<string>();
+	for (const raw of rawRoots) {
+		const dir = raw.dir.trim();
+		if (dir.length === 0 || seen.has(dir)) continue;
+		let isRootDir = false;
+		try {
+			isRootDir = statSync(dir).isDirectory();
+		} catch (err) {
+			if (raw.optional === true) continue;
+			throw err;
+		}
+		if (!isRootDir) {
+			if (raw.optional === true) continue;
+			throw new Error(`knowledge base path is not a directory: ${dir}`);
+		}
+		seen.add(dir);
+		out.push({ dir, ...(raw.label ? { label: raw.label } : {}), ...(raw.optional === true ? { optional: true } : {}) });
+	}
+	return out;
 }
 
 function collectYamlFiles(dir: string, prefix = ""): Array<{ path: string; name: string }> {

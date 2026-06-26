@@ -21,7 +21,7 @@ import type {
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import { applyModelCapabilityPatch, resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
-import { resolveProvidersModelsDir } from "../domains/providers/knowledge-base-path.js";
+import { resolveProviderKnowledgeBaseRoots } from "../domains/providers/knowledge-base-path.js";
 import {
 	FileKnowledgeBase,
 	type KnowledgeBase,
@@ -124,8 +124,8 @@ let kbSingleton: KnowledgeBase | null = null;
 function getKnowledgeBase(): KnowledgeBase {
 	if (kbSingleton) return kbSingleton;
 	try {
-		const dir = resolveProvidersModelsDir(import.meta.url);
-		kbSingleton = dir ? new FileKnowledgeBase(dir) : new NullKnowledgeBase();
+		const roots = resolveProviderKnowledgeBaseRoots(import.meta.url);
+		kbSingleton = roots.length > 0 ? new FileKnowledgeBase(roots) : new NullKnowledgeBase();
 	} catch {
 		kbSingleton = new NullKnowledgeBase();
 	}
