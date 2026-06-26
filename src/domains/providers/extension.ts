@@ -11,7 +11,7 @@ import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
-import { resolveProvidersModelsDir } from "./knowledge-base-path.js";
+import { resolveProviderKnowledgeBaseRoots } from "./knowledge-base-path.js";
 import { loadPluginRuntimes } from "./plugins.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
@@ -39,9 +39,9 @@ class NullKnowledgeBase implements KnowledgeBase {
 
 function loadKnowledgeBase(): KnowledgeBase {
 	try {
-		const dir = resolveProvidersModelsDir(import.meta.url);
-		if (!dir) return new NullKnowledgeBase();
-		return new FileKnowledgeBase(dir);
+		const roots = resolveProviderKnowledgeBaseRoots(import.meta.url);
+		if (roots.length === 0) return new NullKnowledgeBase();
+		return new FileKnowledgeBase(roots);
 	} catch (err) {
 		process.stderr.write(`[providers] knowledge base disabled: ${err instanceof Error ? err.message : String(err)}\n`);
 		return new NullKnowledgeBase();
