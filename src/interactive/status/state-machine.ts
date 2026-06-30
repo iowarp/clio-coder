@@ -253,6 +253,7 @@ const ABORT_SOURCE_LABELS: Record<RunAbortSource, string> = {
 	dispatch_abort: "dispatch abort",
 	dispatch_drain: "dispatch drain",
 	stream_cancel: "stream cancel",
+	loop_guard: "loop guard",
 };
 
 function runAbortDetail(event: RunAbortedStatusEvent): string | undefined {

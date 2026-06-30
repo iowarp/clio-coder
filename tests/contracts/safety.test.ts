@@ -68,6 +68,26 @@ describe("contracts/safety", () => {
 		if (assessment.kind === "ok") strictEqual(assessment.reason, "read_only_status_turn");
 	});
 
+	it("suppresses finish-contract advisories for informational how/what questions", () => {
+		const assessment = assessFinishContract({
+			// Completion vocabulary ("updated", "added", "changed") in a long
+			// explanation must not be read as a work claim when the user only asked
+			// how something works.
+			assistantText: "Here is how docs_search works: it added scoring, changed ranking, and updated the index.",
+			currentUserText: "how does docs_search work?",
+		});
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "informational_question_turn");
+	});
+
+	it("still advises when a work-request prompt claims done without evidence", () => {
+		const assessment = assessFinishContract({
+			assistantText: "Done. Implemented the parser and updated the tests.",
+			currentUserText: "implement the parser and fix the failing test",
+		});
+		strictEqual(assessment.kind, "advisory");
+	});
+
 	it("recognizes run_task verification-family scripts as finish-contract evidence", () => {
 		const assessment = assessFinishContract({
 			assistantText: "Implemented the change and tests passed.",

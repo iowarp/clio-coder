@@ -1264,17 +1264,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// Loop-guard visibility. The backend guard (engine/loop-guard.ts)
 	// emits over the bus instead of importing TUI code; this subscriber turns
 	// each block into a warn notice and, when the per-turn budget is exhausted,
-	// cancels the active turn with an error notice.
+	// stops the active turn with a durable closing message (cancel-with-reason)
+	// instead of leaving an empty aborted turn.
 	const unsubscribeLoopBlocked = deps.bus.on(BusChannels.LoopBlocked, (payload) => {
 		const evt = payload as LoopBlockedPayload | null | undefined;
 		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.repeatCount !== "number") return;
 		if (evt.interrupted) {
-			appendNotice(
-				"error",
-				`[loop-guard] agent stopped for looping: ${evt.tool} repeated ${evt.repeatCount}x; ${evt.blocksThisTurn} loop blocks this turn.`,
-				busNoticeSink,
-			);
-			deps.chat.cancel();
+			// Stop the runaway turn with a durable, visible closing message instead
+			// of the empty aborted turn a bare cancel leaves behind. The chat loop
+			// persists and renders it; the audit trail is tagged "loop_guard".
+			const blockWord = evt.blocksThisTurn === 1 ? "block" : "blocks";
+			deps.chat.cancel({
+				reason:
+					`[Clio Coder] loop guard stopped this turn: ${evt.tool} was called with identical arguments ` +
+					`${evt.repeatCount} times without new results (${evt.blocksThisTurn} loop ${blockWord}). I likely ` +
+					`already have enough to answer. Ask me to continue with a different approach, or narrow the request.`,
+				source: "loop_guard",
+				auditReason: `loop: ${evt.tool} repeated ${evt.repeatCount}x`,
+			});
 		} else {
 			appendNotice(
 				"warn",
@@ -1287,18 +1294,19 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// Tool-call budget visibility. The orchestrator loop guard counts every
 	// distinct tool call in a turn (the identical-call loop guard above misses
 	// near-duplicate sprays) and emits over the bus. The soft budget renders a
-	// warn nudge; the hard ceiling cancels the active turn with an error notice,
-	// matching the loop-budget interrupt path.
+	// warn nudge; the hard ceiling stops the active turn with a durable closing
+	// message, matching the loop-budget interrupt path.
 	const unsubscribeToolBudget = deps.bus.on(BusChannels.ToolBudgetExceeded, (payload) => {
 		const evt = payload as ToolBudgetExceededPayload | null | undefined;
 		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.callsThisTurn !== "number") return;
 		if (evt.interrupted) {
-			appendNotice(
-				"error",
-				`[loop-guard] agent stopped: ${evt.callsThisTurn} tool calls this turn reached the hard ceiling (${evt.hardCeiling}).`,
-				busNoticeSink,
-			);
-			deps.chat.cancel();
+			deps.chat.cancel({
+				reason:
+					`[Clio Coder] loop guard stopped this turn: ${evt.callsThisTurn} tool calls reached the per-turn ceiling ` +
+					`(${evt.hardCeiling}) without converging. Tell me a single concrete next step, or narrow the request.`,
+				source: "loop_guard",
+				auditReason: `tool-call ceiling: ${evt.callsThisTurn} calls`,
+			});
 		} else {
 			appendNotice(
 				"warn",

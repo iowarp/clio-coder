@@ -228,6 +228,10 @@ function inputMessages(input: AgentMessage | AgentMessage[]): AgentMessage[] {
 	return Array.isArray(input) ? input : [input];
 }
 
+function isAssistantMessageEntry(entry: SessionEntry): entry is Extract<SessionEntry, { kind: "message" }> {
+	return entry.kind === "message" && entry.role === "assistant";
+}
+
 describe("contracts/chat-loop compaction and terminal notices", () => {
 	it("runs post-tool compaction guard before an oversized continuation", async () => {
 		const entries: SessionEntry[] = [];
@@ -331,6 +335,96 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 		strictEqual(payload.promptCache?.input, 1100);
 		strictEqual(payload.promptCache?.backendVerdict, "small");
 		ok(panel.render(120).join("\n").includes("generation/output limit"));
+	});
+});
+
+describe("contracts/chat-loop loop-guard interrupt", () => {
+	it("stops with a durable closing turn and suppresses the empty aborted turn", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const aborts: Array<{ source?: string; reason?: string }> = [];
+		bus.on(BusChannels.RunAborted, (payload) => {
+			aborts.push(payload as { source?: string; reason?: string });
+		});
+		const REASON = "[Clio Coder] loop guard stopped this turn: docs_search was called with identical arguments 3 times.";
+		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				agent.state.messages.push(...inputMessages(input));
+				// Simulate the loop guard interrupting mid-turn while streaming.
+				holder.loop?.cancel({ reason: REASON, source: "loop_guard", auditReason: "loop: docs_search repeated 3x" });
+				// The abort surfaces an empty aborted assistant message; the loop must
+				// suppress it because the closing turn was already written.
+				const aborted = {
+					role: "assistant",
+					content: [],
+					stopReason: "aborted",
+					errorMessage: "Request was aborted.",
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(aborted);
+				await agent.emit({ type: "message_end", message: aborted });
+				await agent.emit({ type: "agent_end", messages: [aborted] });
+			}),
+		} as never);
+		holder.loop = loop;
+
+		await loop.submit("use docs_search and learn more");
+
+		const assistantEntries = entries.filter(isAssistantMessageEntry);
+		strictEqual(assistantEntries.length, 1, "exactly one assistant turn: the durable closing message");
+		const payload = assistantEntries[0]?.payload as { text?: string; stopReason?: string };
+		strictEqual(payload.text, REASON, "the closing turn carries the loop-stop reason");
+		ok(payload.stopReason !== "aborted", "the closing turn is not the empty aborted message");
+		const looped = aborts.find((evt) => evt.source === "loop_guard");
+		ok(looped, "a loop_guard RunAborted is audited, distinct from a user stream_cancel");
+		strictEqual(looped?.reason, "loop: docs_search repeated 3x");
+	});
+
+	it("keeps a bare operator cancel as an empty aborted turn", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const aborts: Array<{ source?: string }> = [];
+		bus.on(BusChannels.RunAborted, (payload) => {
+			aborts.push(payload as { source?: string });
+		});
+		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				agent.state.messages.push(...inputMessages(input));
+				holder.loop?.cancel();
+				const aborted = {
+					role: "assistant",
+					content: [],
+					stopReason: "aborted",
+					errorMessage: "Request was aborted.",
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(aborted);
+				await agent.emit({ type: "message_end", message: aborted });
+				await agent.emit({ type: "agent_end", messages: [aborted] });
+			}),
+		} as never);
+		holder.loop = loop;
+
+		await loop.submit("stop");
+
+		const assistantEntries = entries.filter(isAssistantMessageEntry);
+		strictEqual(assistantEntries.length, 1, "the empty aborted turn is preserved for a bare cancel");
+		strictEqual((assistantEntries[0]?.payload as { stopReason?: string }).stopReason, "aborted");
+		strictEqual(aborts.find((evt) => evt.source === "stream_cancel")?.source, "stream_cancel");
 	});
 });
 

@@ -189,14 +189,15 @@ export interface SafetyBlockedPayload {
 }
 
 /** Where a {@link BusChannels.RunAborted} event originated. */
-export type RunAbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel";
+export type RunAbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel" | "loop_guard";
 
 /**
  * Payload published on {@link BusChannels.RunAborted}. Dispatch emits
  * dispatch_abort/dispatch_drain with run lineage; the chat loop emits
- * stream_cancel with a human-readable reason. Subscribers must not collapse
- * the sources: a drained dispatch run and a user-cancelled stream are
- * different operator situations.
+ * stream_cancel for an operator Esc/Ctrl+C and loop_guard when the loop guard
+ * stops a runaway turn. Subscribers must not collapse the sources: a drained
+ * dispatch run, a user-cancelled stream, and a guard-stopped loop are different
+ * operator situations.
  */
 export interface RunAbortedPayload {
 	source: RunAbortSource;
@@ -211,6 +212,7 @@ const RUN_ABORT_SOURCES: ReadonlySet<string> = new Set<RunAbortSource>([
 	"dispatch_abort",
 	"dispatch_drain",
 	"stream_cancel",
+	"loop_guard",
 ]);
 
 export function isRunAbortedPayload(value: unknown): value is RunAbortedPayload {
