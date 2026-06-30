@@ -9,13 +9,19 @@
  *   node scripts/live-turns.mjs --prompts-file <path> [--session-name <tmux>]
  *   node scripts/live-turns.mjs --baseline      # built-in 6-turn baseline
  *
+ * --cwd points at the TARGET repo the agent operates on (defaults to the
+ * current directory). --clio-entry points at the built CLI entry to execute
+ * (defaults to this checkout's dist/cli/index.js), so the harness can drive
+ * the installed clio against an arbitrary clone without that clone owning a
+ * dist build of its own.
+ *
  * Prompts file: one prompt per line, blank lines and # comments skipped.
  * Prints the Clio session id on success so it can be fed to turn-report.mjs.
  */
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -28,7 +34,10 @@ const BASELINE_PROMPTS = [
 	"thanks, that makes sense",
 ];
 
+const OVERLAY_COMMANDS = ["/targets", "/model", "/settings", "/agents", "/skill", "/help"];
+
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const DEFAULT_CLIO_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
 
 /**
  * Resolve the Clio state dir through `clio paths --json` (the built dist in
@@ -46,7 +55,7 @@ function stateDir() {
 				stdio: ["ignore", "pipe", "ignore"],
 			});
 			const dirs = JSON.parse(raw);
-			if (typeof dirs.data === "string" && dirs.data.length > 0) return dirs.data;
+			if (typeof dirs.state === "string" && dirs.state.length > 0) return dirs.state;
 		} catch {
 			// Broken dist; fall through to the embedded resolution.
 		}
@@ -71,6 +80,8 @@ function parseArgs(argv) {
 		sessionName: "clio-live-turns",
 		turnTimeoutS: 600,
 		cwd: process.cwd(),
+		clioEntry: DEFAULT_CLIO_ENTRY,
+		captureDir: null,
 	};
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
@@ -79,9 +90,11 @@ function parseArgs(argv) {
 		else if (a === "--session-name") args.sessionName = argv[++i];
 		else if (a === "--turn-timeout") args.turnTimeoutS = Number(argv[++i]);
 		else if (a === "--cwd") args.cwd = argv[++i];
+		else if (a === "--clio-entry") args.clioEntry = argv[++i];
+		else if (a === "--capture-dir") args.captureDir = argv[++i];
 		else if (a === "--help" || a === "-h") {
 			console.log(
-				"usage: live-turns.mjs (--baseline | --prompts-file <path>) [--session-name <tmux>] [--turn-timeout <s>] [--cwd <path>]",
+				"usage: live-turns.mjs (--baseline | --prompts-file <path>) [--session-name <tmux>] [--turn-timeout <s>] [--cwd <path>] [--clio-entry <path>] [--capture-dir <path>]",
 			);
 			process.exit(0);
 		} else {
@@ -98,6 +111,23 @@ function tmux(args, opts = {}) {
 
 function sleep(ms) {
 	return new Promise((r) => setTimeout(r, ms));
+}
+
+let snapshotSeq = 0;
+
+function snapshotPane(sessionName, captureDir, label) {
+	if (!captureDir) return;
+	mkdirSync(captureDir, { recursive: true });
+	snapshotSeq += 1;
+	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+	const safeLabel = label.replace(/[^a-z0-9-]+/gi, "-").replace(/^-+|-+$/g, "");
+	const file = join(captureDir, `${String(snapshotSeq).padStart(3, "0")}-${stamp}-${safeLabel}.txt`);
+	try {
+		const pane = tmux(["capture-pane", "-p", "-t", sessionName]);
+		writeFileSync(file, pane);
+	} catch {
+		// pane not available; skip this snapshot
+	}
 }
 
 function readLedgerEntries(ledgerPath) {
@@ -117,10 +147,20 @@ function readLedgerEntries(ledgerPath) {
 
 const TERMINAL_STOP = new Set(["stop", "length", "error", "aborted"]);
 
+// write_plan/write_review set ToolResult.terminate=true so pi-agent-core
+// skips the follow-up LLM call; that call would otherwise have produced the
+// assistant message carrying the terminal stopReason this function looks
+// for. A turn that ends on one of these tools never gets that message, so
+// it is recognized here as settled once its tool_result is the last entry
+// for the turn (see FINDINGS.md F2).
+const TERMINAL_TOOLS = new Set(["write_plan", "write_review"]);
+
 function turnState(entries, turnIndex) {
 	let users = 0;
 	let sawNthUser = false;
 	let settled = null;
+	let lastToolCallName = null;
+	let sawTerminalToolResult = false;
 	for (const e of entries) {
 		if (e?.kind === "message" && e?.role === "user") {
 			users += 1;
@@ -128,10 +168,20 @@ function turnState(entries, turnIndex) {
 			continue;
 		}
 		if (!sawNthUser || users !== turnIndex) continue;
-		if (e?.kind === "message" && e?.role === "assistant" && TERMINAL_STOP.has(e?.payload?.stopReason)) {
-			settled = e.payload.stopReason;
+		if (e?.kind === "message" && e?.role === "tool_call" && typeof e?.payload?.name === "string") {
+			lastToolCallName = e.payload.name;
+			continue;
+		}
+		if (e?.kind === "message" && e?.role === "tool_result") {
+			sawTerminalToolResult = lastToolCallName !== null && TERMINAL_TOOLS.has(lastToolCallName);
+			continue;
+		}
+		if (e?.kind === "message" && e?.role === "assistant") {
+			sawTerminalToolResult = false;
+			if (TERMINAL_STOP.has(e?.payload?.stopReason)) settled = e.payload.stopReason;
 		}
 	}
+	if (!settled && sawTerminalToolResult) settled = "stop";
 	return { users, settled };
 }
 
@@ -158,7 +208,7 @@ async function main() {
 	const hash = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
 	const sessionsRoot = join(stateDir(), "sessions", hash);
 	const before = new Set(existsSync(sessionsRoot) ? readdirSync(sessionsRoot) : []);
-	const cliEntry = join(cwd, "dist", "cli", "index.js");
+	const cliEntry = resolve(args.clioEntry);
 	if (!existsSync(cliEntry)) {
 		console.error(`built CLI not found at ${cliEntry}; run npm run build first`);
 		process.exit(1);
@@ -199,6 +249,7 @@ async function main() {
 		process.exit(1);
 	}
 	await sleep(2000);
+	snapshotPane(args.sessionName, args.captureDir, "boot-idle");
 
 	let sessionDir = null;
 	let sessionId = null;
@@ -211,6 +262,8 @@ async function main() {
 		tmux(["send-keys", "-t", args.sessionName, "-l", "--", prompt]);
 		await sleep(300);
 		tmux(["send-keys", "-t", args.sessionName, "Enter"]);
+		await sleep(3000);
+		snapshotPane(args.sessionName, args.captureDir, `turn-${n}-mid-stream`);
 		if (!sessionDir) {
 			const sessionDeadline = Date.now() + 30_000;
 			while (Date.now() < sessionDeadline) {
@@ -254,6 +307,7 @@ async function main() {
 			break;
 		}
 		console.log(`turn ${n}: settled (${state.settled})`);
+		snapshotPane(args.sessionName, args.captureDir, `turn-${n}-settled-${state.settled}`);
 		if (state.settled === "error" || state.settled === "aborted") {
 			console.error(`turn ${n}: terminal state ${state.settled}; stopping`);
 			failed = true;
@@ -262,6 +316,20 @@ async function main() {
 		await sleep(1500); // let post-turn writes (usage, snapshots) flush
 	}
 
+	if (!failed) {
+		for (const overlay of OVERLAY_COMMANDS) {
+			console.log(`overlay: ${overlay}`);
+			tmux(["send-keys", "-t", args.sessionName, "-l", "--", overlay]);
+			await sleep(300);
+			tmux(["send-keys", "-t", args.sessionName, "Enter"]);
+			await sleep(800);
+			snapshotPane(args.sessionName, args.captureDir, `overlay-${overlay.slice(1)}`);
+			tmux(["send-keys", "-t", args.sessionName, "Escape"]);
+			await sleep(300);
+		}
+	}
+
+	snapshotPane(args.sessionName, args.captureDir, "pre-exit");
 	try {
 		tmux(["send-keys", "-t", args.sessionName, "-l", "--", "/exit"]);
 		await sleep(300);
