@@ -30,6 +30,15 @@ export interface HeadlessMainAgentOptions {
 interface HeadlessMainAgentResult {
 	text: string;
 	error: string | null;
+	/**
+	 * True when the most recent tool result ended the turn via
+	 * `ToolResult.terminate` (write_plan, write_review) with no error. These
+	 * tools are the whole turn by design: the agent loop skips the follow-up
+	 * call that would otherwise produce assistant text, so an empty `text`
+	 * here is the turn completing exactly as intended, not a missing
+	 * response.
+	 */
+	sawTerminatingToolResult: boolean;
 }
 
 function assistantText(message: AgentMessage | undefined): string {
@@ -51,16 +60,20 @@ function assistantError(message: AgentMessage | undefined): string | null {
 }
 
 function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult): HeadlessMainAgentResult {
+	if (event.type === "tool_execution_end") {
+		const terminate = (event.result as { terminate?: boolean } | undefined)?.terminate === true;
+		return { ...current, sawTerminatingToolResult: terminate && !event.isError };
+	}
 	if (event.type !== "message_end") return current;
 	const message = event.message;
 	const error = assistantError(message);
-	if (error) return { text: "", error };
+	if (error) return { ...current, text: "", error };
 	const text = assistantText(message).trimEnd();
 	if (text.length === 0) return current;
 	if (isDiagnosticAssistantText(text) && current.text.length > 0 && !isDiagnosticAssistantText(current.text)) {
 		return current;
 	}
-	return { text, error: null };
+	return { ...current, text, error: null };
 }
 
 function isDiagnosticAssistantText(text: string): boolean {
@@ -69,7 +82,7 @@ function isDiagnosticAssistantText(text: string): boolean {
 
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
 	const mode = options.mode ?? "text";
-	let result: HeadlessMainAgentResult = { text: "", error: null };
+	let result: HeadlessMainAgentResult = { text: "", error: null, sawTerminatingToolResult: false };
 	let jsonHeaderWritten = false;
 	const writeJsonHeader = (): void => {
 		if (jsonHeaderWritten) return;
@@ -120,6 +133,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		return 1;
 	}
 	if (result.text.length === 0) {
+		if (result.sawTerminatingToolResult) {
+			await flushRawStdout();
+			return 0;
+		}
 		process.stderr.write("clio run: no assistant response\n");
 		return 1;
 	}

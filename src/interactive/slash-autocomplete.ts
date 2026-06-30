@@ -93,8 +93,15 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const currentLine = lines[cursorLine] ?? "";
 		const textBeforeCursor = currentLine.slice(0, cursorCol);
 
-		// Check if we are typing the canonical /skill selector/invocation command.
-		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)?([a-zA-Z0-9_-]*)$/i);
+		// Check if we are typing the canonical /skill invocation command (a name
+		// separator after /skill). The bare "/skill" selector with nothing after
+		// it must NOT match here: matching would offer every installed skill as
+		// an autocomplete suggestion with the first one pre-selected, and the
+		// editor's autocomplete-confirm binding shares the Enter key with
+		// submit, so submitting the bare selector would silently commit
+		// whichever skill happened to sort first instead of opening the Skills
+		// Hub (see FINDINGS.md F1).
+		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)([a-zA-Z0-9_-]*)$/i);
 		if (skillMatch && this.listSkills) {
 			const typedPrefix = skillMatch[1]?.toLowerCase() ?? "";
 			const { installed, marketplace } = this.listSkills();
@@ -146,7 +153,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const textBeforeCursor = currentLine.slice(0, cursorCol);
 		const textAfterCursor = currentLine.slice(cursorCol);
 
-		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)?[a-zA-Z0-9_-]*$/i);
+		const skillMatch = textBeforeCursor.match(/^\s*\/skill(?::|\s+)[a-zA-Z0-9_-]*$/i);
 		if (skillMatch && (item.value.startsWith("skill:") || item.value.startsWith("marketplace:"))) {
 			const skillName = item.value.slice(item.value.indexOf(":") + 1);
 			const newLine = `/skill:${skillName} ${textAfterCursor}`;
