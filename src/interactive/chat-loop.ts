@@ -1173,6 +1173,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// backend reused the session prefix; later calls in a tool loop are
 		// trivially warm.
 		let runFirstCallVerdict: BackendCacheVerdict | null = null;
+		// write_plan/write_review set ToolResult.terminate=true so the agent
+		// loop skips the follow-up LLM call that would otherwise produce the
+		// assistant message carrying the turn's terminal stopReason. Track the
+		// most recent terminating tool result here; a real assistant
+		// message_end (the follow-up call did happen, e.g. another tool in the
+		// same batch did not also set terminate) clears it. If it is still set
+		// at agent_end, no terminal ledger row was ever written for this turn,
+		// so one is synthesized below.
+		let pendingTerminalToolResult: { toolCallId: string; toolName: string } | null = null;
 
 		handle.agent.subscribe(async (event) => {
 			const eventAt = Date.now();
@@ -1197,6 +1206,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				apiCallStartedAt = null;
 				apiCallFirstDeltaAt = null;
 				runFirstCallVerdict = null;
+				pendingTerminalToolResult = null;
 			}
 			if (publicEvent?.type === "message_start" && publicEvent.message?.role === "assistant") {
 				apiCallStartedAt = eventAt;
@@ -1293,6 +1303,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (enrichedEvent.type === "message_end") {
 				appendQueuedUserTurn(enrichedEvent.message);
 				const isAssistant = enrichedEvent.message?.role === "assistant";
+				if (isAssistant) pendingTerminalToolResult = null;
 				const timing: AssistantCallTiming | null =
 					isAssistant && apiCallStartedAt !== null
 						? {
@@ -1320,8 +1331,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (enrichedEvent.type === "tool_execution_end") {
 				appendToolResultTurn(enrichedEvent);
+				pendingTerminalToolResult =
+					(enrichedEvent.result as { terminate?: boolean } | undefined)?.terminate === true
+						? { toolCallId: enrichedEvent.toolCallId, toolName: enrichedEvent.toolName }
+						: null;
 			}
 			if (enrichedEvent.type === "agent_end") {
+				if (pendingTerminalToolResult && deps.session) {
+					const terminal = pendingTerminalToolResult;
+					pendingTerminalToolResult = null;
+					const turn = deps.session.append({
+						kind: "assistant",
+						parentId: lastTurnId,
+						payload: {
+							text: "",
+							stopReason: "stop",
+							terminalToolResult: true,
+							toolCallId: terminal.toolCallId,
+							toolName: terminal.toolName,
+						},
+					});
+					lastTurnId = turn.id;
+				}
 				flushReconciledSnapshot();
 				fireTurnEnd(localRuntime, enrichedEvent.messages);
 			}

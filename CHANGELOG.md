@@ -174,6 +174,55 @@ interfaces.
   turn. The underlying gap (no terminal ledger entry is ever written for a
   `terminate: true` tool result) is a session-wide ledger-completion gap,
   not specific to this harness, and is still open.
+- Bare `/skill` (the Skills Hub selector, typed with nothing after it) no
+  longer risks invoking the wrong skill on submit. The skill-name completion
+  regex in `createSlashCommandAutocompleteProvider`
+  (`src/interactive/slash-autocomplete.ts`) treated the separator after
+  `/skill` as optional, so a bare `/skill` matched with an empty captured
+  prefix and the autocomplete offered every installed skill with the first
+  one pre-selected. The terminal-engine editor commits the highlighted
+  autocomplete item on the same Enter key that submits a line, so pressing
+  Enter on a bare `/skill` silently committed whichever skill sorted first
+  into the editor (for example `/skill:arxiv-literature`) instead of opening
+  the Skills Hub, and any text typed immediately afterward landed inside
+  that fabricated invocation's task field. The separator (`:` or whitespace)
+  is now required before the skill-name completion branch activates, so a
+  bare `/skill` falls through to the generic command suggestion (a single,
+  harmless self-match on the `/skill` command) and opens the Skills Hub on
+  the first Enter, the same as `/model`, `/targets`, `/settings`, `/agents`,
+  and `/help` already do. `/skill:name`, `/skill:`, and `/skill name` keep
+  listing and filtering installed skills exactly as before.
+- `scripts/turn-report.mjs` had the same `dirs.data`-instead-of-`dirs.state`
+  bug as `scripts/live-turns.mjs` above, independently found while
+  re-verifying the `/skill` fix: it could never locate a session ledger for
+  a checkout with a local `dist` build. Fixed the same way.
+- A turn that ends because `write_plan` or `write_review` wrote its artifact
+  (`ToolResult.terminate = true`) now gets a real terminal ledger entry and a
+  correct headless exit code. These tools are deliberately the whole turn:
+  pi-agent-core skips the follow-up LLM call that would otherwise produce the
+  assistant message carrying the turn's `stopReason`, so no ledger row ever
+  marked the turn as settled, and headless `clio run`, which only derives its
+  result from assistant `message_end` events, saw no text and reported
+  `clio run: no assistant response` with exit code 1 even though the tool had
+  done real, successful work (confirmed live: a model asked to call
+  `write_plan` and nothing else wrote a real `PLAN.md` and still exited 1).
+  The chat loop (`src/interactive/chat-loop.ts`) now tracks the most recent
+  terminating tool result across the `tool_execution_end`/`message_end`
+  events of a run; if it is still pending when `agent_end` fires (no real
+  assistant message followed), it synthesizes a contentless
+  `kind: "assistant"`, `stopReason: "stop"` ledger row tagged
+  `terminalToolResult: true`. The synthesized row is never added to the
+  agent's in-memory message history or sent to a provider, so the
+  byte-stable prompt/cache invariant is unaffected, and chat replay already
+  treats a contentless, non-`length` assistant row as a no-op, so nothing
+  new renders in the transcript. Headless mode
+  (`src/cli/modes/print.ts`) separately now treats a turn that ends on a
+  successful terminating tool result, with no assistant text at all, as
+  success (exit 0, empty output) instead of an error, since the written
+  artifact is the real output of that turn. Re-verified live against the
+  graphify battletest clone: the session ledger now ends the `write_plan`
+  turn with `stopReason: "stop"` instead of nothing, and
+  `clio run "call write_plan and nothing else"` now exits 0 instead of 1.
 
 
 ## 0.2.6 - 2026-06-24

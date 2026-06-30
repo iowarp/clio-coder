@@ -48,7 +48,7 @@ function stateDir() {
 				stdio: ["ignore", "pipe", "ignore"],
 			});
 			const dirs = JSON.parse(raw);
-			if (typeof dirs.data === "string" && dirs.data.length > 0) return dirs.data;
+			if (typeof dirs.state === "string" && dirs.state.length > 0) return dirs.state;
 		} catch {
 			// Broken dist; fall through to the embedded resolution.
 		}
