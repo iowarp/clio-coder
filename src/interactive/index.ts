@@ -96,6 +96,12 @@ import { buildFooterDashboard, type FooterDashboardPanel } from "./footer/dashbo
 import { classifyNoticeLevel, createNotificationCenter } from "./footer/notifications.js";
 import { createKeybindingManager } from "./keybinding-manager.js";
 import { buildLayout } from "./layout.js";
+import {
+	loopBlockedAuditReason,
+	loopBlockedStopReason,
+	toolBudgetAuditReason,
+	toolBudgetStopReason,
+} from "./loop-guard-interrupt.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
@@ -1272,15 +1278,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (evt.interrupted) {
 			// Stop the runaway turn with a durable, visible closing message instead
 			// of the empty aborted turn a bare cancel leaves behind. The chat loop
-			// persists and renders it; the audit trail is tagged "loop_guard".
-			const blockWord = evt.blocksThisTurn === 1 ? "block" : "blocks";
+			// persists and renders it; the audit trail is tagged "loop_guard". The
+			// message text is shared with the headless/ACP subscriber.
 			deps.chat.cancel({
-				reason:
-					`[Clio Coder] loop guard stopped this turn: ${evt.tool} was called with identical arguments ` +
-					`${evt.repeatCount} times without new results (${evt.blocksThisTurn} loop ${blockWord}). I likely ` +
-					`already have enough to answer. Ask me to continue with a different approach, or narrow the request.`,
+				reason: loopBlockedStopReason(evt),
 				source: "loop_guard",
-				auditReason: `loop: ${evt.tool} repeated ${evt.repeatCount}x`,
+				auditReason: loopBlockedAuditReason(evt),
 			});
 		} else {
 			appendNotice(
@@ -1301,11 +1304,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.callsThisTurn !== "number") return;
 		if (evt.interrupted) {
 			deps.chat.cancel({
-				reason:
-					`[Clio Coder] loop guard stopped this turn: ${evt.callsThisTurn} tool calls reached the per-turn ceiling ` +
-					`(${evt.hardCeiling}) without converging. Tell me a single concrete next step, or narrow the request.`,
+				reason: toolBudgetStopReason(evt),
 				source: "loop_guard",
-				auditReason: `tool-call ceiling: ${evt.callsThisTurn} calls`,
+				auditReason: toolBudgetAuditReason(evt),
 			});
 		} else {
 			appendNotice(
