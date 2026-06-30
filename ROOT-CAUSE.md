@@ -47,6 +47,17 @@ cancelled stream"` at 16:34:17 / 16:35:38 / 16:39:12. The user had to ask
   / "user cancelled stream", indistinguishable from a real operator cancel.
   Fixed by P3.
 
+- **F5 (a) harness, headless/ACP non-termination (found during live re-test).**
+  Driving a live `clio run` against the model reproduced the loop and reached
+  200+ blocked `docs_search` attempts in one turn (hard ceiling 40 ignored)
+  before a wall-clock timeout. Only the interactive TUI subscribed to the
+  loop-guard interrupt bus events and aborted; `src/entry/orchestrator.ts`
+  registered the per-turn budgets but wired no interrupt-to-abort on the headless
+  or ACP branches and passed no lifetime `toolCallCap`. Pre-existing (the commit
+  for F1-F4 did not touch `orchestrator.ts`). Fixed by P5: a shared
+  `subscribeLoopGuardStop` helper wires the same interrupt-to-stop path on the
+  operatorless surfaces.
+
 Ruled out with evidence: no malformed qwen tool calls (all 268 audited calls
 executed); no context/compaction overflow; no fleet involvement (`dispatch
 list:true` only; `runs.json` shows no new runs); thinking leakage is a
@@ -64,7 +75,11 @@ zero in the failing session).
   `src/interactive/status/state-machine.ts`: new `loop_guard` abort source.
 - **P4** `src/domains/safety/finish-contract.ts`:
   `isInformationalQuestionPrompt` gate (`informational_question_turn`).
+- **P5** `src/interactive/loop-guard-interrupt.ts` (new shared helper),
+  `src/entry/orchestrator.ts` (headless + ACP branches), `src/interactive/index.ts`
+  (interactive reuses the shared message helpers): wire the interrupt-to-stop
+  path on the operatorless surfaces.
 
 Tests: `tests/contracts/chat-loop.test.ts`, `tests/contracts/loop-guard.test.ts`,
-`tests/contracts/safety.test.ts`. Gate: `npm run ci` and
-`npm run check:boundaries` pass clean.
+`tests/contracts/loop-guard-interrupt.test.ts`, `tests/contracts/safety.test.ts`.
+Gate: `npm run ci` and `npm run check:boundaries` pass clean.

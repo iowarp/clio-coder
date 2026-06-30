@@ -102,6 +102,17 @@ interfaces.
 
 ### Fixed
 
+- Headless `clio run` and ACP sessions now stop on a loop-guard interrupt
+  instead of spinning until an external timeout. Previously only the interactive
+  TUI subscribed to the loop-block / tool-call-ceiling bus events and aborted the
+  run; on the operatorless surfaces the `block_tool` effect blocked each call
+  while the agent loop kept iterating, so a degenerate local model that fell into
+  an identical-call loop never terminated (a live `clio run` against a 35B local
+  model reached 200+ blocked tool-call attempts in one turn before a wall-clock
+  timeout). A shared `subscribeLoopGuardStop` helper now wires the same
+  interrupt-to-stop path on the headless and ACP branches, so the run ends with
+  the same durable closing turn the interactive surface produces, and the
+  closing-message text is shared so the three surfaces never drift.
 - A loop-guard interrupt no longer ends the turn with an empty aborted message.
   When the per-turn loop-block budget or the tool-call hard ceiling stops a
   runaway turn, the chat loop now writes a durable, visible assistant message

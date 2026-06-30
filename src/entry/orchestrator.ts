@@ -107,6 +107,7 @@ import {
 	formatPlatformKeybindingNotice,
 	validateKeybindings,
 } from "../interactive/keybinding-manager.js";
+import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
@@ -834,6 +835,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// note in src/engine/acp/server.ts). The external-divergence and
 		// target-removed notices therefore go to the session ledger as `custom`
 		// entries, where /resume and session tooling can surface them.
+		// ACP is operatorless too: bound a runaway turn with the shared
+		// interrupt->stop subscriber, the same way the headless path does.
+		const unsubscribeAcpLoopGuardStop = subscribeLoopGuardStop(bus, chat);
 		const unsubscribeAcpRoutingNotices = bus.on(BusChannels.ConfigNextTurn, (payload) => {
 			const evt = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
 			if (!evt?.settings || !Array.isArray(evt.diff?.nextTurn)) return;
@@ -870,10 +874,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 		} finally {
 			unsubscribeAcpRoutingNotices();
+			unsubscribeAcpLoopGuardStop();
 		}
 	}
 
 	if (options.headless) {
+		// Operatorless: there is no TUI subscriber to turn a loop-guard interrupt
+		// into a run stop, so a degenerate local model would spin until an
+		// external timeout (each call blocked, the agent loop never aborted). Wire
+		// the shared interrupt->stop subscriber so the run ends with the same
+		// durable closing turn the interactive surface produces.
+		const unsubscribeLoopGuardStop = subscribeLoopGuardStop(bus, chat);
 		const headlessPermissionReason =
 			"clio run cannot confirm permission requests; rerun interactively to approve this action.";
 		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision) => {
@@ -917,6 +928,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 		} finally {
 			unsubscribeHeadlessPermission();
+			unsubscribeLoopGuardStop();
 		}
 	}
 
