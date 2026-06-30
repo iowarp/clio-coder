@@ -156,6 +156,24 @@ interfaces.
   budget cancels a turn. Workers are unaffected: they keep relying on the
   lifetime `CLIO_MAX_TOOL_CALLS` cap. The budget is delivered dynamically through
   the effect machinery, so the static system-prompt prefix stays byte-stable.
+- `scripts/live-turns.mjs` (the live-turn measurement harness) now resolves the
+  Clio state directory correctly. `stateDir()` read `dirs.data` from
+  `clio paths --json` instead of `dirs.state`, so every run against a checkout
+  with a local `dist` build polled the data directory for the session ledger
+  and never found it, failing every run with "no session directory appeared
+  after the first submit" even though the TUI turn completed normally. The
+  harness also gained `--clio-entry` (drive the installed clio against an
+  arbitrary target repo via `--cwd`, instead of requiring `dist` inside the
+  target) and `--capture-dir` (timestamped `capture-pane` snapshots at boot,
+  mid-turn, on settle, through each of the six overlay commands, and before
+  exit), in support of the v0.2.7 battletest. Its turn-settle detection also
+  now recognizes a `write_plan`/`write_review`-terminated turn as settled:
+  these tools set `terminate: true` and skip the assistant message that
+  would otherwise carry the terminal `stopReason` the harness polls for, so
+  the harness previously waited out the full turn timeout on every such
+  turn. The underlying gap (no terminal ledger entry is ever written for a
+  `terminate: true` tool result) is a session-wide ledger-completion gap,
+  not specific to this harness, and is still open.
 
 
 ## 0.2.6 - 2026-06-24

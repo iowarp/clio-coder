@@ -21,6 +21,13 @@ NEXT-SESSION.md
 CODEX.md
 CLAUDE.md
 
+# Battletest session tracking (local working notes, not shipped product docs).
+BATTLETEST.md
+FINDINGS.md
+MODEL-CATALOG.md
+TOOL-SUITE.md
+captures/
+
 # Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
 docs/.superpowers/
 .fallow
