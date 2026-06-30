@@ -102,6 +102,34 @@ interfaces.
 
 ### Fixed
 
+- A loop-guard interrupt no longer ends the turn with an empty aborted message.
+  When the per-turn loop-block budget or the tool-call hard ceiling stops a
+  runaway turn, the chat loop now writes a durable, visible assistant message
+  that states why it stopped (the looping tool and repeat count, or the ceiling
+  it hit) and suppresses the hollow "request aborted" turn the abort would
+  otherwise leave behind. Previously the operator saw only a transient notice and
+  an empty turn, so a session that hit the guard returned nothing and the user
+  had to ask "what happened?". The cancel path takes an optional reason/source so
+  the same seam serves both a bare operator Esc/Ctrl+C and a system-initiated
+  loop stop.
+- Loop-guard interrupts are now audited under a distinct `loop_guard` abort
+  source instead of being recorded as `stream_cancel` ("user cancelled stream").
+  A guard-stopped runaway turn and a real operator cancel were previously
+  indistinguishable in `state/audit`, which made post-hoc root-causing rely on
+  cross-referencing the transcript.
+- The identical-call loop detector trips sooner on weak local models. The
+  verbatim-repeat threshold drops from five to three (`loop-detector.ts`) and the
+  per-turn loop-block budget from three to two (`loop-guard.ts`), bounding a
+  degenerate identical-call loop to about four calls instead of seven before the
+  turn is stopped. Distinct canonical arguments returning identical results are
+  never productive past a couple of tries, so the tighter bound carries little
+  false-positive risk while cutting the dead time a stuck model burns.
+- The finish-contract advisory no longer fires on informational answers. A
+  "how/what/why" question with no work request now suppresses the
+  "no validation evidence" advisory (`informational_question_turn`), so a long
+  explanation that incidentally trips the completion-claim regex ("added",
+  "updated", "changed") is not flagged as an unvalidated work claim. Prompts that
+  request a code or file change, or ask to run validation, are unaffected.
 - The interactive orchestrator now enforces a per-turn tool-call budget, closing
   a gap where a weak local model asked to "audit the repo" sprayed roughly 40
   distinct bash commands over six minutes before the loop guard stopped it. The

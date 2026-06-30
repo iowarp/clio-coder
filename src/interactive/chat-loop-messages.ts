@@ -127,6 +127,27 @@ export function isLengthStopAssistantMessage(message: AgentMessage | undefined):
 	);
 }
 
+/**
+ * An aborted assistant message with no rendered content: empty text and no
+ * structured tool call. This is what `agent.abort()` leaves behind when the
+ * model is interrupted between deltas. The chat loop suppresses it after a
+ * loop-guard interrupt has already written a durable closing turn.
+ */
+export function isEmptyAbortedAssistantMessage(message: AgentMessage | undefined): boolean {
+	if (
+		!message ||
+		typeof message !== "object" ||
+		message === null ||
+		!("role" in message) ||
+		message.role !== "assistant"
+	) {
+		return false;
+	}
+	if ((message as { stopReason?: unknown }).stopReason !== "aborted") return false;
+	if (extractText(message).trim().length > 0) return false;
+	return !hasStructuredToolCall(message);
+}
+
 function lengthStopMetadata(message: AgentMessage): Record<string, unknown> {
 	const usage = (message as { usage?: unknown }).usage;
 	const metadata: Record<string, unknown> = {

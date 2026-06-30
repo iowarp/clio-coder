@@ -20,7 +20,12 @@ export interface LoopVerdict {
 }
 
 const DEFAULT_WINDOW_MS = 30_000;
-const DEFAULT_MAX_REPEATS = 5;
+// Trip after three identical calls in the window. Identical canonical args
+// return identical results, so a third verbatim repeat is never productive;
+// weak local models degenerate into these loops quickly, and a lower bound
+// stops them before they burn a turn. Callers that need a different cadence
+// pass `maxRepeats` explicitly.
+const DEFAULT_MAX_REPEATS = 3;
 
 export function createLoopState(opts?: { windowMs?: number; maxRepeats?: number }): LoopDetectorState {
 	const windowMs = opts?.windowMs ?? DEFAULT_WINDOW_MS;

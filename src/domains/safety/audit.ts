@@ -82,7 +82,7 @@ export interface PermissionAuditRecord {
 	requestedBy?: string;
 }
 
-export type AbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel";
+export type AbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel" | "loop_guard";
 
 export interface AbortAuditRecord {
 	kind: "abort";

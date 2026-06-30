@@ -75,6 +75,14 @@ function guardedRegistry(input: {
 }
 
 describe("unified loop guard registration", () => {
+	it("pins the tuned defaults that bound a runaway local-model turn", () => {
+		// Identical-call loops on weak local models must trip fast: three verbatim
+		// repeats to block, two blocks to interrupt. Raising these regresses the
+		// runaway-turn hardening that motivated them.
+		strictEqual(LOOP_THRESHOLD, 3, "identical-call detector trips on the third repeat");
+		strictEqual(INTERACTIVE_LOOP_BLOCK_BUDGET, 2, "two loop blocks per turn before interrupt");
+	});
+
 	it("blocks the identical call at the detector threshold and recovers with house-style feedback", async () => {
 		const safety = testSafety();
 		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
@@ -119,15 +127,20 @@ describe("unified loop guard registration", () => {
 			const verdict = await registry.invoke(call, { turnId: "t1" });
 			if (verdict.kind === "blocked") lastReason = verdict.reason;
 		}
+		// One bus event per block; the last block in the turn exhausts the budget
+		// and interrupts. Asserted against the constant so the cadence stays
+		// correct if the budget is retuned.
 		strictEqual(events.length, INTERACTIVE_LOOP_BLOCK_BUDGET, "one bus event per block");
-		strictEqual(events[0]?.tool, ToolNames.Read);
-		strictEqual(events[0]?.blocksThisTurn, 1);
-		strictEqual(events[0]?.interrupted, false);
-		strictEqual(events[1]?.blocksThisTurn, 2);
-		strictEqual(events[1]?.interrupted, false);
-		strictEqual(events[2]?.blocksThisTurn, 3);
-		strictEqual(events[2]?.interrupted, true, "third block in a turn exhausts the budget");
-		strictEqual(events[2]?.turnId, "t1");
+		events.forEach((event, index) => {
+			strictEqual(event.tool, ToolNames.Read, `block ${index + 1} names the tool`);
+			strictEqual(event.blocksThisTurn, index + 1, `block ${index + 1} counts up`);
+			strictEqual(event.turnId, "t1", `block ${index + 1} carries the turn id`);
+			strictEqual(
+				event.interrupted,
+				index + 1 === INTERACTIVE_LOOP_BLOCK_BUDGET,
+				`block ${index + 1} interrupts only at the budget`,
+			);
+		});
 		ok(lastReason.includes("stopped"), "final reason states the agent is being stopped");
 	});
 

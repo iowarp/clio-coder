@@ -21,7 +21,12 @@ export interface FinishContractEvidence {
 export type FinishContractAssessment =
 	| {
 			kind: "ok";
-			reason: "no_completion_claim" | "validation_evidence" | "explicit_limitation" | "read_only_status_turn";
+			reason:
+				| "no_completion_claim"
+				| "validation_evidence"
+				| "explicit_limitation"
+				| "read_only_status_turn"
+				| "informational_question_turn";
 			evidence: ReadonlyArray<FinishContractEvidence>;
 	  }
 	| {
@@ -78,6 +83,13 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 	if (userText !== null && isReadOnlyStatusRecallPrompt(userText)) {
 		return { kind: "ok", reason: "read_only_status_turn", evidence: [] };
 	}
+	// An informational answer to a "how/what/why" question is not a work claim:
+	// completion vocabulary ("updated", "added", "changed") routinely appears in
+	// an explanation, so demanding validation evidence there is noise. A work
+	// request in the same prompt disqualifies this branch.
+	if (userText !== null && isInformationalQuestionPrompt(userText)) {
+		return { kind: "ok", reason: "informational_question_turn", evidence: [] };
+	}
 
 	const evidence = collectRecentEvidence(
 		sessionEntries,
@@ -119,10 +131,32 @@ export function isReadOnlyStatusRecallPrompt(text: string): boolean {
 		/\bstatus\s+check\b/.test(normalized) ||
 		/\balignment\b/.test(normalized);
 	if (!readOnlySignal) return false;
-	const workRequest =
+	return !hasWorkRequest(normalized);
+}
+
+/**
+ * A prompt that asks for an explanation rather than a change: it leads with an
+ * interrogative ("how/what/why/...") or explanation verb, or ends in a question
+ * mark, and carries no work request. Used to suppress the finish-contract
+ * advisory when a long informational answer trips the completion regex.
+ */
+export function isInformationalQuestionPrompt(text: string): boolean {
+	const normalized = text.trim().toLowerCase();
+	if (normalized.length === 0) return false;
+	if (hasWorkRequest(normalized)) return false;
+	const leadsWithQuestion =
+		/^(?:how|what|why|when|where|which|who|whose|whom|does|do|did|is|are|can|could|should|would|explain|describe|summarize|compare|tell\s+me\s+about|walk\s+me\s+through|show\s+me\s+how)\b/.test(
+			normalized,
+		);
+	return leadsWithQuestion || /\?\s*$/.test(normalized);
+}
+
+/** True when the prompt asks for a code or file change, or to run validation. */
+function hasWorkRequest(normalized: string): boolean {
+	return (
 		/\b(implement|fix|resolve|change|modify|edit|write|create|delete|remove|add|build|ship)\b/.test(normalized) ||
-		/\b(run|execute)\s+(tests?|lint|typecheck|build|validation)\b/.test(normalized);
-	return !workRequest;
+		/\b(run|execute)\s+(tests?|lint|typecheck|build|validation)\b/.test(normalized)
+	);
 }
 
 function collectRecentEvidence(

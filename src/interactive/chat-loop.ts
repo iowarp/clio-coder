@@ -1,4 +1,9 @@
-import { BusChannels, type ContextPrunedPayload, type ContextWarningPayload } from "../core/bus-events.js";
+import {
+	BusChannels,
+	type ContextPrunedPayload,
+	type ContextWarningPayload,
+	type RunAbortSource,
+} from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy } from "../core/skill-activation.js";
@@ -85,6 +90,7 @@ import {
 	fallbackIdentityPrompt,
 	hasPersistableAssistantContent,
 	hasStructuredToolCall,
+	isEmptyAbortedAssistantMessage,
 	isLengthStopAssistantMessage,
 	notConfiguredNotice,
 	noticeMessage,
@@ -184,13 +190,29 @@ export interface ChatSubmitOptions {
 	requestContinuation?: boolean;
 }
 
+/**
+ * Options for {@link ChatLoop.cancel}. A bare cancel is an operator Esc/Ctrl+C
+ * that ends the in-flight turn as an empty aborted message. Passing a `reason`
+ * marks the cancel as a system-initiated interrupt (the loop guard): the chat
+ * loop persists a durable, visible assistant turn carrying that reason in place
+ * of the empty aborted turn, and tags the audit trail with `source`.
+ */
+export interface ChatCancelOptions {
+	/** Operator-facing explanation for a system-initiated stop. */
+	reason?: string;
+	/** Audit source for the emitted RunAborted event. Defaults to "stream_cancel". */
+	source?: RunAbortSource;
+	/** Short audit reason string. Defaults to a source-appropriate phrase. */
+	auditReason?: string;
+}
+
 export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
 	steer(text: string): boolean;
 	queueFollowUp(text: string): boolean;
 	clearQueuedFollowUps(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
-	cancel(): void;
+	cancel(options?: ChatCancelOptions): void;
 	onEvent(handler: (event: ChatLoopEvent) => void): () => void;
 	getSessionId(): string | null;
 	isStreaming(): boolean;
@@ -359,6 +381,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let pendingPromptLogEntry: { previousHash: string | null; hash: string; tokenEstimate: number } | null = null;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
+	// Set by a loop-guard interrupt (cancel with a reason). While set, the empty
+	// aborted assistant message the abort produces is suppressed at persistence
+	// time because a durable closing turn carrying the reason was already
+	// written. Cleared at the start of each submit.
+	let activeInterruptReason: string | null = null;
 	// UI mirror of both engine queues, in enqueue order. Entries leave when
 	// the engine injects them into the transcript (message_end →
 	// appendQueuedUserTurn), when alt+up restores them to the editor, or when
@@ -547,6 +574,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const appendAssistantTurn = (message: AgentMessage, timing?: AssistantCallTiming | null): void => {
 		if (message?.role !== "assistant") return;
+		// A loop-guard interrupt already persisted a durable closing turn with the
+		// stop reason; drop the empty aborted message the abort leaves behind so
+		// the operator does not see a hollow "request aborted" turn after it.
+		if (activeInterruptReason !== null && isEmptyAbortedAssistantMessage(message)) return;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
 		if (timing) payload.timing = timing;
@@ -1970,6 +2001,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
 			toolProseAbortReason = null;
+			activeInterruptReason = null;
 
 			// 6. Cache-disturbance honesty (T3.3): consume disturbances since
 			// the last settled run. Only single-slot local backends lose their
@@ -2055,25 +2087,36 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (!(await resubmitStrandedSteers())) await resubmitRequestContinuation();
 			}
 		},
-		cancel(): void {
+		cancel(options?: ChatCancelOptions): void {
 			const wasStreaming = streaming;
 			retryCountdown?.cancel();
 			// Clear both queues before the abort settles the in-flight prompt:
 			// a cancelled run must not deliver queued steers or follow-ups, and
 			// the stranded-steer fallback must find an empty mirror.
 			clearQueuedMirror();
+			const interruptReason = options?.reason?.trim();
+			if (wasStreaming && interruptReason) {
+				// System-initiated interrupt (loop guard): replace the empty aborted
+				// turn with a durable, visible assistant message stating why the turn
+				// stopped. `activeInterruptReason` then suppresses the empty aborted
+				// message the abort below leaves behind.
+				activeInterruptReason = interruptReason;
+				const message = noticeMessage(interruptReason);
+				appendAssistantTurn(message);
+				emit({ type: "message_end", message });
+			}
 			runtime?.agent.abort();
-			if (wasStreaming) {
+			if (wasStreaming && !interruptReason) {
 				emitNotice("[Clio Coder] active response cancelled.");
 			}
 			if (wasStreaming && deps.bus) {
 				deps.bus.emit(BusChannels.RunAborted, {
-					source: "stream_cancel",
+					source: options?.source ?? "stream_cancel",
 					runId: null,
 					startedAt: null,
 					elapsedMs: null,
 					at: Date.now(),
-					reason: "user cancelled stream",
+					reason: options?.auditReason ?? (interruptReason ? "loop guard stopped a runaway turn" : "user cancelled stream"),
 				});
 			}
 		},

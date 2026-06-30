@@ -23,8 +23,13 @@ import { createLoopState } from "../domains/safety/loop-detector.js";
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
 
-/** Loop blocks tolerated per user turn before the turn is interrupted. */
-export const INTERACTIVE_LOOP_BLOCK_BUDGET = 3;
+/**
+ * Loop blocks tolerated per user turn before the turn is interrupted. Combined
+ * with the detector's identical-call threshold, a runaway turn is bounded to a
+ * few verbatim repeats (threshold-1 free calls plus this many blocked retries)
+ * rather than spinning for tens of seconds before the stop lands.
+ */
+export const INTERACTIVE_LOOP_BLOCK_BUDGET = 2;
 
 /** Default per-run tool-call cap when the env var is unset or invalid. */
 export const DEFAULT_MAX_TOOL_CALLS = 50;
