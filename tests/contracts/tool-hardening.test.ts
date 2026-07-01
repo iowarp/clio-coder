@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clampTimeoutMs } from "../../src/core/bash-exec.js";
 import { bashTool } from "../../src/tools/bash.js";
-import { grepTool } from "../../src/tools/grep.js";
+import { buildFdArgs } from "../../src/tools/find.js";
+import { excludeGlobsFor, grepTool } from "../../src/tools/grep.js";
 import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { validateFrontendTool } from "../../src/tools/validate-frontend.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
@@ -138,6 +139,41 @@ describe("contracts/tool-hardening grep pure-Node fallback", () => {
 		const literal = await grepTool.run({ pattern: "findMe()", path: scratch, literal: true }, undefined);
 		strictEqual(literal.kind, "ok");
 		if (literal.kind === "ok") ok(literal.output.includes("src/a.ts:1:"), literal.output);
+	});
+
+	it("no longer force-hides matches under dist/build", async () => {
+		mkdirSync(join(scratch, "dist"), { recursive: true });
+		writeFileSync(join(scratch, "dist", "bundle.js"), "var findMe = 42;\n", "utf8");
+		const result = await grepTool.run({ pattern: "findMe", path: scratch }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("dist/bundle.js:1:"), `dist should be searchable: ${result.output}`);
+	});
+});
+
+describe("contracts/tool-hardening find/grep gitignore visibility", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-fd-"));
+	});
+	afterEach(() => {
+		rmSync(scratch, { recursive: true, force: true });
+	});
+
+	it("find passes --no-require-git only outside a git repo", () => {
+		const outside = buildFdArgs("*.ts", scratch, 1000);
+		ok(outside.includes("--no-require-git"), "outside a repo fd must honor ignore files via --no-require-git");
+
+		mkdirSync(join(scratch, ".git"), { recursive: true });
+		const inside = buildFdArgs("*.ts", scratch, 1000);
+		ok(!inside.includes("--no-require-git"), "inside a repo fd must use git-aware behavior (nested-repo boundaries)");
+	});
+
+	it("grep drops dist/build from forced excludes and respects explicit targeting", () => {
+		strictEqual(excludeGlobsFor("/home/u/proj").join(" "), "!**/.clio/** !**/.fallow/** !**/node_modules/**");
+		// Targeting node_modules directly must not suppress it.
+		strictEqual(excludeGlobsFor("/home/u/proj/node_modules/pkg").join(" "), "!**/.clio/** !**/.fallow/**");
 	});
 });
 

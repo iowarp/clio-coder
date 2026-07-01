@@ -11,11 +11,17 @@ import type { ToolResult, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES, formatSize, GREP_MAX_LINE_LENGTH, truncateHead, truncateLine } from "./truncate.js";
 
 const DEFAULT_LIMIT = 100;
-const CLIO_EXCLUDE_GLOBS = ["!**/.clio/**", "!**/.fallow/**", "!**/node_modules/**", "!**/dist/**", "!**/build/**"];
-// Directories the pure-Node fallback skips, mirroring the rg path's
-// CLIO_EXCLUDE_GLOBS plus .git. rg respects .gitignore natively; the fallback
-// cannot, so it skips these well-known heavy/generated trees to stay bounded.
-const FALLBACK_IGNORED_DIRS = new Set([".clio", ".fallow", ".git", "build", "dist", "node_modules"]);
+// Directories clio force-excludes from grep beyond .gitignore. Kept minimal:
+// clio-internal state (.clio/.fallow) and universal dependency noise
+// (node_modules). dist/build are deliberately NOT force-excluded — rg already
+// honors .gitignore, so generated output is hidden when the project ignores it
+// and searchable when it does not, instead of being silently suppressed even
+// when the user likely wants it (audit §1.2).
+const CLIO_EXCLUDE_DIRS = [".clio", ".fallow", "node_modules"];
+// Directories the pure-Node fallback skips (it cannot read .gitignore, so it
+// skips clio-internal state, .git, and node_modules to stay bounded). dist/build
+// are searchable here too, matching the rg path's default.
+const FALLBACK_IGNORED_DIRS = new Set([".clio", ".fallow", ".git", "node_modules"]);
 // Per-file read ceiling for the fallback. Matches the read tool's file cap; the
 // fallback skips anything larger rather than pulling it fully into memory.
 const FALLBACK_MAX_FILE_BYTES = 20_000_000;
@@ -28,6 +34,18 @@ function parseContext(value: unknown): number | null {
 
 function toPosixPath(value: string): string {
 	return value.split(path.sep).join("/");
+}
+
+// rg --glob excludes for the force-excluded dirs, skipping any dir the search
+// path itself sits inside: if the user explicitly points grep at node_modules
+// (or .clio), they want those matches, so the exclude must not suppress them.
+export function excludeGlobsFor(searchPath: string): string[] {
+	const segments = new Set(
+		toPosixPath(searchPath)
+			.split("/")
+			.filter((segment) => segment.length > 0),
+	);
+	return CLIO_EXCLUDE_DIRS.filter((dir) => !segments.has(dir)).map((dir) => `!**/${dir}/**`);
 }
 
 function formatPath(filePath: string, searchPath: string, isDirectory: boolean): string {
@@ -258,7 +276,7 @@ async function runRipgrep(input: {
 	signal?: AbortSignal;
 }): Promise<ToolResult> {
 	const args = ["--json", "--line-number", "--color=never", "--hidden"];
-	for (const exclude of CLIO_EXCLUDE_GLOBS) args.push("--glob", exclude);
+	for (const exclude of excludeGlobsFor(input.searchPath)) args.push("--glob", exclude);
 	if (input.ignoreCase) args.push("--ignore-case");
 	if (input.literal) args.push("--fixed-strings");
 	if (input.glob) args.push("--glob", input.glob);
