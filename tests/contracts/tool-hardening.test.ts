@@ -1,9 +1,11 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clampTimeoutMs } from "../../src/core/bash-exec.js";
+import { bashTool } from "../../src/tools/bash.js";
+import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { validateFrontendTool } from "../../src/tools/validate-frontend.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
 
@@ -23,6 +25,71 @@ describe("contracts/tool-hardening clampTimeoutMs", () => {
 		strictEqual(clampTimeoutMs(0), 0);
 		strictEqual(clampTimeoutMs(-5), 0);
 		strictEqual(clampTimeoutMs(Number.NaN), 0);
+	});
+});
+
+describe("contracts/tool-hardening truncate primitives", () => {
+	it("truncateTail keeps the LAST lines, not the first", () => {
+		const content = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n");
+		const result = truncateTail(content, { maxLines: 3, maxBytes: 64 * 1024 });
+		ok(result.truncated);
+		strictEqual(result.truncatedBy, "lines");
+		strictEqual(result.content, "line 8\nline 9\nline 10");
+		strictEqual(result.totalLines, 10);
+	});
+
+	it("truncateTail keeps the end of an oversized final line (partial edge case)", () => {
+		const content = `${"x".repeat(100)}TAIL`;
+		const result = truncateTail(content, { maxLines: 2000, maxBytes: 8 });
+		ok(result.truncated);
+		ok(result.lastLinePartial);
+		strictEqual(result.content, "xxxxTAIL");
+	});
+
+	it("splitLinesForCounting-backed counts do not over-report newline-terminated files", () => {
+		// A 3-line, newline-terminated file must count as 3 lines, not 4.
+		const result = truncateHead("a\nb\nc\n", { maxLines: 2000, maxBytes: 64 * 1024 });
+		strictEqual(result.totalLines, 3);
+	});
+});
+
+describe("contracts/tool-hardening bash tail-biased non-destructive output", () => {
+	const roots: string[] = [];
+
+	afterEach(() => {
+		while (roots.length > 0) {
+			const dir = roots.pop();
+			if (dir) rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("surfaces the TAIL (FAIL) of a >1MB output and spills the full output to an offload file", async () => {
+		const sessionId = `hardening-${process.pid}`;
+		const toolCallId = `bash-tail-${Date.now()}`;
+		// ~1.049MB of "A\n" then a trailing "FAIL" with no newline: the actionable
+		// tail lives past clio's old 1MB head-truncation point.
+		const result = await bashTool.run({ command: "yes A | head -c 1049000; printf FAIL" }, { sessionId, toolCallId });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("FAIL"), "model-facing output must include the trailing FAIL");
+		ok(result.output.includes("tail-truncated"), "output should announce tail truncation");
+
+		const resultSize = (result.details as { resultSize?: { offloadPath?: string; bytes?: number } } | undefined)
+			?.resultSize;
+		ok(resultSize?.offloadPath, "full output should be offloaded to a scratch file");
+		const offloadPath = resultSize?.offloadPath as string;
+		roots.push(offloadPath);
+		const spilled = readFileSync(offloadPath, "utf8");
+		ok(spilled.includes("FAIL"), "offload file must contain the full output including FAIL");
+		ok(spilled.length > 1_000_000, "offload file must hold the full >1MB output, not a 1MB head slice");
+	});
+
+	it("returns small output verbatim with no truncation or offload", async () => {
+		const result = await bashTool.run({ command: "printf 'hello\\nworld\\n'" }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(result.output.trim(), "hello\nworld");
+		strictEqual((result.details as { resultSize?: unknown } | undefined)?.resultSize, undefined);
 	});
 });
 

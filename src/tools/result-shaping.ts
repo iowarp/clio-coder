@@ -61,21 +61,33 @@ function timestampSegment(): string {
 	return new Date().toISOString().replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
-function offloadBody(text: string, bytes: number): string {
-	if (bytes <= RESULT_OFFLOAD_MAX_BYTES) return text;
-	const notice = `\n[clio scratch output truncated at ${RESULT_OFFLOAD_MAX_BYTES} bytes; original size ${bytes} bytes]`;
-	const prefixBudget = RESULT_OFFLOAD_MAX_BYTES - byteLength(notice);
+function offloadBody(text: string, bytes: number, maxBytes: number): string {
+	if (bytes <= maxBytes) return text;
+	const notice = `\n[clio scratch output truncated at ${maxBytes} bytes; original size ${bytes} bytes]`;
+	const prefixBudget = maxBytes - byteLength(notice);
 	return `${truncateUtf8(text, Math.max(0, prefixBudget), "")}${notice}`;
 }
 
-function writeOffload(text: string, bytes: number, context: ToolResultShapeContext | undefined): string | null {
+/**
+ * Persist the full text of a tool result to a per-session scratch file and
+ * return its path (or null if the write fails). Callers that truncate their own
+ * display output (for example bash's tail-biased shaping) use this to spill the
+ * complete output before truncating, then set `details.resultSize.offloadPath`
+ * so the registry re-truncation pass leaves the already-shaped result alone.
+ */
+export function writeToolOffload(
+	text: string,
+	context: ToolResultShapeContext | undefined,
+	maxBytes: number = RESULT_OFFLOAD_MAX_BYTES,
+): string | null {
 	try {
+		const bytes = byteLength(text);
 		const sessionId = safePathSegment(context?.sessionId ?? "no-session");
 		const callId = safePathSegment(context?.toolCallId ?? timestampSegment());
 		const dir = join(clioStateDir(), "scratch", sessionId);
 		const path = join(dir, `${callId}.txt`);
 		mkdirSync(dir, { recursive: true });
-		writeFileSync(path, offloadBody(text, bytes), "utf8");
+		writeFileSync(path, offloadBody(text, bytes, maxBytes), "utf8");
 		return path;
 	} catch {
 		return null;
@@ -95,7 +107,7 @@ export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: To
 	const bytes = byteLength(text);
 	if (bytes <= maxBytes) return result;
 	const truncated = truncateUtf8(text, maxBytes, RESULT_TRUNCATION_MARKER);
-	const offloadPath = writeOffload(text, bytes, context);
+	const offloadPath = writeToolOffload(text, context);
 	const resultSize = {
 		bytes,
 		shownBytes: byteLength(truncated),
