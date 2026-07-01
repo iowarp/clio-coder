@@ -6,15 +6,36 @@ import { after, before, describe, it } from "node:test";
 import { docsSearchTool } from "../../src/tools/docs-search.js";
 
 interface DocHit {
+	rank: number;
 	file: string;
 	heading: string;
+	breadcrumb: string;
+	lines: { start: number; end: number };
+	snippetLines: { start: number; end: number };
 	snippet: string;
 	score: number;
+	coverage: number;
+	matchedTerms: string[];
+	signals: string[];
 }
 
-function parsePayload(output: string): { query: string; results: DocHit[] } {
+function parsePayload(output: string): {
+	version: number;
+	query: string;
+	corpus: { docs: number; sections: number; excludes: string[] };
+	terms: { query: string[]; expanded: string[]; phrases: string[] };
+	resultCount: number;
+	results: DocHit[];
+} {
 	const json = output.split("\n[", 1)[0] ?? output;
-	return JSON.parse(json) as { query: string; results: DocHit[] };
+	return JSON.parse(json) as {
+		version: number;
+		query: string;
+		corpus: { docs: number; sections: number; excludes: string[] };
+		terms: { query: string[]; expanded: string[]; phrases: string[] };
+		resultCount: number;
+		results: DocHit[];
+	};
 }
 
 // docs_search resolves the bundled docs directory through resolvePackageRoot,
@@ -64,6 +85,18 @@ describe("contracts/docs_search", () => {
 			].join("\n"),
 			"utf8",
 		);
+		writeFileSync(
+			join(docs, "observability.md"),
+			[
+				"# Observability",
+				"",
+				"## Receipts and evidence",
+				"",
+				"Receipts record dispatch outcomes, findings summaries, and accountability evidence.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
 		previousRoot = process.env.CLIO_PACKAGE_ROOT;
 		process.env.CLIO_PACKAGE_ROOT = scratch;
 	});
@@ -79,12 +112,22 @@ describe("contracts/docs_search", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const payload = parsePayload(result.output);
+		strictEqual(payload.version, 2);
+		ok(payload.corpus.docs >= 2, "corpus metadata reports searched docs");
+		ok(payload.corpus.excludes.includes("docs/html/**"), "tool excludes human HTML blueprints");
 		ok(payload.results.length > 0, "expected at least one hit for 'autonomy'");
 		const top = payload.results[0];
 		ok(top, "expected a top hit");
+		strictEqual(top.rank, 1);
 		strictEqual(top.file, "docs/safety-model.md");
 		strictEqual(top.heading, "Autonomy levels");
+		strictEqual(top.breadcrumb, "Safety Model > Autonomy levels");
 		ok(top.score > 0, "score must be positive");
+		ok(top.coverage > 0, "coverage must be reported");
+		ok(top.lines.start > 0 && top.lines.end >= top.lines.start, "section line range must be present");
+		ok(top.snippetLines.start > 0 && top.snippetLines.end >= top.snippetLines.start, "snippet line range must be present");
+		ok(top.matchedTerms.includes("autonomy"), "matched terms include the query term");
+		ok(top.signals.some((signal) => signal.includes("heading")), "signals explain why the hit ranked");
 		ok(top.snippet.length > 0, "snippet must carry the cited passage");
 		// Bounded output: the snippet window plus its ellipses stays small.
 		for (const hit of payload.results) {
@@ -112,6 +155,27 @@ describe("contracts/docs_search", () => {
 			payload.results.some((hit) => hit.file === "docs/configuration-and-targets.md"),
 			"expected a configuration doc hit",
 		);
+	});
+
+	it("uses Clio vocabulary aliases for semantic-style deterministic retrieval", async () => {
+		const result = await docsSearchTool.run({ query: "how do confirmations work" });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		const payload = parsePayload(result.output);
+		ok(payload.terms.expanded.includes("autonomy"), "confirmation query expands to autonomy vocabulary");
+		const top = payload.results[0];
+		ok(top, "expected an alias-backed hit");
+		strictEqual(top.file, "docs/safety-model.md");
+		strictEqual(top.heading, "Autonomy levels");
+	});
+
+	it("supports narrowing to one bundled markdown file", async () => {
+		const result = await docsSearchTool.run({ query: "dispatch evidence", file: "observability.md" });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		const payload = parsePayload(result.output);
+		ok(payload.results.length > 0, "expected observability result");
+		for (const hit of payload.results) strictEqual(hit.file, "docs/observability.md");
 	});
 
 	it("honors the limit parameter", async () => {
