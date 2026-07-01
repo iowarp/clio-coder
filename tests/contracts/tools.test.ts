@@ -538,13 +538,15 @@ describe("contracts/tools result shaping and truncation", () => {
 		const root = scratchDir();
 		const first = join(root, "first.txt");
 		const second = join(root, "second.txt");
-		writeFileSync(first, `${"a".repeat(100)}\n`.repeat(420), "utf8");
-		writeFileSync(second, `${"b".repeat(100)}\n`.repeat(420), "utf8");
+		// Each file (~90KB) exceeds the 50KB per-call read cap so the first read
+		// is a full per-call slice.
+		writeFileSync(first, `${"a".repeat(100)}\n`.repeat(900), "utf8");
+		writeFileSync(second, `${"b".repeat(100)}\n`.repeat(900), "utf8");
 
 		// Size the turn budget above the per-call cap so the first read takes a
 		// full per-call slice and the second read is the one bound by the
 		// aggregate per-turn budget.
-		const turnBudget = 20_480;
+		const turnBudget = 70 * 1024;
 		const previousBudget = process.env[READ_TURN_OBSERVATION_BUDGET_ENV];
 		process.env[READ_TURN_OBSERVATION_BUDGET_ENV] = String(turnBudget);
 		try {

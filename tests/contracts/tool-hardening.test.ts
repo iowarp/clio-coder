@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clampTimeoutMs } from "../../src/core/bash-exec.js";
+import { ToolNames } from "../../src/core/tool-names.js";
+import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { buildFdArgs } from "../../src/tools/find.js";
 import { globTool } from "../../src/tools/glob.js";
 import { excludeGlobsFor, grepTool } from "../../src/tools/grep.js";
-import { readTool } from "../../src/tools/read.js";
+import { DEFAULT_READ_MAX_BYTES, readTool } from "../../src/tools/read.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { validateFrontendTool } from "../../src/tools/validate-frontend.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
@@ -212,6 +216,64 @@ describe("contracts/tool-hardening glob dir filtering + read line count", () => 
 		// total must be 3, not 4.
 		ok(result.output.includes("[1 more line"), result.output);
 		ok(!result.output.includes("2 more lines"), result.output);
+	});
+});
+
+describe("contracts/tool-hardening read large-file ergonomics", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-read-"));
+	});
+	afterEach(() => {
+		rmSync(scratch, { recursive: true, force: true });
+	});
+
+	it("tail=N reads the last N lines and points back to earlier lines", async () => {
+		const file = join(scratch, "log.txt");
+		writeFileSync(file, `${Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n")}\n`, "utf8");
+		const result = await readTool.run({ path: file, tail: 3 }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("line 18\nline 19\nline 20"), result.output);
+		ok(!result.output.includes("line 17"), "tail=3 must not include earlier lines");
+		ok(result.output.includes("Showing last 3 of 20 lines"), result.output);
+	});
+
+	it("reads a >16KB file (under the 50KB cap) in a single call without truncating", async () => {
+		const file = join(scratch, "medium.ts");
+		// ~30KB, comfortably above the old 16KB cap and below the 50KB cap.
+		const body = `${Array.from({ length: 600 }, (_, i) => `const x${i} = ${i}; // padding padding padding`).join("\n")}\n`;
+		ok(Buffer.byteLength(body, "utf8") > 16 * 1024 && Buffer.byteLength(body, "utf8") < DEFAULT_READ_MAX_BYTES);
+		writeFileSync(file, body, "utf8");
+		const result = await readTool.run({ path: file }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("const x0 ="), "first line present");
+		ok(result.output.includes("const x599 ="), "last line present in one call");
+		ok(!result.output.includes("Showing lines"), `must not truncate under the cap: ${result.output.slice(-200)}`);
+	});
+
+	it("registry result-shaping does not re-truncate a full read below the read cap", async () => {
+		const registry = createRegistry({
+			safety: {
+				classify: () => ({ actionClass: "read", reasons: [] }),
+				evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
+				observeLoop: () => ({ looping: false, key: "t", count: 0 }),
+				scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+				isSubset: () => true,
+				audit: { recordCount: () => 0 },
+			},
+		});
+		registerAllTools(registry);
+		const file = join(scratch, "big.ts");
+		const body = `${Array.from({ length: 600 }, (_, i) => `const y${i} = ${i}; // padding padding padding`).join("\n")}\n`;
+		writeFileSync(file, body, "utf8");
+		const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path: file } });
+		strictEqual(verdict.kind, "ok");
+		if (verdict.kind !== "ok" || verdict.result.kind !== "ok") return;
+		ok(verdict.result.output.includes("const y599 ="), "full read must survive result-shaping");
+		ok(!verdict.result.output.includes("tool result truncated"), "must not be offloaded/truncated by the re-shaper");
 	});
 });
 
