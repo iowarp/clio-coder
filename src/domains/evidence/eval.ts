@@ -1,10 +1,12 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
 import type { EvalCommandResult, EvalRunArtifact, EvalRunRecord } from "../eval/index.js";
 import { loadEvalArtifact } from "../eval/index.js";
 import { evidenceDirectory, findingsFile } from "./store.js";
 import {
 	EVIDENCE_VERSION,
+	type EvidenceAuditLinkedRow,
 	type EvidenceBuildResult,
 	type EvidenceCleanTraceRow,
 	type EvidenceEvalCommandTraceRow,
@@ -36,8 +38,16 @@ const PREVIEW_MAX_CHARS = 240;
 
 export interface BuildEvalEvidenceOptions {
 	dataDir: string;
+	stateDir?: string;
 	evalId?: string;
 	artifact?: EvalRunArtifact;
+}
+
+interface EvalLinkedRuns {
+	runSources: Array<{ envelope: RunEnvelope; receipt: RunReceipt | null }>;
+	sessionEntries: number;
+	auditRows: EvidenceAuditLinkedRow[];
+	toolEvents: EvidenceToolEvent[];
 }
 
 export async function buildEvalEvidence(options: BuildEvalEvidenceOptions): Promise<EvidenceBuildResult> {
@@ -50,10 +60,12 @@ export async function buildEvalEvidence(options: BuildEvalEvidenceOptions): Prom
 	const artifact = options.artifact ?? (await loadEvalArtifact(options.dataDir, options.evalId ?? ""));
 	const evidenceId = evalEvidenceId(artifact.evalId);
 	const directory = evidenceDirectory(options.dataDir, evidenceId);
-	const toolEventRows = evalToolEvents(artifact);
+	const linkedRuns =
+		options.stateDir === undefined ? emptyEvalLinkedRuns() : await linkEvalRuns(options.stateDir, artifact);
+	const toolEventRows = [...evalToolEvents(artifact), ...linkedRuns.toolEvents].sort(compareEvidenceToolEvents);
 	const findings = evalFindings(artifact);
-	const overview = evalOverview(evidenceId, artifact, findings, toolEventRows);
-	await writeEvalEvidenceFiles(directory, artifact, overview, findings, toolEventRows);
+	const overview = evalOverview(evidenceId, artifact, findings, toolEventRows, linkedRuns);
+	await writeEvalEvidenceFiles(directory, artifact, overview, findings, toolEventRows, linkedRuns);
 	return { evidenceId, directory, overview, findings };
 }
 
@@ -66,39 +78,64 @@ function evalOverview(
 	artifact: EvalRunArtifact,
 	findings: ReadonlyArray<EvidenceFinding>,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
+	linkedRuns: EvalLinkedRuns,
 ): EvidenceOverview {
+	const envelopes = linkedRuns.runSources.map((source) => source.envelope);
+	const receipts = linkedRuns.runSources.flatMap((source) => (source.receipt === null ? [] : [source.receipt]));
+	const receiptToolStats = receipts.flatMap((receipt) => receipt.toolStats);
+	const linkedToolEvents = linkedRuns.toolEvents.length;
 	return {
 		version: EVIDENCE_VERSION,
 		evidenceId,
 		source: { kind: "eval", evalId: artifact.evalId },
 		generatedAt: artifact.endedAt,
-		runIds: artifact.results.map((result) => result.runId).sort(compareStrings),
-		sessionId: null,
-		statuses: uniqueStrings(artifact.results.map((result) => (result.pass ? "passed" : "failed"))),
+		runIds:
+			envelopes.length > 0
+				? uniqueStrings(envelopes.map((envelope) => envelope.id))
+				: artifact.results.map((result) => result.runId).sort(compareStrings),
+		sessionId:
+			uniqueStrings(envelopes.flatMap((envelope) => (envelope.sessionId === null ? [] : [envelope.sessionId])))[0] ?? null,
+		statuses:
+			envelopes.length > 0
+				? uniqueStrings(envelopes.map((envelope) => envelope.status))
+				: uniqueStrings(artifact.results.map((result) => (result.pass ? "passed" : "failed"))),
 		startedAt: artifact.startedAt,
 		endedAt: artifact.endedAt,
 		tasks: uniqueStrings(artifact.results.map((result) => result.taskId)),
 		cwds: uniqueStrings(artifact.results.map((result) => result.cwd)),
-		agentIds: ["eval-local"],
-		targetIds: ["local"],
-		runtimeIds: ["local"],
-		modelIds: ["none"],
+		agentIds: envelopes.length > 0 ? uniqueStrings(envelopes.map((envelope) => envelope.agentId)) : ["eval-local"],
+		targetIds: envelopes.length > 0 ? uniqueStrings(envelopes.map((envelope) => envelope.targetId)) : ["local"],
+		runtimeIds: envelopes.length > 0 ? uniqueStrings(envelopes.map((envelope) => envelope.runtimeId)) : ["local"],
+		modelIds: envelopes.length > 0 ? uniqueStrings(envelopes.map((envelope) => envelope.wireModelId)) : ["none"],
 		totals: {
-			runs: artifact.results.length,
-			receipts: artifact.summary.harness.receiptCount,
+			runs: envelopes.length > 0 ? envelopes.length : artifact.results.length,
+			receipts: Math.max(artifact.summary.harness.receiptCount, receipts.length),
 			toolCalls: Math.max(
 				artifact.summary.harness.toolCalls,
+				receipts.reduce((total, receipt) => total + receipt.toolCalls, 0),
 				toolEventRows.reduce((total, event) => total + event.count, 0),
 			),
-			toolErrors: toolEventRows.reduce((total, event) => total + event.errors, 0),
-			blockedToolCalls: artifact.summary.harness.safetyBlocks,
-			sessionEntries: 0,
-			auditRows: 0,
+			toolErrors: Math.max(
+				receiptToolStats.reduce((total, stat) => total + stat.errors, 0),
+				toolEventRows.reduce((total, event) => total + event.errors, 0),
+			),
+			blockedToolCalls: Math.max(
+				artifact.summary.harness.safetyBlocks,
+				receiptToolStats.reduce((total, stat) => total + stat.blocked, 0),
+			),
+			sessionEntries: linkedRuns.sessionEntries,
+			auditRows: linkedRuns.auditRows.length,
 			toolEvents: toolEventRows.length,
-			linkedToolEvents: 0,
+			linkedToolEvents,
 			protectedArtifacts: 0,
-			tokens: artifact.summary.tokens,
-			costUsd: artifact.summary.costUsd,
+			tokens: Math.max(
+				artifact.summary.tokens,
+				receipts.reduce((total, receipt) => total + receipt.tokenCount, 0),
+			),
+			costUsd: Math.max(
+				artifact.summary.costUsd,
+				receipts.reduce((total, receipt) => total + receipt.costUsd, 0),
+			),
 			wallTimeMs: artifact.summary.wallTimeMs,
 		},
 		tags: uniqueTags(findings.map((finding) => finding.tag)),
@@ -156,17 +193,21 @@ async function writeEvalEvidenceFiles(
 	overview: EvidenceOverview,
 	findings: ReadonlyArray<EvidenceFinding>,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
+	linkedRuns: EvalLinkedRuns,
 ): Promise<void> {
 	const emptyProtected: EvidenceProtectedArtifactsFile = { version: EVIDENCE_VERSION, artifacts: [], events: [] };
-	const emptyReceipts: EvidenceReceiptFile = { version: EVIDENCE_VERSION, receipts: [] };
+	const receiptsFile: EvidenceReceiptFile = {
+		version: EVIDENCE_VERSION,
+		receipts: linkedRuns.runSources.flatMap((source) => (source.receipt === null ? [] : [source.receipt])),
+	};
 	await mkdir(directory, { recursive: true });
 	await writeJson(join(directory, "overview.json"), overview);
 	await writeFile(join(directory, "transcript.md"), renderEvalTranscript(artifact, overview), "utf8");
 	await writeJsonl(join(directory, "trace.raw.jsonl"), rawEvalTraceRows(artifact));
 	await writeJsonl(join(directory, "trace.cleaned.jsonl"), cleanedEvalTraceRows(artifact, findings));
 	await writeJsonl(join(directory, "tool-events.jsonl"), toolEventRows);
-	await writeJsonl(join(directory, "audit-linked.jsonl"), []);
-	await writeJson(join(directory, "receipt.json"), emptyReceipts);
+	await writeJsonl(join(directory, "audit-linked.jsonl"), linkedRuns.auditRows);
+	await writeJson(join(directory, "receipt.json"), receiptsFile);
 	await writeJson(join(directory, "protected-artifacts.json"), emptyProtected);
 	await writeJson(join(directory, "eval-result.json"), artifact);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
@@ -318,6 +359,208 @@ function compareEvidenceToolEvents(a: EvidenceToolEvent, b: EvidenceToolEvent): 
 	return compareNullableStrings(a.resultPreview ?? null, b.resultPreview ?? null);
 }
 
+function emptyEvalLinkedRuns(): EvalLinkedRuns {
+	return { runSources: [], sessionEntries: 0, auditRows: [], toolEvents: [] };
+}
+
+async function linkEvalRuns(stateDir: string, artifact: EvalRunArtifact): Promise<EvalLinkedRuns> {
+	const envelopes = (await readRunLedger(stateDir)).filter((envelope) => evalRunMatches(artifact, envelope));
+	if (envelopes.length === 0) return emptyEvalLinkedRuns();
+	const runSources: EvalLinkedRuns["runSources"] = [];
+	for (const envelope of envelopes.sort(compareRunEnvelopes)) {
+		runSources.push({ envelope, receipt: await readReceiptForRun(stateDir, envelope) });
+	}
+	const runIds = new Set(runSources.map((source) => source.envelope.id));
+	const sessionIds = uniqueStrings(
+		runSources.flatMap((source) => (source.envelope.sessionId === null ? [] : [source.envelope.sessionId])),
+	);
+	const sessionEntries = await countSessionEntries(stateDir, sessionIds);
+	const auditRows = await linkedEvalAuditRows(stateDir, runIds, artifact);
+	const toolEvents = linkedRunToolEvents(runSources);
+	return { runSources, sessionEntries, auditRows, toolEvents };
+}
+
+async function readRunLedger(stateDir: string): Promise<RunEnvelope[]> {
+	try {
+		const raw = await readFile(join(stateDir, "runs.json"), "utf8");
+		const parsed = JSON.parse(raw) as unknown;
+		return Array.isArray(parsed) ? (parsed.filter(isRecord) as unknown as RunEnvelope[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+function evalRunMatches(artifact: EvalRunArtifact, envelope: RunEnvelope): boolean {
+	const cwds = new Set(artifact.results.map((result) => result.cwd));
+	if (!cwds.has(envelope.cwd)) return false;
+	const evalStart = Date.parse(artifact.startedAt);
+	const evalEnd = Date.parse(artifact.endedAt);
+	const runStart = Date.parse(envelope.startedAt);
+	const runEnd = envelope.endedAt === null ? runStart : Date.parse(envelope.endedAt);
+	if (![evalStart, evalEnd, runStart, runEnd].every(Number.isFinite)) return false;
+	return runStart <= evalEnd && runEnd >= evalStart;
+}
+
+async function readReceiptForRun(stateDir: string, envelope: RunEnvelope): Promise<RunReceipt | null> {
+	const path = envelope.receiptPath ?? join(stateDir, "receipts", `${envelope.id}.json`);
+	try {
+		const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+		return isRecord(parsed) ? (parsed as unknown as RunReceipt) : null;
+	} catch {
+		return null;
+	}
+}
+
+async function countSessionEntries(stateDir: string, sessionIds: ReadonlyArray<string>): Promise<number> {
+	let count = 0;
+	for (const sessionId of sessionIds) {
+		const path = await findSessionLedgerPath(stateDir, sessionId);
+		if (path === null) continue;
+		try {
+			const raw = await readFile(path, "utf8");
+			count += raw
+				.split("\n")
+				.filter((line) => line.trim().length > 0)
+				.filter((line) => {
+					try {
+						const parsed = JSON.parse(line) as unknown;
+						return isRecord(parsed) && parsed.type !== "session";
+					} catch {
+						return false;
+					}
+				}).length;
+		} catch {
+			// Best-effort count only.
+		}
+	}
+	return count;
+}
+
+async function findSessionLedgerPath(stateDir: string, sessionId: string): Promise<string | null> {
+	const root = join(stateDir, "sessions");
+	let cwdHashes: string[];
+	try {
+		cwdHashes = await readdir(root);
+	} catch {
+		return null;
+	}
+	for (const cwdHash of cwdHashes) {
+		const path = join(root, cwdHash, sessionId, "current.jsonl");
+		try {
+			await readFile(path, "utf8");
+			return path;
+		} catch {
+			// Try the next cwd hash.
+		}
+	}
+	return null;
+}
+
+async function linkedEvalAuditRows(
+	stateDir: string,
+	runIds: ReadonlySet<string>,
+	artifact: EvalRunArtifact,
+): Promise<EvidenceAuditLinkedRow[]> {
+	const root = join(stateDir, "audit");
+	let files: string[];
+	try {
+		files = await readdir(root);
+	} catch {
+		return [];
+	}
+	const rows: EvidenceAuditLinkedRow[] = [];
+	for (const file of files.filter((name) => name.endsWith(".jsonl")).sort(compareStrings)) {
+		const raw = await readFile(join(root, file), "utf8").catch(() => "");
+		const lines = raw.split("\n");
+		for (let index = 0; index < lines.length; index += 1) {
+			const line = lines[index];
+			if (!line) continue;
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(line) as unknown;
+			} catch {
+				continue;
+			}
+			if (!isRecord(parsed)) continue;
+			const directRunId = typeof parsed.runId === "string" ? parsed.runId : null;
+			if (directRunId !== null && runIds.has(directRunId)) {
+				rows.push(evalAuditRow(parsed, directRunId, "run-id", "exact", ["audit runId matched nested eval run"]));
+				continue;
+			}
+			const ts = typeof parsed.ts === "string" ? parsed.ts : null;
+			if (ts !== null && timestampInEvalWindow(ts, artifact)) {
+				rows.push(evalAuditRow(parsed, null, "eval-window", "best-effort", ["audit timestamp fell within eval window"]));
+			}
+		}
+	}
+	return rows.sort(compareAuditRows);
+}
+
+function evalAuditRow(
+	row: Record<string, unknown>,
+	runId: string | null,
+	linkKind: string,
+	confidence: "exact" | "best-effort",
+	reasons: string[],
+): EvidenceAuditLinkedRow {
+	return {
+		kind: "audit-linked",
+		auditKind: typeof row.kind === "string" ? row.kind : "tool_call",
+		ts: typeof row.ts === "string" ? row.ts : null,
+		runId,
+		sessionId: typeof row.sessionId === "string" ? row.sessionId : null,
+		linkKind,
+		confidence,
+		reasons,
+		row,
+	};
+}
+
+function linkedRunToolEvents(
+	runSources: ReadonlyArray<{ envelope: RunEnvelope; receipt: RunReceipt | null }>,
+): EvidenceToolEvent[] {
+	const events: EvidenceToolEvent[] = [];
+	for (const source of runSources) {
+		for (const stat of [...(source.receipt?.toolStats ?? [])].sort(compareToolStats)) {
+			events.push({
+				source: "receipt-aggregate",
+				runId: source.envelope.id,
+				sessionId: source.envelope.sessionId,
+				tool: stat.tool,
+				count: stat.count,
+				ok: stat.ok,
+				errors: stat.errors,
+				blocked: stat.blocked,
+				totalDurationMs: stat.totalDurationMs,
+			});
+		}
+	}
+	return events.sort(compareEvidenceToolEvents);
+}
+
+function timestampInEvalWindow(timestamp: string, artifact: EvalRunArtifact): boolean {
+	const value = Date.parse(timestamp);
+	const start = Date.parse(artifact.startedAt);
+	const end = Date.parse(artifact.endedAt);
+	return Number.isFinite(value) && Number.isFinite(start) && Number.isFinite(end) && value >= start && value <= end;
+}
+
+function compareRunEnvelopes(a: RunEnvelope, b: RunEnvelope): number {
+	return compareStrings(a.startedAt, b.startedAt) || compareStrings(a.id, b.id);
+}
+
+function compareAuditRows(a: EvidenceAuditLinkedRow, b: EvidenceAuditLinkedRow): number {
+	return (
+		compareNullableStrings(a.ts, b.ts) ||
+		compareNullableStrings(a.runId, b.runId) ||
+		JSON.stringify(a.row).localeCompare(JSON.stringify(b.row))
+	);
+}
+
+function compareToolStats(a: ToolCallStat, b: ToolCallStat): number {
+	return compareStrings(a.tool, b.tool);
+}
+
 function compareNullableStrings(a: string | null, b: string | null): number {
 	if (a === b) return 0;
 	if (a === null) return -1;
@@ -332,4 +575,8 @@ function sanitizeEvidenceId(value: string): string {
 
 function compareStrings(a: string, b: string): number {
 	return a.localeCompare(b);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

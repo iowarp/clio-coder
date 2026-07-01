@@ -120,7 +120,7 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 							...(parsed.runId === undefined ? {} : { runId: parsed.runId }),
 							...(parsed.sessionId === undefined ? {} : { sessionId: parsed.sessionId }),
 						})
-					: await buildEvalEvidence({ dataDir, evalId: parsed.evalId });
+					: await buildEvalEvidence({ dataDir, stateDir, evalId: parsed.evalId });
 			// The artifact is still written (the finding is part of the evidence),
 			// but the verdict line and exit code must not say ok over a receipt
 			// that failed integrity verification.
