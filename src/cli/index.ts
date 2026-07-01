@@ -1,3 +1,4 @@
+import { traceBoot } from "../core/boot-trace.js";
 import { runAcpCommand } from "./acp.js";
 import { runAgentsCommand } from "./agents.js";
 import { runAuthCommand } from "./auth.js";
@@ -72,6 +73,9 @@ Usage:
 `;
 
 async function main(argv: string[]): Promise<number> {
+	// First application statement after the static import graph resolved: the
+	// elapsed here is the cold module-load tax (see CLIO_TRACE_BOOT).
+	traceBoot("cli entry");
 	const { apiKey, rest: afterApiKey } = extractApiKeyFlag(argv);
 	const { noContextFiles, rest: afterNoContextFiles } = extractNoContextFilesFlag(afterApiKey);
 	const { noSkills, skillPaths, rest } = extractSkillsFlags(afterNoContextFiles);
