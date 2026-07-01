@@ -176,16 +176,18 @@ export function detectValidationCommand(command: string): ValidationCommandDetec
 
 /**
  * Returns every path the command would write to: shell redirect targets
- * (`>`, `>>`), all path arguments to `tee`, and the destination argument
- * of `cp` and `mv`. Standard descriptors like `/dev/null` and fd
- * references like `&1` are filtered out so callers only see real
- * filesystem targets.
+ * (`>`, `>>`), all path arguments to `tee`, the destination argument of `cp`
+ * and `mv`, and the file operands of an in-place `sed -i` edit. Standard
+ * descriptors like `/dev/null` and fd references like `&1` are filtered out so
+ * callers only see real filesystem targets.
  *
  * Used by the action classifier to escalate bash calls that write to a
  * system root or out-of-cwd path through the same confirmation gate as the
- * write tool. The classifier is the only safety lever for these patterns;
- * pi-mono executes the bash command verbatim, so the registry-side check
- * has to happen before the shell runs.
+ * write tool, and by the finish-contract to decide whether a turn mutated
+ * workspace state. Both consumers read the same primitive, so a write pattern
+ * this recognizes gates and gate-completes consistently. pi-mono executes the
+ * bash command verbatim, so the registry-side check has to happen before the
+ * shell runs.
  */
 export function extractCommandWriteTargets(command: string): string[] {
 	const tokens = tokenizeShellLike(command);
@@ -193,6 +195,7 @@ export function extractCommandWriteTargets(command: string): string[] {
 	for (const segment of splitSegments(tokens)) {
 		collectRedirectTargets(segment, targets);
 		collectInvokedWriteTargets(segment, targets);
+		collectInPlaceEditTargets(segment, targets);
 	}
 	return targets.filter(isInterestingWriteTarget);
 }
@@ -249,6 +252,82 @@ function collectInvokedWriteTargets(segment: ReadonlyArray<string>, out: string[
 		const destination = args.at(-1);
 		if (args.length >= 2 && destination !== undefined) out.push(destination);
 	}
+}
+
+/**
+ * In-place stream-editor writes: `sed -i` (GNU `-iSUFFIX` / `--in-place` and
+ * BSD `-i ''` forms) rewrites its file operands in place, which the redirect and
+ * tee/cp/mv detectors miss. Weak models reach for `sed -i` constantly, so
+ * recognizing it here lets both the classifier and the finish-contract treat it
+ * as the write it is. The sed script operand is dropped (it is not a file), so
+ * an address-form script such as `/pat/d` cannot be mistaken for an out-of-cwd
+ * write target.
+ */
+function collectInPlaceEditTargets(segment: ReadonlyArray<string>, out: string[]): void {
+	const cmdIndex = commandTokenIndex(segment);
+	if (cmdIndex === null) return;
+	if (basenameToken(segment[cmdIndex]) !== "sed") return;
+	if (!hasSedInPlaceFlag(segment, cmdIndex)) return;
+	for (const operand of sedFileOperands(segment, cmdIndex)) out.push(operand);
+}
+
+function hasSedInPlaceFlag(segment: ReadonlyArray<string>, cmdIndex: number): boolean {
+	for (let index = cmdIndex + 1; index < segment.length; index += 1) {
+		const token = segment[index];
+		if (token === undefined) continue;
+		if (COMMAND_SEPARATORS.has(token)) break;
+		if (token === "--") break;
+		if (token === "--in-place" || token.startsWith("--in-place=")) return true;
+		if (token.startsWith("--")) continue;
+		// A short-option cluster carrying `i` (`-i`, `-i.bak`, `-ni`) requests
+		// in-place editing; sed's other short flags (`-n`, `-e`, `-r`, ...) do not.
+		if (token.startsWith("-") && token.length > 1 && token.slice(1).includes("i")) return true;
+	}
+	return false;
+}
+
+/**
+ * File operands of a sed invocation, with the inline script dropped. `-e`/`-f`/
+ * `--expression`/`--file` supply the script explicitly, so when one is present
+ * every bare operand is a file; otherwise the first bare operand is the script.
+ */
+function sedFileOperands(segment: ReadonlyArray<string>, cmdIndex: number): string[] {
+	const operands: string[] = [];
+	let sawScriptFlag = false;
+	let endOfOptions = false;
+	for (let index = cmdIndex + 1; index < segment.length; index += 1) {
+		const token = segment[index];
+		if (token === undefined) continue;
+		if (COMMAND_SEPARATORS.has(token)) break;
+		if (!endOfOptions && token === "--") {
+			endOfOptions = true;
+			continue;
+		}
+		if (!endOfOptions && token.startsWith("-") && token.length > 1) {
+			if (token === "-e" || token === "-f") {
+				sawScriptFlag = true;
+				index += 1;
+				continue;
+			}
+			if (token === "-l") {
+				index += 1;
+				continue;
+			}
+			if (token === "--expression" || token === "--file") {
+				sawScriptFlag = true;
+				index += 1;
+				continue;
+			}
+			if (token.startsWith("--expression=") || token.startsWith("--file=")) {
+				sawScriptFlag = true;
+				continue;
+			}
+			continue;
+		}
+		operands.push(token);
+	}
+	if (!sawScriptFlag && operands.length > 0) operands.shift();
+	return operands;
 }
 
 function isInterestingWriteTarget(target: string): boolean {
