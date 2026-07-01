@@ -10,7 +10,12 @@ import {
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or an explicit limitation. Run a verification command or state what could not be verified.";
 
-const DEFAULT_RECENT_ENTRY_LIMIT = 80;
+/**
+ * The recent-window cap (entries since the last user message). Exported so a
+ * tail-scoped reader can size its read as a multiple of this and stay in lockstep
+ * with the window the contract actually inspects.
+ */
+export const DEFAULT_RECENT_ENTRY_LIMIT = 80;
 
 export type FinishContractEvidenceKind = "validation_command" | "protected_artifact" | "dispatch_receipt";
 
