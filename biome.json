@@ -42,7 +42,7 @@
 			"!**/dist",
 			"!**/node_modules",
 			"!**/*.log",
-			"!**/docs/.superpowers",
+			"!**/.superpowers",
 			"!**/*.html"
 		]
 	}
