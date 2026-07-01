@@ -1,16 +1,18 @@
+import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
-import { detectValidationCommand } from "./protected-artifacts.js";
+import {
+	detectValidationCommand,
+	extractCommandDeleteTargets,
+	extractCommandWriteTargets,
+	toolMutationPaths,
+} from "./protected-artifacts.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
-	"[Clio Coder] finish-contract advisory: completion claim found, but no recent validation evidence or explicit limitation was recorded. Run validation or state what could not be verified.";
+	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or an explicit limitation. Run a verification command or state what could not be verified.";
 
 const DEFAULT_RECENT_ENTRY_LIMIT = 80;
 
-export type FinishContractEvidenceKind =
-	| "validation_command"
-	| "protected_artifact"
-	| "dispatch_receipt"
-	| "requested_inspection";
+export type FinishContractEvidenceKind = "validation_command" | "protected_artifact" | "dispatch_receipt";
 
 export interface FinishContractEvidence {
 	kind: FinishContractEvidenceKind;
@@ -18,21 +20,26 @@ export interface FinishContractEvidence {
 	turnId?: string;
 }
 
+/** Why the contract settled. Every branch is auditable from the ledger alone. */
+export type FinishContractReason =
+	| "no_mutation"
+	| "validation_evidence"
+	| "explicit_limitation"
+	| "unvalidated_mutation";
+
 export type FinishContractAssessment =
 	| {
 			kind: "ok";
-			reason:
-				| "no_completion_claim"
-				| "validation_evidence"
-				| "explicit_limitation"
-				| "read_only_status_turn"
-				| "informational_question_turn";
+			reason: "no_mutation" | "validation_evidence" | "explicit_limitation";
 			evidence: ReadonlyArray<FinishContractEvidence>;
+			mutatedPaths: ReadonlyArray<string>;
 	  }
 	| {
-			kind: "advisory";
+			kind: "engage";
+			reason: "unvalidated_mutation";
 			message: string;
 			evidence: ReadonlyArray<FinishContractEvidence>;
+			mutatedPaths: ReadonlyArray<string>;
 	  };
 
 export interface FinishContractInput {
@@ -40,8 +47,6 @@ export interface FinishContractInput {
 	sessionEntries?: ReadonlyArray<unknown>;
 	assistantTurnId?: string | null;
 	recentEntryLimit?: number;
-	/** Optional explicit current user prompt; otherwise derived from sessionEntries. */
-	currentUserText?: string | null;
 }
 
 interface ToolCallEvidenceCandidate {
@@ -50,16 +55,10 @@ interface ToolCallEvidenceCandidate {
 	command: string;
 }
 
-const GIT_INSPECTION_OPS = new Set(["status", "diff", "log"]);
-
-const COMPLETION_PATTERNS: ReadonlyArray<RegExp> = [
-	/\b(?:done|finished|complete|completed|implemented|fixed|resolved|updated|added|changed|removed|wired|shipped)\b/i,
-	/\ball set\b/i,
-	/\bready for (?:review|handoff|use)\b/i,
-	/\b(?:tests?|validation|typecheck|lint)\s+(?:pass|passes|passed|succeed|succeeded|ok)\b/i,
-	/^\s*(?:Changed|Summary)\s*:/im,
-	/^\s*Tests\s*:/im,
-];
+interface MutationCandidate {
+	toolCallId: string;
+	paths: string[];
+}
 
 const LIMITATION_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(?:blocked by|blocker|blockers|unable to|not able to|could not|couldn't|cannot|can't)\b/i,
@@ -71,105 +70,161 @@ const LIMITATION_PATTERNS: ReadonlyArray<RegExp> = [
 	/\bremaining(?:\s+\w+){0,3}\s+(?:work|issue|issues|gap|gaps|blocker|blockers)\b/i,
 ];
 
+/**
+ * Action-scoped completion contract. The engine keys off what the turn actually
+ * DID, not how the prompt was phrased: it engages only when the recent window
+ * mutated workspace state and then settled (turn_end) without recording
+ * validation evidence or an explicit limitation. The turn settling is itself
+ * the completion signal, so the model never has to type "done" to be gated, and
+ * a work request phrased as a question cannot bypass the gate.
+ *
+ * Decision order (pure function of ledger receipts):
+ *   1. no mutating receipt in the window        -> ok/no_mutation
+ *   2. validation evidence present              -> ok/validation_evidence
+ *   3. explicit limitation stated in the text   -> ok/explicit_limitation
+ *   4. otherwise                                -> engage/unvalidated_mutation
+ */
 export function assessFinishContract(input: FinishContractInput): FinishContractAssessment {
 	const assistantText = input.assistantText.trim();
-	if (!hasCompletionClaim(assistantText)) {
-		return { kind: "ok", reason: "no_completion_claim", evidence: [] };
-	}
-
 	const sessionEntries = input.sessionEntries ?? [];
 	const assistantTurnId = input.assistantTurnId ?? null;
-	const userText = input.currentUserText ?? currentUserText(sessionEntries, assistantTurnId);
-	if (userText !== null && isReadOnlyStatusRecallPrompt(userText)) {
-		return { kind: "ok", reason: "read_only_status_turn", evidence: [] };
-	}
-	// An informational answer to a "how/what/why" question is not a work claim:
-	// completion vocabulary ("updated", "added", "changed") routinely appears in
-	// an explanation, so demanding validation evidence there is noise. A work
-	// request in the same prompt disqualifies this branch.
-	if (userText !== null && isInformationalQuestionPrompt(userText)) {
-		return { kind: "ok", reason: "informational_question_turn", evidence: [] };
+	const window = recentEntries(sessionEntries, assistantTurnId, input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT);
+
+	const mutatedPaths = mutatingReceipts(window);
+	if (mutatedPaths.length === 0) {
+		return { kind: "ok", reason: "no_mutation", evidence: [], mutatedPaths };
 	}
 
-	const evidence = collectRecentEvidence(
-		sessionEntries,
-		assistantTurnId,
-		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
-	);
+	const evidence = collectValidationEvidence(window);
 	if (evidence.length > 0) {
-		return { kind: "ok", reason: "validation_evidence", evidence };
+		return { kind: "ok", reason: "validation_evidence", evidence, mutatedPaths };
 	}
 
 	if (hasExplicitLimitation(assistantText)) {
-		return { kind: "ok", reason: "explicit_limitation", evidence: [] };
+		return { kind: "ok", reason: "explicit_limitation", evidence: [], mutatedPaths };
 	}
 
-	return { kind: "advisory", message: FINISH_CONTRACT_ADVISORY_MESSAGE, evidence: [] };
+	return {
+		kind: "engage",
+		reason: "unvalidated_mutation",
+		message: FINISH_CONTRACT_ADVISORY_MESSAGE,
+		evidence: [],
+		mutatedPaths,
+	};
 }
 
-export function hasCompletionClaim(text: string): boolean {
-	const normalized = text.trim();
-	if (normalized.length === 0) return false;
-	return COMPLETION_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
+/**
+ * The single retained text escape valve: the assistant explicitly states what
+ * it could not verify. Everything else about the contract is receipt-grounded;
+ * this is the one place prose still drives the decision. Candidate for a future
+ * structured "limitation" signal so the whole gate becomes text-independent.
+ */
 export function hasExplicitLimitation(text: string): boolean {
 	const normalized = text.trim();
 	if (normalized.length === 0) return false;
 	return LIMITATION_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
-export function isReadOnlyStatusRecallPrompt(text: string): boolean {
-	const normalized = text.trim().toLowerCase();
-	if (normalized.length === 0) return false;
-	const readOnlySignal =
-		/\bread\s+only\b/.test(normalized) ||
-		/\buse\s+read\s+only\b/.test(normalized) ||
-		/\bdo\s+not\s+use\s+tools\b/.test(normalized) ||
-		/\brecall\b/.test(normalized) ||
-		/\bstate\s+check\b/.test(normalized) ||
-		/\bstatus\s+check\b/.test(normalized) ||
-		/\balignment\b/.test(normalized);
-	if (!readOnlySignal) return false;
-	return !hasWorkRequest(normalized);
+/**
+ * Paths the turn actually mutated, drawn only from successful (non-error)
+ * receipts inside the window:
+ *   - write / edit / write_plan / write_review, via `toolMutationPaths`.
+ *   - bash whose command carries a workspace write or delete target, via
+ *     `extractCommandWriteTargets` / `extractCommandDeleteTargets`.
+ * Read-only git and pure read/grep/find/ls/exec/web_fetch receipts contribute
+ * nothing, so the contract can never fire on a retrieval or execution-only
+ * turn. Grounded in the same mutation notion the action classifier records, so
+ * the audit ledger and this gate stay consistent about what counts as a change.
+ */
+function mutatingReceipts(recent: ReadonlyArray<unknown>): string[] {
+	const mutationCalls = new Map<string, MutationCandidate>();
+	const paths: string[] = [];
+	const seen = new Set<string>();
+
+	for (const entry of recent) {
+		// A user-run `!` bash execution is self-contained: it carries its own
+		// success signal, so any mutation targets count without a paired result.
+		const bashMutation = bashExecutionMutationPaths(entry);
+		if (bashMutation !== null) {
+			for (const path of bashMutation) pushPath(paths, seen, path);
+			continue;
+		}
+
+		const call = mutatingToolCall(entry);
+		if (call !== null) {
+			mutationCalls.set(call.toolCallId, call);
+			continue;
+		}
+
+		const resultId = successfulToolResultId(entry);
+		if (resultId !== null) {
+			const candidate = mutationCalls.get(resultId);
+			if (candidate !== undefined) {
+				for (const path of candidate.paths) pushPath(paths, seen, path);
+			}
+		}
+	}
+
+	return paths;
+}
+
+/** Mutation targets for a tool call, empty for read-only/execute-only tools. */
+function mutationPathsForTool(toolName: string, args: Record<string, unknown> | undefined): string[] {
+	if (toolName === ToolNames.Bash) {
+		const command = typeof args?.command === "string" ? args.command : null;
+		if (command === null) return [];
+		return [...extractCommandWriteTargets(command), ...extractCommandDeleteTargets(command)];
+	}
+	return toolMutationPaths(toolName, args);
+}
+
+function mutatingToolCall(entry: unknown): MutationCandidate | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null) return null;
+	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
+	if (toolName === null) return null;
+	const args = asRecord(payload.args ?? payload.arguments ?? payload.input) ?? undefined;
+	const paths = mutationPathsForTool(toolName, args);
+	if (paths.length === 0) return null;
+	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+	if (toolCallId === null) return null;
+	return { toolCallId, paths };
 }
 
 /**
- * A prompt that asks for an explanation rather than a change: it leads with an
- * interrogative ("how/what/why/...") or explanation verb, or ends in a question
- * mark, and carries no work request. Used to suppress the finish-contract
- * advisory when a long informational answer trips the completion regex.
+ * Mutation targets of a settled `!` bash execution entry. Returns null when the
+ * entry is not a successful bash execution so the caller falls through to the
+ * tool_call/tool_result pairing path; returns `[]` for a successful command
+ * with no write/delete target (a read-only `!` command is not a mutation).
  */
-export function isInformationalQuestionPrompt(text: string): boolean {
-	const normalized = text.trim().toLowerCase();
-	if (normalized.length === 0) return false;
-	if (hasWorkRequest(normalized)) return false;
-	const leadsWithQuestion =
-		/^(?:how|what|why|when|where|which|who|whose|whom|does|do|did|is|are|can|could|should|would|explain|describe|summarize|compare|tell\s+me\s+about|walk\s+me\s+through|show\s+me\s+how)\b/.test(
-			normalized,
-		);
-	return leadsWithQuestion || /\?\s*$/.test(normalized);
+function bashExecutionMutationPaths(entry: unknown): string[] | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "bashExecution") return null;
+	if (typeof record.command !== "string") return null;
+	if (record.cancelled === true || record.exitCode !== 0) return null;
+	return [...extractCommandWriteTargets(record.command), ...extractCommandDeleteTargets(record.command)];
 }
 
-/** True when the prompt asks for a code or file change, or to run validation. */
-function hasWorkRequest(normalized: string): boolean {
-	return (
-		/\b(implement|fix|resolve|change|modify|edit|write|create|delete|remove|add|build|ship)\b/.test(normalized) ||
-		/\b(run|execute)\s+(tests?|lint|typecheck|build|validation)\b/.test(normalized)
-	);
+function pushPath(paths: string[], seen: Set<string>, path: string): void {
+	if (path.length === 0 || seen.has(path)) return;
+	seen.add(path);
+	paths.push(path);
 }
 
-function collectRecentEvidence(
-	entries: ReadonlyArray<unknown>,
-	assistantTurnId: string | null,
-	recentEntryLimit: number,
-): FinishContractEvidence[] {
-	const recent = recentEntries(entries, assistantTurnId, recentEntryLimit);
-	const requestedGitOps = requestedGitInspectionOps(entries, assistantTurnId);
+/**
+ * Receipt-based validation evidence over the recent window. Kept verbatim from
+ * the pre-redesign engine minus the requested-inspection path: validation
+ * commands (`detectValidationCommand`), run_task verification scripts,
+ * `validate_frontend`, passed dispatch receipts, and protected-artifact records.
+ * Inspection was removed because inspecting the repo is never a mutation, so it
+ * can no longer be on the path to engaging the contract.
+ */
+function collectValidationEvidence(recent: ReadonlyArray<unknown>): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
-	const inspectionCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 
 	for (const entry of recent) {
@@ -191,12 +246,6 @@ function collectRecentEvidence(
 			continue;
 		}
 
-		const inspectionCall = requestedInspectionToolCall(entry, requestedGitOps);
-		if (inspectionCall !== null) {
-			inspectionCalls.set(inspectionCall.toolCallId, inspectionCall);
-			continue;
-		}
-
 		const dispatchCall = dispatchEvidenceCall(entry);
 		if (dispatchCall !== null) {
 			dispatchCalls.set(dispatchCall.toolCallId, dispatchCall);
@@ -214,11 +263,6 @@ function collectRecentEvidence(
 			const candidate = toolCalls.get(resultId);
 			if (candidate !== undefined) {
 				pushEvidence(evidence, seen, validationEvidence(candidate));
-				continue;
-			}
-			const inspectionCandidate = inspectionCalls.get(resultId);
-			if (inspectionCandidate !== undefined) {
-				pushEvidence(evidence, seen, requestedInspectionEvidence(inspectionCandidate));
 			}
 			continue;
 		}
@@ -228,31 +272,6 @@ function collectRecentEvidence(
 	}
 
 	return evidence;
-}
-
-/** Git ops the current user text explicitly asked to see (e.g. "show git diff"). */
-function requestedGitInspectionOps(entries: ReadonlyArray<unknown>, assistantTurnId: string | null): Set<string> {
-	const userText = currentUserText(entries, assistantTurnId);
-	const requested = new Set<string>();
-	if (userText === null) return requested;
-	if (/\bgit\s+status\b/i.test(userText)) requested.add("status");
-	if (/\bgit\s+diff\b/i.test(userText)) requested.add("diff");
-	if (/\bgit\s+log\b/i.test(userText)) requested.add("log");
-	return requested;
-}
-
-function currentUserText(entries: ReadonlyArray<unknown>, assistantTurnId: string | null): string | null {
-	const assistantIndex =
-		assistantTurnId === null ? entries.length : entries.findIndex((entry) => turnIdOf(entry) === assistantTurnId);
-	const endExclusive = assistantIndex >= 0 ? assistantIndex : entries.length;
-	for (let index = endExclusive - 1; index >= 0; index -= 1) {
-		const entry = entries[index];
-		if (!isUserMessageEntry(entry)) continue;
-		const payload = asRecord(asRecord(entry)?.payload);
-		const text = typeof payload?.text === "string" ? payload.text.trim() : "";
-		return text.length > 0 ? text : null;
-	}
-	return null;
 }
 
 function recentEntries(
@@ -333,31 +352,6 @@ function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
 	const candidate: ToolCallEvidenceCandidate = {
 		toolCallId,
 		command: summary,
-	};
-	const turnId = turnIdOf(entry);
-	if (turnId !== null) candidate.turnId = turnId;
-	return candidate;
-}
-
-function requestedInspectionToolCall(
-	entry: unknown,
-	requestedGitOps: ReadonlySet<string>,
-): ToolCallEvidenceCandidate | null {
-	if (requestedGitOps.size === 0) return null;
-	const record = asRecord(entry);
-	if (record?.kind !== "message" || record.role !== "tool_call") return null;
-	const payload = asRecord(record.payload);
-	if (payload === null) return null;
-	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
-	if (toolName !== "git") return null;
-	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
-	const op = typeof args?.op === "string" ? args.op.trim() : "";
-	if (!GIT_INSPECTION_OPS.has(op) || !requestedGitOps.has(op)) return null;
-	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
-	if (toolCallId === null) return null;
-	const candidate: ToolCallEvidenceCandidate = {
-		toolCallId,
-		command: `git ${op}`,
 	};
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
@@ -454,15 +448,6 @@ function validationEvidence(candidate: ToolCallEvidenceCandidate): FinishContrac
 	const evidence: FinishContractEvidence = {
 		kind: "validation_command",
 		summary: `validation command passed: ${candidate.command}`,
-	};
-	if (candidate.turnId !== undefined) evidence.turnId = candidate.turnId;
-	return evidence;
-}
-
-function requestedInspectionEvidence(candidate: ToolCallEvidenceCandidate): FinishContractEvidence {
-	const evidence: FinishContractEvidence = {
-		kind: "requested_inspection",
-		summary: `requested inspection passed: ${candidate.command}`,
 	};
 	if (candidate.turnId !== undefined) evidence.turnId = candidate.turnId;
 	return evidence;

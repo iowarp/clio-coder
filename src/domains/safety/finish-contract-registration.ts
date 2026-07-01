@@ -12,7 +12,8 @@
 
 import { VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
-import { assessFinishContract } from "./finish-contract.js";
+import type { CompletionContractAuditInput } from "./audit.js";
+import { assessFinishContract, type FinishContractAssessment } from "./finish-contract.js";
 import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_REGISTRATION_ID = "assessor.finish-contract";
@@ -40,10 +41,17 @@ export interface CreateFinishContractRegistrationOptions {
 	/**
 	 * Resolve the effective rigor for the current turn. Optional; defaults to
 	 * `"normal"` (today's soft advisory) when absent. At `"high"` an
-	 * unvalidated completion claim re-prompts the model to validate or state a
+	 * unvalidated mutation re-prompts the model to validate or state a
 	 * limitation instead of merely warning.
 	 */
 	resolveRigor?: () => Rigor;
+	/**
+	 * Record the contract's decision to the audit ledger. Optional; when wired
+	 * (production passes the safety audit sink), every turn_end decision — each
+	 * OK reason and each engagement — is written so the outcome is replayable
+	 * from the JSONL alone. Failures here never affect the returned effects.
+	 */
+	recordDecision?: (input: CompletionContractAuditInput) => void;
 }
 
 export function createFinishContractRegistration(
@@ -76,8 +84,9 @@ export function createFinishContractRegistration(
 				sessionEntries: entries,
 				assistantTurnId: input.turnId ?? null,
 			});
-			if (assessment.kind !== "advisory") return [];
 			const rigor = options.resolveRigor?.() ?? "normal";
+			recordDecision(options, input.turnId ?? null, assessment, rigor);
+			if (assessment.kind !== "engage") return [];
 			if (rigor === "high") {
 				// Withhold the completion and force a re-prompt: a continuation
 				// request carries the turn onward, and the paired reminder gives
@@ -94,4 +103,26 @@ export function createFinishContractRegistration(
 
 function isHardBlockEffect(effect: MiddlewareEffect): boolean {
 	return effect.kind === "block_tool" || (effect.kind === "inject_reminder" && effect.severity === "hard-block");
+}
+
+function recordDecision(
+	options: CreateFinishContractRegistrationOptions,
+	turnId: string | null,
+	assessment: FinishContractAssessment,
+	rigor: Rigor,
+): void {
+	if (options.recordDecision === undefined) return;
+	const evidenceKinds = Array.from(new Set(assessment.evidence.map((item) => item.kind)));
+	try {
+		options.recordDecision({
+			turnId,
+			decision: assessment.kind,
+			reason: assessment.reason,
+			rigor,
+			mutatedPaths: assessment.mutatedPaths,
+			evidenceKinds,
+		});
+	} catch {
+		// Audit must never break the hot path; a failed ledger write is silent.
+	}
 }

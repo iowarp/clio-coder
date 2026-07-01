@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -13,6 +13,7 @@ import type { ProvidersContract, TargetStatus } from "../../src/domains/provider
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
+import type { CompletionContractAuditInput } from "../../src/domains/safety/audit.js";
 import { FINISH_CONTRACT_ADVISORY_MESSAGE } from "../../src/domains/safety/finish-contract.js";
 import {
 	createFinishContractRegistration,
@@ -244,6 +245,28 @@ async function emitReadToolCall(agent: FakeAgent, toolCallId = "tool-1"): Promis
 	} as unknown as AgentEvent);
 }
 
+/**
+ * Emit a successful edit tool call so a mutating receipt lands in the session
+ * ledger. The action-scoped finish contract engages only when the turn actually
+ * changed workspace state, so registration tests that expect an advisory must
+ * seed a mutation like this.
+ */
+async function emitEditToolCall(agent: FakeAgent, path = "src/index.ts", toolCallId = "edit-1"): Promise<void> {
+	await agent.emit({
+		type: "tool_execution_start",
+		toolCallId,
+		toolName: "edit",
+		args: { path },
+	} as unknown as AgentEvent);
+	await agent.emit({
+		type: "tool_execution_end",
+		toolCallId,
+		toolName: "edit",
+		result: { kind: "ok", output: "edited" },
+		isError: false,
+	} as unknown as AgentEvent);
+}
+
 describe("contracts/turn-hooks chat-loop wiring", () => {
 	it("fires turn_start with prompt metadata and flushes its reminders into the same request", async () => {
 		const seenInputs: MiddlewareHookInput[] = [];
@@ -344,6 +367,9 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			createAgent: createFakeAgentFactory(async (agent, input) => {
 				prompts.push(String(input));
 				turn += 1;
+				// Turn 1 mutates a file then claims done with no validation, which is
+				// exactly what the action-scoped contract engages on.
+				if (turn === 1) await emitEditToolCall(agent);
 				await emitAssistantTurn(
 					agent,
 					assistantStopMessage(turn === 1 ? "Done. The feature is implemented and ready for review." : "ok"),
@@ -695,32 +721,78 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 		...overrides,
 	});
 
-	it("emits a warn reminder for a completion claim without evidence", () => {
-		const registration = createFinishContractRegistration({ readSessionEntries: () => [] });
+	// A successful edit receipt: the action-scoped trigger. Registration tests
+	// that expect the contract to engage must seed a mutation like this.
+	const mutationEntries = (path = "src/parser.ts"): SessionEntry[] =>
+		[
+			{
+				kind: "message",
+				turnId: "turn-c",
+				parentTurnId: null,
+				timestamp: "t",
+				role: "tool_call",
+				payload: { name: "edit", toolCallId: "c1", args: { path } },
+			},
+			{
+				kind: "message",
+				turnId: "turn-r",
+				parentTurnId: null,
+				timestamp: "t",
+				role: "tool_result",
+				payload: { toolName: "edit", toolCallId: "c1", isError: false, result: { kind: "ok" } },
+			},
+		] as unknown as SessionEntry[];
+
+	// A read receipt: never a mutation, so it can never engage the contract.
+	const readOnlyEntries = (): SessionEntry[] =>
+		[
+			{
+				kind: "message",
+				turnId: "turn-c",
+				parentTurnId: null,
+				timestamp: "t",
+				role: "tool_call",
+				payload: { name: "read", toolCallId: "c1", args: { path: "src/parser.ts" } },
+			},
+			{
+				kind: "message",
+				turnId: "turn-r",
+				parentTurnId: null,
+				timestamp: "t",
+				role: "tool_result",
+				payload: { toolName: "read", toolCallId: "c1", isError: false, result: { kind: "ok" } },
+			},
+		] as unknown as SessionEntry[];
+
+	it("emits a warn reminder when a turn mutated a file without evidence", () => {
+		const registration = createFinishContractRegistration({ readSessionEntries: () => mutationEntries() });
 		const effects = registration.evaluate(baseInput());
 		strictEqual(effects.length, 1);
 		strictEqual(effects[0]?.kind, "inject_reminder");
 		ok(effects[0]?.kind === "inject_reminder" && effects[0].severity === "warn");
 	});
 
-	it("stays silent on aborted turns, without a session, and when evidence exists", () => {
-		const registration = createFinishContractRegistration({ readSessionEntries: () => [] });
+	it("stays silent on aborted turns, without a session, and when the mutation is validated", () => {
+		const registration = createFinishContractRegistration({ readSessionEntries: () => mutationEntries() });
 		strictEqual(registration.evaluate(baseInput({ metadata: { stopReason: "aborted" } })).length, 0);
 
 		const sessionless = createFinishContractRegistration({ readSessionEntries: () => null });
 		strictEqual(sessionless.evaluate(baseInput()).length, 0);
 
+		// Mutation + a protected-artifact record (validation evidence) clears it.
 		const withEvidence = createFinishContractRegistration({
-			readSessionEntries: () => [
-				{ kind: "protectedArtifact", action: "protect", artifact: { path: "report.md" }, turnId: "turn-1" },
-			],
+			readSessionEntries: () =>
+				[
+					...mutationEntries(),
+					{ kind: "protectedArtifact", action: "protect", artifact: { path: "report.md" }, turnId: "turn-1" },
+				] as unknown as SessionEntry[],
 		});
 		strictEqual(withEvidence.evaluate(baseInput()).length, 0);
 	});
 
-	it("re-prompts with request_continuation at high rigor when a claim has no evidence", () => {
+	it("re-prompts with request_continuation at high rigor when a mutation has no evidence", () => {
 		const registration = createFinishContractRegistration({
-			readSessionEntries: () => [],
+			readSessionEntries: () => mutationEntries(),
 			resolveRigor: () => "high",
 		});
 		const effects = registration.evaluate(baseInput());
@@ -735,7 +807,7 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 
 	it("does not request high-rigor continuation after a prior hard-block effect", () => {
 		const finish = createFinishContractRegistration({
-			readSessionEntries: () => [],
+			readSessionEntries: () => mutationEntries(),
 			resolveRigor: () => "high",
 		});
 		const result = runMiddlewareRegistrations(
@@ -756,7 +828,7 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 
 	it("keeps the soft warn advisory at normal rigor with no request_continuation", () => {
 		const registration = createFinishContractRegistration({
-			readSessionEntries: () => [],
+			readSessionEntries: () => mutationEntries(),
 			resolveRigor: () => "normal",
 		});
 		const effects = registration.evaluate(baseInput());
@@ -766,33 +838,51 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 		ok(!effects.some((effect) => effect.kind === "request_continuation"));
 	});
 
-	it("never gates read-only recall or no-claim turns, even at high rigor", () => {
+	it("never gates a no-mutation turn, even at high rigor", () => {
 		const readOnly = createFinishContractRegistration({
-			readSessionEntries: () => [
-				{
-					kind: "message",
-					role: "user",
-					turnId: "turn-8",
-					payload: { text: "Use read only. Recall the sentinel and report status check only." },
-				},
-			],
+			readSessionEntries: () => readOnlyEntries(),
 			resolveRigor: () => "high",
 		});
 		strictEqual(
 			readOnly.evaluate(baseInput({ text: "Reads complete; ready for next instruction." })).length,
 			0,
-			"read-only recall stays exempt at high rigor",
+			"a read-only turn stays exempt at high rigor",
 		);
 
-		const noClaim = createFinishContractRegistration({
+		const noReceipt = createFinishContractRegistration({
 			readSessionEntries: () => [],
 			resolveRigor: () => "high",
 		});
 		strictEqual(
-			noClaim.evaluate(baseInput({ text: "Here is what I found while looking around the repo." })).length,
+			noReceipt.evaluate(baseInput({ text: "Done. The parser is implemented and ready for review." })).length,
 			0,
-			"a turn with no completion claim stays exempt at high rigor",
+			"a turn that ran no tools stays exempt at high rigor",
 		);
+	});
+
+	it("records every decision to the audit sink with mutated paths, reason, and rigor", () => {
+		const recorded: CompletionContractAuditInput[] = [];
+		const engage = createFinishContractRegistration({
+			readSessionEntries: () => mutationEntries("src/app.ts"),
+			resolveRigor: () => "high",
+			recordDecision: (record) => recorded.push(record),
+		});
+		engage.evaluate(baseInput());
+		strictEqual(recorded.length, 1);
+		strictEqual(recorded[0]?.decision, "engage");
+		strictEqual(recorded[0]?.reason, "unvalidated_mutation");
+		strictEqual(recorded[0]?.rigor, "high");
+		strictEqual(recorded[0]?.turnId, "turn-9");
+		deepStrictEqual(recorded[0]?.mutatedPaths, ["src/app.ts"]);
+
+		const ok2 = createFinishContractRegistration({
+			readSessionEntries: () => readOnlyEntries(),
+			recordDecision: (record) => recorded.push(record),
+		});
+		ok2.evaluate(baseInput());
+		strictEqual(recorded.length, 2);
+		strictEqual(recorded[1]?.decision, "ok");
+		strictEqual(recorded[1]?.reason, "no_mutation");
 	});
 });
 

@@ -1,5 +1,5 @@
 import type { Classification, ClassifierCall } from "./action-classifier.js";
-import type { ToolCallAuditInput } from "./audit.js";
+import type { CompletionContractAuditInput, ToolCallAuditInput } from "./audit.js";
 import type { DamageControlMatch } from "./damage-control.js";
 import type { LoopVerdict } from "./loop-detector.js";
 import type { SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
@@ -53,7 +53,13 @@ export interface SafetyContract {
 
 	/**
 	 * Shared audit sink. `recordCount` is for diagnostics; `recordToolCall` is
-	 * the registry's hook for autonomy-level final dispositions.
+	 * the registry's hook for autonomy-level final dispositions;
+	 * `recordCompletionContract` is the finish-contract's hook for its turn_end
+	 * decision so every gate outcome is replayable from the ledger.
 	 */
-	readonly audit: { recordCount(): number; recordToolCall?(input: ToolCallAuditInput): void };
+	readonly audit: {
+		recordCount(): number;
+		recordToolCall?(input: ToolCallAuditInput): void;
+		recordCompletionContract?(input: CompletionContractAuditInput): void;
+	};
 }

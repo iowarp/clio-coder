@@ -24,7 +24,6 @@ const ALL_FINISH_CONTRACT_KINDS = [
 	"validation_command",
 	"protected_artifact",
 	"dispatch_receipt",
-	"requested_inspection",
 ] as const satisfies readonly FinishContractEvidenceKind[];
 
 const tagSet = new Set<string>(EVIDENCE_TAGS);

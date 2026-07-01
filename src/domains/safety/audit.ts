@@ -22,6 +22,10 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
  *     /audit consumers know which session was reopened and how.
  *   - `agent_status_change`: emitted for alarmable agent-status transitions
  *     such as stuck, tool_blocked, retrying, and cancelled turns.
+ *   - `completion_contract`: emitted at turn_end for every finish-contract
+ *     decision (each OK reason and each engagement) so the decision is
+ *     replayable from the ledger alone: it records the mutated paths, the
+ *     evidence kinds, the decision, the reason, and the effective rigor.
  *
  * Older audit files written before the discriminator existed have rows with
  * the tool_call shape but no `kind` field. Any future reader should treat a
@@ -127,13 +131,38 @@ export interface AgentStatusChangeAuditRecord {
 	metadata?: Record<string, unknown>;
 }
 
+export type CompletionContractDecision = "ok" | "engage";
+
+export interface CompletionContractAuditRecord {
+	kind: "completion_contract";
+	ts: string;
+	correlationId: string;
+	turnId: string | null;
+	decision: CompletionContractDecision;
+	reason: string;
+	rigor: string;
+	mutatedPaths: ReadonlyArray<string>;
+	evidenceKinds: ReadonlyArray<string>;
+}
+
+export interface CompletionContractAuditInput {
+	turnId: string | null;
+	decision: CompletionContractDecision;
+	reason: string;
+	rigor: string;
+	mutatedPaths: ReadonlyArray<string>;
+	evidenceKinds: ReadonlyArray<string>;
+	now?: Date;
+}
+
 export type AuditRecord =
 	| ToolCallAuditRecord
 	| PermissionAuditRecord
 	| AbortAuditRecord
 	| SessionParkAuditRecord
 	| SessionResumeAuditRecord
-	| AgentStatusChangeAuditRecord;
+	| AgentStatusChangeAuditRecord
+	| CompletionContractAuditRecord;
 
 export interface AuditWriter {
 	write(record: AuditRecord): void;
@@ -307,6 +336,21 @@ export function buildAgentStatusChangeAuditRecord(input: {
 	};
 	if (input.metadata !== undefined) record.metadata = redactArgs(input.metadata) as Record<string, unknown>;
 	return record;
+}
+
+export function buildCompletionContractAuditRecord(input: CompletionContractAuditInput): CompletionContractAuditRecord {
+	const now = input.now ?? new Date();
+	return {
+		kind: "completion_contract",
+		ts: now.toISOString(),
+		correlationId: newCorrelationId(),
+		turnId: input.turnId,
+		decision: input.decision,
+		reason: input.reason,
+		rigor: input.rigor,
+		mutatedPaths: input.mutatedPaths.map((path) => redactString(path)),
+		evidenceKinds: [...input.evidenceKinds],
+	};
 }
 
 interface OpenFile {
