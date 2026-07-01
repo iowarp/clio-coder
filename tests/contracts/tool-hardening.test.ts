@@ -5,6 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clampTimeoutMs } from "../../src/core/bash-exec.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
+import {
+	createFinishContractRegistration,
+	HIGH_RIGOR_REVALIDATION_MESSAGE,
+} from "../../src/domains/safety/finish-contract-registration.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
@@ -334,5 +340,221 @@ describe("contracts/tool-hardening validate_frontend html structure", () => {
 	it("still fails on a genuine mismatched non-optional tag", async () => {
 		const { status } = await structureCheck(`<!doctype html><html><body><div><span></div></body></html>`);
 		strictEqual(status, "fail");
+	});
+});
+
+describe("contracts/tool-hardening finish-contract action-scoped trigger", () => {
+	// Session-entry builders mirroring the production turn-id model: every entry
+	// carries its own turnId, and the assistant turnId at turn_end (a final id
+	// not present among the receipts) makes the window everything after the last
+	// user prompt. Verified against the real assessFinishContract.
+	const user = (text: string): unknown => ({ kind: "message", role: "user", turnId: "u1", payload: { text } });
+	const call = (name: string, args: Record<string, unknown>, id: string): unknown => ({
+		kind: "message",
+		role: "tool_call",
+		turnId: `c-${id}`,
+		payload: { name, toolCallId: id, args },
+	});
+	const okResult = (name: string, id: string, details?: Record<string, unknown>): unknown => ({
+		kind: "message",
+		role: "tool_result",
+		turnId: `r-${id}`,
+		payload: {
+			toolName: name,
+			toolCallId: id,
+			isError: false,
+			result: details === undefined ? { kind: "ok" } : { details },
+		},
+	});
+	const errorResult = (name: string, id: string): unknown => ({
+		kind: "message",
+		role: "tool_result",
+		turnId: `r-${id}`,
+		payload: { toolName: name, toolCallId: id, isError: true, result: { details: { kind: "error" } } },
+	});
+	const protectedArtifact = (path: string): unknown => ({
+		kind: "protectedArtifact",
+		action: "protect",
+		turnId: "pa1",
+		artifact: { path },
+	});
+	const dispatchResult = (id: string): unknown => ({
+		kind: "message",
+		role: "tool_result",
+		turnId: `r-${id}`,
+		payload: {
+			toolName: "dispatch",
+			toolCallId: id,
+			isError: false,
+			result: { details: { exitCode: 0, runId: "run-1", agentId: "coder" } },
+		},
+	});
+	const editPair = (path = "src/app.ts", id = "e1"): unknown[] => [call("edit", { path }, id), okResult("edit", id)];
+
+	const assess = (userText: string, assistantText: string, entries: unknown[]) =>
+		assessFinishContract({
+			assistantText,
+			sessionEntries: [user(userText), ...entries],
+			assistantTurnId: "assistant-final",
+		});
+
+	it("engages when a turn mutated a file with no evidence and no limitation", () => {
+		const assessment = assess("edit the parser", "Done.", editPair("src/parser.ts"));
+		strictEqual(assessment.kind, "engage");
+		if (assessment.kind === "engage") {
+			strictEqual(assessment.reason, "unvalidated_mutation");
+			strictEqual(assessment.mutatedPaths[0], "src/parser.ts");
+		}
+	});
+
+	it("clears a mutation validated by any receipt-based evidence source", () => {
+		const validated: Array<[string, unknown[]]> = [
+			["npm test", [...editPair(), call("bash", { command: "npm test" }, "v"), okResult("bash", "v", { exitCode: 0 })]],
+			[
+				"run_task",
+				[...editPair(), call("run_task", { task: "test:contracts" }, "v"), okResult("run_task", "v", { exitCode: 0 })],
+			],
+			[
+				"validate_frontend",
+				[...editPair(), call("validate_frontend", { path: "page.html" }, "v"), okResult("validate_frontend", "v")],
+			],
+			["dispatch", [...editPair(), call("dispatch", { agent_id: "coder", task: "do" }, "v"), dispatchResult("v")]],
+			["protected-artifact", [...editPair(), protectedArtifact("report.md")]],
+		];
+		for (const [label, entries] of validated) {
+			const assessment = assess("make the change", "Done.", entries);
+			strictEqual(assessment.kind, "ok", `${label} must clear the contract`);
+			if (assessment.kind === "ok") strictEqual(assessment.reason, "validation_evidence", label);
+		}
+	});
+
+	it("clears a mutation when the turn records an explicit limitation", () => {
+		const assessment = assess(
+			"edit it",
+			"Updated the parser. Tests: not run — blocked by a missing fixture.",
+			editPair(),
+		);
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "explicit_limitation");
+	});
+
+	it("never fires on a read-only turn (read/grep/find/ls/git status)", () => {
+		const readOnly: Array<[string, unknown[]]> = [
+			["read", [call("read", { path: "src/x.ts" }, "t"), okResult("read", "t")]],
+			["grep", [call("grep", { pattern: "x" }, "t"), okResult("grep", "t")]],
+			["find", [call("find", { pattern: "*.ts" }, "t"), okResult("find", "t")]],
+			["ls", [call("ls", { path: "src" }, "t"), okResult("ls", "t")]],
+			["git status", [call("git", { op: "status" }, "t"), okResult("git", "t", { exitCode: 0 })]],
+		];
+		for (const [label, entries] of readOnly) {
+			const assessment = assess("show me the state", "Done. Here is the current state.", entries);
+			strictEqual(assessment.kind, "ok", label);
+			if (assessment.kind === "ok") strictEqual(assessment.reason, "no_mutation", label);
+		}
+	});
+
+	it("never fires on an execution-only turn — FC-1 (bash sleep)", () => {
+		const assessment = assess("run sleep 3 && echo finished", "The command completed.", [
+			call("bash", { command: "sleep 3 && echo finished" }, "b"),
+			okResult("bash", "b", { exitCode: 0 }),
+		]);
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "no_mutation");
+	});
+
+	it("never fires on a retrieval turn — FC-1 (web_fetch, read-and-show)", () => {
+		const webFetch = assess("fetch https://x/api and show me the JSON", "Here is the JSON body.", [
+			call("web_fetch", { url: "https://x/api" }, "w"),
+			okResult("web_fetch", "w"),
+		]);
+		strictEqual(webFetch.kind, "ok");
+		if (webFetch.kind === "ok") strictEqual(webFetch.reason, "no_mutation");
+
+		const readShow = assess("read src/app.ts and show me the exports", "Here are the exports.", [
+			call("read", { path: "src/app.ts" }, "r"),
+			okResult("read", "r"),
+		]);
+		strictEqual(readShow.kind, "ok");
+		if (readShow.kind === "ok") strictEqual(readShow.reason, "no_mutation");
+	});
+
+	it("engages a question-shaped work request that mutated a file — FC-2", () => {
+		for (const prompt of [
+			"Can you make the parser work?",
+			"Can you update the parser?",
+			"Could you refactor the auth module?",
+			"Will you wire up the logger?",
+		]) {
+			const assessment = assess(prompt, "Done. Updated the parser.", editPair());
+			strictEqual(assessment.kind, "engage", prompt);
+		}
+	});
+
+	it("stays silent on the same question-shaped prompt when nothing mutated — FC-2 control", () => {
+		const assessment = assess(
+			"Can you make the parser work?",
+			"Here is how the parser works: it tokenizes, then builds the AST.",
+			[call("read", { path: "src/parser.ts" }, "r"), okResult("read", "r")],
+		);
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "no_mutation");
+	});
+
+	it("engages on a bash in-place / redirect mutation with no evidence", () => {
+		const sed = assess("fix the import", "Done.", [
+			call("bash", { command: "sed -i 's/a/b/' src/x.ts" }, "s"),
+			okResult("bash", "s", { exitCode: 0 }),
+		]);
+		strictEqual(sed.kind, "engage");
+		if (sed.kind === "engage") strictEqual(sed.mutatedPaths[0], "src/x.ts");
+
+		const redirect = assess("append the flag", "Done.", [
+			call("bash", { command: "echo FLAG=1 > src/y.ts" }, "r"),
+			okResult("bash", "r", { exitCode: 0 }),
+		]);
+		strictEqual(redirect.kind, "engage");
+		if (redirect.kind === "engage") strictEqual(redirect.mutatedPaths[0], "src/y.ts");
+	});
+
+	it("does not treat a failed mutation or failed validation as settling the contract", () => {
+		// The edit errored: nothing actually changed, so there is nothing to gate.
+		const failedEdit = assess("edit it", "Done.", [call("edit", { path: "src/x.ts" }, "e"), errorResult("edit", "e")]);
+		strictEqual(failedEdit.kind, "ok");
+		if (failedEdit.kind === "ok") strictEqual(failedEdit.reason, "no_mutation");
+
+		// The edit succeeded but the validation command failed: still unvalidated.
+		const failedValidation = assess("edit it", "Done. Tests pass.", [
+			...editPair(),
+			call("bash", { command: "npm test" }, "v"),
+			errorResult("bash", "v"),
+		]);
+		strictEqual(failedValidation.kind, "engage");
+	});
+
+	it("gates by rigor: normal advises softly, high withholds completion", () => {
+		const entries = [user("edit it"), ...editPair()];
+		const turnEnd = (): MiddlewareHookInput => ({
+			hook: "turn_end",
+			turnId: "assistant-final",
+			text: "Done.",
+			metadata: { stopReason: "stop" },
+		});
+
+		const normal = createFinishContractRegistration({
+			readSessionEntries: () => entries,
+			resolveRigor: () => "normal",
+		}).evaluate(turnEnd());
+		strictEqual(normal.length, 1);
+		ok(normal[0]?.kind === "inject_reminder" && normal[0].severity === "warn");
+		ok(!normal.some((effect) => effect.kind === "request_continuation"));
+
+		const high = createFinishContractRegistration({
+			readSessionEntries: () => entries,
+			resolveRigor: () => "high",
+		}).evaluate(turnEnd());
+		strictEqual(high.length, 2);
+		const continuation = high.find((effect) => effect.kind === "request_continuation");
+		ok(continuation?.kind === "request_continuation" && continuation.message === HIGH_RIGOR_REVALIDATION_MESSAGE);
+		ok(high.some((effect) => effect.kind === "inject_reminder" && effect.severity === "warn"));
 	});
 });

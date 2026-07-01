@@ -51,12 +51,16 @@ describe("contracts/safety", () => {
 		// System modify (escalations)
 		strictEqual(classify({ tool: "write", args: { path: "/etc/nope" } }).actionClass, "system_modify");
 		strictEqual(classify({ tool: "bash", args: { command: "sudo rm /foo" } }).actionClass, "system_modify");
+		// In-place sed to a system root is a write, so it escalates like the write tool.
+		strictEqual(classify({ tool: "bash", args: { command: "sed -i 's/a/b/' /etc/hosts" } }).actionClass, "system_modify");
 
 		// Git destructive commands
 		strictEqual(classify({ tool: "bash", args: { command: "git reset --hard HEAD" } }).actionClass, "git_destructive");
 
 		// Execute tools
 		strictEqual(classify({ tool: "bash", args: { command: "ls -la" } }).actionClass, "execute");
+		// In-place sed inside the workspace is an ordinary write, not an escalation.
+		strictEqual(classify({ tool: "bash", args: { command: "sed -i 's/a/b/' src/x.ts" } }).actionClass, "execute");
 	});
 
 	it("engages when the turn mutated a file without validation evidence or a limitation", () => {
