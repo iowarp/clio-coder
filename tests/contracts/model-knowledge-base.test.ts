@@ -1,8 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	MODEL_CATALOG_DIRS_ENV,
@@ -103,5 +104,36 @@ describe("contracts/model knowledge base", () => {
 			resetXdgCache();
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+
+	it("resolves mini's local-model ids against the bundled catalog with longest-substring specificity", () => {
+		// Load the real bundled catalog exactly as production does (the whole
+		// models dir, both local- and cloud-model files), so these assertions
+		// pin the shipped matchPattern specificity, not a scratch fixture.
+		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
+		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
+
+		// The qat/UD-Q4_K_XL/MTP build must resolve to its own 262K family, not
+		// to the NVFP4 turbo family whose broader `gemma-4-31b-it` (14 chars)
+		// pattern also matches this id but is shorter than the qat patterns.
+		const qat = kb.lookup("Gemma-4-31B-it-qat-UD-Q4_K_XL-MTP-262K");
+		strictEqual(qat?.entry.family, "gemma-4-31b-it-qat-mtp");
+		strictEqual(qat?.entry.capabilities.contextWindow, 262144);
+
+		// Regression guard: the NVFP4 turbo id keeps its 122880-context family;
+		// the new qat family must not steal it.
+		const nvfp4 = kb.lookup("gemma-4-31b-it-nvfp4-turbo");
+		strictEqual(nvfp4?.entry.family, "gemma-4-31b-it-nvfp4-turbo");
+		strictEqual(nvfp4?.entry.capabilities.contextWindow, 122880);
+
+		// The locked mini orchestrator (hero) resolves to its own coder family.
+		const hero = kb.lookup("Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K");
+		strictEqual(hero?.entry.family, "qwopus3.6-35b-a3b-coder");
+		strictEqual(hero?.entry.capabilities.contextWindow, 262144);
+
+		// The qat family's `gemma-4-31b-it-qat` patterns are not substrings of
+		// the 12B or 26B ids, so those must not be captured by it.
+		strictEqual(kb.lookup("Gemma-4-12B-it-UD-Q4_K_XL-262K")?.entry.family !== "gemma-4-31b-it-qat-mtp", true);
+		strictEqual(kb.lookup("Gemma-4-26B-A4B-it-Q4_K_M-262K")?.entry.family, "gemma4-26b-a4b");
 	});
 });
