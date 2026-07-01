@@ -18,7 +18,7 @@ const DEFAULT_MATRIX = {
 };
 
 function parseArgs(argv) {
-	const out = { outDir: DEFAULT_OUT, limit: 0, target: "", models: [], matrix: "", clio: "" };
+	const out = { outDir: DEFAULT_OUT, limit: 0, target: "", models: [], matrix: "", clio: "", cwd: ROOT };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const need = () => argv[++i] ?? fail(`${a} requires a value`);
@@ -28,6 +28,13 @@ function parseArgs(argv) {
 		else if (a === "--limit") out.limit = Number(need()) || 0;
 		else if (a === "--matrix") out.matrix = need();
 		else if (a === "--clio") out.clio = need();
+		// --clio-entry mirrors live-turns.mjs's flag name; both point at the CLI to run.
+		else if (a === "--clio-entry") out.clio = need();
+		// --cwd points at the repo the benchmarked agent operates in (default: this
+		// checkout). The scored task is a fixed, repo-independent reference build
+		// (see taskPrompt); --cwd only changes the file tree the model navigates and
+		// where artifacts are written, mirroring live-turns.mjs's --cwd.
+		else if (a === "--cwd") out.cwd = need();
 		else if (a === "--help" || a === "-h") usage(0);
 		else fail(`unknown flag: ${a}`);
 	}
@@ -39,32 +46,48 @@ function fail(msg) {
 }
 function usage(code) {
 	console.log(
-		`Usage: node benchmarks/clio-model-suite.mjs [--target id] [--model id ...] [--limit n] [--matrix file.json] [--out .clio-benchmark]\n\nRuns clio headless for each model/config combo, asks it to build a single-file website, and statically scores app.html outputs. Sampler fields are passed to clio run as per-request overrides; context and quantization fields are recorded as run metadata.`,
+		`Usage: node benchmarks/clio-model-suite.mjs [--target id] [--model id ...] [--limit n] [--matrix file.json] [--out .clio-benchmark] [--cwd repo] [--clio-entry path]\n\nRuns clio headless for each model/config combo, asks it to build a single-file website, and statically scores app.html outputs. Sampler fields are passed to clio run as per-request overrides; context and quantization fields are recorded as run metadata. --cwd runs the agent in an arbitrary repo (default: this checkout); the scored build task is fixed and repo-independent, so --cwd only varies the file tree the model navigates and where artifacts land. --clio-entry (alias --clio) selects the CLI to run.`,
 	);
 	process.exit(code);
 }
 
+// firstTokenMarker: when set, run() timestamps the first stdout chunk in which
+// the marker appears, giving a wall-clock time-to-first-token (ttft) from
+// process spawn. clio's --json stream carries no per-event timestamps (only the
+// session header does), so ttft cannot be reconstructed from event times after
+// the fact; measuring it live at the stream is the reliable path. Note this
+// wall-clock ttft includes queue/model-load latency on a cold model swap; the
+// per-run `coldStart` flag records whether the model was already resident.
 function run(cmd, args, opts = {}) {
+	const { firstTokenMarker = null, ...spawnOpts } = opts;
 	return new Promise((resolve) => {
+		const startedAt = Date.now();
 		const p = spawn(cmd, args, {
 			cwd: ROOT,
 			env: process.env,
 			stdio: ["ignore", "pipe", "pipe"],
-			...opts,
+			...spawnOpts,
 		});
 		let stdout = "",
-			stderr = "";
-		p.stdout.on("data", (b) => (stdout += b));
+			stderr = "",
+			firstTokenMs = null;
+		p.stdout.on("data", (b) => {
+			stdout += b;
+			if (firstTokenMarker && firstTokenMs === null && stdout.includes(firstTokenMarker)) {
+				firstTokenMs = Date.now() - startedAt;
+			}
+		});
 		p.stderr.on("data", (b) => (stderr += b));
-		p.on("close", (code) => resolve({ code, stdout, stderr }));
+		p.on("close", (code) => resolve({ code, stdout, stderr, firstTokenMs }));
 	});
 }
 
-async function clioCmd(args, clio) {
-	if (clio) return run(clio, args);
+async function clioCmd(args, clio, opts = {}) {
+	if (clio) return run(clio, args, opts);
 	const dist = join(ROOT, "dist/cli/index.js");
-	if (existsSync(dist)) return run(process.execPath, [dist, ...args]);
-	return run("npx", ["tsx", "src/cli/index.ts", ...args]);
+	if (existsSync(dist)) return run(process.execPath, [dist, ...args], opts);
+	// Absolute src path so the tsx fallback survives a non-ROOT --cwd.
+	return run("npx", ["tsx", join(ROOT, "src/cli/index.ts"), ...args], opts);
 }
 
 async function discover(opts) {
@@ -100,8 +123,13 @@ function combos(matrix) {
 function safeName(s) {
 	return s.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
 }
+// Fixed, repo-independent reference task. The facts the page needs are supplied
+// inline, so the same scored build runs identically in any --cwd (this checkout
+// or a foreign clone like graphify); the inspection budget still exercises the
+// read/list tool loop against whatever file tree the model is dropped into,
+// without depending on clio-coder-specific doc paths that a foreign repo lacks.
 function taskPrompt(runDir, combo) {
-	return `You are being benchmarked directly. Do not use dispatch, subagents, read_skill, external web access, or any delegation. Use only local read/list/write/edit style tools yourself. Hard limit: at most 4 inspection tool calls, then you must call write. Read only README.md and docs/model-catalog.md (small excerpts are enough), optionally list assets once, then create ${runDir}/app.html with the write tool. Requirements for app.html: standalone HTML with embedded CSS, responsive layout, hero, model-management section, benchmark section, docs links, accessibility labels, no external network assets. Current benchmark config metadata: ${JSON.stringify(combo)}. Do not modify files outside ${runDir}.`;
+	return `You are being benchmarked directly. Do not use dispatch, subagents, read_skill, external web access, or any delegation. Use only local read/list/write/edit style tools yourself. Hard limit: at most 4 inspection tool calls (you may read README.md if it exists and list the directory once to orient yourself), then you must call write to create ${runDir}/app.html. Build a standalone marketing landing page for "Clio Coder", a local-first AI coding CLI that runs open-weight models on your own hardware, manages model targets, and benchmarks them. Requirements for app.html: standalone HTML with embedded CSS, responsive layout, a hero, a model-management section, a benchmark section, docs links, accessibility labels, and no external network assets. Current benchmark config metadata: ${JSON.stringify(combo)}. Do not modify files outside ${runDir}.`;
 }
 
 function scoreHtml(file) {
@@ -138,6 +166,13 @@ function samplingArgs(sampling) {
 	return args;
 }
 
+// MTP / speculative-decoding acceptance rate is deliberately NOT captured here.
+// It is a llama.cpp server-side counter (n_drafted / n_accepted), not present in
+// clio's --json event stream, and mini fronts its models with a llama-swap
+// router ("role":"router", max_instances 1) so /metrics is per-instance behind
+// the swap and only meaningful for the MTP-tagged models. It does not gate the
+// matrix analysis (score, tok/s, ttft, exit are the comparison signals), so per
+// the battletest backlog it is noted and left out rather than bolted on here.
 function walk(value, visit) {
 	if (value === null || value === undefined) return;
 	visit(value);
@@ -196,13 +231,19 @@ function extractUsageFromJsonl(stdout) {
 
 async function main() {
 	const opts = parseArgs(process.argv.slice(2));
-	const outDir = resolve(ROOT, opts.outDir);
+	const cwd = resolve(opts.cwd);
+	// Resolve the out dir against --cwd so an absolute --out is honored verbatim
+	// and the default lands inside the repo the agent writes to (keeping app.html
+	// within the model's workspace). Default --cwd is ROOT, so the historical
+	// ROOT/.clio-benchmark layout is unchanged when --cwd is not passed.
+	const outDir = resolve(cwd, opts.outDir);
 	mkdirSync(outDir, { recursive: true });
 	const matrix = loadMatrix(opts.matrix);
 	const models = await discover(opts);
 	const allCombos = combos(matrix);
-	const report = { startedAt: new Date().toISOString(), outDir, matrix, runs: [] };
+	const report = { startedAt: new Date().toISOString(), cwd, outDir, matrix, runs: [] };
 	let previous = null;
+	let lastModelId = null;
 	for (const model of models) {
 		for (const combo of allCombos) {
 			if (previous) previous.score = scoreHtml(join(previous.runDir, "app.html"));
@@ -210,6 +251,9 @@ async function main() {
 			const runDir = join(outDir, id);
 			mkdirSync(runDir, { recursive: true });
 			writeFileSync(join(runDir, "config.json"), JSON.stringify({ model, combo }, null, 2));
+			// A model swap on mini's single-instance router evicts the prior model,
+			// so the first combo per model pays the cold model-load latency in ttft.
+			const coldStart = model.modelId !== lastModelId;
 			const started = Date.now();
 			const r = await clioCmd(
 				[
@@ -226,6 +270,7 @@ async function main() {
 					taskPrompt(runDir, combo),
 				],
 				opts.clio,
+				{ cwd, firstTokenMarker: '"text_delta"' },
 			);
 			const durationMs = Date.now() - started;
 			const usage = extractUsageFromJsonl(r.stdout);
@@ -236,8 +281,10 @@ async function main() {
 				runDir,
 				exitCode: r.code,
 				durationMs,
+				coldStart,
 				metrics: {
 					...usage,
+					ttftMs: r.firstTokenMs,
 					wallTokensPerSecond: outputTokens > 0 ? outputTokens / (durationMs / 1000) : 0,
 				},
 			};
@@ -245,6 +292,7 @@ async function main() {
 			writeFileSync(join(runDir, "stderr.txt"), r.stderr);
 			report.runs.push(row);
 			previous = row;
+			lastModelId = model.modelId;
 			writeFileSync(join(outDir, "report.json"), JSON.stringify(report, null, 2));
 		}
 	}
@@ -263,6 +311,8 @@ async function main() {
 			outTok: r.metrics?.output ?? 0,
 			reasonTok: r.metrics?.reasoning ?? 0,
 			tokSec: Math.round((r.metrics?.wallTokensPerSecond ?? 0) * 10) / 10,
+			ttftMs: r.metrics?.ttftMs ?? null,
+			cold: r.coldStart ? "y" : "",
 			exit: r.exitCode,
 		})),
 	);
