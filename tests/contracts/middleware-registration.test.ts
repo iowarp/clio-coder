@@ -304,6 +304,18 @@ describe("phase-aware hook budgets", () => {
 		}
 	});
 
+	it("clamps threshold to the window so a small window can never disable steady-state warnings", () => {
+		// Footgun guard: window 2 with the default threshold 3 would make overCount
+		// (<= 2) unable to reach 3, silently disabling every warning. The clamp ties
+		// threshold to windowSize, so consistent slowness still warns.
+		const tracker = createHookBudgetTracker({ warmupCalls: 1, windowSize: 2, threshold: 3 });
+		const diagnostics = runBudgetSequence([100, 100, 100], tracker);
+		ok(
+			diagnostics.some((d) => d.kind === "budget_exceeded" && d.steadyStateWarn),
+			"a hook over budget on every post-warmup call must still warn",
+		);
+	});
+
 	it("stays within budget for a hook that is under its (forgiving) phase budget", () => {
 		const tracker = createHookBudgetTracker({ warmupCalls: 1, threshold: 3 });
 		// 60ms turn_end is under the 75ms budget: never a diagnostic, even repeated.
