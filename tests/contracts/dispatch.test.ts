@@ -662,6 +662,81 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("contains a finalization failure: a rejected worker promise still seals the ledger row and emits a terminal event", async () => {
+		const context = stubContext();
+		const failedEvents: unknown[] = [];
+		const unsubscribeFailed = context.bus.on(BusChannels.DispatchFailed, (payload) => {
+			failedEvents.push(payload);
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1004,
+				promise: exit.promise,
+				events: emptyEvents(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "doomed finalization" });
+			exit.reject(new Error("worker channel collapsed"));
+			await rejects(handle.finalPromise, /worker channel collapsed/);
+			// The run must not be stranded: without containment the row stayed
+			// "running" forever, no terminal event fired, and the active entry
+			// leaked until restart.
+			const row = bundle.contract.getRun(handle.runId);
+			strictEqual(row?.status, "failed");
+			match(row?.outcomeDetail ?? "", /finalization failure: worker channel collapsed/);
+			strictEqual(failedEvents.length, 1);
+			match((failedEvents[0] as { outcomeDetail?: string }).outcomeDetail ?? "", /finalization failure/);
+		} finally {
+			unsubscribeFailed();
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("waits for an active event consumer to finish draining before sealing receipt token counts", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1005,
+				promise: exit.promise,
+				events: (async function* () {
+					yield {
+						type: "message_end",
+						message: { role: "assistant", content: [{ type: "text", text: "done" }], usage: { input: 11, output: 7 } },
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "slow consumer accounting" });
+			// A consumer that is mid-drain when the worker exits must still get
+			// its metering folded into the receipt instead of losing the race
+			// to finalization.
+			const drained = (async () => {
+				for await (const _ of handle.events) {
+					await new Promise((resolve) => setTimeout(resolve, 25));
+				}
+			})();
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			await drained;
+			strictEqual(receipt.inputTokenCount, 11);
+			strictEqual(receipt.outputTokenCount, 7);
+			strictEqual(receipt.tokenCount, 18);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("dispatches configured ACP delegation agents with delegation receipt metadata", async () => {
 		const context = stubContext();
 		const terminalEvents: unknown[] = [];
@@ -778,6 +853,66 @@ describe("contracts/dispatch", () => {
 			);
 		} finally {
 			unsubscribeTerminal();
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("normalizes an ACP failed outcome with exit code 0 to a nonzero receipt exit code", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) {
+			configContract.get().delegation.agents = [
+				{
+					id: "opencode",
+					command: "opencode",
+					args: ["acp"],
+					connectTimeoutMs: 5,
+					turnTimeoutMs: 10,
+					permissionTimeoutMs: 15,
+					toolGovernance: "clio-policy",
+				},
+			];
+		}
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => ({
+				pid: 4243,
+				heartbeatAt: { current: Date.now() },
+				abort: () => {},
+				kill: () => {},
+				toolCallLog: () => [],
+				events: (async function* () {})() as AcpDelegationRunHandle["events"],
+				// A timed-out delegation that still exited 0: the outcome is not
+				// "succeeded", so the receipt must not carry a success exit code.
+				promise: Promise.resolve({
+					messages: [],
+					exitCode: 0,
+					timedOut: true,
+					stopReason: "end_turn",
+					usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+					delegation: {
+						acpSessionId: "sess-2",
+						initialize: null,
+						toolCallsRequested: 0,
+						toolCallsApproved: 0,
+						toolCallsDenied: 0,
+					},
+				}),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "opencode",
+				delegationAgentId: "opencode",
+				task: "delegate and time out",
+			});
+			for await (const _ of handle.events) {
+				// drained
+			}
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "timed_out");
+			strictEqual(receipt.exitCode, 1);
+		} finally {
 			await bundle.extension.stop?.();
 		}
 	});

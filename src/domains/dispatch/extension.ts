@@ -309,6 +309,42 @@ function appendDispatchFinishContractEntry(
 	return role === "assistant" && text.trim().length > 0 ? { assistantText: text, assistantTurnId: turnId } : null;
 }
 
+/**
+ * Grace window finalization grants the enriched-event consumer after the
+ * worker ends. Token meters, tool stats, and finish-contract text fold in as
+ * a side effect of iteration, so the receipt must wait for the stream to
+ * finish; the bound exists because a consumer that abandoned or never started
+ * the stream must not stall finalization forever.
+ */
+const DISPATCH_DRAIN_GRACE_MS = 2000;
+
+async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_GRACE_MS): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const grace = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, graceMs);
+		timer.unref?.();
+	});
+	try {
+		await Promise.race([drained, grace]);
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
+	}
+}
+
+/**
+ * Best-effort diagnostic for failures dispatch deliberately survives. These
+ * were previously silent; a swallowed ledger or finalization failure must at
+ * least leave a stderr trace for triage. Never throws.
+ */
+function reportDispatchDiagnostic(scope: string, error: unknown): void {
+	const message = error instanceof Error ? error.message : String(error);
+	try {
+		process.stderr.write(`[clio:dispatch] ${scope}: ${message}\n`);
+	} catch {
+		// stderr itself is best-effort
+	}
+}
+
 const MAX_WORKER_DIAGNOSTIC_DETAIL_CHARS = 2048;
 const MAX_WORKER_DIAGNOSTIC_FAILURE_CHARS = 4096;
 
@@ -1247,8 +1283,8 @@ export function createDispatchBundle(
 				for await (const _ of handle.events) {
 					// drained
 				}
-			})().catch(() => {});
-			handle.finalPromise.catch(() => {});
+			})().catch((error) => reportDispatchDiagnostic(`drain retry run ${handle.runId}`, error));
+			handle.finalPromise.catch((error) => reportDispatchDiagnostic(`finalize retry run ${handle.runId}`, error));
 		} catch (err) {
 			retryBackoff.delete(run.lineage.rootRunId);
 			const message = err instanceof Error ? err.message : String(err);
@@ -1535,6 +1571,16 @@ export function createDispatchBundle(
 			}
 		}
 
+		// Resolve the ledger before starting the ACP process: an external agent
+		// must never outlive a failure to create its tracking row.
+		const ledgerRef = (() => {
+			try {
+				return requireLedger();
+			} catch (error) {
+				releaseWorkerSlot();
+				throw error;
+			}
+		})();
 		let acp: AcpDelegationRunHandle;
 		try {
 			acp = startAcpRun({
@@ -1557,129 +1603,165 @@ export function createDispatchBundle(
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
+		const finishContractEntries: unknown[] = [];
+		let finishContractAssistantText = "";
+		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
 		let runIdForPermissionAudit: string | null = null;
+		let drainStarted = false;
+		let settleEventDrain!: () => void;
+		const eventsDrained = new Promise<void>((resolve) => {
+			settleEventDrain = resolve;
+		});
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
-			for await (const raw of acp.events) {
-				const event = raw as {
-					type?: string;
-					message?: {
-						role?: string;
-						usage?: unknown;
-						model?: unknown;
-						responseModel?: unknown;
-						responseId?: unknown;
-						stopReason?: unknown;
-						errorMessage?: unknown;
+			drainStarted = true;
+			try {
+				for await (const raw of acp.events) {
+					const event = raw as {
+						type?: string;
+						message?: {
+							role?: string;
+							usage?: unknown;
+							model?: unknown;
+							responseModel?: unknown;
+							responseId?: unknown;
+							stopReason?: unknown;
+							errorMessage?: unknown;
+						};
+						payload?: {
+							tool?: string;
+							posture?: string;
+							durationMs?: number;
+							outcome?: "ok" | "error" | "blocked";
+							decision?: "allowed" | "blocked" | "permission_requested";
+							actionClass?: string;
+							ruleId?: string;
+							reasonCode?: string;
+							policySource?: string;
+							reason?: string;
+						};
 					};
-					payload?: {
-						tool?: string;
-						posture?: string;
-						durationMs?: number;
-						outcome?: "ok" | "error" | "blocked";
-						decision?: "allowed" | "blocked" | "permission_requested";
-						actionClass?: string;
-						ruleId?: string;
-						reasonCode?: string;
-						policySource?: string;
-						reason?: string;
-					};
-				};
-				if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-					const u = event.message.usage;
-					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
-					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
-					tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
-					tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
-					tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
-					const model = readStringOrNull(event.message.model);
-					const responseModel = readStringOrNull(event.message.responseModel);
-					const responseId = readStringOrNull(event.message.responseId);
-					if (model !== null || responseModel !== null || responseId !== null) {
-						upstreamResponses.push({ model, responseModel, responseId });
+					if (isRecord(event)) {
+						const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
+						if (finishEntry !== null) {
+							finishContractAssistantText = finishEntry.assistantText;
+							finishContractAssistantTurnId = finishEntry.assistantTurnId;
+						}
 					}
-					if (event.message.stopReason === "error") {
-						const message = readStringOrNull(event.message.errorMessage);
-						if (message !== null) failureMessage = message;
+					if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
+						const u = event.message.usage;
+						tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
+						tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+						tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
+						tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
+						tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+						const model = readStringOrNull(event.message.model);
+						const responseModel = readStringOrNull(event.message.responseModel);
+						const responseId = readStringOrNull(event.message.responseId);
+						if (model !== null || responseModel !== null || responseId !== null) {
+							upstreamResponses.push({ model, responseModel, responseId });
+						}
+						if (event.message.stopReason === "error") {
+							const message = readStringOrNull(event.message.errorMessage);
+							if (message !== null) failureMessage = message;
+						}
 					}
-				}
-				if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
-					context.bus.emit(BusChannels.PermissionResolved, {
-						status: "denied",
-						tool: event.payload.tool,
-						...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
-						...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
-						...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
-					});
-				}
-				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
-					recordToolFinish(toolStats, event.payload);
-					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
-					else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-					else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
-					if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
-						const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
-						if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
-						if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
-						if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
-						if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
-						if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
-						blockedAttempts.push(attempt);
+					if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+						context.bus.emit(BusChannels.PermissionResolved, {
+							status: "denied",
+							tool: event.payload.tool,
+							...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
+							...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
+							...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
+						});
 					}
+					if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+						recordToolFinish(toolStats, event.payload);
+						if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
+						else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
+						else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
+						if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
+							const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
+							if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
+							if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
+							if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
+							if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
+							if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
+							blockedAttempts.push(attempt);
+						}
+					}
+					yield raw;
 				}
-				yield raw;
+			} finally {
+				settleEventDrain();
 			}
 		})();
 
-		const ledgerRef = requireLedger();
-		const envelope = ledgerRef.create({
-			agentId: req.agentId,
-			requestOrigin: lifecycle.requestOrigin,
-			task: req.task,
-			targetId,
-			wireModelId,
-			runtimeId,
-			runtimeKind: "acp-delegation",
-			sessionId: null,
-			cwd: lifecycle.cwd,
-			staticShellHash: lifecycle.staticCompositionHash,
-			sessionShellHash: lifecycle.sessionShellHash,
-			dynamicHash: lifecycle.dynamicHash,
-			promptSignature: lifecycle.promptSignature,
-			toolSignature: lifecycle.toolSignature,
-		});
-		runIdForPermissionAudit = envelope.id;
-		const lineage = lineageFor(req, envelope.id);
-		const identity = detectRunIdentity();
-		ledgerRef.update(envelope.id, {
-			status: "running",
-			pid: acp.pid,
-			heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
-			lineage,
-			identity,
-		});
-		// One durable write at start so sibling processes (clio fleet status)
-		// can observe the running row; finalization persists the terminal state.
-		void ledgerRef.persist().catch(() => {});
-		context.bus.emit(BusChannels.DispatchEnqueued, {
-			runId: envelope.id,
-			agentId: req.agentId,
-			requestOrigin: lifecycle.requestOrigin,
-			targetId,
-			wireModelId,
-			runtimeId,
-			runtimeKind: "acp-delegation",
-		});
-		context.bus.emit(BusChannels.DispatchStarted, {
-			runId: envelope.id,
-			agentId: req.agentId,
-			requestOrigin: lifecycle.requestOrigin,
-			targetId,
-			wireModelId,
-			runtimeId,
-			runtimeKind: "acp-delegation",
-			pid: acp.pid,
-		});
+		// The ACP process is already live; any failure to establish its tracking
+		// row must not leave an orphaned agent holding a concurrency slot.
+		let envelope!: RunEnvelope;
+		let lineage!: RunLineage;
+		let identity!: ReturnType<typeof detectRunIdentity>;
+		try {
+			envelope = ledgerRef.create({
+				agentId: req.agentId,
+				requestOrigin: lifecycle.requestOrigin,
+				task: req.task,
+				targetId,
+				wireModelId,
+				runtimeId,
+				runtimeKind: "acp-delegation",
+				sessionId: null,
+				cwd: lifecycle.cwd,
+				staticShellHash: lifecycle.staticCompositionHash,
+				sessionShellHash: lifecycle.sessionShellHash,
+				dynamicHash: lifecycle.dynamicHash,
+				promptSignature: lifecycle.promptSignature,
+				toolSignature: lifecycle.toolSignature,
+			});
+			runIdForPermissionAudit = envelope.id;
+			lineage = lineageFor(req, envelope.id);
+			identity = detectRunIdentity();
+			ledgerRef.update(envelope.id, {
+				status: "running",
+				pid: acp.pid,
+				heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
+				lineage,
+				identity,
+			});
+			// One durable write at start so sibling processes (clio fleet status)
+			// can observe the running row; finalization persists the terminal state.
+			void ledgerRef
+				.persist()
+				.catch((error) => reportDispatchDiagnostic(`persist running row for run ${envelope.id}`, error));
+			context.bus.emit(BusChannels.DispatchEnqueued, {
+				runId: envelope.id,
+				agentId: req.agentId,
+				requestOrigin: lifecycle.requestOrigin,
+				targetId,
+				wireModelId,
+				runtimeId,
+				runtimeKind: "acp-delegation",
+			});
+			context.bus.emit(BusChannels.DispatchStarted, {
+				runId: envelope.id,
+				agentId: req.agentId,
+				requestOrigin: lifecycle.requestOrigin,
+				targetId,
+				wireModelId,
+				runtimeId,
+				runtimeKind: "acp-delegation",
+				pid: acp.pid,
+			});
+		} catch (error) {
+			try {
+				acp.kill();
+			} catch (killError) {
+				reportDispatchDiagnostic("kill orphaned ACP agent after ledger failure", killError);
+			}
+			releaseWorkerSlot();
+			throw error;
+		}
 
 		const startedAt = envelope.startedAt;
 		const activeRun: ActiveRun = {
@@ -1687,7 +1769,10 @@ export function createDispatchBundle(
 			req,
 			abort: acp.abort,
 			kill: acp.kill,
-			promise: acp.promise.then(() => undefined),
+			promise: acp.promise.then(
+				() => undefined,
+				() => undefined,
+			),
 			recipe: null,
 			startedAt,
 			targetId,
@@ -1716,11 +1801,19 @@ export function createDispatchBundle(
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
 		): RunReceiptDraft => {
-			tokenMeter.inputTokens += result.usage.inputTokens;
-			tokenMeter.outputTokens += result.usage.outputTokens;
-			tokenMeter.cacheReadTokens += result.usage.cacheReadTokens;
-			tokenMeter.cacheWriteTokens += result.usage.cacheWriteTokens;
-			tokenMeter.reasoningTokens += result.usage.reasoningTokens;
+			// The adapter's aggregate usage is authoritative; event metering saw
+			// the same messages, so adding both would double-count. Event-metered
+			// values survive only when the adapter reported nothing.
+			const usage = result.usage;
+			const adapterReportedUsage =
+				usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.reasoningTokens > 0;
+			if (adapterReportedUsage) {
+				tokenMeter.inputTokens = usage.inputTokens;
+				tokenMeter.outputTokens = usage.outputTokens;
+				tokenMeter.cacheReadTokens = usage.cacheReadTokens;
+				tokenMeter.cacheWriteTokens = usage.cacheWriteTokens;
+				tokenMeter.reasoningTokens = usage.reasoningTokens;
+			}
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const safetyMetadata = safety.policy?.metadata() ?? null;
@@ -1742,7 +1835,10 @@ export function createDispatchBundle(
 				identity,
 				startedAt,
 				endedAt,
-				exitCode: status === "dead" ? 1 : status === "interrupted" ? 1 : result.exitCode,
+				exitCode:
+					status === "dead" || status === "interrupted" || (status === "failed" && result.exitCode === 0)
+						? 1
+						: result.exitCode,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				tokenCount,
 				inputTokenCount: tokenMeter.inputTokens,
@@ -1831,9 +1927,39 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: outcome });
 		};
 
+		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
+			if (finishContractAssistantText.trim().length === 0) return null;
+			const assessment = assessFinishContract({
+				assistantText: finishContractAssistantText,
+				sessionEntries: finishContractEntries,
+				assistantTurnId: finishContractAssistantTurnId,
+			});
+			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_RIGOR) });
+			try {
+				safety.audit.recordCompletionContract?.({
+					runId: envelope.id,
+					turnId: finishContractAssistantTurnId,
+					decision: assessment.kind,
+					reason: assessment.reason,
+					rigor,
+					mutatedPaths: assessment.mutatedPaths,
+					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
+				});
+			} catch {
+				// Audit must not destabilize dispatch finalization.
+			}
+			return { assessment, rigor };
+		};
+
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await acp.promise;
+				// The receipt reads meters that fill as a side effect of event
+				// iteration; wait (bounded) for an active consumer to finish
+				// draining before sealing tool stats and the finish gate. A
+				// stream nobody started will never fold anything in, so it must
+				// not delay finalization.
+				if (drainStarted) await awaitEventDrain(eventsDrained);
 				const endedAt = new Date().toISOString();
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode,
@@ -1845,12 +1971,22 @@ export function createDispatchBundle(
 					stopReason: result.stopReason ?? null,
 				};
 				const { outcome, detail } = resolveRunOutcome(evidence);
-				const status = runStatusForOutcome(outcome);
-				const receiptDraft = buildReceiptDraft(result, endedAt, status, outcome, detail);
+				let finalOutcome = outcome;
+				let finalDetail = detail;
+				// Same high-rigor completion gate as native dispatch: an external
+				// agent is a guest inside Clio's policy model, not an exemption.
+				const finishContract = assessDispatchFinishContract();
+				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
+					finalOutcome = "failed";
+					finalDetail = "high-rigor finish gate: unvalidated mutation";
+					failureMessage = finalDetail;
+				}
+				const status = runStatusForOutcome(finalOutcome);
+				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
-					outcome,
-					outcomeDetail: detail,
+					outcome: finalOutcome,
+					outcomeDetail: finalDetail,
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					sessionId: receiptDraft.sessionId,
@@ -1872,9 +2008,46 @@ export function createDispatchBundle(
 				active.delete(envelope.id);
 				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode);
 				accumulateFinalizedTotals(receipt);
-				emitTerminalDispatchEvent(receipt, outcome);
-				maybeScheduleRetry(activeRun, outcome, detail);
+				emitTerminalDispatchEvent(receipt, finalOutcome);
+				maybeScheduleRetry(activeRun, finalOutcome, finalDetail);
 				return receipt;
+			} catch (error) {
+				// Finalization itself failed (ACP promise rejection, ledger or
+				// persist failure). Without containment the run row stays
+				// "running" forever, no receipt or terminal event exists, and the
+				// active entry leaks until restart.
+				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
+				const endedAt = new Date().toISOString();
+				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
+				try {
+					ledgerRef.update(envelope.id, {
+						status: "failed",
+						outcome: "failed",
+						outcomeDetail: detail,
+						endedAt,
+						exitCode: 1,
+					});
+					await ledgerRef.persist();
+				} catch (ledgerError) {
+					reportDispatchDiagnostic(`persist failed row for run ${envelope.id}`, ledgerError);
+				}
+				active.delete(envelope.id);
+				recordTargetOutcome(targetId, runtimeId, wireModelId, "failed", 1);
+				context.bus.emit(BusChannels.DispatchFailed, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					requestOrigin: lifecycle.requestOrigin,
+					targetId,
+					wireModelId,
+					runtimeId,
+					runtimeKind: "acp-delegation",
+					outcome: "failed" satisfies RunOutcome,
+					outcomeDetail: detail,
+					reason: "failed",
+					lineage,
+					exitCode: 1,
+				});
+				throw error;
 			} finally {
 				releaseWorkerSlot();
 			}
@@ -1934,6 +2107,16 @@ export function createDispatchBundle(
 			}
 		}
 
+		// Resolve the ledger before spawning: a worker subprocess must never
+		// outlive a failure to create its tracking row.
+		const ledgerRef = (() => {
+			try {
+				return requireLedger();
+			} catch (error) {
+				releaseWorkerSlot();
+				throw error;
+			}
+		})();
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
@@ -1976,145 +2159,171 @@ export function createDispatchBundle(
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
 		let runIdForPermissionAudit: string | null = null;
+		let drainStarted = false;
+		let settleEventDrain!: () => void;
+		const eventsDrained = new Promise<void>((resolve) => {
+			settleEventDrain = resolve;
+		});
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
-			if (lifecycle.target.routeWarning) {
-				yield { type: "route_warning", level: "warning", message: lifecycle.target.routeWarning };
-			}
-			for await (const raw of workerEvents) {
-				const event = raw as {
-					type?: string;
-					message?: {
-						role?: string;
-						usage?: unknown;
-						model?: unknown;
-						responseModel?: unknown;
-						responseId?: unknown;
-						stopReason?: unknown;
-						errorMessage?: unknown;
+			drainStarted = true;
+			try {
+				if (lifecycle.target.routeWarning) {
+					yield { type: "route_warning", level: "warning", message: lifecycle.target.routeWarning };
+				}
+				for await (const raw of workerEvents) {
+					const event = raw as {
+						type?: string;
+						message?: {
+							role?: string;
+							usage?: unknown;
+							model?: unknown;
+							responseModel?: unknown;
+							responseId?: unknown;
+							stopReason?: unknown;
+							errorMessage?: unknown;
+						};
+						payload?: {
+							tool?: string;
+							posture?: string;
+							durationMs?: number;
+							outcome?: "ok" | "error" | "blocked";
+							decision?: "allowed" | "blocked" | "permission_requested";
+							actionClass?: string;
+							ruleId?: string;
+							reasonCode?: string;
+							policySource?: string;
+							reason?: string;
+							skillActivation?: unknown;
+						};
 					};
-					payload?: {
-						tool?: string;
-						posture?: string;
-						durationMs?: number;
-						outcome?: "ok" | "error" | "blocked";
-						decision?: "allowed" | "blocked" | "permission_requested";
-						actionClass?: string;
-						ruleId?: string;
-						reasonCode?: string;
-						policySource?: string;
-						reason?: string;
-						skillActivation?: unknown;
-					};
-				};
-				if (isRecord(event)) {
-					const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
-					if (finishEntry !== null) {
-						finishContractAssistantText = finishEntry.assistantText;
-						finishContractAssistantTurnId = finishEntry.assistantTurnId;
+					if (isRecord(event)) {
+						const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
+						if (finishEntry !== null) {
+							finishContractAssistantText = finishEntry.assistantText;
+							finishContractAssistantTurnId = finishEntry.assistantTurnId;
+						}
 					}
+					if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
+						const u = event.message.usage;
+						tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
+						tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+						tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
+						tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
+						tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+						const model = readStringOrNull(event.message.model);
+						const responseModel = readStringOrNull(event.message.responseModel);
+						const responseId = readStringOrNull(event.message.responseId);
+						if (model !== null || responseModel !== null || responseId !== null) {
+							upstreamResponses.push({ model, responseModel, responseId });
+						}
+						if (event.message.stopReason === "error") {
+							const message = readStringOrNull(event.message.errorMessage);
+							if (message !== null) failureMessage = message;
+						}
+					}
+					if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+						context.bus.emit(BusChannels.PermissionResolved, {
+							status: "denied",
+							tool: event.payload.tool,
+							...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
+							...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
+							...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
+						});
+					}
+					if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+						recordToolFinish(toolStats, event.payload);
+						if (isSkillActivation(event.payload.skillActivation)) {
+							skillActivations.push(event.payload.skillActivation);
+						}
+						if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
+						else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
+						else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
+						if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
+							const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
+							if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
+							if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
+							if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
+							if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
+							if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
+							blockedAttempts.push(attempt);
+						}
+					}
+					yield raw;
 				}
-				if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-					const u = event.message.usage;
-					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
-					tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
-					tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
-					tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
-					tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
-					const model = readStringOrNull(event.message.model);
-					const responseModel = readStringOrNull(event.message.responseModel);
-					const responseId = readStringOrNull(event.message.responseId);
-					if (model !== null || responseModel !== null || responseId !== null) {
-						upstreamResponses.push({ model, responseModel, responseId });
-					}
-					if (event.message.stopReason === "error") {
-						const message = readStringOrNull(event.message.errorMessage);
-						if (message !== null) failureMessage = message;
-					}
-				}
-				if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
-					context.bus.emit(BusChannels.PermissionResolved, {
-						status: "denied",
-						tool: event.payload.tool,
-						...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
-						...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
-						...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
-					});
-				}
-				if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
-					recordToolFinish(toolStats, event.payload);
-					if (isSkillActivation(event.payload.skillActivation)) {
-						skillActivations.push(event.payload.skillActivation);
-					}
-					if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
-					else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-					else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
-					if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
-						const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
-						if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
-						if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
-						if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
-						if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
-						if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
-						blockedAttempts.push(attempt);
-					}
-				}
-				yield raw;
+			} finally {
+				settleEventDrain();
 			}
 		})();
 
-		const ledgerRef = requireLedger();
-		const envelope = ledgerRef.create({
-			agentId: req.agentId,
-			agentAudience: lifecycle.agentAudience,
-			requestOrigin: lifecycle.requestOrigin,
-			task: req.task,
-			targetId: lifecycle.target.target.id,
-			wireModelId: lifecycle.target.wireModelId,
-			runtimeId: lifecycle.target.runtime.id,
-			runtimeKind: lifecycle.runtimeKind,
-			sessionId: null,
-			cwd: lifecycle.cwd,
-			staticShellHash: lifecycle.staticCompositionHash,
-			sessionShellHash: lifecycle.sessionShellHash,
-			dynamicHash: lifecycle.dynamicHash,
-			promptSignature: lifecycle.promptSignature,
-			toolSignature: lifecycle.toolSignature,
-		});
-		runIdForPermissionAudit = envelope.id;
-		const lineage = lineageFor(req, envelope.id);
-		const identity = detectRunIdentity();
-		ledgerRef.update(envelope.id, {
-			status: "running",
-			pid,
-			lineage,
-			identity,
-			...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
-		});
-		// One durable write at start so sibling processes (clio fleet status)
-		// can observe the running row; finalization persists the terminal state.
-		void ledgerRef.persist().catch(() => {});
+		// The worker is already live; any failure to establish its tracking row
+		// must not leave an orphaned subprocess holding a concurrency slot.
+		let envelope!: RunEnvelope;
+		let lineage!: RunLineage;
+		let identity!: ReturnType<typeof detectRunIdentity>;
+		try {
+			envelope = ledgerRef.create({
+				agentId: req.agentId,
+				agentAudience: lifecycle.agentAudience,
+				requestOrigin: lifecycle.requestOrigin,
+				task: req.task,
+				targetId: lifecycle.target.target.id,
+				wireModelId: lifecycle.target.wireModelId,
+				runtimeId: lifecycle.target.runtime.id,
+				runtimeKind: lifecycle.runtimeKind,
+				sessionId: null,
+				cwd: lifecycle.cwd,
+				staticShellHash: lifecycle.staticCompositionHash,
+				sessionShellHash: lifecycle.sessionShellHash,
+				dynamicHash: lifecycle.dynamicHash,
+				promptSignature: lifecycle.promptSignature,
+				toolSignature: lifecycle.toolSignature,
+			});
+			runIdForPermissionAudit = envelope.id;
+			lineage = lineageFor(req, envelope.id);
+			identity = detectRunIdentity();
+			ledgerRef.update(envelope.id, {
+				status: "running",
+				pid,
+				lineage,
+				identity,
+				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
+			});
+			// One durable write at start so sibling processes (clio fleet status)
+			// can observe the running row; finalization persists the terminal state.
+			void ledgerRef
+				.persist()
+				.catch((error) => reportDispatchDiagnostic(`persist running row for run ${envelope.id}`, error));
 
-		context.bus.emit(BusChannels.DispatchEnqueued, {
-			runId: envelope.id,
-			agentId: req.agentId,
-			agentAudience: lifecycle.agentAudience,
-			requestOrigin: lifecycle.requestOrigin,
-			targetId: lifecycle.target.target.id,
-			wireModelId: lifecycle.target.wireModelId,
-			runtimeId: lifecycle.target.runtime.id,
-			runtimeKind: lifecycle.runtimeKind,
-		});
-		context.bus.emit(BusChannels.DispatchStarted, {
-			runId: envelope.id,
-			agentId: req.agentId,
-			agentAudience: lifecycle.agentAudience,
-			requestOrigin: lifecycle.requestOrigin,
-			targetId: lifecycle.target.target.id,
-			wireModelId: lifecycle.target.wireModelId,
-			runtimeId: lifecycle.target.runtime.id,
-			runtimeKind: lifecycle.runtimeKind,
-			pid,
-		});
+			context.bus.emit(BusChannels.DispatchEnqueued, {
+				runId: envelope.id,
+				agentId: req.agentId,
+				agentAudience: lifecycle.agentAudience,
+				requestOrigin: lifecycle.requestOrigin,
+				targetId: lifecycle.target.target.id,
+				wireModelId: lifecycle.target.wireModelId,
+				runtimeId: lifecycle.target.runtime.id,
+				runtimeKind: lifecycle.runtimeKind,
+			});
+			context.bus.emit(BusChannels.DispatchStarted, {
+				runId: envelope.id,
+				agentId: req.agentId,
+				agentAudience: lifecycle.agentAudience,
+				requestOrigin: lifecycle.requestOrigin,
+				targetId: lifecycle.target.target.id,
+				wireModelId: lifecycle.target.wireModelId,
+				runtimeId: lifecycle.target.runtime.id,
+				runtimeKind: lifecycle.runtimeKind,
+				pid,
+			});
+		} catch (error) {
+			try {
+				worker.abort();
+			} catch (abortError) {
+				reportDispatchDiagnostic("abort orphaned worker after ledger failure", abortError);
+			}
+			releaseWorkerSlot();
+			throw error;
+		}
 
 		const startedAt = envelope.startedAt;
 
@@ -2124,7 +2333,10 @@ export function createDispatchBundle(
 			abort,
 			kill: abort,
 			...(steer ? { steer } : {}),
-			promise: workerDone.then(() => undefined),
+			promise: workerDone.then(
+				() => undefined,
+				() => undefined,
+			),
 			recipe: lifecycle.recipe,
 			startedAt,
 			targetId: lifecycle.target.target.id,
@@ -2293,6 +2505,12 @@ export function createDispatchBundle(
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
+				// The receipt reads meters that fill as a side effect of event
+				// iteration; wait (bounded) for an active consumer to finish
+				// draining before sealing token counts, tool stats, and the
+				// finish gate. A stream nobody started will never fold anything
+				// in, so it must not delay finalization.
+				if (drainStarted) await awaitEventDrain(eventsDrained);
 				const endedAt = new Date().toISOString();
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode ?? null,
@@ -2353,6 +2571,50 @@ export function createDispatchBundle(
 				emitTerminalDispatchEvent(receipt, finalOutcome);
 				maybeScheduleRetry(activeRun, finalOutcome, finalDetail);
 				return receipt;
+			} catch (error) {
+				// Finalization itself failed (worker promise rejection, ledger or
+				// persist failure). Without containment the run row stays
+				// "running" forever, no receipt or terminal event exists, and the
+				// active entry leaks until restart.
+				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
+				const endedAt = new Date().toISOString();
+				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
+				try {
+					ledgerRef.update(envelope.id, {
+						status: "failed",
+						outcome: "failed",
+						outcomeDetail: detail,
+						endedAt,
+						exitCode: 1,
+					});
+					await ledgerRef.persist();
+				} catch (ledgerError) {
+					reportDispatchDiagnostic(`persist failed row for run ${envelope.id}`, ledgerError);
+				}
+				active.delete(envelope.id);
+				recordTargetOutcome(
+					lifecycle.target.target.id,
+					lifecycle.target.runtime.id,
+					lifecycle.target.wireModelId,
+					"failed",
+					1,
+				);
+				context.bus.emit(BusChannels.DispatchFailed, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					agentAudience: lifecycle.agentAudience,
+					requestOrigin: lifecycle.requestOrigin,
+					targetId: lifecycle.target.target.id,
+					wireModelId: lifecycle.target.wireModelId,
+					runtimeId: lifecycle.target.runtime.id,
+					runtimeKind: lifecycle.runtimeKind,
+					outcome: "failed" satisfies RunOutcome,
+					outcomeDetail: detail,
+					reason: "failed",
+					lineage,
+					exitCode: 1,
+				});
+				throw error;
 			} finally {
 				releaseWorkerSlot();
 			}
