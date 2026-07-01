@@ -265,6 +265,21 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(result.stdout, /clio run \[flags\] <task>/);
 	});
 
+	it("-v routes through the lazily loaded version command", async () => {
+		// Guards the WS3 lazy dispatch: the version path must import ./version.js
+		// dynamically and still print the version, not fall through to a subcommand.
+		const result = await runCli(["-v"], { env: scratch.env });
+		strictEqual(result.code, 0);
+		strictEqual(result.stdout, VERSION_STDOUT);
+	});
+
+	it("an unknown subcommand exits 2 and prints usage (dispatch default branch)", async () => {
+		const result = await runCli(["definitely-not-a-command"], { env: scratch.env });
+		strictEqual(result.code, 2);
+		match(result.stderr, /unknown subcommand: definitely-not-a-command/);
+		match(result.stdout, /Usage:/);
+	});
+
 	it("doctor --fix bootstraps the configurations and environment", async () => {
 		const result = await runCli(["doctor", "--fix"], { env: scratch.env });
 		strictEqual(result.code, 0);

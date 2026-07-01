@@ -1,33 +1,11 @@
+// Only argument parsing and boot tracing load statically. Every subcommand is
+// imported dynamically inside its switch case (see `dispatch`), so a bare `clio`
+// (interactive) or `clio --version` pays for its own module graph and nothing
+// else — this is the highest-value cut of the cold module-load tax. Code
+// splitting (tsup.config.ts) keeps each command's transitive heavy externals in
+// its own chunk.
 import { traceBoot } from "../core/boot-trace.js";
-import { runAcpCommand } from "./acp.js";
-import { runAgentsCommand } from "./agents.js";
-import { runAuthCommand } from "./auth.js";
-import { runClioCommand } from "./clio.js";
-import { runComponentsCommand } from "./components.js";
-import { runConfigCommand } from "./config.js";
-import { runConfigureCommand } from "./configure.js";
-import { runContextClearCommand } from "./context-clear.js";
-import { runContextIndexCommand } from "./context-index.js";
-import { runDocsCommand } from "./docs.js";
-import { runDoctorCommand } from "./doctor.js";
-import { runEvalCommand } from "./eval.js";
-import { runEvidenceCommand } from "./evidence.js";
-import { runEvolveCommand } from "./evolve.js";
-import { runExtensionsCommand } from "./extensions.js";
-import { runFleetCommand } from "./fleet.js";
-import { runInitCommand } from "./init.js";
-import { runMemoryCommand } from "./memory.js";
-import { runModelsCommand } from "./models.js";
-import { runPathsCommand } from "./paths.js";
-import { runResetCommand } from "./reset.js";
-import { runClioRun } from "./run.js";
-import { runExportCommand, runImportCommand, runShareCommand } from "./share.js";
-import { extractApiKeyFlag, extractNoContextFilesFlag, extractSkillsFlags, parseFlags, printError } from "./shared.js";
-import { runSkillsCommand } from "./skills.js";
-import { runTargetsCommand } from "./targets.js";
-import { runUninstallCommand } from "./uninstall.js";
-import { runUpgradeCommand } from "./upgrade.js";
-import { runVersionCommand } from "./version.js";
+import { extractApiKeyFlag, extractNoContextFilesFlag, extractSkillsFlags, parseFlags, printError } from "./argv.js";
 
 const HELP = `Clio Coder command line
 
@@ -87,7 +65,10 @@ async function main(argv: string[]): Promise<number> {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	if (flags.has("version") || flags.has("v")) return runVersionCommand();
+	if (flags.has("version") || flags.has("v")) {
+		const { runVersionCommand } = await import("./version.js");
+		return runVersionCommand();
+	}
 
 	const subArgs = subcommandIndex === -1 ? [] : rest.slice(subcommandIndex + 1);
 	const bootOptions = {
@@ -96,68 +77,90 @@ async function main(argv: string[]): Promise<number> {
 		...(noSkills ? { noSkills: true } : {}),
 		...(skillPaths.length > 0 ? { skillPaths } : {}),
 	};
-	if (!subcommand) return runClioCommand(bootOptions);
+	if (!subcommand) {
+		const { runClioCommand } = await import("./clio.js");
+		return runClioCommand(bootOptions);
+	}
 
+	return dispatch(subcommand, subArgs, bootOptions);
+}
+
+/**
+ * Route a subcommand to its handler, importing only that command's module. Each
+ * case is an isolated dynamic import so the process never loads a command it did
+ * not run. Keep every `MODULE` string a plain literal — the bundler splits on
+ * static import specifiers, so a computed path would not code-split.
+ */
+async function dispatch(
+	subcommand: string,
+	subArgs: string[],
+	bootOptions: {
+		apiKey?: string;
+		noContextFiles?: boolean;
+		noSkills?: boolean;
+		skillPaths?: string[];
+	},
+): Promise<number> {
 	switch (subcommand) {
 		case "acp":
-			return runAcpCommand(subArgs, bootOptions);
+			return (await import("./acp.js")).runAcpCommand(subArgs, bootOptions);
 		case "auth":
-			return runAuthCommand(subArgs);
+			return (await import("./auth.js")).runAuthCommand(subArgs);
 		case "config":
-			return runConfigCommand(subArgs);
+			return (await import("./config.js")).runConfigCommand(subArgs);
 		case "configure":
-			return runConfigureCommand(subArgs);
+			return (await import("./configure.js")).runConfigureCommand(subArgs);
 		case "targets":
-			return runTargetsCommand(subArgs);
+			return (await import("./targets.js")).runTargetsCommand(subArgs);
 		case "models":
-			return runModelsCommand(subArgs);
+			return (await import("./models.js")).runModelsCommand(subArgs);
 		case "agents":
-			return runAgentsCommand(subArgs);
+			return (await import("./agents.js")).runAgentsCommand(subArgs);
 		case "components":
-			return runComponentsCommand(subArgs);
+			return (await import("./components.js")).runComponentsCommand(subArgs);
 		case "evidence":
-			return runEvidenceCommand(subArgs);
+			return (await import("./evidence.js")).runEvidenceCommand(subArgs);
 		case "eval":
-			return runEvalCommand(subArgs);
+			return (await import("./eval.js")).runEvalCommand(subArgs);
 		case "memory":
-			return runMemoryCommand(subArgs);
+			return (await import("./memory.js")).runMemoryCommand(subArgs);
 		case "evolve":
-			return runEvolveCommand(subArgs);
+			return (await import("./evolve.js")).runEvolveCommand(subArgs);
 		case "extensions":
 		case "ext":
-			return runExtensionsCommand(subArgs);
+			return (await import("./extensions.js")).runExtensionsCommand(subArgs);
 		case "fleet":
-			return runFleetCommand(subArgs);
+			return (await import("./fleet.js")).runFleetCommand(subArgs);
 		case "skills":
-			return runSkillsCommand(subArgs);
+			return (await import("./skills.js")).runSkillsCommand(subArgs);
 		case "docs":
-			return runDocsCommand(subArgs);
+			return (await import("./docs.js")).runDocsCommand(subArgs);
 		case "share":
-			return runShareCommand(subArgs);
+			return (await import("./share.js")).runShareCommand(subArgs);
 		case "export":
-			return runExportCommand(subArgs);
+			return (await import("./share.js")).runExportCommand(subArgs);
 		case "import":
-			return runImportCommand(subArgs);
+			return (await import("./share.js")).runImportCommand(subArgs);
 		case "context-init":
-			return runInitCommand(subArgs);
+			return (await import("./init.js")).runInitCommand(subArgs);
 		case "context-index":
-			return runContextIndexCommand(subArgs);
+			return (await import("./context-index.js")).runContextIndexCommand(subArgs);
 		case "context-clear":
-			return runContextClearCommand(subArgs);
+			return (await import("./context-clear.js")).runContextClearCommand(subArgs);
 		case "run":
-			return runClioRun(subArgs, bootOptions);
+			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
 		case "doctor":
-			return runDoctorCommand(subArgs);
+			return (await import("./doctor.js")).runDoctorCommand(subArgs);
 		case "paths":
-			return runPathsCommand(subArgs);
+			return (await import("./paths.js")).runPathsCommand(subArgs);
 		case "reset":
-			return runResetCommand(subArgs);
+			return (await import("./reset.js")).runResetCommand(subArgs);
 		case "uninstall":
-			return runUninstallCommand(subArgs);
+			return (await import("./uninstall.js")).runUninstallCommand(subArgs);
 		case "upgrade":
-			return runUpgradeCommand(subArgs);
+			return (await import("./upgrade.js")).runUpgradeCommand(subArgs);
 		case "version":
-			return runVersionCommand();
+			return (await import("./version.js")).runVersionCommand();
 		default:
 			printError(`unknown subcommand: ${subcommand}`);
 			process.stdout.write(HELP);
