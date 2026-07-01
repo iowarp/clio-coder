@@ -29,18 +29,40 @@ function parseEditEntry(value: unknown): Edit | null {
 }
 
 function parseEditsArray(value: unknown): Edit[] | null {
-	let raw = value;
-	if (typeof raw === "string") {
-		try {
-			raw = JSON.parse(raw) as unknown;
-		} catch {
-			return null;
-		}
-	}
-	if (!Array.isArray(raw)) return null;
-	const edits = raw.map(parseEditEntry);
+	if (!Array.isArray(value)) return null;
+	const edits = value.map(parseEditEntry);
 	if (edits.some((entry) => entry === null)) return null;
 	return edits as Edit[];
+}
+
+/**
+ * Normalize the weak-model argument shapes edit still sees in the wild, ported
+ * from pi's prepareEditArguments:
+ *  - `edits` sent as a JSON string (Opus 4.6, GLM-5.1) -> parsed to an array.
+ *  - legacy top-level `{oldText, newText}` (pre-`edits[]` callers) -> appended
+ *    to `edits[]` instead of erroring the turn.
+ * Pure and idempotent: already-normalized args pass through unchanged. Wired as
+ * the registry `prepareArguments` hook and also called at the top of `run` so
+ * direct callers get the same normalization.
+ */
+export function prepareEditArguments(args: Record<string, unknown>): Record<string, unknown> {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+	const next: Record<string, unknown> = { ...args };
+	if (typeof next.edits === "string") {
+		try {
+			const parsed = JSON.parse(next.edits) as unknown;
+			if (Array.isArray(parsed)) next.edits = parsed;
+		} catch {
+			// Leave the malformed string in place; run() reports the shape error.
+		}
+	}
+	if (typeof next.oldText === "string" && typeof next.newText === "string") {
+		const edits = Array.isArray(next.edits) ? [...next.edits] : [];
+		edits.push({ oldText: next.oldText, newText: next.newText });
+		const { oldText: _oldText, newText: _newText, ...rest } = next;
+		return { ...rest, edits };
+	}
+	return next;
 }
 
 export const editTool: ToolSpec = {
@@ -53,7 +75,11 @@ export const editTool: ToolSpec = {
 	}),
 	baseActionClass: "write",
 	executionMode: "sequential",
-	async run(args): Promise<ToolResult> {
+	prepareArguments: prepareEditArguments,
+	async run(rawArgs): Promise<ToolResult> {
+		// Normalize here too so direct run() callers (not just registry-admitted
+		// calls) accept the legacy/JSON-string shapes. Idempotent.
+		const args = prepareEditArguments(rawArgs);
 		const pathArg = typeof args.path === "string" ? args.path : null;
 		if (!pathArg) return { kind: "error", message: "edit: missing path argument" };
 		const edits = parseEditsArray(args.edits);

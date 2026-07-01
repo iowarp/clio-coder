@@ -198,6 +198,64 @@ describe("contracts/tools basic happy paths", () => {
 		ok(result.details?.diff);
 	});
 
+	it("editTool accepts the legacy top-level {oldText,newText} shape", async () => {
+		const root = scratchDir();
+		const filePath = join(root, "legacy.ts");
+		writeFileSync(filePath, "const a = 1;\n", "utf8");
+
+		const result = await editTool.run({ path: filePath, oldText: "const a = 1;", newText: "const a = 2;" });
+		strictEqual(result.kind, "ok");
+		strictEqual(readFileSync(filePath, "utf8"), "const a = 2;\n");
+	});
+
+	it("editTool accepts edits sent as a JSON string, and the canonical array", async () => {
+		const root = scratchDir();
+		const jsonFile = join(root, "jsonstr.ts");
+		writeFileSync(jsonFile, "let x = 0;\n", "utf8");
+		const asJson = await editTool.run({
+			path: jsonFile,
+			edits: JSON.stringify([{ oldText: "let x = 0;", newText: "let x = 9;" }]),
+		});
+		strictEqual(asJson.kind, "ok");
+		strictEqual(readFileSync(jsonFile, "utf8"), "let x = 9;\n");
+
+		const arrayFile = join(root, "array.ts");
+		writeFileSync(arrayFile, "y = 1;\n", "utf8");
+		const asArray = await editTool.run({ path: arrayFile, edits: [{ oldText: "y = 1;", newText: "y = 2;" }] });
+		strictEqual(asArray.kind, "ok");
+		strictEqual(readFileSync(arrayFile, "utf8"), "y = 2;\n");
+	});
+
+	it("registry applies prepareArguments before the tool body", async () => {
+		let received: Record<string, unknown> | null = null;
+		const spec: ToolSpec = {
+			name: ToolNames.Read,
+			description: "normalizing read",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			prepareArguments: (args) => (typeof args.legacy === "string" ? { path: args.legacy } : args),
+			run: async (args) => {
+				received = args;
+				return { kind: "ok", output: "ok" };
+			},
+		};
+		const registry = createRegistry({
+			safety: {
+				classify: () => ({ actionClass: "read", reasons: [] }),
+				evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
+				observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+				scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+				isSubset: () => true,
+				audit: { recordCount: () => 0 },
+			},
+		});
+		registry.register(spec);
+		const verdict = await registry.invoke({ tool: ToolNames.Read, args: { legacy: "x.ts" } });
+		strictEqual(verdict.kind, "ok");
+		strictEqual(received !== null && (received as Record<string, unknown>).path, "x.ts");
+		strictEqual(received !== null && (received as Record<string, unknown>).legacy, undefined);
+	});
+
 	it("findTool locates files by glob relative to search root", async () => {
 		const root = scratchDir();
 		mkdirSync(join(root, "src"), { recursive: true });

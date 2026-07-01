@@ -79,6 +79,16 @@ export interface ToolSpec {
 	 * so two `bash` or `edit` calls in the same batch never run concurrently.
 	 */
 	executionMode?: ToolExecutionMode;
+	/**
+	 * Optional argument normalizer applied before the tool body (and its own
+	 * internal validation). Mirrors pi's `prepareArguments`: lets a tool accept
+	 * the common weak-model argument shapes (legacy top-level fields, a
+	 * JSON-string array) without hand-parsing inside every `run`. Must be pure
+	 * and idempotent; a throwing normalizer is ignored and the raw args pass
+	 * through. Tools that also want direct `run` calls normalized should invoke
+	 * the same function at the top of `run`.
+	 */
+	prepareArguments?(args: Record<string, unknown>): Record<string, unknown>;
 	/** Execute the tool. Only called after admission. */
 	run(args: Record<string, unknown>, options?: ToolInvokeOptions): Promise<ToolResult>;
 }
@@ -278,7 +288,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const block = firstBlockToolEffect(beforeEffects);
 		if (block) return { kind: "blocked", reason: block.reason, decision };
 		try {
-			const result = shapeToolResult(spec, await spec.run(call.args ?? {}, options), options);
+			const preparedArgs = prepareToolArgs(spec, call.args ?? {});
+			const result = shapeToolResult(spec, await spec.run(preparedArgs, options), options);
 			const afterEffects = runToolHook("after_tool", spec, call, decision, options, result);
 			const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options);
 			return { kind: "ok", result: finalResult, decision };
@@ -525,6 +536,21 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			};
 		},
 	};
+}
+
+/**
+ * Run a tool's optional `prepareArguments` normalizer before its body. A
+ * throwing or non-object result is discarded so a buggy normalizer can never
+ * abort admission; the raw args pass through unchanged.
+ */
+function prepareToolArgs(spec: ToolSpec, args: Record<string, unknown>): Record<string, unknown> {
+	if (!spec.prepareArguments) return args;
+	try {
+		const prepared = spec.prepareArguments(args);
+		return prepared !== null && typeof prepared === "object" && !Array.isArray(prepared) ? prepared : args;
+	} catch {
+		return args;
+	}
 }
 
 function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolSpec): SafetyDecision {
