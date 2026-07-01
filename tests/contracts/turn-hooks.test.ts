@@ -447,9 +447,10 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 				(entry) =>
 					entry.kind === "message" &&
 					entry.role === "user" &&
+					(entry.payload as { synthetic?: unknown }).synthetic === true &&
 					JSON.stringify(entry).includes(STALLED_TURN_REQUEST_CONTINUATION_MESSAGE),
 			),
-			"the continuation reminder should persist as a user ledger entry",
+			"the continuation reminder should persist as a synthetic user ledger entry",
 		);
 		ok(
 			notices.some(
@@ -883,6 +884,39 @@ describe("contracts/turn-hooks finish-contract registration", () => {
 		strictEqual(recorded.length, 2);
 		strictEqual(recorded[1]?.decision, "ok");
 		strictEqual(recorded[1]?.reason, "no_mutation");
+	});
+
+	it("does not let synthetic request-continuation reminders reset the finish-contract mutation window", () => {
+		const recorded: CompletionContractAuditInput[] = [];
+		const entries = [
+			...mutationEntries("src/app.ts"),
+			{
+				kind: "message",
+				role: "user",
+				turnId: "turn-reminder",
+				payload: { text: "<system-reminder>validate</system-reminder>", synthetic: true },
+			},
+			{
+				kind: "message",
+				role: "tool_call",
+				turnId: "turn-validate",
+				payload: { name: "bash", toolCallId: "call-validate", args: { command: "npm run test" } },
+			},
+			{
+				kind: "message",
+				role: "tool_result",
+				turnId: "turn-validate",
+				payload: { toolName: "bash", toolCallId: "call-validate", result: { details: { exitCode: 0 } } },
+			},
+		];
+		const registration = createFinishContractRegistration({
+			readSessionEntries: () => entries,
+			resolveRigor: () => "high",
+			recordDecision: (record) => recorded.push(record),
+		});
+		registration.evaluate(baseInput({ text: "Validated and complete." }));
+		strictEqual(recorded[0]?.decision, "ok");
+		strictEqual(recorded[0]?.reason, "validation_evidence");
 	});
 });
 

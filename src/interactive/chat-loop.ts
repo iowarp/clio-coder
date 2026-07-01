@@ -1812,6 +1812,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		agentRuntime: AgentRuntime,
 		text: string,
 		images: ReadonlyArray<ImageContent> | undefined,
+		synthetic: boolean,
 	): string | null => {
 		if (!deps.session) return null;
 		if (!deps.session.current()) {
@@ -1821,10 +1822,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				model: agentRuntime.wireModelId,
 			});
 		}
+		const payload: Record<string, unknown> = images ? { content: [{ type: "text", text }, ...images] } : { text };
+		if (synthetic) {
+			payload.synthetic = true;
+			payload.source = "middleware_request_continuation";
+		}
 		const userTurn = deps.session.append({
 			kind: "user",
 			parentId: lastTurnId,
-			payload: images ? { content: [{ type: "text", text }, ...images] } : { text },
+			payload,
 		});
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
@@ -2023,7 +2029,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// 5. Append the user turn, then stamp and persist the snapshot.
 			// PendingSkillRequest is intent only; SkillActivation ledger entries
 			// are recorded by read_skill success.
-			const userTurnId = appendSubmittedUserTurn(agentRuntime, submittedText, images);
+			const userTurnId = appendSubmittedUserTurn(
+				agentRuntime,
+				submittedText,
+				images,
+				options.requestContinuation === true,
+			);
 			logPromptCompileIfPending();
 			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
 			currentContextSnapshot = turnSnapshot;

@@ -467,7 +467,9 @@ function pushEvidence(evidence: FinishContractEvidence[], seen: Set<string>, ite
 
 function isUserMessageEntry(entry: unknown): boolean {
 	const record = asRecord(entry);
-	return record?.kind === "message" && record.role === "user";
+	if (record?.kind !== "message" || record.role !== "user") return false;
+	const payload = asRecord(record.payload);
+	return payload?.synthetic !== true;
 }
 
 function turnIdOf(entry: unknown): string | null {
