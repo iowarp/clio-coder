@@ -5,27 +5,12 @@ import { createInterface } from "node:readline";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveFdBinary } from "./executables.js";
-import { compileGlobRegex, normalizeGlobInput } from "./glob.js";
+import { compileGlobRegex, IGNORED_DIRS, normalizeGlobInput } from "./glob.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
 
 const DEFAULT_LIMIT = 1000;
-const IGNORED_DIRS = new Set([
-	".cache",
-	".clio",
-	".fallow",
-	".git",
-	".next",
-	".pytest_cache",
-	".turbo",
-	".venv",
-	"build",
-	"coverage",
-	"dist",
-	"node_modules",
-	"target",
-]);
 
 function toPosixPath(value: string): string {
 	return value.split(path.sep).join("/");

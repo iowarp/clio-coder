@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { clampTimeoutMs } from "../../src/core/bash-exec.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { buildFdArgs } from "../../src/tools/find.js";
+import { globTool } from "../../src/tools/glob.js";
 import { excludeGlobsFor, grepTool } from "../../src/tools/grep.js";
+import { readTool } from "../../src/tools/read.js";
 import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { validateFrontendTool } from "../../src/tools/validate-frontend.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
@@ -174,6 +176,42 @@ describe("contracts/tool-hardening find/grep gitignore visibility", () => {
 		strictEqual(excludeGlobsFor("/home/u/proj").join(" "), "!**/.clio/** !**/.fallow/** !**/node_modules/**");
 		// Targeting node_modules directly must not suppress it.
 		strictEqual(excludeGlobsFor("/home/u/proj/node_modules/pkg").join(" "), "!**/.clio/** !**/.fallow/**");
+	});
+});
+
+describe("contracts/tool-hardening glob dir filtering + read line count", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-glob-"));
+	});
+	afterEach(() => {
+		rmSync(scratch, { recursive: true, force: true });
+	});
+
+	it("glob skips node_modules and .git like find", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		mkdirSync(join(scratch, "node_modules", "pkg"), { recursive: true });
+		writeFileSync(join(scratch, "src", "a.ts"), "x\n", "utf8");
+		writeFileSync(join(scratch, "node_modules", "pkg", "b.ts"), "y\n", "utf8");
+
+		const result = await globTool.run({ pattern: "**/*.ts", path: scratch });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("src/a.ts"), result.output);
+		ok(!result.output.includes("node_modules"), `must not walk node_modules: ${result.output}`);
+	});
+
+	it("read does not over-report remaining lines on a newline-terminated file", async () => {
+		const file = join(scratch, "three.txt");
+		writeFileSync(file, "a\nb\nc\n", "utf8");
+		const result = await readTool.run({ path: file, limit: 2 }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		// Only line "c" remains; the notice must say 1 more line, not 2, and the
+		// total must be 3, not 4.
+		ok(result.output.includes("[1 more line"), result.output);
+		ok(!result.output.includes("2 more lines"), result.output);
 	});
 });
 
