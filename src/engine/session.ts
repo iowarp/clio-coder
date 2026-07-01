@@ -25,6 +25,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
+	fstatSync,
 	fsyncSync,
 	mkdirSync,
 	openSync,
@@ -287,6 +288,103 @@ export function readSessionFileEntries(path: string, options: SessionJsonlReadOp
 		closeSync(fd);
 	}
 	return entries;
+}
+
+export interface SessionTailReadResult {
+	/** Parsed tail entries in file order (header included only if BOF was reached). */
+	entries: unknown[];
+	/** Non-empty JSONL lines parsed — the bounded-work signal (≈ maxEntries, not file size). */
+	linesParsed: number;
+	/** True when the read consumed the whole file from its start (small files). */
+	reachedStart: boolean;
+}
+
+/** Read exactly `length` bytes at `position`, looping over short reads. */
+function readExactAt(fd: number, buffer: Buffer, position: number, length: number): void {
+	let read = 0;
+	while (read < length) {
+		const got = readSync(fd, buffer, read, length - read, position + read);
+		if (got === 0) break; // truncated under us; parse what we have
+		read += got;
+	}
+}
+
+/**
+ * Read only the last `maxEntries` non-empty JSONL lines of a session ledger by
+ * scanning backward from EOF, instead of parsing the whole file. Cost is bounded
+ * by `maxEntries` and the trailing bytes those lines occupy, not by session
+ * length. The trailing window starts at one chunk and doubles until it holds
+ * enough complete lines or reaches the file start; the first line of a non-BOF
+ * window is dropped as a partial line (its start lies before the window), which
+ * at worst discards one extra oldest line — never one of the last `maxEntries`.
+ *
+ * Behaviour matches `readSessionFileEntries` line-for-line over the tail it
+ * returns: same `parseSessionJsonlLine` (torn-tail tolerant), same warning sink.
+ */
+export function readSessionFileTailEntries(
+	path: string,
+	maxEntries: number,
+	options: SessionJsonlReadOptions & { chunkBytes?: number } = {},
+): SessionTailReadResult {
+	const readPath = recoverJsonlTargetIfMissing(path);
+	if (readPath === null) return { entries: [], linesParsed: 0, reachedStart: true };
+	const warn = options.onWarning ?? defaultSessionJsonlWarning;
+	const bound = Number.isFinite(maxEntries) && maxEntries > 0 ? Math.floor(maxEntries) : 1;
+	const chunkBytes =
+		options.chunkBytes !== undefined && options.chunkBytes > 0
+			? Math.floor(options.chunkBytes)
+			: SESSION_JSONL_READ_CHUNK_BYTES;
+	const fd = openSync(readPath, "r");
+	try {
+		const size = fstatSync(fd).size;
+		if (size === 0) return { entries: [], linesParsed: 0, reachedStart: true };
+		let windowBytes = Math.min(size, chunkBytes);
+		for (;;) {
+			const offset = Math.max(0, size - windowBytes);
+			const length = size - offset;
+			const buffer = Buffer.allocUnsafe(length);
+			readExactAt(fd, buffer, offset, length);
+			const decoder = new StringDecoder("utf8");
+			const text = decoder.write(buffer) + decoder.end();
+			const reachedStart = offset === 0;
+			// A non-BOF window's first line is partial (it began before `offset`).
+			const lines = text.split("\n");
+			const candidate = reachedStart ? lines : lines.slice(1);
+			const nonEmpty = candidate.filter((line) => line.trim().length > 0);
+			if (nonEmpty.length >= bound || reachedStart) {
+				const tail = nonEmpty.slice(Math.max(0, nonEmpty.length - bound));
+				const entries: unknown[] = [];
+				let lineNumber = 0;
+				for (const line of tail) {
+					lineNumber += 1;
+					parseSessionJsonlLine(line, lineNumber, readPath, entries, warn);
+				}
+				return { entries, linesParsed: tail.length, reachedStart };
+			}
+			if (windowBytes >= size) return { entries: [], linesParsed: 0, reachedStart: true };
+			windowBytes = Math.min(size, windowBytes * 2);
+		}
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/**
+ * Tail-scoped counterpart to `openSession(id).turns()`: the last `maxTurns`
+ * non-header entries of the session ledger, in file order. Reads one extra line
+ * so a header consuming a slot in a wholly-read small file never shrinks the
+ * turn count below `maxTurns`.
+ */
+export function readSessionTailTurns(id: string, maxTurns: number): SessionTailReadResult {
+	const dir = findSessionDir(id);
+	const currentPath = join(dir, "current.jsonl");
+	const result = readSessionFileTailEntries(currentPath, maxTurns + 1);
+	const turns = result.entries.filter((entry) => !isSessionJsonlHeader(entry));
+	return {
+		entries: turns.slice(Math.max(0, turns.length - maxTurns)),
+		linesParsed: result.linesParsed,
+		reachedStart: result.reachedStart,
+	};
 }
 
 function isPositiveInteger(value: unknown): value is number {

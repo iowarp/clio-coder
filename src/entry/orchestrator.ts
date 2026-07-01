@@ -65,6 +65,7 @@ import {
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { createResourcesDomainModule, type ResourcesContract } from "../domains/resources/index.js";
+import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { SafetyContract } from "../domains/safety/index.js";
 import { parseRigorOverride, resolveRigor, SafetyDomainModule } from "../domains/safety/index.js";
@@ -95,7 +96,7 @@ import {
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
-import { openSession } from "../engine/session.js";
+import { openSession, readSessionTailTurns } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
@@ -277,6 +278,21 @@ async function resolveCompactionModel(
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
 	return collectSessionEntries(reader.turns());
+}
+
+/**
+ * The finish-contract only inspects the window since the last user message
+ * (`recentEntries`, capped at 80), so it reads a bounded tail of the ledger
+ * instead of parsing the whole file every turn_end. 160 = twice the 80-entry cap
+ * leaves ample margin above any entries appended after the assistant turn, so the
+ * assessed window is byte-identical to the whole-file read (see the
+ * behaviour-equivalence contract test) while cost stays bounded by session
+ * *shape*, not session *length*.
+ */
+const FINISH_CONTRACT_TAIL_ENTRIES = DEFAULT_RECENT_ENTRY_LIMIT * 2;
+
+function readRecentSessionEntriesForContract(sessionId: string): SessionEntry[] {
+	return collectSessionEntries(readSessionTailTurns(sessionId, FINISH_CONTRACT_TAIL_ENTRIES).entries);
 }
 
 function protectedArtifactStateForCurrentSession(
@@ -795,7 +811,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (session) {
 		middleware.registerHook(
 			createFinishContractRegistration({
-				readSessionEntries: () => (session.current() ? readCurrentSessionEntries() : null),
+				// Tail-scoped: the contract only needs the last-user-message window, so
+				// it parses a bounded ledger tail per turn_end rather than the whole
+				// file (which grows unbounded with session length).
+				readSessionEntries: () => {
+					const meta = session.current();
+					return meta ? readRecentSessionEntriesForContract(meta.id) : null;
+				},
 				resolveRigor: () => resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_RIGOR) }),
 				recordDecision: (record) => safety.audit.recordCompletionContract?.(record),
 			}),
