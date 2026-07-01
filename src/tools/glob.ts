@@ -8,6 +8,26 @@ import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
 
 const MAX_RESULTS = 500;
 
+// Directories skipped by both glob and find (imported there). Heavy, generated,
+// or tool-internal trees that a glob almost never wants to walk into. A dir is
+// only skipped as a nested entry, so pointing the search root inside one still
+// works.
+export const IGNORED_DIRS = new Set([
+	".cache",
+	".clio",
+	".fallow",
+	".git",
+	".next",
+	".pytest_cache",
+	".turbo",
+	".venv",
+	"build",
+	"coverage",
+	"dist",
+	"node_modules",
+	"target",
+]);
+
 interface WalkEntry {
 	absPath: string;
 	mtimeMs: number;
@@ -85,8 +105,12 @@ function walk(root: string, out: WalkEntry[]): void {
 	for (const entry of entries) {
 		const absPath = path.join(root, entry.name);
 		const stat = lstatSync(absPath);
+		const isWalkableDir = stat.isDirectory() && !stat.isSymbolicLink();
+		// Skip heavy/generated/tool-internal trees entirely (neither list nor
+		// recurse), matching find's IGNORED_DIRS.
+		if (isWalkableDir && IGNORED_DIRS.has(entry.name)) continue;
 		out.push({ absPath, mtimeMs: stat.mtimeMs });
-		if (stat.isDirectory() && !stat.isSymbolicLink()) {
+		if (isWalkableDir) {
 			walk(absPath, out);
 		}
 	}

@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, splitLinesForCounting, truncateHead } from "./truncate.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 export const DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES = 128 * 1024;
@@ -158,8 +158,11 @@ export const readTool: ToolSpec = {
 				};
 			}
 			const content = readFileSync(filePath, "utf8");
+			// Slice from the raw split (keeps the trailing newline on selections that
+			// reach EOF); count lines honestly (a trailing "\n" is a terminator, not
+			// a phantom extra line) so continuation notices never over-report by one.
 			const allLines = content.split("\n");
-			const totalLines = allLines.length;
+			const totalLines = splitLinesForCounting(content).length;
 			const startIndex = Math.min(offset - 1, totalLines);
 			if (offset > 1 && startIndex >= totalLines) {
 				return { kind: "error", message: `read: offset ${offset} is beyond end of file (${totalLines} lines total)` };
@@ -179,9 +182,7 @@ export const readTool: ToolSpec = {
 				};
 			}
 			const selected =
-				limit !== null
-					? allLines.slice(startIndex, Math.min(startIndex + limit, totalLines)).join("\n")
-					: allLines.slice(startIndex).join("\n");
+				limit !== null ? allLines.slice(startIndex, startIndex + limit).join("\n") : allLines.slice(startIndex).join("\n");
 			const truncation = truncateHead(selected, turnBudget ? { maxBytes: turnBudget.maxBytes } : undefined);
 			let output: string;
 			if (truncation.firstLineExceedsLimit) {
