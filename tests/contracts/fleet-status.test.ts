@@ -6,23 +6,16 @@
  */
 
 import { strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { statusSnapshot } from "../../src/cli/fleet.js";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
 	const originalEnv = { ...process.env };
-	const scratch = mkdtempSync(join(tmpdir(), "clio-fleet-status-"));
-	process.env.CLIO_HOME = scratch;
-	process.env.CLIO_DATA_DIR = join(scratch, "data");
-	process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-	process.env.CLIO_STATE_DIR = join(scratch, "state");
-	process.env.CLIO_CACHE_DIR = join(scratch, "cache");
-	resetXdgCache();
+	const scratch = newScratchClioHome("clio-fleet-status-");
 	return Promise.resolve()
 		.then(() => fn(scratch))
 		.finally(() => {
@@ -32,8 +25,7 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 			for (const [k, v] of Object.entries(originalEnv)) {
 				if (v !== undefined) process.env[k] = v;
 			}
-			rmSync(scratch, { recursive: true, force: true });
-			resetXdgCache();
+			clearScratchClioHome(scratch);
 		});
 }
 

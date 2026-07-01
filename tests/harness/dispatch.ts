@@ -13,13 +13,10 @@
  *     through, so receipt-content and orphan-recovery plumbing remain testable.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { RunReceiptReproducibility } from "../../src/domains/dispatch/types.js";
 import type { SafetyPolicyMetadata } from "../../src/domains/safety/policy-engine.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "./scratch-env.js";
 
 /**
  * Drop-in for collectReproducibilityMetadata that never spawns git. It mirrors
@@ -48,27 +45,13 @@ export function makeDispatchBundle(
 	return createDispatchBundle(ctx, { collectReproducibility: fastReproducibility, ...options });
 }
 
-let envBackup: NodeJS.ProcessEnv = {};
-let stateScratch = "";
+let isolated: IsolatedClioEnv | null = null;
 
 export function isolateDispatchState(): void {
-	envBackup = { ...process.env };
-	stateScratch = mkdtempSync(join(tmpdir(), "clio-dispatch-state-"));
-	process.env.CLIO_HOME = stateScratch;
-	process.env.CLIO_DATA_DIR = join(stateScratch, "data");
-	process.env.CLIO_CONFIG_DIR = join(stateScratch, "config");
-	process.env.CLIO_STATE_DIR = join(stateScratch, "state");
-	process.env.CLIO_CACHE_DIR = join(stateScratch, "cache");
-	resetXdgCache();
+	isolated = isolateClioEnv("clio-dispatch-state-");
 }
 
 export function restoreDispatchState(): void {
-	for (const key of Object.keys(process.env)) {
-		if (!(key in envBackup)) Reflect.deleteProperty(process.env, key);
-	}
-	for (const [key, value] of Object.entries(envBackup)) {
-		if (value !== undefined) process.env[key] = value;
-	}
-	rmSync(stateScratch, { recursive: true, force: true });
-	resetXdgCache();
+	isolated?.restore();
+	isolated = null;
 }

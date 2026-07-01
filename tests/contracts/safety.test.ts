@@ -1,31 +1,22 @@
 import { strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
 import { compilePathPolicy, evaluatePathPolicy } from "../../src/domains/safety/path-policy.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 describe("contracts/safety", () => {
 	const ORIGINAL_ENV = { ...process.env };
 	let scratch: string;
 
 	beforeEach(() => {
-		scratch = mkdtempSync(join(tmpdir(), "clio-safety-"));
-		process.env.CLIO_HOME = scratch;
-		process.env.CLIO_DATA_DIR = join(scratch, "data");
-		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-		process.env.CLIO_STATE_DIR = join(scratch, "state");
-		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
-		resetXdgCache();
+		scratch = newScratchClioHome("clio-safety-");
 	});
 
 	afterEach(() => {
@@ -35,8 +26,7 @@ describe("contracts/safety", () => {
 		for (const [k, v] of Object.entries(ORIGINAL_ENV)) {
 			if (v !== undefined) process.env[k] = v;
 		}
-		rmSync(scratch, { recursive: true, force: true });
-		resetXdgCache();
+		clearScratchClioHome(scratch);
 	});
 
 	it("classifies tool actions correctly", () => {

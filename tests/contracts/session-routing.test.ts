@@ -1,6 +1,5 @@
 import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
@@ -29,10 +28,10 @@ import {
 	seedSessionRouting,
 	setAtPath,
 } from "../../src/core/session-routing.js";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { applySettingChange, buildSettingItems } from "../../src/interactive/overlays/settings.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 function settingsWithTargets(): ClioSettings {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -319,13 +318,7 @@ describe("contracts/session-routing recents", () => {
 	let scratch = "";
 
 	beforeEach(() => {
-		scratch = mkdtempSync(join(tmpdir(), "clio-recents-"));
-		process.env.CLIO_HOME = scratch;
-		process.env.CLIO_DATA_DIR = join(scratch, "data");
-		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-		process.env.CLIO_STATE_DIR = join(scratch, "state");
-		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
-		resetXdgCache();
+		scratch = newScratchClioHome("clio-recents-");
 		resetRecentModelsCache();
 	});
 
@@ -336,8 +329,7 @@ describe("contracts/session-routing recents", () => {
 		for (const [k, v] of Object.entries(ORIGINAL_ENV)) {
 			if (v !== undefined) process.env[k] = v;
 		}
-		rmSync(scratch, { recursive: true, force: true });
-		resetXdgCache();
+		clearScratchClioHome(scratch);
 		resetRecentModelsCache();
 	});
 

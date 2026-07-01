@@ -1,10 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { isSessionEntry, isSessionHeader, type SkillActivationEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
@@ -17,6 +15,7 @@ import {
 	sessionPaths,
 	writeJsonlFileAtomic,
 } from "../../src/engine/session.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -37,13 +36,7 @@ describe("contracts/persistence", () => {
 	let scratch: string;
 
 	beforeEach(() => {
-		scratch = mkdtempSync(join(tmpdir(), "clio-persistence-"));
-		process.env.CLIO_HOME = scratch;
-		process.env.CLIO_DATA_DIR = join(scratch, "data");
-		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-		process.env.CLIO_STATE_DIR = join(scratch, "state");
-		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
-		resetXdgCache();
+		scratch = newScratchClioHome("clio-persistence-");
 	});
 
 	afterEach(() => {
@@ -53,8 +46,7 @@ describe("contracts/persistence", () => {
 		for (const [k, v] of Object.entries(ORIGINAL_ENV)) {
 			if (v !== undefined) process.env[k] = v;
 		}
-		rmSync(scratch, { recursive: true, force: true });
-		resetXdgCache();
+		clearScratchClioHome(scratch);
 	});
 
 	it("creates, retrieves, and persists ledger runs and receipts", async () => {
