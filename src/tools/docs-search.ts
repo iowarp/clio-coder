@@ -379,7 +379,9 @@ function makeQueryPlan(query: string, fileFilter: string | null): QueryPlan {
 	const normalizedQuery = normalizeText(query);
 	const phraseCandidates = [
 		normalizedQuery,
-		...rawTokens(query).slice(0, -1).map((token, index, tokens) => `${token} ${tokens[index + 1] ?? ""}`.trim()),
+		...rawTokens(query)
+			.slice(0, -1)
+			.map((token, index, tokens) => `${token} ${tokens[index + 1] ?? ""}`.trim()),
 	];
 	const phrases = unique(phraseCandidates.filter((phrase) => phrase.includes(" ") && phrase.length >= 5));
 	return { query, fileFilter, originalTokens, weightedTerms, expandedTerms, phrases };
@@ -461,15 +463,17 @@ function cleanSnippet(text: string): string {
 }
 
 function snippetFor(section: IndexedSection, plan: QueryPlan): { text: string; startLine: number; endLine: number } {
-	const needles = unique([
-		...plan.phrases,
-		...plan.originalTokens,
-		...plan.expandedTerms.slice(0, 8),
-	]).filter((needle) => needle.length > 0);
+	const needles = unique([...plan.phrases, ...plan.originalTokens, ...plan.expandedTerms.slice(0, 8)]).filter(
+		(needle) => needle.length > 0,
+	);
 	let hitLine = section.bodyLines.findIndex((line) => lineHasNeedle(line, needles));
 	if (hitLine < 0) hitLine = section.bodyLines.findIndex((line) => line.trim().length > 0);
 	if (hitLine < 0) {
-		return { text: section.heading === "(overview)" ? section.title : section.heading, startLine: section.startLine, endLine: section.startLine };
+		return {
+			text: section.heading === "(overview)" ? section.title : section.heading,
+			startLine: section.startLine,
+			endLine: section.startLine,
+		};
 	}
 	const from = Math.max(0, hitLine - SNIPPET_CONTEXT_LINES);
 	const to = Math.min(section.bodyLines.length - 1, hitLine + SNIPPET_CONTEXT_LINES);
@@ -545,9 +549,13 @@ export const docsSearchTool: ToolSpec = {
 	description:
 		"Search Clio's bundled markdown documentation with deterministic section retrieval. Uses BM25-style scoring, heading/phrase boosts, and Clio vocabulary aliases; returns compact JSON with file, heading breadcrumb, line range, snippet, matched terms, and score. Use this for questions about Clio's own commands, tools, safety, agents, targets, docs, middleware, evidence, and capabilities.",
 	parameters: Type.Object({
-		query: Type.String({ description: "Question or terms, for example 'how do approvals work' or 'finish contract validation evidence'." }),
+		query: Type.String({
+			description: "Question or terms, for example 'how do approvals work' or 'finish contract validation evidence'.",
+		}),
 		limit: Type.Optional(Type.Number({ description: `Max results (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` })),
-		file: Type.Optional(Type.String({ description: "Optional doc path or filename substring filter, for example 'safety-model.md'." })),
+		file: Type.Optional(
+			Type.String({ description: "Optional doc path or filename substring filter, for example 'safety-model.md'." }),
+		),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
