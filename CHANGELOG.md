@@ -118,6 +118,15 @@ interfaces.
   returned empty observations), so nothing changes for the operator. The source
   stays in the tree under `src/domains/intelligence/` with a `PARKED.md` that
   records the intent and the re-entry condition.
+- `docs_search` now behaves as a deterministic self-documentation retriever
+  instead of a raw section grep. It indexes the bundled markdown corpus with
+  heading breadcrumbs and line ranges, expands queries through a controlled
+  Clio vocabulary, applies light stemming, phrase boosts, and BM25-style body
+  scoring, and returns compact structured JSON with corpus metadata, normalized
+  and expanded terms, ranked file/heading citations, bounded snippets, matched
+  terms, coverage, and ranking signals. The human `clio docs` server remains
+  responsible for `docs/html/**`; agent search intentionally excludes those
+  interactive HTML blueprints.
 - Documentation guides (docs/observability.md, docs/safety-model.md, docs/evidence-and-memory.md, docs/scientific-validation.md, docs/evolution.md, and docs/commands-and-modes.md) and the agent handbook CLIO.md are updated and verified against the implementation code to accurately reflect the shipped v0.2.7 behavior (including forensic auto-builds, v3 receipt integrity checks, validation-rigor integration, TUI /view accountability summaries, environment variable overrides, evidence-linked change manifests, and parked intelligence domain status).
 
 ### Fixed

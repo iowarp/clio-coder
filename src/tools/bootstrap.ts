@@ -199,7 +199,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.DocsSearch]: {
-		objective: "Retrieve cited sections from Clio's bundled documentation by term-frequency match.",
+		objective: "Retrieve cited sections from Clio's bundled documentation by deterministic semantic-style ranking.",
 		uiLabel: "Docs",
 		retrySafety: "idempotent",
 		resultSizePolicy: boundedSearchPolicy,

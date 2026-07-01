@@ -42,6 +42,23 @@ node scripts/turn-report.mjs --session <id>
 
 The report prints per-call `ttft`, `api`, input, cache read, cache write, backend cache verdict, and expected cold reasons. Cache verdicts are `hot`, `partial`, `cold`, or `small`.
 
+## Self-documentation retrieval
+
+`docs_search` is the model-facing companion to the human `clio docs` server.
+The server serves bundled `docs/html/**` blueprints for people; `docs_search`
+indexes the bundled markdown corpus for agents. It is deterministic and
+offline: no embeddings service, network call, or filesystem write is needed.
+
+The search index splits markdown into heading-delimited sections, records
+heading breadcrumbs and line ranges, and ranks results with light stemming,
+controlled Clio vocabulary aliases, phrase boosts, and BM25-style body
+scoring. The tool returns compact JSON containing corpus metadata, normalized
+and expanded query terms, ranked hits with `file`, `heading`, `breadcrumb`,
+`anchor`, section `lines`, `snippetLines`, a bounded `snippet`, `matchedTerms`,
+`signals`, `coverage`, and `score`. Use the optional `file` argument to narrow
+search to one bundled markdown file when a query already names the relevant
+guide.
+
 ## Edit matching safety
 
 The `edit` tool first attempts exact matching. If the model's old text differs
