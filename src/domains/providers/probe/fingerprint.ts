@@ -35,7 +35,10 @@ export async function fingerprintNativeRuntime(baseUrl: string): Promise<NativeR
 			if (typeof data.version === "string") {
 				return { runtimeId: "ollama-native", displayName: "Ollama" };
 			}
-		} catch {}
+		} catch {
+			// A reachable endpoint with a non-JSON version reply fingerprints as
+			// unknown; the caller treats null as "no native runtime detected".
+		}
 	}
 	return null;
 }
