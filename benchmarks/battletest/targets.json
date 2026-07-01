@@ -1,0 +1,54 @@
+{
+	"description": "Frozen oracle targets for the deterministic battletest. Each target is a real repo copied to /tmp at a pinned SHA. The harness re-freezes the copy, INJECTS one deterministic single-line regression into a NON-TEST source file, drives clio to repair it, then grades with the repo's OWN offline gate plus a programmatic test-edit ban. Pass = gate exit 0 after clio's fix. The green->inject->red->revert->green preflight (battletest_clio.py prepare) proves the oracle is non-vacuous before any model runs. `find` must occur exactly once in the clean source; the harness asserts that and refuses to inject otherwise.",
+	"template": "A regression was introduced in the {repo_name} repository. Users report the following problem:\n\n{symptom}\n\nInvestigate the codebase, locate the faulty NON-TEST source file, and fix it with the smallest correct change. Do NOT modify, add, or delete any test file; the existing test suite already defines the expected behavior. Use the code navigation tools to find the relevant code before editing. When the fix is complete and you have validated it against the tests, stop.",
+	"targets": {
+		"voipi": {
+			"repo": "/home/akougkas/tools/voipi",
+			"sha": "28b56de",
+			"lang": "ts",
+			"repo_name": "voipi",
+			"install": "pnpm install --prefer-offline --config.confirmModulesPurge=false",
+			"gate": "pnpm lint && pnpm typecheck && pnpm exec vitest run --exclude test/index.test.ts",
+			"test_pathspec": ":(glob)test/**/*.test.ts",
+			"clean_exclude": ["node_modules"],
+			"bug": {
+				"file": "src/cli/_install.ts",
+				"find": "const args = command === \"npx\" ? [\"-y\", \"voipi@latest\", \"mcp\"] : [\"voipi@latest\", \"mcp\"];",
+				"replace": "const args = command !== \"npx\" ? [\"-y\", \"voipi@latest\", \"mcp\"] : [\"voipi@latest\", \"mcp\"];"
+			},
+			"symptom": "Running the MCP launcher through `npx` no longer passes the `-y` flag, so the launch stalls on an interactive install prompt instead of running non-interactively; meanwhile `pnpx` and `bunx` wrongly receive `-y`."
+		},
+		"sandcastle": {
+			"repo": "/home/akougkas/tools/sandcastle",
+			"sha": "c932eea",
+			"lang": "ts",
+			"repo_name": "sandcastle",
+			"install": "npm install --prefer-offline --no-audit --no-fund",
+			"gate": "npm test -- --exclude src/sandboxes/podman.test.ts --exclude src/cli.test.ts && npm run typecheck",
+			"test_pathspec": ":(glob)src/**/*.test.ts",
+			"clean_exclude": ["node_modules"],
+			"bug": {
+				"file": "src/boundedTail.ts",
+				"find": "while (this.totalChars > this.maxChars && this.items.length > 1) {",
+				"replace": "while (this.totalChars > this.maxChars || this.items.length > 1) {"
+			},
+			"symptom": "The bounded output tail discards recent lines even when the total output is well under the size limit, so only the very last appended line survives instead of the full retained tail."
+		},
+		"graphify": {
+			"repo": "/home/akougkas/tools/graphify",
+			"sha": "c750582",
+			"lang": "py",
+			"repo_name": "graphify",
+			"install": "uv venv --seed && uv pip install -e . pytest",
+			"gate": ".venv/bin/python -m pytest -q tests/test_cache.py tests/test_claude_md.py tests/test_detect.py tests/test_hooks.py tests/test_ingest.py tests/test_install.py tests/test_security.py tests/test_transcribe.py tests/test_validate.py tests/test_watch.py",
+			"test_pathspec": ":(glob)tests/**/test_*.py",
+			"clean_exclude": [".venv", "*.egg-info"],
+			"bug": {
+				"file": "graphify/cache.py",
+				"find": "return text[end + 4:].encode()",
+				"replace": "return text[end + 3:].encode()"
+			},
+			"symptom": "Editing only the YAML frontmatter of a Markdown file (leaving the body text unchanged) incorrectly invalidates its cache entry, as if the body content had changed."
+		}
+	}
+}

@@ -4,7 +4,7 @@ This is the first Clio model-management benchmark harness. It sweeps configured 
 
 ## Benchmark map
 
-Clio currently has five benchmark tracks:
+Clio currently has six benchmark tracks:
 
 | Track | Harness | Measures | Run command | Output | Reproducibility |
 |---|---|---|---|---|---|
@@ -13,8 +13,9 @@ Clio currently has five benchmark tracks:
 | Live turns | `benchmarks/live/` (`live-turns.mjs` + `turn-report.mjs`) | Real interactive TUI multi-turn drive over tmux; TTFT, prompt-cache hot/partial/cold verdicts, per-API-call usage | `npm run build`; `npm run bench:turns -- --baseline`; then `npm run bench:report -- --session <id>` | tmux pane snapshots + read-only session-ledger forensics | Live and model-dependent (drives the real fleet through the TUI). The reporter is deterministic over a recorded ledger. |
 | Community coding | `benchmarks/community-benchmarks/swe-bench-lite/` and `benchmarks/community-benchmarks/terminal-bench/` | Repo patch generation and container workflow solving | See `benchmarks/community-benchmarks/README.md` | SWE predictions/metrics JSONL; Terminal-Bench run directories | External dataset, Docker, and local fleet dependent. Historical v0.2.3 calibration is preserved in `community-benchmarks/MANIFEST.md`. |
 | Science coding | `benchmarks/community-benchmarks/scicode/scicode_clio.py` plus local SciCode prompt corpus | Stepwise scientific Python synthesis with per-substep numeric grading | `python benchmarks/community-benchmarks/scicode/scicode_clio.py generate-tasks --out .clio-scicode/tasks.yaml --h5py-file /path/to/test_data.h5`; `clio eval run --task-file .clio-scicode/tasks.yaml` | Normal Clio eval artifact plus `scicode-grade.json` per problem | Adapter is wired. Faithful scoring is blocked until the official SciCode HDF5 target file and SciCode Python package are supplied externally. |
+| Battletest oracle | `benchmarks/battletest/` (`battletest_clio.py` + `targets.json`) | Whole-harness repair of a pinned single-line regression in a real repo, scored by the repo's OWN offline gate plus a programmatic test-edit ban; runs the main-agent path and the `--agent` fleet-dispatch path | `npm run bench:battletest -- run --target voipi --run-root /tmp/bt-voipi --repeat 3` | Normal Clio eval artifact plus per-run `envelope.json` and per-attempt streams under `<run-root>/logs/` | pass@k over `--repeat N` (no decode seed yet). `prepare` proves `green→inject→red→revert→green` before any model runs, so a drifted target cannot pass vacuously. |
 
-Every track has an npm script: `bench:models`, `bench:context`, `bench:turns`/`bench:report`, `bench:swe`, `bench:scicode`, `bench:tb`. The Python tracks are thin npm wrappers that shell out to the adapters under `community-benchmarks/`.
+Every track has an npm script: `bench:models`, `bench:context`, `bench:turns`/`bench:report`, `bench:swe`, `bench:scicode`, `bench:tb`, `bench:battletest`. The Python tracks are thin npm wrappers that shell out to the adapters under `community-benchmarks/` and `battletest/`.
 
 > Publishing note: `package.json` ships `benchmarks/**` in the npm `files` list, so these measurement harnesses (including `benchmarks/live/` and `benchmarks/lib/`) travel in the published tarball, matching how `bench-context.mjs` already ships. They are small dev tools; if that is ever undesired, add a `files` exclusion.
 
