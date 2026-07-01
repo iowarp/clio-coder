@@ -7,12 +7,8 @@ export function findExecutableOnPath(name: string): string | null {
 	for (const dir of pathEnv.split(delimiter)) {
 		if (!dir) continue;
 		const candidate = join(dir, name);
-		try {
-			const stat = statSync(candidate);
-			if (stat.isFile() && (stat.mode & 0o111) !== 0) return candidate;
-		} catch {
-			// absent
-		}
+		const stat = statSync(candidate, { throwIfNoEntry: false });
+		if (stat?.isFile() && (stat.mode & 0o111) !== 0) return candidate;
 	}
 	return null;
 }

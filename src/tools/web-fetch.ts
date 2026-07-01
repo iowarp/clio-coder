@@ -115,10 +115,17 @@ function isProbablyBinary(contentType: string, text: string): boolean {
 	return text.includes("\0");
 }
 
+// String.fromCodePoint throws RangeError for values above U+10FFFF; a single
+// malformed numeric entity (e.g. &#1114112;) must not fail the whole fetch, so
+// out-of-range code points fall back to their original escape text.
+function safeFromCodePoint(code: number, original: string): string {
+	return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : original;
+}
+
 function decodeEntities(value: string): string {
 	return value
-		.replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-		.replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+		.replace(/&#(\d+);/g, (m, code: string) => safeFromCodePoint(Number(code), m))
+		.replace(/&#x([0-9a-f]+);/gi, (m, code: string) => safeFromCodePoint(Number.parseInt(code, 16), m))
 		.replace(/&nbsp;/gi, " ")
 		.replace(/&amp;/gi, "&")
 		.replace(/&lt;/gi, "<")
@@ -134,6 +141,11 @@ function stripTags(value: string): string {
 			.replace(/\s+/g, " ")
 			.trim(),
 	);
+}
+
+// Like stripTags but keeps newlines/indentation so fenced code blocks survive.
+function stripCodeTags(value: string): string {
+	return decodeEntities(value.replace(/<[^>]+>/g, ""));
 }
 
 function firstMatch(html: string, regex: RegExp): string | undefined {
@@ -188,9 +200,8 @@ function extractMainHtml(html: string): string {
 		}
 	}
 	if (candidates.length === 0) {
-		return firstMatch(cleaned, /<body\b[^>]*>([\s\S]*?)<\/body>/i)
-			? (/<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(cleaned)?.[1] ?? cleaned)
-			: cleaned;
+		const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(cleaned);
+		return body?.[1] ?? cleaned;
 	}
 	return candidates.sort((a, b) => scoreContent(b) - scoreContent(a))[0] ?? cleaned;
 }
@@ -200,7 +211,7 @@ function htmlToMarkdown(html: string, baseUrl: string): string {
 	const codeBlocks: string[] = [];
 	out = out.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, code: string) => {
 		const placeholder = `\n\n@@CLIO_CODE_${codeBlocks.length}@@\n\n`;
-		codeBlocks.push(`\n\n\`\`\`\n${stripTags(code).replace(/^\n+|\n+$/g, "")}\n\`\`\`\n\n`);
+		codeBlocks.push(`\n\n\`\`\`\n${stripCodeTags(code).replace(/^\n+|\n+$/g, "")}\n\`\`\`\n\n`);
 		return placeholder;
 	});
 	out = out.replace(/<br\s*\/?>/gi, "\n");
@@ -234,7 +245,9 @@ function htmlToMarkdown(html: string, baseUrl: string): string {
 	out = out.replace(/<[^>]+>/g, " ");
 	out = decodeEntities(out);
 	for (const [index, block] of codeBlocks.entries()) {
-		out = out.replace(`@@CLIO_CODE_${index}@@`, block);
+		// Function replacer: block is page-derived and may contain $&, $1, ... which a
+		// string replacement would interpret and corrupt.
+		out = out.replace(`@@CLIO_CODE_${index}@@`, () => block);
 	}
 	return out
 		.split("\n")

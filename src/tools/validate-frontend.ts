@@ -51,6 +51,26 @@ const VOID_HTML_TAGS = new Set([
 	"wbr",
 ]);
 const RAW_TEXT_TAGS = new Set(["script", "style", "textarea", "title"]);
+// HTML5 permits omitting the end tag for these elements, so an implicitly closed
+// one must not be reported as a structural error (e.g. <ul><li>a<li>b</ul>).
+const OPTIONAL_END_TAGS = new Set([
+	"li",
+	"dt",
+	"dd",
+	"p",
+	"td",
+	"th",
+	"tr",
+	"thead",
+	"tbody",
+	"tfoot",
+	"option",
+	"optgroup",
+	"caption",
+	"colgroup",
+	"rp",
+	"rt",
+]);
 const JAVASCRIPT_TYPES = new Set([
 	"",
 	"module",
@@ -171,38 +191,53 @@ async function validateHtml(
 }
 
 function validateHtmlStructure(content: string, checks: FrontendCheck[], artifactPath: string): void {
+	// Blank out comment interiors (keeping newlines so line numbers stay accurate)
+	// so tags mentioned inside <!-- ... --> are not parsed as real elements.
+	const scan = content.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " "));
 	const tagRe = /<\/?\s*([a-zA-Z][\w:-]*)(?:\s[^<>]*)?>/g;
 	const stack: Array<{ tag: string; line: number }> = [];
-	for (let match = tagRe.exec(content); match !== null; match = tagRe.exec(content)) {
+	for (let match = tagRe.exec(scan); match !== null; match = tagRe.exec(scan)) {
 		const raw = match[0];
 		if (/^<!|^<\?/u.test(raw)) continue;
 		const tag = (match[1] ?? "").toLowerCase();
 		const isClosing = /^<\//u.test(raw);
 		const selfClosing = /\/\s*>$/u.test(raw) || VOID_HTML_TAGS.has(tag);
 		if (isClosing) {
-			const last = stack.pop();
-			if (!last || last.tag !== tag) {
-				const expected = last ? ` expected </${last.tag}> from line ${last.line}` : "";
-				checks.push({
-					name: "html structure",
-					status: "fail",
-					message: `unexpected </${tag}> on line ${lineAt(content, match.index)}${expected}`,
-					path: artifactPath,
-				});
-				return;
+			// Unwind elements whose end tag HTML5 lets you omit and that were
+			// implicitly closed by this closing tag.
+			while (
+				stack.length > 0 &&
+				stack[stack.length - 1]?.tag !== tag &&
+				OPTIONAL_END_TAGS.has(stack[stack.length - 1]?.tag ?? "")
+			) {
+				stack.pop();
 			}
-			continue;
+			const last = stack[stack.length - 1];
+			if (last && last.tag === tag) {
+				stack.pop();
+				continue;
+			}
+			// A stray close of an optional-end element (no matching open) is legal.
+			if (OPTIONAL_END_TAGS.has(tag)) continue;
+			const expected = last ? ` expected </${last.tag}> from line ${last.line}` : "";
+			checks.push({
+				name: "html structure",
+				status: "fail",
+				message: `unexpected </${tag}> on line ${lineAt(scan, match.index)}${expected}`,
+				path: artifactPath,
+			});
+			return;
 		}
 		if (selfClosing) continue;
 		if (RAW_TEXT_TAGS.has(tag)) {
 			const closeRe = new RegExp(`</\\s*${escapeRegExp(tag)}\\s*>`, "giu");
 			closeRe.lastIndex = tagRe.lastIndex;
-			const close = closeRe.exec(content);
+			const close = closeRe.exec(scan);
 			if (!close) {
 				checks.push({
 					name: "html structure",
 					status: "fail",
-					message: `missing </${tag}> for opening tag on line ${lineAt(content, match.index)}`,
+					message: `missing </${tag}> for opening tag on line ${lineAt(scan, match.index)}`,
 					path: artifactPath,
 				});
 				return;
@@ -210,7 +245,11 @@ function validateHtmlStructure(content: string, checks: FrontendCheck[], artifac
 			tagRe.lastIndex = close.index + close[0].length;
 			continue;
 		}
-		stack.push({ tag, line: lineAt(content, match.index) });
+		stack.push({ tag, line: lineAt(scan, match.index) });
+	}
+	// Any elements still open whose end tag is optional are validly closed at EOF.
+	while (stack.length > 0 && OPTIONAL_END_TAGS.has(stack[stack.length - 1]?.tag ?? "")) {
+		stack.pop();
 	}
 	const unclosed = stack.pop();
 	if (unclosed) {
@@ -573,8 +612,7 @@ function parseAttributes(source: string): Record<string, string> {
 
 function normalizeScriptType(value: string | undefined): string {
 	if (value === undefined) return "";
-	const normalized = value.split(";")[0]?.trim().toLowerCase() ?? "";
-	return normalized === "text/javascript" ? "text/javascript" : normalized;
+	return value.split(";")[0]?.trim().toLowerCase() ?? "";
 }
 
 function isStylesheetLink(attrs: Record<string, string>): boolean {

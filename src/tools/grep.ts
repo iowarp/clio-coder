@@ -135,7 +135,7 @@ async function runRipgrep(input: {
 			stderr += chunk.toString();
 		});
 		rl.on("line", (line) => {
-			if (!line.trim() || matches.length >= input.limit) return;
+			if (line.length === 0 || matches.length >= input.limit) return;
 			let event: unknown;
 			try {
 				event = JSON.parse(line) as unknown;

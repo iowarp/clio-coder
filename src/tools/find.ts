@@ -174,7 +174,7 @@ export const findTool: ToolSpec = {
 			return renderFindOutput(fallbackFind(pattern, searchPath, limit), limit);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			return { kind: "error", message: message.startsWith("glob:") ? `find: ${message}` : `find: ${message}` };
+			return { kind: "error", message: `find: ${message}` };
 		}
 	},
 };
