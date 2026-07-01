@@ -33,7 +33,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
-import { type ContextContract, ContextDomainModule } from "../domains/context/index.js";
+import { type ContextContract, createContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
@@ -470,7 +470,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		}),
 		ShareDomainModule,
-		ContextDomainModule,
+		createContextDomainModule({ noContextFiles: options.noContextFiles === true }),
 		ProvidersDomainModule,
 		SafetyDomainModule,
 		createPromptsDomainModule({

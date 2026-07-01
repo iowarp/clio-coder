@@ -122,7 +122,11 @@ function createContextStateReader(): { read(cwd?: string): ContextState; invalid
 	};
 }
 
-function collectStartupHints(cwd: string): string[] {
+export interface ContextBundleOptions {
+	noContextFiles?: boolean;
+}
+
+function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): string[] {
 	const hints: string[] = [];
 	let projectType: ReturnType<typeof detectProjectType>;
 	try {
@@ -131,7 +135,7 @@ function collectStartupHints(cwd: string): string[] {
 		projectType = "unknown";
 	}
 	const clio = tryReadClioMd(cwd);
-	if (!clio && projectType !== "unknown") {
+	if (!clio && projectType !== "unknown" && options.noContextFiles !== true) {
 		hints.push("clio: No CLIO.md detected. Run /context-init to explore the repo and bootstrap context.");
 	}
 	if (clio && !clio.ok) {
@@ -145,7 +149,10 @@ function collectStartupHints(cwd: string): string[] {
 	return hints;
 }
 
-export function createContextBundle(_context: DomainContext): DomainBundle<ContextContract> {
+export function createContextBundle(
+	_context: DomainContext,
+	options: ContextBundleOptions = {},
+): DomainBundle<ContextContract> {
 	let lastCwd = process.cwd();
 	let startupHints: string[] = [];
 	const contextState = createContextStateReader();
@@ -156,7 +163,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 		} catch {
 			// Indexing is best-effort; a failed refresh must not block session start.
 		}
-		startupHints = collectStartupHints(lastCwd);
+		startupHints = collectStartupHints(lastCwd, options);
 		if (process.env.CLIO_INTERACTIVE === "1") return;
 		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
 	};
@@ -218,7 +225,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 				const result = await runBootstrap(input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress });
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
-				if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
+				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
 				return result;
 			} catch (err) {
 				emitProgress({
@@ -239,7 +246,7 @@ export function createContextBundle(_context: DomainContext): DomainBundle<Conte
 				const result = await runContextClear(input);
 				const cwd = input?.cwd ?? process.cwd();
 				contextState.invalidate(cwd);
-				if (cwd === lastCwd) startupHints = collectStartupHints(cwd);
+				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
 				emitProgress({ phase: "done", status: "completed", message: "context cleared" });
 				return result;
 			} catch (err) {
