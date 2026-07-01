@@ -5,6 +5,7 @@
 # https://huggingface.co/LilaRest/gemma-4-31B-it-NVFP4-turbo
 # https://huggingface.co/Jackrong/Gemopus-4-31B-it-GGUF
 # https://huggingface.co/Jackrong/Qwopus3.6-27B-v1-preview-GGUF
+# https://huggingface.co/Jackrong/Qwopus3.6-35B-A3B-Coder-MTP-GGUF
 # https://huggingface.co/nvidia/Nemotron-Cascade-2-30B-A3B
 # https://huggingface.co/unsloth/NVIDIA-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-GGUF
 # https://huggingface.co/mradermacher/Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-i1-GGUF
@@ -420,6 +421,80 @@
         leak into visible text.
     serving: "LilaRest publishes no per-model sampler; values inherit the gemma family default per the official Google Gemma 4 31B card. KV cache budget at f16, ctx=122880 is roughly 57 GB on top of ~21 GB of NVFP4 weights."
 
+# The qat/UD-Q4_K_XL/MTP build is the mini llama.cpp gemma variant and is a
+# different serving profile from the NVFP4 turbo family above: 262K context
+# (not 122880), q8 KV, F16 gemma4v mmproj vision, and MTP speculative decoding.
+# Its longest matchPattern (gemma-4-31b-it-qat-...) is longer than the NVFP4
+# family's `gemma-4-31b-it` (14 chars), so the longest-substring matcher in
+# knowledge-base.ts resolves this id here rather than to the NVFP4 profile.
+- family: gemma-4-31b-it-qat-mtp
+  matchPatterns:
+    - gemma-4-31b-it-qat-ud-q4_k_xl-mtp-262k
+    - gemma-4-31b-it-qat-ud-q4_k_xl-mtp
+    - gemma-4-31b-it-qat-ud
+    - gemma-4-31b-it-qat
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: openai
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 32768
+  quirks:
+    kvCache:
+      kQuant: q8_0
+      vQuant: q8_0
+    sampling:
+      thinking:
+        temperature: 1.0
+        topP: 0.95
+        topK: 64
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+        maxTokens: 32768
+      instruct:
+        temperature: 0.7  # 0.7 keeps tool-call JSON parseable; mini's router serves this qat build at 0.8
+        topP: 0.95
+        topK: 64
+        minP: 0.0
+        repeatPenalty: 1.05
+        maxTokens: 32768
+    chatTemplate: "gemma-channel"
+    gpuTiers:
+      "32gb": "Loaded on mini's Radeon AI PRO R9700 (vulkan) with UD-Q4_K_XL weights, ctx=262144, q8 KV, flash attention, parallel=1, F16 gemma4v mmproj (vision) and MTP draft (spec-type draft-mtp, n_max 4) both active."
+    runtimePreference:
+      llamaCpp: "OpenAI-compatible chat completions with --jinja and --reasoning off. Mini preset serves at ctx=262144, q8 KV, flash attention, parallel=1, batch=1024, ubatch=256, with F16 mmproj vision and draft-mtp speculative decoding; sampler temperature 0.8, top_p 0.95, top_k 64, repeat_penalty 1.05."
+      openaiCompat: "Fallback when a gateway fronts the same llama.cpp chat-completions surface; the openai-compat surface does not expose the channel-marker classifier, so visible text may show raw thought markers."
+    llamaCpp:
+      ctxSize: 262144
+      cacheTypeK: q8_0
+      cacheTypeV: q8_0
+      flashAttn: true
+      nGpuLayers: 99
+      parallel: 1
+      batchSize: 1024
+      ubatchSize: 256
+      mmproj: true
+    thinking:
+      mechanism: on-off
+      guidance: |
+        Gemma 4 31B IT QAT exposes thinking only as on or off via the gemma-4
+        enable_thinking template; intermediate levels coerce to on. Mini's
+        llama.cpp preset serves it with --reasoning off (default_reasoning off),
+        so the chain-of-thought is not requested; if the template emits one it
+        surfaces via reasoning_content and is accounted as reasoning tokens. The
+        QAT weights hold tool-call JSON together better than the NVFP4 turbo
+        build, but the instruct profile still pins a conservative temperature.
+    serving: "Gemma 4 31B IT QAT, UD-Q4_K_XL, served as a mini llama.cpp router model (vulkan) with MTP speculative decoding (spec-type draft-mtp, n_max 4, draft mtp-gemma-4-31B-it) and F16 gemma4v mmproj vision both active at 262k. Reasoning off by default; gemma-4 thinking is on/off. Sampler temperature 0.8, top_p 0.95, top_k 64, repeat_penalty 1.05."
+
 - family: gemopus-4-31b-it
   matchPatterns:
     - gemopus-4-31b-it
@@ -532,6 +607,67 @@
         standard <think> tags. Coding-task sampler is the precise variant.
         Preserve thinking blocks across turns for iterative workflows.
     serving: "Distilled from Claude 4.6 Opus reasoning traces onto Qwen3.6 27B. Coding-task sampler is the precise variant: temperature 0.6, top_p 0.95, top_k 20."
+
+- family: qwopus3.6-35b-a3b-coder
+  matchPatterns:
+    - qwopus3.6-35b-a3b-coder-mtp-q4_k_m-262k
+    - qwopus3.6-35b-a3b-coder-mtp
+    - qwopus3.6-35b-a3b-coder
+    - qwopus3.6-35b-a3b
+  capabilities:
+    chat: true
+    tools: true
+    toolCallFormat: qwen
+    reasoning: true
+    thinkingFormat: qwen-chat-template
+    structuredOutputs: json-schema
+    vision: true
+    audio: false
+    embeddings: false
+    rerank: false
+    fim: false
+    contextWindow: 262144
+    maxTokens: 32768
+  quirks:
+    sampling:
+      instruct:
+        temperature: 0.2
+        topP: 0.9
+        topK: 20
+        repeatPenalty: 1.05
+        maxTokens: 32768
+      thinking:
+        temperature: 0.6
+        topP: 0.95
+        topK: 20
+        maxTokens: 16384
+        reasoningBudget: 4096
+    gpuTiers:
+      "32gb": "Default model on mini's Radeon AI PRO R9700: Q4_K_M, ctx=262144, q8 KV, flash attention, parallel=1, with F32 mmproj (vision) and draft-mtp speculative decoding both active. Measured ~26.5 GiB used / ~6 GiB free at 262k."
+    runtimePreference:
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Mini preset serves text-only with reasoning off and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
+      openaiCompat: "Use when a gateway fronts the same llama.cpp chat-completions surface with qwen tool parsing."
+    llamaCpp:
+      ctxSize: 262144
+      cacheTypeK: q8_0
+      cacheTypeV: q8_0
+      flashAttn: true
+      nGpuLayers: 99
+      parallel: 1
+      batchSize: 2048
+      ubatchSize: 512
+      mmproj: true
+      chatTemplateKwargs:
+        enable_thinking: false
+    thinking:
+      mechanism: on-off
+      guidance: |
+        Qwopus3.6 35B-A3B Coder is a thinking-off-by-default agentic coder in
+        the Qwopus line (Opus-distilled traces over Qwen3.6 35B-A3B). The mini
+        llama.cpp preset disables thinking (reasoning off, enable_thinking false)
+        for fast read -> tool -> edit -> test execution. Flip reasoning on via a
+        runtime override only when an explicit chain-of-thought is wanted.
+    serving: "Jackrong Qwopus3.6 35B-A3B Coder MTP, Q4_K_M. Thinking-off coder/agent tuned for tool-use loops. Served as the mini router default with MTP speculative decoding (spec-type draft-mtp, n_max 2) and F32 mmproj vision both active at 262k."
 
 - family: gemma4-26b-a4b
   matchPatterns:

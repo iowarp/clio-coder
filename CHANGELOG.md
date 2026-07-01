@@ -80,6 +80,20 @@ interfaces.
   ships now and 5b is tracked in `src/domains/evolution/SELF_EDIT_GATE.md`,
   including the concrete middleware gate design and the minimal missing
   `selfEditOrigin` signal needed before enforcement can ship safely.
+- Local model catalog gains two families in `clio-local-coding-targets.yaml`.
+  `gemma-4-31b-it-qat-mtp` describes the `Gemma-4-31B-it-qat-UD-Q4_K_XL-MTP-262K`
+  build served on mini's llama.cpp router: 262144 context (not the NVFP4 turbo
+  family's 122880), q8 KV, flash attention, F16 gemma4v mmproj vision, and
+  draft-mtp speculative decoding, with gemma-4 on/off thinking served reasoning
+  off. Its `gemma-4-31b-it-qat…` match patterns are longer than the NVFP4
+  family's `gemma-4-31b-it`, so the longest-substring resolver routes the qat id
+  to the correct 262K profile while the NVFP4 turbo id keeps its own.
+  `qwopus3.6-35b-a3b-coder` describes the locked mini orchestrator
+  (`Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K`): a thinking-off-by-default agentic
+  coder that would otherwise fall back to the shorter `qwopus3.6` (27B) family
+  and inherit the wrong sampler and thinking profile. A bundled-catalog contract
+  test pins both resolutions and guards the 12B/26B/NVFP4 gemma ids against
+  capture by the new qat family.
 
 ### Changed
 
