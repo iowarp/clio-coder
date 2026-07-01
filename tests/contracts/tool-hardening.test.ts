@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clampTimeoutMs } from "../../src/core/bash-exec.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { grepTool } from "../../src/tools/grep.js";
 import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
 import { validateFrontendTool } from "../../src/tools/validate-frontend.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
@@ -90,6 +91,53 @@ describe("contracts/tool-hardening bash tail-biased non-destructive output", () 
 		if (result.kind !== "ok") return;
 		strictEqual(result.output.trim(), "hello\nworld");
 		strictEqual((result.details as { resultSize?: unknown } | undefined)?.resultSize, undefined);
+	});
+});
+
+describe("contracts/tool-hardening grep pure-Node fallback", () => {
+	let scratch: string;
+	let originalPath: string | undefined;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-grep-"));
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "a.ts"), "export function findMe() {}\nconst other = 1;\n", "utf8");
+		writeFileSync(join(scratch, "src", "b.md"), "# doc\nfindMe is documented here\n", "utf8");
+		// Force rg-resolution failure by pointing PATH at an rg-free directory.
+		originalPath = process.env.PATH;
+		process.env.PATH = join(scratch, "empty-bin");
+		mkdirSync(process.env.PATH, { recursive: true });
+	});
+	afterEach(() => {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		rmSync(scratch, { recursive: true, force: true });
+	});
+
+	it("returns matches in path:line: format when ripgrep is unavailable", async () => {
+		const result = await grepTool.run({ pattern: "findMe", path: scratch }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("src/a.ts:1: export function findMe() {}"), result.output);
+		ok(result.output.includes("src/b.md:2: findMe is documented here"), result.output);
+	});
+
+	it("honors the glob filter in the fallback", async () => {
+		const result = await grepTool.run({ pattern: "findMe", path: scratch, glob: "*.ts" }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("src/a.ts:1:"), result.output);
+		ok(!result.output.includes("b.md"), "glob *.ts must exclude the markdown match");
+	});
+
+	it("honors ignoreCase and literal in the fallback", async () => {
+		const insensitive = await grepTool.run({ pattern: "FINDME", path: scratch, ignoreCase: true }, undefined);
+		strictEqual(insensitive.kind, "ok");
+		if (insensitive.kind === "ok") ok(insensitive.output.includes("src/a.ts:1:"), insensitive.output);
+
+		const literal = await grepTool.run({ pattern: "findMe()", path: scratch, literal: true }, undefined);
+		strictEqual(literal.kind, "ok");
+		if (literal.kind === "ok") ok(literal.output.includes("src/a.ts:1:"), literal.output);
 	});
 });
 
