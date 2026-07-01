@@ -10,6 +10,7 @@ coverage/
 .clio-benchmark/
 .codex
 .codex/
+.antigravitycli
 .tsbuildinfo
 __pycache__/
 
@@ -30,6 +31,6 @@ captures/
 
 # Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
 .superpowers/
-.fallow
-.antigravitycli
+
+
 
