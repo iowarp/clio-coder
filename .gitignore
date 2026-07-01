@@ -29,7 +29,7 @@ TOOL-SUITE.md
 captures/
 
 # Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
-docs/.superpowers/
+.superpowers/
 .fallow
 .antigravitycli
 
