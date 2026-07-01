@@ -165,7 +165,11 @@ export function createHookBudgetTracker(options: HookBudgetTrackerOptions = {}):
 	const budgets: HookBudgetMap = { ...DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS, ...(options.budgets ?? {}) };
 	const warmupCalls = Math.max(0, options.warmupCalls ?? DEFAULT_HOOK_BUDGET_WARMUP_CALLS);
 	const windowSize = Math.max(1, options.windowSize ?? DEFAULT_HOOK_BUDGET_WINDOW);
-	const threshold = Math.max(1, options.threshold ?? DEFAULT_HOOK_BUDGET_THRESHOLD);
+	// Bound the threshold by the window: overCount can never exceed the number of
+	// samples the window holds, so a threshold above windowSize would silently
+	// disable steady-state warnings forever (e.g. CLIO_HOOK_BUDGET_WINDOW=2 with
+	// the default threshold of 3). Clamp so the signal is always reachable.
+	const threshold = Math.min(windowSize, Math.max(1, options.threshold ?? DEFAULT_HOOK_BUDGET_THRESHOLD));
 	const states = new Map<string, KeyState>();
 
 	function statsFor(state: KeyState, budgetMs: number): HookBudgetStats {
