@@ -14,26 +14,28 @@ import {
 	type AssistantMessage,
 	fauxAssistantMessage,
 	fauxToolCall,
-	getModels,
-	getProviders,
 	type KnownProvider,
 	type Model,
 	type ModelThinkingLevel,
 	calculateCost as piCalculateCost,
 	cleanupSessionResources as piCleanupSessionResources,
-	getModel as piGetModel,
 	getSupportedThinkingLevels as piGetSupportedThinkingLevels,
 	isContextOverflow as piIsContextOverflow,
 	parseJsonWithRepair as piParseJsonWithRepair,
 	parseStreamingJson as piParseStreamingJson,
-	stream as piStream,
 	validateToolArguments as piValidateToolArguments,
-	registerBuiltInApiProviders,
-	registerFauxProvider,
 	type Tool,
 	type ToolCall,
 	type Usage,
 } from "@earendil-works/pi-ai";
+import {
+	getModels,
+	getProviders,
+	getModel as piGetModel,
+	stream as piStream,
+	registerBuiltInApiProviders,
+	registerFauxProvider,
+} from "@earendil-works/pi-ai/compat";
 
 export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
 

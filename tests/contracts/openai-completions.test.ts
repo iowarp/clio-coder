@@ -1,9 +1,61 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Context, Model } from "@earendil-works/pi-ai";
-import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
+import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import {
+	applyOpenAICompatReasoningEstimate,
+	openAICompletionsApiProvider,
+} from "../../src/engine/apis/openai-completions.js";
+
+function usage(overrides: Record<string, unknown> = {}): AssistantMessage["usage"] {
+	return {
+		input: 0,
+		output: 10,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 10,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		...overrides,
+	} as AssistantMessage["usage"];
+}
+
+function thinkingMessage(messageUsage: AssistantMessage["usage"]): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "thinking", thinking: "abcdefgh" }],
+		api: "openai-completions",
+		provider: "llamacpp",
+		model: "qwen3.6-27b",
+		usage: messageUsage,
+		stopReason: "stop",
+		timestamp: 0,
+	};
+}
 
 describe("openai-completions thinking preservation", () => {
+	it("keeps fallback reasoning usage estimates for local openai-compatible servers", () => {
+		const message = thinkingMessage(usage());
+
+		applyOpenAICompatReasoningEstimate(message);
+
+		strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, 2);
+	});
+
+	it("does not add fallback reasoning usage when upstream already reported it", () => {
+		const cases: Array<[string, Record<string, unknown>, number | undefined]> = [
+			["reasoning", { reasoning: 5 }, undefined],
+			["reasoningTokens", { reasoningTokens: 6 }, 6],
+			["reasoning_tokens", { reasoning_tokens: 7 }, undefined],
+		];
+
+		for (const [_label, overrides, expectedReasoningTokens] of cases) {
+			const message = thinkingMessage(usage(overrides));
+
+			applyOpenAICompatReasoningEstimate(message);
+
+			strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, expectedReasoningTokens);
+		}
+	});
+
 	it("replays a prior assistant thinking block as reasoning_content (no strip)", async () => {
 		const model = {
 			id: "qwen3.6-27b",

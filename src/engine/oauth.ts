@@ -5,15 +5,14 @@
  * than value-importing pi-ai directly.
  */
 
-import {
-	type OAuthCredentials,
-	type OAuthLoginCallbacks,
-	type OAuthProviderId,
-	type OAuthProviderInterface,
-	type OAuthSelectPrompt,
-	findEnvKeys as piFindEnvKeys,
-	getEnvApiKey as piGetEnvApiKey,
+import type {
+	OAuthCredentials,
+	OAuthLoginCallbacks,
+	OAuthProviderId,
+	OAuthProviderInterface,
+	OAuthSelectPrompt,
 } from "@earendil-works/pi-ai";
+import { findEnvKeys as piFindEnvKeys, getEnvApiKey as piGetEnvApiKey } from "@earendil-works/pi-ai/compat";
 import {
 	getOAuthProvider as piGetOAuthProvider,
 	getOAuthProviders as piGetOAuthProviders,

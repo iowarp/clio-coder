@@ -71,7 +71,7 @@ while keeping every privileged action gated and auditable.
 ## Status
 
 Clio Coder is alpha software distributed from source. The current release is
-**v0.2.6**. The `@iowarp/clio-coder` package is not yet published to npm;
+**v0.2.7**. The `@iowarp/clio-coder` package is not yet published to npm;
 install from a source checkout as described below. Interfaces may still move
 between minor versions, and model-specific behavior varies by target. Release
 history lives in the [CHANGELOG](CHANGELOG.md), and every release is gated by
@@ -385,4 +385,3 @@ Clio Coder is designed to support the rigorous evaluation standards of scientifi
 - **Durable Validation Evidence:** Every subagent run generates structured execution evidence. These artifacts are matched against baseline and candidate evaluations to guarantee mathematical reproducibility and prevent silent code regressions.
 
 Licensed under Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-

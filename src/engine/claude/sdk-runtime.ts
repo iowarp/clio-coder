@@ -12,6 +12,7 @@ import {
 	type ThinkingConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { readClioVersion } from "../../core/package-root.js";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
@@ -416,7 +417,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		includePartialMessages: true,
 		persistSession: false,
 		settingSources: [],
-		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "@iowarp/clio-coder/0.2.4" },
+		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: `@iowarp/clio-coder/${readClioVersion()}` },
 	};
 	const thinking = thinkingForInput(input);
 	if (thinking !== undefined) options.thinking = thinking;

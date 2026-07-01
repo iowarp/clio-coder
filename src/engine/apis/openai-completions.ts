@@ -1,6 +1,5 @@
 import {
 	type Api,
-	type ApiProvider,
 	type AssistantMessage,
 	type AssistantMessageEvent,
 	type Context,
@@ -9,12 +8,11 @@ import {
 	type OpenAICompletionsOptions,
 	type SimpleStreamOptions,
 	type StreamOptions,
-	streamOpenAICompletions,
-	streamSimpleOpenAICompletions,
 	type ThinkingContent,
 	type Tool,
 	type Usage,
 } from "@earendil-works/pi-ai";
+import { type ApiProvider, streamOpenAICompletions, streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/compat";
 import {
 	type AppliedThinking,
 	type ResolvedModelRuntimeCapabilities,
@@ -322,15 +320,37 @@ function estimateReasoningTokens(content: AssistantMessage["content"]): number {
 	return Math.max(1, Math.round(chars / REASONING_CHARS_PER_TOKEN));
 }
 
+type UsageWithReasoningAliases = Usage & { reasoningTokens?: number; reasoning_tokens?: number };
+
+function positiveNumber(value: unknown): boolean {
+	return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function hasReportedReasoningUsage(usage: Usage): boolean {
+	const aliases = usage as UsageWithReasoningAliases;
+	return (
+		positiveNumber(aliases.reasoning) ||
+		positiveNumber(aliases.reasoningTokens) ||
+		positiveNumber(aliases.reasoning_tokens)
+	);
+}
+
 /**
- * pi-ai's openai-compatible parseChunkUsage drops `completion_tokens_details.
- * reasoning_tokens`, and llama.cpp's /v1/chat/completions doesn't surface that
- * field at all. Without a per-fragment token count (the lmstudio-native SDK
- * gives us one; openai-compat does not), we estimate from the cumulative
- * thinking content surfaced as ThinkingContent blocks. The receipt and TUI
- * footer would otherwise report `reasoningTokenCount = 0` even when the model
- * emitted a chain-of-thought, hiding the real cost from the operator.
+ * pi-ai 0.80.x reports `completion_tokens_details.reasoning_tokens` as
+ * `usage.reasoning`. Some local OpenAI-compatible servers still emit thinking
+ * content without provider usage details, so clio keeps a fallback estimate
+ * from ThinkingContent blocks. The fallback must not add a second alias when
+ * upstream already reported reasoning usage, because ACP consumers accept all
+ * three field spellings for cross-agent compatibility.
  */
+export function applyOpenAICompatReasoningEstimate(message: AssistantMessage): void {
+	if (hasReportedReasoningUsage(message.usage)) return;
+	const reasoningTokens = estimateReasoningTokens(message.content);
+	if (reasoningTokens > 0) {
+		(message.usage as UsageWithReasoningAliases).reasoningTokens = reasoningTokens;
+	}
+}
+
 function withReasoningTokenEstimate(
 	source: ReturnType<typeof streamOpenAICompletions>,
 ): ReturnType<typeof streamOpenAICompletions> {
@@ -339,15 +359,9 @@ function withReasoningTokenEstimate(
 		try {
 			for await (const event of source) {
 				if (event.type === "done") {
-					const reasoningTokens = estimateReasoningTokens(event.message.content);
-					if (reasoningTokens > 0) {
-						(event.message.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokens;
-					}
+					applyOpenAICompatReasoningEstimate(event.message);
 				} else if (event.type === "error") {
-					const reasoningTokens = estimateReasoningTokens(event.error.content);
-					if (reasoningTokens > 0) {
-						(event.error.usage as Usage & { reasoningTokens?: number }).reasoningTokens = reasoningTokens;
-					}
+					applyOpenAICompatReasoningEstimate(event.error);
 				}
 				annotated.push(event as AssistantMessageEvent);
 			}
