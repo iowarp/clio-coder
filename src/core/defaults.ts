@@ -286,6 +286,10 @@ workers:
   # agentBindings: map an agent id to a profiles key, e.g. scout: fast-local
   agentBindings: {}
   maxRetries: 2
+  # onPermission: what a worker does when a tool call needs interactive
+  # permission. "deny" turns it into a structured tool denial and the run
+  # continues; "fail" finalizes the run as failed/permission_required.
+  onPermission: deny
   resilienceCooldownMs: 15000
   # fast-local:
   #   target: local-lmstudio

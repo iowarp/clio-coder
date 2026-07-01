@@ -1655,7 +1655,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 									let configDir: string | undefined;
 									try {
 										configDir = clioConfigDir();
-									} catch {}
+									} catch (configErr) {
+										io.stderr(
+											`Skill install: config dir unavailable (${configErr instanceof Error ? configErr.message : String(configErr)}); continuing without it.\n`,
+										);
+									}
 									await installMarketplaceSkill(uninstalled.name, {
 										cwd: process.cwd(),
 										...(configDir ? { configDir } : {}),

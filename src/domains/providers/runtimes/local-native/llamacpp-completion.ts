@@ -57,6 +57,10 @@ async function* streamSse(body: ReadableStream<Uint8Array>): AsyncGenerator<Comp
 	const reader = body.getReader();
 	const decoder = new TextDecoder("utf-8");
 	let buffered = "";
+	// Malformed frames are skipped so one bad chunk cannot kill a stream, but
+	// silent drops used to make mid-stream token loss look like a truncated
+	// model response; count them and leave one diagnostic per stream.
+	let droppedFrames = 0;
 	try {
 		while (true) {
 			const { done, value } = await reader.read();
@@ -71,24 +75,33 @@ async function* streamSse(body: ReadableStream<Uint8Array>): AsyncGenerator<Comp
 				nl = buffered.indexOf("\n");
 				if (line.length === 0) continue;
 				const payload = line.startsWith("data:") ? line.slice(5).trim() : line;
-				if (payload.length === 0) continue;
+				if (payload.length === 0 || payload === "[DONE]") continue;
 				try {
 					const parsed = JSON.parse(payload) as RawCompletionChunk;
 					const chunk = parseChunk(parsed);
 					yield chunk;
 					if (chunk.stop) return;
-				} catch {}
+				} catch {
+					droppedFrames += 1;
+				}
 			}
 		}
 		const tail = buffered.trim();
 		if (tail.length > 0) {
 			const payload = tail.startsWith("data:") ? tail.slice(5).trim() : tail;
-			try {
-				const parsed = JSON.parse(payload) as RawCompletionChunk;
-				yield parseChunk(parsed);
-			} catch {}
+			if (payload !== "[DONE]") {
+				try {
+					const parsed = JSON.parse(payload) as RawCompletionChunk;
+					yield parseChunk(parsed);
+				} catch {
+					droppedFrames += 1;
+				}
+			}
 		}
 	} finally {
+		if (droppedFrames > 0) {
+			process.stderr.write(`[clio:llamacpp] dropped ${droppedFrames} malformed stream frame(s)\n`);
+		}
 		reader.releaseLock();
 	}
 }
