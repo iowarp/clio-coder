@@ -26,7 +26,7 @@
 				"target": "mini",
 				"runtime": "llamacpp",
 				"url": "http://192.168.86.141:8080",
-				"model": "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K",
+				"model": "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K",
 				"thinking": "off"
 			},
 			"workers": {

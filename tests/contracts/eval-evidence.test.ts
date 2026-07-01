@@ -119,7 +119,7 @@ describe("contracts/eval evidence linking", () => {
 			);
 			writeFileSync(
 				join(stateDir, "sessions", "hash", "session-nested", "current.jsonl"),
-				[
+				`${[
 					JSON.stringify({ type: "session", version: 3, id: "session-nested", timestamp: run.startedAt, cwd }),
 					JSON.stringify({
 						kind: "message",
@@ -129,7 +129,7 @@ describe("contracts/eval evidence linking", () => {
 						timestamp: run.endedAt,
 						payload: { text: "validated" },
 					}),
-				].join("\n") + "\n",
+				].join("\n")}\n`,
 			);
 			writeFileSync(
 				join(stateDir, "audit", "2026-07-01.jsonl"),
