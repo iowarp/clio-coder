@@ -1,4 +1,4 @@
-import { registerApiProvider } from "@earendil-works/pi-ai";
+import { registerApiProvider } from "@earendil-works/pi-ai/compat";
 
 import { lmstudioNativeApiProvider } from "./lmstudio-native.js";
 import { ollamaNativeApiProvider } from "./ollama-native.js";

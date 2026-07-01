@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
 	Api,
-	ApiProvider,
 	AssistantMessage,
 	AssistantMessageEventStream,
 	Context,
@@ -17,6 +16,7 @@ import type {
 	Usage,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { ApiProvider } from "@earendil-works/pi-ai/compat";
 import {
 	type ChatHistoryData,
 	type ChatMessageData,

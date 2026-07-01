@@ -97,6 +97,12 @@ interfaces.
 
 ### Changed
 
+- Upgraded the pinned pi SDK packages (`@earendil-works/pi-agent-core`,
+  `@earendil-works/pi-ai`, and `@earendil-works/pi-tui`) from `0.79.10` to
+  `0.80.3`. Clio keeps the 0.80.x `pi-ai/compat` bridge for the legacy global
+  provider registry while preserving the engine boundary, and the
+  OpenAI-compatible adapter now avoids adding a fallback reasoning-token alias
+  when upstream already reports `usage.reasoning`.
 - Receipt integrity bumped from v2 to v3. The v3 digest additionally folds the
   new `findingsSummary` so tampering with it is detected. Per the no-migrations
   mandate there is no receipt migration: the v1 and v2 verification branches are
