@@ -1,4 +1,10 @@
 import type { DomainBundle } from "../../core/domain-loader.js";
+import {
+	createHookBudgetTracker,
+	type HookBudgetTracker,
+	resolveHookBudgetsFromEnv,
+	resolveHookBudgetTunablesFromEnv,
+} from "./budget.js";
 import type { MiddlewareContract } from "./contract.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions } from "./rules.js";
 import {
@@ -9,6 +15,16 @@ import {
 	runMiddlewareRegistrations,
 } from "./runtime.js";
 import { createMiddlewareSnapshot } from "./snapshot.js";
+
+/**
+ * One session-scoped budget tracker per contract, seeded from the environment so
+ * an operator can loosen budgets (`CLIO_HOOK_BUDGET_*`) without a rebuild. The
+ * persistent instance is what makes warmup grace and the steady-state rolling
+ * window meaningful: state accumulates across every hook occurrence in the run.
+ */
+export function createEnvHookBudgetTracker(env: NodeJS.ProcessEnv = process.env): HookBudgetTracker {
+	return createHookBudgetTracker({ budgets: resolveHookBudgetsFromEnv(env), ...resolveHookBudgetTunablesFromEnv(env) });
+}
 
 export interface MiddlewareBundleOptions {
 	/**
@@ -28,6 +44,11 @@ export interface MiddlewareBundleOptions {
 	 * to the stderr writer in runtime.ts.
 	 */
 	onDiagnostic?: MiddlewareDiagnosticSink;
+	/**
+	 * Budget tracker override. Defaults to an env-seeded session-scoped tracker;
+	 * tests inject a deterministic one to drive warmup/rolling-window behaviour.
+	 */
+	budgetTracker?: HookBudgetTracker;
 }
 
 export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): DomainBundle<MiddlewareContract> {
@@ -35,13 +56,13 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 	const registrations = combineRegistrations(ruleDefinitions, options.registrations ?? []);
 	const registeredIds = new Set(registrations.map((registration) => registration.id));
 	let diagnosticSink = options.onDiagnostic;
+	const budgetTracker = options.budgetTracker ?? createEnvHookBudgetTracker();
 	const contract: MiddlewareContract = {
 		runHook(input) {
-			return runMiddlewareRegistrations(
-				input,
-				registrations,
-				diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {},
-			);
+			return runMiddlewareRegistrations(input, registrations, {
+				budgetTracker,
+				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+			});
 		},
 		listRules() {
 			return ruleDefinitions.map((definition) => cloneMiddlewareRule(definition.rule));

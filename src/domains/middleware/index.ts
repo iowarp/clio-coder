@@ -8,9 +8,23 @@ export const MiddlewareDomainModule: DomainModule<MiddlewareContract> = {
 	createExtension: () => createMiddlewareBundle(),
 };
 
+export {
+	createHookBudgetTracker,
+	DEFAULT_HOOK_BUDGET_THRESHOLD,
+	DEFAULT_HOOK_BUDGET_WARMUP_CALLS,
+	DEFAULT_HOOK_BUDGET_WINDOW,
+	DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS,
+	type HookBudgetMap,
+	type HookBudgetOutcome,
+	type HookBudgetStats,
+	type HookBudgetTracker,
+	type HookBudgetTrackerOptions,
+	resolveHookBudgetsFromEnv,
+	resolveHookBudgetTunablesFromEnv,
+} from "./budget.js";
 export type { MiddlewareContract } from "./contract.js";
 export type { MiddlewareBundleOptions } from "./extension.js";
-export { createMiddlewareBundle } from "./extension.js";
+export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.js";
 export { createHookReceiptLog, HOOK_RECEIPT_LOG_CAPACITY, type HookReceiptLog } from "./hook-receipts.js";
 export type {
 	HookReceipt,

@@ -1,3 +1,4 @@
+import { createHookBudgetTracker, type HookBudgetStats, type HookBudgetTracker } from "./budget.js";
 import { listMiddlewareRuleDefinitions } from "./rules.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
@@ -7,6 +8,9 @@ import {
 	type MiddlewareHookResult,
 	type MiddlewareRule,
 } from "./types.js";
+
+/** Re-exported for back-compat; the phase-aware map in budget.ts supersedes it. */
+export { MIDDLEWARE_HOOK_BUDGET_MS } from "./budget.js";
 
 /**
  * Runtime pairing of a declarative middleware rule with the data it needs to
@@ -64,12 +68,24 @@ export interface MiddlewareHookEvaluationContext {
 	priorEffects: ReadonlyArray<MiddlewareEffect>;
 }
 
-/** Soft per-evaluation wall-time budget. Overruns are reported, never preempted. */
-export const MIDDLEWARE_HOOK_BUDGET_MS = 10;
-
 export type MiddlewareDiagnostic =
 	| { kind: "hook_failed"; registrationId: string; hook: MiddlewareHook; message: string }
-	| { kind: "budget_exceeded"; registrationId: string; hook: MiddlewareHook; elapsedMs: number; budgetMs: number };
+	| {
+			kind: "budget_exceeded";
+			registrationId: string;
+			hook: MiddlewareHook;
+			elapsedMs: number;
+			budgetMs: number;
+			/**
+			 * Steady-state signal: this post-warmup overrun is part of consistent
+			 * slowness (≥N of the last M post-warmup calls over budget), not a lone
+			 * spike. Only steady-state overruns surface as an operator notice; every
+			 * post-warmup overrun still rides the bus for telemetry.
+			 */
+			steadyStateWarn: boolean;
+			/** Rolling-window stats (p50/p95/over-count) for diagnosis. */
+			stats: HookBudgetStats;
+	  };
 
 export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => void;
 
@@ -85,9 +101,17 @@ export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnost
 		);
 		return;
 	}
+	// A single post-warmup spike is telemetry, not operator-facing noise: only
+	// consistent slowness prints, unless CLIO_HOOK_BUDGET_DEBUG=1 asks for all.
+	if (!diagnostic.steadyStateWarn && process.env.CLIO_HOOK_BUDGET_DEBUG !== "1") return;
+	const stats = diagnostic.stats;
+	const trend =
+		stats.window > 0
+			? ` (slow on ${stats.overCount}/${stats.window} recent ${diagnostic.hook} calls, p95 ${stats.p95Ms.toFixed(1)}ms)`
+			: "";
 	process.stderr.write(
 		`[clio:middleware] registration '${diagnostic.registrationId}' exceeded budget on '${diagnostic.hook}': ` +
-			`${diagnostic.elapsedMs.toFixed(1)}ms > ${diagnostic.budgetMs}ms\n`,
+			`${diagnostic.elapsedMs.toFixed(1)}ms > ${diagnostic.budgetMs}ms${trend}\n`,
 	);
 }
 
@@ -113,6 +137,13 @@ export interface RunMiddlewareRegistrationsOptions {
 	onDiagnostic?: MiddlewareDiagnosticSink;
 	/** Millisecond clock, injectable for budget tests. */
 	now?: () => number;
+	/**
+	 * Session-scoped budget tracker carrying phase budgets, warmup grace, and the
+	 * rolling window. The bundle threads one persistent tracker across the run;
+	 * when absent a fresh per-call tracker is used, so a lone direct call is
+	 * always in warmup and never warns.
+	 */
+	budgetTracker?: HookBudgetTracker;
 }
 
 /**
@@ -128,6 +159,7 @@ export function runMiddlewareRegistrations(
 ): MiddlewareHookResult {
 	const onDiagnostic = options.onDiagnostic ?? writeMiddlewareDiagnosticToStderr;
 	const now = options.now ?? (() => performance.now());
+	const budgetTracker = options.budgetTracker ?? createHookBudgetTracker();
 	const effects: MiddlewareEffect[] = [];
 	const ruleIds: string[] = [];
 	for (const registration of registrations) {
@@ -152,13 +184,20 @@ export function runMiddlewareRegistrations(
 			continue;
 		}
 		const elapsedMs = now() - startedAt;
-		if (elapsedMs > MIDDLEWARE_HOOK_BUDGET_MS) {
+		// Record every evaluation so the rolling window has an accurate
+		// denominator, but never surface warmup overruns (one-time JIT/module
+		// warmup is not misbehavior). Post-warmup overruns ride the bus for
+		// telemetry; only steady-state slowness carries steadyStateWarn.
+		const outcome = budgetTracker.record(registration.id, input.hook, elapsedMs);
+		if (outcome.exceeded && !outcome.warmup) {
 			emitDiagnostic(onDiagnostic, {
 				kind: "budget_exceeded",
 				registrationId: registration.id,
 				hook: input.hook,
 				elapsedMs,
-				budgetMs: MIDDLEWARE_HOOK_BUDGET_MS,
+				budgetMs: outcome.budgetMs,
+				steadyStateWarn: outcome.warn,
+				stats: outcome.stats,
 			});
 		}
 		if (emitted.length === 0) continue;
