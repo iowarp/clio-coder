@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 
-export const BASH_MAX_OUTPUT_BYTES = 1_000_000;
+// Hard memory-safety ceiling for a single command's captured output. This is
+// deliberately far above any display cap (see BASH_DISPLAY_MAX_BYTES in
+// bash.ts, ~16 KB): output is retained and spilled to an offload file up to
+// this bound, and only a runaway command that blows past it gets the child
+// killed. Never truncate merely because the *display* cap was hit — the tail
+// (failing assertion, compiler error, exit summary) must survive.
+export const BASH_HARD_CAP_BYTES = 16 * 1024 * 1024;
 
 // setTimeout silently clamps delays above 2^31-1 (or non-finite) down to 1ms,
 // which would turn a large caller-supplied timeout into a near-instant kill.
@@ -112,13 +118,22 @@ export function runBashCommand(command: string, options: RunBashCommandOptions =
 		}
 
 		const appendChunk = (target: "stdout" | "stderr", chunk: Buffer): void => {
+			if (outputCapped) return;
 			outputBytes += chunk.byteLength;
-			if (outputBytes > BASH_MAX_OUTPUT_BYTES * 2) {
+			if (outputBytes > BASH_HARD_CAP_BYTES) {
+				// Keep the bytes seen so far (including this chunk's prefix would
+				// overshoot memory, so append the remaining budget) and stop the
+				// child. Truncation for display is tail-biased downstream.
+				const remaining = BASH_HARD_CAP_BYTES - (outputBytes - chunk.byteLength);
+				if (remaining > 0) {
+					const slice = chunk.subarray(0, remaining).toString("utf8");
+					if (target === "stdout") stdout += slice;
+					else stderr += slice;
+				}
 				outputCapped = true;
 				killChild();
 				return;
 			}
-			if (outputCapped) return;
 			if (target === "stdout") stdout += chunk.toString("utf8");
 			else stderr += chunk.toString("utf8");
 		};
