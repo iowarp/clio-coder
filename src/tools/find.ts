@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
-import path, { join, relative } from "node:path";
+import path, { dirname, join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
@@ -29,6 +29,38 @@ const IGNORED_DIRS = new Set([
 
 function toPosixPath(value: string): string {
 	return value.split(path.sep).join("/");
+}
+
+// Walk up from the search path looking for a `.git` marker (a directory in a
+// normal repo, a file in worktrees/submodules).
+export function isInsideGitRepo(startPath: string): boolean {
+	let current = startPath;
+	for (;;) {
+		if (existsSync(join(current, ".git"))) return true;
+		const parent = dirname(current);
+		if (parent === current) return false;
+		current = parent;
+	}
+}
+
+// Build fd's argv. fd normally ignores .gitignore outside a git repo, so keep
+// `--no-require-git` there to still honor ignore files. Inside a repo, use fd's
+// default git-aware behavior so parent .gitignore rules stop at nested-repo
+// boundaries (pi issue 5960); forcing `--no-require-git` there leaks the outer
+// repo's ignores into a nested checkout. Exported for tests.
+export function buildFdArgs(pattern: string, searchPath: string, limit: number): string[] {
+	const args = ["--glob", "--color=never", "--hidden"];
+	if (!isInsideGitRepo(searchPath)) args.push("--no-require-git");
+	args.push("--max-results", String(limit + 1));
+	let effectivePattern = pattern;
+	if (pattern.includes("/")) {
+		args.push("--full-path");
+		if (!pattern.startsWith("/") && !pattern.startsWith("**/") && pattern !== "**") {
+			effectivePattern = `**/${pattern}`;
+		}
+	}
+	args.push("--", effectivePattern, searchPath);
+	return args;
 }
 
 function renderFindOutput(paths: string[], limit: number): ToolResult {
@@ -90,15 +122,7 @@ async function fdFind(
 	signal?: AbortSignal,
 ): Promise<{ ok: true; paths: string[] } | { ok: false; message: string }> {
 	return new Promise((resolve) => {
-		const args = ["--glob", "--color=never", "--hidden", "--no-require-git", "--max-results", String(limit + 1)];
-		let effectivePattern = pattern;
-		if (pattern.includes("/")) {
-			args.push("--full-path");
-			if (!pattern.startsWith("/") && !pattern.startsWith("**/") && pattern !== "**") {
-				effectivePattern = `**/${pattern}`;
-			}
-		}
-		args.push("--", effectivePattern, searchPath);
+		const args = buildFdArgs(pattern, searchPath, limit);
 
 		const child = spawn(fdPath, args, { stdio: ["ignore", "pipe", "pipe"] });
 		const rl = createInterface({ input: child.stdout });
