@@ -49,6 +49,8 @@ import {
 } from "../providers/index.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { SafetyContract } from "../safety/contract.js";
+import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
+import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
@@ -133,6 +135,11 @@ interface ActiveRun {
 	meter: RunTokenMeter;
 	pricing: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null;
 	finalPromise: Promise<RunReceipt>;
+}
+
+interface DispatchFinishContractSnapshot {
+	assessment: FinishContractAssessment;
+	rigor: Rigor;
 }
 
 export interface DispatchBundleOptions {
@@ -226,6 +233,80 @@ function extractReasoningTokenCount(usage: unknown): number {
 
 function readStringOrNull(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function messageText(value: unknown): string {
+	const record = isRecord(value) ? value : null;
+	if (record === null) return "";
+	const content = record.content;
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.map((part) => {
+				if (typeof part === "string") return part;
+				if (!isRecord(part)) return "";
+				const text = part.text;
+				return typeof text === "string" ? text : "";
+			})
+			.join("");
+	}
+	const text = record.text;
+	return typeof text === "string" ? text : "";
+}
+
+function appendDispatchFinishContractEntry(
+	entries: unknown[],
+	event: Record<string, unknown>,
+): { assistantText: string; assistantTurnId: string } | null {
+	const eventType = event.type;
+	if (eventType === "tool_execution_start") {
+		const toolCallId = readStringOrNull(event.toolCallId) ?? `worker-tool-${entries.length + 1}`;
+		const toolName = readStringOrNull(event.toolName) ?? readStringOrNull(event.tool) ?? "tool";
+		entries.push({
+			kind: "message",
+			role: "tool_call",
+			turnId: toolCallId,
+			payload: {
+				name: toolName,
+				toolCallId,
+				args: event.args ?? {},
+			},
+		});
+		return null;
+	}
+	if (eventType === "tool_execution_end") {
+		const toolCallId = readStringOrNull(event.toolCallId) ?? `worker-tool-${entries.length + 1}`;
+		const toolName = readStringOrNull(event.toolName) ?? readStringOrNull(event.tool) ?? "tool";
+		entries.push({
+			kind: "message",
+			role: "tool_result",
+			turnId: toolCallId,
+			payload: {
+				toolName,
+				toolCallId,
+				isError: event.isError === true,
+				result: event.result ?? null,
+			},
+		});
+		return null;
+	}
+	if (eventType !== "message_end") return null;
+	const message = isRecord(event.message) ? event.message : null;
+	if (message === null) return null;
+	const role = readStringOrNull(message.role);
+	if (role !== "user" && role !== "assistant") return null;
+	const text = messageText(message);
+	const turnId = `${role}-${entries.length + 1}`;
+	const payload: Record<string, unknown> = { text };
+	const stopReason = message.stopReason;
+	if (typeof stopReason === "string") payload.stopReason = stopReason;
+	entries.push({
+		kind: "message",
+		role,
+		turnId,
+		payload,
+	});
+	return role === "assistant" && text.trim().length > 0 ? { assistantText: text, assistantTurnId: turnId } : null;
 }
 
 const MAX_WORKER_DIAGNOSTIC_DETAIL_CHARS = 2048;
@@ -1890,6 +1971,9 @@ export function createDispatchBundle(
 		const toolStats = new Map<string, ToolCallStat>();
 		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
+		const finishContractEntries: unknown[] = [];
+		let finishContractAssistantText = "";
+		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
 		let runIdForPermissionAudit: string | null = null;
 		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
@@ -1922,6 +2006,13 @@ export function createDispatchBundle(
 						skillActivation?: unknown;
 					};
 				};
+				if (isRecord(event)) {
+					const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
+					if (finishEntry !== null) {
+						finishContractAssistantText = finishEntry.assistantText;
+						finishContractAssistantTurnId = finishEntry.assistantTurnId;
+					}
+				}
 				if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
 					const u = event.message.usage;
 					tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
@@ -2063,7 +2154,8 @@ export function createDispatchBundle(
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
 		): RunReceiptDraft => {
-			const receiptExitCode = status === "dead" ? 1 : (result.exitCode ?? 1);
+			const receiptExitCode =
+				status === "dead" || (status === "failed" && result.exitCode === 0) ? 1 : (result.exitCode ?? 1);
 			const toolActivity = summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass);
 			// A run that exits 0 with zero successful tool calls keeps its
 			// succeeded outcome (the harness cannot judge semantic completion),
@@ -2174,6 +2266,30 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: outcome });
 		};
 
+		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
+			if (finishContractAssistantText.trim().length === 0) return null;
+			const assessment = assessFinishContract({
+				assistantText: finishContractAssistantText,
+				sessionEntries: finishContractEntries,
+				assistantTurnId: finishContractAssistantTurnId,
+			});
+			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_RIGOR) });
+			try {
+				safety.audit.recordCompletionContract?.({
+					runId: envelope.id,
+					turnId: finishContractAssistantTurnId,
+					decision: assessment.kind,
+					reason: assessment.reason,
+					rigor,
+					mutatedPaths: assessment.mutatedPaths,
+					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
+				});
+			} catch {
+				// Audit must not destabilize dispatch finalization.
+			}
+			return { assessment, rigor };
+		};
+
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
@@ -2188,12 +2304,20 @@ export function createDispatchBundle(
 					stopReason: null,
 				};
 				const { outcome, detail } = resolveRunOutcome(evidence);
-				const status = runStatusForOutcome(outcome);
-				const receiptDraft = buildReceiptDraft(result, endedAt, status, outcome, detail);
+				let finalOutcome = outcome;
+				let finalDetail = detail;
+				const finishContract = assessDispatchFinishContract();
+				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
+					finalOutcome = "failed";
+					finalDetail = "high-rigor finish gate: unvalidated mutation";
+					failureMessage = finalDetail;
+				}
+				const status = runStatusForOutcome(finalOutcome);
+				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
-					outcome,
-					outcomeDetail: receiptDraft.outcomeDetail ?? detail,
+					outcome: finalOutcome,
+					outcomeDetail: receiptDraft.outcomeDetail ?? finalDetail,
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					tokenCount: receiptDraft.tokenCount,
@@ -2226,8 +2350,8 @@ export function createDispatchBundle(
 					receipt.exitCode,
 				);
 				accumulateFinalizedTotals(receipt);
-				emitTerminalDispatchEvent(receipt, outcome);
-				maybeScheduleRetry(activeRun, outcome, detail);
+				emitTerminalDispatchEvent(receipt, finalOutcome);
+				maybeScheduleRetry(activeRun, finalOutcome, finalDetail);
 				return receipt;
 			} finally {
 				releaseWorkerSlot();

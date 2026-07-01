@@ -212,4 +212,38 @@ describe("contracts/evidence-build", () => {
 			strictEqual(toolEvents[0]?.ok, 0);
 		});
 	});
+
+	it("treats linked completion_contract validation_evidence as run validation proof", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const { runId } = await sealRun();
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
+			const auditDir = join(stateDir, "audit");
+			mkdirSync(auditDir, { recursive: true });
+			const ts = new Date().toISOString();
+			writeFileSync(
+				join(auditDir, `${ts.slice(0, 10)}.jsonl`),
+				`${JSON.stringify({
+					kind: "completion_contract",
+					ts,
+					correlationId: "completion-validation",
+					runId,
+					turnId: "turn-validated",
+					decision: "ok",
+					reason: "validation_evidence",
+					rigor: "high",
+					mutatedPaths: ["src/app.ts"],
+					evidenceKinds: ["validation_command"],
+				})}\n`,
+			);
+
+			const result = await buildEvidence({ dataDir, stateDir, runId });
+
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "no-validation"),
+				false,
+			);
+			strictEqual(result.overview.totals.auditRows, 1);
+		});
+	});
 });
