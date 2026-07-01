@@ -8,7 +8,7 @@ const entries = {
 export default defineConfig({
 	entry: entries,
 	format: ["esm"],
-	target: "node20",
+	target: "node22",
 	platform: "node",
 	// Code splitting is what makes cli/index.ts's dynamic `await import("./x.js")`
 	// per-subcommand loading pay off: each command module (and its transitive
