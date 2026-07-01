@@ -10,7 +10,13 @@ export default defineConfig({
 	format: ["esm"],
 	target: "node20",
 	platform: "node",
-	splitting: false,
+	// Code splitting is what makes cli/index.ts's dynamic `await import("./x.js")`
+	// per-subcommand loading pay off: each command module (and its transitive
+	// heavy externals) lands in its own chunk, loaded only when that subcommand
+	// runs. Without splitting, esbuild inlines everything into one chunk and the
+	// external imports still execute eagerly, so `clio --version` would pay the
+	// full module-load tax.
+	splitting: true,
 	sourcemap: true,
 	clean: true,
 	dts: false,
