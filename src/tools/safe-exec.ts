@@ -56,20 +56,19 @@ async function runVectorTool(
 	args: Record<string, unknown>,
 	options?: { signal?: AbortSignal },
 ): Promise<ToolResult> {
+	const timeoutMs = timeoutArg(args);
+	const maxOutputBytes = maxOutputArg(args);
 	try {
-		const runOptions: Parameters<typeof runCommandVector>[2] = {
-			timeoutMs: timeoutArg(args),
-			maxOutputBytes: maxOutputArg(args),
-		};
+		const runOptions: Parameters<typeof runCommandVector>[2] = { timeoutMs, maxOutputBytes };
 		const cwd = cwdArg(args);
 		if (cwd !== undefined) runOptions.cwd = cwd;
 		if (options?.signal !== undefined) runOptions.signal = options.signal;
 		const result = await runCommandVector(file, vectorArgs, runOptions);
-		const output = truncateUtf8(combineSafeOutput(result), maxOutputArg(args), TRUNCATION_MARKER);
+		const output = truncateUtf8(combineSafeOutput(result), maxOutputBytes, TRUNCATION_MARKER);
 		const details = resultDetails(result, action);
 		if (result.aborted) return { kind: "error", message: `${action}: aborted`, details };
 		if (result.timedOut) {
-			const status = `${action}: timed out after ${timeoutArg(args)}ms`;
+			const status = `${action}: timed out after ${timeoutMs}ms`;
 			return { kind: "error", message: output.trim().length > 0 ? `${status}\n\n${output.trim()}` : status, details };
 		}
 		if (result.outputCapped)
@@ -77,8 +76,8 @@ async function runVectorTool(
 				kind: "error",
 				message:
 					output.trim().length > 0
-						? `${action}: output exceeded ${maxOutputArg(args)} bytes\n\n${output.trim()}`
-						: `${action}: output exceeded ${maxOutputArg(args)} bytes`,
+						? `${action}: output exceeded ${maxOutputBytes} bytes\n\n${output.trim()}`
+						: `${action}: output exceeded ${maxOutputBytes} bytes`,
 				details,
 			};
 		if (result.exitCode !== 0) {

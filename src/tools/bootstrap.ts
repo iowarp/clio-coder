@@ -19,6 +19,7 @@ import { readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import { gitTool, runTaskTool } from "./safe-exec.js";
 import { createReadSkillTool, createSkillTool } from "./skills.js";
+import { DEFAULT_MAX_BYTES } from "./truncate.js";
 import { validateFrontendTool } from "./validate-frontend.js";
 import { webFetchTool } from "./web-fetch.js";
 import { workspaceContextTool } from "./workspace-context.js";
@@ -48,19 +49,21 @@ function withMetadata<T extends ToolSpec>(spec: T, metadata: ToolMetadata): T {
 }
 
 // Per-observation caps at persistence time. Bounded read/search tools cap a
-// hair above the 6KB source cap in src/tools/truncate.ts so their own
-// continuation notices survive shaping. The 16KB summary policies are the
-// explicit overrides for tools whose output is inherently aggregate (shell,
-// validation runs, dispatch receipts, web pages); nothing exceeds them.
+// hair above the source cap in src/tools/truncate.ts so their own continuation
+// notices (with precise offsets) survive shaping instead of being cut again and
+// replaced by a generic hint. The 16KB summary policies are the explicit
+// overrides for tools whose output is inherently aggregate (shell, validation
+// runs, dispatch receipts, web pages); nothing exceeds them.
+const BOUNDED_RESULT_MAX_BYTES = DEFAULT_MAX_BYTES + 2 * 1024;
 const boundedReadPolicy = {
 	kind: "bounded",
-	maxBytes: 8_192,
+	maxBytes: BOUNDED_RESULT_MAX_BYTES,
 	followUpHint: "Use offset/limit or a narrower locate/search tool call to inspect omitted content.",
 } satisfies ToolMetadata["resultSizePolicy"];
 
 const boundedSearchPolicy = {
 	kind: "bounded",
-	maxBytes: 8_192,
+	maxBytes: BOUNDED_RESULT_MAX_BYTES,
 	followUpHint: "Refine the pattern, path, glob, context, or limit to inspect omitted matches.",
 } satisfies ToolMetadata["resultSizePolicy"];
 

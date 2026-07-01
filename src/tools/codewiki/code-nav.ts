@@ -26,7 +26,9 @@ function regexFromPattern(pattern: string): RegExp | null {
 	if (pattern.startsWith("/") && pattern.lastIndexOf("/") > 0) {
 		const last = pattern.lastIndexOf("/");
 		const body = pattern.slice(1, last);
-		const flags = pattern.slice(last + 1);
+		// Strip g/y: the regex is reused across .test() in a .filter, and a sticky/global
+		// flag advances lastIndex between calls, silently skipping matching paths.
+		const flags = pattern.slice(last + 1).replace(/[gy]/g, "");
 		try {
 			return new RegExp(body, flags);
 		} catch {
@@ -201,7 +203,7 @@ function runEntries(index: NavIndex, limitArg: unknown): ToolResult {
 		typeof limitArg === "number" && Number.isFinite(limitArg) && limitArg > 0
 			? Math.min(Math.floor(limitArg), MAX_ENTRY_LIMIT)
 			: DEFAULT_ENTRY_LIMIT;
-	const ranked = [...candidates].sort((a, b) => {
+	const ranked = candidates.sort((a, b) => {
 		const aPkg = packageEntries.has(a.path) ? 0 : 1;
 		const bPkg = packageEntries.has(b.path) ? 0 : 1;
 		return aPkg === bPkg ? a.path.localeCompare(b.path) : aPkg - bPkg;
@@ -215,7 +217,7 @@ function runEntries(index: NavIndex, limitArg: unknown): ToolResult {
 function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: string } {
 	const exact = index.filesByPath.get(query);
 	if (exact) return exact;
-	const matches = index.paths.filter((path) => path.endsWith(query) || path.includes(query));
+	const matches = index.paths.filter((path) => path.includes(query));
 	if (matches.length === 1) {
 		const file = index.filesByPath.get(matches[0] ?? "");
 		if (file) return file;

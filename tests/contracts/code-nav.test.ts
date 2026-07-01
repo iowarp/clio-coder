@@ -51,6 +51,14 @@ describe("contracts/code_nav", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
+	it("path mode with an explicit /g regex matches every path (no sticky lastIndex skips)", async () => {
+		const result = await codeNavTool.run({ mode: "path", query: "/\\.ts$/g" });
+		strictEqual(result.kind, "ok");
+		const paths = pathsFromFiles(parseJsonOutput(result.output).files);
+		ok(paths.includes("src/index.ts"), "src/index.ts matched");
+		ok(paths.includes("src/worker.ts"), "src/worker.ts matched (a reused /g regex would skip one)");
+	});
+
 	it("supports symbol, path, entries, outline, deps, and dependents modes", async () => {
 		const symbol = await codeNavTool.run({ mode: "symbol", query: "worker" });
 		strictEqual(symbol.kind, "ok");

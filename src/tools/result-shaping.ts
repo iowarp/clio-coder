@@ -2,12 +2,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
+import { DEFAULT_MAX_BYTES } from "./truncate.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
-// Backstop for tools without an explicit resultSizePolicy. Sits slightly
-// above the 6KB per-observation source cap (src/tools/truncate.ts) so a
-// tool's own truncation notice survives shaping instead of being cut again.
-export const DEFAULT_TOOL_RESULT_MAX_BYTES = 8 * 1024;
+// Backstop for tools without an explicit resultSizePolicy. Sits above the
+// per-observation source cap (src/tools/truncate.ts) so a tool's own truncation
+// notice (with its precise continuation offset) survives shaping instead of
+// being cut again and replaced by a generic hint.
+export const DEFAULT_TOOL_RESULT_MAX_BYTES = DEFAULT_MAX_BYTES + 2 * 1024;
 const RESULT_TRUNCATION_MARKER = "\n[tool result truncated]";
 const RESULT_OFFLOAD_MAX_BYTES = 10 * 1024 * 1024;
 

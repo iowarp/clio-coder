@@ -2,6 +2,16 @@ import { spawn } from "node:child_process";
 
 export const BASH_MAX_OUTPUT_BYTES = 1_000_000;
 
+// setTimeout silently clamps delays above 2^31-1 (or non-finite) down to 1ms,
+// which would turn a large caller-supplied timeout into a near-instant kill.
+// Clamp to a valid timer range: <=0/NaN disables the timeout, huge/Infinity caps
+// at the longest schedulable delay.
+const TIMEOUT_MAX_MS = 2_147_483_647;
+export function clampTimeoutMs(ms: number): number {
+	if (Number.isNaN(ms) || ms <= 0) return 0;
+	return ms >= TIMEOUT_MAX_MS ? TIMEOUT_MAX_MS : Math.floor(ms);
+}
+
 const CLIO_CONTROL_ENV_KEYS = ["CLIO_INTERACTIVE", "CLIO_RESUME_SESSION_ID"] as const;
 
 export interface BashCommandResult {
@@ -36,7 +46,7 @@ export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "st
 
 export function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
 	return new Promise((resolve) => {
-		const timeout = options.timeoutMs ?? 300_000;
+		const timeout = clampTimeoutMs(options.timeoutMs ?? 300_000);
 		let aborted = false;
 		let timedOut = false;
 		let settled = false;
