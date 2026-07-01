@@ -125,9 +125,15 @@ describe("contracts/docs_search", () => {
 		ok(top.score > 0, "score must be positive");
 		ok(top.coverage > 0, "coverage must be reported");
 		ok(top.lines.start > 0 && top.lines.end >= top.lines.start, "section line range must be present");
-		ok(top.snippetLines.start > 0 && top.snippetLines.end >= top.snippetLines.start, "snippet line range must be present");
+		ok(
+			top.snippetLines.start > 0 && top.snippetLines.end >= top.snippetLines.start,
+			"snippet line range must be present",
+		);
 		ok(top.matchedTerms.includes("autonomy"), "matched terms include the query term");
-		ok(top.signals.some((signal) => signal.includes("heading")), "signals explain why the hit ranked");
+		ok(
+			top.signals.some((signal) => signal.includes("heading")),
+			"signals explain why the hit ranked",
+		);
 		ok(top.snippet.length > 0, "snippet must carry the cited passage");
 		// Bounded output: the snippet window plus its ellipses stays small.
 		for (const hit of payload.results) {
