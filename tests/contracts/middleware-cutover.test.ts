@@ -166,6 +166,60 @@ describe("contracts/middleware-cutover hookFailed notice formatting", () => {
 		strictEqual(otherHook?.level, "warn");
 	});
 
+	it("surfaces steady-state budget warnings but suppresses lone post-warmup spikes", () => {
+		const seen = new Set<string>();
+		// A single post-warmup spike rides the bus for telemetry (steadyStateWarn
+		// false) but must never become an operator notice.
+		const spike = middlewareHookFailedSessionNotice(
+			{
+				kind: "budget_exceeded",
+				registrationId: "assessor.finish-contract",
+				hook: "turn_end",
+				at: Date.now(),
+				elapsedMs: 90,
+				budgetMs: 75,
+				steadyStateWarn: false,
+			},
+			seen,
+		);
+		strictEqual(spike, null);
+
+		// Consistent slowness (steadyStateWarn true) surfaces once, with the trend.
+		const steady = middlewareHookFailedSessionNotice(
+			{
+				kind: "budget_exceeded",
+				registrationId: "assessor.finish-contract",
+				hook: "turn_end",
+				at: Date.now(),
+				elapsedMs: 90,
+				budgetMs: 75,
+				steadyStateWarn: true,
+				overCount: 3,
+				windowSamples: 5,
+				p95Ms: 95,
+			},
+			seen,
+		);
+		strictEqual(steady?.level, "warn");
+		ok(steady.text.includes("3 of the last 5 turn_end calls"));
+		ok(steady.text.includes("further budget warnings for this hook suppressed"));
+
+		// The once-per-(registration, hook) floor still holds after it surfaced.
+		const repeat = middlewareHookFailedSessionNotice(
+			{
+				kind: "budget_exceeded",
+				registrationId: "assessor.finish-contract",
+				hook: "turn_end",
+				at: Date.now(),
+				elapsedMs: 91,
+				budgetMs: 75,
+				steadyStateWarn: true,
+			},
+			seen,
+		);
+		strictEqual(repeat, null);
+	});
+
 	it("keys budget-warning dedupe only for valid budget payloads", () => {
 		strictEqual(
 			middlewareBudgetWarningKey({

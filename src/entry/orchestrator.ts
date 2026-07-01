@@ -563,7 +563,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			at: Date.now(),
 			...(diagnostic.kind === "hook_failed"
 				? { message: diagnostic.message }
-				: { elapsedMs: diagnostic.elapsedMs, budgetMs: diagnostic.budgetMs }),
+				: {
+						elapsedMs: diagnostic.elapsedMs,
+						budgetMs: diagnostic.budgetMs,
+						steadyStateWarn: diagnostic.steadyStateWarn,
+						p50Ms: diagnostic.stats.p50Ms,
+						p95Ms: diagnostic.stats.p95Ms,
+						overCount: diagnostic.stats.overCount,
+						windowSamples: diagnostic.stats.window,
+					}),
 		});
 		if (!interactive) writeMiddlewareDiagnosticToStderr(diagnostic);
 	});

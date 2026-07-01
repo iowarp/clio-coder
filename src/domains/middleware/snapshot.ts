@@ -1,3 +1,4 @@
+import { createHookBudgetTracker, resolveHookBudgetsFromEnv, resolveHookBudgetTunablesFromEnv } from "./budget.js";
 import type { MiddlewareContract } from "./contract.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 import {
@@ -40,14 +41,17 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 	});
 	const registrations: MiddlewareHookRegistration[] = definitions.map(registrationFromRuleDefinition);
 	const registeredIds = new Set(registrations.map((registration) => registration.id));
+	const budgetTracker = createHookBudgetTracker({
+		budgets: resolveHookBudgetsFromEnv(),
+		...resolveHookBudgetTunablesFromEnv(),
+	});
 	let diagnosticSink: MiddlewareDiagnosticSink | undefined;
 	return {
 		runHook(input) {
-			return runMiddlewareRegistrations(
-				input,
-				registrations,
-				diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {},
-			);
+			return runMiddlewareRegistrations(input, registrations, {
+				budgetTracker,
+				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+			});
 		},
 		listRules() {
 			return definitions.map((definition) => cloneMiddlewareRule(definition.rule));

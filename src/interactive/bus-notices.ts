@@ -73,6 +73,10 @@ function isMiddlewareHookFailedPayload(value: unknown): value is MiddlewareHookF
 	if (p.message !== undefined && typeof p.message !== "string") return false;
 	if (p.elapsedMs !== undefined && typeof p.elapsedMs !== "number") return false;
 	if (p.budgetMs !== undefined && typeof p.budgetMs !== "number") return false;
+	if (p.steadyStateWarn !== undefined && typeof p.steadyStateWarn !== "boolean") return false;
+	if (p.p95Ms !== undefined && typeof p.p95Ms !== "number") return false;
+	if (p.overCount !== undefined && typeof p.overCount !== "number") return false;
+	if (p.windowSamples !== undefined && typeof p.windowSamples !== "number") return false;
 	return true;
 }
 
@@ -102,14 +106,35 @@ export function middlewareHookFailedNotice(
 	}
 	const elapsed = payload.elapsedMs !== undefined ? `${payload.elapsedMs.toFixed(1)}ms` : "unknown";
 	const budget = payload.budgetMs !== undefined ? `${payload.budgetMs}ms` : "budget";
-	const suffix = options.noteBudgetWarningSuppression ? "; further budget warnings for this hook suppressed" : "";
+	const trend =
+		payload.overCount !== undefined && payload.windowSamples !== undefined && payload.windowSamples > 0
+			? ` slow on ${payload.overCount} of the last ${payload.windowSamples} ${payload.hook} calls${
+					payload.p95Ms !== undefined ? `, p95 ${payload.p95Ms.toFixed(1)}ms` : ""
+				};`
+			: ";";
+	const suffix = options.noteBudgetWarningSuppression ? " further budget warnings for this hook suppressed" : "";
 	return {
 		level: "warn",
-		text: `[middleware] hook '${payload.registrationId}' exceeded its soft budget on ${payload.hook} (${elapsed} > ${budget})${suffix}.`,
+		text:
+			`[middleware] hook '${payload.registrationId}' consistently exceeds its soft budget on ${payload.hook} (${elapsed} > ${budget})${trend}${suffix}`.trimEnd(),
 	};
 }
 
+/**
+ * Interactive-notice gate. Only steady-state slowness surfaces to the operator:
+ * a lone post-warmup spike still rides the bus for telemetry but is suppressed
+ * here (`steadyStateWarn === false`). Absent flag surfaces, for back-compat with
+ * producers that predate the field. The once-per-(registration, hook) set is the
+ * floor so even a genuine steady-state warning is shown once, not every turn.
+ */
 export function middlewareHookFailedSessionNotice(payload: unknown, seenBudgetWarnings: Set<string>): BusNotice | null {
+	if (
+		isMiddlewareHookFailedPayload(payload) &&
+		payload.kind === "budget_exceeded" &&
+		payload.steadyStateWarn === false
+	) {
+		return null;
+	}
 	const key = middlewareBudgetWarningKey(payload);
 	if (key !== null) {
 		if (seenBudgetWarnings.has(key)) return null;
