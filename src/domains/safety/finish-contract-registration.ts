@@ -1,13 +1,13 @@
 /**
  * Finish-contract assessor, packaged as a turn_end hook registration.
  *
- * Replaces the chat-loop's bespoke `emitFinishContractAdvisory` call site: the
- * chat-loop fires `turn_end` with the final assistant text and this
- * registration emits an advisory `inject_reminder` (severity "warn") when a
- * completion claim has no recent validation evidence and no explicit
- * limitation. The chat-loop's generic effect application renders the notice,
- * persists the session entry, and flushes the reminder into the next model
- * request.
+ * The chat-loop fires `turn_end` with the final assistant text and this
+ * registration emits an advisory `inject_reminder` (severity "warn") when the
+ * turn mutated workspace state but recorded no validation evidence and no
+ * explicit limitation. The trigger is the observed mutation, not the wording of
+ * the assistant's text. The chat-loop's generic effect application renders the
+ * notice, persists the session entry, and flushes the reminder into the next
+ * model request. Every decision is also written to the audit ledger.
  */
 
 import { VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
@@ -59,7 +59,7 @@ export function createFinishContractRegistration(
 ): MiddlewareHookRegistration {
 	return {
 		id: FINISH_CONTRACT_REGISTRATION_ID,
-		description: "advise when a completion claim lands without validation evidence or an explicit limitation",
+		description: "advise when a turn mutated files without validation evidence or an explicit limitation",
 		hooks: ["turn_end"],
 		evaluate(input: MiddlewareHookInput, context): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
