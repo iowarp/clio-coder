@@ -122,6 +122,10 @@ const TERMINAL_STOP = new Set(["stop", "length", "error", "aborted"]);
 // for the turn (see FINDINGS.md F2).
 const TERMINAL_TOOLS = new Set(["write_plan", "write_review"]);
 
+function isSyntheticUserMessage(entry) {
+	return entry?.kind === "message" && entry?.role === "user" && entry?.payload?.synthetic === true;
+}
+
 function turnState(entries, turnIndex) {
 	let users = 0;
 	let sawNthUser = false;
@@ -129,7 +133,7 @@ function turnState(entries, turnIndex) {
 	let lastToolCallName = null;
 	let sawTerminalToolResult = false;
 	for (const e of entries) {
-		if (e?.kind === "message" && e?.role === "user") {
+		if (e?.kind === "message" && e?.role === "user" && !isSyntheticUserMessage(e)) {
 			users += 1;
 			if (users === turnIndex) sawNthUser = true;
 			continue;
