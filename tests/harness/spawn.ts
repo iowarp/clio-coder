@@ -76,24 +76,6 @@ export function runCli(args: ReadonlyArray<string>, opts: RunOptions = {}): Prom
 	});
 }
 
-export function makeScratchHome(): { dir: string; env: NodeJS.ProcessEnv; cleanup: () => void } {
-	const dir = mkdtempSync(join(tmpdir(), "clio-e2e-"));
-	return {
-		dir,
-		env: {
-			CLIO_HOME: dir,
-			CLIO_DATA_DIR: join(dir, "data"),
-			CLIO_CONFIG_DIR: join(dir, "config"),
-			CLIO_STATE_DIR: join(dir, "state"),
-			CLIO_CACHE_DIR: join(dir, "cache"),
-			CLIO_REQUIRE_HOME_PREFIX: "1",
-		},
-		cleanup() {
-			try {
-				rmSync(dir, { recursive: true, force: true });
-			} catch {
-				// best-effort
-			}
-		},
-	};
-}
+// The scratch-home helper lives in scratch-env.ts (the one Clio-state isolation
+// module); re-exported here so existing `../harness/spawn.js` importers are unchanged.
+export { makeScratchHome } from "./scratch-env.js";

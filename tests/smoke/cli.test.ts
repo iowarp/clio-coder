@@ -1,11 +1,16 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
+import {
+	closeServer,
+	seedOpenAICompatFleetDefault,
+	seedOpenAICompatOrchestrator,
+	seedUnregisteredRuntimeTarget,
+	startOpenAICompatFixture,
+} from "../harness/openai-compat-fixture.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
@@ -92,144 +97,6 @@ function createJsonRpcProcessClient(args: string[], env: NodeJS.ProcessEnv, cwd:
 			});
 		},
 	};
-}
-
-async function closeServer(server: Server | null): Promise<void> {
-	if (!server) return;
-	await new Promise<void>((resolve) => server.close(() => resolve()));
-}
-
-async function readRequestBody(req: IncomingMessage): Promise<string> {
-	return new Promise((resolve) => {
-		let body = "";
-		req.setEncoding("utf8");
-		req.on("data", (chunk) => {
-			body += chunk;
-		});
-		req.on("end", () => resolve(body));
-	});
-}
-
-interface OpenAICompatFixtureOptions {
-	models?: Array<Record<string, unknown> & { id: string }>;
-}
-
-async function startOpenAICompatFixture(
-	reply: string,
-	options: OpenAICompatFixtureOptions = {},
-): Promise<{
-	server: Server;
-	url: string;
-	requests: Array<Record<string, unknown>>;
-}> {
-	const models = options.models ?? [{ id: "mock-model", object: "model" }];
-	const requests: Array<Record<string, unknown>> = [];
-	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-		if (req.method === "GET" && req.url === "/v1/models") {
-			res.writeHead(200, { "content-type": "application/json" });
-			res.end(JSON.stringify({ object: "list", data: models }));
-			return;
-		}
-		if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
-			res.writeHead(404);
-			res.end("not found");
-			return;
-		}
-		const raw = await readRequestBody(req);
-		const request = JSON.parse(raw) as Record<string, unknown>;
-		requests.push(request);
-		if (request.stream === false) {
-			res.writeHead(200, { "content-type": "application/json" });
-			res.end(
-				JSON.stringify({
-					id: "chatcmpl-clio-probe",
-					object: "chat.completion",
-					model: request.model ?? "mock-model",
-					choices: [{ index: 0, message: { role: "assistant", content: reply }, finish_reason: "stop" }],
-				}),
-			);
-			return;
-		}
-		res.writeHead(200, {
-			"content-type": "text/event-stream",
-			"cache-control": "no-cache",
-			connection: "keep-alive",
-		});
-		res.write(
-			`data: ${JSON.stringify({
-				id: "chatcmpl-clio-print",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "mock-model",
-				choices: [{ index: 0, delta: { content: reply } }],
-			})}\n\n`,
-		);
-		res.write(
-			`data: ${JSON.stringify({
-				id: "chatcmpl-clio-print",
-				object: "chat.completion.chunk",
-				created: 1,
-				model: "mock-model",
-				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-				usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
-			})}\n\n`,
-		);
-		res.end("data: [DONE]\n\n");
-	});
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const addr = server.address() as AddressInfo;
-	return { server, url: `http://127.0.0.1:${addr.port}`, requests };
-}
-
-function seedOpenAICompatOrchestrator(configDir: string, url: string): void {
-	const p = join(configDir, "settings.yaml");
-	const yaml = readFileSync(p, "utf8");
-	const patched = yaml
-		.replace(
-			/^targets:.*$/m,
-			[
-				"targets:",
-				"  - id: mock-chat",
-				"    runtime: openai-compat",
-				`    url: ${url}`,
-				"    defaultModel: mock-model",
-				"    auth:",
-				"      apiKeyEnvVar: CLIO_TEST_OPENAI_KEY",
-				"    capabilities:",
-				"      vision: true",
-				"    wireModels:",
-				"      - mock-model",
-			].join("\n"),
-		)
-		.replace(/^ {2}target: null$/m, "  target: mock-chat")
-		.replace(/^ {2}model: null$/m, "  model: mock-model");
-	writeFileSync(p, patched, "utf8");
-}
-
-function seedOpenAICompatFleetDefault(configDir: string): void {
-	const p = join(configDir, "settings.yaml");
-	const yaml = readFileSync(p, "utf8");
-	const patched = yaml
-		.replace(/^ {4}target: null$/m, "    target: mock-chat")
-		.replace(/^ {4}model: null$/m, "    model: mock-model");
-	writeFileSync(p, patched, "utf8");
-}
-
-function seedUnregisteredRuntimeTarget(configDir: string): void {
-	const p = join(configDir, "settings.yaml");
-	const yaml = readFileSync(p, "utf8");
-	const patched = yaml.replace(
-		/^targets:.*$/m,
-		[
-			"targets:",
-			"  - id: codex-worker",
-			"    runtime: codex-cli",
-			"    defaultModel: gpt-5.4",
-			"    wireModels:",
-			"      - gpt-5.4",
-		].join("\n"),
-	);
-	writeFileSync(p, patched, "utf8");
 }
 
 function writeSkill(dir: string, name: string, description: string, body = "Skill body."): string {

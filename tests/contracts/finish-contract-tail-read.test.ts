@@ -10,7 +10,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { resetXdgCache } from "../../src/core/xdg.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import {
@@ -20,6 +19,7 @@ import {
 	readSessionFileTailEntries,
 	readSessionTailTurns,
 } from "../../src/engine/session.js";
+import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 const FIXED_TS = "2026-01-01T00:00:00.000Z";
 const TAIL = 160; // FINISH_CONTRACT_TAIL_ENTRIES: 2× the 80-entry window cap
@@ -128,13 +128,7 @@ describe("contracts/finish-contract-tail-read", () => {
 	const ORIGINAL_ENV = { ...process.env };
 
 	beforeEach(() => {
-		scratch = mkdtempSync(join(tmpdir(), "clio-tail-read-"));
-		process.env.CLIO_HOME = scratch;
-		process.env.CLIO_DATA_DIR = join(scratch, "data");
-		process.env.CLIO_CONFIG_DIR = join(scratch, "config");
-		process.env.CLIO_STATE_DIR = join(scratch, "state");
-		process.env.CLIO_CACHE_DIR = join(scratch, "cache");
-		resetXdgCache();
+		scratch = newScratchClioHome("clio-tail-read-");
 	});
 
 	afterEach(async () => {
@@ -144,8 +138,7 @@ describe("contracts/finish-contract-tail-read", () => {
 		for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
 			if (value !== undefined) process.env[key] = value;
 		}
-		resetXdgCache();
-		rmSync(scratch, { recursive: true, force: true });
+		clearScratchClioHome(scratch);
 	});
 
 	for (const scenario of SCENARIOS) {

@@ -1,7 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
@@ -12,6 +11,7 @@ import { openLedger } from "../../src/domains/dispatch/state.js";
 import { readAccountabilitySummary } from "../../src/domains/observability/accountability.js";
 import { readEvidenceIndex } from "../../src/domains/observability/evidence-index.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
+import { newScratchClioHome } from "../harness/scratch-env.js";
 
 /**
  * Drive the auto-build path in-process: emit a DispatchCompleted on the bus and
@@ -28,17 +28,13 @@ interface Scratch {
 }
 
 function makeScratch(): Scratch {
-	const dir = mkdtempSync(join(tmpdir(), "clio-auto-evidence-"));
+	// newScratchClioHome points the CLIO_* env at a fresh scratch home and resets
+	// the XDG cache; we still mkdir the data/state dirs this suite seeds directly.
+	const dir = newScratchClioHome("clio-auto-evidence-");
 	const dataDir = join(dir, "data");
 	const stateDir = join(dir, "state");
 	mkdirSync(dataDir, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
-	process.env.CLIO_HOME = dir;
-	process.env.CLIO_DATA_DIR = dataDir;
-	process.env.CLIO_STATE_DIR = stateDir;
-	process.env.CLIO_CONFIG_DIR = join(dir, "config");
-	process.env.CLIO_CACHE_DIR = join(dir, "cache");
-	resetXdgCache();
 	return { dir, dataDir, stateDir };
 }
 
