@@ -7,12 +7,13 @@ import {
 } from "../../src/domains/safety/finish-contract-registration.js";
 
 /**
- * Slice 4 end-to-end shape: a high-rigor turn that claims done with no
- * validation evidence is re-prompted (a request_continuation withholds the
- * completion), and once the session carries a passing validation command the
- * same evaluation settles cleanly with no gate effect. The session-entry shapes
- * mirror those the finish-contract unit/contract tests use (tool_call +
- * successful tool_result, plus a leading user prompt).
+ * End-to-end shape of the action-scoped gate: a high-rigor turn that MUTATED a
+ * file and then claimed done with no validation evidence is re-prompted (a
+ * request_continuation withholds the completion), and once the session carries a
+ * passing validation command for that same mutation the evaluation settles
+ * cleanly with no gate effect. The session-entry shapes mirror those the
+ * finish-contract unit/contract tests use (tool_call + successful tool_result,
+ * plus a leading user prompt).
  */
 
 const ASSISTANT_CLAIM = "Done. Implemented the parser and tests pass.";
@@ -30,9 +31,27 @@ function userPromptEntry(): unknown {
 	return { kind: "message", role: "user", turnId: "turn-1", payload: { text: "implement the parser" } };
 }
 
+/** A successful edit receipt: the mutation that arms the contract. */
+function mutationEntries(): ReadonlyArray<unknown> {
+	return [
+		{
+			kind: "message",
+			role: "tool_call",
+			turnId: "turn-1",
+			payload: { name: "edit", toolCallId: "edit-1", args: { path: "src/parser.ts" } },
+		},
+		{
+			kind: "message",
+			role: "tool_result",
+			turnId: "turn-1",
+			payload: { toolName: "edit", toolCallId: "edit-1", isError: false, result: { kind: "ok" } },
+		},
+	];
+}
+
+/** A passing validation command for the mutation above. */
 function validationEntries(): ReadonlyArray<unknown> {
 	return [
-		userPromptEntry(),
 		{
 			kind: "message",
 			role: "tool_call",
@@ -53,9 +72,10 @@ function find(effects: ReadonlyArray<MiddlewareEffect>, kind: MiddlewareEffect["
 }
 
 describe("smoke/rigor-gate high-rigor finish gate", () => {
-	it("re-prompts an unvalidated high-rigor completion claim, then settles after validation runs", () => {
-		// No evidence in the session: the high-rigor gate withholds completion.
-		let entries: ReadonlyArray<unknown> = [userPromptEntry()];
+	it("re-prompts an unvalidated high-rigor mutation, then settles after validation runs", () => {
+		// The turn changed a file but recorded no validation: the high-rigor gate
+		// withholds completion.
+		let entries: ReadonlyArray<unknown> = [userPromptEntry(), ...mutationEntries()];
 		const registration = createFinishContractRegistration({
 			readSessionEntries: () => entries,
 			resolveRigor: () => "high",
@@ -63,14 +83,14 @@ describe("smoke/rigor-gate high-rigor finish gate", () => {
 
 		const gated = registration.evaluate(turnEndInput());
 		const continuation = find(gated, "request_continuation");
-		ok(continuation, "an unvalidated high-rigor claim must be re-prompted via request_continuation");
+		ok(continuation, "an unvalidated high-rigor mutation must be re-prompted via request_continuation");
 		ok(continuation?.kind === "request_continuation" && continuation.message === HIGH_RIGOR_REVALIDATION_MESSAGE);
 		ok(find(gated, "inject_reminder"), "the directive also lands as a reminder line");
 
-		// The model runs validation; assessFinishContract now finds evidence and
-		// returns ok, so the same evaluation settles with no gate effect.
-		entries = validationEntries();
+		// The model runs validation; assessFinishContract now finds evidence for
+		// the same mutation and returns ok, so the evaluation settles cleanly.
+		entries = [userPromptEntry(), ...mutationEntries(), ...validationEntries()];
 		const settled = registration.evaluate(turnEndInput());
-		strictEqual(settled.length, 0, "a validated claim settles cleanly with no gate effect");
+		strictEqual(settled.length, 0, "a validated mutation settles cleanly with no gate effect");
 	});
 });

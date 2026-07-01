@@ -59,33 +59,51 @@ describe("contracts/safety", () => {
 		strictEqual(classify({ tool: "bash", args: { command: "ls -la" } }).actionClass, "execute");
 	});
 
-	it("suppresses finish-contract advisories for explicit read-only recall/status drills", () => {
-		const assessment = assessFinishContract({
-			assistantText: "Reads complete; ready for next instruction.",
-			currentUserText: "Use read only. Recall the sentinel and report status check only.",
-		});
-		strictEqual(assessment.kind, "ok");
-		if (assessment.kind === "ok") strictEqual(assessment.reason, "read_only_status_turn");
-	});
-
-	it("suppresses finish-contract advisories for informational how/what questions", () => {
-		const assessment = assessFinishContract({
-			// Completion vocabulary ("updated", "added", "changed") in a long
-			// explanation must not be read as a work claim when the user only asked
-			// how something works.
-			assistantText: "Here is how docs_search works: it added scoring, changed ranking, and updated the index.",
-			currentUserText: "how does docs_search work?",
-		});
-		strictEqual(assessment.kind, "ok");
-		if (assessment.kind === "ok") strictEqual(assessment.reason, "informational_question_turn");
-	});
-
-	it("still advises when a work-request prompt claims done without evidence", () => {
+	it("engages when the turn mutated a file without validation evidence or a limitation", () => {
+		// Action-scoped: the edit receipt is the trigger, not the wording of the
+		// prompt or the assistant's "done".
 		const assessment = assessFinishContract({
 			assistantText: "Done. Implemented the parser and updated the tests.",
-			currentUserText: "implement the parser and fix the failing test",
+			sessionEntries: [
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "edit", toolCallId: "call-1", args: { path: "src/parser.ts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "edit", toolCallId: "call-1", isError: false, result: { kind: "ok" } },
+				},
+			],
 		});
-		strictEqual(assessment.kind, "advisory");
+		strictEqual(assessment.kind, "engage");
+		if (assessment.kind === "engage") {
+			strictEqual(assessment.reason, "unvalidated_mutation");
+			strictEqual(assessment.mutatedPaths[0], "src/parser.ts");
+		}
+	});
+
+	it("stays silent when no receipt mutated workspace state", () => {
+		// A read-only turn cannot engage the contract no matter how it reads: no
+		// mutating receipt means nothing to validate.
+		const assessment = assessFinishContract({
+			assistantText: "Done. Here is the current state of the parser.",
+			sessionEntries: [
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "read", toolCallId: "call-1", args: { path: "src/parser.ts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "read", toolCallId: "call-1", isError: false, result: { kind: "ok" } },
+				},
+			],
+		});
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "no_mutation");
 	});
 
 	it("recognizes run_task verification-family scripts as finish-contract evidence", () => {
@@ -95,12 +113,22 @@ describe("contracts/safety", () => {
 				{
 					kind: "message",
 					role: "tool_call",
-					payload: { name: "run_task", toolCallId: "call-1", args: { task: "test:contracts" } },
+					payload: { name: "edit", toolCallId: "call-1", args: { path: "src/parser.ts" } },
 				},
 				{
 					kind: "message",
 					role: "tool_result",
-					payload: { toolName: "run_task", toolCallId: "call-1", result: { details: { exitCode: 0 } } },
+					payload: { toolName: "edit", toolCallId: "call-1", isError: false, result: { kind: "ok" } },
+				},
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "run_task", toolCallId: "call-2", args: { task: "test:contracts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "run_task", toolCallId: "call-2", result: { details: { exitCode: 0 } } },
 				},
 			],
 		});
@@ -110,6 +138,26 @@ describe("contracts/safety", () => {
 			strictEqual(assessment.reason, "validation_evidence");
 			strictEqual(assessment.evidence[0]?.summary, "validation command passed: npm run test:contracts");
 		}
+	});
+
+	it("clears the contract when the turn records an explicit limitation", () => {
+		const assessment = assessFinishContract({
+			assistantText: "Updated the parser. Tests: not run — the suite is blocked by a missing fixture.",
+			sessionEntries: [
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "edit", toolCallId: "call-1", args: { path: "src/parser.ts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "edit", toolCallId: "call-1", isError: false, result: { kind: "ok" } },
+				},
+			],
+		});
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") strictEqual(assessment.reason, "explicit_limitation");
 	});
 
 	it("evaluates safety scope subsets", () => {

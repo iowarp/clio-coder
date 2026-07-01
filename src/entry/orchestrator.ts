@@ -788,6 +788,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			createFinishContractRegistration({
 				readSessionEntries: () => (session.current() ? readCurrentSessionEntries() : null),
 				resolveRigor: () => resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_RIGOR) }),
+				recordDecision: (record) => safety.audit.recordCompletionContract?.(record),
 			}),
 		);
 	}

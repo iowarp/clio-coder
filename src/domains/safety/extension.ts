@@ -14,6 +14,7 @@ import {
 	buildAbortAuditRecord,
 	buildAgentStatusChangeAuditRecord,
 	buildAuditRecord,
+	buildCompletionContractAuditRecord,
 	buildPermissionAuditRecord,
 	buildSessionParkAuditRecord,
 	buildSessionResumeAuditRecord,
@@ -101,6 +102,10 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 
 	function recordToolCallAudit(input: Parameters<typeof buildAuditRecord>[0]): void {
 		writeAudit(buildAuditRecord(input));
+	}
+
+	function recordCompletionContractAudit(input: Parameters<typeof buildCompletionContractAuditRecord>[0]): void {
+		writeAudit(buildCompletionContractAuditRecord(input));
 	}
 
 	const extension: DomainExtension = {
@@ -315,7 +320,11 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
 		policy: { metadata: (posture) => (policyEngine ?? createSafetyPolicyEngine()).metadata(posture) },
-		audit: { recordCount: () => recordCount, recordToolCall: recordToolCallAudit },
+		audit: {
+			recordCount: () => recordCount,
+			recordToolCall: recordToolCallAudit,
+			recordCompletionContract: recordCompletionContractAudit,
+		},
 	};
 
 	return { extension, contract };

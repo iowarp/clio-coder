@@ -18,13 +18,14 @@ export {
 	mapAutonomy,
 } from "./autonomy.js";
 export type { SafetyContract, SafetyDecision } from "./contract.js";
-export type { FinishContractAssessment, FinishContractEvidence, FinishContractInput } from "./finish-contract.js";
-export {
-	assessFinishContract,
-	FINISH_CONTRACT_ADVISORY_MESSAGE,
-	hasCompletionClaim,
-	hasExplicitLimitation,
+export type {
+	FinishContractAssessment,
+	FinishContractEvidence,
+	FinishContractEvidenceKind,
+	FinishContractInput,
+	FinishContractReason,
 } from "./finish-contract.js";
+export { assessFinishContract, FINISH_CONTRACT_ADVISORY_MESSAGE, hasExplicitLimitation } from "./finish-contract.js";
 export { SafetyManifest } from "./manifest.js";
 export {
 	type CompiledPathPolicy,
