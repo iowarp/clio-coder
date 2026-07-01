@@ -3,14 +3,36 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, splitLinesForCounting, truncateHead } from "./truncate.js";
+import {
+	DEFAULT_MAX_LINES,
+	formatSize,
+	splitLinesForCounting,
+	type TruncationResult,
+	truncateHead,
+	truncateTail,
+} from "./truncate.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 export const DEFAULT_READ_TURN_OBSERVATION_BUDGET_BYTES = 128 * 1024;
 export const READ_TURN_OBSERVATION_BUDGET_ENV = "CLIO_READ_TURN_OBSERVATION_BUDGET_BYTES";
 
+// Per-call read cap. Raised from the 16KB per-observation source cap toward
+// pi's 50KB so large source/generated files finish in fewer calls (a 144KB file
+// took ~9 sequential 16KB reads before). The per-turn observation budget still
+// bounds the aggregate. Override with CLIO_READ_MAX_BYTES.
+export const DEFAULT_READ_MAX_BYTES = 50 * 1024;
+export const READ_MAX_BYTES_ENV = "CLIO_READ_MAX_BYTES";
+
 const MIN_READ_BUDGET_SLICE_BYTES = 1024;
 const READ_BUDGET_TRACK_LIMIT = 256;
+
+export function readMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env[READ_MAX_BYTES_ENV];
+	if (raw === undefined || raw.trim().length === 0) return DEFAULT_READ_MAX_BYTES;
+	const parsed = Number(raw.trim());
+	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_READ_MAX_BYTES;
+	return Math.max(MIN_READ_BUDGET_SLICE_BYTES, Math.floor(parsed));
+}
 
 interface ReadTurnBudgetState {
 	usedBytes: number;
@@ -82,14 +104,15 @@ function reserveTurnBudget(options: ToolInvokeOptions | undefined): ReadTurnBudg
 			exhausted: true,
 		};
 	}
-	const maxBytes = Math.min(DEFAULT_MAX_BYTES, remainingBeforeBytes);
+	const perCallCap = readMaxBytes();
+	const maxBytes = Math.min(perCallCap, remainingBeforeBytes);
 	return {
 		key,
 		limitBytes,
 		usedBeforeBytes: state.usedBytes,
 		remainingBeforeBytes,
 		maxBytes,
-		limited: maxBytes < DEFAULT_MAX_BYTES,
+		limited: maxBytes < perCallCap,
 		exhausted: false,
 	};
 }
@@ -132,12 +155,15 @@ function budgetNote(reservation: ReadTurnBudgetReservation | null): string {
 export const readTool: ToolSpec = {
 	name: ToolNames.Read,
 	description: `Read a UTF-8 text file. Output is capped at ${DEFAULT_MAX_LINES} lines or ${
-		DEFAULT_MAX_BYTES / 1024
-	}KB per call; truncated results say how to continue with offset/limit.`,
+		DEFAULT_READ_MAX_BYTES / 1024
+	}KB per call; truncated results say how to continue with offset/limit. Pass tail=N to read the last N lines (jump to EOF) instead of paging from the top.`,
 	parameters: Type.Object({
 		path: Type.String({ description: "File path (relative or absolute)." }),
 		offset: Type.Optional(Type.Number({ description: "1-indexed start line." })),
 		limit: Type.Optional(Type.Number({ description: "Max lines to read." })),
+		tail: Type.Optional(
+			Type.Number({ description: "Read the last N lines of the file (jump to EOF). Overrides offset/limit." }),
+		),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
@@ -147,6 +173,7 @@ export const readTool: ToolSpec = {
 		const filePath = resolveReadPath(pathArg);
 		const offset = typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 1;
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : null;
+		const tail = typeof args.tail === "number" && args.tail > 0 ? Math.floor(args.tail) : null;
 		const turnBudget = reserveTurnBudget(options);
 		try {
 			const stat = statSync(filePath);
@@ -164,7 +191,7 @@ export const readTool: ToolSpec = {
 			const allLines = content.split("\n");
 			const totalLines = splitLinesForCounting(content).length;
 			const startIndex = Math.min(offset - 1, totalLines);
-			if (offset > 1 && startIndex >= totalLines) {
+			if (tail === null && offset > 1 && startIndex >= totalLines) {
 				return { kind: "error", message: `read: offset ${offset} is beyond end of file (${totalLines} lines total)` };
 			}
 			if (turnBudget?.exhausted) {
@@ -181,32 +208,48 @@ export const readTool: ToolSpec = {
 					...(observationBudget ? { details: { observationBudget } } : {}),
 				};
 			}
-			const selected =
-				limit !== null ? allLines.slice(startIndex, startIndex + limit).join("\n") : allLines.slice(startIndex).join("\n");
-			const truncation = truncateHead(selected, turnBudget ? { maxBytes: turnBudget.maxBytes } : undefined);
+			const cap = turnBudget ? turnBudget.maxBytes : readMaxBytes();
 			let output: string;
-			if (truncation.firstLineExceedsLimit) {
-				const maxBytes = turnBudget?.maxBytes ?? DEFAULT_MAX_BYTES;
-				const firstLineSize = formatSize(Buffer.byteLength(allLines[startIndex] ?? "", "utf8"));
-				const linePrefix = truncateUtf8(allLines[startIndex] ?? "", maxBytes, "\n[line truncated]");
-				output = `${linePrefix}\n\n[Line ${startIndex + 1} is ${firstLineSize}, exceeding the ${formatSize(maxBytes)} read limit. Showing the UTF-8 prefix only. Use grep with a narrower literal/regex or edit with exact surrounding text; use shell access only when byte-level inspection is required.]`;
-			} else if (truncation.truncated) {
-				const endDisplay = startIndex + truncation.outputLines;
-				const nextOffset = endDisplay + 1;
+			let truncation: TruncationResult;
+			if (tail !== null) {
+				// Jump to EOF: keep the last N lines, then bound by the byte cap from
+				// the end (reusing truncateTail) so the very tail always survives.
+				const startLine = Math.max(0, totalLines - tail);
+				const tailContent = allLines.slice(startLine).join("\n");
+				truncation = truncateTail(tailContent, { maxBytes: cap, maxLines: tail });
 				output = truncation.content;
-				const suffix =
-					truncation.truncatedBy === "lines"
-						? `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines}. Use offset=${nextOffset} to continue.]`
-						: `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines} (${formatSize(
-								truncation.maxBytes,
-							)} limit). Use offset=${nextOffset} to continue.]`;
-				output += `\n\n${suffix}`;
-			} else if (limit !== null && startIndex + truncation.outputLines < totalLines) {
-				const nextOffset = startIndex + truncation.outputLines + 1;
-				const remaining = totalLines - (startIndex + truncation.outputLines);
-				output = `${truncation.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+				const shownLines = truncation.outputLines;
+				const firstShown = Math.max(1, totalLines - shownLines + 1);
+				const capNote = truncation.truncated ? ` (${formatSize(cap)} limit)` : "";
+				if (startLine > 0 || truncation.truncated) {
+					output += `\n\n[Showing last ${shownLines} of ${totalLines} lines (lines ${firstShown}-${totalLines})${capNote}. Use offset/limit to read earlier lines.]`;
+				}
 			} else {
-				output = truncation.content;
+				const selected =
+					limit !== null ? allLines.slice(startIndex, startIndex + limit).join("\n") : allLines.slice(startIndex).join("\n");
+				truncation = truncateHead(selected, { maxBytes: cap });
+				if (truncation.firstLineExceedsLimit) {
+					const firstLineSize = formatSize(Buffer.byteLength(allLines[startIndex] ?? "", "utf8"));
+					const linePrefix = truncateUtf8(allLines[startIndex] ?? "", cap, "\n[line truncated]");
+					output = `${linePrefix}\n\n[Line ${startIndex + 1} is ${firstLineSize}, exceeding the ${formatSize(cap)} read limit. Showing the UTF-8 prefix only. Use grep with a narrower literal/regex or edit with exact surrounding text; use shell access only when byte-level inspection is required.]`;
+				} else if (truncation.truncated) {
+					const endDisplay = startIndex + truncation.outputLines;
+					const nextOffset = endDisplay + 1;
+					output = truncation.content;
+					const suffix =
+						truncation.truncatedBy === "lines"
+							? `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines}. Use offset=${nextOffset} to continue.]`
+							: `[Showing lines ${startIndex + 1}-${endDisplay} of ${totalLines} (${formatSize(
+									truncation.maxBytes,
+								)} limit). Use offset=${nextOffset} to continue.]`;
+					output += `\n\n${suffix}`;
+				} else if (limit !== null && startIndex + truncation.outputLines < totalLines) {
+					const nextOffset = startIndex + truncation.outputLines + 1;
+					const remaining = totalLines - (startIndex + truncation.outputLines);
+					output = `${truncation.content}\n\n[${remaining} more line${remaining === 1 ? "" : "s"} in file. Use offset=${nextOffset} to continue.]`;
+				} else {
+					output = truncation.content;
+				}
 			}
 			const note = budgetNote(turnBudget);
 			if (note.length > 0) output += `\n\n${note}`;

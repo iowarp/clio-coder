@@ -15,7 +15,7 @@ import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
-import { readTool } from "./read.js";
+import { readMaxBytes, readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import { gitTool, runTaskTool } from "./safe-exec.js";
 import { createReadSkillTool, createSkillTool } from "./skills.js";
@@ -55,9 +55,14 @@ function withMetadata<T extends ToolSpec>(spec: T, metadata: ToolMetadata): T {
 // overrides for tools whose output is inherently aggregate (shell, validation
 // runs, dispatch receipts, web pages); nothing exceeds them.
 const BOUNDED_RESULT_MAX_BYTES = DEFAULT_MAX_BYTES + 2 * 1024;
+// The read tool self-caps at the (larger) per-call read cap, so its result
+// policy tracks that cap plus the same slack, otherwise the registry re-shaper
+// would truncate a full read down to the search-tool budget and replace read's
+// precise offset/limit continuation notice with a generic hint.
+const BOUNDED_READ_MAX_BYTES = readMaxBytes() + 2 * 1024;
 const boundedReadPolicy = {
 	kind: "bounded",
-	maxBytes: BOUNDED_RESULT_MAX_BYTES,
+	maxBytes: BOUNDED_READ_MAX_BYTES,
 	followUpHint: "Use offset/limit or a narrower locate/search tool call to inspect omitted content.",
 } satisfies ToolMetadata["resultSizePolicy"];
 
