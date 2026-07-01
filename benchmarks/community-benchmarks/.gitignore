@@ -1,0 +1,9 @@
+# Python bytecode and virtualenvs for the community benchmark adapters.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Adapter run outputs (predictions, metrics, events, checkouts).
+runs/

@@ -1,0 +1,21 @@
+# Python dependencies for the Clio Coder community benchmark adapters.
+#
+# The adapters are run as scripts, not installed as a package. Install into a
+# venv (`uv venv && uv pip install -r requirements.txt`) or run each adapter
+# ad hoc with uv (`uv tool run --from swebench --with datasets python ...`),
+# as documented in README.md. Deps are grouped by adapter; you only need the
+# group for the track you are running.
+
+# --- swe-bench-lite (swebench_clio.py, recompute_patches.py) ---
+datasets            # load princeton-nlp/SWE-bench_Lite
+swebench            # harness for `python -m swebench.harness.run_evaluation`
+
+# --- terminal-bench (tb_clio_agent/) ---
+terminal-bench      # provides the `tb` CLI and AbstractInstalledAgent base
+
+# --- scicode (scicode_clio.py grade path) ---
+# Only needed to grade against the official HDF5 targets; task generation and
+# the JSON-manifest smoke path need none of these.
+h5py                # process_hdf5_to_tuple over the official test_data.h5
+scipy               # SciCode reference numerics
+numpy               # SciCode reference numerics

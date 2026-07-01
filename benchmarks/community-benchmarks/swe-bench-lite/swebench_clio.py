@@ -27,7 +27,21 @@ from pathlib import Path
 
 DATASET = "princeton-nlp/SWE-bench_Lite"
 CLIO = os.environ.get("CLIO_BIN", "clio")
-DEFAULT_MODEL_NAME = os.environ.get("CLIO_PRED_MODEL", "clio-coder-qwopus3.6-27b")
+
+# Shared fleet config (benchmarks/community-benchmarks/clio_fleet.py) is the one
+# source of truth for fleet endpoints/model names. The import is guarded so the
+# adapter still runs if the config is missing; env vars override either way.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from clio_fleet import load_fleet
+
+    _FLEET = load_fleet()
+except Exception:
+    _FLEET = None
+
+DEFAULT_MODEL_NAME = os.environ.get("CLIO_PRED_MODEL") or (_FLEET or {}).get(
+    "predictionModelName", "clio-coder-qwopus3.6-27b"
+)
 
 TASK_TEMPLATE = """You are resolving a GitHub issue in the {repo} repository (checked out at commit {base_commit}).
 

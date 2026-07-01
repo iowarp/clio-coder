@@ -582,7 +582,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const payload = assistantSessionPayload(message, failure);
 		if (timing) payload.timing = timing;
 		// Per-call prompt-cache record (T3.2): provider-reported numbers only,
-		// classified with the same thresholds as scripts/turn-report.mjs. The
+		// classified with the same thresholds as benchmarks/live/turn-report.mjs. The
 		// run's first persisted call also carries any expected-cold reasons.
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {

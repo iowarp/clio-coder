@@ -294,7 +294,7 @@ reasons and shows one dim notice. Per-call cache verdicts (`hot`, `partial`,
 with:
 
 ```bash
-node scripts/turn-report.mjs --session <id>
+node benchmarks/live/turn-report.mjs --session <id>
 ```
 
 See [docs/context-engine.md](docs/context-engine.md) for how the context

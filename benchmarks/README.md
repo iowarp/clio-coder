@@ -4,14 +4,19 @@ This is the first Clio model-management benchmark harness. It sweeps configured 
 
 ## Benchmark map
 
-Clio currently has four benchmark tracks:
+Clio currently has five benchmark tracks:
 
 | Track | Harness | Measures | Run command | Output | Reproducibility |
 |---|---|---|---|---|---|
 | Model suite | `benchmarks/clio-model-suite.mjs` | Single-file coding/design quality across target/model/sampler settings | `npm run build`; `npm run bench:models -- --target mini --limit 3` | `.clio-benchmark/report.json`, per-run stdout/stderr/config/app.html | Provider-dependent. Deterministic prompt and static scorer, but model output is stochastic unless the runtime pins sampling. |
-| Context engine | `benchmarks/bench-context.mjs` | Codewiki coverage, deterministic structural hash, digest size, scout-read token estimate, nav latency | `npm run build`; `node benchmarks/bench-context.mjs --baseline benchmarks/context-baseline-main.json` | JSON report, compared with `benchmarks/context-baseline-main.json` and `benchmarks/context-after.json` | High for local indexing metrics. It copies fixed repos and checks two indexing passes for identical structural hashes. |
+| Context engine | `benchmarks/bench-context.mjs` | Codewiki coverage, deterministic structural hash, digest size, scout-read token estimate, nav latency | `npm run build`; `npm run bench:context` | JSON report, compared with `benchmarks/context-baseline-main.json` and `benchmarks/context-after.json` | High for local indexing metrics. It checks out a pinned corpus (`benchmarks/context-corpus.json`) and checks two indexing passes for identical structural hashes. |
+| Live turns | `benchmarks/live/` (`live-turns.mjs` + `turn-report.mjs`) | Real interactive TUI multi-turn drive over tmux; TTFT, prompt-cache hot/partial/cold verdicts, per-API-call usage | `npm run build`; `npm run bench:turns -- --baseline`; then `npm run bench:report -- --session <id>` | tmux pane snapshots + read-only session-ledger forensics | Live and model-dependent (drives the real fleet through the TUI). The reporter is deterministic over a recorded ledger. |
 | Community coding | `benchmarks/community-benchmarks/swe-bench-lite/` and `benchmarks/community-benchmarks/terminal-bench/` | Repo patch generation and container workflow solving | See `benchmarks/community-benchmarks/README.md` | SWE predictions/metrics JSONL; Terminal-Bench run directories | External dataset, Docker, and local fleet dependent. Historical v0.2.3 calibration is preserved in `community-benchmarks/MANIFEST.md`. |
 | Science coding | `benchmarks/community-benchmarks/scicode/scicode_clio.py` plus local SciCode prompt corpus | Stepwise scientific Python synthesis with per-substep numeric grading | `python benchmarks/community-benchmarks/scicode/scicode_clio.py generate-tasks --out .clio-scicode/tasks.yaml --h5py-file /path/to/test_data.h5`; `clio eval run --task-file .clio-scicode/tasks.yaml` | Normal Clio eval artifact plus `scicode-grade.json` per problem | Adapter is wired. Faithful scoring is blocked until the official SciCode HDF5 target file and SciCode Python package are supplied externally. |
+
+Every track has an npm script: `bench:models`, `bench:context`, `bench:turns`/`bench:report`, `bench:swe`, `bench:scicode`, `bench:tb`. The Python tracks are thin npm wrappers that shell out to the adapters under `community-benchmarks/`.
+
+> Publishing note: `package.json` ships `benchmarks/**` in the npm `files` list, so these measurement harnesses (including `benchmarks/live/` and `benchmarks/lib/`) travel in the published tarball, matching how `bench-context.mjs` already ships. They are small dev tools; if that is ever undesired, add a `files` exclusion.
 
 ## Quick start
 

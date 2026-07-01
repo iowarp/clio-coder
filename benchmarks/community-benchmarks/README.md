@@ -19,11 +19,20 @@ community-benchmarks/
 
 ## Fleet and machine layout
 
-Generation runs on the host (e.g. zbook) and drives the fleet for inference only:
-- main / orchestrator: `mini`, llama.cpp, `http://192.168.86.141:8080`,
-  `Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K`
-- workers: `dynamo`, LM Studio, `http://192.168.86.143:1234`, `qwopus3.6-27b-v1-preview`
-- autonomy `full-auto`, thinking `low`
+The fleet is defined once in **`fleet.json`** (loaded by `clio_fleet.py`), the single
+source of truth all adapters read. It carries named profiles; select one with
+`CLIO_FLEET_PROFILE` (default `local-split`) and inspect the resolved fleet with
+`npm run bench:tb` or `python3 clio_fleet.py <profile>`:
+
+- `local-single` — one node, one model: `mini` (llama.cpp) serves orchestrator + workers.
+- `local-split` (default) — orchestrator `mini` (llama.cpp, `Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K`),
+  workers `dynamo` (LM Studio, `ornith-1.0-35b`).
+- `cloud-claude` / `cloud-openai` — frontier models for apples-to-apples comparison with
+  Claude Code / Codex, via the operator's `~/.config/clio` OAuth.
+
+Per-run `CLIO_MAIN_URL` / `CLIO_MAIN_MODEL` / `CLIO_WORKER_URL` / `CLIO_WORKER_MODEL` (and the
+`*_TARGET` / `*_THINKING` variants) still override any field. The historical calibration in
+`MANIFEST.md` records the exact models used at the time and is not changed by later config edits.
 
 Docker (SWE-bench eval, Terminal-Bench containers) runs locally on the host. The fleet
 nodes are not used for Docker. Both `192.168.86.x` endpoints must be reachable from the host

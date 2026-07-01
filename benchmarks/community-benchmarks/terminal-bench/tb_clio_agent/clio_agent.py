@@ -25,12 +25,39 @@ Tunables via `--agent-kwarg key=value` or env:
 """
 import os
 import shlex
+import sys
 from pathlib import Path
 
 from terminal_bench.agents.installed_agents.abstract_installed_agent import (
     AbstractInstalledAgent,
 )
 from terminal_bench.terminal.models import TerminalCommand
+
+# Shared fleet defaults (benchmarks/community-benchmarks/clio_fleet.py). Guarded
+# so the agent still loads if the config is missing or moved; per-run CLIO_* env
+# vars and --agent-kwarg still override everything below.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+try:
+    from clio_fleet import load_fleet
+
+    _F = load_fleet()
+    _DEF = {
+        "main_target": _F["orchestrator"]["target"],
+        "main_url": _F["orchestrator"]["url"],
+        "main_model": _F["orchestrator"]["model"],
+        "worker_url": _F["workers"]["url"],
+        "worker_model": _F["workers"]["model"],
+        "autonomy": _F.get("autonomy", "full-auto"),
+    }
+except Exception:
+    _DEF = {
+        "main_target": "mini",
+        "main_url": "http://192.168.86.141:8080",
+        "main_model": "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K",
+        "worker_url": "http://192.168.86.143:1234",
+        "worker_model": "qwopus3.6-27b-v1-preview",
+        "autonomy": "full-auto",
+    }
 
 
 class ClioAgent(AbstractInstalledAgent):
@@ -40,13 +67,13 @@ class ClioAgent(AbstractInstalledAgent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._main_target = kwargs.get("main_target", os.environ.get("CLIO_MAIN_TARGET", "mini"))
+        self._main_target = kwargs.get("main_target", os.environ.get("CLIO_MAIN_TARGET", _DEF["main_target"]))
         self._main_model = kwargs.get(
             "main_model",
-            os.environ.get("CLIO_MAIN_MODEL", "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K"),
+            os.environ.get("CLIO_MAIN_MODEL", _DEF["main_model"]),
         )
         self._worker_model = kwargs.get(
-            "worker_model", os.environ.get("CLIO_WORKER_MODEL", "qwopus3.6-27b-v1-preview")
+            "worker_model", os.environ.get("CLIO_WORKER_MODEL", _DEF["worker_model"])
         )
         self._timeout_sec = int(kwargs.get("timeout_sec", os.environ.get("CLIO_TASK_TIMEOUT", "1800")))
 

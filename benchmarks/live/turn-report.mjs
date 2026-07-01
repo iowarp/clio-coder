@@ -17,54 +17,17 @@
  * cold reasons).
  *
  * Usage:
- *   node scripts/turn-report.mjs                  # latest session for this cwd
- *   node scripts/turn-report.mjs --session <id>   # specific session
- *   node scripts/turn-report.mjs --all            # all sessions, slow turns only (gap > 20s)
- *   node scripts/turn-report.mjs --all --min-gap 5
- *   node scripts/turn-report.mjs --cwd /path/to/repo
+ *   node benchmarks/live/turn-report.mjs                  # latest session for this cwd
+ *   node benchmarks/live/turn-report.mjs --session <id>   # specific session
+ *   node benchmarks/live/turn-report.mjs --all            # all sessions, slow turns only (gap > 20s)
+ *   node benchmarks/live/turn-report.mjs --all --min-gap 5
+ *   node benchmarks/live/turn-report.mjs --cwd /path/to/repo
  */
 
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
-
-const REPO_ROOT = new URL("..", import.meta.url).pathname;
-
-/**
- * Resolve the Clio state dir through `clio paths --json` (the built dist in
- * this checkout), the single source of truth for directory resolution. The
- * embedded fallback exists only for a broken or missing dist and must mirror
- * src/core/xdg.ts.
- */
-function stateDir() {
-	const cliEntry = join(REPO_ROOT, "dist", "cli", "index.js");
-	if (existsSync(cliEntry)) {
-		try {
-			const raw = execFileSync(process.execPath, [cliEntry, "paths", "--json"], {
-				encoding: "utf8",
-				timeout: 15_000,
-				stdio: ["ignore", "pipe", "ignore"],
-			});
-			const dirs = JSON.parse(raw);
-			if (typeof dirs.state === "string" && dirs.state.length > 0) return dirs.state;
-		} catch {
-			// Broken dist; fall through to the embedded resolution.
-		}
-	}
-	const env = (k) => {
-		const v = process.env[k]?.trim();
-		return v && v.length > 0 ? v : null;
-	};
-	const override = env("CLIO_STATE_DIR") ?? (env("CLIO_HOME") ? join(env("CLIO_HOME"), "state") : null);
-	if (override) return override;
-	const h = homedir();
-	const p = platform();
-	if (p === "win32") return join(process.env.LOCALAPPDATA ?? join(h, "AppData", "Local"), "clio", "state");
-	if (p === "darwin") return join(h, "Library", "Application Support", "clio", "state");
-	return join(process.env.XDG_STATE_HOME ?? join(h, ".local", "state"), "clio");
-}
+import { clioStateDir } from "../lib/clio-paths.mjs";
 
 function cwdHash(cwd) {
 	return createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16);
@@ -256,7 +219,7 @@ function reportSession(session, { slowOnly = false, minGap = 20 } = {}) {
 
 function main() {
 	const args = parseArgs(process.argv.slice(2));
-	const sessionsRoot = join(stateDir(), "sessions", cwdHash(args.cwd));
+	const sessionsRoot = join(clioStateDir(), "sessions", cwdHash(args.cwd));
 	const sessions = listSessions(sessionsRoot);
 	if (sessions.length === 0) {
 		console.error(`no sessions found under ${sessionsRoot}`);

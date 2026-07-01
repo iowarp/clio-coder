@@ -6,8 +6,8 @@
  * harness for prompt/cache work.
  *
  * Usage:
- *   node scripts/live-turns.mjs --prompts-file <path> [--session-name <tmux>]
- *   node scripts/live-turns.mjs --baseline      # built-in 6-turn baseline
+ *   node benchmarks/live/live-turns.mjs --prompts-file <path> [--session-name <tmux>]
+ *   node benchmarks/live/live-turns.mjs --baseline      # built-in 6-turn baseline
  *
  * --cwd points at the TARGET repo the agent operates on (defaults to the
  * current directory). --clio-entry points at the built CLI entry to execute
@@ -22,8 +22,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
+import { clioStateDir } from "../lib/clio-paths.mjs";
 
 const BASELINE_PROMPTS = [
 	"hi",
@@ -36,42 +36,9 @@ const BASELINE_PROMPTS = [
 
 const OVERLAY_COMMANDS = ["/targets", "/model", "/settings", "/agents", "/skill", "/help"];
 
-const REPO_ROOT = new URL("..", import.meta.url).pathname;
+// Repo root is two levels up from benchmarks/live/.
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const DEFAULT_CLIO_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
-
-/**
- * Resolve the Clio state dir through `clio paths --json` (the built dist in
- * this checkout), the single source of truth for directory resolution. The
- * embedded fallback exists only for a broken or missing dist and must mirror
- * src/core/xdg.ts.
- */
-function stateDir() {
-	const cliEntry = join(REPO_ROOT, "dist", "cli", "index.js");
-	if (existsSync(cliEntry)) {
-		try {
-			const raw = execFileSync(process.execPath, [cliEntry, "paths", "--json"], {
-				encoding: "utf8",
-				timeout: 15_000,
-				stdio: ["ignore", "pipe", "ignore"],
-			});
-			const dirs = JSON.parse(raw);
-			if (typeof dirs.state === "string" && dirs.state.length > 0) return dirs.state;
-		} catch {
-			// Broken dist; fall through to the embedded resolution.
-		}
-	}
-	const env = (k) => {
-		const v = process.env[k]?.trim();
-		return v && v.length > 0 ? v : null;
-	};
-	const override = env("CLIO_STATE_DIR") ?? (env("CLIO_HOME") ? join(env("CLIO_HOME"), "state") : null);
-	if (override) return override;
-	const h = homedir();
-	const p = platform();
-	if (p === "win32") return join(process.env.LOCALAPPDATA ?? join(h, "AppData", "Local"), "clio", "state");
-	if (p === "darwin") return join(h, "Library", "Application Support", "clio", "state");
-	return join(process.env.XDG_STATE_HOME ?? join(h, ".local", "state"), "clio");
-}
 
 function parseArgs(argv) {
 	const args = {
@@ -206,7 +173,7 @@ async function main() {
 
 	const cwd = resolve(args.cwd);
 	const hash = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-	const sessionsRoot = join(stateDir(), "sessions", hash);
+	const sessionsRoot = join(clioStateDir(), "sessions", hash);
 	const before = new Set(existsSync(sessionsRoot) ? readdirSync(sessionsRoot) : []);
 	const cliEntry = resolve(args.clioEntry);
 	if (!existsSync(cliEntry)) {
@@ -344,7 +311,7 @@ async function main() {
 		// already exited
 	}
 	console.log(`done. session id: ${sessionId}`);
-	console.log(`inspect with: node scripts/turn-report.mjs --session ${sessionId}`);
+	console.log(`inspect with: node benchmarks/live/turn-report.mjs --session ${sessionId}`);
 	process.exit(failed ? 1 : 0);
 }
 

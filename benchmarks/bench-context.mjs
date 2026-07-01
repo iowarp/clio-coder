@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	cpSync,
@@ -17,15 +17,11 @@ import { basename, join, resolve } from "node:path";
 
 const ROOT = resolve(new URL("..", import.meta.url).pathname);
 const DEFAULT_OUT = ".clio-benchmark/context";
-const DEFAULT_CORPUS = [
-	["rendergit", "~/tmp/clio-ctxtest/rendergit", "python"],
-	["quipslop", "~/tmp/clio-ctxtest/quipslop", "typescript"],
-	["mac-mini-agent", "~/tmp/clio-ctxtest/mac-mini-agent", "python"],
-	["clio-coder", ROOT, "typescript"],
-	["once", "~/tools/once", "go"],
-	["opentui", "~/tools/opentui", "typescript"],
-];
-const QUALITY_REPOS = new Set(["rendergit", "quipslop", "mac-mini-agent"]);
+// The corpus is a committed manifest that pins each repo by URL + commit; see
+// benchmarks/context-corpus.json. Repos are cloned into DEFAULT_CACHE (skipped
+// on fetch failure) and the clio-coder ROOT entry always runs from this checkout.
+const DEFAULT_CORPUS_MANIFEST = join(ROOT, "benchmarks", "context-corpus.json");
+const DEFAULT_CACHE = join(ROOT, "benchmarks", ".corpus-cache");
 const BOOTSTRAP_DIGEST_TOKEN_BUDGET = 1200;
 const CONTEXT_FILE_CANDIDATES = [
 	"AGENTS.md",
@@ -83,17 +79,28 @@ function fail(message) {
 function usage(code = 0) {
 	console.log(`Usage: node benchmarks/bench-context.mjs [--after <cli.js>] [--before <cli.js>]
                                        [--baseline <report.json>] [--out <dir>]
+                                       [--corpus <manifest.json>] [--cache <dir>]
 
-Copies the context benchmark corpus to temp directories and measures codewiki coverage,
-determinism, digest size, end-to-end scout-read estimates, and local nav latency. A CLI
-may be a built dist JS file or an executable. If --before is supplied, the report includes
-before/after deltas measured live. If --baseline points at a prior recorded report instead,
-deltas are computed against that recorded run without rebuilding the old CLI.`);
+Checks out the pinned context benchmark corpus (default benchmarks/context-corpus.json)
+into a cache dir (default benchmarks/.corpus-cache), copies each repo to a temp directory,
+and measures codewiki coverage, determinism, digest size, end-to-end scout-read estimates,
+and local nav latency. The clio-coder ROOT entry always runs; pinned repos that cannot be
+fetched are skipped with a warning. A CLI may be a built dist JS file or an executable. If
+--before is supplied, the report includes before/after deltas measured live. If --baseline
+points at a prior recorded report instead, deltas are computed against that recorded run
+without rebuilding the old CLI.`);
 	process.exit(code);
 }
 
 function parseArgs(argv) {
-	const out = { after: join(ROOT, "dist", "cli", "index.js"), before: "", baseline: "", outDir: DEFAULT_OUT };
+	const out = {
+		after: join(ROOT, "dist", "cli", "index.js"),
+		before: "",
+		baseline: "",
+		outDir: DEFAULT_OUT,
+		corpus: DEFAULT_CORPUS_MANIFEST,
+		cache: DEFAULT_CACHE,
+	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		const need = () => argv[++i] ?? fail(`${arg} requires a value`);
@@ -101,8 +108,88 @@ function parseArgs(argv) {
 		else if (arg === "--before") out.before = need();
 		else if (arg === "--baseline") out.baseline = need();
 		else if (arg === "--out") out.outDir = need();
+		else if (arg === "--corpus") out.corpus = need();
+		else if (arg === "--cache") out.cache = need();
 		else if (arg === "--help" || arg === "-h") usage(0);
 		else fail(`unknown flag: ${arg}`);
+	}
+	return out;
+}
+
+function loadCorpusManifest(path) {
+	let parsed;
+	try {
+		parsed = JSON.parse(readFileSync(path, "utf8"));
+	} catch (err) {
+		fail(`cannot read corpus manifest ${path}: ${err.message}`);
+	}
+	if (!parsed || !Array.isArray(parsed.repos)) fail(`corpus manifest ${path} must have a "repos" array`);
+	return parsed.repos;
+}
+
+function git(args, cwd) {
+	return execFileSync("git", args, {
+		cwd,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+		timeout: 300_000,
+	});
+}
+
+// Ensure a pinned repo is checked out at its exact commit under the cache dir.
+// Returns the checkout path, or null if it could not be fetched (offline etc.),
+// so the caller can skip it without failing the whole run.
+function ensureRepoCheckout(entry, cacheDir) {
+	if (!entry.url || !entry.commit) {
+		console.error(`bench-context: skipping ${entry.name}: manifest entry needs url + commit`);
+		return null;
+	}
+	const dest = join(cacheDir, entry.name);
+	try {
+		mkdirSync(cacheDir, { recursive: true });
+		if (!existsSync(join(dest, ".git"))) {
+			rmSync(dest, { recursive: true, force: true });
+			git(["clone", "--quiet", entry.url, dest]);
+		}
+		const head = git(["-C", dest, "rev-parse", "HEAD"]).trim();
+		if (head !== entry.commit) {
+			try {
+				git(["-C", dest, "checkout", "--quiet", entry.commit]);
+			} catch {
+				git(["-C", dest, "fetch", "--quiet", "origin", entry.commit]);
+				git(["-C", dest, "checkout", "--quiet", entry.commit]);
+			}
+		}
+		return dest;
+	} catch (err) {
+		console.error(`bench-context: skipping ${entry.name} (${entry.url}@${entry.commit?.slice(0, 12)}): ${err.message}`);
+		return null;
+	}
+}
+
+// Resolve the manifest into concrete corpus entries. The ROOT entry always
+// resolves to this checkout; pinned repos are cloned into the cache and skipped
+// if unavailable.
+function materializeCorpus(opts) {
+	const repos = loadCorpusManifest(resolve(expandHome(opts.corpus)));
+	const cacheDir = resolve(expandHome(opts.cache));
+	const out = [];
+	for (const entry of repos) {
+		const shared = {
+			name: entry.name,
+			language: entry.language,
+			quality: entry.quality === true,
+			navLatency: entry.navLatency === true,
+		};
+		if (entry.root) {
+			out.push({ ...shared, src: ROOT });
+			continue;
+		}
+		const dest = ensureRepoCheckout(entry, cacheDir);
+		if (dest) out.push({ ...shared, src: dest });
+	}
+	if (out.length === 0) {
+		fail("no corpus repos available (pinned repos need network; the clio-coder ROOT entry should always resolve)");
 	}
 	return out;
 }
@@ -547,7 +634,7 @@ function qualityScore({ clioMd, codewiki, expectedLanguage, sources }) {
 	};
 }
 
-async function contextInitProbe(cli, repo, name, expectedLanguage, sources) {
+async function contextInitProbe(cli, repo, wantQuality, expectedLanguage, sources) {
 	const result = await runCli(cli, ["context-init", "--heuristic", "--yes", "--rewrite"], repo);
 	if (result.code !== 0) {
 		throw new Error(`context-init probe failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
@@ -561,7 +648,7 @@ async function contextInitProbe(cli, repo, name, expectedLanguage, sources) {
 		clioMdHash: hashJson(clioMd),
 		handoffFiles: handoffs,
 		handoffCount: handoffs.length,
-		quality: QUALITY_REPOS.has(name) ? qualityScore({ clioMd, codewiki, expectedLanguage, sources }) : null,
+		quality: wantQuality ? qualityScore({ clioMd, codewiki, expectedLanguage, sources }) : null,
 	};
 }
 
@@ -652,9 +739,8 @@ async function measureCli(cli, corpus) {
 	const temp = mkdtempSync(join(tmpdir(), "clio-context-bench-"));
 	const results = [];
 	try {
-		for (const [name, rawPath, expectedLanguage] of corpus) {
-			const src = resolve(expandHome(rawPath));
-			if (!existsSync(src)) fail(`missing corpus path ${rawPath}`);
+		for (const entry of corpus) {
+			const { name, src, language: expectedLanguage } = entry;
 			const repo = copyCorpus(src, temp, name);
 			const sources = await collectSourceFiles(repo);
 			const first = await indexOnce(cli, repo);
@@ -663,7 +749,7 @@ async function measureCli(cli, corpus) {
 			const coverage = sources.length === 0 ? 1 : indexed / sources.length;
 			const language = second.codewiki?.language ?? "unknown";
 			const prompt = promptMetrics(repo, second.codewiki);
-			const contextInit = await contextInitProbe(cli, repo, name, expectedLanguage, sources);
+			const contextInit = await contextInitProbe(cli, repo, entry.quality, expectedLanguage, sources);
 			const assertions = {
 				hasFiles: indexed > 0,
 				coverageOk: sources.length === 0 || coverage >= 0.95,
@@ -673,7 +759,7 @@ async function measureCli(cli, corpus) {
 						: language === expectedLanguage,
 				deterministic: first.structuralHash === second.structuralHash,
 				noHandoffFromContextInit: contextInit.handoffCount === 0,
-				qualityOk: !QUALITY_REPOS.has(name) || (contextInit.quality?.score ?? 0) >= 2,
+				qualityOk: !entry.quality || (contextInit.quality?.score ?? 0) >= 2,
 			};
 			results.push({
 				name,
@@ -690,7 +776,7 @@ async function measureCli(cli, corpus) {
 				promptPayloadTokens: prompt.payloadTokens,
 				promptTokenBasis: prompt.basis,
 				scout: scoutEstimate(repo, second.codewiki),
-				navLatency: name === "opentui" ? navLatency(second.codewiki) : null,
+				navLatency: entry.navLatency ? navLatency(second.codewiki) : null,
 				contextInit,
 				assertions,
 			});
@@ -725,7 +811,7 @@ function compare(before, after) {
 
 async function main() {
 	const opts = parseArgs(process.argv.slice(2));
-	const corpus = DEFAULT_CORPUS;
+	const corpus = materializeCorpus(opts);
 	const after = await measureCli(resolve(opts.after), corpus);
 	let before = opts.before ? await measureCli(resolve(opts.before), corpus) : [];
 	let baselineSource = "";
@@ -737,7 +823,7 @@ async function main() {
 	const delta = before.length > 0 ? compare(before, after) : [];
 	const report = {
 		generatedAt: new Date().toISOString(),
-		corpus: corpus.map(([name, path, expectedLanguage]) => ({ name, path, expectedLanguage })),
+		corpus: corpus.map((entry) => ({ name: entry.name, path: entry.src, expectedLanguage: entry.language })),
 		afterCli: resolve(opts.after),
 		...(opts.before ? { beforeCli: resolve(opts.before) } : {}),
 		...(baselineSource ? { baselineReport: baselineSource } : {}),

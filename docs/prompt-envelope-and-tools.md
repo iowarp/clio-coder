@@ -37,7 +37,7 @@ Compaction rewrites history, so the next turn on a local single-slot backend is 
 Use the turn report to inspect persisted timing and cache behavior:
 
 ```bash
-node scripts/turn-report.mjs --session <id>
+node benchmarks/live/turn-report.mjs --session <id>
 ```
 
 The report prints per-call `ttft`, `api`, input, cache read, cache write, backend cache verdict, and expected cold reasons. Cache verdicts are `hot`, `partial`, `cold`, or `small`.

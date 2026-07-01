@@ -1,0 +1,66 @@
+{
+	"description": "Single source of truth for the model fleets the benchmark + battletest harnesses drive. Named profiles map the three operating modes to concrete targets/models: (a) local-single = one node, one model; (b) local-split = orchestrator and workers on separate nodes; (c) cloud-* = frontier models for apples-to-apples comparison with Claude Code / Codex. Adapters call clio_fleet.load_fleet(); the selected profile defaults to `default` below and is overridable with CLIO_FLEET_PROFILE. The per-node CLIO_* env vars still override url/model/target/thinking per run, and terminal-bench's install-clio.sh renders its container settings.yaml from the same CLIO_* vars. Cloud profiles authenticate through the operator's ~/.config/clio OAuth (anthropic-max / openai-codex) and are pass@k only (frontier decoding is not bit-reproducible).",
+	"default": "local-split",
+	"predictionModelName": "clio-coder-qwopus3.6-27b",
+	"profiles": {
+		"local-single": {
+			"description": "One node, one model loaded: mini serves both orchestrator and workers.",
+			"orchestrator": {
+				"target": "mini",
+				"runtime": "llamacpp",
+				"url": "http://192.168.86.141:8080",
+				"model": "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K",
+				"thinking": "off"
+			},
+			"workers": {
+				"target": "mini",
+				"runtime": "llamacpp",
+				"url": "http://192.168.86.141:8080",
+				"model": "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K",
+				"thinking": "off"
+			}
+		},
+		"local-split": {
+			"description": "Orchestrator on mini, workers on dynamo: exercises the full cross-node dispatch path.",
+			"orchestrator": {
+				"target": "mini",
+				"runtime": "llamacpp",
+				"url": "http://192.168.86.141:8080",
+				"model": "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K",
+				"thinking": "off"
+			},
+			"workers": {
+				"target": "dynamo",
+				"runtime": "lmstudio-native",
+				"url": "http://192.168.86.143:1234",
+				"model": "ornith-1.0-35b",
+				"thinking": "off"
+			}
+		},
+		"cloud-claude": {
+			"description": "Frontier Claude for apples-to-apples comparison with Claude Code. OAuth via anthropic-max; pass@k only.",
+			"orchestrator": {
+				"target": "anthropic-max",
+				"runtime": "anthropic-max",
+				"model": "claude-opus-4-8",
+				"thinking": "medium"
+			},
+			"workers": {
+				"target": "anthropic-max",
+				"runtime": "anthropic-max",
+				"model": "claude-sonnet-5",
+				"thinking": "medium"
+			}
+		},
+		"cloud-openai": {
+			"description": "Frontier OpenAI for apples-to-apples comparison with Codex. OAuth via openai-codex; pass@k only.",
+			"orchestrator": { "target": "openai-codex", "runtime": "openai-codex", "model": "gpt-5.5", "thinking": "medium" },
+			"workers": {
+				"target": "openai-codex",
+				"runtime": "openai-codex",
+				"model": "gpt-5.3-codex-spark",
+				"thinking": "high"
+			}
+		}
+	}
+}

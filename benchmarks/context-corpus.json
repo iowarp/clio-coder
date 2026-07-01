@@ -1,0 +1,40 @@
+{
+	"version": 1,
+	"description": "Portable corpus for the context-engine benchmark (benchmarks/bench-context.mjs). Each repo is pinned by URL + commit and checked out under a cache dir (default benchmarks/.corpus-cache, gitignored). The clio-coder ROOT entry always runs from this checkout; pinned repos that cannot be fetched (offline) are skipped with a warning so the benchmark still runs on whatever is available. The tracked baselines (context-baseline-main.json, context-after.json) were recorded on the author's earlier local corpus, so cross-run deltas only appear for repos whose names match.",
+	"repos": [
+		{ "name": "clio-coder", "root": true, "language": "typescript" },
+		{
+			"name": "rendergit",
+			"url": "https://github.com/karpathy/rendergit.git",
+			"commit": "14d7a58c0f4d815a3447f25e9ef1088c7e9ade84",
+			"language": "python",
+			"quality": true
+		},
+		{
+			"name": "click",
+			"url": "https://github.com/pallets/click.git",
+			"commit": "6ec99f89261b32f8a50848786eca055e1967659f",
+			"language": "python"
+		},
+		{
+			"name": "commander",
+			"url": "https://github.com/tj/commander.js.git",
+			"commit": "ba6d13ddb4243e5913367734f8c159089ffe7834",
+			"language": "javascript",
+			"quality": true
+		},
+		{
+			"name": "once",
+			"url": "https://github.com/basecamp/once.git",
+			"commit": "34fb5982f5055f21b059cadbf3eacc8accca762e",
+			"language": "go"
+		},
+		{
+			"name": "opentui",
+			"url": "https://github.com/anomalyco/opentui.git",
+			"commit": "cea1daec460ab487b7f2aab274c6be0798a74c64",
+			"language": "typescript",
+			"navLatency": true
+		}
+	]
+}
