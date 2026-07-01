@@ -137,6 +137,8 @@ export interface CompletionContractAuditRecord {
 	kind: "completion_contract";
 	ts: string;
 	correlationId: string;
+	runId?: string;
+	sessionId?: string;
 	turnId: string | null;
 	decision: CompletionContractDecision;
 	reason: string;
@@ -146,6 +148,8 @@ export interface CompletionContractAuditRecord {
 }
 
 export interface CompletionContractAuditInput {
+	runId?: string;
+	sessionId?: string;
 	turnId: string | null;
 	decision: CompletionContractDecision;
 	reason: string;
@@ -340,7 +344,7 @@ export function buildAgentStatusChangeAuditRecord(input: {
 
 export function buildCompletionContractAuditRecord(input: CompletionContractAuditInput): CompletionContractAuditRecord {
 	const now = input.now ?? new Date();
-	return {
+	const record: CompletionContractAuditRecord = {
 		kind: "completion_contract",
 		ts: now.toISOString(),
 		correlationId: newCorrelationId(),
@@ -351,6 +355,9 @@ export function buildCompletionContractAuditRecord(input: CompletionContractAudi
 		mutatedPaths: input.mutatedPaths.map((path) => redactString(path)),
 		evidenceKinds: [...input.evidenceKinds],
 	};
+	if (input.runId !== undefined) record.runId = input.runId;
+	if (input.sessionId !== undefined) record.sessionId = input.sessionId;
+	return record;
 }
 
 interface OpenFile {

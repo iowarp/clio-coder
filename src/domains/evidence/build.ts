@@ -205,7 +205,7 @@ function buildFindings(
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
 ): EvidenceFinding[] {
 	const findings: EvidenceFinding[] = [];
-	const validationRunIds = validationEvidenceRunIds(sessionLinks.entries, runSources);
+	const validationRunIds = validationEvidenceRunIds(sessionLinks.entries, runSources, auditLinks.rows);
 	for (const source of runSources) {
 		if (source.receiptError !== null) {
 			const tag = source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
@@ -298,8 +298,10 @@ interface ValidationToolCallCandidate {
 function validationEvidenceRunIds(
 	entries: ReadonlyArray<LinkedSessionEntry>,
 	runSources: ReadonlyArray<EvidenceRunSource>,
+	auditRows: ReadonlyArray<EvidenceAuditLinkedRow>,
 ): Set<string> {
 	const runIds = new Set<string>();
+	const sourceRunIds = new Set(runSources.map((source) => source.envelope.id));
 	const calls = new Map<string, ValidationToolCallCandidate>();
 	for (const linked of entries) {
 		const runId = validationRunIdFor(linked, runSources);
@@ -323,6 +325,13 @@ function validationEvidenceRunIds(
 		if (result.id === null || !isSuccessfulSessionToolResult(result)) continue;
 		const candidate = calls.get(result.id);
 		if (candidate?.runId !== null && candidate?.runId !== undefined) runIds.add(candidate.runId);
+	}
+	for (const linked of auditRows) {
+		if (linked.auditKind !== "completion_contract") continue;
+		if (linked.runId === null || !sourceRunIds.has(linked.runId)) continue;
+		if (readOptionalString(linked.row.decision) !== "ok") continue;
+		if (readOptionalString(linked.row.reason) !== "validation_evidence") continue;
+		runIds.add(linked.runId);
 	}
 	return runIds;
 }

@@ -29,7 +29,7 @@ import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
-import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
+import type { CompletionContractAuditInput, ToolCallAuditInput } from "../../src/domains/safety/audit.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
@@ -104,6 +104,7 @@ function stubContext(
 		status?: Partial<TargetStatus>;
 		budgetVerdict?: "under" | "at" | "over";
 		auditSink?: ToolCallAuditInput[];
+		completionSink?: CompletionContractAuditInput[];
 	} = {},
 ): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -198,6 +199,9 @@ function stubContext(
 			recordCount: () => 0,
 			...(options.auditSink !== undefined
 				? { recordToolCall: (input: ToolCallAuditInput) => options.auditSink?.push(input) }
+				: {}),
+			...(options.completionSink !== undefined
+				? { recordCompletionContract: (input: CompletionContractAuditInput) => options.completionSink?.push(input) }
 				: {}),
 		},
 	};
@@ -1799,6 +1803,131 @@ describe("contracts/dispatch tool activity honesty", () => {
 				mutatingSucceeded: false,
 			});
 		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("records and enforces the finish contract for high-rigor dispatched worker completions", async () => {
+		const completionRows: CompletionContractAuditInput[] = [];
+		const context = stubContext({
+			completionSink: completionRows,
+			status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true } },
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const originalRigor = process.env.CLIO_RIGOR;
+		process.env.CLIO_RIGOR = "high";
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 8103,
+				promise: exit.promise,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+				events: (async function* () {
+					yield {
+						type: "message_end",
+						message: { role: "user", content: "edit src/app.ts" },
+					};
+					yield {
+						type: "tool_execution_start",
+						toolCallId: "write-1",
+						toolName: "write",
+						args: { path: "src/app.ts", content: "updated" },
+					};
+					yield {
+						type: "tool_execution_end",
+						toolCallId: "write-1",
+						toolName: "write",
+						isError: false,
+						result: { details: { kind: "ok" } },
+					};
+					yield {
+						type: "message_end",
+						message: { role: "assistant", content: "Done. Implemented." },
+					};
+				})(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "edit src/app.ts" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(completionRows.length, 1);
+			strictEqual(completionRows[0]?.runId, handle.runId);
+			strictEqual(completionRows[0]?.decision, "engage");
+			strictEqual(completionRows[0]?.reason, "unvalidated_mutation");
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.exitCode, 1);
+		} finally {
+			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
+			else process.env.CLIO_RIGOR = originalRigor;
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("records validation evidence for a dispatched worker that validates after mutating", async () => {
+		const completionRows: CompletionContractAuditInput[] = [];
+		const context = stubContext({
+			completionSink: completionRows,
+			status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true } },
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const originalRigor = process.env.CLIO_RIGOR;
+		process.env.CLIO_RIGOR = "high";
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 8104,
+				promise: exit.promise,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+				events: (async function* () {
+					yield { type: "message_end", message: { role: "user", content: "edit and test" } };
+					yield {
+						type: "tool_execution_start",
+						toolCallId: "write-1",
+						toolName: "write",
+						args: { path: "src/app.ts", content: "updated" },
+					};
+					yield {
+						type: "tool_execution_end",
+						toolCallId: "write-1",
+						toolName: "write",
+						isError: false,
+						result: { details: { kind: "ok" } },
+					};
+					yield {
+						type: "tool_execution_start",
+						toolCallId: "test-1",
+						toolName: "run_task",
+						args: { task: "test" },
+					};
+					yield {
+						type: "tool_execution_end",
+						toolCallId: "test-1",
+						toolName: "run_task",
+						isError: false,
+						result: { details: { exitCode: 0 } },
+					};
+					yield { type: "message_end", message: { role: "assistant", content: "Tests pass. Done." } };
+				})(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "edit and test" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(completionRows.length, 1);
+			strictEqual(completionRows[0]?.runId, handle.runId);
+			strictEqual(completionRows[0]?.decision, "ok");
+			strictEqual(completionRows[0]?.reason, "validation_evidence");
+			strictEqual(receipt.outcome, "succeeded");
+			strictEqual(receipt.exitCode, 0);
+		} finally {
+			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
+			else process.env.CLIO_RIGOR = originalRigor;
 			await bundle.extension.stop?.();
 		}
 	});
