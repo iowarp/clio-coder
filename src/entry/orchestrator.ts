@@ -495,6 +495,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const config = result.getContract<ConfigContract>("config");
 	const providers = result.getContract<ProvidersContract>("providers");
+	timer.mark("providers resolved");
 
 	if (options.apiKey) {
 		if (!providers) {
@@ -933,6 +934,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
+	timer.mark("first TUI paint");
 	await startInteractive({
 		bus,
 		providers,
