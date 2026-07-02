@@ -163,7 +163,19 @@ function dispatchRequestsFromArgs(
 	const requests: DispatchRequest[] = [];
 	for (let index = 0; index < tasks.length; index += 1) {
 		const item = tasks[index];
-		const itemArgs = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		if (isRecord(item)) {
+			// The task's own agent identity overrides the shared default. `agent`
+			// and its `agent_id` alias both survive the spread, and
+			// dispatchRequestFromArgs resolves `agent` first, so a shared `agent`
+			// would otherwise beat a task-level `agent_id`. Canonicalize the task's
+			// identity into `agent` and drop the now-ambiguous alias.
+			const itemAgent = stringArg(item, "agent", "agent_id");
+			if (itemAgent !== undefined) {
+				itemArgs.agent = itemAgent;
+				Reflect.deleteProperty(itemArgs, "agent_id");
+			}
+		}
 		const parsed = dispatchRequestFromArgs(itemArgs);
 		if (!parsed.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${parsed.message}` };
 		requests.push(parsed.request);
