@@ -6,10 +6,12 @@ import { ToolNames } from "../core/tool-names.js";
 import { resolveFdBinary } from "./executables.js";
 import { compileGlobRegex, fallbackIgnoredDirs, fdIgnoreArgs, normalizeGlobInput } from "./ignore-policy.js";
 import {
+	commitObservationReservation,
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
 	type ObservationReservation,
 	observationBudgetExhausted,
+	releaseObservation,
 	reserveObservation,
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
@@ -250,33 +252,41 @@ export const findTool: ToolSpec = {
 		}
 		const collectLimit = order === "mtime" ? Math.max(limit * 4, MTIME_CANDIDATE_FLOOR) : limit + 1;
 
-		let collectedPaths: string[];
-		const fdPath = resolveFdBinary();
-		if (fdPath) {
-			const result = await fdFind(fdPath, pattern, searchPath, collectLimit, includeIgnored, options?.signal);
-			if (!result.ok) return { kind: "error", message: result.message };
-			collectedPaths = result.paths;
-		} else {
-			try {
-				collectedPaths = await fallbackFind(pattern, searchPath, collectLimit, includeIgnored, options?.signal);
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return { kind: "error", message: `find: ${message}` };
+		// find yields on the fd subprocess / readdir walk below, so charge the
+		// shared turn pool up front and refund the unused slice at finalize; a
+		// concurrent OBSERVE sibling that reserves mid-walk must see this spend.
+		commitObservationReservation(reservation);
+		try {
+			let collectedPaths: string[];
+			const fdPath = resolveFdBinary();
+			if (fdPath) {
+				const result = await fdFind(fdPath, pattern, searchPath, collectLimit, includeIgnored, options?.signal);
+				if (!result.ok) return { kind: "error", message: result.message };
+				collectedPaths = result.paths;
+			} else {
+				try {
+					collectedPaths = await fallbackFind(pattern, searchPath, collectLimit, includeIgnored, options?.signal);
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					return { kind: "error", message: `find: ${message}` };
+				}
 			}
-		}
 
-		const ordered: OrderedPaths =
-			order === "mtime"
-				? orderByMtime(collectedPaths, searchPath, limit, collectLimit)
-				: { paths: collectedPaths.slice(0, limit), candidateCapHit: false, candidateCap: null };
-		return renderFindResult({
-			ordered,
-			collected: collectedPaths.length,
-			collectLimit,
-			limit,
-			order,
-			reservation,
-			options,
-		});
+			const ordered: OrderedPaths =
+				order === "mtime"
+					? orderByMtime(collectedPaths, searchPath, limit, collectLimit)
+					: { paths: collectedPaths.slice(0, limit), candidateCapHit: false, candidateCap: null };
+			return renderFindResult({
+				ordered,
+				collected: collectedPaths.length,
+				collectLimit,
+				limit,
+				order,
+				reservation,
+				options,
+			});
+		} finally {
+			releaseObservation(reservation);
+		}
 	},
 };
