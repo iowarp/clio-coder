@@ -3,7 +3,7 @@ import { detectProjectType, type ProjectType } from "./project-type.js";
 
 /**
  * Workspace snapshot captured at session bind. Read-only for the session's
- * lifetime; refreshed by /reset or /new. Surfaced via the workspace_context
+ * lifetime; refreshed by /reset or /new. Surfaced via context(scope="workspace")
  * tool and the welcome dashboard's Workspace panel.
  */
 export interface WorkspaceCommit {

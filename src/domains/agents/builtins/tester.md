@@ -1,7 +1,7 @@
 ---
 name: Tester
 description: Adds focused deterministic tests for regressions and missing coverage.
-tools: [read, write, edit, grep, glob, ls, git, run_task]
+tools: [read, write, edit, grep, find, ls, git, verify]
 audience: base
 category: quality
 capabilityClass: workspace-edit

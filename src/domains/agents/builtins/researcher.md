@@ -1,7 +1,7 @@
 ---
 name: Researcher
 description: Shadow external-source researcher for coding decisions, official docs, standards, release notes, and academic papers.
-tools: [read, web_fetch, read_skill]
+tools: [read, web_fetch, context]
 audience: shadow
 category: research
 capabilityClass: read-only

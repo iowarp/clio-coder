@@ -120,7 +120,6 @@ function pickToolArg(toolName: string, args: unknown): string {
 		verify: ["check"],
 		grep: ["pattern", "query"],
 		search: ["query", "pattern"],
-		glob: ["pattern"],
 		web_fetch: ["url"],
 		web_search: ["query"],
 	};
