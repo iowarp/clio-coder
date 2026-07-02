@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { assertSafeId } from "../../core/safe-id.js";
 import type { EvidenceFinding, EvidenceFindingsFile, EvidenceInspectable, EvidenceOverview } from "./types.js";
 
 export const EVIDENCE_FILES = [
@@ -20,6 +21,7 @@ export function evidenceRoot(dataDir: string): string {
 }
 
 export function evidenceDirectory(dataDir: string, evidenceId: string): string {
+	assertSafeId(evidenceId, "evidence");
 	return join(evidenceRoot(dataDir), evidenceId);
 }
 

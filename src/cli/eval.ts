@@ -1,3 +1,4 @@
+import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir } from "../core/xdg.js";
 import type { EvalRunArtifact } from "../domains/eval/index.js";
 import {
@@ -181,7 +182,7 @@ async function runEvalReportCommand(parsed: ParsedEvalArgs): Promise<number> {
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		return 1;
+		return error instanceof InvalidIdError ? 2 : 1;
 	}
 }
 
@@ -200,6 +201,6 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		return 1;
+		return error instanceof InvalidIdError ? 2 : 1;
 	}
 }

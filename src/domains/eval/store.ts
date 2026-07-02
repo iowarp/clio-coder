@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { evalHarnessMetricsFromCommands, ZERO_EVAL_HARNESS_METRICS } from "./metrics.js";
 import type {
@@ -55,6 +56,7 @@ export function evalRoot(dataDir: string): string {
 }
 
 export function evalArtifactPath(dataDir: string, evalId: string): string {
+	assertSafeId(evalId, "eval");
 	return join(evalRoot(dataDir), `${evalId}.json`);
 }
 
