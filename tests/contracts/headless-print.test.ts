@@ -46,18 +46,19 @@ function buildFakeChatLoop(events: ChatLoopEvent[]): ChatLoop {
 }
 
 describe("contracts/headless-print", () => {
-	it("exits 0 with empty output when the turn ends on a terminating tool result (write_plan)", async () => {
+	it("exits 0 with empty output when the turn ends on a terminating tool result (artifact plan)", async () => {
 		// Regression for FINDINGS.md F2's headless corroboration: a turn whose
-		// only action is write_plan/write_review never produces an assistant
-		// message_end (ToolResult.terminate skips the follow-up LLM call), so
-		// headless `clio run` used to report "no assistant response" and exit 1
-		// even though the tool did real, successful work.
+		// only action is a terminal artifact (kind=plan/review/report) never
+		// produces an assistant message_end (ToolResult.terminate skips the
+		// follow-up LLM call), so headless `clio run` used to report "no
+		// assistant response" and exit 1 even though the tool did real,
+		// successful work.
 		const chat = buildFakeChatLoop([
-			{ type: "tool_execution_start", toolCallId: "1", toolName: "write_plan", args: {} },
+			{ type: "tool_execution_start", toolCallId: "1", toolName: "artifact", args: { kind: "plan" } },
 			{
 				type: "tool_execution_end",
 				toolCallId: "1",
-				toolName: "write_plan",
+				toolName: "artifact",
 				result: { content: [], details: {}, terminate: true },
 				isError: false,
 			},

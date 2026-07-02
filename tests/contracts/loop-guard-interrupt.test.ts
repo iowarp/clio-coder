@@ -16,7 +16,7 @@ function captureChat(): { calls: ChatCancelOptions[]; cancel(options?: ChatCance
 }
 
 const loopBlocked = (interrupted: boolean): LoopBlockedPayload => ({
-	tool: "docs_search",
+	tool: "context",
 	repeatCount: 3,
 	blocksThisTurn: interrupted ? 2 : 1,
 	budget: 2,
@@ -43,9 +43,9 @@ describe("contracts/loop-guard-interrupt operatorless stop", () => {
 		bus.emit(BusChannels.LoopBlocked, loopBlocked(true));
 		strictEqual(chat.calls.length, 1);
 		strictEqual(chat.calls[0]?.source, "loop_guard");
-		ok(chat.calls[0]?.reason?.includes("docs_search"), "reason names the looping tool");
+		ok(chat.calls[0]?.reason?.includes("context"), "reason names the looping tool");
 		ok(chat.calls[0]?.reason?.includes("loop guard stopped this turn"), "reason states the stop");
-		strictEqual(chat.calls[0]?.auditReason, "loop: docs_search repeated 3x");
+		strictEqual(chat.calls[0]?.auditReason, "loop: context repeated 3x");
 	});
 
 	it("stops the turn with a loop_guard cancel on a tool-call ceiling interrupt", () => {

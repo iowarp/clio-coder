@@ -99,6 +99,7 @@ describe("contracts/slash-spec", () => {
 			openExtensions: () => opened.push("extensions"),
 			setEditorText: (text) => opened.push(`editor:${text}`),
 			runCompact: () => undefined,
+			exportTranscript: () => undefined,
 			verifyReceipt: () => ({ ok: false, reason: "missing" }),
 			submitChat: (text) => submitted.push(text),
 			render: () => undefined,
@@ -386,6 +387,7 @@ describe("contracts/slash-spec", () => {
 			"tree",
 			"fork",
 			"compact",
+			"export",
 		];
 		deepStrictEqual(
 			BUILTIN_SLASH_COMMANDS.map((entry) => entry.name),

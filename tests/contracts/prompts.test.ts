@@ -18,9 +18,8 @@ import { compile } from "../../src/domains/prompts/compiler.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
-import { emptyWorkspaceSnapshot } from "../../src/domains/session/workspace/index.js";
+import { createContextTool } from "../../src/tools/context/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
-import { workspaceContextTool } from "../../src/tools/workspace-context.js";
 
 const scratchRoots: string[] = [];
 
@@ -79,7 +78,7 @@ async function compileProjectPrompt(cwd: string) {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["workspace_context", "grep", "read"],
+				activeToolNames: ["context", "grep", "read"],
 			},
 		});
 	} finally {
@@ -108,7 +107,7 @@ async function compileProjectPromptWithWorkingPaths(cwd: string, workingContextP
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["workspace_context", "grep", "read"],
+				activeToolNames: ["context", "grep", "read"],
 			},
 		});
 	} finally {
@@ -228,7 +227,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read", "grep", "read_skill", "dispatch"],
+				activeToolNames: ["read", "grep", "context", "dispatch"],
 			},
 		});
 
@@ -242,11 +241,11 @@ describe("contracts/prompts compiler logic", () => {
 			result.sections.some((section) => section.id === "skills-catalog"),
 			false,
 		);
-		ok(result.systemPrompt.includes("Call read_skill with no name to list available skills"));
+		ok(result.systemPrompt.includes('Call context with scope="skills" to list available skills'));
 		ok(result.systemPrompt.includes("Call dispatch with list:true"));
 	});
 
-	it("omits the catalog one-liners when read_skill and dispatch are not in the session surface", () => {
+	it("omits the catalog one-liners when context and dispatch are not in the session surface", () => {
 		const table = loadFragments();
 		const result = compile(table, {
 			identity: "identity.clio",
@@ -260,7 +259,7 @@ describe("contracts/prompts compiler logic", () => {
 			},
 		});
 
-		strictEqual(result.systemPrompt.includes("read_skill with no name"), false);
+		strictEqual(result.systemPrompt.includes('scope="skills"'), false);
 		strictEqual(result.systemPrompt.includes("list:true"), false);
 	});
 
@@ -274,7 +273,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read", "grep", "dispatch", "read_skill", "ask_user"],
+				activeToolNames: ["read", "grep", "dispatch", "context", "ask_user"],
 			},
 		});
 		strictEqual(result.systemPrompt.includes("send policy"), false);
@@ -293,10 +292,10 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read_skill", "ask_user"],
+				activeToolNames: ["context", "ask_user"],
 			},
 		});
-		ok(active.systemPrompt.includes("first call read_skill for that skill"));
+		ok(active.systemPrompt.includes("first load that skill via context"));
 		ok(active.systemPrompt.includes("Use ask_user for operator interviews"));
 		ok(active.systemPrompt.includes("If cancelled, continue with defaults"));
 
@@ -308,7 +307,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read_skill"],
+				activeToolNames: ["context"],
 			},
 		});
 		strictEqual(inactive.systemPrompt.includes("Use ask_user for operator interviews"), false);
@@ -386,7 +385,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["workspace_context", "grep", "read"],
+				activeToolNames: ["context", "grep", "read"],
 			};
 			const first = await promptsBundle.contract.compileSessionPrompt({ cwd, sessionInputs });
 			ok(first.systemPrompt.includes("Keep prompt context compact."));
@@ -430,7 +429,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		const res = await compileProjectPrompt(cwd);
 		const systemPrompt = res.systemPrompt;
 		ok(systemPrompt.includes("# Retrieval Hints"));
-		ok(systemPrompt.includes("inspect with code_nav, workspace_context, grep, or read before answering"));
+		ok(systemPrompt.includes("inspect with code_nav, context, grep, or read before answering"));
 		ok(systemPrompt.includes("Never invent file paths, automatic tool behavior, or mutable repo details"));
 	});
 
@@ -453,16 +452,10 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 		ok(withWorkingPath.systemPrompt.includes("Prefer explicit exports for fixture modules."));
 	});
 
-	it("workspace_context is not described as automatic and is explicit/manual", () => {
-		const spec = workspaceContextTool({
-			getSnapshot: () => null,
-			probeWorkspace: () => emptyWorkspaceSnapshot(process.cwd()),
-			saveSnapshot: () => {},
-			hasSession: () => true,
-		});
-		ok(spec.description.includes("An explicit, manual workspace snapshot tool"));
-		ok(spec.description.includes("Do not assume this tool is run automatically"));
-		strictEqual(spec.description.includes("runs automatically"), false);
+	it("context is not described as automatic; the snapshot is an explicit call", () => {
+		const spec = createContextTool();
+		ok(spec.description.includes("scope=workspace"));
+		strictEqual(spec.description.toLowerCase().includes("automatic"), false);
 	});
 
 	it("dispatch is not described as context handoff", () => {
