@@ -104,6 +104,11 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 		}
 	}
 	const entries = providers.list();
+	if (parsed.target !== undefined && !entries.some((e) => e.target.id === parsed.target)) {
+		printError(`no target with id ${parsed.target}. ${targetCount(entries.length)} configured.`);
+		await loaded.stop();
+		return 2;
+	}
 	const filtered = parsed.target ? entries.filter((e) => e.target.id === parsed.target) : entries;
 	const rows = collectRows(filtered, providers).filter((row) => matchesSearch(row, parsed.search));
 
