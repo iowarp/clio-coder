@@ -36,6 +36,23 @@ describe("contracts/config", () => {
 		deepStrictEqual(result.settings, DEFAULT_SETTINGS);
 	});
 
+	// BUG-008: validateSettingsFile falls back to defaults for a genuinely missing
+	// file before calling validateSettings, so a null/undefined/empty document
+	// reaching validateSettings is a present, malformed file, not a valid default.
+	it("rejects a present null, undefined, or empty settings document as a root-shape issue", () => {
+		for (const raw of [null, undefined, parseYaml(""), parseYaml("null\n")]) {
+			const result = validateSettings(raw);
+			strictEqual(
+				result.issues.some(
+					(issue) => issue.path === "(root)" && /expected a map, got (null|undefined)/.test(issue.message),
+				),
+				true,
+				`expected a root-shape issue for ${JSON.stringify(raw)}`,
+			);
+			deepStrictEqual(result.settings, DEFAULT_SETTINGS);
+		}
+	});
+
 	it("validates target config and fills default/fallback models", () => {
 		const result = validateSettings({
 			identity: "clio",

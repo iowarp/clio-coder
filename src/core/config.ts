@@ -601,7 +601,10 @@ export interface SettingsValidationResult {
 export function validateSettings(raw: unknown): SettingsValidationResult {
 	const issues = new Issues();
 	const settings = cloneValue(DEFAULT_SETTINGS);
-	if (raw === null || raw === undefined) return { settings, issues: issues.list };
+	// A genuinely missing settings file falls back to defaults before ever
+	// reaching here (validateSettingsFile returns early when the file is absent).
+	// So a null/undefined raw here means a present-but-empty or `null` document,
+	// which is malformed and must be a root-shape issue, not silent defaults.
 	if (!isPlainObject(raw)) {
 		issues.add("(root)", `expected a map, got ${describe(raw)}`);
 		return { settings, issues: issues.list };
