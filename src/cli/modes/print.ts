@@ -294,7 +294,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			}
 		}
 		recordToolEnd(receiptStats, event);
-		if (event.type === "agent_end") receiptStats.usage = sumRunUsage(event.messages);
+		if (event.type === "agent_end") {
+			// Notice-only agent_end events carry no usage; never let one clobber
+			// the real run's totals with zeros.
+			const usageSummary = sumRunUsage(event.messages);
+			if (usageSummary.hadUsage) receiptStats.usage = usageSummary;
+		}
 		result = resultFromEvent(event, result);
 	});
 
