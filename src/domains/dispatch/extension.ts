@@ -2366,8 +2366,13 @@ export function createDispatchBundle(
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
 		): RunReceiptDraft => {
+			// A canceled run seals status "interrupted" and must not report exit 0:
+			// the terminal state disagrees with a success code. This mirrors the ACP
+			// receipt builder, which already coerces "interrupted" to nonzero.
 			const receiptExitCode =
-				status === "dead" || (status === "failed" && result.exitCode === 0) ? 1 : (result.exitCode ?? 1);
+				status === "dead" || status === "interrupted" || (status === "failed" && result.exitCode === 0)
+					? 1
+					: (result.exitCode ?? 1);
 			const toolActivity = summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass);
 			// A run that exits 0 with zero successful tool calls keeps its
 			// succeeded outcome (the harness cannot judge semantic completion),
