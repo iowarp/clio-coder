@@ -471,11 +471,27 @@ export function toolResultSummary(result: unknown): Record<string, unknown> {
 	const details = recordValue(obj?.details);
 	const size = recordValue(details?.resultSize);
 	const truncation = recordValue(details?.truncation);
+	const observation = recordValue(details?.observation);
+	const offloadPath =
+		typeof observation?.offloadPath === "string"
+			? observation.offloadPath
+			: typeof size?.offloadPath === "string"
+				? size.offloadPath
+				: null;
 	return {
 		bytes,
-		truncated: size?.truncated === true || truncation?.truncated === true || text.includes("[tool result truncated]"),
+		truncated:
+			size?.truncated === true ||
+			truncation?.truncated === true ||
+			observation?.truncated === true ||
+			text.includes("[tool result truncated]"),
 		...(typeof size?.policy === "string" ? { policy: size.policy } : {}),
 		...(typeof size?.followUpHint === "string" ? { followUpHint: size.followUpHint } : {}),
+		...(offloadPath !== null ? { offloadPath } : {}),
+		// Observation envelope counts (OBSERVE plane): unit, shown/total counts
+		// and bytes, format, exact continuation, offload path. Persisted with
+		// the turn so the ledger line renders identically live and on replay.
+		...(observation !== null ? { observation } : {}),
 	};
 }
 
