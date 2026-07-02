@@ -142,8 +142,8 @@ import { openViewOverlay } from "./view/view-overlay.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 
 // Re-exports preserve the public surface for diag scripts that import these
-// names from "interactive/index.js". Slice 2.6 relocated the implementations
-// into slash-commands.ts.
+// names from "interactive/index.js"; the implementations live in
+// slash-commands.ts.
 export {
 	BUILTIN_SLASH_COMMANDS,
 	type BuiltinSlashCommand,
@@ -235,8 +235,7 @@ export interface InteractiveDeps {
 	 * Run /compact for the current session. Resolves the compaction model
 	 * (settings.compaction.model with fallback to the orchestrator target),
 	 * reads session entries, streams a summary via the session compaction
-	 * engine, and persists a compactionSummary entry. Slice 12c ships the
-	 * hook; 12d adds the auto-trigger and overflow-recovery path.
+	 * engine, and persists a compactionSummary entry.
 	 */
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	/** Run /context-init for the current working directory. */

@@ -1106,11 +1106,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtime.runtimeResolution = target.runtimeResolution;
 			appendModelChangeEntry(target);
 			ensureReasoningProbe(target);
-			// Residency reconciliation now lives in the shared engine stream path
-			// (src/engine/apis/residency.ts), which both the interactive and
-			// headless paths drive, so the hot-swap no longer evicts here. The
-			// reconciler releases any Clio-loaded straggler just-in-time on the
-			// next turn, backs off on a foreign-loaded model, and is VRAM-aware.
 			return runtime;
 		}
 
@@ -2299,7 +2294,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// TUI with nothing configured still reports the actionable "no
 			// current session" message rather than the "not configured"
 			// banner.
-			// this ordering.
 			if (!deps.session?.current()) {
 				emitNotice("[/compact] no current session to compact; start one with /new or /resume first");
 				return;

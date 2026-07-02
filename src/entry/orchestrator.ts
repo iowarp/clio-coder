@@ -566,11 +566,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	Reflect.deleteProperty(process.env, "CLIO_RESUME_SESSION_ID");
 
-	// Q1 second half: hook diagnostics ride the typed bus. The domain loader
-	// constructed the bundle with the stderr default; swap in a sink that
-	// publishes middleware.hookFailed (the interactive warn notice consumes
-	// it) and keep stderr for non-interactive runs, which have no notice
-	// subscriber.
+	// Hook diagnostics ride the typed bus. The domain loader constructed the
+	// bundle with the stderr default; swap in a sink that publishes
+	// middleware.hookFailed (the interactive warn notice consumes it) and keep
+	// stderr for non-interactive runs, which have no notice subscriber.
 	middleware.setDiagnosticSink((diagnostic) => {
 		bus.emit(BusChannels.MiddlewareHookFailed, {
 			kind: diagnostic.kind,
