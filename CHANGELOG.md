@@ -7,8 +7,93 @@ interfaces.
 
 ## 0.2.8 - unreleased
 
-The toolkit-rework release: refactoring the tool surface available to Clio
-Coder.
+The toolkit-rework release: the tool surface was redesigned into seven planes
+with 18 tools, every OBSERVE tool now closes through one observation envelope,
+and grep/find answer tree visibility from a single ignore policy.
+
+### Added
+
+- **Toolkit v2: seven planes, 18 tools.** The surface is organized as OBSERVE
+  (read, grep, find, ls, code_nav, context, credential_present), MUTATE
+  (write, edit), EXECUTE (bash, git, verify), ORCHESTRATE (dispatch, monitor,
+  steer), RETRIEVE (web_fetch), INTERACT (ask_user), and ARTIFACT (artifact).
+  Each plane is one policy unit for action class, size posture, details
+  schema, and concurrency. Consolidations: `find` absorbs `glob` (same
+  pattern dialect, plus `order="mtime"` for recency); `context` absorbs
+  `workspace_context`, `docs_search`, and `read_skill` behind
+  `scope=workspace|docs|skills`; `verify` absorbs `run_task` and
+  `validate_frontend` (`verify()` lists declared checks); `artifact` absorbs
+  `write_plan`, `write_review`, and `create_skill` behind
+  `kind=plan|review|report|skill`, adding the new terminal `report` kind; and
+  `dispatch` absorbs `dispatch_batch` with a `tasks` array and
+  `mode=parallel|sequential`. The `gateway` name is design-reserved for the
+  future MCP/DB proxy and is not implemented.
+- **monitor and steer.** `monitor(run_id?, mode=list|status|peek|receipt)`
+  inspects dispatched runs, including an in-process rolling event tail
+  (`peek`) and the stored receipt JSON (`receipt`, 14KB cap).
+  `steer(run_id, action=guide|cancel)` sends mid-run guidance over the
+  dispatch contract's stdin steer channel (native workers) or aborts a run,
+  with `outcome=canceled` recorded on the receipt.
+- **Observation envelope.** All six sized OBSERVE tools report truncation
+  through one notice line with an exact continuation call
+  (`[grep: 100/1000+ matches shown (16.0KB of 120KB) | full: <path> |
+  next: limit=200]`), offload the full rendering to the session scratch
+  directory when the byte cap cuts collected content, and share one 192KB
+  per-turn output pool (`CLIO_OBSERVATION_TURN_BUDGET_BYTES`). JSON-format
+  tools (code_nav, context docs/workspace) never truncate mid-document: an
+  oversize payload is replaced whole by a parseable
+  `{"error", "offloadPath", "next"}` stub, and empty results are valid JSON
+  with a populated `next`.
+- **`/export`.** Writes the session transcript to Markdown at
+  `.clio/exports/<sessionId>-<date>.md` (or an explicit path) with all tool
+  segments expanded and ANSI escapes stripped.
+- **Deep per-tool usage docs.** Rich usage guidance moved out of non-hot tool
+  descriptions (now one sentence each) into `docs/tool-usage.md`, retrievable
+  section by section through `context(scope="docs")`.
+
+### Changed
+
+- **Ignore coherence.** grep and find answer "which parts of the tree are
+  visible" from one shared policy: `.gitignore` is honored natively by rg/fd,
+  `.clio`/`.fallow`/`.git` are always excluded, one generated-dirs list
+  (node_modules, dist, build, coverage, .venv, ...) is force-excluded, and
+  `include_ignored=true` lifts the gitignore and generated layers together on
+  both tools. Pointing a tool directly at an excluded directory keeps it
+  visible.
+- **Spawn hygiene.** rg and fd run with an allowlisted environment, pinned
+  cwd, a 30s wall-clock timeout, and SIGTERM-then-SIGKILL teardown.
+- **TUI ledger.** Finished tool calls collapse to one line carrying the call
+  signature, outcome counts, bytes, duration, and the offload path when
+  truncated; resource reads (SKILL.md, CLIO.md, AGENTS.md, docs/) stay
+  collapsed to a labeled line; running tools show live elapsed time.
+- **Performance.** glob's full-tree synchronous lstat walk is gone;
+  `find(order="mtime")` stats only a bounded candidate set and reports the
+  cap in `details.candidates`; grep context lines come from rg's `--json`
+  stream instead of a second read.
+
+### Removed / BREAKING (unreleased, no compat shims)
+
+- Tool names `glob`, `workspace_context`, `docs_search`, `read_skill`,
+  `run_task`, `validate_frontend`, `write_plan`, `write_review`,
+  `create_skill`, and `dispatch_batch` are gone; see the consolidations above
+  for the replacement call shapes. `grep`'s `ignoreCase` argument is renamed
+  `ignore_case`; `find`'s default limit is 500; `docs_search`'s `file` filter
+  was dropped in the context consolidation.
+- Details payloads changed: OBSERVE tools return `details.observation`
+  (replacing `details.truncation`, per-tool `resultSize`,
+  `matchLimitReached`, `entryLimitReached`, `resultLimitReached`, and
+  `observationBudget`); dispatch returns
+  `{mode, runIds, receiptCount, failedCount, runs[]}` and no longer surfaces
+  `batchId` or single-run `runId` details; git and verify script checks
+  return `{command, cwd, exitCode, durationMs, timedOut, outputCapped}` with
+  `command` as a joined string; artifact returns `{kind, paths}` or the
+  skill-store shape.
+- The `CLIO_READ_TURN_OBSERVATION_BUDGET_BYTES` environment variable is
+  replaced by `CLIO_OBSERVATION_TURN_BUDGET_BYTES`, which now covers every
+  OBSERVE tool, not just read.
+- Skill `allowed-tools` narrowing now exempts `context` and `ask_user`
+  (previously `read_skill` and `ask_user`); skills declaring deleted tool
+  names in `allowed-tools` block their own workflows until renamed.
 
 ## 0.2.7 - 2026-07-02
 
