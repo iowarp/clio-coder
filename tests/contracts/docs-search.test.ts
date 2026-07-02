@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { docsSearchTool } from "../../src/tools/docs-search.js";
+import { createContextTool } from "../../src/tools/context/index.js";
 
 interface DocHit {
 	rank: number;
@@ -19,6 +19,8 @@ interface DocHit {
 	signals: string[];
 }
 
+// context(scope=docs) is a JSON-format observation: the output is always one
+// parseable document, never a body with an appended notice line.
 function parsePayload(output: string): {
 	version: number;
 	query: string;
@@ -26,23 +28,18 @@ function parsePayload(output: string): {
 	terms: { query: string[]; expanded: string[]; phrases: string[] };
 	resultCount: number;
 	results: DocHit[];
+	next?: string;
 } {
-	const json = output.split("\n[", 1)[0] ?? output;
-	return JSON.parse(json) as {
-		version: number;
-		query: string;
-		corpus: { docs: number; sections: number; excludes: string[] };
-		terms: { query: string[]; expanded: string[]; phrases: string[] };
-		resultCount: number;
-		results: DocHit[];
-	};
+	return JSON.parse(output) as ReturnType<typeof parsePayload>;
 }
 
-// docs_search resolves the bundled docs directory through resolvePackageRoot,
-// so a CLIO_PACKAGE_ROOT fixture makes the contract hermetic: a known docs set
-// instead of the shipped wording. resolvePackageRoot caches its first
-// resolution per process, so one fixture serves the whole file.
-describe("contracts/docs_search", () => {
+// The docs engine resolves the bundled docs directory through
+// resolvePackageRoot, so a CLIO_PACKAGE_ROOT fixture makes the contract
+// hermetic: a known docs set instead of the shipped wording.
+// resolvePackageRoot caches its first resolution per process, so one fixture
+// serves the whole file.
+describe("contracts/context docs scope", () => {
+	const contextTool = createContextTool();
 	let scratch: string;
 	let previousRoot: string | undefined;
 
@@ -108,7 +105,7 @@ describe("contracts/docs_search", () => {
 	});
 
 	it("returns a cited, bounded result for a known doc term", async () => {
-		const result = await docsSearchTool.run({ query: "autonomy" });
+		const result = await contextTool.run({ scope: "docs", query: "autonomy" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const payload = parsePayload(result.output);
@@ -142,7 +139,7 @@ describe("contracts/docs_search", () => {
 	});
 
 	it("ranks a multi-term query by heading and body matches", async () => {
-		const result = await docsSearchTool.run({ query: "fleet dispatch" });
+		const result = await contextTool.run({ scope: "docs", query: "fleet dispatch" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const payload = parsePayload(result.output);
@@ -153,7 +150,7 @@ describe("contracts/docs_search", () => {
 	});
 
 	it("finds configuration terms in a different doc", async () => {
-		const result = await docsSearchTool.run({ query: "settings precedence" });
+		const result = await contextTool.run({ scope: "docs", query: "settings precedence" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const payload = parsePayload(result.output);
@@ -164,7 +161,7 @@ describe("contracts/docs_search", () => {
 	});
 
 	it("uses Clio vocabulary aliases for semantic-style deterministic retrieval", async () => {
-		const result = await docsSearchTool.run({ query: "how do confirmations work" });
+		const result = await contextTool.run({ scope: "docs", query: "how do confirmations work" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const payload = parsePayload(result.output);
@@ -175,32 +172,25 @@ describe("contracts/docs_search", () => {
 		strictEqual(top.heading, "Autonomy levels");
 	});
 
-	it("supports narrowing to one bundled markdown file", async () => {
-		const result = await docsSearchTool.run({ query: "dispatch evidence", file: "observability.md" });
-		strictEqual(result.kind, "ok");
-		if (result.kind !== "ok") return;
-		const payload = parsePayload(result.output);
-		ok(payload.results.length > 0, "expected observability result");
-		for (const hit of payload.results) strictEqual(hit.file, "docs/observability.md");
-	});
-
 	it("honors the limit parameter", async () => {
-		const result = await docsSearchTool.run({ query: "settings", limit: 1 });
+		const result = await contextTool.run({ scope: "docs", query: "settings", limit: 1 });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		strictEqual(parsePayload(result.output).results.length, 1);
 	});
 
-	it("reports a clean miss for nonsense without erroring", async () => {
-		const result = await docsSearchTool.run({ query: "zzqqxnonsensetoken" });
+	it("reports a clean miss as valid JSON with a populated continuation", async () => {
+		const result = await contextTool.run({ scope: "docs", query: "zzqqxnonsensetoken" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
-		ok(result.output.includes("[no matches]"));
-		strictEqual(parsePayload(result.output).results.length, 0);
+		const payload = parsePayload(result.output);
+		strictEqual(payload.resultCount, 0);
+		strictEqual(payload.results.length, 0);
+		ok(typeof payload.next === "string" && payload.next.startsWith("query="), "empty results carry an exact next call");
 	});
 
 	it("rejects an empty query", async () => {
-		const result = await docsSearchTool.run({});
+		const result = await contextTool.run({ scope: "docs" });
 		strictEqual(result.kind, "error");
 	});
 });

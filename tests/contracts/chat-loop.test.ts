@@ -22,8 +22,8 @@ import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { backendCacheVerdict } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { createContextTool } from "../../src/tools/context/index.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
-import { createReadSkillTool } from "../../src/tools/skills.js";
 
 function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSettings {
 	const value = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
@@ -346,7 +346,7 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		bus.on(BusChannels.RunAborted, (payload) => {
 			aborts.push(payload as { source?: string; reason?: string });
 		});
-		const REASON = "[Clio Coder] loop guard stopped this turn: docs_search was called with identical arguments 3 times.";
+		const REASON = "[Clio Coder] loop guard stopped this turn: context was called with identical arguments 3 times.";
 		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
 		const loop = createChatLoop({
 			getSettings: () => settings(),
@@ -358,7 +358,7 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 			createAgent: createFakeAgentFactory(async (agent, input) => {
 				agent.state.messages.push(...inputMessages(input));
 				// Simulate the loop guard interrupting mid-turn while streaming.
-				holder.loop?.cancel({ reason: REASON, source: "loop_guard", auditReason: "loop: docs_search repeated 3x" });
+				holder.loop?.cancel({ reason: REASON, source: "loop_guard", auditReason: "loop: context repeated 3x" });
 				// The abort surfaces an empty aborted assistant message; the loop must
 				// suppress it because the closing turn was already written.
 				const aborted = {
@@ -375,7 +375,7 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		} as never);
 		holder.loop = loop;
 
-		await loop.submit("use docs_search and learn more");
+		await loop.submit("use context and learn more");
 
 		const assistantEntries = entries.filter(isAssistantMessageEntry);
 		strictEqual(assistantEntries.length, 1, "exactly one assistant turn: the durable closing message");
@@ -384,7 +384,7 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		ok(payload.stopReason !== "aborted", "the closing turn is not the empty aborted message");
 		const looped = aborts.find((evt) => evt.source === "loop_guard");
 		ok(looped, "a loop_guard RunAborted is audited, distinct from a user stream_cancel");
-		strictEqual(looped?.reason, "loop: docs_search repeated 3x");
+		strictEqual(looped?.reason, "loop: context repeated 3x");
 	});
 
 	it("keeps a bare operator cancel as an empty aborted turn", async () => {
@@ -544,7 +544,7 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 			);
 
 			const registry = createRegistry({ safety: allowAllSafety() });
-			registry.register(createReadSkillTool({ getCwd: () => scratch }));
+			registry.register(createContextTool({ getCwd: () => scratch }));
 			for (const name of [ToolNames.Read, ToolNames.Grep, ToolNames.Edit, ToolNames.Bash]) {
 				registry.register(dummyTool(name));
 			}
@@ -565,32 +565,32 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 					agent.state.messages.push(...inputMessages(input));
 					const tools = agent.state.tools as NamedAgentTool[];
 					toolsAtStart = tools.map((tool) => tool.name);
-					const readSkill = tools.find((tool) => tool.name === "read_skill");
-					ok(readSkill, "read_skill must be active on a pending-skill turn");
+					const contextTool = tools.find((tool) => tool.name === "context");
+					ok(contextTool, "context must be active on a pending-skill turn");
 					// Invoke-time policy still gates skill loading even though the
 					// wire schemas never narrow.
 					try {
-						const denied = (await readSkill.execute("call-0", { name: "unrequested" })) as {
+						const denied = (await contextTool.execute("call-0", { scope: "skills", name: "unrequested" })) as {
 							content?: Array<{ type: string; text?: string }>;
 						};
 						unrequestedDenied = denied.content?.find((part) => part.type === "text")?.text ?? "";
 					} catch (err) {
 						unrequestedDenied = err instanceof Error ? err.message : String(err);
 					}
-					const result = (await readSkill.execute("call-1", { name: "narrow" })) as {
+					const result = (await contextTool.execute("call-1", { scope: "skills", name: "narrow" })) as {
 						content?: Array<{ type: string; text?: string }>;
 					};
 					readSkillOutput = result.content?.find((part) => part.type === "text")?.text ?? "";
 					agent.state.messages.push({
 						role: "assistant",
-						content: [{ type: "toolCall", id: "call-1", name: "read_skill", arguments: { name: "narrow" } }],
+						content: [{ type: "toolCall", id: "call-1", name: "context", arguments: { scope: "skills", name: "narrow" } }],
 						stopReason: "toolUse",
 						timestamp: Date.now(),
 					} as unknown as AgentMessage);
 					agent.state.messages.push({
 						role: "toolResult",
 						toolCallId: "call-1",
-						toolName: "read_skill",
+						toolName: "context",
 						content: [{ type: "text", text: readSkillOutput }],
 						timestamp: Date.now(),
 					} as unknown as AgentMessage);
@@ -611,8 +611,8 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 			});
 
 			// The frozen surface: every registered tool, sorted, from the first call.
-			deepStrictEqual(toolsAtStart, ["bash", "edit", "grep", "read", "read_skill"]);
-			ok(unrequestedDenied.includes("read_skill"));
+			deepStrictEqual(toolsAtStart, ["bash", "context", "edit", "grep", "read"]);
+			ok(unrequestedDenied.includes("pending skill request"));
 			ok(readSkillOutput.includes("NARROW BODY"));
 			// Loading a skill must not push a continuation update that reshapes tools.
 			strictEqual(updateAfterLoad, undefined);

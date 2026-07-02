@@ -103,7 +103,7 @@ describe("contracts/safety", () => {
 		if (assessment.kind === "ok") strictEqual(assessment.reason, "no_mutation");
 	});
 
-	it("recognizes run_task verification-family scripts as finish-contract evidence", () => {
+	it("recognizes verify verification-family checks as finish-contract evidence", () => {
 		const assessment = assessFinishContract({
 			assistantText: "Implemented the change and tests passed.",
 			sessionEntries: [
@@ -120,12 +120,12 @@ describe("contracts/safety", () => {
 				{
 					kind: "message",
 					role: "tool_call",
-					payload: { name: "run_task", toolCallId: "call-2", args: { task: "test:contracts" } },
+					payload: { name: "verify", toolCallId: "call-2", args: { check: "test:contracts" } },
 				},
 				{
 					kind: "message",
 					role: "tool_result",
-					payload: { toolName: "run_task", toolCallId: "call-2", result: { details: { exitCode: 0 } } },
+					payload: { toolName: "verify", toolCallId: "call-2", result: { details: { exitCode: 0 } } },
 				},
 			],
 		});

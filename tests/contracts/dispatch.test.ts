@@ -548,7 +548,7 @@ describe("contracts/dispatch", () => {
 					id: "bad-validator",
 					name: "Bad Validator",
 					description: "Invalid validation recipe.",
-					tools: ["read", "run_task"],
+					tools: ["read", "verify"],
 					capabilityClass: "read-only",
 					source: "builtin",
 					filepath: "/test/bad-validator.md",
@@ -625,7 +625,7 @@ describe("contracts/dispatch", () => {
 			id: "researcher",
 			name: "Researcher",
 			description: "Docs researcher.",
-			tools: ["read", "read_skill"],
+			tools: ["read", "context"],
 			skills: ["context7-docs", "pdf-reader"],
 			source: "builtin",
 			filepath: "/test/researcher.md",
@@ -1931,7 +1931,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 			const result = await tool.run({ task: "impossible write task" }, undefined as never);
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") {
-				ok(result.output.includes("completed (completed without executing any tools)"), result.output);
+				ok(result.output.includes("note=completed without executing any tools"), result.output);
 			}
 		} finally {
 			await bundle.extension.stop?.();
@@ -2067,13 +2067,13 @@ describe("contracts/dispatch tool activity honesty", () => {
 					yield {
 						type: "tool_execution_start",
 						toolCallId: "test-1",
-						toolName: "run_task",
-						args: { task: "test" },
+						toolName: "verify",
+						args: { check: "test" },
 					};
 					yield {
 						type: "tool_execution_end",
 						toolCallId: "test-1",
-						toolName: "run_task",
+						toolName: "verify",
 						isError: false,
 						result: { details: { exitCode: 0 } },
 					};
