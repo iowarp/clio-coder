@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -39,12 +39,28 @@ function scratchCatalog(): string {
 	return root;
 }
 
-function writeSkill(catalog: string, name: string, frontmatterLines: string[]): string {
+function writeSkill(catalog: string, name: string, frontmatterLines: string[], options?: { evals?: boolean }): string {
 	const dir = join(catalog, name);
 	mkdirSync(dir, { recursive: true });
 	const file = join(dir, "SKILL.md");
 	writeFileSync(file, ["---", ...frontmatterLines, "---", "", "Body.", ""].join("\n"), "utf8");
+	if (options?.evals !== false) {
+		writeFileSync(join(dir, "evals.md"), "## S1 - smoke\n\nSetup: run it.\n\nExpected:\n- it runs\n", "utf8");
+	}
 	return file;
+}
+
+/** Full catalog-contract frontmatter for a valid fixture skill. */
+function catalogFrontmatter(name: string, description: string, version: string): string[] {
+	return [
+		`name: "${name}"`,
+		`description: "${description}"`,
+		`version: "${version}"`,
+		"license: Apache-2.0",
+		"registry-id: iowarp/clio-coder",
+		`source-url: https://example.invalid/skills/${name}`,
+		"audit: pass",
+	];
 }
 
 afterEach(() => {
@@ -54,7 +70,7 @@ afterEach(() => {
 describe("contracts/pin-skills script", () => {
 	it("fails loudly with the file path and YAML error on malformed frontmatter", async () => {
 		const catalog = scratchCatalog();
-		writeSkill(catalog, "good", ['name: "good"', 'description: "A fine skill."', 'version: "0.1.0"']);
+		writeSkill(catalog, "good", catalogFrontmatter("good", "A fine skill.", "0.1.0"));
 		// A colon-space inside a plain scalar is invalid YAML; the old script
 		// silently pinned the folder name with version null for this case.
 		const brokenPath = writeSkill(catalog, "broken", ["name: broken", "description: Use when: things break"]);
@@ -72,8 +88,8 @@ describe("contracts/pin-skills script", () => {
 
 	it("pins a valid catalog, passes --check, and fails --check on drift", async () => {
 		const catalog = scratchCatalog();
-		writeSkill(catalog, "alpha", ['name: "alpha"', 'description: "Alpha skill."', 'version: "0.1.0"']);
-		writeSkill(catalog, "beta", ['name: "beta"', 'description: "Beta skill."', 'version: "0.2.0"']);
+		writeSkill(catalog, "alpha", catalogFrontmatter("alpha", "Alpha skill.", "0.1.0"));
+		writeSkill(catalog, "beta", catalogFrontmatter("beta", "Beta skill.", "0.2.0"));
 
 		const pin = await runPinScript(["--dir", catalog]);
 		strictEqual(pin.code, 0);
@@ -83,10 +99,44 @@ describe("contracts/pin-skills script", () => {
 		strictEqual(clean.code, 0);
 		ok(clean.stdout.includes("registry pin check ok"));
 
-		writeSkill(catalog, "beta", ['name: "beta"', 'description: "Beta skill, edited."', 'version: "0.2.1"']);
+		writeSkill(catalog, "beta", catalogFrontmatter("beta", "Beta skill, edited.", "0.2.1"));
 		const drift = await runPinScript(["--dir", catalog, "--check"]);
 		strictEqual(drift.code, 1);
 		ok(drift.stderr.includes("does not match the catalog content hashes"));
 		ok(drift.stderr.includes("beta: pin is stale"));
+	});
+
+	it("pins the provenance-stripped hash so install-lifecycle stamps are not drift", async () => {
+		const catalog = scratchCatalog();
+		const file = writeSkill(catalog, "alpha", catalogFrontmatter("alpha", "Alpha skill.", "0.1.0"));
+		const pin = await runPinScript(["--dir", catalog]);
+		strictEqual(pin.code, 0);
+
+		// Stamp lifecycle fields the way `install.sh --copy` and `clio skills
+		// install` do; the pinned hash must not change.
+		const raw = readFileSync(file, "utf8");
+		writeFileSync(file, raw.replace("audit: pass\n", 'audit: pass\ninstalled-at: "2026-07-02T00:00:00.000Z"\n'), "utf8");
+		const clean = await runPinScript(["--dir", catalog, "--check"]);
+		strictEqual(clean.code, 0, clean.stderr);
+
+		// A body edit is real drift.
+		writeFileSync(file, readFileSync(file, "utf8").replace("Body.", "Edited body."), "utf8");
+		const drift = await runPinScript(["--dir", catalog, "--check"]);
+		strictEqual(drift.code, 1);
+	});
+
+	it("rejects catalog skills missing the publishing contract", async () => {
+		const catalog = scratchCatalog();
+		// Missing license/registry-id/source-url, audit not "pass", no evals.md.
+		const bare = writeSkill(catalog, "bare", ['name: "bare"', 'description: "Bare skill."', 'version: "0.1.0"'], {
+			evals: false,
+		});
+		const result = await runPinScript(["--dir", catalog]);
+		strictEqual(result.code, 1);
+		ok(result.stderr.includes(bare));
+		ok(result.stderr.includes('missing required catalog frontmatter "license"'));
+		ok(result.stderr.includes('"audit: pass"'));
+		ok(result.stderr.includes("evals.md"));
+		strictEqual(existsSync(join(catalog, "registry.yaml")), false);
 	});
 });

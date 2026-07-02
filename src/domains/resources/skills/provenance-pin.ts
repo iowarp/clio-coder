@@ -2,12 +2,15 @@
  * Local-first skill provenance pinning.
  *
  * `skills/registry.yaml` (regenerated with `npm run skills:pin`) pins the
- * sha256 of every marketplace skill's SKILL.md. At activation time, a skill
- * carrying marketplace provenance (`registry-id` frontmatter) is compared
- * against the pinned entry: a mismatch means the installed content drifted
- * from its audited form. Drift never blocks; skills still pass through the
- * normal tool safety gates. No network, no remote registry, no signing; this
- * is hash comparison against a local manifest.
+ * provenance-stripped sha256 of every marketplace skill's SKILL.md. At
+ * activation time, a skill carrying marketplace provenance (`registry-id`
+ * frontmatter) is compared against the pinned entry on the same normalized
+ * hash, so install-lifecycle stamps (`installed-at`, `installed-hash`, ...)
+ * never read as drift while any content or registry-identity edit does. A
+ * mismatch means the installed content drifted from its audited form. Drift
+ * never blocks; skills still pass through the normal tool safety gates. No
+ * network, no remote registry, no signing; this is hash comparison against a
+ * local manifest.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -64,12 +67,15 @@ export function loadSkillPinManifest(manifestPath: string): Map<string, SkillPin
  * no manifest exists locally or the manifest has no entry for the skill
  * (silent pass: pinning is opt-in evidence, not a gate).
  */
-export function checkSkillDrift(skill: { name: string; hash: string }, cwd: string): SkillDriftVerdict | null {
+export function checkSkillDrift(
+	skill: { name: string; normalizedHash: string },
+	cwd: string,
+): SkillDriftVerdict | null {
 	const manifestPath = resolveSkillPinManifestPath(cwd);
 	if (manifestPath === null) return null;
 	const manifest = loadSkillPinManifest(manifestPath);
 	if (manifest === null) return null;
 	const entry = manifest.get(skill.name);
 	if (entry === undefined) return null;
-	return entry.sha256 === skill.hash.toLowerCase() ? "match" : "mismatch";
+	return entry.sha256 === skill.normalizedHash.toLowerCase() ? "match" : "mismatch";
 }

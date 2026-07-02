@@ -38,7 +38,7 @@ auto-loads. That gap is deliberate.
 | [`context-prime`](context-prime/) | workflow | A session begins and you need to load project state, the last handoff, and orientation before acting. |
 | [`context-handoff`](context-handoff/) | workflow | A session is ending and work continues in a new session or another agent. Writes the artifact `context-prime` reads. |
 | [`clio-dev`](clio-dev/) | discipline | Modifying Clio's own source in this repo; deciding whether a change stays local or becomes a contribution. |
-| [`clio-test`](clio-test/) | reference | Writing or verifying changes to Clio against the real v0.2.2 harness (contracts / smoke / boundaries). |
+| [`clio-test`](clio-test/) | reference | Writing or verifying changes to Clio against the real harness (contracts / smoke / boundaries). |
 | [`arxiv-literature`](arxiv-literature/) | research | Searching arXiv, summarizing papers, comparing papers, or producing compact literature surveys while protecting main-agent context. |
 | [`scientific-debugging`](scientific-debugging/) | workflow | Debugging has stalled or produces wrong numbers, NaNs, or flaky results. Forces falsifiable hypotheses across fault classes and evidence-cited verdicts before any fix. |
 | [`experiment-protocol`](experiment-protocol/) | workflow | A benchmark, optimization, or numerical comparison needs success criteria locked before results exist. Pre-registers thresholds into the repo validation contract. |
@@ -108,4 +108,19 @@ audit: pass
 ```
 
 Each skill ships an `evals.md` recording the baseline scenarios it was tested
-against (RED-GREEN per `superpowers:writing-skills`).
+against (RED-GREEN per `superpowers:writing-skills`). `clio skills eval <name>`
+executes those scenarios instead of trusting the prose.
+
+`npm run skills:pin` enforces this contract structurally: it refuses to pin a
+catalog where any skill is missing the required frontmatter, `audit: pass`, or
+its `evals.md`, and `npm run skills:check` (run in CI) fails on any drift
+between the catalog and `registry.yaml`. Pinned hashes are provenance-stripped
+(install-lifecycle stamps like `installed-at` do not count as drift; content
+and registry-identity edits do), so a copy installed via `install.sh --copy`
+or `clio skills install` still verifies against its audited source at
+activation.
+
+A skill may declare typed dependencies with `requires: [skill:<name>, ...]`
+frontmatter; the loader warns at load time when a required skill is not
+installed, keeping composed workflows (for example a distilled skill that
+references `credentials`) auditable instead of silently incomplete.
