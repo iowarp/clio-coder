@@ -66,11 +66,11 @@ Common local runtime IDs and default URLs are:
 
 | Runtime | Target runtime id | Example local URL |
 | --- | --- | --- |
-| LM Studio | `lmstudio-native` | `http://localhost:1234` |
-| Ollama | `ollama-native` | `http://localhost:11434` |
+| LM Studio | `lmstudio-native` | `http://127.0.0.1:1234` |
+| Ollama | `ollama-native` | `http://127.0.0.1:11434` |
 | llama.cpp server | `llamacpp` | `http://127.0.0.1:8080` |
-| vLLM | `vllm` | `http://localhost:8000` |
-| SGLang | `sglang` | `http://localhost:30000` |
+| vLLM | `vllm` | `http://127.0.0.1:8000` |
+| SGLang | `sglang` | `http://127.0.0.1:30000` |
 
 
 Example registration:
@@ -79,7 +79,7 @@ Example registration:
 clio configure \
   --id local-lmstudio \
   --runtime lmstudio-native \
-  --url http://localhost:1234 \
+  --url http://127.0.0.1:1234 \
   --model your-model-id \
   --set-orchestrator \
   --set-fleet-default
@@ -102,7 +102,7 @@ Inside the TUI, verify the local surface with:
 /skill
 ```
 
-The `/targets` overlay is the interactive target hub. It shows one compact row per configured target, streams live probe updates, and keeps target actions on the selected row. Use `Enter` to show details, `u` to use the target for chat, `c` to connect or authorize it, `d` to disconnect the live session state, `r` to probe the selected target, and `R` to probe all targets.
+The `/targets` overlay is the interactive target hub. It shows one compact row per configured target, streams live probe updates, and keeps target actions on the selected row. Use `Enter` to show details, `u` to use the target for chat, `f` to set the target as the fleet default, `c` to connect or authorize it, `r` to probe the selected target, and `R` to probe all targets.
 
 Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` when you have runtime/model-specific values that should override live probe results.
 
@@ -130,7 +130,7 @@ autonomy: auto-edit         # read-only | suggest | auto-edit | full-auto (enfor
 targets:
   - id: local-lmstudio
     runtime: lmstudio-native
-    url: http://localhost:1234
+    url: http://127.0.0.1:1234
     defaultModel: your-model-id
     capabilities:
       reasoning: true       # optional; only if your model/runtime supports it
@@ -373,10 +373,10 @@ These runtimes drive your local `claude` installation to execute subagent tasks.
 claude auth login
 
 # 2. Configure the SDK worker target (enforced safety)
-clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
+clio configure --id claude-sdk-worker --runtime claude-sdk --model claude-3-5-sonnet-20241022 --set-fleet-default
 
 # 3. Configure the subprocess worker target (advisory/permission-mode gating)
-clio configure --id claude-code-worker --runtime claude-code --model sonnet
+clio configure --id claude-code-worker --runtime claude-code --model claude-3-5-sonnet-20241022
 ```
 
 ### 4. Claude Code over ACP (Delegation-Only)
@@ -468,7 +468,7 @@ The command `clio targets profile` supports several subcommands to manage fleet 
 - **unbind**: Unbind an agent from its profile. Use `clio targets profile unbind <agentId>`.
 - **bindings**: List active agent-to-profile bindings. Use `clio targets profile bindings [--json]` to output details in JSON format.
 
-Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio targets use`. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system. Press `d` to clear live connection state while leaving stored credentials unchanged.
+Inside the TUI, `/targets` is the target management surface. The hub lists health, auth, runtime, model, capabilities, ready or unavailable reason, URL, and discovered models. Press `u` on a row to switch the active orchestrator target; the model is rebased to that target's default, matching `/settings` and `clio targets use`. Press `f` to set the selected target as the fleet default. Press `c` on a row for the same API-key, OAuth, or no-auth connection flow used by the auth system.
 
 ---
 
@@ -581,7 +581,7 @@ You have two ways to give Clio an API key:
 
 Prefer `--api-key-env` for shared machines, HPC login nodes, and CI. Avoid committing literal secrets in settings or share archives. Stored keys are never printed back by `clio auth status`, `clio targets`, or `clio configure`; only the source (env var name or `stored-api-key`) is shown.
 
-For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio auth logout <target-or-runtime>`; for a live session disconnect without deleting credentials, press `d` in `/targets`.
+For interactive auth, open `/targets`, select the row, and press `c`. For a stored credential cleanup, use `clio auth logout <target-or-runtime>`.
 
 ---
 
