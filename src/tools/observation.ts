@@ -85,6 +85,13 @@ export interface ObservationReservation {
 	/** True when the pool reduced this call's cap below the self cap. */
 	limited: boolean;
 	exhausted: boolean;
+	/**
+	 * True once the call has charged its full cap to the pool up front (async
+	 * tools, via commitObservationReservation) so concurrent siblings see it.
+	 */
+	committed: boolean;
+	/** True once the charge has been reconciled or refunded exactly once. */
+	settled: boolean;
 }
 
 function byteLength(text: string): number {
@@ -136,6 +143,8 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			callCapBytes: selfCapBytes,
 			limited: false,
 			exhausted: false,
+			committed: false,
+			settled: false,
 		};
 	}
 	const limitBytes = observationTurnBudgetLimit();
@@ -153,6 +162,8 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			callCapBytes: 0,
 			limited: true,
 			exhausted: true,
+			committed: false,
+			settled: false,
 		};
 	}
 	const callCapBytes = Math.min(selfCapBytes, remaining);
@@ -164,16 +175,62 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 		callCapBytes,
 		limited: callCapBytes < selfCapBytes,
 		exhausted: false,
+		committed: false,
+		settled: false,
 	};
 }
 
-function recordSpentBytes(reservation: ObservationReservation, bytes: number): void {
-	if (reservation.key === null) return;
+/**
+ * Charge this call's full cap to the shared pool up front so concurrent OBSERVE
+ * siblings that reserve during an async call's in-flight window see the running
+ * spend instead of an empty pool. finalizeObservation reconciles the charge down
+ * to the bytes actually returned; releaseObservation refunds it on an error
+ * path. Only tools that await between reserving and finalizing need this;
+ * synchronous tools settle within one microtask and charge at finalize.
+ */
+export function commitObservationReservation(reservation: ObservationReservation): void {
+	if (reservation.key === null || reservation.committed || reservation.settled) return;
+	if (reservation.callCapBytes <= 0) return;
+	reservation.committed = true;
 	const state = turnBudgets.get(reservation.key) ?? {
 		usedBytes: reservation.usedBeforeBytes,
 		lastSeenAt: Date.now(),
 	};
-	state.usedBytes += bytes;
+	state.usedBytes += reservation.callCapBytes;
+	state.lastSeenAt = Date.now();
+	turnBudgets.set(reservation.key, state);
+}
+
+/**
+ * Refund a committed reservation whose call bailed out before finalizing (an
+ * error return between commit and finalize). A no-op once the call has settled
+ * through finalizeObservation/observationBudgetExhausted, so a tool can call it
+ * unconditionally from a finally block.
+ */
+export function releaseObservation(reservation: ObservationReservation): void {
+	if (reservation.key === null || reservation.settled) return;
+	reservation.settled = true;
+	if (!reservation.committed) return;
+	const state = turnBudgets.get(reservation.key);
+	if (state === undefined) return;
+	state.usedBytes = Math.max(0, state.usedBytes - reservation.callCapBytes);
+	state.lastSeenAt = Date.now();
+	turnBudgets.set(reservation.key, state);
+}
+
+function recordSpentBytes(reservation: ObservationReservation, bytes: number): void {
+	if (reservation.key === null || reservation.settled) return;
+	reservation.settled = true;
+	// A committed call already charged its full cap to the pool at reserve time
+	// so concurrent siblings could see it; reconcile that down (or up) to the
+	// bytes actually returned. An uncommitted (synchronous) call charges its
+	// spend now, having touched the pool nowhere else.
+	const committedBytes = reservation.committed ? reservation.callCapBytes : 0;
+	const state = turnBudgets.get(reservation.key) ?? {
+		usedBytes: reservation.usedBeforeBytes + committedBytes,
+		lastSeenAt: Date.now(),
+	};
+	state.usedBytes = Math.max(0, state.usedBytes + bytes - committedBytes);
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(reservation.key, state);
 }

@@ -5,11 +5,13 @@ import { ToolNames } from "../core/tool-names.js";
 import { resolveRgBinary } from "./executables.js";
 import { compileGlobRegex, fallbackIgnoredDirs, normalizeGlobInput, rgIgnoreArgs } from "./ignore-policy.js";
 import {
+	commitObservationReservation,
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
 	type ObservationReservation,
 	type ObservationUnit,
 	observationBudgetExhausted,
+	releaseObservation,
 	reserveObservation,
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
@@ -474,10 +476,20 @@ export const grepTool: ToolSpec = {
 			reservation,
 			options,
 		};
-		const rgPath = resolveRgBinary();
-		if (rgPath) return runRipgrep({ rgPath, ...shared });
-		// rg absent (offline/weak node): degrade to a bounded pure-Node search
-		// instead of failing content search outright.
-		return fallbackGrep(shared);
+		// grep yields on the rg subprocess below, so charge the shared turn pool
+		// up front and refund the unused slice at finalize; a concurrent OBSERVE
+		// sibling that reserves mid-search must see this spend.
+		commitObservationReservation(reservation);
+		try {
+			const rgPath = resolveRgBinary();
+			// `return await` so the finally refund runs only after the search has
+			// finalized (or errored), never while its promise is still pending.
+			if (rgPath) return await runRipgrep({ rgPath, ...shared });
+			// rg absent (offline/weak node): degrade to a bounded pure-Node search
+			// instead of failing content search outright.
+			return fallbackGrep(shared);
+		} finally {
+			releaseObservation(reservation);
+		}
 	},
 };
