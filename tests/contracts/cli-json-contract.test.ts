@@ -35,4 +35,20 @@ describe("contracts/cli-json-contract", () => {
 			match(result.stderr, /unknown|usage|requires|invalid/i);
 		});
 	}
+
+	// BUG-002: surfaces with a finite flag set must reject an unknown flag rather
+	// than ignore it, exit 0, and emit a successful JSON payload.
+	const ignoredFlagCases: ReadonlyArray<ReadonlyArray<string>> = [
+		["agents", "--json", "--definitely-not-a-real-flag"],
+		["fleet", "status", "--json", "--definitely-not-a-real-flag"],
+	];
+
+	for (const args of ignoredFlagCases) {
+		it(`clio ${args.join(" ")} rejects the unknown flag instead of emitting JSON`, async () => {
+			const result = await runCli(args, { env: scratch.env });
+			strictEqual(result.code, 2, `stderr=${result.stderr}`);
+			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
+			match(result.stderr, /unknown flag|usage/i);
+		});
+	}
 });

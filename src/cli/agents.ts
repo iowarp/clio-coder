@@ -5,6 +5,7 @@ import { type AgentSpec, isUserVisibleAgent } from "../domains/agents/spec.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { printError } from "./shared.js";
 
 const HELP = `clio agents [--json] [--all]
 
@@ -22,6 +23,12 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 	}
 	const json = args.includes("--json");
 	const all = args.includes("--all");
+	const unknown = args.find((arg) => arg !== "--json" && arg !== "--all");
+	if (unknown) {
+		printError(`unknown flag: ${unknown}`);
+		process.stderr.write(HELP);
+		return 2;
+	}
 	ensureClioState();
 	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, AgentsDomainModule]);
 	const agents = result.getContract<AgentsContract>("agents");
