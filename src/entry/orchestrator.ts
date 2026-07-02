@@ -143,6 +143,7 @@ export interface BootOptions {
 		images?: ReadonlyArray<ImageContent>;
 		workingContextPaths?: ReadonlyArray<string>;
 		mode?: "text" | "json";
+		jsonEvents?: "full" | "terminal";
 		target?: string;
 		model?: string;
 		thinking?: ThinkingLevel;
@@ -956,6 +957,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					? { pendingSkillRequests: parsedSkillRequest.pendingSkillRequests }
 					: {}),
 				mode: options.headless.mode ?? "text",
+				...(options.headless.jsonEvents ? { jsonEvents: options.headless.jsonEvents } : {}),
 				...(options.headless.steerChannel ? { steerChannel: options.headless.steerChannel } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});

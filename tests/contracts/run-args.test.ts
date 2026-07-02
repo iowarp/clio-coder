@@ -36,6 +36,25 @@ describe("contracts/run CLI args", () => {
 		deepStrictEqual(parsed.diagnostics, []);
 	});
 
+	it("parses terminal JSON event mode as an additive JSON selector", () => {
+		const parsed = parseRunCliArgs(["--json-events", "terminal", "do work"]);
+		strictEqual(parsed.json, true);
+		strictEqual(parsed.jsonEvents, "terminal");
+		deepStrictEqual(parsed.messages, ["do work"]);
+		deepStrictEqual(parsed.diagnostics, []);
+	});
+
+	it("rejects unknown JSON event modes", () => {
+		const parsed = parseRunCliArgs(["--json-events", "deltas", "do work"]);
+		strictEqual(parsed.json, true);
+		strictEqual(parsed.jsonEvents, "full");
+		ok(
+			parsed.diagnostics.some(
+				(diagnostic) => diagnostic.type === "error" && diagnostic.message === "--json-events must be one of: full|terminal",
+			),
+		);
+	});
+
 	it("rejects non-positive and non-integer max context values", () => {
 		for (const value of ["0", "-1", "2.5", "abc"]) {
 			const parsed = parseRunCliArgs(["--max-context-tokens", value, "task"]);
@@ -63,6 +82,7 @@ describe("contracts/run CLI args", () => {
 			ok(stdout.includes("--max-context-tokens <N>"));
 			ok(stdout.includes("--kv-cache-mode <mode>"));
 			ok(stdout.includes("--steer-channel <path>"));
+			ok(stdout.includes("--json-events <mode>"));
 			strictEqual(process.env.CLIO_MAX_CONTEXT_TOKENS, "111");
 			strictEqual(process.env.CLIO_KV_CACHE_MODE, "q4_0");
 		} finally {

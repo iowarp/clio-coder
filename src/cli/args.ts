@@ -15,9 +15,12 @@ export interface RunSamplingArgs {
 	repeatPenalty?: number;
 }
 
+export type RunJsonEventsMode = "full" | "terminal";
+
 export interface RunCliArgs {
 	help: boolean;
 	json: boolean;
+	jsonEvents: RunJsonEventsMode;
 	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
@@ -43,6 +46,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	const parsed: RunCliArgs = {
 		help: false,
 		json: false,
+		jsonEvents: "full",
 		required: [],
 		noSkills: false,
 		skillPaths: [],
@@ -68,6 +72,15 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--json") {
 			parsed.json = true;
+			continue;
+		}
+		if (arg === "--json-events") {
+			const value = need(arg);
+			if (value !== null) {
+				parsed.json = true;
+				if (value === "full" || value === "terminal") parsed.jsonEvents = value;
+				else parsed.diagnostics.push({ type: "error", message: "--json-events must be one of: full|terminal" });
+			}
 			continue;
 		}
 		if (arg === "--target") {

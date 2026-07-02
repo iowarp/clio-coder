@@ -32,6 +32,7 @@ export interface HeadlessMainAgentOptions {
 	sampling?: HeadlessSamplingOverrides;
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	mode?: "text" | "json";
+	jsonEvents?: "full" | "terminal";
 	steerChannel?: string;
 	getSessionHeader?: () => unknown | null;
 }
@@ -134,6 +135,14 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	for (const stat of stats.values()) count += stat.count;
 	return count;
 }
+
+const TERMINAL_JSON_EVENT_TYPES = new Set([
+	"agent_start",
+	"agent_end",
+	"message_end",
+	"tool_execution_start",
+	"tool_execution_end",
+]);
 
 function isMainAgentRunKind(value: string): value is RunKind {
 	return value === "http" || value === "sdk" || value === "subprocess";
@@ -243,6 +252,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
 	const mode = options.mode ?? "text";
+	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();
 	let result: HeadlessMainAgentResult = { text: "", error: null, sawTerminatingToolResult: false };
 	const receiptStats: HeadlessMainAgentReceiptStats = {
@@ -251,16 +261,37 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		usage: null,
 	};
 	let jsonHeaderWritten = false;
-	const writeJsonHeader = (): void => {
+	const writeJsonHeader = (allowFallback: boolean): void => {
 		if (jsonHeaderWritten) return;
-		jsonHeaderWritten = true;
 		const header = options.getSessionHeader?.();
-		if (header !== undefined && header !== null) writeRawStdout(serializeJsonLine(header));
+		if (header === undefined || header === null) {
+			if (!allowFallback) return;
+			const sessionId = chat.getSessionId();
+			if (sessionId === null) return;
+			jsonHeaderWritten = true;
+			writeRawStdout(serializeJsonLine({ type: "session", id: sessionId, timestamp: startedAt, cwd: process.cwd() }));
+			return;
+		}
+		jsonHeaderWritten = true;
+		writeRawStdout(serializeJsonLine(header));
+	};
+	let terminalTurnStartWritten = false;
+	const writeTerminalTurnStart = (): void => {
+		if (terminalTurnStartWritten) return;
+		terminalTurnStartWritten = true;
+		writeJsonHeader(true);
+		writeRawStdout(serializeJsonLine({ type: "turn_start", startedAt }));
 	};
 	const unsubscribe = chat.onEvent((event) => {
 		if (mode === "json") {
-			writeJsonHeader();
-			writeRawStdout(serializeJsonLine(event));
+			if (jsonEvents === "terminal") {
+				writeTerminalTurnStart();
+				writeJsonHeader(true);
+				if (TERMINAL_JSON_EVENT_TYPES.has(event.type)) writeRawStdout(serializeJsonLine(event));
+			} else {
+				writeJsonHeader(false);
+				writeRawStdout(serializeJsonLine(event));
+			}
 		}
 		recordToolEnd(receiptStats, event);
 		if (event.type === "agent_end") receiptStats.usage = sumRunUsage(event.messages);
@@ -278,6 +309,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		});
 	}
 	try {
+		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
 			...(options.workingContextPaths && options.workingContextPaths.length > 0
@@ -320,6 +352,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = result.text;
 	} else if (mode === "text") {
 		stdoutMessage = result.text;
+	}
+
+	if (mode === "json" && jsonEvents === "terminal") {
+		writeJsonHeader(true);
+		writeRawStdout(
+			serializeJsonLine({
+				type: "turn_end",
+				startedAt,
+				endedAt,
+				exitCode,
+				...(failureMessage !== null ? { error: failureMessage } : {}),
+			}),
+		);
 	}
 
 	try {
