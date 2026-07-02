@@ -1,9 +1,9 @@
 # Installation and Lifecycle Operations
 
-Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). The supported alpha install path is a source checkout with a deterministic local symlink, not a fragile npm-global prefix link.
+Clio Coder is designed to be self-contained and platform-compliant. This document outlines the default directory paths, file purposes, permission levels, and lifecycle commands (`install`, `reset`, `upgrade`, and `uninstall`). The supported alpha install path is a source checkout with a deterministic local symlink; npm distribution of `@iowarp/clio-coder` begins with the first stable v0.3.0 (the CLI already classifies and upgrades npm installs, so nothing here changes shape at that point).
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html) (Version: 0.2.7). You can open it directly in any web browser to view details dynamically.
+> **Interactive Spec Available:** An interactive dashboard with a path simulator and visual flowcharts is located at [docs/html/lifecycle_blueprint.html](html/lifecycle_blueprint.html). You can open it directly in any web browser to view details dynamically.
 
 ---
 
@@ -76,10 +76,16 @@ clio --version
 - runs `npm run build` unless `--no-build` is passed;
 - verifies `dist/cli/index.js` exists and is executable;
 - creates `${CLIO_BIN_DIR:-$HOME/.local/bin}` and links `clio` there;
-- warns if that bin dir is not on `PATH`;
+- warns if that bin dir is not on `PATH`, and warns when another `clio`
+  earlier on `PATH` shadows the freshly linked one;
 - runs the installed CLI's structure repair (`node dist/cli/index.js doctor
   --fix` with the caller's environment), so a fresh install passes plain
   `clio doctor` with no manual steps.
+
+On a machine where Clio has never run, plain `clio doctor` reports the
+missing config structure and exits nonzero by design (it is a read-only
+diagnosis); `clio doctor --fix`, the installer above, or simply launching
+`clio` creates everything.
 
 First-run target setup after install:
 

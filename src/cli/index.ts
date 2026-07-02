@@ -52,10 +52,33 @@ Usage:
   clio --help, -h           this message
 `;
 
+/** Engines floor from package.json; npm only warns on EBADENGINE, so the CLI
+ * states the requirement itself instead of failing with an arbitrary syntax
+ * or API error on old Node versions. */
+const MIN_NODE = [22, 19, 0] as const;
+
+function nodeVersionError(): string | null {
+	const parts = process.versions.node.split(".").map((part) => Number.parseInt(part, 10));
+	for (let i = 0; i < MIN_NODE.length; i += 1) {
+		const actual = parts[i] ?? 0;
+		const wanted = MIN_NODE[i] ?? 0;
+		if (actual > wanted) return null;
+		if (actual < wanted) {
+			return `clio requires Node.js >=${MIN_NODE.join(".")}; this is ${process.versions.node}. Upgrade Node and retry.`;
+		}
+	}
+	return null;
+}
+
 async function main(argv: string[]): Promise<number> {
 	// First application statement after the static import graph resolved: the
 	// elapsed here is the cold module-load tax (see CLIO_TRACE_BOOT).
 	traceBoot("cli entry");
+	const versionError = nodeVersionError();
+	if (versionError !== null) {
+		printError(versionError);
+		return 1;
+	}
 	const { apiKey, rest: afterApiKey, error: apiKeyError } = extractApiKeyFlag(argv, isRecognizedSubcommand);
 	if (apiKeyError) {
 		printError(apiKeyError);

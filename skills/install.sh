@@ -41,12 +41,14 @@ if [ "${#names[@]}" -eq 0 ]; then
 	exit 2
 fi
 
-# Mirror src/core/xdg.ts so install targets match Clio's discovery roots.
+# Mirror src/core/xdg.ts so install targets match Clio's discovery roots:
+# the user skill root is <configDir>/skills, where configDir resolves as
+# CLIO_CONFIG_DIR, then $CLIO_HOME/config, then the platform default.
 resolve_user_skills_dir() {
-	if [ -n "${CLIO_HOME:-}" ]; then echo "$CLIO_HOME/skills"; return; fi
 	if [ -n "${CLIO_CONFIG_DIR:-}" ]; then echo "$CLIO_CONFIG_DIR/skills"; return; fi
+	if [ -n "${CLIO_HOME:-}" ]; then echo "$CLIO_HOME/config/skills"; return; fi
 	case "$(uname -s)" in
-		Darwin) echo "$HOME/Library/Application Support/clio/skills" ;;
+		Darwin) echo "$HOME/Library/Application Support/clio/config/skills" ;;
 		*) echo "${XDG_CONFIG_HOME:-$HOME/.config}/clio/skills" ;;
 	esac
 }

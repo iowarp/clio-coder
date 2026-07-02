@@ -1,13 +1,16 @@
 name: release
 
-# Publishing flow: push a tag `vX.Y.Z` that matches package.json's version.
-# `npm publish` runs `prepublishOnly` (ci:release), so the full deterministic
-# gate — typecheck, lint, skills pins, build, tests, dist integrity, and the
-# package-content audit — runs exactly once before anything leaves the runner.
+# Release flow: push a tag `vX.Y.Z` that matches package.json's version. The
+# full deterministic gate — typecheck, lint, skills pins, build, tests, dist
+# integrity, and the package-content audit — runs once before the GitHub
+# release is created with the tarball attached.
 #
-# Requires the `NPM_TOKEN` repository secret (a granular automation token with
-# publish rights for @iowarp). Once the package exists on npm, this can be
-# switched to npm trusted publishing (OIDC) and the secret removed.
+# npm publishing is deferred until the first stable v0.3.0: the publish step
+# is disabled by its `if: false` guard. To re-enable, flip the guard, set the
+# `NPM_TOKEN` repository secret (a granular automation token with publish
+# rights for @iowarp), and update README's distribution note. Once the package
+# exists on npm, this can be switched to npm trusted publishing (OIDC) and the
+# secret removed.
 
 on:
   push:
@@ -47,7 +50,10 @@ jobs:
             echo "package.json version $pkg does not match tag $GITHUB_REF_NAME" >&2
             exit 1
           fi
-      - name: Publish to npm (runs ci:release via prepublishOnly)
+      - name: Run the release gate
+        run: npm run ci:release
+      - name: Publish to npm (disabled until stable v0.3.0)
+        if: ${{ false }}
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
