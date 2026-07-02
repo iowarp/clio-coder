@@ -1295,24 +1295,38 @@ export async function runConfigureCommand(argv: ReadonlyArray<string>): Promise<
 			return 2;
 		}
 	}
-	const nonInteractive =
-		runtime !== null &&
-		(args.id !== undefined ||
-			args.url !== undefined ||
-			args.model !== undefined ||
-			args.workerProfile !== undefined ||
-			args.workerProfileModel !== undefined ||
-			args.apiKey !== undefined ||
-			args.apiKeyEnv !== undefined ||
-			args.gateway ||
-			args.lifecycle !== undefined ||
-			args.setOrchestrator ||
-			args.setWorkerDefault ||
-			args.contextWindow !== undefined ||
-			args.maxTokens !== undefined ||
-			args.reasoning !== undefined);
+	const hasTargetSetupFlag =
+		args.id !== undefined ||
+		args.url !== undefined ||
+		args.model !== undefined ||
+		args.workerProfile !== undefined ||
+		args.workerProfileModel !== undefined ||
+		args.apiKey !== undefined ||
+		args.apiKeyEnv !== undefined ||
+		args.gateway ||
+		args.lifecycle !== undefined ||
+		args.setOrchestrator ||
+		args.setWorkerDefault ||
+		args.contextWindow !== undefined ||
+		args.maxTokens !== undefined ||
+		args.reasoning !== undefined;
+	const nonInteractive = runtime !== null && hasTargetSetupFlag;
 
 	if (nonInteractive && runtime) return runNonInteractive(runtime, args);
+
+	// Setup flags were supplied but the non-interactive spec is incomplete
+	// (missing --runtime, or a --runtime with no target flags). On a
+	// non-interactive stdin the wizard below would read EOF, take the default
+	// answers, write the initial settings template, and exit 0 without
+	// configuring the requested target. Reject with the missing half instead.
+	if ((runtimeId !== undefined || hasTargetSetupFlag) && !input.isTTY) {
+		printError(
+			runtime === null
+				? "--runtime is required when configuring a target non-interactively"
+				: "--id is required when passing flags non-interactively",
+		);
+		return 2;
+	}
 
 	const rl = createInterface({ input, output });
 	try {
