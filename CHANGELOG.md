@@ -28,6 +28,18 @@ and grep/find answer tree visibility from a single ignore policy.
   `dispatch` absorbs `dispatch_batch` with a `tasks` array and
   `mode=parallel|sequential`. The `gateway` name is design-reserved for the
   future MCP/DB proxy and is not implemented.
+- **dispatch pipeline mode.** `dispatch(tasks, mode=pipeline)` runs tasks one
+  at a time and threads each step's final assistant output to the next step as
+  a delimited dynamic prompt message treated as data, not instructions (step 1
+  receives none). The threaded text is capped at 12000 characters and the
+  receiving run's receipt carries `pipeline` provenance (`fromRunId`,
+  `position`, `inputBytes`, `inputTruncated`). A failed step halts the chain
+  and later steps are reported as skipped. Threading rides the existing
+  dynamic-message channel only, so worker static prompt hashes
+  (`staticCompositionHash`) are byte-identical with pipeline mode on or off.
+  This changes the `dispatch` tool's parameter schema (the `mode` enum gains
+  `pipeline`) and its description, which invalidates provider prompt caches on
+  first use after upgrade.
 - **monitor and steer.** `monitor(run_id?, mode=list|status|peek|receipt)`
   inspects dispatched runs, including an in-process rolling event tail
   (`peek`) and the stored receipt JSON (`receipt`, 14KB cap).

@@ -45,6 +45,20 @@ export interface RunLineage {
 }
 
 /**
+ * Provenance for a pipeline step whose worker received the previous step's
+ * final output as threaded dynamic input. Absent on step 1 and on every
+ * non-pipeline run. `inputBytes` is the UTF-8 byte length of the upstream
+ * text before the 12000-char cap; `inputTruncated` records whether the cap
+ * clipped it. Follows the optional-field pattern of `lineage`/`identity`.
+ */
+export interface RunPipelineProvenance {
+	fromRunId: string | null; // run whose output was threaded in; null when unknown
+	position: number; // 1-based index of this step in the chain
+	inputBytes: number; // UTF-8 byte length of the upstream text before capping
+	inputTruncated: boolean; // true when the 12000-char cap clipped the input
+}
+
+/**
  * Host and HPC-scheduler identity captured at run start. A receipt produced
  * inside a Slurm/PBS/LSF allocation carries the allocation identity so the
  * provenance chain anchors to the scheduler job, not folklore.
@@ -110,6 +124,8 @@ export interface RunEnvelope {
 	outcomeDetail?: string | null;
 	lineage?: RunLineage;
 	identity?: RunIdentity;
+	/** Pipeline threading provenance; present only on pipeline steps after the first. */
+	pipeline?: RunPipelineProvenance;
 	exitCode: number | null;
 	pid: number | null;
 	heartbeatAt: string | null;
@@ -255,6 +271,8 @@ export interface RunReceipt {
 	outcomeDetail?: string | null;
 	lineage?: RunLineage;
 	identity?: RunIdentity;
+	/** Pipeline threading provenance; present only on pipeline steps after the first. */
+	pipeline?: RunPipelineProvenance;
 	exitCode: number;
 	failureMessage?: string;
 	tokenCount: number;

@@ -156,6 +156,13 @@ over run:
   prompt's safety section uses.
 - **Memory** (when the request carries an approved memory section): unchanged,
   delivered after the two messages above.
+- **Pipeline input** (`pipeline`-mode steps after the first): the previous
+  step's final assistant output, threaded as data inside a fixed
+  `<<<PIPELINE-INPUT ... PIPELINE-INPUT>>>` delimiter and labeled as input,
+  not instructions. It is ordered last, after memory and adjacent to the task,
+  and capped at 12000 characters; the receiving run's receipt records
+  `pipeline` provenance (source run, step position, input bytes, whether the
+  cap truncated it). Step 1 and every non-pipeline run get none.
 
 ---
 
