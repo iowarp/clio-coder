@@ -653,18 +653,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		autonomy: () => (config?.get() ?? readSettings()).autonomy ?? "auto-edit",
 	});
 	let askUserHandler: AskUserHandler | null = null;
-	// ask_user registers on every surface. Interactive sessions install a real
-	// handler; headless and ACP runs have none, so the bridge answers with an
-	// immediate cancelled interview and the model proceeds with its stated
-	// defaults instead of losing the tool (and interview skills their contract)
-	// silently. This keeps the compiled tool surface identical across surfaces.
+	// ask_user is interactive-only by design: it is a human interview tool and
+	// headless/ACP surfaces have no operator to interview, so the tool is not
+	// registered there at all (documented in `clio run --help`). Skills that
+	// interview fall back to their stated defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 		dispatch,
 		bus,
-		askUser: askUserBridge,
+		...(interactive ? { askUser: askUserBridge } : {}),
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
