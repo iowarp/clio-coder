@@ -255,17 +255,20 @@ The effective rigor level for a session or dispatch run is resolved at boot time
 
 ### The Finish Gate and Re-Prompt Behavior
 
-On every settled turn end (turns where the assistant has stopped speaking and is ready to yield control), the finish-contract assessor scans the last 80 entries in the session history.
+On every settled `turn_end`, the finish-contract assessor scans entries since the last user message, capped at 80 entries. The trigger is action-scoped: the gate engages only when that window contains successful workspace mutation evidence and no validation evidence or explicit limitation. The model does not have to type a phrase such as `done` or `fixed`; the settled turn after mutation is the completion signal.
 
-If the assistant's response contains a completion claim (matching patterns such as `done`, `complete`, `fixed`, `resolved`, `ready for review`) but the recent history contains **no validation evidence** (e.g. successful verification commands, validation tools, or dispatch receipts):
+The assessor decision order is:
+
+1. If the window has no successful mutating receipt or settled mutating `!` bash execution, the contract passes with `no_mutation`.
+2. If the window has validation evidence, the contract passes with `validation_evidence`. Evidence includes successful validation commands, verification `run_task` scripts, `validate_frontend`, passed dispatch receipts, and protected-artifact validation records.
+3. If the assistant explicitly states what could not be verified and why, the contract passes with `explicit_limitation`.
+4. Otherwise, the contract engages with `unvalidated_mutation`.
 
 - **Normal Rigor**: Clio issues a soft advisory warning (`FINISH_CONTRACT_ADVISORY_MESSAGE`) injected as a reminder for the next turn, but permits the turn to settle.
-- **High Rigor**: Clio withholds completion. The assessor emits two middleware effects:
-  - `request_continuation`: Forces the model to keep executing, preventing the turn from settling.
-  - `inject_reminder` (severity: `"warn"`): Injects the `HIGH_RIGOR_REVALIDATION_MESSAGE` directive to instruct the model to run a verification-family command (e.g. `npm test`, `npm run build`) or explicitly declare a limitation (matching patterns such as `could not`, `blocked by`, `unable to`) before claiming completion.
+- **High Rigor**: Clio withholds completion. The assessor emits `request_continuation` and a warning `inject_reminder` carrying `HIGH_RIGOR_REVALIDATION_MESSAGE`, instructing the model to run a verification-family command (e.g. `npm test`, `npm run build`) or explicitly declare a limitation before ending.
 
 #### Exemptions and Safety Precautions
-- **Read-Only Status Turns**: Status and alignment checks that do not request work are exempt from the rigor gate.
+- **No-Mutation Turns**: Read-only status, alignment, and inspection turns are exempt because there is no successful workspace mutation in the recent window.
 - **Limitation Claims**: If the model explicitly states what could not be verified and why, the assessor accepts the statement as an explicit limitation and allows the turn to settle cleanly.
 - **Dynamic Injection**: All gate directives are injected dynamically through middleware effects. This ensures that the static system prompt prefix remains byte-stable, preserving prompt caches.
 - **Prior Hard-Block Preservation**: If a prior middleware hook has already emitted a hard block (e.g. tool-prose violation), the high-rigor continuation is suppressed so that critical error guidance is not overwritten.
