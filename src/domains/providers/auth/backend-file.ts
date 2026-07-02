@@ -1,20 +1,8 @@
-import { randomUUID } from "node:crypto";
-import {
-	chmodSync,
-	closeSync,
-	existsSync,
-	fsyncSync,
-	mkdirSync,
-	openSync,
-	readFileSync,
-	renameSync,
-	statSync,
-	unlinkSync,
-	writeSync,
-} from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { open, readFile, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 
 import type { AuthStorageBackend, LockResult } from "./storage.js";
@@ -27,29 +15,14 @@ function sleepSync(ms: number): void {
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// Both the sync and async lock paths funnel through the canonical writer. It is
+// sync-only, but the credentials file is tiny, the write runs under an exclusive
+// lock on a rare auth path, and delegating additionally gains the directory
+// fsync the hand-rolled variants lacked. The explicit chmod pins the file to
+// exactly 0o600: safeResourceWrite creates its temp with mode 0o600, which umask
+// can still narrow, so we re-assert the secret's mode after the rename.
 function atomicWriteSecret(absPath: string, contents: string): void {
-	const tmp = join(dirname(absPath), `.${randomUUID()}.tmp`);
-	const fd = openSync(tmp, "wx", 0o600);
-	try {
-		writeSync(fd, contents);
-		fsyncSync(fd);
-	} finally {
-		closeSync(fd);
-	}
-	renameSync(tmp, absPath);
-	chmodSync(absPath, 0o600);
-}
-
-async function atomicWriteSecretAsync(absPath: string, contents: string): Promise<void> {
-	const tmp = join(dirname(absPath), `.${randomUUID()}.tmp`);
-	const handle = await open(tmp, "wx", 0o600);
-	try {
-		await handle.writeFile(contents, "utf8");
-		await handle.sync();
-	} finally {
-		await handle.close();
-	}
-	renameSync(tmp, absPath);
+	safeResourceWrite(absPath, contents, { encoding: "utf8", mode: 0o600 });
 	chmodSync(absPath, 0o600);
 }
 
@@ -184,7 +157,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			const current = existsSync(this.path) ? await readFile(this.path, "utf8") : undefined;
 			const { result, next } = await fn(current);
 			if (next !== undefined) {
-				await atomicWriteSecretAsync(this.path, next);
+				atomicWriteSecret(this.path, next);
 			}
 			return result;
 		} finally {
