@@ -251,7 +251,19 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				return 2;
 			}
 			const list = validationLoad(pathArg);
-			const ok = list.items.length > 0 && !list.diagnostics.some((diag) => diag.type === "error");
+			// A scanned file that produced no loaded skill is malformed, and a
+			// collision drops a skill: both make the catalog invalid, as does any
+			// hard error. Benign warnings (name/path mismatch, name format,
+			// description length) attach to a file that still loaded, so their path
+			// is among the loaded skills and they do not fail validation.
+			const loadedPaths = new Set(list.items.map((skill) => skill.filePath));
+			const hasInvalidDiagnostic = list.diagnostics.some(
+				(diag) =>
+					diag.type === "error" ||
+					diag.type === "collision" ||
+					(diag.type === "warning" && diag.path !== undefined && !loadedPaths.has(diag.path)),
+			);
+			const ok = list.items.length > 0 && !hasInvalidDiagnostic;
 			if (parsed.json) {
 				process.stdout.write(`${JSON.stringify({ ok, skills: list.items, diagnostics: list.diagnostics }, null, 2)}\n`);
 			} else {
