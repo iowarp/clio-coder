@@ -41,6 +41,13 @@ export interface BuildEvalEvidenceOptions {
 	stateDir?: string;
 	evalId?: string;
 	artifact?: EvalRunArtifact;
+	/**
+	 * Extra file names the caller writes into the bundle directory after the
+	 * build (for example a per-eval `skill-eval.json` detail sidecar). They are
+	 * appended to `overview.files` so a consumer enumerating the overview learns
+	 * they exist; the caller is still responsible for writing them.
+	 */
+	sidecars?: ReadonlyArray<string>;
 }
 
 interface EvalLinkedRuns {
@@ -64,7 +71,7 @@ export async function buildEvalEvidence(options: BuildEvalEvidenceOptions): Prom
 		options.stateDir === undefined ? emptyEvalLinkedRuns() : await linkEvalRuns(options.stateDir, artifact);
 	const toolEventRows = [...evalToolEvents(artifact), ...linkedRuns.toolEvents].sort(compareEvidenceToolEvents);
 	const findings = evalFindings(artifact);
-	const overview = evalOverview(evidenceId, artifact, findings, toolEventRows, linkedRuns);
+	const overview = evalOverview(evidenceId, artifact, findings, toolEventRows, linkedRuns, options.sidecars);
 	await writeEvalEvidenceFiles(directory, artifact, overview, findings, toolEventRows, linkedRuns);
 	return { evidenceId, directory, overview, findings };
 }
@@ -79,6 +86,7 @@ function evalOverview(
 	findings: ReadonlyArray<EvidenceFinding>,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
 	linkedRuns: EvalLinkedRuns,
+	sidecars: ReadonlyArray<string> = [],
 ): EvidenceOverview {
 	const envelopes = linkedRuns.runSources.map((source) => source.envelope);
 	const receipts = linkedRuns.runSources.flatMap((source) => (source.receipt === null ? [] : [source.receipt]));
@@ -139,7 +147,7 @@ function evalOverview(
 			wallTimeMs: artifact.summary.wallTimeMs,
 		},
 		tags: uniqueTags(findings.map((finding) => finding.tag)),
-		files: [...EVAL_EVIDENCE_FILES],
+		files: [...EVAL_EVIDENCE_FILES, ...sidecars],
 	};
 }
 
