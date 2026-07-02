@@ -9,6 +9,22 @@ interfaces.
 
 ### Added
 
+- `clio skills eval <name|path>` (experimental) executes a skill's `evals.md`
+  RED-GREEN scenarios instead of trusting the prose. Per scenario it runs a
+  baseline headless turn without the skill, a treatment turn with the skill
+  loaded through the explicit `--skill` path and invoked via `/skill:<name>`,
+  and a judge turn that scores each Expected bullet pass/fail from the two
+  transcripts (strict JSON, parsed tolerantly from the judge's final text or
+  terminating-tool content). Scenario blocks are parsed prose-tolerantly
+  (`## S<n> - <title>`, Setup paragraph, Expected bullets); unparseable
+  scenario blocks are skipped with a diagnostic. Exit is nonzero when any
+  treatment bullet fails; `--json` emits one JSONL row per (scenario, bullet)
+  with `schema: "experimental"`. Results land as a standard eval evidence
+  bundle via a synthesized eval artifact, with the recorded deltas: bullet
+  verdicts are judge-scored rather than command-verified, token/cost totals
+  are zero because headless main-agent runs produce no receipts, and the
+  per-bullet detail (verdicts, transcripts, stderr tails) lives in a
+  `skill-eval.json` sidecar beside the standard bundle files.
 - Credential damage control closed three verified gaps. B1: Clio's own secret
   store is zero-access by default; the `credentials.yaml` literal joins the
   default deny-list and the expanded `<configDir>/credentials.yaml` path is
