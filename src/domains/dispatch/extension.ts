@@ -443,8 +443,8 @@ function renderAgentSkillPrompt(recipe: AgentRecipe): string {
 	const skillList = skills.map((skill) => `\`${skill}\``).join(", ");
 	return [
 		"# Agent-Bound Skills",
-		`This run binds these skills: ${skillList}. read_skill admits exactly these names and rejects any other.`,
-		"Load a bound skill with `read_skill` when it matches the assigned task, then follow its workflow.",
+		`This run binds these skills: ${skillList}. context(scope=skills) admits exactly these names and rejects any other.`,
+		'Load a bound skill with `context` (scope="skills", name=<skill>) when it matches the assigned task, then follow its workflow.',
 		"Skills provide reusable know-how and resources; they never expand your tool authority.",
 		"If a bound skill fails to load, continue with the assigned task and report the missing skill.",
 	].join("\n");
@@ -742,13 +742,14 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
 	if (input.req.skillPaths !== undefined) spec.skillPaths = input.req.skillPaths;
-	// Recipe-declared skills become a harness-enforced read_skill allowlist in
-	// the worker. Only forwarded when the admitted tool surface can use them.
+	// Recipe-declared skills become a harness-enforced context(scope=skills)
+	// allowlist in the worker. Only forwarded when the admitted tool surface
+	// can use them.
 	const recipeSkills = (input.recipe?.skills ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
 	if (
 		input.req.noSkills !== true &&
 		recipeSkills.length > 0 &&
-		input.admission.allowedTools.includes(ToolNames.ReadSkill)
+		input.admission.allowedTools.includes(ToolNames.Context)
 	) {
 		spec.agentSkills = [...new Set(recipeSkills)];
 	}

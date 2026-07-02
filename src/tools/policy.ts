@@ -2,7 +2,7 @@ import { isBuiltinToolName, type ToolName, ToolNames } from "../core/tool-names.
 import { classify } from "../domains/safety/action-classifier.js";
 import type { ToolSpec } from "./registry.js";
 
-const SESSION_BOUND_TOOLS = new Set<ToolName>([ToolNames.WorkspaceContext]);
+const SESSION_BOUND_TOOLS = new Set<ToolName>([]);
 const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.DispatchBatch]);
 const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser]);
 

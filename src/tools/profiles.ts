@@ -14,10 +14,9 @@ const MINIMAL_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [
 	ToolNames.Read,
 	ToolNames.Grep,
 	ToolNames.Find,
-	ToolNames.Glob,
 	ToolNames.Ls,
 	ToolNames.Git,
-	ToolNames.WorkspaceContext,
+	ToolNames.Context,
 	ToolNames.CodeNav,
 ];
 

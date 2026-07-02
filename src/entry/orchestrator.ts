@@ -334,7 +334,7 @@ function appendSkillActivationRegistryEvent(
 		session.recordSkillActivation(activation);
 	} catch {
 		// Activation metadata should never alter the result of a completed
-		// read_skill call. Missing ledger data is visible in diagnostics.
+		// context(scope=skills) call. Missing ledger data is visible in diagnostics.
 	}
 }
 

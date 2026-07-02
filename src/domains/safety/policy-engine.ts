@@ -403,8 +403,7 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 		case ToolNames.Read:
 		case ToolNames.Ls:
 		case ToolNames.Grep:
-		case ToolNames.Find:
-		case ToolNames.Glob: {
+		case ToolNames.Find: {
 			const target = pathArg(args) ?? ".";
 			return [{ operation: "read", path: target }];
 		}

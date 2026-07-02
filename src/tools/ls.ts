@@ -2,9 +2,15 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import {
+	finalizeObservation,
+	OBSERVE_SELF_CAPS,
+	observationBudgetExhausted,
+	reserveObservation,
+} from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
-import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
+import { truncateHead } from "./truncate.js";
 
 const DEFAULT_LIMIT = 500;
 
@@ -17,11 +23,11 @@ export const lsTool: ToolSpec = {
 	description: 'List directory entries sorted alphabetically, "/" suffix for directories, dotfiles included.',
 	parameters: Type.Object({
 		path: Type.Optional(Type.String({ description: "Directory to list." })),
-		limit: Type.Optional(Type.Number({ description: "Max entries (default 500)." })),
+		limit: Type.Optional(Type.Number({ description: `Max entries (default ${DEFAULT_LIMIT}).` })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
-	async run(args): Promise<ToolResult> {
+	async run(args, options): Promise<ToolResult> {
 		const rootArg = typeof args.path === "string" ? args.path : ".";
 		const root = resolveReadPath(rootArg);
 		const limit = parseLimit(args.limit);
@@ -34,6 +40,16 @@ export const lsTool: ToolSpec = {
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `ls: ${msg}` };
+		}
+		const reservation = reserveObservation(OBSERVE_SELF_CAPS.ls, options);
+		if (reservation.exhausted) {
+			return observationBudgetExhausted({
+				tool: ToolNames.Ls,
+				unit: "entries",
+				reservation,
+				subject: `listing ${rootArg}`,
+				hint: "Use find with a narrower pattern or continue in a follow-up turn.",
+			});
 		}
 
 		try {
@@ -54,26 +70,38 @@ export const lsTool: ToolSpec = {
 			}
 
 			if (outputEntries.length === 0) {
-				return { kind: "ok", output: "(empty directory)" };
+				return finalizeObservation({
+					tool: ToolNames.Ls,
+					unit: "entries",
+					output: "(empty directory)",
+					shownCount: 0,
+					totalCount: 0,
+					truncated: false,
+					reservation,
+					...(options ? { options } : {}),
+				});
 			}
 
-			const truncation = truncateHead(outputEntries.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
-			const notices: string[] = [];
-			const details: { truncation?: TruncationResult; entryLimitReached?: number } = {};
-			if (entryLimitReached) {
-				notices.push(`${limit} entries limit reached. Use limit=${limit * 2} for more`);
-				details.entryLimitReached = limit;
-			}
-			if (truncation.truncated) {
-				notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
-				details.truncation = truncation;
-			}
-			const output = notices.length > 0 ? `${truncation.content}\n\n[${notices.join(". ")}]` : truncation.content;
-			return {
-				kind: "ok",
-				output,
-				...(Object.keys(details).length > 0 ? { details } : {}),
-			};
+			const fullOutput = outputEntries.join("\n");
+			const truncation = truncateHead(fullOutput, {
+				maxBytes: reservation.callCapBytes,
+				maxLines: Number.MAX_SAFE_INTEGER,
+			});
+			const truncated = entryLimitReached || truncation.truncated;
+			return finalizeObservation({
+				tool: ToolNames.Ls,
+				unit: "entries",
+				output: truncation.content,
+				// Offload only when the byte cap cut collected entries; a bare
+				// entry limit continues via `next`.
+				...(truncation.truncated ? { fullOutput } : {}),
+				shownCount: truncation.outputLines,
+				totalCount: entries.length,
+				truncated,
+				...(entryLimitReached ? { next: `limit=${limit * 2}` } : {}),
+				reservation,
+				...(options ? { options } : {}),
+			});
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `ls: ${msg}` };

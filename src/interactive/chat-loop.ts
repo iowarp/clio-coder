@@ -186,7 +186,7 @@ export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
 	/** Files already expanded into this session's working context. */
 	workingContextPaths?: ReadonlyArray<string>;
-	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until read_skill succeeds. */
+	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until the skill body loads. */
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	/** Internal middleware resubmit; does not reset the per-user-prompt stalled-turn nudge cap. */
 	requestContinuation?: boolean;
@@ -2042,7 +2042,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 5. Append the user turn, then stamp and persist the snapshot.
 			// PendingSkillRequest is intent only; SkillActivation ledger entries
-			// are recorded by read_skill success.
+			// are recorded on skill-load success.
 			const userTurnId = appendSubmittedUserTurn(
 				agentRuntime,
 				submittedText,

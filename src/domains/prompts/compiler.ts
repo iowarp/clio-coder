@@ -126,7 +126,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	}
 	if (activeToolNames.includes("read_skill")) {
 		lines.push(
-			"Call read_skill with no name to list available skills. When the user message carries a skill request, first call read_skill for that skill before doing anything else.",
+			"Call context with scope=\"skills\" to list available skills. When the user message carries a skill request, first load that skill via context (scope=\"skills\", name=<skill>) before doing anything else.",
 		);
 	}
 	if (activeToolNames.includes("dispatch")) {

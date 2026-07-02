@@ -57,6 +57,7 @@ export const OBSERVE_SELF_CAPS = {
 	codeNav: 16 * 1024,
 	contextDocs: 16 * 1024,
 	contextSkills: 50 * 1024,
+	contextWorkspace: 50 * 1024,
 } as const;
 
 // Per-turn observation budget pool. One pool per sessionId:turnId shared by
@@ -237,11 +238,24 @@ export interface ObservationInput {
 	totalBytes?: number;
 	truncated: boolean;
 	next?: string;
+	/**
+	 * Suppress the appended notice when the body already carries its own
+	 * explanation (read's oversized-line edge). The observation details still
+	 * record the truncation; "exactly one notice line" stays true.
+	 */
+	omitNotice?: boolean;
+	/** Extra details merged beside `observation` (the skill-activation contract). */
+	details?: Record<string, unknown>;
 	reservation: ObservationReservation;
 	options?: ToolInvokeOptions;
 }
 
-function noticeLine(input: ObservationInput, bodyBytes: number, totalBytes: number, offloadPath: string | null): string {
+function noticeLine(
+	input: ObservationInput,
+	bodyBytes: number,
+	totalBytes: number,
+	offloadPath: string | null,
+): string {
 	const totalSegment = input.totalCount === null ? `${input.shownCount}+` : String(input.totalCount);
 	const parts = [
 		`${input.tool}: ${input.shownCount}/${totalSegment} ${input.unit} shown (${formatSize(bodyBytes)} of ${formatSize(totalBytes)})`,
@@ -284,7 +298,7 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 	}
 
 	if (format === "text") {
-		if (truncated) output += `\n\n${noticeLine(input, bodyBytes, totalBytes, offloadPath)}`;
+		if (truncated && input.omitNotice !== true) output += `\n\n${noticeLine(input, bodyBytes, totalBytes, offloadPath)}`;
 		if (input.reservation.limited && !input.reservation.exhausted) {
 			output += `\n\n${limitedBudgetNote(input.reservation)}`;
 		}
@@ -306,5 +320,5 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 		...(offloadPath !== null ? { offloadPath } : {}),
 		...(budget !== null ? { budget } : {}),
 	};
-	return { kind: "ok", output, details: { observation } };
+	return { kind: "ok", output, details: { ...(input.details ?? {}), observation } };
 }

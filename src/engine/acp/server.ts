@@ -82,7 +82,7 @@ function textContent(text: string): { type: "text"; text: string } {
 const TOOL_KIND_BY_NAME: Record<string, AcpToolKind> = {
 	read: "read",
 	ls: "read",
-	read_skill: "read",
+	context: "read",
 	write: "edit",
 	edit: "edit",
 	create_skill: "edit",
@@ -90,9 +90,7 @@ const TOOL_KIND_BY_NAME: Record<string, AcpToolKind> = {
 	write_review: "edit",
 	grep: "search",
 	find: "search",
-	glob: "search",
 	code_nav: "search",
-	workspace_context: "search",
 	bash: "execute",
 	run_task: "execute",
 	validate_frontend: "execute",

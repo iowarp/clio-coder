@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { compileGlobRegex, normalizeGlobInput } from "../../tools/glob.js";
+import { compileGlobRegex, normalizeGlobInput } from "../../tools/ignore-policy.js";
 import { ceilChars } from "../session/context-accounting.js";
 
 export interface ProjectRule {

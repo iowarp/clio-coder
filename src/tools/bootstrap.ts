@@ -7,23 +7,21 @@ import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
 import { codeNavTool } from "./codewiki/code-nav.js";
+import { createContextTool } from "./context/index.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { createDispatchBatchTool, createDispatchTool } from "./dispatch.js";
-import { docsSearchTool } from "./docs-search.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
-import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readMaxBytes, readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import { gitTool, runTaskTool } from "./safe-exec.js";
-import { createReadSkillTool, createSkillTool } from "./skills.js";
+import { createSkillTool } from "./skills.js";
 import { DEFAULT_MAX_BYTES } from "./truncate.js";
 import { validateFrontendTool } from "./validate-frontend.js";
 import { webFetchTool } from "./web-fetch.js";
-import { workspaceContextTool } from "./workspace-context.js";
 import { writeTool } from "./write.js";
 import { writePlanTool } from "./write-plan.js";
 import { writeReviewTool } from "./write-review.js";
@@ -132,13 +130,6 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: boundedSearchPolicy,
 		costLatency: "local_medium",
 	},
-	[ToolNames.Glob]: {
-		objective: "Find paths by glob pattern with recency ordering.",
-		uiLabel: "Glob",
-		retrySafety: "idempotent",
-		resultSizePolicy: boundedSearchPolicy,
-		costLatency: "local_medium",
-	},
 	[ToolNames.Ls]: {
 		objective: "List directory entries.",
 		uiLabel: "List",
@@ -199,16 +190,9 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: boundedSearchPolicy,
 		costLatency: "local_fast",
 	},
-	[ToolNames.DocsSearch]: {
-		objective: "Retrieve cited sections from Clio's bundled documentation by deterministic semantic-style ranking.",
-		uiLabel: "Docs",
-		retrySafety: "idempotent",
-		resultSizePolicy: boundedSearchPolicy,
-		costLatency: "local_fast",
-	},
-	[ToolNames.ReadSkill]: {
-		objective: "Read an available coding skill body.",
-		uiLabel: "Skill",
+	[ToolNames.Context]: {
+		objective: "Return workspace, bundled-docs, or skill context.",
+		uiLabel: "Context",
 		retrySafety: "idempotent",
 		resultSizePolicy: boundedReadPolicy,
 		costLatency: "local_fast",
@@ -264,13 +248,6 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "agent",
 	},
-	[ToolNames.WorkspaceContext]: {
-		objective: "Return structured workspace/git/project facts.",
-		uiLabel: "Workspace",
-		retrySafety: "idempotent",
-		resultSizePolicy: boundedReadPolicy,
-		costLatency: "local_fast",
-	},
 };
 
 function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
@@ -306,9 +283,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...builtin(findTool, { path: "src/tools/find.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(globTool, { path: "src/tools/glob.ts", scope: "core" }),
-	});
-	registry.register({
 		...builtin(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
 	});
 	registry.register({
@@ -332,9 +306,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	registry.register({
 		...builtin(codeNavTool, { path: "src/tools/codewiki/code-nav.ts", scope: "core" }),
 	});
-	registry.register({
-		...builtin(docsSearchTool, { path: "src/tools/docs-search.ts", scope: "core" }),
-	});
 	const skillToolDeps = {
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
@@ -350,8 +321,27 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	registry.register({
 		...builtin(credentialPresentTool, { path: "src/tools/credential-present.ts", scope: "core" }),
 	});
+	const session = deps.session;
 	registry.register({
-		...builtin(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
+		...builtin(
+			createContextTool({
+				...skillToolDeps,
+				...(session
+					? {
+							workspace: {
+								hasSession: () => session.current() !== null,
+								getSnapshot: () => session.current()?.workspace ?? null,
+								probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
+								saveSnapshot: (snap) => {
+									const meta = session.current();
+									if (meta) meta.workspace = snap;
+								},
+							},
+						}
+					: {}),
+			}),
+			{ path: "src/tools/context/index.ts", scope: "core" },
+		),
 	});
 	registry.register({
 		...builtin(createSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
@@ -373,24 +363,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 				path: "src/tools/dispatch.ts",
 				scope: "core",
 			}),
-		});
-	}
-
-	const session = deps.session;
-	if (session) {
-		registry.register({
-			...withBuiltinMetadata(
-				workspaceContextTool({
-					hasSession: () => session.current() !== null,
-					getSnapshot: () => session.current()?.workspace ?? null,
-					probeWorkspace: () => probeWorkspace(session.current()?.cwd ?? process.cwd()),
-					saveSnapshot: (snap) => {
-						const meta = session.current();
-						if (meta) meta.workspace = snap;
-					},
-				}),
-			),
-			sourceInfo: { path: "src/tools/workspace-context.ts", scope: "core" },
 		});
 	}
 

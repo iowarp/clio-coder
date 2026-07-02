@@ -124,7 +124,8 @@ function shapeJsonOverflow(
 ): ToolResult {
 	const observation = detailsRecord(result.details, "observation");
 	const offloadPath = writeToolOffload(text, context);
-	const next = typeof observation?.next === "string" && observation.next.length > 0 ? observation.next : followUpHint(spec);
+	const next =
+		typeof observation?.next === "string" && observation.next.length > 0 ? observation.next : followUpHint(spec);
 	const stub = JSON.stringify({
 		error: `result exceeded ${maxBytes} bytes`,
 		...(offloadPath !== null ? { offloadPath } : {}),
