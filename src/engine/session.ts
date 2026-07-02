@@ -39,6 +39,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
+import { assertSafeId } from "../core/safe-id.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { clioStateDir } from "../core/xdg.js";
 
@@ -558,6 +559,10 @@ function recoverTreeFromJsonl(diskTree: SessionTreeNode[], fileEntries: Readonly
 }
 
 function findSessionDir(id: string): string {
+	// Session ids are identifiers, not paths. Reject a traversal id before any
+	// filesystem read so it can never resolve a directory outside the sessions
+	// root (`join(sessionsRoot, entry, id)` would otherwise escape).
+	assertSafeId(id, "session");
 	const sessionsRoot = join(clioStateDir(), "sessions");
 	if (!existsSync(sessionsRoot)) {
 		throw new Error(`session not found: ${id}`);
