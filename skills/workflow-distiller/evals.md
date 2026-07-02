@@ -15,10 +15,11 @@ Expected:
   assumptions.
 - Interviews via `ask_user` with `mode: "single_question"`, one question per
   round, bounded rounds.
-- Lists installed skills via `read_skill` with no name before designing.
+- Lists installed skills via `context(scope="skills")` with no name before
+  designing.
 - Presents a compact design summary and waits for explicit approval.
-- Calls `create_skill` only after approval, with session-specific values
-  replaced by placeholders.
+- Calls `artifact(kind="skill")` only after approval, with session-specific
+  values replaced by placeholders.
 - Records a RED-GREEN validation scenario.
 
 ## S2 - overlap with an installed skill
@@ -31,7 +32,7 @@ Expected:
 - The overlap check finds the installed skill.
 - The generated skill references it by name instead of reimplementing the
   step, with a one-line rationale in the body.
-- The `create_skill` call passes `requires: ["skill:<name>"]` so the
+- The `artifact(kind="skill")` call passes `requires: ["skill:<name>"]` so the
   generated frontmatter arms the loader's unmet-dependency warning when the
   referenced skill is absent.
 
@@ -51,7 +52,8 @@ Setup: user asks for a new skill for something never done in any session.
 
 Expected:
 
-- Skips the distiller ceremony and gives direct `create_skill` guidance.
+- Skips the distiller ceremony and gives direct `artifact(kind="skill")`
+  guidance.
 
 ## Baseline failure modes to watch for (RED)
 
@@ -71,24 +73,25 @@ prompt; the phases still had to run in order.
 - Six-phase walk (CSV header normalization fixture): the workflow visibly ran
   (write plus execute normalize.py, row-count check), Phase 1 cited exactly
   those steps, Phase 2 applied the pre-supplied decisions question by
-  question, Phase 3 called `read_skill` with no name, Phase 4 presented the
-  summary and stopped for approval even though pre-approval was offered (the
-  strict reading of the gate), and after an explicit approval turn Phase 5's
-  `create_skill` landed a loadable project skill that `clio skills inspect`
-  resolves, with placeholders instead of session paths. Phase 6 recorded the
-  validation scenario in the body.
-- S2 RED (no distiller, arxiv-literature installed): the baseline called
-  `create_skill` immediately with no `read_skill` overlap check, no gate, and
-  a body that reimplements the fetch step. Gap confirmed.
+  question, Phase 3 listed installed skills with no name, Phase 4 presented
+  the summary and stopped for approval even though pre-approval was offered
+  (the strict reading of the gate), and after an explicit approval turn Phase
+  5's skill-creation call landed a loadable project skill that `clio skills
+  inspect` resolves, with placeholders instead of session paths. Phase 6
+  recorded the validation scenario in the body.
+- S2 RED (no distiller, arxiv-literature installed): the baseline created the
+  skill immediately with no overlap check against the installed-skill
+  listing, no gate, and a body that reimplements the fetch step. Gap
+  confirmed.
 - S2 GREEN: with the shipped per-step overlap wording, the design references
   `arxiv-literature` with a rationale instead of reimplementing retrieval.
   Two earlier drafts missed this: workflow-level overlap judgment and a
   fixture prompt that prescribed the fetch mechanism both masked the
   behavior; the wording now says a different end goal does not excuse
-  reimplementing a covered step. At the time of that run `create_skill`
-  could not emit `requires` frontmatter, so the skill handed the user the
-  line to add; `requires: [skill:arxiv-literature]` on the generated skill
-  was verified to produce the loader's "requires skill ... which is not
-  available" warning when the dependency is absent. 2026-07-02: create_skill
-  gained a validated `requires` parameter and the skill now passes the
-  entries directly in Phase 5.
+  reimplementing a covered step. At the time of that run the skill-creation
+  tool could not emit `requires` frontmatter, so the skill handed the user
+  the line to add; `requires: [skill:arxiv-literature]` on the generated
+  skill was verified to produce the loader's "requires skill ... which is not
+  available" warning when the dependency is absent. 2026-07-02: skill
+  creation (today's `artifact(kind="skill")`) gained a validated `requires`
+  parameter and the skill now passes the entries directly in Phase 5.

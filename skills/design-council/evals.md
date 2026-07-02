@@ -74,9 +74,9 @@ MPI checkpointing module writing one raw npy per rank per step).
   Performance Engineer's dissent preserved and answered. Note the topic
   proved genuinely debatable, so full rounds were correct.
 - Degraded fallback (HDF5 vs Zarr, run while the fleet target had model
-  residency failures): the skill attempted `dispatch_batch` first, observed
-  worker failures in receipts, then ran the same rounds inline and labeled
-  the result degraded exactly as the clause requires.
+  residency failures): the skill attempted a parallel `dispatch` first,
+  observed worker failures in receipts, then ran the same rounds inline and
+  labeled the result degraded exactly as the clause requires.
 - Early termination (S2, zero-padded vs unpadded checkpoint filenames): the
   first draft of the skill ran full rounds on side-quibbles for two
   debatable-in-hindsight "consensus" topics; the composition and termination

@@ -6,11 +6,10 @@ license: Apache-2.0
 allowed-tools:
   - read
   - grep
-  - glob
   - ls
   - find
   - git
-  - workspace_context
+  - context
   - code_nav
   - ask_user
 registry-id: iowarp/clio-coder
@@ -49,9 +48,10 @@ Work top to bottom; stop early once you have enough to state where things stand.
    session's brief: focus, work-in-progress, blockers, suggested skills.
 
 3. **Git state.** Capture branch, uncommitted changes, and recent commits
-   (`workspace_context` and `git` (op=status) when available, else `git status -sb`
-   and `git log --oneline -10`). Reconcile against the handoff's "work in
-   progress" — flag anything that drifted (committed since, reverted, conflicts).
+   (`context(scope="workspace")` and `git` (op=status) when available, else
+   `git status -sb` and `git log --oneline -10`). Reconcile against the
+   handoff's "work in progress" — flag anything that drifted (committed
+   since, reverted, conflicts).
 
 4. **Active signals.** Check `.clio/state.json` and codewiki freshness if
    present. Treat stale summaries as hints, never as authority over source.

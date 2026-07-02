@@ -6,11 +6,10 @@ license: Apache-2.0
 allowed-tools:
   - read
   - grep
-  - glob
   - ls
   - find
   - git
-  - workspace_context
+  - context
   - code_nav
   - write
   - edit
