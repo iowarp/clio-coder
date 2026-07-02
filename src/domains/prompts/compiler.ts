@@ -119,14 +119,14 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		"# Tool Contract",
 		"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
-		"Prefer workspace_context, grep, and read for repository orientation instead of assuming source-tree details were preloaded.",
+		'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
 	];
 	if (activeToolNames.includes("code_nav")) {
 		lines.push("Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).");
 	}
-	if (activeToolNames.includes("read_skill")) {
+	if (activeToolNames.includes("context")) {
 		lines.push(
-			"Call context with scope=\"skills\" to list available skills. When the user message carries a skill request, first load that skill via context (scope=\"skills\", name=<skill>) before doing anything else.",
+			'Call context with scope="skills" to list available skills. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 		);
 	}
 	if (activeToolNames.includes("dispatch")) {
@@ -151,7 +151,7 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	return [
 		"# Retrieval Hints",
 		"Compact CLIO.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
-		"For questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, workspace_context, grep, or read before answering. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
+		"For questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
 }
 

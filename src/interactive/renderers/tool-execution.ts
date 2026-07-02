@@ -151,8 +151,14 @@ const PRIMARY_ARG_FIELD: Record<string, string> = {
 	bash: "command",
 	grep: "pattern",
 	find: "pattern",
-	glob: "pattern",
 	web_fetch: "url",
+	git: "op",
+	verify: "check",
+	code_nav: "query",
+	context: "scope",
+	artifact: "kind",
+	monitor: "run_id",
+	steer: "run_id",
 };
 
 /**
@@ -253,7 +259,13 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
 	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
 	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
-	glob: (args) => buildFieldSublineBody(args, "pattern", "matching ", { wrapInBackticks: true }),
+	git: (args) => buildFieldSublineBody(args, "op", "git "),
+	verify: (args) => buildFieldSublineBody(args, "check", "verifying "),
+	code_nav: (args) => buildFieldSublineBody(args, "query", "navigating ", { wrapInBackticks: true }),
+	context: (args) => buildFieldSublineBody(args, "scope", "context "),
+	artifact: (args) => buildFieldSublineBody(args, "kind", "writing "),
+	monitor: (args) => buildFieldSublineBody(args, "run_id", "monitoring "),
+	steer: (args) => buildFieldSublineBody(args, "run_id", "steering "),
 };
 
 /**

@@ -96,7 +96,7 @@ const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expan
 	},
 	{
 		triggers: ["skill", "skills", "marketplace"],
-		expansions: ["skill", "skills", "marketplace", "discovery", "read_skill"],
+		expansions: ["skill", "skills", "marketplace", "discovery", "context"],
 	},
 	{
 		triggers: ["docs", "documentation", "manual", "self"],
