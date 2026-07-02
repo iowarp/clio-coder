@@ -260,6 +260,15 @@ export function createContextBundle(
 			}
 		},
 		renderPromptContext,
+		projectStructuredContext(cwd = process.cwd()) {
+			const clio = tryReadClioMd(cwd);
+			if (!clio?.ok) return null;
+			return {
+				projectName: clio.value.projectName,
+				conventions: [...clio.value.conventions],
+				invariants: [...clio.value.invariants],
+			};
+		},
 		contextState: contextState.read,
 		startupHints: () => [...startupHints],
 		noteFileChanges,

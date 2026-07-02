@@ -78,7 +78,12 @@ function lookupFragment(table: FragmentTable, id: string, role: string): LoadedF
 	return frag;
 }
 
-function safetyOneLiner(level: string): string {
+/**
+ * One-sentence autonomy directive. Shared: the session prompt's safety
+ * section and the dispatch worker safety-posture message must describe the
+ * same enforced behavior, so neither side duplicates this switch.
+ */
+export function safetyOneLiner(level: string): string {
 	switch (level) {
 		case "read-only":
 			return "inspect and answer; mutating calls are auto-denied, so propose changes instead.";

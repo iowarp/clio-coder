@@ -28,9 +28,17 @@ import {
 } from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
-import { type AgentAudience, assertAgentSpecPolicy, isUserVisibleAgent, normalizeAgentSpec } from "../agents/spec.js";
+import {
+	type AgentAudience,
+	type AgentCapabilityClass,
+	assertAgentSpecPolicy,
+	isUserVisibleAgent,
+	normalizeAgentSpec,
+} from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
+import type { ContextContract, ProjectStructuredContext } from "../context/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
+import { safetyOneLiner } from "../prompts/compiler.js";
 import {
 	type CapabilityFlags,
 	canonicalizeWireModelId,
@@ -452,16 +460,82 @@ function renderAgentSkillPrompt(recipe: AgentRecipe): string {
 	].join("\n");
 }
 
-export function buildDynamicPromptMessages(req: DispatchRequest): WorkerPromptMessage[] {
+/**
+ * Capability classes whose workers act on the workspace and therefore
+ * receive the bounded project-context message. Read-only, shadow, and
+ * orchestration recipes deliberately get none.
+ */
+const PROJECT_CONTEXT_CAPABILITY_CLASSES: ReadonlySet<AgentCapabilityClass> = new Set([
+	"workspace-edit",
+	"verification",
+	"artifact-write",
+]);
+
+/** Total budget for the worker project-context message body. */
+const WORKER_PROJECT_CONTEXT_MAX_CHARS = 1500;
+
+/**
+ * Per-run context for the dynamic worker prompt messages. Everything here
+ * flows through dynamic messages, never through the stable system prompt, so
+ * `staticCompositionHash` stays byte-identical run over run.
+ */
+export interface WorkerDynamicContext {
+	capabilityClass?: AgentCapabilityClass | null;
+	/** Effective autonomy the worker spec will carry; renders the safety-posture line. */
+	autonomy?: string | null;
+	/** Structured CLIO.md fields; null when CLIO.md is absent or malformed. */
+	project?: ProjectStructuredContext | null;
+}
+
+/**
+ * Render the bounded project message: name, conventions, invariants, capped
+ * at WORKER_PROJECT_CONTEXT_MAX_CHARS. Conventions are truncated first, then
+ * invariants; a final hard slice guards against a pathological project name.
+ */
+function renderWorkerProjectContext(project: ProjectStructuredContext): string {
+	const render = (conventions: ReadonlyArray<string>, invariants: ReadonlyArray<string>): string => {
+		const lines = ["# Project Context", `Project: ${project.projectName}`];
+		if (conventions.length > 0) lines.push("Conventions:", ...conventions.map((item) => `- ${item}`));
+		if (invariants.length > 0)
+			lines.push("Hard invariants:", ...invariants.map((item, index) => `${index + 1}. ${item}`));
+		return lines.join("\n");
+	};
+	const conventions = [...project.conventions];
+	const invariants = [...project.invariants];
+	let body = render(conventions, invariants);
+	while (body.length > WORKER_PROJECT_CONTEXT_MAX_CHARS && conventions.length > 0) {
+		conventions.pop();
+		body = render(conventions, invariants);
+	}
+	while (body.length > WORKER_PROJECT_CONTEXT_MAX_CHARS && invariants.length > 0) {
+		invariants.pop();
+		body = render(conventions, invariants);
+	}
+	return body.length > WORKER_PROJECT_CONTEXT_MAX_CHARS ? body.slice(0, WORKER_PROJECT_CONTEXT_MAX_CHARS) : body;
+}
+
+export function buildDynamicPromptMessages(
+	req: DispatchRequest,
+	dynamicContext: WorkerDynamicContext = {},
+): WorkerPromptMessage[] {
+	const messages: WorkerPromptMessage[] = [];
+	const capabilityClass = dynamicContext.capabilityClass;
+	if (dynamicContext.project && capabilityClass && PROJECT_CONTEXT_CAPABILITY_CLASSES.has(capabilityClass)) {
+		const body = renderWorkerProjectContext(dynamicContext.project);
+		if (body.length > 0) {
+			messages.push({ id: "dispatch-project-context", body, contentHash: sha256(body) });
+		}
+	}
+	const autonomy = dynamicContext.autonomy?.trim() ?? "";
+	if (autonomy.length > 0) {
+		const body = `Safety posture: autonomy ${autonomy}. ${safetyOneLiner(autonomy)}`;
+		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
+	}
 	const memory = req.memorySection?.trim() ?? "";
-	if (memory.length === 0) return [];
-	return [
-		{
-			id: "dispatch-memory",
-			body: memory,
-			contentHash: sha256(memory),
-		},
-	];
+	if (memory.length > 0) {
+		messages.push({ id: "dispatch-memory", body: memory, contentHash: sha256(memory) });
+	}
+	return messages;
 }
 
 interface ResolvedTarget {
@@ -1143,6 +1217,9 @@ export function createDispatchBundle(
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const config = context.getContract<ConfigContract>("config");
 	const scheduling = context.getContract<SchedulingContract>("scheduling");
+	// Optional: absent in minimal test bundles. Workers just get no project
+	// message when the context domain is not loaded.
+	const projectContext = context.getContract<ContextContract>("context");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 	const startAcpRun = options?.startAcpDelegationRun ?? startAcpDelegationRun;
 	const collectReproducibility = options?.collectReproducibility ?? collectReproducibilityMetadata;
@@ -1478,7 +1555,17 @@ export function createDispatchBundle(
 
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, recipe);
-		const dynamicPromptMessages = buildDynamicPromptMessages(req);
+		// Fetch structured project context only for capability classes that
+		// receive it, so read-only scouts never pay the CLIO.md read.
+		const project =
+			projectContext && PROJECT_CONTEXT_CAPABILITY_CLASSES.has(spec.capabilityClass)
+				? projectContext.projectStructuredContext(cwd)
+				: null;
+		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
+			capabilityClass: spec.capabilityClass,
+			autonomy: config?.get().autonomy ?? "auto-edit",
+			project,
+		});
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
 		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
 		const staticCompositionHash = promptHash(systemPrompt);
@@ -1535,7 +1622,11 @@ export function createDispatchBundle(
 		const admission = resolveDelegationAdmissionStage(req, safety);
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, null);
-		const dynamicPromptMessages = buildDynamicPromptMessages(req);
+		// ACP delegation has no recipe, so no project message; the safety
+		// posture line still rides along for every worker run.
+		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
+			autonomy: config?.get().autonomy ?? "auto-edit",
+		});
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
 		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
 		const staticCompositionHash = promptHash(systemPrompt);

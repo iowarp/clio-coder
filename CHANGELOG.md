@@ -51,6 +51,18 @@ and grep/find answer tree visibility from a single ignore policy.
   descriptions (now one sentence each) into `docs/tool-usage.md`, retrievable
   section by section through `context(scope="docs")`.
 
+### Added (context wiring)
+
+- **Worker context injection.** Dispatched workers with capability class
+  `workspace-edit`, `verification`, or `artifact-write` now receive a bounded
+  dynamic prompt message with the project name, conventions, and hard
+  invariants from CLIO.md (1500-char cap, conventions truncated first), and
+  every worker run (including ACP delegation) receives a one-line
+  safety-posture message stating its effective autonomy level. Both ride the
+  dynamic prompt-message channel, so worker static prompt hashes
+  (`staticCompositionHash`) are unchanged. Read-only and shadow recipes get no
+  project message.
+
 ### Changed
 
 - **Registry-owned tool prompt hints.** The per-tool guidance sentences in the

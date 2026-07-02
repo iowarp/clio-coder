@@ -12,7 +12,7 @@ import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
-import { buildStableSystemPrompt } from "../../src/domains/dispatch/extension.js";
+import { buildDynamicPromptMessages, buildStableSystemPrompt } from "../../src/domains/dispatch/extension.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
@@ -26,6 +26,7 @@ import {
 import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
+import { safetyOneLiner } from "../../src/domains/prompts/compiler.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -637,6 +638,107 @@ describe("contracts/dispatch", () => {
 		match(prompt, /Skills provide reusable know-how and resources; they never expand your tool authority\./);
 		const noSkillsPrompt = buildStableSystemPrompt({ agentId: "researcher", task: "check docs", noSkills: true }, recipe);
 		strictEqual(noSkillsPrompt.includes("# Agent-Bound Skills"), false);
+	});
+
+	it("injects bounded project context only for workspace-class workers", () => {
+		const project = {
+			projectName: "Fixture Project",
+			conventions: ["Tabs, line width 120."],
+			invariants: ["Only src/engine imports the pi SDK."],
+		};
+		const req = { agentId: "coder", task: "do work" };
+
+		for (const capabilityClass of ["workspace-edit", "verification", "artifact-write"] as const) {
+			const messages = buildDynamicPromptMessages(req, { capabilityClass, autonomy: "auto-edit", project });
+			deepStrictEqual(
+				messages.map((message) => message.id),
+				["dispatch-project-context", "dispatch-safety-posture"],
+				`project message expected for ${capabilityClass}`,
+			);
+			const body = messages[0]?.body ?? "";
+			ok(body.includes("Project: Fixture Project"));
+			ok(body.includes("- Tabs, line width 120."));
+			ok(body.includes("1. Only src/engine imports the pi SDK."));
+		}
+
+		for (const capabilityClass of ["read-only", "orchestration"] as const) {
+			const messages = buildDynamicPromptMessages(req, { capabilityClass, autonomy: "auto-edit", project });
+			deepStrictEqual(
+				messages.map((message) => message.id),
+				["dispatch-safety-posture"],
+				`no project message expected for ${capabilityClass}`,
+			);
+		}
+
+		// Missing CLIO.md (null project): no project message either.
+		const withoutProject = buildDynamicPromptMessages(req, {
+			capabilityClass: "workspace-edit",
+			autonomy: "auto-edit",
+			project: null,
+		});
+		deepStrictEqual(
+			withoutProject.map((message) => message.id),
+			["dispatch-safety-posture"],
+		);
+	});
+
+	it("caps the worker project message at 1500 chars, truncating conventions before invariants", () => {
+		const project = {
+			projectName: "Fixture Project",
+			conventions: Array.from({ length: 60 }, (_, index) => `Convention ${index}: ${"x".repeat(40)}`),
+			invariants: ["Invariant that must survive convention truncation."],
+		};
+		const messages = buildDynamicPromptMessages(
+			{ agentId: "coder", task: "t" },
+			{ capabilityClass: "workspace-edit", autonomy: "auto-edit", project },
+		);
+		const body = messages[0]?.body ?? "";
+		strictEqual(messages[0]?.id, "dispatch-project-context");
+		ok(body.length <= 1500, `body length ${body.length} exceeds the 1500-char cap`);
+		ok(body.includes("1. Invariant that must survive convention truncation."));
+	});
+
+	it("adds one safety-posture line per run matching the shared safetyOneLiner text", () => {
+		const req = { agentId: "coder", task: "t" };
+		for (const level of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
+			const messages = buildDynamicPromptMessages(req, { autonomy: level });
+			strictEqual(messages.length, 1);
+			strictEqual(messages[0]?.id, "dispatch-safety-posture");
+			strictEqual(messages[0]?.body, `Safety posture: autonomy ${level}. ${safetyOneLiner(level)}`);
+		}
+	});
+
+	it("keeps memory last and the stable system prompt untouched by dynamic context", () => {
+		const recipe: AgentRecipe = {
+			id: "coder",
+			name: "Coder",
+			description: "Coding worker.",
+			tools: ["read", "edit"],
+			source: "builtin",
+			filepath: "/test/coder.md",
+			body: "# Coder\nDo bounded work.",
+		};
+		const req = { agentId: "coder", task: "do work", memorySection: "# Memory\nApproved fact." };
+		const project = { projectName: "Fixture", conventions: ["Tabs."], invariants: [] };
+
+		const messages = buildDynamicPromptMessages(req, {
+			capabilityClass: "workspace-edit",
+			autonomy: "auto-edit",
+			project,
+		});
+		deepStrictEqual(
+			messages.map((message) => message.id),
+			["dispatch-project-context", "dispatch-safety-posture", "dispatch-memory"],
+		);
+
+		// The stable worker prompt never carries the injected context: the
+		// static composition hash is promptHash(systemPrompt), so byte-identity
+		// here is byte-identity of staticCompositionHash across runs.
+		const withInjection = buildStableSystemPrompt(req, recipe);
+		const withoutInjection = buildStableSystemPrompt({ agentId: "coder", task: "do work" }, recipe);
+		strictEqual(withInjection, withoutInjection);
+		strictEqual(withInjection.includes("Safety posture"), false);
+		strictEqual(withInjection.includes("# Project Context"), false);
 	});
 
 	it("releases the gate and creates receipt with exit code on worker failure", async () => {

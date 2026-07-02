@@ -9,6 +9,16 @@ export interface ProjectPromptContext {
 	warnings: string[];
 }
 
+/**
+ * Structured CLIO.md fields for bounded injection into worker prompts.
+ * Deliberately excludes the identity paragraph and any raw handbook prose.
+ */
+export interface ProjectStructuredContext {
+	projectName: string;
+	conventions: ReadonlyArray<string>;
+	invariants: ReadonlyArray<string>;
+}
+
 export interface ContextState {
 	clioMd: "ok" | "stale" | "none" | "malformed" | "no-fingerprint";
 	memoryCount: number;
@@ -18,6 +28,12 @@ export interface ContextContract extends DomainContract {
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
+	/**
+	 * Parsed CLIO.md structured fields (project name, conventions, invariants)
+	 * or null when CLIO.md is absent or malformed. Never returns raw handbook
+	 * text; used by dispatch to give workers bounded project context.
+	 */
+	projectStructuredContext(cwd?: string): ProjectStructuredContext | null;
 	contextState(cwd?: string): ContextState;
 	startupHints(): string[];
 	/**

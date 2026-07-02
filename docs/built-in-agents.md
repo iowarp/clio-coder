@@ -139,6 +139,24 @@ Dispatch admission enforces three gates:
 2. The requested action classes must be allowed by the agent's scope.
 3. The worker scope must be a subset of the orchestrator's active scope.
 
+### Worker context injection
+
+Every dispatched worker receives per-run context through dynamic prompt
+messages (user-role messages sent before the task), never through the stable
+system prompt, so the static prompt composition hash stays byte-identical run
+over run:
+
+- **Project context** (capability classes `workspace-edit`, `verification`,
+  and `artifact-write` only): the project name, conventions, and hard
+  invariants parsed from `CLIO.md`, capped at 1500 characters with conventions
+  truncated first. Read-only, shadow, and orchestration recipes get none, and
+  no message is sent when `CLIO.md` is absent or malformed.
+- **Safety posture** (every run, including ACP delegation): one line naming
+  the run's effective autonomy level with the same directive text the session
+  prompt's safety section uses.
+- **Memory** (when the request carries an approved memory section): unchanged,
+  delivered after the two messages above.
+
 ---
 
 ## Fleet Management and Fault Tolerance
