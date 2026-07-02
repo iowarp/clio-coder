@@ -173,6 +173,23 @@ interfaces.
 
 ### Changed
 
+- The npm package was cut from 3.91 MB to 0.93 MB (unpacked 10.93 MB to
+  3.91 MB). Source maps, benchmarks (including stray Python bytecode caches),
+  the README banner images, and all logo sizes except the runtime
+  `clio-coder-logo-128.webp` no longer ship; the README banner now loads from
+  raw.githubusercontent.com so it renders on npm too. `typescript` and
+  `esbuild` moved to devDependencies (only tsup/tsx pull them), shrinking the
+  production install. The shebang now comes from a hashbang line in the two
+  entry sources instead of a tsup banner, so shared chunks are no longer
+  stamped executable. A new `scripts/check-pack.mjs` audit (wired into
+  `ci:release`) enforces all of this: forbidden files, required runtime
+  resources, and tarball/unpacked size budgets; `scripts/check-dist.mjs`
+  additionally fails if a shebang leaks onto a non-entry chunk.
+- Publishing is now automated. `.github/workflows/release.yml` triggers on
+  `v*` tags, refuses a tag that disagrees with package.json's version, runs
+  the full `ci:release` gate via `prepublishOnly`, publishes to npm with
+  provenance, and creates a GitHub release carrying the tarball. It needs the
+  `NPM_TOKEN` repository secret until npm trusted publishing is configured.
 - Upgraded the pinned pi SDK packages (`@earendil-works/pi-agent-core`,
   `@earendil-works/pi-ai`, and `@earendil-works/pi-tui`) from `0.79.10` to
   `0.80.3`. Clio keeps the 0.80.x `pi-ai/compat` bridge for the legacy global

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Worker subprocess entry point.
  *

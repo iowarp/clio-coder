@@ -44,12 +44,10 @@
 	},
 	"files": [
 		"dist",
-		"assets/banner.png",
-		"assets/banner.webp",
-		"assets/clio-coder-logo-*.webp",
+		"!dist/**/*.map",
+		"assets/clio-coder-logo-128.webp",
 		"scripts/install-local.sh",
 		"scripts/uninstall-local.sh",
-		"benchmarks/**",
 		"src/domains/agents/builtins/**",
 		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",
@@ -83,7 +81,7 @@
 		"test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' 'tests/contracts/**/*.test.ts' 'tests/smoke/**/*.test.ts' 'tests/boundaries/**/*.test.ts'",
 		"test:repeat": "node tests/harness/repeat-tests.mjs",
 		"ci": "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test",
-		"ci:release": "npm run ci && node scripts/check-dist.mjs",
+		"ci:release": "npm run ci && node scripts/check-dist.mjs && node scripts/check-pack.mjs",
 		"test:live": "node scripts/live-smoke.mjs",
 		"bench:models": "node benchmarks/clio-model-suite.mjs",
 		"bench:context": "node benchmarks/bench-context.mjs",
@@ -109,11 +107,9 @@
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "5.6.2",
 		"diff": "9.0.0",
-		"esbuild": "0.28.1",
 		"ollama": "0.6.3",
 		"tree-sitter-wasms": "^0.1.13",
 		"typebox": "1.3.0",
-		"typescript": "6.0.3",
 		"undici": "8.5.0",
 		"uuid": "14.0.1",
 		"web-tree-sitter": "^0.20.8",
@@ -127,8 +123,10 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.5.1",
 		"@types/node": "24.12.2",
+		"esbuild": "0.28.1",
 		"node-pty": "1.1.0",
 		"tsup": "8.5.1",
-		"tsx": "4.22.4"
+		"tsx": "4.22.4",
+		"typescript": "6.0.3"
 	}
 }

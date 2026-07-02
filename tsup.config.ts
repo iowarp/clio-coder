@@ -22,14 +22,15 @@ export default defineConfig({
 	dts: false,
 	shims: false,
 	outDir: "dist",
-	banner: ({ format }) => (format === "esm" ? { js: "#!/usr/bin/env node" } : {}),
+	// The shebang comes from the hashbang line in each entry source file;
+	// esbuild hoists it to the top of the corresponding entry chunk. A tsup
+	// `banner` would stamp it onto every emitted chunk instead.
 	external: [
 		"@anthropic-ai/claude-agent-sdk",
 		"@earendil-works/pi-agent-core",
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-tui",
 		"@silvia-odwyer/photon-node",
-		"typescript",
 		"tree-sitter-wasms",
 		"web-tree-sitter",
 	],
