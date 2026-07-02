@@ -35,7 +35,7 @@ import { formatColumns, printError } from "./shared.js";
  * synthesized EvalRunArtifact carries scenario-level records with empty
  * command lists and zero token/cost totals (headless main-agent runs do not
  * produce receipts), and the per-bullet detail lands in a `skill-eval.json`
- * sidecar beside the standard bundle files.
+ * sidecar registered in the bundle's `overview.json` files list.
  */
 
 const DEFAULT_RUN_TIMEOUT_MS = 600_000;
@@ -43,6 +43,8 @@ const CHILD_OUTPUT_LIMIT = 4_000_000;
 const PREVIEW_MAX_CHARS = 300;
 const TRANSCRIPT_HEAD_CHARS = 9_000;
 const TRANSCRIPT_TAIL_CHARS = 4_000;
+/** Per-eval detail file written beside the standard bundle and registered in overview.files. */
+const SKILL_EVAL_SIDECAR = "skill-eval.json";
 
 export interface SkillsEvalOptions {
 	json: boolean;
@@ -135,11 +137,16 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	const evidenceErrors: string[] = [];
 	try {
 		await writeEvalArtifact(clioDataDir(), artifact);
-		const built = await buildEvalEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), artifact });
+		const built = await buildEvalEvidence({
+			dataDir: clioDataDir(),
+			stateDir: clioStateDir(),
+			artifact,
+			sidecars: [SKILL_EVAL_SIDECAR],
+		});
 		evidenceId = built.evidenceId;
 		evidenceDirectory = built.directory;
 		await writeFile(
-			join(built.directory, "skill-eval.json"),
+			join(built.directory, SKILL_EVAL_SIDECAR),
 			`${JSON.stringify(sidecar(skill.name, artifact.evalId, outcomes), null, 2)}\n`,
 			"utf8",
 		);
@@ -590,7 +597,7 @@ function sidecar(skillName: string, evalId: string, outcomes: ReadonlyArray<Scen
 		deltas: [
 			"bullet verdicts are judge-scored from run transcripts, not command exit codes; the evals-domain artifact carries scenario-level records with empty command lists",
 			"tokens and cost are zero: headless main-agent runs produce no receipts",
-			"this sidecar is additive and is not listed in overview.json files[]",
+			"this sidecar is additive and is registered in overview.json files[]",
 		],
 		scenarios: outcomes.map((outcome) => ({
 			id: outcome.scenario.id,

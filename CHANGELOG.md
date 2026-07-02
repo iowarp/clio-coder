@@ -24,7 +24,9 @@ interfaces.
   verdicts are judge-scored rather than command-verified, token/cost totals
   are zero because headless main-agent runs produce no receipts, and the
   per-bullet detail (verdicts, transcripts, stderr tails) lives in a
-  `skill-eval.json` sidecar beside the standard bundle files.
+  `skill-eval.json` sidecar registered in the bundle's `overview.json` file
+  list (evidence builds now accept additive sidecar files so a consumer
+  enumerating `overview.json` learns they exist).
 - `clio usage report` (experimental, read-only) analyzes the local usage
   archive across sessions: receipts, session ledgers, audit rows, the
   evidence index, the memory store, and the installed-skill listing. The

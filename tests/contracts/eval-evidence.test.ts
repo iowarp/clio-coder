@@ -164,4 +164,22 @@ describe("contracts/eval evidence linking", () => {
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
+
+	it("registers additive sidecars in overview.files while keeping the base file set", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-eval-sidecar-"));
+		try {
+			const dataDir = join(root, "data");
+			const cwd = join(root, "target");
+			mkdirSync(cwd, { recursive: true });
+
+			const withSidecar = await buildEvalEvidence({ dataDir, artifact: artifact(cwd), sidecars: ["skill-eval.json"] });
+			ok(withSidecar.overview.files.includes("overview.json"), "base files must survive");
+			ok(withSidecar.overview.files.includes("skill-eval.json"), "sidecar must be registered");
+
+			const withoutSidecar = await buildEvalEvidence({ dataDir, artifact: artifact(cwd) });
+			ok(!withoutSidecar.overview.files.includes("skill-eval.json"), "no sidecar without the option");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
 });
