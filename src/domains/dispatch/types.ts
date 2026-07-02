@@ -232,6 +232,17 @@ export interface RunReceiptSafetySummary {
 		allowed: number;
 		blocked: number;
 		permissionRequested: number;
+		/**
+		 * Worker permission-escalation tallies. Present only on receipts that saw
+		 * at least one escalation (onPermission="escalate"), so deny/fail
+		 * receipts stay byte-identical. `requested` counts parked asks handed to
+		 * the operator; `approved`/`denied` count operator decisions; `timedOut`
+		 * counts asks resolved by the timeout fallback.
+		 */
+		escalationRequested?: number;
+		escalationApproved?: number;
+		escalationDenied?: number;
+		escalationTimedOut?: number;
 	};
 	blockedAttempts: SafetyBlockedAttempt[];
 	requestedActions: ReadonlyArray<string>;

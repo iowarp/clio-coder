@@ -329,8 +329,20 @@ export interface PermissionRequestedPayload {
 	ruleId?: string | undefined;
 	posture?: string | undefined;
 	rejection?: { short: string; detail: string; hints: ReadonlyArray<string> } | undefined;
-	policySource: string;
-	reasonCode: string;
+	policySource?: string | undefined;
+	reasonCode?: string | undefined;
+	/**
+	 * Worker permission escalation provenance. Present only when dispatch
+	 * republishes an escalate-posture worker's parked ask; absent for
+	 * main-agent asks. `requestedBy` carries the worker run id so the
+	 * interactive layer can label the overlay and route the operator decision
+	 * back through resolveWorkerPermission.
+	 */
+	requestedBy?: string | undefined;
+	requestId?: string | undefined;
+	agentId?: string | undefined;
+	summary?: string | undefined;
+	timeoutMs?: number | undefined;
 }
 
 /**

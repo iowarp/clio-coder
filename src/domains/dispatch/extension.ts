@@ -123,6 +123,12 @@ interface ActiveRun {
 	 * when the channel is gone. Absent for run kinds without one (ACP).
 	 */
 	steer?: (text: string) => boolean;
+	/**
+	 * Apply an operator permission decision to a parked escalation by writing a
+	 * `permission_decision` line to the worker's stdin. Returns false when the
+	 * channel is gone. Absent for run kinds without one (ACP).
+	 */
+	resolvePermission?: (requestId: string, decision: "approve" | "deny") => boolean;
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	startedAt: string;
@@ -2313,6 +2319,7 @@ export function createDispatchBundle(
 		})();
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
+		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const spec = buildDispatchWorkerSpec(
 			{
@@ -2341,6 +2348,10 @@ export function createDispatchBundle(
 		const abort = () => worker.abort();
 		const sendToWorker = worker.send?.bind(worker);
 		const steer = sendToWorker ? (text: string) => sendToWorker({ type: "steer", text }) : undefined;
+		const resolvePermission = sendToWorker
+			? (requestId: string, decision: "approve" | "deny") =>
+					sendToWorker({ type: "permission_decision", requestId, decision })
+			: undefined;
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
 		const workerDone = worker.promise;
@@ -2381,13 +2392,19 @@ export function createDispatchBundle(
 							posture?: string;
 							durationMs?: number;
 							outcome?: "ok" | "error" | "blocked";
-							decision?: "allowed" | "blocked" | "permission_requested";
+							decision?: "allowed" | "blocked" | "permission_requested" | "approved" | "denied";
 							actionClass?: string;
 							ruleId?: string;
 							reasonCode?: string;
 							policySource?: string;
 							reason?: string;
 							skillActivation?: unknown;
+							// Worker permission-escalation fields (clio_permission_escalated /
+							// clio_permission_resolved escalate path).
+							requestId?: string;
+							summary?: string;
+							timeoutMs?: number;
+							source?: "operator" | "timeout" | "policy";
 						};
 					};
 					if (isRecord(event)) {
@@ -2396,6 +2413,27 @@ export function createDispatchBundle(
 							finishContractAssistantText = finishEntry.assistantText;
 							finishContractAssistantTurnId = finishEntry.assistantTurnId;
 						}
+					}
+					if (event.type === "clio_permission_escalated" && event.payload && typeof event.payload.requestId === "string") {
+						escalationCounts.requested += 1;
+						const ctx = event.payload.decision as unknown as
+							| { classification?: { actionClass?: unknown }; actionClass?: unknown }
+							| undefined;
+						const actionClass =
+							typeof ctx?.classification?.actionClass === "string"
+								? ctx.classification.actionClass
+								: typeof ctx?.actionClass === "string"
+									? ctx.actionClass
+									: "unknown";
+						context.bus.emit(BusChannels.PermissionRequested, {
+							tool: typeof event.payload.tool === "string" ? event.payload.tool : "unknown",
+							actionClass,
+							requestedBy: runIdForPermissionAudit ?? undefined,
+							requestId: event.payload.requestId,
+							agentId: req.agentId,
+							...(typeof event.payload.summary === "string" ? { summary: event.payload.summary } : {}),
+							...(typeof event.payload.timeoutMs === "number" ? { timeoutMs: event.payload.timeoutMs } : {}),
+						});
 					}
 					if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
 						const u = event.message.usage;
@@ -2416,8 +2454,18 @@ export function createDispatchBundle(
 						}
 					}
 					if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+						// Escalation resolutions carry a source (operator/timeout); the
+						// existing deny/fail policy path carries none and is unchanged.
+						const source = event.payload.source;
+						const granted = source === "operator" && event.payload.decision === "approved";
+						if (source === "operator") {
+							if (granted) escalationCounts.approved += 1;
+							else escalationCounts.denied += 1;
+						} else if (source === "timeout") {
+							escalationCounts.timedOut += 1;
+						}
 						context.bus.emit(BusChannels.PermissionResolved, {
-							status: "denied",
+							status: granted ? "granted" : "denied",
 							tool: event.payload.tool,
 							...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
 							...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
@@ -2529,6 +2577,7 @@ export function createDispatchBundle(
 			abort,
 			kill: abort,
 			...(steer ? { steer } : {}),
+			...(resolvePermission ? { resolvePermission } : {}),
 			promise: workerDone.then(
 				() => undefined,
 				() => undefined,
@@ -2633,7 +2682,18 @@ export function createDispatchBundle(
 				toolActivity,
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				safety: {
-					decisions: safetyDecisionCounts,
+					// Escalation tallies are folded in only when at least one ask was
+					// escalated, so deny/fail receipts stay byte-identical.
+					decisions:
+						escalationCounts.requested > 0
+							? {
+									...safetyDecisionCounts,
+									escalationRequested: escalationCounts.requested,
+									escalationApproved: escalationCounts.approved,
+									escalationDenied: escalationCounts.denied,
+									escalationTimedOut: escalationCounts.timedOut,
+								}
+							: safetyDecisionCounts,
 					blockedAttempts,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
@@ -3113,6 +3173,29 @@ export function createDispatchBundle(
 			}
 			if (!run.steer(trimmed)) {
 				throw new Error(`steer: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`);
+			}
+		},
+		resolveWorkerPermission(runId, requestId, decision) {
+			const run = active.get(runId);
+			if (!run) {
+				throw new Error(
+					`resolveWorkerPermission: run '${runId}' is not active; only running native workers accept permission decisions`,
+				);
+			}
+			if (run.aborted || run.stallKilled) {
+				throw new Error(
+					`resolveWorkerPermission: run '${runId}' is ${run.aborted ? "aborting" : "terminating"} and cannot resolve permissions`,
+				);
+			}
+			if (!run.resolvePermission) {
+				throw new Error(
+					`resolveWorkerPermission: run '${runId}' (${run.runtimeKind}) has no input channel; only native workers accept permission decisions`,
+				);
+			}
+			if (!run.resolvePermission(requestId, decision)) {
+				throw new Error(
+					`resolveWorkerPermission: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`,
+				);
 			}
 		},
 		snapshot,
