@@ -214,7 +214,8 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 				return 2;
 			}
 			const plan = planShareImport(resolve(archivePath), { dryRun: true, force: true });
-			if (parsed.json) process.stdout.write(`${JSON.stringify(plan.archive, null, 2)}\n`);
+			if (parsed.json)
+				process.stdout.write(`${JSON.stringify({ archive: plan.archive, diagnostics: plan.diagnostics }, null, 2)}\n`);
 			else {
 				printDiagnostics(plan.diagnostics);
 				const archive = plan.archive;
