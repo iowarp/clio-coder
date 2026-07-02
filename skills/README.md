@@ -40,6 +40,8 @@ auto-loads. That gap is deliberate.
 | [`clio-dev`](clio-dev/) | discipline | Modifying Clio's own source in this repo; deciding whether a change stays local or becomes a contribution. |
 | [`clio-test`](clio-test/) | reference | Writing or verifying changes to Clio against the real v0.2.2 harness (contracts / smoke / boundaries). |
 | [`arxiv-literature`](arxiv-literature/) | research | Searching arXiv, summarizing papers, comparing papers, or producing compact literature surveys while protecting main-agent context. |
+| [`scientific-debugging`](scientific-debugging/) | workflow | Debugging has stalled or produces wrong numbers, NaNs, or flaky results. Forces falsifiable hypotheses across fault classes and evidence-cited verdicts before any fix. |
+| [`experiment-protocol`](experiment-protocol/) | workflow | A benchmark, optimization, or numerical comparison needs success criteria locked before results exist. Pre-registers thresholds into the repo validation contract. |
 
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
 loads, Clio merges that declaration with host policy; a skill can narrow its

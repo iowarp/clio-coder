@@ -13,16 +13,22 @@ skills:
     sha256: 762c437a99510f8fb03c8a65073749d275e5607cbc7fa2732399fb2fb09bf451
   - name: context-handoff
     version: 0.2.0
-    sha256: 240994e8eff5e069f7b448b517d1dde16dd906f17384d75b2b30674dbc4b7a45
+    sha256: 392381c9baf891bcbdf98ae7cbac83c238be1e9ff671dbaf6cb1a4204222f831
   - name: context-prime
     version: 0.2.0
-    sha256: 1a86cd0338812c28203d8125b878d8192796be2772eda5eb489e3a12499ebd39
+    sha256: 86710b29f8e60597116a70dae8cb32097375904ec44109f667c021bf52e926bf
   - name: cut-it
     version: 0.2.0
-    sha256: 40dc26c98c2698e7f238e40f6cd47e3287f18622fd7ae3b9a31d0dd2b8126e2a
+    sha256: 6939c7e29e3033e316040694d77444f48cc446c0c13704df022d595408731d8c
+  - name: experiment-protocol
+    version: 0.1.0
+    sha256: 831fda7dde81b971ac23660faf02606abe457b34487c40492e04b9095b0a9260
   - name: grill-me
     version: 0.3.0
-    sha256: 2d4db0dde4926dc5ccc283724193f1b2db274e555e33cc36d2f0eb4e30f884c0
+    sha256: 6a9399ac879a2591dec2cc8f201d1974943373c99923118f3b93a8d3443ce9ef
   - name: prd
     version: 0.2.0
-    sha256: ec69dcb9b523fc34c78a3bfbe9641cfb5c3e62ad2b9b9d7d8352304bc9e4de83
+    sha256: 50dd73e36631758c1ec8a7d6269fec2535ba7e9c391a205b507a9a2fb083955b
+  - name: scientific-debugging
+    version: 0.1.0
+    sha256: 4a3664cedd1b954f7d3abc38bcb73e161234b8084b90ff1c7b7e12ddf9a14c55
