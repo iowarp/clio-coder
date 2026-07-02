@@ -272,7 +272,19 @@ describe("contracts/skill-evals CLI argument contract", () => {
 		const dir = scratchSkillDir({ evals: "## S1 - only\nSetup: x.\nExpected:\n- Bullet.\n" });
 		const { result, stderr } = await captureStderr(() => runSkillsCommand(["eval", dir, "--scenario", "9"]));
 		strictEqual(result, 2);
-		ok(stderr.includes("scenario S9 not found"));
+		ok(stderr.includes("scenario 9 not found"));
+		ok(stderr.includes("have: S1"));
+	});
+
+	it("selects a scenario by full letter-prefixed id (exit 2 when absent)", async () => {
+		const dir = scratchSkillDir({ evals: "## D1 - discipline\nSetup: x.\nExpected:\n- Bullet.\n" });
+		const missing = await captureStderr(() => runSkillsCommand(["eval", dir, "--scenario", "S1"]));
+		strictEqual(missing.result, 2);
+		ok(missing.stderr.includes("scenario S1 not found"));
+		ok(missing.stderr.includes("have: D1"));
+		const invalid = await captureStderr(() => runSkillsCommand(["eval", dir, "--scenario", "S1x"]));
+		strictEqual(invalid.result, 2);
+		ok(invalid.stderr.includes('invalid --scenario "S1x"'));
 	});
 
 	it("rejects a non-positive --timeout (exit 2)", async () => {
@@ -325,8 +337,31 @@ describe("contracts/skill-evals CLI argument contract", () => {
 			);
 			const workspace = join(scratch.dir, "workspace");
 			mkdirSync(workspace);
-			const result = await runCli(
+
+			// Fixtures are third-party shell: without the explicit opt-in they
+			// must not execute, and the scenario reports the refusal.
+			const untrusted = await runCli(
 				["skills", "eval", skillDir, "--scenario", "1", "--workspace", workspace, "--target", "mock-chat", "--json"],
+				{ cwd: scratch.dir, env, timeoutMs: 90_000 },
+			);
+			strictEqual(untrusted.code, 1, untrusted.stderr);
+			strictEqual(existsSync(join(workspace, "marker.txt")), false);
+			ok(untrusted.stdout.includes("--trust-fixtures"));
+
+			const result = await runCli(
+				[
+					"skills",
+					"eval",
+					skillDir,
+					"--scenario",
+					"1",
+					"--workspace",
+					workspace,
+					"--target",
+					"mock-chat",
+					"--trust-fixtures",
+					"--json",
+				],
 				{ cwd: scratch.dir, env, timeoutMs: 90_000 },
 			);
 			strictEqual(result.code, 0, result.stderr);

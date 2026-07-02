@@ -71,7 +71,10 @@ function extractSetup(block: ReadonlyArray<string>): string | null {
 }
 
 function isScenarioLabel(line: string): boolean {
-	return /^(Expected|Fixture|Setup commands):\s*/i.test(line.trim());
+	const trimmed = line.trim();
+	// extractExpected accepts `Expected` with or without a colon, so a bare
+	// `Expected` line must terminate the setup paragraph too.
+	return /^(Expected|Fixture|Setup commands):/i.test(trimmed) || /^Expected$/i.test(trimmed);
 }
 
 function extractLabeledParagraph(block: ReadonlyArray<string>, label: RegExp): string | null {

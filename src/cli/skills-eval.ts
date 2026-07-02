@@ -50,6 +50,13 @@ const SKILL_EVAL_SIDECAR = "skill-eval.json";
 
 export interface SkillsEvalOptions {
 	json: boolean;
+	/**
+	 * Fixture commands in evals.md are shell authored by the skill, executed
+	 * with the operator's environment. They run only on explicit opt-in;
+	 * without it a fixture-bearing scenario reports an error instead of
+	 * silently executing third-party shell.
+	 */
+	trustFixtures: boolean;
 	scenario?: string;
 	target?: string;
 	timeoutSeconds?: number;
@@ -120,14 +127,17 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	for (const diagnostic of parsed.diagnostics) {
 		process.stderr.write(`clio skills eval: ${diagnostic}\n`);
 	}
-	const wanted = options.scenario === undefined ? null : normalizeScenarioId(options.scenario);
-	const scenarios =
-		wanted === null ? parsed.scenarios : parsed.scenarios.filter((scenario) => scenario.number === wanted);
+	const matcher = options.scenario === undefined ? null : scenarioMatcher(options.scenario);
+	if (options.scenario !== undefined && matcher === null) {
+		printError(`invalid --scenario "${options.scenario}": use a scenario id like S1 or a bare number`);
+		return 2;
+	}
+	const scenarios = matcher === null ? parsed.scenarios : parsed.scenarios.filter(matcher);
 	if (scenarios.length === 0) {
 		printError(
-			wanted === null
+			matcher === null
 				? `no parseable scenarios in ${evalsPath}`
-				: `scenario S${wanted} not found in ${evalsPath} (have: ${parsed.scenarios.map((s) => s.id).join(", ") || "none"})`,
+				: `scenario ${options.scenario} not found in ${evalsPath} (have: ${parsed.scenarios.map((s) => s.id).join(", ") || "none"})`,
 		);
 		return 2;
 	}
@@ -143,7 +153,15 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	for (const scenario of scenarios) {
 		process.stderr.write(`clio skills eval: ${skill.name} ${scenario.id} baseline/treatment/judge...\n`);
 		outcomes.push(
-			await runScenario(skill.name, resolved.baseDir, scenario, options.target, timeoutMs, workspaceOverride),
+			await runScenario(
+				skill.name,
+				resolved.baseDir,
+				scenario,
+				options.target,
+				timeoutMs,
+				workspaceOverride,
+				options.trustFixtures,
+			),
 		);
 	}
 	const endedAt = new Date().toISOString();
@@ -201,7 +219,11 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 		printHumanReport(skill.name, outcomes, artifact.evalId, evidenceId, evidenceDirectory);
 	}
 	const anyFailure = outcomes.some((outcome) => outcome.bullets.some((bullet) => bullet.verdict !== "pass"));
-	return anyFailure || evidenceErrors.length > 0 ? 1 : 0;
+	// 1 means the skill failed its rubric; 3 means the verdicts stand but the
+	// evidence archive write failed, so infra flakiness is not read as a
+	// regression by callers branching on the code.
+	if (anyFailure) return 1;
+	return evidenceErrors.length > 0 ? 3 : 0;
 }
 
 function resolveSkillBaseDir(nameOrPath: string): { baseDir: string | null; error?: string } {
@@ -216,10 +238,23 @@ function resolveSkillBaseDir(nameOrPath: string): { baseDir: string | null; erro
 	};
 }
 
-function normalizeScenarioId(value: string): number | null {
-	const match = /^[sS]?(\d+)$/.exec(value.trim());
-	if (match === null) return null;
-	return Number.parseInt(match[1] ?? "", 10);
+/**
+ * A full id like "D2" selects exactly that scenario; a bare number selects
+ * every scenario with that number (evals.md files may mix letter prefixes).
+ */
+function scenarioMatcher(value: string): ((scenario: SkillEvalScenario) => boolean) | null {
+	const trimmed = value.trim();
+	const full = /^([A-Za-z])(\d+)$/.exec(trimmed);
+	if (full !== null) {
+		const id = `${(full[1] ?? "").toUpperCase()}${Number.parseInt(full[2] ?? "", 10)}`;
+		return (scenario) => scenario.id === id;
+	}
+	const bare = /^(\d+)$/.exec(trimmed);
+	if (bare !== null) {
+		const wanted = Number.parseInt(bare[1] ?? "", 10);
+		return (scenario) => scenario.number === wanted;
+	}
+	return null;
 }
 
 async function resolveWorkspaceOverride(workspace: string | undefined): Promise<string | null | { error: string }> {
@@ -242,13 +277,14 @@ async function runScenario(
 	target: string | undefined,
 	timeoutMs: number,
 	workspaceOverride: string | null,
+	trustFixtures: boolean,
 ): Promise<ScenarioOutcome> {
 	const scenarioStart = Date.now();
 	const workspace = workspaceOverride ?? (await mkdtemp(join(tmpdir(), "clio-skill-eval-")));
 	const removeWorkspace = workspaceOverride === null;
 	const targetArgs = target === undefined ? [] : ["--target", target];
 	try {
-		const fixtureError = await runFixtureCommands(scenario, workspace, timeoutMs);
+		const fixtureError = await runFixtureCommands(scenario, workspace, timeoutMs, trustFixtures);
 		if (fixtureError !== null) {
 			return await completeScenarioOutcome({
 				scenario,
@@ -350,9 +386,13 @@ async function runFixtureCommands(
 	scenario: SkillEvalScenario,
 	workspace: string,
 	timeoutMs: number,
+	trustFixtures: boolean,
 ): Promise<string | null> {
 	const commands = scenario.fixtureCommands?.trim();
 	if (commands === undefined || commands.length === 0) return null;
+	if (!trustFixtures) {
+		return "scenario declares fixture commands, which are real shell from the skill's evals.md; review them and rerun with --trust-fixtures";
+	}
 	const validationError = validateFixtureCommands(commands);
 	if (validationError !== null) return `fixture setup rejected: ${validationError}`;
 	const result = await runBashCommand(commands, {
@@ -370,14 +410,20 @@ async function runFixtureCommands(
 	return null;
 }
 
+/**
+ * Best-effort lint over trusted fixture scripts, not a sandbox: fixtures only
+ * run behind --trust-fixtures, and these checks exist to catch obvious
+ * workspace escapes in otherwise-reviewed scripts (shell is not reliably
+ * classifiable by regex).
+ */
 function validateFixtureCommands(commands: string): string | null {
 	const checks: Array<{ pattern: RegExp; reason: string }> = [
 		{
-			pattern: /(^|[\s;&|(<>=])\/(?!dev\/null(?:\s|$))(?=\S)/,
+			pattern: /(^|[\s;&|(<>='"`])\/(?!dev\/null(?:\s|$))(?=\S)/,
 			reason: "absolute paths are not allowed in fixture commands",
 		},
 		{
-			pattern: /(^|[\s;&|()])\.\.(?=$|[/\s;&|()])/,
+			pattern: /(^|[\s;&|()'"`/=])\.\.(?=$|[/\s;&|()'"`])/,
 			reason: "parent-directory path segments are not allowed in fixture commands",
 		},
 		{

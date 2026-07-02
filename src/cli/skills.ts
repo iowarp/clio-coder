@@ -26,7 +26,7 @@ Commands:
   clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
   clio skills update <name> | --all [--force]
   clio skills sync [--force]
-  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--json]
+  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]
 
 search covers installed skills plus the local marketplace (a repo skills/
 catalog, CLIO_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
@@ -36,7 +36,9 @@ scenario a baseline headless run without the skill, a treatment run with it,
 and a judge run scoring each Expected bullet from the transcripts. Exit is
 nonzero when any treatment bullet fails. --json emits one JSONL row per
 (scenario, bullet) with schema: "experimental". --workspace runs scenarios in
-an existing checkout instead of a throwaway temp directory.
+an existing checkout instead of a throwaway temp directory. Fixture commands
+declared in evals.md are real shell run in the scenario workspace; they only
+execute with --trust-fixtures, after you have reviewed the evals.md.
 `;
 
 type SkillCreateScope = "user" | "project";
@@ -54,10 +56,11 @@ interface Parsed {
 	target?: string;
 	workspace?: string;
 	timeoutSeconds?: number;
+	trustFixtures: boolean;
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
-	const out: Parsed = { positional: [], json: false, all: false, help: false, force: false };
+	const out: Parsed = { positional: [], json: false, all: false, help: false, force: false, trustFixtures: false };
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === undefined) continue;
@@ -74,6 +77,9 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 				break;
 			case "--force":
 				out.force = true;
+				break;
+			case "--trust-fixtures":
+				out.trustFixtures = true;
 				break;
 			case "--name": {
 				const value = argv[i + 1];
@@ -325,7 +331,6 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				description: defaultDescription(name),
 				body: defaultBody(name),
 				scope: parsed.scope ?? "project",
-				with_scaffold: true,
 			});
 			if (result.kind === "error") {
 				printError(result.message);
@@ -382,7 +387,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			const name = parsed.positional[0];
 			if (!name || parsed.positional.length !== 1) {
 				process.stderr.write(
-					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--json]\n",
+					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]\n",
 				);
 				return 2;
 			}
@@ -391,6 +396,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			const { runSkillsEvalCommand } = await import("./skills-eval.js");
 			return runSkillsEvalCommand(name, {
 				json: parsed.json,
+				trustFixtures: parsed.trustFixtures,
 				...(parsed.scenario !== undefined ? { scenario: parsed.scenario } : {}),
 				...(parsed.target !== undefined ? { target: parsed.target } : {}),
 				...(parsed.workspace !== undefined ? { workspace: parsed.workspace } : {}),
