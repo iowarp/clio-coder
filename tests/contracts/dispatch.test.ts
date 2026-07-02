@@ -588,6 +588,38 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("persona overrides still obey capability-class admission checks", async () => {
+		const context = stubContext({
+			recipes: [
+				{
+					id: "bad-validator",
+					name: "Bad Validator",
+					description: "Invalid validation recipe.",
+					tools: ["read", "verify"],
+					capabilityClass: "read-only",
+					source: "builtin",
+					filepath: "/test/bad-validator.md",
+					body: "# Bad Validator",
+				},
+			],
+		});
+		const bundle = makeDispatchBundle(context);
+		await bundle.extension.start();
+		try {
+			await rejects(
+				() =>
+					bundle.contract.dispatch({
+						agentId: "bad-validator",
+						task: "run tests",
+						systemPrompt: "# Validation Specialist\nRun focused checks.",
+					}),
+				/read-only agent 'bad-validator' requests execute tools/,
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("blocks user-origin dispatches to shadow agents while allowing internal orchestration", async () => {
 		const context = stubContext({
 			recipes: [
@@ -630,6 +662,46 @@ describe("contracts/dispatch", () => {
 			strictEqual(receipt.exitCode, 0);
 			strictEqual(receipt.agentAudience, "shadow");
 			strictEqual(receipt.requestOrigin, "agent");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("rejects persona overrides for shadow agents before spawning", async () => {
+		const context = stubContext({
+			recipes: [
+				{
+					id: "scout",
+					name: "Scout",
+					description: "Shadow scout.",
+					tools: ["read"],
+					audience: "shadow",
+					source: "builtin",
+					filepath: "/test/scout.md",
+					body: "# Scout",
+				},
+			],
+		});
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("shadow persona must not spawn");
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			await rejects(
+				() =>
+					bundle.contract.dispatch({
+						agentId: "scout",
+						task: "map files",
+						systemPrompt: "# Shadow Specialist\nMap files with custom instructions.",
+					}),
+				/persona.*shadow|shadow.*persona/i,
+			);
+			strictEqual(spawned, false);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -928,6 +1000,72 @@ describe("contracts/dispatch", () => {
 		strictEqual(withPipelineInput.includes("PIPELINE-INPUT"), false);
 	});
 
+	it("records persona override provenance only for composed stable prompts", async () => {
+		const recipe: AgentRecipe = {
+			id: "coder",
+			name: "Coder",
+			description: "Coding worker.",
+			tools: ["read", "edit"],
+			source: "builtin",
+			filepath: "/test/coder.md",
+			body: "# Base Recipe\nUse the normal recipe persona.",
+		};
+		const context = stubContext({ recipes: [recipe] });
+		const exits = [
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+			deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>(),
+		];
+		const exitQueue = [...exits];
+		const capturedPrompts: string[] = [];
+
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedPrompts.push(spec.systemPrompt);
+				const exit = exitQueue.shift();
+				if (!exit) throw new Error("no exits left");
+				return {
+					pid: 7410 + capturedPrompts.length,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const composedReq = {
+				agentId: "coder",
+				task: "composed task",
+				systemPrompt: "# Import Boundary Specialist\nAudit import boundaries and report concrete risks.",
+			};
+			const composed = await bundle.contract.dispatch(composedReq);
+			exits[0]?.resolve({ exitCode: 0, signal: null });
+			const composedReceipt = await composed.finalPromise;
+			const composedPrompt = buildStableSystemPrompt(composedReq, recipe);
+			strictEqual(capturedPrompts[0], composedPrompt);
+			ok(composedPrompt.includes("# Import Boundary Specialist"));
+			strictEqual(composedPrompt.includes("# Base Recipe"), false);
+			strictEqual(composedReceipt.staticCompositionHash, sha256(composedPrompt));
+			deepStrictEqual((composedReceipt as { personaOverride?: { promptHash: string } }).personaOverride, {
+				promptHash: composedReceipt.staticCompositionHash,
+			});
+
+			const recipeReq = { agentId: "coder", task: "recipe task" };
+			const recipeRun = await bundle.contract.dispatch(recipeReq);
+			exits[1]?.resolve({ exitCode: 0, signal: null });
+			const recipeReceipt = await recipeRun.finalPromise;
+			const recipePrompt = buildStableSystemPrompt(recipeReq, recipe);
+			strictEqual(capturedPrompts[1], recipePrompt);
+			ok(recipePrompt.includes("# Base Recipe"));
+			strictEqual(recipeReceipt.staticCompositionHash, sha256(recipePrompt));
+			strictEqual((recipeReceipt as { personaOverride?: unknown }).personaOverride, undefined);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("releases the gate and creates receipt with exit code on worker failure", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
@@ -1206,6 +1344,48 @@ describe("contracts/dispatch", () => {
 			);
 		} finally {
 			unsubscribeTerminal();
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("rejects persona overrides for ACP delegation agents before starting the agent", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) {
+			configContract.get().delegation.agents = [
+				{
+					id: "opencode",
+					command: "opencode",
+					args: ["acp"],
+					connectTimeoutMs: 5,
+					turnTimeoutMs: 10,
+					permissionTimeoutMs: 15,
+					toolGovernance: "clio-policy",
+				},
+			];
+		}
+		let started = false;
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => {
+				started = true;
+				throw new Error("ACP should not start before persona refusal");
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			await rejects(
+				() =>
+					bundle.contract.dispatch({
+						agentId: "opencode",
+						delegationAgentId: "opencode",
+						task: "delegate this",
+						systemPrompt: "# Delegated Specialist\nDo the delegated task with custom instructions.",
+					}),
+				/persona.*ACP|ACP.*persona/i,
+			);
+			strictEqual(started, false);
+		} finally {
 			await bundle.extension.stop?.();
 		}
 	});

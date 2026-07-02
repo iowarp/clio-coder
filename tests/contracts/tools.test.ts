@@ -761,6 +761,72 @@ describe("contracts/tools dispatch run paths", () => {
 		}
 	});
 
+	it("task persona and tool_profile map onto dispatch request fields", async () => {
+		const capturedRequests: DispatchRequest[] = [];
+		const mockDispatch: DispatchContract = {
+			dispatch: async (req: DispatchRequest) => {
+				capturedRequests.push(req);
+				return {
+					runId: "run-persona",
+					events: assistantMessageEvents("done"),
+					finalPromise: Promise.resolve(runReceipt("run-persona", req.task)),
+				};
+			},
+			dispatchBatch: async () => {
+				throw new Error("dispatchBatch not used");
+			},
+			listRuns: () => [],
+			getRun: (runId: string) => runEnvelope(runId),
+			abort: () => {},
+			steer: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+
+		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const result = await tool.run({
+			tasks: [
+				{
+					task: "audit the boundary",
+					agent_id: "coder",
+					persona: "# Boundary Auditor\nCheck imports and report risks.",
+					tool_profile: "minimal-local",
+				},
+			],
+		});
+
+		strictEqual(result.kind, "ok");
+		strictEqual(capturedRequests.length, 1);
+		const request = capturedRequests[0] as DispatchRequest & { systemPrompt?: string };
+		strictEqual(request.systemPrompt, "# Boundary Auditor\nCheck imports and report risks.");
+		strictEqual(request.toolProfile, "minimal-local");
+	});
+
+	it("rejects persona above the 8000 character cap at the tool boundary", async () => {
+		const tool = createDispatchTool({
+			dispatch: {
+				dispatch: async () => {
+					throw new Error("dispatch must not run for oversized persona");
+				},
+			} as unknown as DispatchContract,
+		});
+
+		const result = await tool.run({
+			tasks: [{ task: "do work", agent_id: "coder", persona: "x".repeat(8001) }],
+		});
+
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") {
+			match(result.message, /persona/i);
+			match(result.message, /8000/);
+		}
+	});
+
 	it("createDispatchTool headlines failed receipts as failures", async () => {
 		const mockDispatch: DispatchContract = {
 			dispatch: async () => ({
@@ -904,6 +970,51 @@ describe("contracts/tools dispatch run paths", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("dispatch (pipeline) total=3 failed=0"));
 		}
+	});
+
+	it("mode pipeline preserves per-step persona and tool_profile", async () => {
+		const capturedRequests: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch(
+				[
+					{ runId: "run-1", assistantText: "first specialist answer" },
+					{ runId: "run-2", assistantText: "second specialist answer" },
+				],
+				capturedRequests,
+			),
+		});
+
+		const result = await tool.run({
+			mode: "pipeline",
+			tasks: [
+				{
+					task: "summarize interface",
+					agent_id: "coder",
+					persona: "# Interface Specialist\nSummarize the public contract.",
+					tool_profile: "minimal-local",
+				},
+				{
+					task: "check implications",
+					agent_id: "coder",
+					persona: "# Risk Specialist\nIdentify integration risks.",
+					tool_profile: "science-local",
+				},
+			],
+		});
+
+		strictEqual(result.kind, "ok");
+		strictEqual(capturedRequests.length, 2);
+		const first = capturedRequests[0] as DispatchRequest & { systemPrompt?: string };
+		const second = capturedRequests[1] as DispatchRequest & { systemPrompt?: string };
+		strictEqual(first.systemPrompt, "# Interface Specialist\nSummarize the public contract.");
+		strictEqual(first.toolProfile, "minimal-local");
+		strictEqual(second.systemPrompt, "# Risk Specialist\nIdentify integration risks.");
+		strictEqual(second.toolProfile, "science-local");
+		deepStrictEqual((second as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, {
+			fromRunId: "run-1",
+			position: 2,
+			text: "first specialist answer",
+		});
 	});
 
 	it("mode pipeline halts after a failed middle step and reports skipped tasks", async () => {
