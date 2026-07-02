@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { clioConfigDir } from "../../core/xdg.js";
 import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
 import type { DamageControlMatch, DamageControlRule } from "./damage-control.js";
 import { DEFAULT_DAMAGE_CONTROL_PATH_POLICY, mergePathPolicyInputs } from "./default-path-policy.js";
@@ -113,7 +114,20 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
 		? projectPolicy.pathPolicy
 		: mergePathPolicyInputs(DEFAULT_DAMAGE_CONTROL_PATH_POLICY, projectPolicy.pathPolicy);
-	const pathPolicy = compilePathPolicy(pathPolicyInput, projectPolicyRoot);
+	// Clio's own secret store, by absolute path. The static default list carries
+	// the `credentials.yaml` literal; the expansion has to happen here because
+	// the list cannot call config helpers at module scope.
+	const expandedDefaults = projectPolicy.disableDefaultPathPolicy
+		? pathPolicyInput
+		: mergePathPolicyInputs(pathPolicyInput, { zeroAccessPaths: clioCredentialStorePaths() });
+	const pathPolicy = compilePathPolicy(expandedDefaults, projectPolicyRoot);
+	// Bash-read scanning tests argument tokens against zero-access entries only:
+	// read-only paths stay readable from bash by design, secrets do not.
+	const zeroAccessPolicy: CompiledPathPolicy = {
+		root: pathPolicy.root,
+		entries: pathPolicy.entries.filter((entry) => entry.kind === "zeroAccessPaths"),
+		diagnostics: [],
+	};
 
 	function rulesFor(_posture: string | undefined): SourcedRule[] {
 		const base: SourcedRule[] = packs.base.rules.map((rule) => ({ rule, source: "damage-control:base" }));
@@ -206,6 +220,32 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
 					return blockDecision(base, blockInput);
 				}
+				// Bash reads of zero-access paths. pathPolicyTargets extracts only
+				// write/delete targets from bash, so `cat .env` used to run and its
+				// output persisted into the transcript and evidence previews. Any
+				// path-like argument token matching a zero-access entry blocks the
+				// command; the one carve-out is the exit-code-only presence check
+				// (`grep -q`/`grep -sq` with a ^NAME= pattern), which is the safe
+				// protocol the credentials skill teaches.
+				if (call.tool === ToolNames.Bash && command !== null) {
+					const secretRead = evaluateBashZeroAccessRead(zeroAccessPolicy, command, callCwd);
+					if (secretRead !== null) {
+						const blockInput: Omit<
+							SafetyPolicyDecision,
+							"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+						> = {
+							ruleId: "secret_path_bash",
+							reasonCode: "secret_path_bash",
+							reasons: [
+								`bash read of zero-access path blocked: '${secretRead.token}' matches ${secretRead.entrySource}. Check presence with exit codes only (grep -sq "^NAME=" <file>); have the user supply values through their own terminal (read -s), never through chat or command output.`,
+							],
+							policySource: "project-policy",
+						};
+						if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
+						if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
+						return blockDecision(base, blockInput);
+					}
+				}
 			}
 
 			if (call.tool === ToolNames.Bash && classification.actionClass === "execute") {
@@ -245,6 +285,103 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 		},
 	};
+}
+
+/** Absolute path of Clio's provider secret store, when resolvable. */
+function clioCredentialStorePaths(): string[] {
+	try {
+		return [path.join(clioConfigDir(), "credentials.yaml")];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * The exact safe presence form: `grep -q` or `grep -sq` (either flag order)
+ * with a `^NAME=`-shaped pattern and a single file argument. Exit code only;
+ * the value never enters context. Anything broader stays blocked.
+ */
+const SAFE_PRESENCE_RE = /^\s*grep\s+(?:-(?:q|sq|qs)\s+)('[^']*'|"[^"]*"|\S+)\s+\S+\s*$/;
+
+function isSafePresenceCheck(command: string): boolean {
+	const match = SAFE_PRESENCE_RE.exec(command);
+	if (!match || match[1] === undefined) return false;
+	const pattern = stripQuotes(match[1]);
+	return /^\^[A-Za-z_][A-Za-z0-9_]*=/.test(pattern);
+}
+
+function stripQuotes(token: string): string {
+	if (token.length >= 2) {
+		const first = token[0];
+		const last = token[token.length - 1];
+		if ((first === '"' && last === '"') || (first === "'" && last === "'")) return token.slice(1, -1);
+	}
+	return token;
+}
+
+/**
+ * Split a bash command into candidate path tokens. Quotes bind: a quoted
+ * string is one token, so `git commit -m "handle .env parsing"` yields the
+ * whole message (not a path) while `cat ".env"` still yields `.env`. Shell
+ * metacharacters outside quotes act as separators. Tokens are matched as
+ * paths against the compiled zero-access entries (which handle tilde
+ * expansion and globs), never against a list of reader binaries: a
+ * zero-access path appearing anywhere in the command is the signal.
+ */
+function bashPathTokenCandidates(command: string): string[] {
+	const tokens: string[] = [];
+	let current = "";
+	let quote: '"' | "'" | null = null;
+	const flush = (): void => {
+		if (current.length > 0) tokens.push(current);
+		current = "";
+	};
+	for (const ch of command) {
+		if (quote !== null) {
+			if (ch === quote) quote = null;
+			else current += ch;
+			continue;
+		}
+		if (ch === '"' || ch === "'") {
+			quote = ch;
+			continue;
+		}
+		if (/[\s;|&<>()]/.test(ch)) {
+			flush();
+			continue;
+		}
+		current += ch;
+	}
+	flush();
+	const candidates: string[] = [];
+	for (const token of tokens) {
+		if (token.length === 0) continue;
+		// A token containing whitespace came from a quoted string of prose, not
+		// a path argument; and flags are not paths unless they embed one
+		// (--file=~/.aws/credentials).
+		if (/\s/.test(token)) continue;
+		if (token.startsWith("-") && !token.includes("/") && !token.includes("=")) continue;
+		candidates.push(token);
+		const eq = token.indexOf("=");
+		if (eq > 0 && eq < token.length - 1) candidates.push(token.slice(eq + 1));
+	}
+	return candidates;
+}
+
+function evaluateBashZeroAccessRead(
+	zeroAccessPolicy: CompiledPathPolicy,
+	command: string,
+	callCwd: string,
+): { token: string; entrySource: string } | null {
+	if (zeroAccessPolicy.entries.length === 0) return null;
+	if (isSafePresenceCheck(command)) return null;
+	for (const token of bashPathTokenCandidates(command)) {
+		const decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd);
+		if (decision.kind === "block") {
+			return { token, entrySource: `zeroAccessPaths entry ${decision.matchedPath}` };
+		}
+	}
+	return null;
 }
 
 function evaluateProjectPathPolicy(

@@ -47,6 +47,11 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		"~/.pypirc",
 		"~/.git-credentials",
 		".git-credentials",
+		// Clio's own provider secret store. The literal covers a repo-level file
+		// of the same name on purpose; the expanded clioConfigDir() form is
+		// appended at policy construction (policy-engine.ts), since this static
+		// list cannot call config helpers.
+		"credentials.yaml",
 		"dump.sql",
 		"backup.sql",
 		"*.dump",
