@@ -251,12 +251,17 @@ policy.
 Skills are reusable `SKILL.md` guides the model loads on demand. Clio
 discovers them from per-user and per-project roots, including `.clio/skills`
 and cross-harness layouts such as `.claude/skills` and `.codex/skills`, and
-loads bodies on request through `read_skill`. Manage them with
-`clio skills list | inspect | validate | create`.
+loads bodies on request through `read_skill`. A skill's `allowed-tools`
+declaration is enforced at tool admission, and every skill can ship
+executable RED-GREEN evals that `clio skills eval <name>` runs instead of
+trusting the prose. Manage them with
+`clio skills list | inspect | validate | create | eval`.
 
 This repository also ships a curated skills catalog under
 [skills/](skills/README.md): maintainer-reviewed skills with provenance
-frontmatter. Nothing in the catalog auto-loads; activate a skill explicitly:
+frontmatter, evals, and content hashes pinned in `skills/registry.yaml` so
+installed copies verify against their audited source at activation. Nothing
+in the catalog auto-loads; activate a skill explicitly:
 
 ```bash
 skills/install.sh context-handoff   # link into .clio/skills (project scope)
