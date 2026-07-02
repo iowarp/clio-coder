@@ -54,7 +54,7 @@ import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
-import { type BackoffState, createBackoff, nextDelay } from "./backoff.js";
+import { type BackoffState, createBackoff, isDeterministicWorkerFailure, nextDelay } from "./backoff.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
 import {
 	DispatchConcurrencyError,
@@ -1218,11 +1218,27 @@ export function createDispatchBundle(
 		}
 	}
 
-	function maybeScheduleRetry(run: ActiveRun, outcome: RunOutcome, detail: string | null): void {
+	function maybeScheduleRetry(
+		run: ActiveRun,
+		outcome: RunOutcome,
+		detail: string | null,
+		failureMessage?: string,
+	): void {
 		if (draining) return;
 		const rootRunId = run.lineage.rootRunId;
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
 			retryBackoff.delete(rootRunId);
+			return;
+		}
+		// Fail fast on failures a retry cannot change (model-residency fit
+		// misses): the receipt already carries the reason, and re-running the
+		// same load probe against the same target only delays the verdict.
+		if (isDeterministicWorkerFailure(failureMessage ?? detail)) {
+			retryBackoff.delete(rootRunId);
+			reportDispatchDiagnostic(
+				`run ${run.runId}`,
+				new Error(`retry suppressed: deterministic worker failure (${(failureMessage ?? detail ?? "").slice(0, 200)})`),
+			);
 			return;
 		}
 		const maxRetries = workersMaxRetries();
@@ -2009,7 +2025,7 @@ export function createDispatchBundle(
 				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				maybeScheduleRetry(activeRun, finalOutcome, finalDetail);
+				maybeScheduleRetry(activeRun, finalOutcome, finalDetail, failureMessage);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (ACP promise rejection, ledger or
@@ -2574,7 +2590,7 @@ export function createDispatchBundle(
 				);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				maybeScheduleRetry(activeRun, finalOutcome, finalDetail);
+				maybeScheduleRetry(activeRun, finalOutcome, finalDetail, failureMessage);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (worker promise rejection, ledger or

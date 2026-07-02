@@ -44,3 +44,19 @@ export function reset(opts?: BackoffOptions): BackoffState {
 	const { baseMs } = resolve(opts);
 	return { attempts: 0, nextDelayMs: baseMs };
 }
+
+/**
+ * Worker failures that retrying with identical parameters cannot heal. Today
+ * these are the model-residency verdicts from the local-runtime reconciler: a
+ * VRAM fit miss is deterministic for the same target, model, and context, so
+ * scheduling dispatch retries only multiplies the slow load-probe wait the
+ * failure already paid (observed: a council smoke spent 12+ minutes in
+ * will-not-fit retries on a wedged fleet target). Matched narrowly on the
+ * reconciler's own message shapes; everything else keeps normal retry policy.
+ */
+const DETERMINISTIC_FAILURE_PATTERN = /of VRAM but only .* is available|VRAM fit check failed/i;
+
+export function isDeterministicWorkerFailure(message: string | null | undefined): boolean {
+	if (!message || message.length === 0) return false;
+	return DETERMINISTIC_FAILURE_PATTERN.test(message);
+}
