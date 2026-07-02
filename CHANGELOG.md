@@ -9,6 +9,12 @@ interfaces.
 
 ### Added
 
+- Headless main-agent `clio run` turns now write integrity-covered run
+  receipts with `agentId: "main-agent"`, session id, token and cost totals,
+  tool stats, and skill activations. The receipts live beside dispatch
+  receipts under `<stateDir>/receipts/`, are backed by `runs.json`, and are
+  counted by `clio usage report` and evidence consumers instead of leaving
+  main-agent usage invisible.
 - `clio skills eval <name|path>` (experimental) executes a skill's `evals.md`
   RED-GREEN scenarios instead of trusting the prose. Per scenario it runs a
   baseline headless turn without the skill, a treatment turn with the skill

@@ -1,7 +1,16 @@
-import type { PendingSkillRequest } from "../../core/skill-activation.js";
+import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import {
+	type PendingSkillRequest,
+	type SkillActivation,
+	skillActivationFromToolDetails,
+} from "../../core/skill-activation.js";
+import { ToolNames } from "../../core/tool-names.js";
+import { openLedger } from "../../domains/dispatch/state.js";
+import type { RunKind, RunOutcome, RunReceiptDraft, ToolCallStat } from "../../domains/dispatch/types.js";
 import { CLIO_SAMPLING_OVERRIDES_ENV } from "../../engine/apis/sampling-overrides.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
+import { type RunUsageSummary, sumRunUsage } from "../../interactive/chat-loop-messages.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import { serializeJsonLine } from "./jsonl.js";
@@ -39,6 +48,12 @@ interface HeadlessMainAgentResult {
 	 * response.
 	 */
 	sawTerminatingToolResult: boolean;
+}
+
+interface HeadlessMainAgentReceiptStats {
+	toolStats: Map<string, ToolCallStat>;
+	skillActivations: SkillActivation[];
+	usage: RunUsageSummary | null;
 }
 
 function assistantText(message: AgentMessage | undefined): string {
@@ -80,9 +95,161 @@ function isDiagnosticAssistantText(text: string): boolean {
 	return text.startsWith("[Clio Coder]") || text.startsWith("[/");
 }
 
+function blankToolStat(tool: string): ToolCallStat {
+	return { tool, count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0 };
+}
+
+function durationMsFromEvent(event: ChatLoopEvent): number | undefined {
+	const value = (event as { durationMs?: unknown }).durationMs;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEvent): void {
+	if (event.type !== "tool_execution_end") return;
+	const tool = typeof event.toolName === "string" && event.toolName.length > 0 ? event.toolName : "tool";
+	const stat = stats.toolStats.get(tool) ?? blankToolStat(tool);
+	stat.count += 1;
+	const durationMs = durationMsFromEvent(event);
+	if (durationMs !== undefined) stat.totalDurationMs += durationMs;
+	if (event.isError) stat.errors += 1;
+	else stat.ok += 1;
+	stats.toolStats.set(tool, stat);
+	if (tool === ToolNames.ReadSkill) {
+		const rawTurnId = (event as { turnId?: unknown }).turnId;
+		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
+		const activation = skillActivationFromToolDetails(
+			(event.result as { details?: unknown } | undefined)?.details,
+			turnId,
+		);
+		if (activation) stats.skillActivations.push(activation);
+	}
+}
+
+function sortedToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
+	return [...stats.values()].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+}
+
+function countToolStats(stats: Map<string, ToolCallStat>): number {
+	let count = 0;
+	for (const stat of stats.values()) count += stat.count;
+	return count;
+}
+
+function isMainAgentRunKind(value: string): value is RunKind {
+	return value === "http" || value === "sdk" || value === "subprocess";
+}
+
+async function recordHeadlessMainAgentReceipt(input: {
+	chat: ChatLoop;
+	task: string;
+	startedAt: string;
+	endedAt: string;
+	exitCode: number;
+	failureMessage: string | null;
+	stats: HeadlessMainAgentReceiptStats;
+}): Promise<void> {
+	const snapshot = input.chat.lastRunSnapshot?.();
+	if (!snapshot) return;
+	if (!isMainAgentRunKind(snapshot.runtimeKind)) return;
+	const usage = input.stats.usage;
+	const tokenCount = usage?.tokens ?? 0;
+	const inputTokenCount = usage?.input ?? 0;
+	const outputTokenCount = usage?.output ?? 0;
+	const cacheReadTokenCount = usage?.cacheRead ?? 0;
+	const cacheWriteTokenCount = usage?.cacheWrite ?? 0;
+	const reasoningTokenCount = usage?.reasoning ?? 0;
+	const costUsd = usage?.costUsd ?? 0;
+	const status = input.exitCode === 0 ? "completed" : "failed";
+	const outcome: RunOutcome = input.exitCode === 0 ? "succeeded" : "failed";
+	const outcomeDetail = input.exitCode === 0 ? null : input.failureMessage;
+	const ledger = openLedger();
+	const envelope = ledger.create({
+		agentId: "main-agent",
+		requestOrigin: "user",
+		task: input.task,
+		targetId: snapshot.targetId,
+		wireModelId: snapshot.wireModelId,
+		runtimeId: snapshot.runtimeId,
+		runtimeKind: snapshot.runtimeKind,
+		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
+		cwd: snapshot.cwd,
+	});
+	const lineage = {
+		parentRunId: null,
+		rootRunId: envelope.id,
+		attempt: 0,
+		depth: 0,
+	};
+	const updated = ledger.update(envelope.id, {
+		startedAt: input.startedAt,
+		endedAt: input.endedAt,
+		status,
+		outcome,
+		outcomeDetail,
+		lineage,
+		exitCode: input.exitCode,
+		tokenCount,
+		inputTokenCount,
+		outputTokenCount,
+		cacheReadTokenCount,
+		cacheWriteTokenCount,
+		reasoningTokenCount,
+		costUsd,
+		promptSignature: snapshot.promptSignature,
+		toolSignature: snapshot.toolSignature,
+	});
+	if (!updated) return;
+	const toolStats = sortedToolStats(input.stats.toolStats);
+	const receipt: RunReceiptDraft = {
+		runId: envelope.id,
+		agentId: "main-agent",
+		requestOrigin: "user",
+		task: input.task,
+		targetId: snapshot.targetId,
+		wireModelId: snapshot.wireModelId,
+		runtimeId: snapshot.runtimeId,
+		runtimeKind: snapshot.runtimeKind,
+		outcome,
+		outcomeDetail,
+		lineage,
+		startedAt: input.startedAt,
+		endedAt: input.endedAt,
+		exitCode: input.exitCode,
+		...(input.failureMessage !== null ? { failureMessage: input.failureMessage } : {}),
+		tokenCount,
+		inputTokenCount,
+		outputTokenCount,
+		cacheReadTokenCount,
+		cacheWriteTokenCount,
+		reasoningTokenCount,
+		costUsd,
+		compiledPromptHash: snapshot.compiledPromptHash,
+		staticCompositionHash: snapshot.staticCompositionHash,
+		promptSignature: snapshot.promptSignature,
+		toolSignature: snapshot.toolSignature,
+		clioVersion: readClioVersion(),
+		piMonoVersion: readPiMonoVersion(),
+		platform: process.platform,
+		nodeVersion: process.version,
+		toolCalls: countToolStats(input.stats.toolStats),
+		toolStats,
+		skillActivations: input.stats.skillActivations,
+		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
+		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
+	};
+	ledger.recordReceipt(envelope.id, receipt);
+	await ledger.persist();
+}
+
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
 	const mode = options.mode ?? "text";
+	const startedAt = new Date().toISOString();
 	let result: HeadlessMainAgentResult = { text: "", error: null, sawTerminatingToolResult: false };
+	const receiptStats: HeadlessMainAgentReceiptStats = {
+		toolStats: new Map<string, ToolCallStat>(),
+		skillActivations: [],
+		usage: null,
+	};
 	let jsonHeaderWritten = false;
 	const writeJsonHeader = (): void => {
 		if (jsonHeaderWritten) return;
@@ -95,6 +262,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			writeJsonHeader();
 			writeRawStdout(serializeJsonLine(event));
 		}
+		recordToolEnd(receiptStats, event);
+		if (event.type === "agent_end") receiptStats.usage = sumRunUsage(event.messages);
 		result = resultFromEvent(event, result);
 	});
 
@@ -128,24 +297,50 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		unsubscribe();
 	}
 
+	const endedAt = new Date().toISOString();
+	let exitCode = 0;
+	let failureMessage: string | null = null;
+	let stderrMessage: string | null = null;
+	let stdoutMessage: string | null = null;
 	if (result.error) {
-		process.stderr.write(`${result.error}\n`);
-		return 1;
-	}
-	if (result.text.length === 0) {
+		exitCode = 1;
+		failureMessage = result.error;
+		stderrMessage = result.error;
+	} else if (result.text.length === 0) {
 		if (result.sawTerminatingToolResult) {
-			await flushRawStdout();
-			return 0;
+			exitCode = 0;
+		} else {
+			exitCode = 1;
+			failureMessage = "clio run: no assistant response";
+			stderrMessage = failureMessage;
 		}
-		process.stderr.write("clio run: no assistant response\n");
-		return 1;
-	}
-	if (isDiagnosticAssistantText(result.text)) {
-		process.stderr.write(`${result.text}\n`);
-		return 1;
+	} else if (isDiagnosticAssistantText(result.text)) {
+		exitCode = 1;
+		failureMessage = result.text;
+		stderrMessage = result.text;
+	} else if (mode === "text") {
+		stdoutMessage = result.text;
 	}
 
-	if (mode === "text") writeRawStdout(`${result.text}\n`);
+	try {
+		await recordHeadlessMainAgentReceipt({
+			chat,
+			task: options.prompt,
+			startedAt,
+			endedAt,
+			exitCode,
+			failureMessage,
+			stats: receiptStats,
+		});
+	} catch (error) {
+		process.stderr.write(`clio run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`);
+	}
+
+	if (stderrMessage !== null) {
+		process.stderr.write(`${stderrMessage}\n`);
+	} else if (stdoutMessage !== null) {
+		writeRawStdout(`${stdoutMessage}\n`);
+	}
 	await flushRawStdout();
-	return 0;
+	return exitCode;
 }

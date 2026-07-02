@@ -1,8 +1,14 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { bashShape } from "../../src/cli/usage.js";
+import { type RunEnvelope, type RunReceipt, verifyReceiptIntegrity } from "../../src/domains/dispatch/index.js";
+import {
+	closeServer,
+	seedOpenAICompatOrchestrator,
+	startOpenAICompatFixture,
+} from "../harness/openai-compat-fixture.js";
 import type { ScratchHome } from "../harness/scratch-env.js";
 import { makeScratchHome, type RunResult, runCli } from "../harness/spawn.js";
 
@@ -276,6 +282,55 @@ describe("contracts/usage-report seeded archive facts", () => {
 			strictEqual(row.schema, "experimental");
 			strictEqual(row.windowDays, 30);
 			ok(row.kind === "fact" || row.kind === "opportunity", `unexpected kind: ${row.kind}`);
+		}
+	});
+});
+
+describe("contracts/usage-report headless main-agent receipts", () => {
+	const scratch = makeScratchHome("clio-usage-headless-");
+	after(() => scratch.cleanup());
+
+	it("counts a live headless main-agent receipt in the usage report", async () => {
+		const fixed = await runCli(["doctor", "--fix"], { env: usageEnv(scratch), cwd: scratch.dir });
+		strictEqual(fixed.code, 0, `stderr=${fixed.stderr}`);
+		const fixture = await startOpenAICompatFixture("receipt reply");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const env = { ...usageEnv(scratch), CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const run = await runCli(["--no-context-files", "--no-skills", "run", "hello receipt"], {
+				env,
+				cwd: scratch.dir,
+				timeoutMs: 20_000,
+			});
+			strictEqual(run.code, 0, `stderr=${run.stderr}`);
+			strictEqual(run.stdout, "receipt reply\n");
+
+			const receiptFiles = readdirSync(join(scratch.dir, "state", "receipts")).filter((name) => name.endsWith(".json"));
+			strictEqual(receiptFiles.length, 1);
+			const receipt = JSON.parse(
+				readFileSync(join(scratch.dir, "state", "receipts", receiptFiles[0] ?? ""), "utf8"),
+			) as Record<string, unknown>;
+			strictEqual(receipt.agentId, "main-agent");
+			strictEqual(receipt.targetId, "mock-chat");
+			strictEqual(receipt.runtimeKind, "http");
+			strictEqual(receipt.exitCode, 0);
+			ok(typeof receipt.sessionId === "string" && receipt.sessionId.length > 0, "receipt records the session id");
+			ok(typeof receipt.tokenCount === "number" && receipt.tokenCount > 0, "receipt records token usage");
+			ok(Array.isArray(receipt.toolStats), "receipt carries toolStats");
+			ok(Array.isArray(receipt.skillActivations), "receipt carries skillActivations");
+			const runs = JSON.parse(readFileSync(join(scratch.dir, "state", "runs.json"), "utf8")) as RunEnvelope[];
+			const envelope = runs.find((runEnvelope) => runEnvelope.id === receipt.runId);
+			ok(envelope, "receipt has a matching run ledger envelope");
+			const integrity = verifyReceiptIntegrity(receipt as unknown as RunReceipt, envelope);
+			strictEqual(integrity.ok, true, integrity.ok ? "" : integrity.reason);
+
+			const usage = await runUsage(scratch, ["report", "--json"]);
+			strictEqual(usage.code, 0, `stderr=${usage.stderr}`);
+			const rows = parseJsonl(usage.stdout);
+			strictEqual(facts(rows, "dispatch-runs")[0]?.value, 1);
+			strictEqual(facts(rows, "recipe-used").find((row) => row.agentId === "main-agent")?.runs, 1);
+		} finally {
+			await closeServer(fixture.server);
 		}
 	});
 });
