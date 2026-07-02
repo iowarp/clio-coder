@@ -1,14 +1,15 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "../dispatch/index.js";
 import { verifyReceiptIntegrity } from "../dispatch/index.js";
+// Direct module import (not the observability index): the observability
+// extension imports this domain, so an index-level import would cycle.
+import { type AuditJsonRow, readAuditRows, readSessionEntriesForId } from "../observability/archive-readers.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import {
 	type BashExecutionEntry,
-	isSessionEntry,
 	type MessageEntry,
-	type MessageRole,
 	type ProtectedArtifactEntry,
 	protectedArtifactFromSessionEntry,
 	protectedArtifactStateFromSessionEntries,
@@ -58,24 +59,9 @@ interface SessionLinkResult {
 	readErrors: string[];
 }
 
-interface AuditJsonRow {
-	file: string;
-	line: number;
-	row: Record<string, unknown>;
-	ts: string | null;
-	auditKind: string;
-	correlationId: string;
-}
-
 interface AuditLinkResult {
 	rows: EvidenceAuditLinkedRow[];
 	readErrors: string[];
-}
-
-interface SessionReadResult {
-	entries: SessionEntry[];
-	missing: boolean;
-	errors: string[];
 }
 
 export async function buildEvidence(options: BuildEvidenceOptions): Promise<EvidenceBuildResult> {
@@ -614,85 +600,6 @@ function sourceSessionIds(source: EvidenceOverview["source"], runSources: Readon
 	return uniqueStrings(values);
 }
 
-async function readSessionEntriesForId(stateDir: string, sessionId: string): Promise<SessionReadResult> {
-	const root = join(stateDir, "sessions");
-	let cwdHashes: string[];
-	try {
-		cwdHashes = await readdir(root);
-	} catch (error) {
-		const err = error as NodeJS.ErrnoException;
-		if (err.code === "ENOENT") return { entries: [], missing: true, errors: [] };
-		return { entries: [], missing: false, errors: [`session root read error: ${err.message ?? String(err)}`] };
-	}
-	for (const cwdHash of cwdHashes.sort(compareStrings)) {
-		const currentPath = join(root, cwdHash, sessionId, "current.jsonl");
-		let raw: string;
-		let source = currentPath;
-		try {
-			raw = await readFile(currentPath, "utf8");
-		} catch (error) {
-			const err = error as NodeJS.ErrnoException;
-			if (err.code === "ENOENT") {
-				const tmpPath = `${currentPath}.tmp`;
-				try {
-					raw = await readFile(tmpPath, "utf8");
-					source = tmpPath;
-				} catch {
-					continue;
-				}
-			} else if (err.code === "ENOTDIR") {
-				continue;
-			} else {
-				return { entries: [], missing: false, errors: [`${currentPath}: ${err.message ?? String(err)}`] };
-			}
-		}
-		return parseSessionEntries(raw, source);
-	}
-	return { entries: [], missing: true, errors: [] };
-}
-
-function parseSessionEntries(raw: string, source: string): SessionReadResult {
-	const entries: SessionEntry[] = [];
-	const errors: string[] = [];
-	const lines = raw.split("\n");
-	for (let index = 0; index < lines.length; index += 1) {
-		const line = lines[index];
-		if (line === undefined || line.trim().length === 0) continue;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(line) as unknown;
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			errors.push(`${source}:${index + 1}: invalid JSON: ${message}`);
-			continue;
-		}
-		const entry = parseSessionEntryLine(parsed);
-		if (entry !== null) entries.push(entry);
-	}
-	return { entries, missing: false, errors };
-}
-
-function parseSessionEntryLine(value: unknown): SessionEntry | null {
-	if (isSessionEntry(value)) return value;
-	if (!isRecord(value)) return null;
-	const id = readOptionalString(value.id);
-	const parentId = readOptionalNullableString(value.parentId);
-	const at = readOptionalString(value.at);
-	const kind = readOptionalMessageRole(value.kind);
-	if (id === null || parentId === undefined || at === null || kind === null || !Object.hasOwn(value, "payload")) {
-		return null;
-	}
-	const entry: MessageEntry = {
-		kind: "message",
-		turnId: id,
-		parentTurnId: parentId,
-		timestamp: at,
-		role: kind,
-		payload: value.payload,
-	};
-	return entry;
-}
-
 function linkedRunIdForTimestamp(timestamp: string, runSources: ReadonlyArray<EvidenceRunSource>): string | null {
 	const candidates = runSources
 		.filter((source) => timestampInRunWindow(timestamp, source.envelope))
@@ -929,58 +836,6 @@ async function linkAuditRows(
 	}
 	rows.sort(compareAuditLinkedRows);
 	return { rows, readErrors: auditRows.errors };
-}
-
-async function readAuditRows(stateDir: string): Promise<{ rows: AuditJsonRow[]; errors: string[] }> {
-	const root = join(stateDir, "audit");
-	let files: string[];
-	try {
-		files = await readdir(root);
-	} catch (error) {
-		const err = error as NodeJS.ErrnoException;
-		if (err.code === "ENOENT") return { rows: [], errors: [] };
-		return { rows: [], errors: [`audit root read error: ${err.message ?? String(err)}`] };
-	}
-	const rows: AuditJsonRow[] = [];
-	const errors: string[] = [];
-	for (const file of files.filter((name) => name.endsWith(".jsonl")).sort(compareStrings)) {
-		const path = join(root, file);
-		let raw: string;
-		try {
-			raw = await readFile(path, "utf8");
-		} catch (error) {
-			const err = error as NodeJS.ErrnoException;
-			errors.push(`${path}: ${err.message ?? String(err)}`);
-			continue;
-		}
-		const lines = raw.split("\n");
-		for (let index = 0; index < lines.length; index += 1) {
-			const line = lines[index];
-			if (line === undefined || line.length === 0) continue;
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(line) as unknown;
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				errors.push(`${path}:${index + 1}: invalid JSON: ${message}`);
-				continue;
-			}
-			if (!isRecord(parsed)) {
-				errors.push(`${path}:${index + 1}: expected object`);
-				continue;
-			}
-			const auditKind = readOptionalString(parsed.kind) ?? "tool_call";
-			rows.push({
-				file,
-				line: index + 1,
-				row: parsed,
-				ts: readOptionalString(parsed.ts),
-				auditKind,
-				correlationId: readOptionalString(parsed.correlationId) ?? "",
-			});
-		}
-	}
-	return { rows, errors };
 }
 
 interface AuditLinkFields {
@@ -1476,26 +1331,6 @@ function readNullableNumber(record: Record<string, unknown>, source: string, fie
 
 function readOptionalString(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readOptionalNullableString(value: unknown): string | null | undefined {
-	if (value === null) return null;
-	if (typeof value === "string") return value;
-	return undefined;
-}
-
-const MESSAGE_ROLES: ReadonlySet<MessageRole> = new Set([
-	"user",
-	"assistant",
-	"tool_call",
-	"tool_result",
-	"system",
-	"checkpoint",
-]);
-
-function readOptionalMessageRole(value: unknown): MessageRole | null {
-	if (typeof value !== "string") return null;
-	return MESSAGE_ROLES.has(value as MessageRole) ? (value as MessageRole) : null;
 }
 
 function parseJson(raw: string, source: string): unknown {

@@ -42,6 +42,7 @@ Usage:
   clio evidence             build, list, or inspect evidence artifacts
   clio eval                 run, report, or compare local eval task files
   clio memory               list, propose, approve, reject, or prune memory
+  clio usage report         cross-session usage facts and opportunities (experimental)
   clio evolve manifest      create, validate, or summarize change manifests
   clio extensions           install, list, enable, disable, or remove extension packages
   clio skills               list, inspect, validate, or create skills
@@ -114,6 +115,7 @@ const RECOGNIZED_SUBCOMMANDS = new Set<string>([
 	"evidence",
 	"eval",
 	"memory",
+	"usage",
 	"evolve",
 	"extensions",
 	"ext",
@@ -178,6 +180,8 @@ async function dispatch(
 			return (await import("./eval.js")).runEvalCommand(subArgs);
 		case "memory":
 			return (await import("./memory.js")).runMemoryCommand(subArgs);
+		case "usage":
+			return (await import("./usage.js")).runUsageCommand(subArgs);
 		case "evolve":
 			return (await import("./evolve.js")).runEvolveCommand(subArgs);
 		case "extensions":

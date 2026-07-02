@@ -25,6 +25,26 @@ interfaces.
   are zero because headless main-agent runs produce no receipts, and the
   per-bullet detail (verdicts, transcripts, stderr tails) lives in a
   `skill-eval.json` sidecar beside the standard bundle files.
+- `clio usage report` (experimental, read-only) analyzes the local usage
+  archive across sessions: receipts, session ledgers, audit rows, the
+  evidence index, the memory store, and the installed-skill listing. The
+  facts section reports sessions and dispatch runs in the window (default 30
+  days, `--days` to change, `--repo` to scope), top tools from receipt
+  toolStats, normalized bash command shapes (verb plus flag skeleton,
+  arguments stripped), skills activated versus installed-but-never-activated,
+  dispatch recipes used, failure tags from the evidence index, and memory
+  counts. The opportunities section cites ids and counts on every line: a
+  recurring bash shape across three or more sessions with no skill activation
+  suggests `/skill:workflow-distiller` (trivial shell furniture like `cd` and
+  `ls` is excluded), two or more dispatches with near-identical task prefixes
+  suggest a recipe, and a recurring failure tag with no matching memory
+  record suggests `clio memory propose --from-evidence <id>`. `--json` emits
+  one JSONL row per fact and opportunity with `schema: "experimental"`;
+  malformed rows are skipped and counted on stderr, and receipts beyond a
+  1000-file cap are truncated oldest-first with an honest notice. The command
+  writes nothing. The audit and session-ledger parsers it shares with
+  evidence building were factored into
+  `src/domains/observability/archive-readers.ts`.
 - Credential damage control closed three verified gaps. B1: Clio's own secret
   store is zero-access by default; the `credentials.yaml` literal joins the
   default deny-list and the expanded `<configDir>/credentials.yaml` path is
