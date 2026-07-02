@@ -668,6 +668,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"agentBindings",
 				"maxRetries",
 				"onPermission",
+				"escalation",
 				"resilienceCooldownMs",
 			]);
 			if ("default" in raw.workers) {
@@ -725,8 +726,35 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (v !== undefined) settings.workers.maxRetries = v;
 			}
 			if ("onPermission" in raw.workers) {
-				const v = expectEnum(issues, "workers.onPermission", raw.workers.onPermission, ["deny", "fail"] as const);
+				const v = expectEnum(issues, "workers.onPermission", raw.workers.onPermission, [
+					"deny",
+					"fail",
+					"escalate",
+				] as const);
 				if (v !== undefined) settings.workers.onPermission = v;
+			}
+			if ("escalation" in raw.workers) {
+				if (!isPlainObject(raw.workers.escalation)) {
+					issues.add("workers.escalation", `expected a map, got ${describe(raw.workers.escalation)}`);
+				} else {
+					const base = settings.workers.escalation ?? DEFAULT_SETTINGS.workers.escalation;
+					const escalation = { timeoutMs: base?.timeoutMs ?? 120000, fallback: base?.fallback ?? "deny" };
+					issues.unknownKeys("workers.escalation", raw.workers.escalation, ["timeoutMs", "fallback"]);
+					if ("timeoutMs" in raw.workers.escalation) {
+						const v = expectInteger(issues, "workers.escalation.timeoutMs", raw.workers.escalation.timeoutMs, {
+							min: 1,
+						});
+						if (v !== undefined) escalation.timeoutMs = v;
+					}
+					if ("fallback" in raw.workers.escalation) {
+						const v = expectEnum(issues, "workers.escalation.fallback", raw.workers.escalation.fallback, [
+							"deny",
+							"fail",
+						] as const);
+						if (v !== undefined) escalation.fallback = v;
+					}
+					settings.workers.escalation = escalation;
+				}
 			}
 			if ("resilienceCooldownMs" in raw.workers) {
 				const v = expectInteger(issues, "workers.resilienceCooldownMs", raw.workers.resilienceCooldownMs, { min: 0 });

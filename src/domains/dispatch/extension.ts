@@ -907,9 +907,15 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		spec.trustProjectCompatRoots = config.get().skills.trustProjectCompatRoots === true;
 	}
 	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator
-	// to answer a permission prompt, so the resolution policy ships with the
-	// spec and the worker enforces it within bounded time.
+	// to answer a permission prompt by default, so the resolution policy ships
+	// with the spec and the worker enforces it within bounded time. Under the
+	// escalate posture the configured timeout/fallback bounds ride along so the
+	// worker still cannot hang when no operator resolves the ask.
 	spec.onPermission = config?.get().workers.onPermission ?? "deny";
+	if (spec.onPermission === "escalate") {
+		const escalation = config?.get().workers.escalation;
+		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
+	}
 	// Workers inherit the session's autonomy level at admission time (sd-01
 	// §2.5); the worker registry applies the same mapping the orchestrator's
 	// does, with asks resolving through onPermission above.
