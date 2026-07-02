@@ -63,6 +63,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.CodeNav:
 		case ToolNames.DocsSearch:
 		case ToolNames.AskUser:
+		case ToolNames.CredentialPresent:
 		case ToolNames.ReadSkill:
 			return "read";
 		case ToolNames.Write:

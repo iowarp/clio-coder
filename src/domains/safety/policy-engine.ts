@@ -417,6 +417,10 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 			return [{ operation: "write", path: pathArg(args) ?? "PLAN.md" }];
 		case ToolNames.WriteReview:
 			return [{ operation: "write", path: pathArg(args) ?? "REVIEW.md" }];
+		case ToolNames.CredentialPresent:
+			// Sanctioned typed presence check: it may inspect secret-shaped paths
+			// internally, but its tool contract can return only boolean metadata.
+			return [];
 		case ToolNames.Bash: {
 			const command = commandArg(args);
 			if (command === null) return [];
