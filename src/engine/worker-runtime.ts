@@ -27,9 +27,16 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
+import type { ActionClass } from "../domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
-import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerPromptMessage } from "../worker/spec-contract.js";
+import {
+	DEFAULT_ESCALATION_FALLBACK,
+	DEFAULT_ESCALATION_TIMEOUT_MS,
+	WORKER_EXIT_PERMISSION_REQUIRED,
+	type WorkerEscalationConfig,
+	type WorkerPromptMessage,
+} from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { startAntigravityWorkerRun } from "./antigravity/subprocess-runtime.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
@@ -66,7 +73,9 @@ export interface WorkerRunInput {
 	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 	/** Non-stall posture for permission-requiring tool calls; default "deny". */
-	onPermission?: "deny" | "fail";
+	onPermission?: "deny" | "fail" | "escalate";
+	/** Escalation bounds, honored only when onPermission="escalate". */
+	escalation?: WorkerEscalationConfig;
 	/**
 	 * Session autonomy level captured at dispatch admission (sd-01 §2.5).
 	 * Workers inherit the orchestrator's level; absent means the default.
@@ -89,6 +98,13 @@ export interface WorkerRunHandle {
 	 * that races run completion is dropped with the run.
 	 */
 	steer(text: string): void;
+	/**
+	 * Apply an operator decision to a parked escalation. Present only on native
+	 * pi-agent workers (the runtimes with a registry park loop); external
+	 * runners omit it. Returns false when the requestId is unknown or already
+	 * resolved (duplicate), so callers can drop the line without crashing.
+	 */
+	resolvePermission?(requestId: string, decision: "approve" | "deny"): boolean;
 }
 
 export type WorkerEventEmit = (event: AgentEvent | ClioWorkerEvent) => void;
@@ -277,24 +293,139 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 
 	// Non-stall guarantee (Symphony §10.5): a dispatched worker has no
-	// operator, so a permission-requiring tool call must never park forever.
-	// "deny" resolves the parked call as a structured denial and the run
-	// continues; "fail" denies it and aborts the run, which then exits with
+	// operator by default, so a permission-requiring tool call must never park
+	// forever. "deny" resolves the parked call as a structured denial and the
+	// run continues; "fail" denies it and aborts the run, which then exits with
 	// the dedicated permission-required code so the orchestrator can resolve
 	// the outcome as failed/permission_required without racing the event
-	// stream.
+	// stream; "escalate" parks the call, hands the decision up to the operator
+	// over the event/stdin channels, and applies the configured deny/fail
+	// fallback on timeout so the run still cannot hang forever.
 	const onPermission = input.onPermission ?? "deny";
+	const escalationConfig: WorkerEscalationConfig | null =
+		onPermission === "escalate"
+			? {
+					timeoutMs: input.escalation?.timeoutMs ?? DEFAULT_ESCALATION_TIMEOUT_MS,
+					fallback: input.escalation?.fallback ?? DEFAULT_ESCALATION_FALLBACK,
+				}
+			: null;
 	let permissionFailure = false;
+
+	// Exact, byte-stable denial reasons for the deny/fail postures. Escalate
+	// timeouts and operator denials use their own wording below.
+	const denyReason = (tool: string, actionClass: string): string =>
+		`permission denied by policy: dispatched workers run non-interactively (workers.onPermission=deny); ${tool} requires ${actionClass} confirmation`;
+	const failReason = (tool: string, actionClass: string): string =>
+		`permission required for ${tool} (${actionClass}); workers.onPermission=fail ends this run`;
+
+	interface ActiveEscalation {
+		requestId: string;
+		tool: string;
+		actionClass: ActionClass;
+		timer: ReturnType<typeof setTimeout>;
+	}
+	let escalationCounter = 0;
+	let activeEscalation: ActiveEscalation | null = null;
+	const clearActiveEscalation = (): void => {
+		if (activeEscalation) {
+			clearTimeout(activeEscalation.timer);
+			activeEscalation = null;
+		}
+	};
+
+	// One escalation is outstanding at a time. A call that parks while a prior
+	// escalation awaits a decision is re-notified after the active one resolves
+	// (registry.resumeParkedCalls re-fires onPermissionRequired for the next
+	// parked call) or cancelled with it on deny/timeout, so it never gets lost
+	// and the requestId->parked-call mapping stays unambiguous.
+	const resolveEscalation = (
+		requestId: string,
+		decision: "approve" | "deny",
+		source: "operator" | "timeout",
+	): boolean => {
+		const active = activeEscalation;
+		if (!active || active.requestId !== requestId) return false;
+		clearActiveEscalation();
+		if (decision === "approve") {
+			emit({
+				type: "clio_permission_resolved",
+				payload: {
+					tool: active.tool,
+					actionClass: active.actionClass,
+					mode: "escalate",
+					source,
+					requestId,
+					decision: "approved",
+					reason: `operator approved permission escalation for ${active.tool} (${active.actionClass})`,
+				},
+			} as ClioWorkerEvent);
+			void registry.resumeParkedCalls({ actionClass: active.actionClass, requestedBy: `escalation:${source}` });
+			return true;
+		}
+		// A denial resolves to the effective posture: a timeout with fallback
+		// "fail" ends the run like posture fail; every other denial mirrors
+		// posture deny, so the structured tool denial the model sees (including
+		// the "permission denied" reason) is identical to the deny posture.
+		const effectiveFail = source === "timeout" && escalationConfig?.fallback === "fail";
+		const mode: "deny" | "fail" = effectiveFail ? "fail" : "deny";
+		const denialContext = source === "timeout" ? "escalation timed out with no operator decision" : "operator denied";
+		const reason = effectiveFail
+			? `permission required for ${active.tool} (${active.actionClass}); ${denialContext} and workers fallback=fail ends this run`
+			: `permission denied by ${source === "timeout" ? "escalation timeout fallback" : "operator"}: ${active.tool} requires ${active.actionClass} confirmation`;
+		emit({
+			type: "clio_permission_resolved",
+			payload: {
+				tool: active.tool,
+				actionClass: active.actionClass,
+				mode,
+				source,
+				requestId,
+				decision: "denied",
+				reason,
+			},
+		} as ClioWorkerEvent);
+		if (effectiveFail) {
+			permissionFailure = true;
+			registry.cancelParkedCalls(reason);
+			agent.abort();
+			return true;
+		}
+		registry.cancelParkedCalls(reason);
+		return true;
+	};
+
 	const unsubscribePermission = registry.onPermissionRequired((call, decision) => {
-		const reason =
-			onPermission === "fail"
-				? `permission required for ${call.tool} (${decision.classification.actionClass}); workers.onPermission=fail ends this run`
-				: `permission denied by policy: dispatched workers run non-interactively (workers.onPermission=deny); ${call.tool} requires ${decision.classification.actionClass} confirmation`;
+		const actionClass = decision.classification.actionClass;
+		if (escalationConfig) {
+			if (activeEscalation !== null) return;
+			const requestId = `esc-${++escalationCounter}`;
+			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
+			timer.unref?.();
+			activeEscalation = { requestId, tool: call.tool, actionClass, timer };
+			emit({
+				type: "clio_permission_escalated",
+				payload: {
+					requestId,
+					tool: call.tool,
+					summary: `${call.tool} requires ${actionClass} confirmation`,
+					decision: {
+						actionClass,
+						reasons: decision.classification.reasons,
+						...(decision.policy?.reasonCode ? { reasonCode: decision.policy.reasonCode } : {}),
+						...(decision.policy?.ruleId ? { ruleId: decision.policy.ruleId } : {}),
+						...(decision.policy?.policySource ? { policySource: decision.policy.policySource } : {}),
+					},
+					timeoutMs: escalationConfig.timeoutMs,
+				},
+			} as ClioWorkerEvent);
+			return;
+		}
+		const reason = onPermission === "fail" ? failReason(call.tool, actionClass) : denyReason(call.tool, actionClass);
 		emit({
 			type: "clio_permission_resolved",
 			payload: {
 				tool: call.tool,
-				actionClass: decision.classification.actionClass,
+				actionClass,
 				mode: onPermission,
 				reason,
 			},
@@ -335,18 +466,30 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			process.stderr.write(`[worker] agent error: ${msg}\n`);
 			return { messages: agent.state.messages, exitCode: 1 };
 		} finally {
+			clearActiveEscalation();
 			unsubscribePermission();
 		}
 	})();
 
 	return {
 		promise,
-		abort: () => agent.abort(),
+		abort: () => {
+			// Under escalate a parked call would otherwise keep waitForIdle from
+			// returning, so cancel it before aborting. cancelParkedCalls is a
+			// no-op when nothing is parked, so deny/fail abort stays unchanged.
+			if (escalationConfig) {
+				clearActiveEscalation();
+				registry.cancelParkedCalls("run aborted while a permission escalation was pending");
+			}
+			agent.abort();
+		},
 		steer: (text: string) => {
 			const trimmed = text.trim();
 			if (trimmed.length === 0) return;
 			emit({ type: "clio_steer_received", payload: { chars: trimmed.length } });
 			agent.steer(taskMessage(trimmed));
 		},
+		resolvePermission: (requestId: string, decision: "approve" | "deny") =>
+			resolveEscalation(requestId, decision, "operator"),
 	};
 }

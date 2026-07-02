@@ -389,8 +389,11 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	}
 
 	const safety = createWorkerSafety({ cwd: process.cwd() });
-	const onPermission = input.onPermission ?? "deny";
-	const permissionGate = {
+	// Escalation needs the native registry park loop and an operator on the
+	// worker's stdin; the Claude SDK path has neither, so it collapses the
+	// escalate posture to the non-stall deny fallback.
+	const onPermission: "deny" | "fail" = input.onPermission === "fail" ? "fail" : "deny";
+	const permissionGate: PermissionGateInput = {
 		safety,
 		cwd: process.cwd(),
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),

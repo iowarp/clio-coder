@@ -11,7 +11,14 @@ export interface WorkerStdinDemux {
 	 * Single handler; a second registration replaces the first.
 	 */
 	onSteer(handler: (text: string) => void): void;
-	/** Post-spec lines that were not valid steer messages. */
+	/**
+	 * Register the handler for post-spec permission-decision lines
+	 * (`{"type":"permission_decision","requestId":"...","decision":"approve"|"deny"}`).
+	 * Decisions that arrive before registration are buffered in order and
+	 * flushed. Single handler; a second registration replaces the first.
+	 */
+	onPermissionDecision(handler: (decision: { requestId: string; decision: "approve" | "deny" }) => void): void;
+	/** Post-spec lines that were not valid steer or permission-decision messages. */
 	droppedLineCount(): number;
 }
 
@@ -25,6 +32,8 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let closed = false;
 	let steerHandler: ((text: string) => void) | null = null;
 	const pendingSteers: string[] = [];
+	let permissionHandler: ((decision: { requestId: string; decision: "approve" | "deny" }) => void) | null = null;
+	const pendingPermissionDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
 	let droppedLines = 0;
 
 	function resolveSpec(spec: WorkerSpec): void {
@@ -45,6 +54,14 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		pendingSteers.push(text);
 	}
 
+	function deliverPermissionDecision(requestId: string, decision: "approve" | "deny"): void {
+		if (permissionHandler) {
+			permissionHandler({ requestId, decision });
+			return;
+		}
+		pendingPermissionDecisions.push({ requestId, decision });
+	}
+
 	function processPostSpecLine(line: string): void {
 		let value: unknown;
 		try {
@@ -61,6 +78,20 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			(value as { text: string }).text.trim().length > 0
 		) {
 			deliverSteer((value as { text: string }).text);
+			return;
+		}
+		if (
+			typeof value === "object" &&
+			value !== null &&
+			(value as { type?: unknown }).type === "permission_decision" &&
+			typeof (value as { requestId?: unknown }).requestId === "string" &&
+			(value as { requestId: string }).requestId.length > 0 &&
+			((value as { decision?: unknown }).decision === "approve" || (value as { decision?: unknown }).decision === "deny")
+		) {
+			deliverPermissionDecision(
+				(value as { requestId: string }).requestId,
+				(value as { decision: "approve" | "deny" }).decision,
+			);
 			return;
 		}
 		droppedLines += 1;
@@ -115,6 +146,13 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			while (pendingSteers.length > 0) {
 				const text = pendingSteers.shift();
 				if (text !== undefined) handler(text);
+			}
+		},
+		onPermissionDecision(handler: (decision: { requestId: string; decision: "approve" | "deny" }) => void): void {
+			permissionHandler = handler;
+			while (pendingPermissionDecisions.length > 0) {
+				const entry = pendingPermissionDecisions.shift();
+				if (entry !== undefined) handler(entry);
 			}
 		},
 		droppedLineCount(): number {

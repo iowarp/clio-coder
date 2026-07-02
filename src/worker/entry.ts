@@ -63,6 +63,7 @@ async function main(): Promise<number> {
 		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
 		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
+		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
 		...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
@@ -75,6 +76,15 @@ async function main(): Promise<number> {
 	// Steer lines arriving on stdin after the spec queue onto the agent's
 	// steering queue; the demux buffers any that landed before this point.
 	demux.onSteer((text) => handle.steer(text));
+	// Permission-decision lines resolve a parked escalation. Unknown or
+	// duplicate requestIds return false and are dropped without crashing the
+	// worker; runtimes without an escalation loop simply have no handler.
+	demux.onPermissionDecision(({ requestId, decision }) => {
+		const resolved = handle.resolvePermission?.(requestId, decision) ?? false;
+		if (!resolved) {
+			process.stderr.write(`[worker] dropped permission_decision for unknown request '${requestId}'\n`);
+		}
+	});
 	const onSignal = () => handle.abort();
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
