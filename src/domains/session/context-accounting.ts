@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cwdHash, sessionPaths } from "../../engine/session.js";
 import type { AgentMessage, Usage } from "../../engine/types.js";
+import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
 import { categoryForSegment } from "./context-ledger.js";
 import type { SessionMeta } from "./contract.js";
 
@@ -373,7 +374,7 @@ export function buildSnapshotCategories(inputs: {
 
 	const decomposed = Object.keys(raw).reduce((sum, k) => sum + (raw[k] ?? 0), 0);
 	const window = inputs.effectiveContextWindow;
-	const threshold = inputs.compactionThreshold ?? 0.85;
+	const threshold = inputs.compactionThreshold ?? DEFAULT_COMPACTION_THRESHOLD;
 	let reserve = 0;
 	let free = 0;
 	if (window > 0) {

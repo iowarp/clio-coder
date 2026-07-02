@@ -6,6 +6,7 @@ import {
 	type TargetDescriptor,
 } from "../../src/domains/providers/index.js";
 import { resolveContextWindowDetails } from "../../src/domains/providers/runtime-resolution.js";
+import { DEFAULT_COMPACTION_THRESHOLD } from "../../src/domains/session/compaction/auto.js";
 import {
 	buildSnapshotCategories,
 	type ContextSnapshot,
@@ -54,6 +55,27 @@ describe("contracts/context-accounting", () => {
 			contextWindow: 1000,
 		});
 		strictEqual(withoutCache.promptCache, null);
+	});
+
+	it("falls back to the shared compaction threshold when none is configured", () => {
+		const window = 1000;
+		const expectedReserve = Math.round(window * (1 - DEFAULT_COMPACTION_THRESHOLD));
+
+		const ledger = buildContextLedger({
+			provider: "test",
+			model: "test-model",
+			contextWindow: window,
+			systemPromptTokens: 100,
+			compactionAuto: true,
+		});
+		strictEqual(ledger.reserveTokens, expectedReserve);
+
+		const categories = buildSnapshotCategories({
+			systemPrompt: "You are a coding assistant.",
+			effectiveContextWindow: window,
+			compactionThreshold: null,
+		});
+		strictEqual(categories.reserve, expectedReserve);
 	});
 
 	it("categories sum to usedTokens in the ledger", () => {

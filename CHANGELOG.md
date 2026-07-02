@@ -71,6 +71,13 @@ and grep/find answer tree visibility from a single ignore policy.
   cap in `details.candidates`; grep context lines come from rg's `--json`
   stream instead of a second read.
 
+### Fixed
+
+- **One compaction threshold.** The context ledger overlay and the persisted
+  context snapshots now fall back to the shared auto-compact default (0.8)
+  instead of a local 0.85, so `/context` reserve/free math and the
+  auto-compact trigger can no longer disagree when no threshold is configured.
+
 ### Removed / BREAKING (unreleased, no compat shims)
 
 - Tool names `glob`, `workspace_context`, `docs_search`, `read_skill`,

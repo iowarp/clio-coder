@@ -16,6 +16,8 @@
  * proportional reconciliation the footer bar already performs.
  */
 
+import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
+
 /** Distinct buckets a context window is divided into for display. */
 export type ContextLedgerCategory =
 	| "system"
@@ -146,8 +148,6 @@ export interface ContextLedger {
 	promptCache: PromptCacheStats | null;
 }
 
-const DEFAULT_AUTO_THRESHOLD = 0.85;
-
 /** Maps a prompt segment id to the ledger bucket it belongs to. */
 const SEGMENT_CATEGORY: Readonly<Record<string, ContextLedgerCategory>> = {
 	identity: "system",
@@ -264,7 +264,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		typeof input.compactionThreshold === "number" && input.compactionThreshold > 0 && input.compactionThreshold < 1
 			? input.compactionThreshold
 			: input.compactionAuto
-				? DEFAULT_AUTO_THRESHOLD
+				? DEFAULT_COMPACTION_THRESHOLD
 				: null;
 
 	let reserveTokens = 0;
