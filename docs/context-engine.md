@@ -66,7 +66,7 @@ Settings validation is strict: an older file still carrying the removed `compact
 
 ## Codewiki Indexing and Navigation
 
-The command `clio context-index` builds the Stage 1 codewiki index without invoking any models. It writes the results to `.clio/codewiki.json` and updates the fingerprint state in `.clio/state.json`. Indexing is deterministic. The same tree produces the identical structural hash on every run, making it safe to run in CI pipelines or compare across environments. Extraction is powered by web-tree-sitter WASM grammars. It supports TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and Ruby, with a fallback plain-text parser for unsupported file types. The schema tracks:
+The command `clio context-index` builds the Stage 1 codewiki index without invoking any models. It writes the results to `.clio/codewiki.json` and updates the fingerprint state in `.clio/state.json`. Indexing is deterministic. The same tree produces the identical structural hash on every run, making it safe to run in CI pipelines or compare across environments. The indexer walks selected source and config extensions. Extraction uses web-tree-sitter WASM grammars where available and regex fallback extractors for TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and Ruby. Unsupported file types are skipped rather than parsed as plain text. The schema tracks:
 - Files: path, language, line count, and role.
 - Symbols: name, kind, line number, and signature.
 - Import edges: internal path links and external modules.
@@ -79,4 +79,3 @@ Subagents query the compiled codewiki using the read-only `code_nav` tool instea
 - **outline**: Outline all symbols declared within a specific file path.
 - **deps**: List internal and external import dependencies for a specific file.
 - **dependents**: List all workspace files that import a specific target path.
-
