@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -147,6 +147,61 @@ function runEnvelope(runId: string): RunEnvelope {
 		cwd: "/tmp",
 		tokenCount: 0,
 		costUsd: 0,
+	};
+}
+
+function assistantMessageEvents(text: string): AsyncIterableIterator<unknown> {
+	return (async function* () {
+		if (text.length > 0) {
+			yield {
+				type: "message_end",
+				message: { role: "assistant", content: text },
+			};
+		}
+	})();
+}
+
+function fakeSequentialDispatch(
+	steps: ReadonlyArray<{
+		runId: string;
+		assistantText: string;
+		receipt?: Partial<RunReceipt>;
+	}>,
+	capturedRequests: DispatchRequest[],
+): DispatchContract {
+	let index = 0;
+	let inFlight = false;
+	return {
+		dispatch: async (req: DispatchRequest) => {
+			strictEqual(inFlight, false, "pipeline dispatch must wait for the active step to finish");
+			const step = steps[index];
+			if (!step) throw new Error(`unexpected dispatch ${index + 1}`);
+			index += 1;
+			inFlight = true;
+			capturedRequests.push(req);
+			const finalPromise = Promise.resolve(runReceipt(step.runId, req.task, step.receipt)).finally(() => {
+				inFlight = false;
+			});
+			return {
+				runId: step.runId,
+				events: assistantMessageEvents(step.assistantText),
+				finalPromise,
+			};
+		},
+		dispatchBatch: async () => {
+			throw new Error("dispatchBatch not used");
+		},
+		listRuns: () => [],
+		getRun: (runId: string) => runEnvelope(runId),
+		abort: () => {},
+		steer: () => {},
+		snapshot: () => ({
+			generatedAt: new Date().toISOString(),
+			running: [],
+			retrying: [],
+			totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+		}),
+		drain: async () => {},
 	};
 }
 
@@ -809,6 +864,119 @@ describe("contracts/tools dispatch run paths", () => {
 			ok(result.output.includes("first scout finding"));
 			ok(result.output.includes("second scout finding"));
 		}
+	});
+
+	it("mode pipeline dispatches steps sequentially and threads previous assistant text", async () => {
+		const capturedRequests: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch(
+				[
+					{ runId: "run-1", assistantText: "first worker answer" },
+					{ runId: "run-2", assistantText: "second worker answer" },
+					{ runId: "run-3", assistantText: "third worker answer" },
+				],
+				capturedRequests,
+			),
+		});
+
+		const result = await tool.run({
+			mode: "pipeline",
+			tasks: [
+				{ task: "step 1", agent_id: "coder" },
+				{ task: "step 2", agent_id: "coder" },
+				{ task: "step 3", agent_id: "coder" },
+			],
+		});
+
+		strictEqual(result.kind, "ok");
+		strictEqual(capturedRequests.length, 3);
+		strictEqual((capturedRequests[0] as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, undefined);
+		deepStrictEqual((capturedRequests[1] as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, {
+			fromRunId: "run-1",
+			position: 2,
+			text: "first worker answer",
+		});
+		deepStrictEqual((capturedRequests[2] as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, {
+			fromRunId: "run-2",
+			position: 3,
+			text: "second worker answer",
+		});
+		if (result.kind === "ok") {
+			ok(result.output.includes("dispatch (pipeline) total=3 failed=0"));
+		}
+	});
+
+	it("mode pipeline halts after a failed middle step and reports skipped tasks", async () => {
+		const capturedRequests: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch(
+				[
+					{ runId: "run-1", assistantText: "first worker answer" },
+					{
+						runId: "run-2",
+						assistantText: "second worker failed",
+						receipt: {
+							exitCode: 2,
+							outcome: "failed",
+							outcomeDetail: "exit code 2",
+							failureMessage: "middle step failed",
+						},
+					},
+					{ runId: "run-3", assistantText: "must not dispatch" },
+				],
+				capturedRequests,
+			),
+		});
+
+		const result = await tool.run({
+			mode: "pipeline",
+			tasks: [
+				{ task: "step 1", agent_id: "coder" },
+				{ task: "step 2", agent_id: "coder" },
+				{ task: "step 3", agent_id: "coder" },
+			],
+		});
+
+		strictEqual(result.kind, "error");
+		strictEqual(capturedRequests.length, 2);
+		strictEqual((capturedRequests[0] as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, undefined);
+		deepStrictEqual((capturedRequests[1] as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, {
+			fromRunId: "run-1",
+			position: 2,
+			text: "first worker answer",
+		});
+		if (result.kind === "error") {
+			match(result.message, /step 2/i);
+			match(result.message, /skip(?:ped)?\s+1|1\s+skip/i);
+		}
+	});
+
+	it("invalid dispatch mode error names all supported modes", async () => {
+		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
+		const result = await tool.run({ mode: "serial", tasks: [{ task: "do work", agent_id: "coder" }] });
+
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") {
+			ok(result.message.includes("parallel"));
+			ok(result.message.includes("sequential"));
+			ok(result.message.includes("pipeline"));
+		}
+	});
+
+	it("single-task pipeline dispatch sends no pipeline input", async () => {
+		const capturedRequests: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch([{ runId: "run-1", assistantText: "single worker answer" }], capturedRequests),
+		});
+
+		const result = await tool.run({
+			mode: "pipeline",
+			tasks: [{ task: "single step", agent_id: "coder" }],
+		});
+
+		strictEqual(result.kind, "ok");
+		strictEqual(capturedRequests.length, 1);
+		strictEqual((capturedRequests[0] as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, undefined);
 	});
 });
 
