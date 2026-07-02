@@ -9,6 +9,20 @@ interfaces.
 
 ### Added
 
+- Two new marketplace skills port the LifeOS Science pack method onto Clio's
+  evidence-first posture. `scientific-debugging` forces a one-sentence goal, at
+  least three falsifiable hypotheses spanning distinct fault classes, cheapest
+  test first, and an evidence-cited verdict per hypothesis before any fix, with
+  a fifteen-minute escalation from quick diagnosis to a written investigation
+  file. `experiment-protocol` pre-registers thresholds, per-metric tolerance
+  semantics, environment pins, input checksums, and verdict conditions into the
+  repo validation contract (`.clio/validation.yaml` or `VALIDATION.md`) before
+  any measurement, so creating the contract raises repo-derived rigor and the
+  finish gate demands matching evidence; iteration keeps a dead-ends ledger.
+  Both carry catalog provenance and RED-GREEN `evals.md` scenarios verified
+  against live headless runs. `skills/registry.yaml` was re-pinned, which also
+  heals five stale pins left by an earlier skill edit that skipped the pin.
+
 - Dispatch runs now auto-produce a forensic evidence bundle and a sidecar
   index on completion. When a run finalizes, the observability domain subscribes
   to the `dispatch.completed` / `dispatch.failed` bus events and builds the full
