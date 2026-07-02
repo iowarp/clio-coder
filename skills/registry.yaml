@@ -20,6 +20,9 @@ skills:
   - name: cut-it
     version: 0.2.0
     sha256: 6939c7e29e3033e316040694d77444f48cc446c0c13704df022d595408731d8c
+  - name: design-council
+    version: 0.1.0
+    sha256: 2153a7e1e064a96c417ff75938bb2876b879448570d1ea46e66999b8b6686034
   - name: experiment-protocol
     version: 0.1.0
     sha256: 831fda7dde81b971ac23660faf02606abe457b34487c40492e04b9095b0a9260
