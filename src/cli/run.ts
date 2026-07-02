@@ -67,6 +67,22 @@ function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 	);
 }
 
+/**
+ * True when an explicit --target override names a target that is not in
+ * settings.targets. `readSettings().targets` is the same source the runtime
+ * resolver checks (providers.getTarget), so this mirrors its `target-not-found`
+ * verdict without booting the providers domain. Unreadable/invalid settings
+ * fall through (returns false) so the normal boot path surfaces that error
+ * instead of a misleading "target not found".
+ */
+function explicitTargetMissing(targetId: string): boolean {
+	try {
+		return !readSettings().targets.some((target) => target.id === targetId);
+	} catch {
+		return false;
+	}
+}
+
 async function assemblePrompt(parsed: RunCliArgs): Promise<{
 	prompt: string;
 	images?: ReadonlyArray<ImageContent>;
@@ -162,6 +178,14 @@ export async function runClioRun(
 		if (!assembled) return 2;
 
 		if (parsed.agentId === undefined) {
+			// An explicit --target override is a one-run target; a missing id is an
+			// operator config error, not an assistant response. Reject it before the
+			// headless turn so the resolver diagnostic never streams to stdout as a
+			// message_end/agent_end assistant turn.
+			if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
+				process.stderr.write(`clio run: target '${parsed.target}' not found in settings.targets\n`);
+				return 2;
+			}
 			takeOverStdout();
 			try {
 				const code = await runClioCommand({

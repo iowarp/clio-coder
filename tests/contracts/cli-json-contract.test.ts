@@ -1,5 +1,5 @@
 import { match, strictEqual } from "node:assert/strict";
-import { after, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 // Contract: a --json-capable surface keeps stdout machine-readable. On an
@@ -51,4 +51,38 @@ describe("contracts/cli-json-contract", () => {
 			match(result.stderr, /unknown flag|usage/i);
 		});
 	}
+});
+
+describe("contracts/cli-json-contract run --target", () => {
+	const scratch = makeScratchHome("clio-json-run-target-");
+	before(async () => {
+		const configured = await runCli(
+			[
+				"configure",
+				"--id",
+				"local",
+				"--runtime",
+				"llamacpp",
+				"--url",
+				"http://127.0.0.1:1",
+				"--model",
+				"local-model",
+				"--set-orchestrator",
+				"--force",
+			],
+			{ env: scratch.env },
+		);
+		strictEqual(configured.code, 0, `configure failed: ${configured.stderr}`);
+	});
+	after(() => scratch.cleanup());
+
+	// BUG-003: an explicit --target override that names a missing target is an
+	// operator config error, not an assistant response. It must exit 2 with a
+	// stderr diagnostic and empty stdout, never a message_end/agent_end turn.
+	it("run --json --target <missing> rejects before the agent turn", async () => {
+		const result = await runCli(["run", "--json", "--target", "missing", "hello"], { env: scratch.env });
+		strictEqual(result.code, 2, `stderr=${result.stderr}`);
+		strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
+		match(result.stderr, /target 'missing' not found/);
+	});
 });
