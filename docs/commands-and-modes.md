@@ -18,14 +18,17 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio` | Launch the interactive terminal UI. |
 | `clio run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
 | `clio run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
+| `clio acp` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
 | `clio --version` | Print the installed version. |
+| `clio --api-key <key>` | Override the active target API key for one invocation. |
 | `clio --no-context-files` / `clio -nc` | Skip `CLIO.md` project-context injection for one invocation. |
 | `clio configure` | Run the configuration wizard. |
 | `clio configure --list` | List user-facing runtime ids. |
+| `clio configure --list --all` | List every registered runtime, including aliases. |
 | `clio targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
 | `clio targets add` | Add a target interactively or through configure flags. |
-| `clio targets use <id>` | Set chat and fleet defaults to one orchestrator-capable target. |
-| `clio targets profile <name> <id>` | Register a named fleet profile. |
+| `clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]` | Set chat and fleet defaults to one orchestrator-capable target. |
+| `clio targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. |
 | `clio targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
 | `clio targets remove <id>` | Remove a target. |
 | `clio targets rename <old> <new>` | Rename a target id. |
@@ -33,26 +36,29 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio paths [--json]` | Print the resolved config, data, state, and cache directories. |
 | `clio auth list` | Show known auth entries. |
 | `clio auth status [target-or-runtime]` | Inspect auth state. |
-| `clio auth login <target-or-runtime>` | Add credentials through the supported flow. |
-| `clio auth logout <target-or-runtime>` | Remove stored credentials. |
-| `clio doctor [--fix]` | Diagnose state; with `--fix`, repair or create missing state. |
-| `clio reset [--state\|--data\|--cache\|--auth\|--config\|--all]` | Reset selected Clio Coder state. `--state` is the default level. |
+| `clio auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
+| `clio auth logout [target-or-runtime]` | Remove stored credentials. |
+| `clio doctor [--fix] [--json]` | Diagnose state; with `--fix`, repair or create missing state. |
+| `clio reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force]` | Reset selected Clio Coder state. `--state` is the default level. |
 | `clio uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
-| `clio upgrade` | Check for and apply runtime upgrades. |
-| `clio agents` | List discovered agent specs. |
-| `clio components [--json]` | List behavior-affecting harness components. |
+| `clio upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
+| `clio agents [--json] [--all]` | List discovered agent specs. |
+| `clio fleet list\|run\|status` | List fleet contracts, run a contract, or show dispatch state. |
+| `clio components [list] [--json]` | List behavior-affecting harness components. |
 | `clio components snapshot --out <path>` | Write a component snapshot JSON file. |
-| `clio components diff --from <a> --to <b>` | Compare component snapshots. |
+| `clio components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
 | `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
 | `clio eval run\|report\|compare` | Run local eval task files and compare results. |
 | `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
 | `clio evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
-| `clio skills list\|inspect\|validate\|create` | Manage discovered and Clio-native skills. |
-| `clio share export --out <path>` | Export project context, prompts, skills, settings fragments, and extension bundles. |
-| `clio share import <path> [--dry-run] [--force]` | Import a share archive with conflict reporting. |
+| `clio skills list\|search\|inspect\|validate\|create\|install\|update\|sync` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
+| `clio docs [topic] [--no-open]` | Serve bundled HTML docs on 127.0.0.1. |
+| `clio share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
+| `clio share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
 | `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
-| `clio context-init [--yes] [--preview|--heuristic|--adopt]` | Explore the repo and bootstrap project context: `CLIO.md` and codewiki. |
+| `clio context-clear [--all]` | Clear accumulated project context artifacts. |
+| `clio context-init [--preview] [--heuristic] [--yes] [--adopt] [--propose\|--apply\|--rewrite]` | Explore the repo and bootstrap project context: `CLIO.md` and codewiki. |
 | `clio context-index [--json]` | Build the Stage 1 codewiki index without model calls; writes `.clio/codewiki.json` and `.clio/state.json` and prints coverage plus a structural hash. |
 
 ## Headless Run Flags
@@ -64,6 +70,8 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
+| `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
+| `--kv-cache-mode <mode>` | One-run KV-cache override for supported local runtimes: `f16`, `f32`, `none`, `false`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, or `q5_1`. |
 | `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
 | `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
