@@ -22,6 +22,16 @@ interfaces.
   Both carry catalog provenance and RED-GREEN `evals.md` scenarios verified
   against live headless runs. `skills/registry.yaml` was re-pinned, which also
   heals five stale pins left by an earlier skill edit that skipped the pin.
+- The `design-council` marketplace skill runs a bounded multi-perspective
+  debate on design decisions with real tradeoffs. Three to five perspectives
+  are composed from the topic (name, stance, expertise, attack target) and
+  dispatched as read-only workers (`scout`, `researcher`, `provenance`) with
+  the persona and accumulated transcript in the task prompt, parallel within a
+  round and sequential across the position, response, and convergence rounds.
+  The synthesis names agreements, the crux of each live disagreement, a
+  recommendation, and preserved dissent, all receipt-linked. A settled
+  question terminates early with the consensus instead of manufactured
+  debate, and an unavailable fleet degrades to a labeled inline debate.
 
 - Dispatch runs now auto-produce a forensic evidence bundle and a sidecar
   index on completion. When a run finalizes, the observability domain subscribes
