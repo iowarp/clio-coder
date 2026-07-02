@@ -7,6 +7,7 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy } from "../core/skill-activation.js";
+import type { ToolName } from "../core/tool-names.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
@@ -1544,13 +1545,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			| undefined;
 		const contextWindow = typeof modelState?.contextWindow === "number" ? modelState.contextWindow : null;
 		const guidance = modelState?.clio?.quirks?.thinking?.guidance;
+		// Per-tool prompt hints come from registry metadata, derived once from
+		// the frozen surface per compile. The compiler renders them sorted by
+		// tool name, so the compiled text stays byte-stable for a given surface.
+		const toolPromptHints = toolNamesFromAgentState(agentRuntime.agent.state.tools).flatMap((name) => {
+			const hint = deps.toolRegistry?.get(name as ToolName)?.metadata?.promptHint;
+			return hint ? [{ tool: name, hint }] : [];
+		});
 		const sessionInputs: SessionPromptInputs = {
 			provider: agentRuntime.targetId,
 			model: agentRuntime.wireModelId,
 			contextWindow,
 			providerSupportsTools: runtimeSupportsTools(agentRuntime),
 			...(guidance ? { thinkingGuidance: guidance } : {}),
-			activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools),
+			...(toolPromptHints.length > 0 ? { toolPromptHints } : {}),
 		};
 		if (deps.getMemorySection) {
 			try {

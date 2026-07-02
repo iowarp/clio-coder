@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.j
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { credentialPresentTool } from "../../src/tools/credential-present.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
@@ -808,5 +809,36 @@ describe("contracts/tools dispatch run paths", () => {
 			ok(result.output.includes("first scout finding"));
 			ok(result.output.includes("second scout finding"));
 		}
+	});
+});
+
+describe("contracts/tools prompt hints", () => {
+	it("carries promptHint metadata on exactly the four hinted tools, verbatim", () => {
+		const registry = testRegistryWithTools([]);
+		registerAllTools(registry, {
+			askUser: async () => ({ answers: [] }),
+			dispatch: {} as DispatchContract,
+		});
+
+		const hinted = new Map<string, string>();
+		for (const spec of registry.listAll()) {
+			const hint = spec.metadata?.promptHint;
+			if (typeof hint === "string") hinted.set(spec.name, hint);
+		}
+
+		deepStrictEqual([...hinted.keys()].sort(), ["ask_user", "code_nav", "context", "dispatch"]);
+		strictEqual(
+			hinted.get("code_nav"),
+			"Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).",
+		);
+		strictEqual(
+			hinted.get("context"),
+			'Call context with scope="skills" to list available skills. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+		);
+		strictEqual(hinted.get("dispatch"), "Call dispatch with list:true to see the agent fleet.");
+		strictEqual(
+			hinted.get("ask_user"),
+			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
+		);
 	});
 });

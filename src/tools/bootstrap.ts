@@ -115,6 +115,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.codeNav, "Raise limit or use a narrower mode/query."),
 		costLatency: "local_fast",
+		promptHint: "Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).",
 	},
 	[ToolNames.Context]: {
 		objective: "Return workspace, bundled-docs, or skill context.",
@@ -125,6 +126,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use a narrower query or scope to inspect omitted content.",
 		),
 		costLatency: "local_fast",
+		promptHint:
+			'Call context with scope="skills" to list available skills. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 	},
 	[ToolNames.CredentialPresent]: {
 		objective: "Check whether a credential key is present without returning its value.",
@@ -187,6 +190,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use the dispatch receipt paths or ask a narrower worker follow-up for omitted output.",
 		),
 		costLatency: "agent",
+		promptHint: "Call dispatch with list:true to see the agent fleet.",
 	},
 	[ToolNames.Monitor]: {
 		objective: "Inspect dispatched runs: state, recent events, receipts.",
@@ -229,6 +233,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			followUpHint: "Proceed with stated assumptions if the operator cancels or no UI is available.",
 		},
 		costLatency: "local_slow",
+		promptHint:
+			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
 	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {
