@@ -23,15 +23,19 @@ interfaces.
   transcripts (strict JSON, parsed tolerantly from the judge's final text or
   terminating-tool content). Scenario blocks are parsed prose-tolerantly
   (`## S<n> - <title>`, Setup paragraph, Expected bullets); unparseable
-  scenario blocks are skipped with a diagnostic. Exit is nonzero when any
-  treatment bullet fails; `--json` emits one JSONL row per (scenario, bullet)
-  with `schema: "experimental"`. Results land as a standard eval evidence
-  bundle via a synthesized eval artifact, with the recorded deltas: bullet
-  verdicts are judge-scored rather than command-verified, token/cost totals
-  are zero because headless main-agent runs produce no receipts, and the
-  per-bullet detail (verdicts, transcripts, stderr tails) lives in a
-  `skill-eval.json` sidecar registered in the bundle's `overview.json` file
-  list (evidence builds now accept additive sidecar files so a consumer
+  scenario blocks are skipped with a diagnostic. Scenarios may also declare
+  fixture commands with `Fixture:` or `Setup commands:` blocks; the runner
+  executes them in the scenario workspace before baseline and treatment, and
+  `--workspace <path>` runs against an existing checkout instead of a
+  throwaway temp directory. Exit is nonzero when any treatment bullet fails;
+  `--json` emits one JSONL row per (scenario, bullet) with
+  `schema: "experimental"`. Results land as a standard eval evidence bundle
+  via a synthesized eval artifact, with the recorded deltas: bullet verdicts
+  are judge-scored rather than command-verified, token/cost totals are rolled
+  up from headless main-agent receipts when present, and the per-bullet
+  detail (verdicts, transcripts, stderr tails, fixture commands, usage) lives
+  in a `skill-eval.json` sidecar registered in the bundle's `overview.json`
+  file list (evidence builds now accept additive sidecar files so a consumer
   enumerating `overview.json` learns they exist).
 - `clio usage report` (experimental, read-only) analyzes the local usage
   archive across sessions: receipts, session ledgers, audit rows, the

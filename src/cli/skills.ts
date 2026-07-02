@@ -26,7 +26,7 @@ Commands:
   clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
   clio skills update <name> | --all [--force]
   clio skills sync [--force]
-  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--timeout <seconds>] [--json]
+  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--json]
 
 search covers installed skills plus the local marketplace (a repo skills/
 catalog, CLIO_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
@@ -35,7 +35,8 @@ eval (experimental) executes the skill's evals.md RED-GREEN scenarios: per
 scenario a baseline headless run without the skill, a treatment run with it,
 and a judge run scoring each Expected bullet from the transcripts. Exit is
 nonzero when any treatment bullet fails. --json emits one JSONL row per
-(scenario, bullet) with schema: "experimental".
+(scenario, bullet) with schema: "experimental". --workspace runs scenarios in
+an existing checkout instead of a throwaway temp directory.
 `;
 
 type SkillCreateScope = "user" | "project";
@@ -51,6 +52,7 @@ interface Parsed {
 	scope?: SkillCreateScope;
 	scenario?: string;
 	target?: string;
+	workspace?: string;
 	timeoutSeconds?: number;
 }
 
@@ -91,6 +93,13 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 				const value = argv[i + 1];
 				if (!value || value.startsWith("-")) throw new Error("--target requires a value");
 				out.target = value;
+				i++;
+				break;
+			}
+			case "--workspace": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) throw new Error("--workspace requires a value");
+				out.workspace = value;
 				i++;
 				break;
 			}
@@ -373,7 +382,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 			const name = parsed.positional[0];
 			if (!name || parsed.positional.length !== 1) {
 				process.stderr.write(
-					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--timeout <seconds>] [--json]\n",
+					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--json]\n",
 				);
 				return 2;
 			}
@@ -384,6 +393,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				json: parsed.json,
 				...(parsed.scenario !== undefined ? { scenario: parsed.scenario } : {}),
 				...(parsed.target !== undefined ? { target: parsed.target } : {}),
+				...(parsed.workspace !== undefined ? { workspace: parsed.workspace } : {}),
 				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
 			});
 		}

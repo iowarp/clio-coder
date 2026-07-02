@@ -15,6 +15,8 @@ export interface SkillEvalScenario {
 	title: string;
 	/** Setup paragraph with the `Setup:` label stripped; used as the run prompt. */
 	setup: string;
+	/** Optional shell commands that materialize the workspace fixture before the runs. */
+	fixtureCommands?: string;
 	/** Expected rubric bullets, wrapped lines joined. */
 	expected: string[];
 }
@@ -49,10 +51,11 @@ export function parseSkillEvals(markdown: string): SkillEvalParseResult {
 		const id = `${heading[1] ?? "S"}${number}`;
 		const title = heading[3] ?? "";
 		const setup = extractSetup(block);
+		const fixtureCommands = extractFixtureCommands(block);
 		const expected = extractExpected(block);
 		if (setup === null) diagnostics.push(`${id} (${title}): no "Setup:" or "Prompt:" paragraph found; scenario skipped`);
 		else if (expected.length === 0) diagnostics.push(`${id} (${title}): no "Expected:" bullets found; scenario skipped`);
-		else scenarios.push({ id, number, title, setup, expected });
+		else scenarios.push({ id, number, title, setup, ...(fixtureCommands ? { fixtureCommands } : {}), expected });
 		index = blockEnd;
 	}
 	return { scenarios, diagnostics };
@@ -67,6 +70,10 @@ function extractSetup(block: ReadonlyArray<string>): string | null {
 	return extractLabeledParagraph(block, /^Setup:\s*(.*)$/i) ?? extractLabeledParagraph(block, /^(Prompt:.*)$/i);
 }
 
+function isScenarioLabel(line: string): boolean {
+	return /^(Expected|Fixture|Setup commands):\s*/i.test(line.trim());
+}
+
 function extractLabeledParagraph(block: ReadonlyArray<string>, label: RegExp): string | null {
 	for (let i = 0; i < block.length; i += 1) {
 		const line = block[i] ?? "";
@@ -77,11 +84,48 @@ function extractLabeledParagraph(block: ReadonlyArray<string>, label: RegExp): s
 		for (let j = i + 1; j < block.length; j += 1) {
 			const next = (block[j] ?? "").trim();
 			if (next.length === 0) break;
-			if (/^Expected:?\s*$/i.test(next)) break;
+			if (isScenarioLabel(next)) break;
 			parts.push(next);
 		}
 		const setup = parts.join(" ").trim();
 		return setup.length > 0 ? setup : null;
+	}
+	return null;
+}
+
+function extractFixtureCommands(block: ReadonlyArray<string>): string | null {
+	for (let i = 0; i < block.length; i += 1) {
+		const line = (block[i] ?? "").trim();
+		const match = /^(?:Fixture|Setup commands):\s*(.*)$/i.exec(line);
+		if (match === null) continue;
+		const inline = (match[1] ?? "").trim();
+		let cursor = i + 1;
+		while (cursor < block.length && (block[cursor] ?? "").trim().length === 0) cursor += 1;
+		const first = block[cursor] ?? "";
+		const fence = /^```\w*\s*$/.test(first.trim());
+		if (fence) {
+			const commands: string[] = [];
+			for (let j = cursor + 1; j < block.length; j += 1) {
+				const current = block[j] ?? "";
+				if (/^```\s*$/.test(current.trim())) {
+					const script = commands.join("\n").trim();
+					return script.length > 0 ? script : null;
+				}
+				commands.push(current);
+			}
+			return null;
+		}
+		const commands: string[] = [];
+		if (inline.length > 0) commands.push(inline);
+		for (let j = cursor; j < block.length; j += 1) {
+			const current = block[j] ?? "";
+			const trimmed = current.trim();
+			if (trimmed.length === 0) break;
+			if (isScenarioLabel(trimmed)) break;
+			commands.push(current);
+		}
+		const script = commands.join("\n").trim();
+		return script.length > 0 ? script : null;
 	}
 	return null;
 }
