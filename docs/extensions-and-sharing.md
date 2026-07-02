@@ -98,7 +98,7 @@ Use in the TUI:
 /skill:hdf5-review review the output validation path
 ```
 
-`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` force-activates a skill by expanding its body into the submitted message. The same expansion runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
+`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` submits `args` with a pending skill request; the model must call `read_skill` for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -110,7 +110,8 @@ Recognized frontmatter fields:
 
 - `name`, `description`: core identity.
 - `disable-model-invocation: true`: hides the skill from the model-visible catalog while keeping it loadable by `/skill:name`.
-- `license`, `version`, `compatibility`, `allowed-tools`, and any other keys: captured as skill metadata and surfaced by `read_skill`.
+- `allowed-tools`, `disallowed-tools`: parsed as tool policy fields for the loaded skill workflow.
+- `license`, `version`, `compatibility`, and other non-core keys: captured as skill metadata and surfaced by `read_skill`.
 - `source-url`, `registry-id`, `installed-at`, `updated-at`, `audit`: captured as install provenance when present.
 
 ### Trust and compatibility roots
@@ -121,17 +122,21 @@ Opt in to model-visible project compatibility roots by setting `skills.trustProj
 
 ### read_skill and create_skill
 
-`read_skill` loads a skill body after the model matches the catalog. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` (optionally with `max_tree_entries`) to list sibling files under the skill base directory. `read_skill` never executes bundled scripts and only resolves skills the model is allowed to see.
+`read_skill` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. `read_skill` never executes bundled scripts and only resolves skills the model is allowed to see.
 
-`create_skill` writes a `SKILL.md` folder. It defaults to project scope, refuses to overwrite without `overwrite: true`, and warns when the destination is gitignored. Pass `with_scaffold: true` to also create `scripts/`, `references`, and `assets` folders, and supply `license`, `version`, `compatibility`, `allowed_tools`, or `metadata` to populate frontmatter.
+`create_skill` writes a single `SKILL.md` file under a project or user skill folder. It accepts `name`, `description`, `body`, optional `scope` (`project` by default), optional `overwrite`, and optional `allowed_tools` for `allowed-tools` frontmatter. It refuses to overwrite without `overwrite: true` and warns when the destination is gitignored.
 
 ### Skills CLI
 
 ```bash
 clio skills list [--json] [--all]
+clio skills search <query> [--json]
 clio skills inspect <name> [--json]
 clio skills validate [path] [--json]
 clio skills create <name> [--user|--project]
+clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
+clio skills update <name> | --all [--force]
+clio skills sync [--force]
 ```
 
 Headless runs also accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory for that run. Explicit `--skill` paths are honored even when `--no-skills` is set.
@@ -144,7 +149,7 @@ Clio is local-first. Skills run from disk and no chat turn depends on network ac
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Remote search, audit, and install through Clio are deferred and not enabled in this release.
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio does support local marketplace search plus `clio skills install <path|github-url>` for explicit local paths or GitHub URLs.
 
 ### Prompt envelope and safety
 
