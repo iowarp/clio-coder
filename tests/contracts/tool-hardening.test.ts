@@ -585,3 +585,49 @@ describe("contracts/tool-hardening finish-contract action-scoped trigger", () =>
 		ok(high.some((effect) => effect.kind === "inject_reminder" && effect.severity === "warn"));
 	});
 });
+
+describe("contracts/tool-hardening oversized search pattern validation", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-huge-pattern-"));
+		writeFileSync(join(scratch, "a.txt"), "hello world\n", "utf8");
+	});
+	afterEach(() => {
+		rmSync(scratch, { recursive: true, force: true });
+	});
+
+	// A single argv entry over MAX_ARG_STRLEN (128 KiB on Linux) makes spawn throw
+	// a raw `spawn E2BIG` before rg/fd ever runs. BUG-008 (grep) and BUG-009 (find)
+	// share this root cause: the pattern is the one unbounded argument, so both
+	// searchers must reject an oversized pattern with a bounded validation error
+	// before spawning — never throw, never leak the raw platform fault.
+	const huge = "x".repeat(256_000);
+
+	it("grep rejects an oversized pattern before spawn (BUG-008)", async () => {
+		const result = await grepTool.run({ pattern: huge, path: scratch }, undefined);
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.startsWith("grep:"), `must be a grep-scoped tool error: ${result.message}`);
+		ok(/too large/i.test(result.message), `must explain the pattern is too large: ${result.message}`);
+		ok(!/E2BIG/i.test(result.message), `must not leak the raw spawn error: ${result.message}`);
+		ok(result.message.length < 500, `validation error must stay bounded: ${result.message.length} bytes`);
+	});
+
+	it("find rejects an oversized pattern before spawn (BUG-009)", async () => {
+		const result = await findTool.run({ pattern: huge, path: scratch }, undefined);
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.startsWith("find:"), `must be a find-scoped tool error: ${result.message}`);
+		ok(/too large/i.test(result.message), `must explain the pattern is too large: ${result.message}`);
+		ok(!/E2BIG/i.test(result.message), `must not leak the raw spawn error: ${result.message}`);
+		ok(result.message.length < 500, `validation error must stay bounded: ${result.message.length} bytes`);
+	});
+
+	it("both searchers still accept a normal-sized pattern", async () => {
+		const grepped = await grepTool.run({ pattern: "hello", path: scratch }, undefined);
+		strictEqual(grepped.kind, "ok");
+		const found = await findTool.run({ pattern: "*.txt", path: scratch }, undefined);
+		strictEqual(found.kind, "ok");
+	});
+});

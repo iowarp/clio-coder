@@ -15,6 +15,31 @@ export const SEARCH_SPAWN_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 3_000;
 const STDERR_CAP_BYTES = 16 * 1024;
 
+/**
+ * Per-argument byte ceiling for the search binaries. Linux caps a single argv
+ * entry at MAX_ARG_STRLEN (PAGE_SIZE * 32 = 128 KiB); handing spawn a longer
+ * string throws a raw `spawn E2BIG` before the child ever runs. The search
+ * tools guard their one unbounded argument — the caller-supplied pattern — well
+ * under that so an oversized pattern returns a bounded validation error instead
+ * of leaking the platform fault, and the pure-Node fallbacks never compile a
+ * multi-hundred-KB regex either. 64 KiB is far past any real search pattern.
+ */
+export const MAX_SEARCH_PATTERN_BYTES = 64 * 1024;
+
+/**
+ * Validate a search pattern's byte size before it reaches spawn (or a fallback
+ * regex compile). Returns the caller-agnostic message body; each searcher
+ * prefixes it with its own tool name.
+ */
+export function validateSearchPatternSize(pattern: string): { ok: true } | { ok: false; message: string } {
+	const bytes = Buffer.byteLength(pattern, "utf8");
+	if (bytes <= MAX_SEARCH_PATTERN_BYTES) return { ok: true };
+	return {
+		ok: false,
+		message: `pattern too large (${bytes} bytes; max ${MAX_SEARCH_PATTERN_BYTES}). Narrow the pattern before searching.`,
+	};
+}
+
 export interface LineStreamOptions {
 	/** Spawn cwd; defaults to the workspace root (process.cwd()). */
 	cwd?: string;
@@ -50,12 +75,39 @@ export function spawnLineStream(
 		let stderr = "";
 		let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
 
-		const child = spawn(file, [...args], {
-			cwd: options.cwd ?? process.cwd(),
-			env: buildSafeToolEnv(),
-			detached: process.platform !== "win32",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		// spawn can throw synchronously (e.g. an argv entry over MAX_ARG_STRLEN
+		// raises E2BIG). Route that through the documented spawnError channel so
+		// callers see a spawn-level failure instead of a rejected promise; the
+		// search tools validate pattern size up front, so this is a backstop. The
+		// IIFE keeps the child's narrowed stdio typing (non-null stdout) that an
+		// explicit ReturnType<typeof spawn> annotation would widen away.
+		const spawned = (() => {
+			try {
+				return {
+					ok: true as const,
+					child: spawn(file, [...args], {
+						cwd: options.cwd ?? process.cwd(),
+						env: buildSafeToolEnv(),
+						detached: process.platform !== "win32",
+						stdio: ["ignore", "pipe", "pipe"],
+					}),
+				};
+			} catch (error) {
+				return { ok: false as const, message: error instanceof Error ? error.message : String(error) };
+			}
+		})();
+		if (!spawned.ok) {
+			resolve({
+				exitCode: null,
+				stderr: "",
+				timedOut: false,
+				aborted: false,
+				stoppedEarly: false,
+				spawnError: spawned.message,
+			});
+			return;
+		}
+		const child = spawned.child;
 		const rl = createInterface({ input: child.stdout });
 
 		const sendSignal = (signalName: NodeJS.Signals): void => {
