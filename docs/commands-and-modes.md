@@ -127,7 +127,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/compact` | - | `/compact [instructions]` | Compact earlier context |
 
 
-The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `c` to connect, `d` to disconnect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
+The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
 
 The `/fleet` overlay displays live running, retrying, and completed fleet dispatch subagents in the current TUI process. It includes three distinct tabs: Status, Profiles, and Bindings. You can cycle between these tabs by pressing `Tab`. The Status tab shows active runs, their execution stats, and scheduled retries with backoff times. The Profiles tab allows creating, editing, renaming, and deleting worker profiles. The Bindings tab supports binding or unbinding specific agents to profiles.
 
