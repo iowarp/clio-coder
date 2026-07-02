@@ -70,8 +70,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.CreateSkill:
 			return "write";
 		case ToolNames.Bash:
-		case ToolNames.RunTask:
-		case ToolNames.ValidateFrontend:
+		case ToolNames.Verify:
 			return "execute";
 		case ToolNames.Dispatch:
 		case ToolNames.DispatchBatch:

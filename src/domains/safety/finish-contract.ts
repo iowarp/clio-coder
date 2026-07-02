@@ -221,8 +221,8 @@ function pushPath(paths: string[], seen: Set<string>, path: string): void {
 /**
  * Receipt-based validation evidence over the recent window. Kept verbatim from
  * the pre-redesign engine minus the requested-inspection path: validation
- * commands (`detectValidationCommand`), run_task verification scripts,
- * `validate_frontend`, passed dispatch receipts, and protected-artifact records.
+ * commands (`detectValidationCommand`), verify check runs, passed dispatch
+ * receipts, and protected-artifact records.
  * Inspection was removed because inspecting the repo is never a mutation, so it
  * can no longer be on the path to engaging the contract.
  */
@@ -365,14 +365,14 @@ function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
 
 function typedValidationSummary(toolName: string, payload: Record<string, unknown>): string | null {
 	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
-	if (toolName === "run_task") {
-		const task = typeof args?.task === "string" ? args.task.trim() : "";
-		if (!isVerificationScriptName(task)) return null;
-		return `npm run ${task}`;
-	}
-	if (toolName === "validate_frontend") {
-		const path = typeof args?.path === "string" && args.path.trim().length > 0 ? args.path.trim() : "artifact";
-		return `validate_frontend ${path}`;
+	if (toolName === "verify") {
+		const check = typeof args?.check === "string" ? args.check.trim() : "";
+		if (check === "frontend") {
+			const path = typeof args?.path === "string" && args.path.trim().length > 0 ? args.path.trim() : "artifact";
+			return `verify frontend ${path}`;
+		}
+		if (!isVerificationScriptName(check)) return null;
+		return `npm run ${check}`;
 	}
 	return null;
 }

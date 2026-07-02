@@ -117,7 +117,7 @@ function pickToolArg(toolName: string, args: unknown): string {
 		bash: ["command"],
 		code_nav: ["query", "mode"],
 		git: ["op"],
-		run_task: ["task"],
+		verify: ["check"],
 		grep: ["pattern", "query"],
 		search: ["query", "pattern"],
 		glob: ["pattern"],

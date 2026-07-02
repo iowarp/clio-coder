@@ -17,10 +17,10 @@ import { lsTool } from "./ls.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readMaxBytes, readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
-import { gitTool, runTaskTool } from "./safe-exec.js";
+import { gitTool } from "./safe-exec.js";
 import { createSkillTool } from "./skills.js";
 import { DEFAULT_MAX_BYTES } from "./truncate.js";
-import { validateFrontendTool } from "./validate-frontend.js";
+import { verifyTool } from "./verify/index.js";
 import { webFetchTool } from "./web-fetch.js";
 import { writeTool } from "./write.js";
 import { writePlanTool } from "./write-plan.js";
@@ -155,16 +155,9 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: boundedSearchPolicy,
 		costLatency: "local_fast",
 	},
-	[ToolNames.RunTask]: {
-		objective: "Run one declared package.json verification script.",
-		uiLabel: "Task",
-		retrySafety: "retry_safe",
-		resultSizePolicy: boundedValidationPolicy,
-		costLatency: "local_slow",
-	},
-	[ToolNames.ValidateFrontend]: {
-		objective: "Validate frontend artifacts without shell access.",
-		uiLabel: "Frontend",
+	[ToolNames.Verify]: {
+		objective: "Run declared verification checks (scripts or frontend artifacts).",
+		uiLabel: "Verify",
 		retrySafety: "retry_safe",
 		resultSizePolicy: boundedValidationPolicy,
 		costLatency: "local_slow",
@@ -292,10 +285,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...builtin(gitTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(runTaskTool, { path: "src/tools/safe-exec.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(validateFrontendTool, { path: "src/tools/validate-frontend.ts", scope: "core" }),
+		...builtin(verifyTool, { path: "src/tools/verify/index.ts", scope: "core" }),
 	});
 	registry.register({
 		...builtin(writePlanTool, { path: "src/tools/write-plan.ts", scope: "core" }),

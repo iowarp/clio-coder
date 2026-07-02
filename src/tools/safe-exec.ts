@@ -1,20 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { Type } from "typebox";
 import {
 	combineSafeOutput,
-	resolveSafeCwd,
 	runCommandVector,
 	SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
 	SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 	type SafeCommandResult,
 } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
-import {
-	declaredVerificationScripts,
-	isVerificationScriptName,
-	VERIFICATION_SCRIPT_FAMILY_HINT,
-} from "../core/verification-scripts.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -35,21 +27,23 @@ function maxOutputArg(args: Record<string, unknown>): number {
 		: SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES;
 }
 
-function resultDetails(result: SafeCommandResult, action: string): ToolResultDetails {
+/**
+ * The EXECUTE plane's standardized exec record: what ran, where, how it
+ * ended, how long it took, and whether output was capped. Shared by git and
+ * verify so ledgers and observers read one shape.
+ */
+function resultDetails(result: SafeCommandResult): ToolResultDetails {
 	return {
-		action,
-		command: [result.file, ...result.args],
+		command: [result.file, ...result.args].join(" "),
 		cwd: result.cwd,
 		exitCode: result.exitCode,
-		signal: result.signal,
-		timedOut: result.timedOut,
-		aborted: result.aborted,
-		outputCapped: result.outputCapped,
 		durationMs: result.durationMs,
+		timedOut: result.timedOut,
+		outputCapped: result.outputCapped,
 	};
 }
 
-async function runVectorTool(
+export async function runVectorTool(
 	action: string,
 	file: string,
 	vectorArgs: ReadonlyArray<string>,
@@ -65,7 +59,7 @@ async function runVectorTool(
 		if (options?.signal !== undefined) runOptions.signal = options.signal;
 		const result = await runCommandVector(file, vectorArgs, runOptions);
 		const output = truncateUtf8(combineSafeOutput(result), maxOutputBytes, TRUNCATION_MARKER);
-		const details = resultDetails(result, action);
+		const details = resultDetails(result);
 		if (result.aborted) return { kind: "error", message: `${action}: aborted`, details };
 		if (result.timedOut) {
 			const status = `${action}: timed out after ${timeoutMs}ms`;
@@ -130,80 +124,3 @@ export const gitTool: ToolSpec = {
 		return { kind: "error", message: `git: op must be status, diff, or log; got '${op}'` };
 	},
 };
-
-export const runTaskTool: ToolSpec = {
-	name: ToolNames.RunTask,
-	description:
-		"Run a verification script declared in package.json via npm with no shell (names starting with test/lint/build/typecheck/check/format/ci). Pass file paths or flags via args (forwarded after --). Prefer a per-file script such as test:file for single test files when the project declares one.",
-	parameters: Type.Object({
-		task: Type.String({ description: "Declared verification script name." }),
-		args: Type.Optional(Type.Array(Type.String(), { description: "Extra arguments passed after --." })),
-		cwd: Type.Optional(Type.String({ description: "Working directory." })),
-		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default 120000)." })),
-	}),
-	baseActionClass: "execute",
-	executionMode: "sequential",
-	async run(args, options) {
-		const task = typeof args.task === "string" ? args.task : "";
-		if (!isVerificationScriptName(task)) {
-			return {
-				kind: "error",
-				message: `run_task: task '${task}' is not a verification script (${VERIFICATION_SCRIPT_FAMILY_HINT}); run it through bash.`,
-			};
-		}
-		return runPackageScript("run_task", task, args, options);
-	},
-};
-
-async function runPackageScript(
-	action: string,
-	script: string,
-	args: Record<string, unknown>,
-	options?: { signal?: AbortSignal },
-): Promise<ToolResult> {
-	let cwd: string;
-	try {
-		cwd = resolveSafeCwd(cwdArg(args), process.cwd());
-	} catch (err) {
-		return { kind: "error", message: `${action}: ${err instanceof Error ? err.message : String(err)}` };
-	}
-	const pkgPath = path.join(cwd, "package.json");
-	if (!existsSync(pkgPath)) return { kind: "error", message: `${action}: package.json not found in ${cwd}` };
-	const pkg = parsePackageJson(pkgPath);
-	if (!pkg.ok) return { kind: "error", message: `${action}: ${pkg.reason}` };
-	if (!Object.hasOwn(pkg.scripts, script)) {
-		if (action === "run_task") {
-			const declared = declaredVerificationScripts(pkg.scripts);
-			const list = declared.length > 0 ? declared.join(", ") : "(none)";
-			return {
-				kind: "error",
-				message: `${action}: package.json has no '${script}' script. Declared verification scripts: ${list}.`,
-			};
-		}
-		return { kind: "error", message: `${action}: package.json has no '${script}' script` };
-	}
-	const extraArgs = Array.isArray(args.args)
-		? args.args.filter((entry): entry is string => typeof entry === "string")
-		: [];
-	const vector = ["run", script];
-	if (extraArgs.length > 0) vector.push("--", ...extraArgs);
-	return runVectorTool(action, "npm", vector, { ...args, cwd }, options);
-}
-
-function parsePackageJson(
-	pkgPath: string,
-): { ok: true; scripts: Record<string, unknown> } | { ok: false; reason: string } {
-	try {
-		const parsed = JSON.parse(readFileSync(pkgPath, "utf8")) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			return { ok: false, reason: "package.json root must be an object" };
-		}
-		const scripts = (parsed as Record<string, unknown>).scripts;
-		if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) {
-			return { ok: false, reason: "package.json has no scripts object" };
-		}
-		return { ok: true, scripts: scripts as Record<string, unknown> };
-	} catch (err) {
-		return { ok: false, reason: err instanceof Error ? err.message : String(err) };
-	}
-}
