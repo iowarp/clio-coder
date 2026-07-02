@@ -114,6 +114,13 @@ export interface ChatPanel extends Component {
 	toggleLastToolExpanded(): boolean;
 	toggleAllToolsExpanded(): boolean;
 	/**
+	 * Force every tool segment into its collapsed one-line form. Replay
+	 * (`rehydrateChatPanelFromTurns`) calls this so a resumed or forked
+	 * transcript reproduces the settled live view, where tools are collapsed to
+	 * their ledger summary rather than the expanded body. Idempotent.
+	 */
+	collapseAllTools(): void;
+	/**
 	 * Flip thinking-bearing assistant turns between the one-line dim marker
 	 * and the full rail-prefixed body. The target visibility is panel-level
 	 * sticky state, then applied to current thinking history so Ctrl+T behaves
@@ -544,6 +551,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			for (const seg of tools) seg.expanded = expand;
 			markDirty();
 			return true;
+		},
+		collapseAllTools(): void {
+			for (const entry of transcript) {
+				if (entry.role !== "assistant") continue;
+				for (const seg of entry.segments) {
+					if (seg.kind === "tool") seg.expanded = false;
+				}
+			}
+			markDirty();
 		},
 		toggleLastThinking(): boolean {
 			for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
