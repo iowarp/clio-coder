@@ -15,14 +15,16 @@ Clio Coder treats a selectable model as the intersection of three sources:
 - `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
 - `clio models`: probes live targets before printing the CLI model list. Use `--offline` to skip live probing. `--probe` is still accepted for compatibility.
 
-Configured `wireModels` and a target `defaultModel` remain selectable even when
-a live catalog does not list them; Clio labels those rows as `configured` or
-`default`. Live probe discoveries are labeled `live` and carry load-state
-metadata when the runtime exposes it. This preserves operator-curated defaults
-while allowing newly installed local models or newly entitled cloud models to
-appear without restarting Clio. A refresh also reloads the local YAML knowledge
-base when the bundled `FileKnowledgeBase` is active, so capability and quirk
-edits from bundled and overlay catalogs are visible during development.
+Configured `wireModels` and a target `defaultModel` remain selectable before a
+live catalog is known; Clio labels those rows as `configured` or `default`.
+Once a target returns a live catalog, that catalog is authoritative and models
+the runtime no longer reports stop resolving. Live probe discoveries are labeled
+`live` and carry load-state metadata when the runtime exposes it. This preserves
+operator-curated defaults while still letting runtime discovery take over after
+newly installed local models or newly entitled cloud models appear. Catalog YAML
+entries are loaded when the provider domain is built, so bundled or overlay
+edits require a restart or rebuild before they affect capability and quirk
+matching.
 
 Live provider probes are the preferred source for loaded context and per-model metadata. Clio keeps a 128k local-coding context recommendation, but it no longer treats that recommendation as provider truth for unknown local models: effective context comes from live probe data, an explicit target override, a model catalog/KB entry, or the runtime descriptor default. If the live target is below the recommendation, Clio reports a warning rather than silently inflating the displayed window.
 
@@ -42,7 +44,7 @@ npm run build
 npm run bench:models -- --target mini --limit 3
 ```
 
-The runner discovers models with `clio models --probe --json`, creates a gitignored `.clio-benchmark/` run directory, asks each model/config combo to generate a single-file Clio Coder website at `app.html`, and scores the artifact with a static rubric. The matrix records context-window, thinking, sampling, weight quantization, and KV-cache quantization settings so server-side sweeps (Q4/Q5/Q6/IQ/UD quants and f16 vs q8 KV) can be compared consistently. Current per-request Clio overrides cover model and thinking level; sampling/context/quant fields are recorded in the report and should be matched by the serving preset until those controls are wired through every runtime.
+The runner discovers models with `clio models --probe --json`, creates a gitignored `.clio-benchmark/` run directory, asks each model/config combo to generate a single-file Clio Coder website at `app.html`, and scores the artifact with a static rubric. The matrix records context-window, thinking, sampling, weight quantization, and KV-cache quantization settings so server-side sweeps (Q4/Q5/Q6/IQ/UD quants and f16 vs q8 KV) can be compared consistently. Current per-request Clio overrides cover model, thinking level, sampling, context-window, and KV-cache mode where the runtime adapter supports those fields. Weight quantization remains a serving preset choice and should be recorded in the report.
 
 ## What “sanctioned” means
 
@@ -168,8 +170,8 @@ The Context Engine evaluates thinking mechanisms per model target and manages li
 
 Subscription models are registered and managed as standard HTTP/cloud targets:
 
-- **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to standard OpenAI models (like `gpt-4o`, `gpt-4o-mini`, `o1-mini`, `o3-mini`) via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
-- **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using Claude Pro models (like `claude-3-5-sonnet-latest`). It relies on pi-ai's `anthropic` OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
+- **`openai-codex` (ChatGPT Plus/Pro OAuth):** Maps to catalog-backed Codex model ids surfaced by `clio configure --list` and `clio models` via a browser-minted subscription OAuth token, supporting complete chat, vision, and tool-use capabilities.
+- **`anthropic-max` (Claude Pro/Max OAuth):** Powers chat and workers using catalog-backed Claude model ids surfaced by `clio configure --list` and `clio models`. It relies on pi-ai's `anthropic` OAuth provider. During auth initialization, it alerts the operator to usage-terms caveat via:
   `Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). Using subscription credentials outside Anthropic's first-party apps may not align with their terms of service; enable at your own discretion.`
 
 ---
