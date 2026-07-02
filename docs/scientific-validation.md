@@ -5,13 +5,15 @@
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 
-Clio Coder introduces **Scientific Validation Contracts**: declarative, typed YAML documents that declare the exact expected dimensions, attributes, numerical tolerances, and verification checks for scientific artifacts. Developed at the [Gnosis Research Center (GRC)](https://grc.iit.edu) at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318)), these contracts link execution metadata with physical output checks.
+Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.2.7, core Clio does not parse or enforce a scientific contract schema. The presence of `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
+
+The convention below is a recommended shape for scientific projects that need to document expected dimensions, attributes, numerical tolerances, scheduler context, and verification commands for scientific artifacts. Developed at the [Gnosis Research Center (GRC)](https://grc.iit.edu) at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318)), this convention links execution metadata with physical output checks without claiming that the current harness executes those checks automatically.
 
 ---
 
-## 📋 The Validation Contract Schema
+## 📋 Validation Contract Convention
 
-A validation contract is stored as a YAML document (matching version `1` schema). A custom or project-level agent (such as a local `scientific-validator` agent example under `.clio/agents/`) or the developer drafts these contracts, which are then committed next to the research code.
+A validation contract can be stored as YAML or Markdown. A custom or project-level agent (such as a local `scientific-validator` agent example under `.clio/agents/`) or the developer can draft these files and commit them next to the research code. Clio core currently checks only for the documented filenames at the workspace root.
 
 ### Example netCDF / Slurm validation contract:
 ```yaml
@@ -49,18 +51,18 @@ notes: |
   Re-run check_grid.py after job completion is observed.
 ```
 
-### Schema Rules:
-1. **`version`:** Set to `1`.
-2. **`runtime.kind`:** Specifies execution mode (`local`, `slurm`, `mpi`, or `other`).
-3. **`artifacts`:** Non-empty list of output files.
-4. **`preserve`:** Boolean flag. When `true`, cleanup tools are forbidden from deleting the validated checkpoint or restart file.
-5. **`validators`:** List of shell commands run to verify the generated files.
+### Suggested Fields:
+1. **`version`:** Set to `1` for project-local compatibility.
+2. **`runtime.kind`:** Document execution mode (`local`, `slurm`, `mpi`, or `other`).
+3. **`artifacts`:** List output files or directories the validation plan should inspect.
+4. **`preserve`:** Project convention for artifacts that should not be deleted by cleanup workflows. Clio's built-in protected-artifact guard is separate and is driven by live `protect_path` effects, not by this YAML field.
+5. **`validators`:** List shell commands or scripts a verifier should run to validate the generated files.
 
 ---
 
 ## 🧮 Numerical Tolerances
 
-Comparing floating-point values in scientific computations must accommodate round-offs, hardware differences, and compiler optimizations. Clio validation contracts support three tolerance checks:
+Comparing floating-point values in scientific computations must accommodate round-offs, hardware differences, and compiler optimizations. Project validators can document any tolerance vocabulary they enforce. A common convention is:
 
 | Tolerance Type | Formula / Check | Purpose |
 | :--- | :--- | :--- |
@@ -69,13 +71,13 @@ Comparing floating-point values in scientific computations must accommodate roun
 | **`ulp`** | $StepsBetween(val, ref) \le ulp$ | Unit in the Last Place. Measures floating-point representation steps. |
 
 > [!NOTE]
-> If numerical tolerances are omitted in the contract, the engine defaults to a relative tolerance of `relative: 1e-6`.
+> Clio core does not currently execute tolerance comparisons and does not apply a default numerical tolerance. Put defaults directly in project validators or contract text.
 
 ---
 
-## 📂 Supported Scientific Artifact Families
+## 📂 Common Scientific Artifact Families
 
-Clio Coder’s domain logic categorizes scientific output files into a set of case-sensitive formats:
+The following labels are useful project conventions for validation contracts and reports. They are not a closed, core-enforced enum in v0.2.7:
 
 - **`HDF5` / `NetCDF` / `Zarr`:** Multi-dimensional scientific array files.
 - **`FITS`:** Flexible Image Transport System (used in astrophysics).
@@ -89,15 +91,15 @@ Clio Coder’s domain logic categorizes scientific output files into a set of ca
 ## HPC Schedulers and Validation Lifecycle
 
 Scheduler-driven runs require distinct validation handling compared to local unit tests:
-- **Queue status is not validation**: Checking if a Slurm command like `sbatch` exits successfully only proves that the Slurm scheduler accepted the job script. The validation contract is designed to execute post-completion, checking the actual simulation artifacts inside `out/` or `ckpt/`.
-- **Environment module loading**: The `runtime.modules` array lists the exact software stack dependencies (such as `intel/2024`, `openmpi/5.0`) that must be loaded before running the validators.
-- **HPC and Data Integration**: For large-scale allocations such as those at the Argonne Leadership Computing Facility (ALCF), verification logs can be transferred and archived via Globus endpoints, allowing provenance collection across distributed scientific clusters.
+- **Queue status is not validation**: Checking if a Slurm command like `sbatch` exits successfully only proves that the Slurm scheduler accepted the job script. A good contract tells the verifier how to check actual simulation artifacts inside `out/` or `ckpt/` after job completion.
+- **Environment module loading**: The `runtime.modules` array can document the exact software stack dependencies (such as `intel/2024`, `openmpi/5.0`) that must be loaded before running the validators.
+- **HPC and Data Integration**: For large-scale allocations such as those at the Argonne Leadership Computing Facility (ALCF), projects can archive verification logs through their own storage or data-transfer workflow. Clio core does not manage Globus transfers.
 - **Validator execution**: In the current alpha version, contract validation is advisory. Quality/verification agents (such as the base `verifier` agent or custom project-level agents) read the contract to guide developers and write out verification receipts. Automated in-harness contract execution is not implemented yet.
 
 ### How a Validation Contract Raises Session Rigor
 
 Clio Coder integrates scientific validation contracts directly into its safety model to raise the evidence standard automatically:
 - **Automatic Escalation**: At startup, Clio scans the workspace root. The presence of any validation contract (e.g. `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md`) automatically escalates the session's rigor level from `normal` to `high`.
-- **High-Rigor Gate Requirements**: Once the rigor is raised to `high`, the finish gate is active. If the agent claims to be finished, the gate intercepts the turn-end event. If no recent validation evidence is found in the last 80 history entries, Clio blocks the completion claim:
+- **High-Rigor Gate Requirements**: Once the rigor is raised to `high`, the finish gate is active. It engages on a settled `turn_end` only when the recent window contains successful workspace mutation evidence and no validation evidence or explicit limitation. The window is entries since the last user message, capped at 80 entries:
   - Clio issues a `request_continuation` middleware effect to keep the session running.
   - Clio injects a dynamic warning reminder (`HIGH_RIGOR_REVALIDATION_MESSAGE`) instructing the agent to run a verification command or to declare a limitation before it can conclude the turn.
