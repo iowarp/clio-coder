@@ -35,13 +35,22 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fd-find ripgrep
       - run: npm ci --prefer-offline --no-audit --no-fund
-      - run: npm run ci:release
-      - name: Repeat smoke and boundary lane
+      # The full release gate runs once, on the engines floor. Typecheck,
+      # lint, the skills pin check, and the package audit are node-version
+      # insensitive; repeating them on the 24 lane buys nothing.
+      - name: Release gate
+        if: matrix.node-version == 22
+        run: npm run ci:release
+      # The 24 lane verifies runtime behavior only. The coverage-instrumented
+      # suite is its main (and only) full-suite run; smoke tests execute
+      # dist/, hence the build. pipefail keeps tee from masking failures.
+      - name: Build dist for the test suite
         if: matrix.node-version == 24
-        run: npm run test:repeat
-      - name: Coverage summary
+        run: npm run build
+      - name: Tests with coverage summary
         if: matrix.node-version == 24
         run: |
+          set -o pipefail
           npm run test:coverage | tee coverage.txt
           {
             echo "### Coverage summary"
@@ -49,3 +58,6 @@ jobs:
             sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Repeat smoke and boundary lane
+        if: matrix.node-version == 24
+        run: npm run test:repeat
