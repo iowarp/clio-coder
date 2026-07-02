@@ -1,42 +1,48 @@
-import { spawn } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
-import path, { dirname, join, relative } from "node:path";
-import { createInterface } from "node:readline";
+import { existsSync, statSync } from "node:fs";
+import { readdir } from "node:fs/promises";
+import path, { join, relative } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { resolveFdBinary } from "./executables.js";
-import { compileGlobRegex, IGNORED_DIRS, normalizeGlobInput } from "./glob.js";
+import { compileGlobRegex, fallbackIgnoredDirs, fdIgnoreArgs, normalizeGlobInput } from "./ignore-policy.js";
+import {
+	commitObservationReservation,
+	finalizeObservation,
+	OBSERVE_SELF_CAPS,
+	type ObservationReservation,
+	observationBudgetExhausted,
+	releaseObservation,
+	reserveObservation,
+} from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
-import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
+import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
+import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
+import { stringEnum } from "./string-enum.js";
+import { truncateHead } from "./truncate.js";
 
-const DEFAULT_LIMIT = 1000;
+const DEFAULT_LIMIT = 500;
+// order=mtime never walks the whole tree: it collects a bounded candidate set,
+// stats only those, sorts, and slices. When the candidate cap is hit the
+// ordering is approximate and the observation says so.
+const MTIME_CANDIDATE_FLOOR = 2000;
+
+type FindOrder = "path" | "mtime";
 
 function toPosixPath(value: string): string {
 	return value.split(path.sep).join("/");
 }
 
-// Walk up from the search path looking for a `.git` marker (a directory in a
-// normal repo, a file in worktrees/submodules).
-export function isInsideGitRepo(startPath: string): boolean {
-	let current = startPath;
-	for (;;) {
-		if (existsSync(join(current, ".git"))) return true;
-		const parent = dirname(current);
-		if (parent === current) return false;
-		current = parent;
-	}
-}
-
-// Build fd's argv. fd normally ignores .gitignore outside a git repo, so keep
-// `--no-require-git` there to still honor ignore files. Inside a repo, use fd's
-// default git-aware behavior so parent .gitignore rules stop at nested-repo
-// boundaries (pi issue 5960); forcing `--no-require-git` there leaks the outer
-// repo's ignores into a nested checkout. Exported for tests.
-export function buildFdArgs(pattern: string, searchPath: string, limit: number): string[] {
-	const args = ["--glob", "--color=never", "--hidden"];
-	if (!isInsideGitRepo(searchPath)) args.push("--no-require-git");
-	args.push("--max-results", String(limit + 1));
+// Build fd's argv. Ignore semantics (hidden files, .gitignore honoring,
+// generated-dir excludes, include_ignored) come entirely from the shared
+// ignore policy so grep and find never disagree about tree visibility.
+export function buildFdArgs(
+	pattern: string,
+	searchPath: string,
+	maxResults: number,
+	includeIgnored: boolean,
+): string[] {
+	const args = ["--glob", "--color=never", ...fdIgnoreArgs(searchPath, includeIgnored)];
+	args.push("--max-results", String(maxResults));
 	let effectivePattern = pattern;
 	if (pattern.includes("/")) {
 		args.push("--full-path");
@@ -48,142 +54,243 @@ export function buildFdArgs(pattern: string, searchPath: string, limit: number):
 	return args;
 }
 
-function renderFindOutput(paths: string[], limit: number): ToolResult {
-	if (paths.length === 0) return { kind: "ok", output: "No files found matching pattern" };
-	const resultLimitReached = paths.length > limit;
-	const visiblePaths = paths.slice(0, limit);
-	const truncation = truncateHead(visiblePaths.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
-	let output = truncation.content;
-	const details: Record<string, unknown> = {};
-	const notices: string[] = [];
-	if (resultLimitReached) {
-		notices.push(`${limit} results limit reached. Use limit=${limit * 2} for more, or refine pattern`);
-		details.resultLimitReached = limit;
-	}
-	if (truncation.truncated) {
-		notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
-		details.truncation = truncation;
-	}
-	if (notices.length > 0) output += `\n\n[${notices.join(". ")}]`;
-	return { kind: "ok", output, ...(Object.keys(details).length > 0 ? { details } : {}) };
-}
-
-function fallbackFind(pattern: string, searchPath: string, collectLimit: number): string[] {
-	const matcher = compileGlobRegex(pattern.includes("/") ? pattern : `**/${pattern}`);
-	const out: string[] = [];
-	function walk(dir: string): void {
-		if (out.length >= collectLimit) return;
-		const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-		for (const entry of entries) {
-			if (out.length >= collectLimit) return;
-			const absPath = join(dir, entry.name);
-			let stat: import("node:fs").Stats;
-			try {
-				stat = lstatSync(absPath);
-			} catch {
-				continue;
-			}
-			if (stat.isDirectory() && !stat.isSymbolicLink()) {
-				if (IGNORED_DIRS.has(entry.name)) continue;
-				const relDir = `${toPosixPath(relative(searchPath, absPath))}/`;
-				if (matcher.test(normalizeGlobInput(relDir))) out.push(relDir);
-				walk(absPath);
-				continue;
-			}
-			if (!stat.isFile()) continue;
-			const relPath = toPosixPath(relative(searchPath, absPath));
-			if (matcher.test(normalizeGlobInput(relPath))) out.push(relPath);
-		}
-	}
-	walk(searchPath);
-	return out;
-}
-
 async function fdFind(
 	fdPath: string,
 	pattern: string,
 	searchPath: string,
-	limit: number,
+	collectLimit: number,
+	includeIgnored: boolean,
 	signal?: AbortSignal,
 ): Promise<{ ok: true; paths: string[] } | { ok: false; message: string }> {
-	return new Promise((resolve) => {
-		const args = buildFdArgs(pattern, searchPath, limit);
-
-		const child = spawn(fdPath, args, { stdio: ["ignore", "pipe", "pipe"] });
-		const rl = createInterface({ input: child.stdout });
-		const lines: string[] = [];
-		let stderr = "";
-		let settled = false;
-		const finish = (result: { ok: true; paths: string[] } | { ok: false; message: string }) => {
-			if (settled) return;
-			settled = true;
-			rl.close();
-			signal?.removeEventListener("abort", onAbort);
-			resolve(result);
-		};
-		const onAbort = () => {
-			if (!child.killed) child.kill();
-			finish({ ok: false, message: "find: operation aborted" });
-		};
-		signal?.addEventListener("abort", onAbort, { once: true });
-		child.stderr?.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		rl.on("line", (line) => {
+	const lines: string[] = [];
+	const result = await spawnLineStream(fdPath, buildFdArgs(pattern, searchPath, collectLimit, includeIgnored), {
+		...(signal ? { signal } : {}),
+		onLine(line, stop) {
 			lines.push(line);
+			if (lines.length >= collectLimit) stop();
+		},
+	});
+	if (result.aborted) return { ok: false, message: "find: operation aborted" };
+	if (result.timedOut) {
+		return {
+			ok: false,
+			message: `find: fd timed out after ${SEARCH_SPAWN_TIMEOUT_MS / 1000}s. Narrow the pattern or path, or lower limit.`,
+		};
+	}
+	if (result.spawnError !== null) return { ok: false, message: `find: failed to run fd: ${result.spawnError}` };
+	if (!result.stoppedEarly && result.exitCode !== 0 && lines.length === 0) {
+		return { ok: false, message: `find: ${result.stderr.trim() || `fd exited with code ${result.exitCode}`}` };
+	}
+	const paths = lines
+		.map((rawLine) => rawLine.replace(/\r$/, "").trim())
+		.filter((line) => line.length > 0)
+		.map((line) => {
+			const hadTrailingSlash = line.endsWith("/") || line.endsWith("\\");
+			let relPath = line.startsWith(searchPath) ? line.slice(searchPath.length + 1) : relative(searchPath, line);
+			if (hadTrailingSlash && !relPath.endsWith("/")) relPath += "/";
+			return toPosixPath(relPath);
 		});
-		child.on("error", (error) => finish({ ok: false, message: `find: failed to run fd: ${error.message}` }));
-		child.on("close", (code) => {
-			if (signal?.aborted) {
-				finish({ ok: false, message: "find: operation aborted" });
-				return;
+	return { ok: true, paths };
+}
+
+// Bounded async fallback walker for hosts without fd. Uses dirents only (no
+// per-entry lstat), skips the shared ignored-dir set, and stops as soon as the
+// collect limit is reached; the full-tree sync lstat walk the old glob tool
+// did is gone.
+async function fallbackFind(
+	pattern: string,
+	searchPath: string,
+	collectLimit: number,
+	includeIgnored: boolean,
+	signal?: AbortSignal,
+): Promise<string[]> {
+	const matcher = compileGlobRegex(pattern.includes("/") ? pattern : `**/${pattern}`);
+	const ignored = fallbackIgnoredDirs(includeIgnored);
+	const out: string[] = [];
+	async function walk(dir: string): Promise<void> {
+		if (out.length >= collectLimit || signal?.aborted) return;
+		let entries: import("node:fs").Dirent[];
+		try {
+			entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (out.length >= collectLimit || signal?.aborted) return;
+			const absPath = join(dir, entry.name);
+			if (entry.isDirectory() && !entry.isSymbolicLink()) {
+				if (ignored.has(entry.name)) continue;
+				const relDir = `${toPosixPath(relative(searchPath, absPath))}/`;
+				if (matcher.test(normalizeGlobInput(relDir))) out.push(relDir);
+				await walk(absPath);
+				continue;
 			}
-			if (code !== 0 && lines.length === 0) {
-				finish({ ok: false, message: `find: ${stderr.trim() || `fd exited with code ${code}`}` });
-				return;
-			}
-			const paths = lines
-				.map((rawLine) => rawLine.replace(/\r$/, "").trim())
-				.filter((line) => line.length > 0)
-				.map((line) => {
-					const hadTrailingSlash = line.endsWith("/") || line.endsWith("\\");
-					let relPath = line.startsWith(searchPath) ? line.slice(searchPath.length + 1) : relative(searchPath, line);
-					if (hadTrailingSlash && !relPath.endsWith("/")) relPath += "/";
-					return toPosixPath(relPath);
-				});
-			finish({ ok: true, paths });
+			if (!entry.isFile()) continue;
+			const relPath = toPosixPath(relative(searchPath, absPath));
+			if (matcher.test(normalizeGlobInput(relPath))) out.push(relPath);
+		}
+	}
+	await walk(searchPath);
+	return out;
+}
+
+interface OrderedPaths {
+	paths: string[];
+	/** Candidate cap was hit in mtime mode; ordering is approximate. */
+	candidateCapHit: boolean;
+	candidateCap: number | null;
+}
+
+function orderByMtime(paths: string[], searchPath: string, limit: number, candidateCap: number): OrderedPaths {
+	const candidateCapHit = paths.length >= candidateCap;
+	const stamped = paths.map((relPath) => {
+		let mtimeMs = 0;
+		try {
+			mtimeMs = statSync(join(searchPath, relPath)).mtimeMs;
+		} catch {
+			// Entries that vanish mid-scan sort last instead of failing the call.
+		}
+		return { relPath, mtimeMs };
+	});
+	stamped.sort((a, b) => b.mtimeMs - a.mtimeMs || a.relPath.localeCompare(b.relPath));
+	return { paths: stamped.slice(0, limit).map((entry) => entry.relPath), candidateCapHit, candidateCap };
+}
+
+function renderFindResult(input: {
+	ordered: OrderedPaths;
+	collected: number;
+	collectLimit: number;
+	limit: number;
+	order: FindOrder;
+	reservation: ObservationReservation;
+	options: ToolInvokeOptions | undefined;
+}): ToolResult {
+	const { ordered, collected, collectLimit, limit, order, reservation, options } = input;
+	if (ordered.paths.length === 0) {
+		return finalizeObservation({
+			tool: ToolNames.Find,
+			unit: "paths",
+			output: "No files found matching pattern",
+			shownCount: 0,
+			totalCount: 0,
+			truncated: false,
+			reservation,
+			...(options ? { options } : {}),
 		});
+	}
+	const fullOutput = ordered.paths.join("\n");
+	const truncation = truncateHead(fullOutput, {
+		maxBytes: reservation.callCapBytes,
+		maxLines: Number.MAX_SAFE_INTEGER,
+	});
+	const limitHit = collected > limit || collected >= collectLimit;
+	// Unknown totals: the collector stopped at its cap, so matches beyond it
+	// exist but were never counted.
+	const totalKnown = !limitHit && !ordered.candidateCapHit;
+	const truncated = limitHit || ordered.candidateCapHit || truncation.truncated;
+	const next = limitHit ? `limit=${limit * 2}` : ordered.candidateCapHit ? "order=path" : undefined;
+	const details: Record<string, unknown> = {};
+	if (order === "mtime" && ordered.candidateCap !== null) {
+		details.candidates = {
+			cap: ordered.candidateCap,
+			collected,
+			capHit: ordered.candidateCapHit,
+			...(ordered.candidateCapHit ? { note: "candidate cap reached; mtime ordering is approximate" } : {}),
+		};
+	}
+	return finalizeObservation({
+		tool: ToolNames.Find,
+		unit: "paths",
+		output: truncation.content,
+		// Offload only when the byte cap cut collected paths; a bare result
+		// limit continues via `next`, and the offload would duplicate the body.
+		...(truncation.truncated ? { fullOutput } : {}),
+		shownCount: truncation.outputLines,
+		totalCount: totalKnown ? ordered.paths.length : null,
+		truncated,
+		...(next !== undefined ? { next } : {}),
+		...(Object.keys(details).length > 0 ? { details } : {}),
+		reservation,
+		...(options ? { options } : {}),
 	});
 }
 
 export const findTool: ToolSpec = {
 	name: ToolNames.Find,
-	description: "Find files by glob pattern; returns paths relative to the search directory. Respects .gitignore.",
+	description:
+		"Find files and directories by glob pattern (supports *, **, ?, [abc]); returns paths relative to the search directory. Respects .gitignore and skips generated dirs (node_modules, dist, build, ...) unless include_ignored=true. order=path (default) returns fd's native order; order=mtime returns newest first from a bounded candidate set. Truncated results say how to continue and where the full list was saved.",
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Glob pattern, e.g. 'src/**/*.ts'." }),
 		path: Type.Optional(Type.String({ description: "Directory to search in." })),
-		limit: Type.Optional(Type.Number({ description: "Max results (default 1000)." })),
+		order: Type.Optional(stringEnum(["path", "mtime"], "Result order: path (default) or mtime descending.")),
+		limit: Type.Optional(Type.Number({ description: `Max results (default ${DEFAULT_LIMIT}).` })),
+		include_ignored: Type.Optional(Type.Boolean({ description: "Search gitignored and generated paths too." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
 	async run(args, options): Promise<ToolResult> {
 		const pattern = typeof args.pattern === "string" && args.pattern.length > 0 ? args.pattern : null;
 		if (!pattern) return { kind: "error", message: "find: missing pattern argument" };
+		// Reject an oversized pattern before spawning fd or compiling a fallback
+		// glob regex; an over-MAX_ARG_STRLEN argv entry would otherwise throw E2BIG.
+		const patternSize = validateSearchPatternSize(pattern);
+		if (!patternSize.ok) return { kind: "error", message: `find: ${patternSize.message}` };
+		const order: FindOrder = args.order === "mtime" ? "mtime" : "path";
+		if (args.order !== undefined && args.order !== "path" && args.order !== "mtime") {
+			return { kind: "error", message: `find: order must be path or mtime; got '${String(args.order)}'` };
+		}
 		const searchPath = resolveReadPath(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
 		if (!existsSync(searchPath)) return { kind: "error", message: `find: path not found: ${searchPath}` };
 		if (!statSync(searchPath).isDirectory()) return { kind: "error", message: `find: not a directory: ${searchPath}` };
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : DEFAULT_LIMIT;
-		const fdPath = resolveFdBinary();
-		if (fdPath) {
-			const result = await fdFind(fdPath, pattern, searchPath, limit, options?.signal);
-			if (!result.ok) return { kind: "error", message: result.message };
-			return renderFindOutput(result.paths, limit);
+		const includeIgnored = args.include_ignored === true;
+		const reservation = reserveObservation(OBSERVE_SELF_CAPS.find, options);
+		if (reservation.exhausted) {
+			return observationBudgetExhausted({
+				tool: ToolNames.Find,
+				unit: "paths",
+				reservation,
+				subject: `pattern '${pattern}'`,
+				hint: "Use a narrower pattern or path in a follow-up turn.",
+			});
 		}
+		const collectLimit = order === "mtime" ? Math.max(limit * 4, MTIME_CANDIDATE_FLOOR) : limit + 1;
+
+		// find yields on the fd subprocess / readdir walk below, so charge the
+		// shared turn pool up front and refund the unused slice at finalize; a
+		// concurrent OBSERVE sibling that reserves mid-walk must see this spend.
+		commitObservationReservation(reservation);
 		try {
-			return renderFindOutput(fallbackFind(pattern, searchPath, limit), limit);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			return { kind: "error", message: `find: ${message}` };
+			let collectedPaths: string[];
+			const fdPath = resolveFdBinary();
+			if (fdPath) {
+				const result = await fdFind(fdPath, pattern, searchPath, collectLimit, includeIgnored, options?.signal);
+				if (!result.ok) return { kind: "error", message: result.message };
+				collectedPaths = result.paths;
+			} else {
+				try {
+					collectedPaths = await fallbackFind(pattern, searchPath, collectLimit, includeIgnored, options?.signal);
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					return { kind: "error", message: `find: ${message}` };
+				}
+			}
+
+			const ordered: OrderedPaths =
+				order === "mtime"
+					? orderByMtime(collectedPaths, searchPath, limit, collectLimit)
+					: { paths: collectedPaths.slice(0, limit), candidateCapHit: false, candidateCap: null };
+			return renderFindResult({
+				ordered,
+				collected: collectedPaths.length,
+				collectLimit,
+				limit,
+				order,
+				reservation,
+				options,
+			});
+		} finally {
+			releaseObservation(reservation);
 		}
 	},
 };

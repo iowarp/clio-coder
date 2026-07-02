@@ -42,7 +42,7 @@ export type ClioSessionMetaExtension = {
 	/**
 	 * Workspace snapshot captured at session bind. Populated by probeWorkspace
 	 * during create(); read-only thereafter. Omitted on resumed sessions that
-	 * pre-date this field; the workspace_context tool lazy-fills then.
+	 * pre-date this field; context(scope="workspace") lazy-fills then.
 	 */
 	workspace?: WorkspaceSnapshot;
 	/** Ordered record of skills activated in this session. */

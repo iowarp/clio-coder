@@ -112,6 +112,13 @@ export interface RehydrateChatPanelOptions {
 	 * pre-fork transcript. Unset (default) replays the entire list.
 	 */
 	uptoTurnId?: string;
+	/**
+	 * Render orphan tool results (results with no matching prior call) in full,
+	 * without the live view's middle-elision. `/export` sets this so its
+	 * throwaway panel writes complete tool bodies; the paired-result path reads
+	 * the same intent from the panel's `unboundedToolBodies` option.
+	 */
+	unboundedToolBodies?: boolean;
 }
 
 function extractTurnText(payload: unknown): string {
@@ -243,7 +250,11 @@ function toolResultContent(result: unknown): unknown[] {
 }
 
 function displayReplayToolResult(result: unknown): unknown {
-	return toolResultContent(result);
+	const content = toolResultContent(result);
+	// Preserve the details record (observation envelope, exec records) so the
+	// replayed ledger line carries the same outcome facts as the live one.
+	const details = payloadObject(result)?.details;
+	return details !== null && details !== undefined && typeof details === "object" ? { content, details } : content;
 }
 
 function textFromContentBlocks(content: unknown): string {
@@ -391,6 +402,8 @@ interface ReplayToolResult {
 	name: string;
 	result: unknown;
 	isError: boolean;
+	durationMs?: number;
+	resultSummary?: Record<string, unknown>;
 }
 
 function extractToolResult(entry: MessageEntry): ReplayToolResult {
@@ -409,7 +422,16 @@ function extractToolResult(entry: MessageEntry): ReplayToolResult {
 		"tool";
 	const result =
 		obj?.result ?? obj?.output ?? obj?.out ?? obj?.content ?? (contentText.length > 0 ? contentText : payload);
-	return { id, name, result, isError: obj?.isError === true || obj?.error === true };
+	const durationMs = typeof obj?.durationMs === "number" && Number.isFinite(obj.durationMs) ? obj.durationMs : undefined;
+	const resultSummary = payloadObject(obj?.resultSummary) ?? undefined;
+	return {
+		id,
+		name,
+		result,
+		isError: obj?.isError === true || obj?.error === true,
+		...(durationMs !== undefined ? { durationMs } : {}),
+		...(resultSummary !== undefined ? { resultSummary } : {}),
+	};
 }
 
 function renderReplayLine(text: string, width: number): string[] {
@@ -808,7 +830,9 @@ export function rehydrateChatPanelFromTurns(
 							toolName: result.name,
 							result: displayReplayToolResult(result.result),
 							isError: result.isError,
-						});
+							...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
+							...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
+						} as ChatLoopEvent);
 					} else {
 						chatPanel.appendReplayBlock((width) =>
 							renderToolResultOnly(
@@ -817,8 +841,11 @@ export function rehydrateChatPanelFromTurns(
 									toolName: result.name,
 									result: displayReplayToolResult(result.result),
 									isError: result.isError,
+									...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
+									...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
 								},
 								width,
+								{ unbounded: options.unboundedToolBodies === true },
 							),
 						);
 					}
@@ -888,4 +915,10 @@ export function rehydrateChatPanelFromTurns(
 			isError: true,
 		});
 	}
+	// Replay reproduces the settled view: tools collapse to their one-line
+	// ledger summary. The live path collapses tools because they fire while the
+	// assistant is streaming (pending), a state replay cannot reconstruct
+	// per-tool, so collapse them explicitly here. /export re-expands afterward
+	// via toggleAllToolsExpanded; /resume and /fork keep the collapsed form.
+	chatPanel.collapseAllTools();
 }

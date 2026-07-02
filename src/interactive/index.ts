@@ -1,5 +1,6 @@
 import { exec } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { runBashCommand } from "../core/bash-exec.js";
 import {
 	BusChannels,
@@ -252,6 +253,15 @@ export interface InteractiveDeps {
 export const CTRL_C_DOUBLE_TAP_MS = 500;
 export const ENTER = "\r";
 export const ESC = "\x1b";
+
+// /export renders the transcript at a fixed width so exports are stable
+// regardless of the live terminal size.
+const EXPORT_RENDER_WIDTH = 100;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC control character is the ANSI escape introducer this pattern exists to strip
+const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
+function stripAnsiForExport(line: string): string {
+	return line.replace(ANSI_PATTERN, "");
+}
 const EDITOR_BASH_TIMEOUT_MS = 300_000;
 
 export interface InteractiveSubmitExpansion {
@@ -1484,6 +1494,35 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		runCompact: (instructions) => {
 			runCompactWithNotice(deps.onCompact, appendCommandNotice, instructions);
 		},
+		exportTranscript: (pathArg) => {
+			const sessionId = deps.chat.getSessionId();
+			if (!sessionId) {
+				appendCommandNotice("error", "[/export] no active session to export");
+				return;
+			}
+			try {
+				const turns = openSession(sessionId).turns();
+				// Same pure render pipeline as the live panel and /resume replay:
+				// a throwaway panel rehydrated from the ledger, every tool segment
+				// expanded, rendered at a fixed width, ANSI stripped. Unlike the
+				// live view, export renders full tool bodies (no middle-elision or
+				// char truncation) so the transcript reproduces the complete output.
+				const exportPanel = createChatPanel({ unboundedToolBodies: true });
+				rehydrateChatPanelFromTurns(exportPanel, turns, { unboundedToolBodies: true });
+				exportPanel.toggleAllToolsExpanded();
+				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
+				const date = new Date().toISOString().slice(0, 10);
+				const target = resolve(
+					pathArg && pathArg.trim().length > 0 ? pathArg.trim() : join(".clio", "exports", `${sessionId}-${date}.md`),
+				);
+				mkdirSync(resolve(target, ".."), { recursive: true });
+				const header = [`# Clio session ${sessionId}`, "", `Exported ${new Date().toISOString()}`, "", "```text"];
+				writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
+				appendCommandNotice("success", `[/export] wrote ${lines.length} lines to ${target}`);
+			} catch (err) {
+				appendCommandNotice("error", `[/export] ${err instanceof Error ? err.message : String(err)}`);
+			}
+		},
 		runInit: (options) => {
 			const onInit = deps.onInit;
 			if (!onInit) {
@@ -1738,6 +1777,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		tui.requestRender();
 	}, 120);
 	footerTicker.unref?.();
+
+	// Running expanded/collapsed tool segments show live elapsed time; refresh
+	// the transcript once per second while a turn is streaming so the elapsed
+	// counter ticks without waiting for the next agent event.
+	let toolElapsedTicker: NodeJS.Timeout | null = null;
+	toolElapsedTicker = setInterval(() => {
+		if (!deps.chat.isStreaming()) return;
+		chatPanel.invalidate?.();
+		tui.requestRender();
+	}, 1_000);
+	toolElapsedTicker.unref?.();
 
 	let workspaceTicker: NodeJS.Timeout | null = null;
 	workspaceTicker = setInterval(() => {
@@ -2717,6 +2767,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		process.off("SIGINT", handleCtrlC);
 		clearInterval(keepAlive);
 		if (footerTicker) clearInterval(footerTicker);
+		if (toolElapsedTicker) clearInterval(toolElapsedTicker);
 		if (workspaceTicker) clearInterval(workspaceTicker);
 		if (leaderTimer) clearTimeout(leaderTimer);
 		stopDispatchBoardTicker();

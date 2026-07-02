@@ -896,7 +896,7 @@ commands:
     rationale: Standard local test command.</code></pre>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Typed validation tools</h3>
-        <p>Prefer typed tools over Bash: <code>git</code> (status/diff/log), <code>run_task</code>, and <code>validate_frontend</code>. <code>validate_frontend</code> accepts <code>.html</code>, <code>.css</code>, <code>.js</code> under the workspace root, performing syntax checks and optionally validating references in headless browsers.</p>
+        <p>Prefer typed tools over Bash: <code>git</code> (status/diff/log) and <code>verify</code>. <code>verify(check="frontend")</code> accepts <code>.html</code>, <code>.css</code>, <code>.js</code> under the workspace root, performing syntax checks and optionally validating references in headless browsers.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Dispatch and delegation runtimes</h3>
         <p>Clio dispatches tasks to worker runtimes and delegation agents under different safety postures:</p>

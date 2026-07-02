@@ -701,7 +701,7 @@ export function loadSkills(input: LoadSkillsInput = {}): SkillList {
 	};
 }
 
-/** Skills the model may see in read_skill listings and load via read_skill. */
+/** Skills the model may see in context(scope=skills) listings and load by name. */
 export function modelVisibleSkills(skills: ReadonlyArray<Skill>): Skill[] {
 	return skills.filter((skill) => skill.trusted && !skill.disableModelInvocation);
 }

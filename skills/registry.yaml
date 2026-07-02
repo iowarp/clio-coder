@@ -5,7 +5,7 @@
 skills:
   - name: arxiv-literature
     version: 0.1.0
-    sha256: c83d650cfa4dc135d01b215e2db1c73fceb4645fdc509c1f1a3c3a47c8a95ad1
+    sha256: aa4a63d465ef5edac22fd13534dbf9650fad6efbd0e2ead58ad17172736910db
   - name: clio-dev
     version: 0.1.0
     sha256: 587685747a96168f49c6ebac7f0e425d9bbf48619fda5cd14685788605201ead
@@ -14,31 +14,31 @@ skills:
     sha256: 8582cfc80d542037918623658a495371758fae90c838daac2414db52f605f1e6
   - name: context-handoff
     version: 0.2.0
-    sha256: dc874a0ba34e8b116dc48b7ac43c40d295ff26311c76720849b886d609599971
+    sha256: a535968ccedf4d7049a39bc3d43e9290b5fd7084eda63cff67bb747b002a3b4f
   - name: context-prime
     version: 0.2.0
-    sha256: 94b59dd2ca81cdcf94b4e654075384f4853bd6a8bc922d7a421e9062a9a2c1df
+    sha256: e6aea95a5b673b824de603cc1048c9271ab480481e74d781d7f9312f2fa8a8d7
   - name: credentials
     version: 0.1.0
-    sha256: 7aa5fe09455a15dadf7b9bf2c591789dded2ec129c8ad290eab723e4d7eb93e3
+    sha256: 3678925060a96285b15caabbff3e3f6f3bd31763a67ff8b963d2c4519f2eb594
   - name: cut-it
     version: 0.2.0
-    sha256: 738e33df1d1cda5aa50e7a9fd8016dfd344c69b1273d7061fccd7f2cfbe2b222
+    sha256: 5bc7620e478fc7404884c9b4f57d3cceabda5b9413b71a3e6d159a626e772979
   - name: design-council
     version: 0.1.0
-    sha256: 323d5b2fd95395a60e83b9b7661dab7cb7d8c2013f1c44ceb057277585fd2214
+    sha256: 766515866814cbf7dacc92312ca35300393ec2ff690fa991737d20473f9791c5
   - name: experiment-protocol
     version: 0.1.0
-    sha256: 884309a7740a0576f7c844086cc5a20ac764be574043e46e81ef35497e8bd807
+    sha256: e87c7de8bf4678c50d5d1192d628078cae6645d0cfa61d9458e060dd40f2a703
   - name: grill-me
     version: 0.3.0
-    sha256: 9f3f7b84f7e0bdffd8e6ec4996fe56d812ede94545dab15dcdfeaf2cad162e4b
+    sha256: 0f889abb2b509cf92039ff3f2ec126dbbc43f2343bb16e12942d0177376a6c4a
   - name: prd
     version: 0.2.0
-    sha256: 1ff105f9309a9afa9eaf4e09ce28974cfe00d99772a8e233a14addfbc5cbdab6
+    sha256: 34b825ce494c702aba3b9a5ca36cd56bee5aa8bd50cf2de9ca84aee7476b291c
   - name: scientific-debugging
     version: 0.1.0
-    sha256: f6019d8dee5534e718e8dcb83184be40c37fba31b48a9ae0ab6f38421ff84310
+    sha256: 78709827b42d975722f84d3c5786491e2128debad0042377e1c4dee8804dfa8b
   - name: workflow-distiller
     version: 0.1.0
-    sha256: e7558a994bac7c29f02643d32abec7230c33d2fdec58f653255e9b67eaf5c74c
+    sha256: 71afdf26fd89bc78bf9125a9e77dd1bfd84aaa2f682386cf80575431e09c5fcf

@@ -46,7 +46,7 @@ const VALIDATION_TOOL_NEEDLES = [
 	"check",
 	"ci",
 	"validate",
-	"run_task",
+	"verify",
 ] as const;
 
 /**

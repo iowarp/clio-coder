@@ -103,7 +103,7 @@ describe("contracts/safety", () => {
 		if (assessment.kind === "ok") strictEqual(assessment.reason, "no_mutation");
 	});
 
-	it("recognizes run_task verification-family scripts as finish-contract evidence", () => {
+	it("recognizes verify verification-family checks as finish-contract evidence", () => {
 		const assessment = assessFinishContract({
 			assistantText: "Implemented the change and tests passed.",
 			sessionEntries: [
@@ -120,12 +120,12 @@ describe("contracts/safety", () => {
 				{
 					kind: "message",
 					role: "tool_call",
-					payload: { name: "run_task", toolCallId: "call-2", args: { task: "test:contracts" } },
+					payload: { name: "verify", toolCallId: "call-2", args: { check: "test:contracts" } },
 				},
 				{
 					kind: "message",
 					role: "tool_result",
-					payload: { toolName: "run_task", toolCallId: "call-2", result: { details: { exitCode: 0 } } },
+					payload: { toolName: "verify", toolCallId: "call-2", result: { details: { exitCode: 0 } } },
 				},
 			],
 		});
@@ -155,6 +155,120 @@ describe("contracts/safety", () => {
 		});
 		strictEqual(assessment.kind, "ok");
 		if (assessment.kind === "ok") strictEqual(assessment.reason, "explicit_limitation");
+	});
+
+	it("recognizes a toolkit v2 dispatch receipt as finish-contract evidence", () => {
+		// Toolkit v2 dispatch takes a `tasks` array and returns details of shape
+		// { mode, runIds, receiptCount, failedCount, runs:[{runId, agentId, exitCode}] }
+		// with exit codes per-run, not a top-level details.exitCode. A passed
+		// receipt must still clear the finish contract for a mutating turn.
+		const assessment = assessFinishContract({
+			assistantText: "Dispatched the refactor to the coder agent and applied the follow-up edit.",
+			sessionEntries: [
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "edit", toolCallId: "call-1", args: { path: "src/parser.ts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "edit", toolCallId: "call-1", isError: false, result: { kind: "ok" } },
+				},
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: {
+						name: "dispatch",
+						toolCallId: "call-2",
+						args: { tasks: [{ agent: "coder", task: "refactor the parser module" }] },
+					},
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: {
+						toolName: "dispatch",
+						toolCallId: "call-2",
+						isError: false,
+						result: {
+							kind: "ok",
+							details: {
+								mode: "parallel",
+								runIds: ["run-abc"],
+								receiptCount: 1,
+								failedCount: 0,
+								runs: [{ runId: "run-abc", agentId: "coder", exitCode: 0, receiptPath: "/r/run-abc.json", eventCount: 3 }],
+							},
+						},
+					},
+				},
+			],
+		});
+
+		strictEqual(assessment.kind, "ok");
+		if (assessment.kind === "ok") {
+			strictEqual(assessment.reason, "validation_evidence");
+			const receipt = assessment.evidence.find((item) => item.kind === "dispatch_receipt");
+			ok(receipt, "expected a dispatch_receipt evidence entry");
+			ok(receipt?.summary.includes("run-abc"), "dispatch receipt summary should reference the run id");
+			ok(receipt?.summary.includes("coder"), "dispatch receipt summary should reference the agent id");
+		}
+	});
+
+	it("does not count a toolkit v2 dispatch receipt with a failed run as evidence", () => {
+		// A receipt only clears the contract when every run passed. A batch with a
+		// non-zero-exit run is not passing evidence even if the result envelope is
+		// not flagged as an error.
+		const assessment = assessFinishContract({
+			assistantText: "Dispatched the batch and applied the edit.",
+			sessionEntries: [
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: { name: "edit", toolCallId: "call-1", args: { path: "src/parser.ts" } },
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "edit", toolCallId: "call-1", isError: false, result: { kind: "ok" } },
+				},
+				{
+					kind: "message",
+					role: "tool_call",
+					payload: {
+						name: "dispatch",
+						toolCallId: "call-2",
+						args: { tasks: ["task one", "task two"] },
+					},
+				},
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: {
+						toolName: "dispatch",
+						toolCallId: "call-2",
+						isError: false,
+						result: {
+							kind: "ok",
+							details: {
+								mode: "parallel",
+								runIds: ["run-1", "run-2"],
+								receiptCount: 2,
+								failedCount: 1,
+								runs: [
+									{ runId: "run-1", agentId: "coder", exitCode: 0 },
+									{ runId: "run-2", agentId: "coder", exitCode: 1 },
+								],
+							},
+						},
+					},
+				},
+			],
+		});
+
+		strictEqual(assessment.kind, "engage");
+		if (assessment.kind === "engage") strictEqual(assessment.reason, "unvalidated_mutation");
 	});
 
 	it("evaluates safety scope subsets", () => {

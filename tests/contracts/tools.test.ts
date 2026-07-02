@@ -11,17 +11,17 @@ import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/doma
 import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { credentialPresentTool } from "../../src/tools/credential-present.js";
-import { createDispatchBatchTool, createDispatchTool } from "../../src/tools/dispatch.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
 import { findTool } from "../../src/tools/find.js";
-import { globTool } from "../../src/tools/glob.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
+import { OBSERVATION_TURN_BUDGET_ENV } from "../../src/tools/observation.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
-import { READ_TURN_OBSERVATION_BUDGET_ENV, readTool } from "../../src/tools/read.js";
+import { readTool } from "../../src/tools/read.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
-import { runTaskTool } from "../../src/tools/safe-exec.js";
+import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
 
 const scratchRoots: string[] = [];
@@ -268,11 +268,12 @@ describe("contracts/tools basic happy paths", () => {
 		ok(result.output.includes("src/index.ts"));
 	});
 
-	it("globTool filters files by pattern", async () => {
+	it("findTool filters files by bare pattern (glob dialect)", async () => {
 		const root = scratchDir();
 		writeFileSync(join(root, "note.md"), "# sample\n", "utf8");
+		writeFileSync(join(root, "code.ts"), "const x = 1;\n", "utf8");
 
-		const result = await globTool.run({ pattern: "*.md", path: root });
+		const result = await findTool.run({ pattern: "*.md", path: root });
 		strictEqual(result.kind, "ok");
 		strictEqual(result.output.trim(), "note.md");
 	});
@@ -333,33 +334,51 @@ describe("contracts/tools basic happy paths", () => {
 		}
 	});
 
-	it("runTaskTool runs declared verification-family scripts", async () => {
+	it("verifyTool runs declared verification-family scripts", async () => {
 		const root = workspaceScratchDir();
 		writePackageJson(root, {
 			"check:boundaries": "node -e \"process.stdout.write('boundaries lane\\n')\"",
 			"test:contracts": "node -e \"process.stdout.write('contracts lane\\n')\"",
 		});
 
-		const contracts = await runTaskTool.run({ task: "test:contracts", cwd: root, timeout_ms: 10_000 });
+		const contracts = await verifyTool.run({ check: "test:contracts", cwd: root, timeout_ms: 10_000 });
 		strictEqual(contracts.kind, "ok");
 		ok(contracts.kind === "ok" && contracts.output.includes("contracts lane"));
 
-		const boundaries = await runTaskTool.run({ task: "check:boundaries", cwd: root, timeout_ms: 10_000 });
+		const boundaries = await verifyTool.run({ check: "check:boundaries", cwd: root, timeout_ms: 10_000 });
 		strictEqual(boundaries.kind, "ok");
 		ok(boundaries.kind === "ok" && boundaries.output.includes("boundaries lane"));
 	});
 
-	it("runTaskTool rejects non-verification families with a bash redirect", async () => {
-		const result = await runTaskTool.run({ task: "dev" });
+	it("verifyTool with no check lists declared checks grouped by source", async () => {
+		const root = workspaceScratchDir();
+		writePackageJson(root, {
+			dev: "node server.js",
+			typecheck: "tsc --noEmit",
+			"test:contracts": "node --test tests/contracts.test.mjs",
+		});
+
+		const result = await verifyTool.run({ cwd: root });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		ok(result.output.includes("Declared verification checks:"));
+		ok(result.output.includes("package.json:"));
+		ok(result.output.includes("- typecheck"));
+		ok(result.output.includes("- test:contracts"));
+		ok(!result.output.includes("- dev"), "non-verification scripts must not be listed");
+	});
+
+	it("verifyTool rejects non-verification families with a bash redirect", async () => {
+		const result = await verifyTool.run({ check: "dev" });
 
 		strictEqual(result.kind, "error");
 		strictEqual(
 			result.kind === "error" ? result.message : "",
-			"run_task: task 'dev' is not a verification script (test*/lint*/build*/typecheck*/check*/format*/ci*); run it through bash.",
+			"verify: 'dev' is not a verification check (test*/lint*/build*/typecheck*/check*/format*/ci* or \"frontend\"); run it through bash.",
 		);
 	});
 
-	it("runTaskTool lists sorted declared verification scripts for undeclared family names", async () => {
+	it("verifyTool lists sorted declared verification checks for undeclared family names", async () => {
 		const root = workspaceScratchDir();
 		writePackageJson(root, {
 			dev: "node server.js",
@@ -377,16 +396,16 @@ describe("contracts/tools basic happy paths", () => {
 			"test:file": "node --test",
 		});
 
-		const result = await runTaskTool.run({ task: "test:unit", cwd: root });
+		const result = await verifyTool.run({ check: "test:unit", cwd: root });
 
 		strictEqual(result.kind, "error");
 		strictEqual(
 			result.kind === "error" ? result.message : "",
-			"run_task: package.json has no 'test:unit' script. Declared verification scripts: build, check:boundaries, ci, ci:release, format, lint, test, test:contracts, test:file, test:smoke, typecheck.",
+			"verify: package.json has no 'test:unit' script. Declared verification checks: build, check:boundaries, ci, ci:release, format, lint, test, test:contracts, test:file, test:smoke, typecheck.",
 		);
 	});
 
-	it("runTaskTool forwards args to a declared test:file lane for one named test file", async () => {
+	it("verifyTool forwards args to a declared test:file lane for one named test file", async () => {
 		const root = workspaceScratchDir();
 		writePackageJson(root, { "test:file": "node --test" });
 		writeFileSync(
@@ -414,8 +433,8 @@ describe("contracts/tools basic happy paths", () => {
 			"utf8",
 		);
 
-		const result = await runTaskTool.run({
-			task: "test:file",
+		const result = await verifyTool.run({
+			check: "test:file",
 			args: ["selected.test.mjs"],
 			cwd: root,
 			timeout_ms: 10_000,
@@ -442,7 +461,7 @@ describe("contracts/tools basic happy paths", () => {
 
 describe("contracts/tools profiles", () => {
 	it("keeps codewiki tools scout-owned by default while allowing navigation-heavy non-scout runs", () => {
-		const candidateTools = [ToolNames.Read, ToolNames.WorkspaceContext, ToolNames.CodeNav];
+		const candidateTools = [ToolNames.Read, ToolNames.Context, ToolNames.CodeNav];
 
 		const scout = applyToolProfile(candidateTools, undefined, { agentId: "scout", task: "summarize the current work" });
 		ok(scout.includes(ToolNames.CodeNav));
@@ -452,7 +471,7 @@ describe("contracts/tools profiles", () => {
 			task: "write a high level implementation plan",
 		});
 		strictEqual(genericArchitect.includes(ToolNames.CodeNav), false);
-		ok(genericArchitect.includes(ToolNames.WorkspaceContext));
+		ok(genericArchitect.includes(ToolNames.Context));
 
 		const navigationArchitect = applyToolProfile(candidateTools, undefined, {
 			agentId: "architect",
@@ -462,7 +481,7 @@ describe("contracts/tools profiles", () => {
 	});
 
 	it("applies scout codewiki ownership in the worker tool resolver", () => {
-		const registry = testRegistryWithTools([ToolNames.Read, ToolNames.WorkspaceContext, ToolNames.CodeNav]);
+		const registry = testRegistryWithTools([ToolNames.Read, ToolNames.Context, ToolNames.CodeNav]);
 		const genericArchitect = resolveAgentTools({
 			registry,
 			agentId: "architect",
@@ -588,8 +607,8 @@ describe("contracts/tools result shaping and truncation", () => {
 		// full per-call slice and the second read is the one bound by the
 		// aggregate per-turn budget.
 		const turnBudget = 70 * 1024;
-		const previousBudget = process.env[READ_TURN_OBSERVATION_BUDGET_ENV];
-		process.env[READ_TURN_OBSERVATION_BUDGET_ENV] = String(turnBudget);
+		const previousBudget = process.env[OBSERVATION_TURN_BUDGET_ENV];
+		process.env[OBSERVATION_TURN_BUDGET_ENV] = String(turnBudget);
 		try {
 			const options = { sessionId: "s-read-budget", turnId: `turn-${Date.now()}` };
 			const r1 = await readTool.run({ path: first }, options);
@@ -600,13 +619,19 @@ describe("contracts/tools result shaping and truncation", () => {
 			if (r1.kind === "ok" && r2.kind === "ok") {
 				ok(Buffer.byteLength(r1.output, "utf8") > 4_000, "first read should use most of the per-call cap");
 				ok(Buffer.byteLength(r1.output + r2.output, "utf8") < turnBudget + 4_000);
-				ok(r2.output.includes("Per-turn read observation budget"));
-				const budget = r2.details?.observationBudget as { limited?: unknown } | undefined;
-				strictEqual(budget?.limited, true);
+				ok(r2.output.includes("Per-turn observation budget"));
+				const observation = r2.details?.observation as
+					| { budget?: { limitBytes?: unknown; usedBeforeBytes?: unknown } }
+					| undefined;
+				strictEqual(observation?.budget?.limitBytes, turnBudget);
+				ok(
+					typeof observation?.budget?.usedBeforeBytes === "number" && observation.budget.usedBeforeBytes > 4_000,
+					"second read must see the first read's spend in the shared pool",
+				);
 			}
 		} finally {
-			if (previousBudget === undefined) delete process.env[READ_TURN_OBSERVATION_BUDGET_ENV];
-			else process.env[READ_TURN_OBSERVATION_BUDGET_ENV] = previousBudget;
+			if (previousBudget === undefined) delete process.env[OBSERVATION_TURN_BUDGET_ENV];
+			else process.env[OBSERVATION_TURN_BUDGET_ENV] = previousBudget;
 		}
 	});
 });
@@ -672,8 +697,11 @@ describe("contracts/tools dispatch run paths", () => {
 
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
-			ok(result.output.includes("dispatch run run-123 completed"));
-			strictEqual(result.details?.runId, "run-123");
+			ok(result.output.includes("dispatch (parallel) total=1 failed=0"));
+			ok(result.output.includes("run-123"));
+			const details = result.details as { runIds?: unknown; receiptCount?: unknown } | undefined;
+			ok(Array.isArray(details?.runIds) && details.runIds[0] === "run-123");
+			strictEqual(details?.receiptCount, 1);
 		}
 	});
 
@@ -712,12 +740,12 @@ describe("contracts/tools dispatch run paths", () => {
 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") {
-			ok(result.message.includes("dispatch run run-failed failed"));
-			ok(!result.message.includes("dispatch run run-failed completed"));
+			ok(result.message.includes("dispatch (parallel) total=1 failed=1"));
+			ok(result.message.includes("failure=worker crashed"));
 		}
 	});
 
-	it("createDispatchBatchTool triggers batch dispatch contract", async () => {
+	it("dispatch with multiple tasks triggers the batch dispatch contract", async () => {
 		const mockDispatch: DispatchContract = {
 			dispatch: async () => {
 				throw new Error("dispatch not used");
@@ -765,7 +793,7 @@ describe("contracts/tools dispatch run paths", () => {
 			drain: async () => {},
 		};
 
-		const tool = createDispatchBatchTool({ dispatch: mockDispatch });
+		const tool = createDispatchTool({ dispatch: mockDispatch });
 		const result = await tool.run({
 			tasks: [
 				{ task: "task 1", agent_id: "coder" },
@@ -775,8 +803,7 @@ describe("contracts/tools dispatch run paths", () => {
 
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
-			ok(result.output.includes("completed"));
-			ok(result.output.includes("total=2"));
+			ok(result.output.includes("dispatch (parallel) total=2 failed=0"));
 			ok(result.output.includes("receipt=/tmp/run-1.json"));
 			ok(result.output.includes("first scout finding"));
 			ok(result.output.includes("second scout finding"));

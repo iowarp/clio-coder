@@ -20,17 +20,17 @@ export interface PendingSkillToolPolicy {
 	allowedSkillNames: ReadonlyArray<string>;
 	requests: ReadonlyArray<PendingSkillRequest>;
 	loadedSkillNames: Set<string>;
-	/** Declared tool policy per successfully loaded skill, recorded by read_skill. */
+	/** Declared tool policy per successfully loaded skill, recorded by context(scope=skills). */
 	loadedSkillPolicies: Map<string, SkillDeclaredToolPolicy>;
 }
 
 /**
- * Tools admitted regardless of any active skill narrowing: read_skill so the
+ * Tools admitted regardless of any active skill narrowing: context so the
  * remaining requested skills of the same turn can still load, and ask_user as
  * the escape hatch the block message points at when a workflow genuinely
  * needs a tool its skill did not declare.
  */
-export const SKILL_SURFACE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["read_skill", "ask_user"]);
+export const SKILL_SURFACE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["context", "ask_user"]);
 
 export interface SkillToolSurfaceViolation {
 	/** Every loaded skill that contributed a declaration to the merged surface. */
@@ -75,7 +75,7 @@ export function evaluateSkillToolSurface(
 
 /**
  * Per-run skill policy for a dispatched worker whose agent recipe declares
- * skills. The worker may read_skill exactly these names; anything else gets
+ * skills. The worker may load exactly these skill names; anything else gets
  * the same deterministic rejection an unrequested skill gets interactively.
  */
 export function agentSkillToolPolicy(skillNames: ReadonlyArray<string>): PendingSkillToolPolicy | undefined {

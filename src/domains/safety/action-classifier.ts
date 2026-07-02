@@ -55,29 +55,24 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Read:
 		case ToolNames.Grep:
 		case ToolNames.Find:
-		case ToolNames.Glob:
 		case ToolNames.Ls:
 		case ToolNames.WebFetch:
 		case ToolNames.Git:
-		case ToolNames.WorkspaceContext:
 		case ToolNames.CodeNav:
-		case ToolNames.DocsSearch:
+		case ToolNames.Context:
+		case ToolNames.Monitor:
 		case ToolNames.AskUser:
 		case ToolNames.CredentialPresent:
-		case ToolNames.ReadSkill:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:
-		case ToolNames.WritePlan:
-		case ToolNames.WriteReview:
-		case ToolNames.CreateSkill:
+		case ToolNames.Artifact:
 			return "write";
 		case ToolNames.Bash:
-		case ToolNames.RunTask:
-		case ToolNames.ValidateFrontend:
+		case ToolNames.Verify:
 			return "execute";
 		case ToolNames.Dispatch:
-		case ToolNames.DispatchBatch:
+		case ToolNames.Steer:
 			return "dispatch";
 		default:
 			return null;

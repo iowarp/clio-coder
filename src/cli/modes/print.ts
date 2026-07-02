@@ -42,7 +42,7 @@ interface HeadlessMainAgentResult {
 	error: string | null;
 	/**
 	 * True when the most recent tool result ended the turn via
-	 * `ToolResult.terminate` (write_plan, write_review) with no error. These
+	 * `ToolResult.terminate` (artifact plan/review/report) with no error. These
 	 * tools are the whole turn by design: the agent loop skips the follow-up
 	 * call that would otherwise produce assistant text, so an empty `text`
 	 * here is the turn completing exactly as intended, not a missing
@@ -115,7 +115,7 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	if (event.isError) stat.errors += 1;
 	else stat.ok += 1;
 	stats.toolStats.set(tool, stat);
-	if (tool === ToolNames.ReadSkill) {
+	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
 		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
 		const activation = skillActivationFromToolDetails(

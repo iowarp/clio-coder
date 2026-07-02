@@ -394,14 +394,14 @@ function validationToolCallSummary(toolName: string, args: unknown): string | nu
 		const detected = detectValidationCommand(command);
 		return detected.kind === "validation" ? detected.matched : null;
 	}
-	if (toolName === "run_task") {
-		const task = readOptionalString(argRecord?.task);
-		if (task === null || !isVerificationScriptName(task)) return null;
-		return `npm run ${task}`;
-	}
-	if (toolName === "validate_frontend") {
-		const target = readOptionalString(argRecord?.path) ?? "artifact";
-		return `validate_frontend ${target}`;
+	if (toolName === "verify") {
+		const check = readOptionalString(argRecord?.check);
+		if (check === "frontend") {
+			const target = readOptionalString(argRecord?.path) ?? "artifact";
+			return `verify frontend ${target}`;
+		}
+		if (check === null || !isVerificationScriptName(check)) return null;
+		return `npm run ${check}`;
 	}
 	return null;
 }

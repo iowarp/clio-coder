@@ -8,7 +8,7 @@ allowed-tools:
   - dispatch
   - read
   - grep
-  - glob
+  - find
   - ls
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/arxiv-literature

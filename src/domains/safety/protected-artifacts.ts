@@ -59,13 +59,22 @@ const SHELL_WRAPPERS = new Set(["command", "builtin", "sudo", "doas"]);
  * separately through command classification.
  */
 export function toolMutationPaths(toolName: string, args: Record<string, unknown> | undefined): string[] {
-	if (toolName === ToolNames.WritePlan) return [mutationPathArg(args) ?? "PLAN.md"];
-	if (toolName === ToolNames.WriteReview) return [mutationPathArg(args) ?? "REVIEW.md"];
+	if (toolName === ToolNames.Artifact) {
+		// kind=skill writes into the managed skill store, not a caller path.
+		if (args?.kind === "skill") return [];
+		return [mutationPathArg(args) ?? artifactDefaultPath(args)];
+	}
 	if (toolName === ToolNames.Write || toolName === ToolNames.Edit) {
 		const candidate = mutationPathArg(args);
 		return candidate === null ? [] : [candidate];
 	}
 	return [];
+}
+
+function artifactDefaultPath(args: Record<string, unknown> | undefined): string {
+	if (args?.kind === "review") return "REVIEW.md";
+	if (args?.kind === "report") return "REPORT.md";
+	return "PLAN.md";
 }
 
 function mutationPathArg(args: Record<string, unknown> | undefined): string | null {

@@ -125,6 +125,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/tree` | - | `/tree` | Open session tree navigator |
 | `/fork` | - | `/fork` | Fork from an assistant turn |
 | `/compact` | - | `/compact [instructions]` | Compact earlier context |
+| `/export` | - | `/export [path]` | Export the session transcript to Markdown |
 
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.

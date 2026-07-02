@@ -37,35 +37,38 @@ function mockSpec(name: ToolName, result: ToolResult): ToolSpec {
 }
 
 describe("after_tool observer registrations", () => {
-	it("reports successful read_skill activations with turn metadata", async () => {
+	it("reports successful context skill activations with turn metadata", async () => {
 		const activations: SkillActivation[] = [];
 		const bundle = createMiddlewareBundle({
 			registrations: [createSkillActivationObserver((activation) => activations.push(activation))],
 		});
 		const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
 		registry.register(
-			mockSpec(ToolNames.ReadSkill, {
+			mockSpec(ToolNames.Context, {
 				kind: "ok",
 				output: "skill body",
 				details: { name: "readable", filePath: "/skills/readable/SKILL.md", hash: "a".repeat(64), source: "project" },
 			}),
 		);
-		const verdict = await registry.invoke({ tool: ToolNames.ReadSkill, args: { name: "readable" } }, { turnId: "t1" });
+		const verdict = await registry.invoke(
+			{ tool: ToolNames.Context, args: { scope: "skills", name: "readable" } },
+			{ turnId: "t1" },
+		);
 		strictEqual(verdict.kind, "ok");
 		strictEqual(activations.length, 1);
 		strictEqual(activations[0]?.name, "readable");
 		strictEqual(activations[0]?.turnId, "t1");
 	});
 
-	it("stays silent for failed read_skill results and for other tools", async () => {
+	it("stays silent for failed context skill loads and for other tools", async () => {
 		const activations: SkillActivation[] = [];
 		const bundle = createMiddlewareBundle({
 			registrations: [createSkillActivationObserver((activation) => activations.push(activation))],
 		});
 		const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
-		registry.register(mockSpec(ToolNames.ReadSkill, { kind: "error", message: "skill not found" }));
+		registry.register(mockSpec(ToolNames.Context, { kind: "error", message: "skill not found" }));
 		registry.register(mockSpec(ToolNames.Read, { kind: "ok", output: "file contents" }));
-		await registry.invoke({ tool: ToolNames.ReadSkill, args: { name: "missing" } }, { turnId: "t1" });
+		await registry.invoke({ tool: ToolNames.Context, args: { scope: "skills", name: "missing" } }, { turnId: "t1" });
 		await registry.invoke({ tool: ToolNames.Read, args: { path: "a.md" } }, { turnId: "t1" });
 		strictEqual(activations.length, 0);
 	});

@@ -6,7 +6,7 @@ license: Apache-2.0
 allowed-tools:
   - read
   - grep
-  - glob
+  - find
   - ls
   - bash
   - ask_user

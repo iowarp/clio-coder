@@ -18,13 +18,13 @@ export const FILE_MUTATION_OBSERVER_ID = "observer.file-mutation";
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
-/** Records successful read_skill activations into the caller's ledger. */
+/** Records successful context(scope=skills) activations into the caller's ledger. */
 export function createSkillActivationObserver(sink: (activation: SkillActivation) => void): MiddlewareHookRegistration {
 	return {
 		id: SKILL_ACTIVATION_OBSERVER_ID,
 		description: "records successful skill activations for the session ledger",
 		hooks: ["after_tool"],
-		toolNames: [ToolNames.ReadSkill],
+		toolNames: [ToolNames.Context],
 		evaluate(input) {
 			if (input.metadata?.resultKind !== "ok") return NO_EFFECTS;
 			const activation = skillActivationFromToolDetails(input.toolResultDetails, input.turnId);

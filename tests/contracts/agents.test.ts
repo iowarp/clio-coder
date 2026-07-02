@@ -18,7 +18,7 @@ describe("contracts/agents", () => {
 					"---",
 					"name: Scientific Validator",
 					"description: HPC artifact validation planner.",
-					"tools: [read, grep, glob, ls, read_skill]",
+					"tools: [read, grep, find, ls, context]",
 					"audience: custom",
 					"category: science",
 					"capabilityClass: read-only",
@@ -72,7 +72,7 @@ describe("contracts/agents", () => {
 				id: "verifier",
 				name: "Verifier",
 				description: "Run gates.",
-				tools: ["read", "run_task"],
+				tools: ["read", "verify"],
 				category: "quality",
 				capabilityClass: "verification",
 				latencyClass: "fast",
@@ -225,7 +225,7 @@ describe("contracts/agents", () => {
 		strictEqual(merged.find((recipe) => recipe.id === "domain-helper")?.source, "project");
 	});
 
-	it("requires read_skill when a recipe declares agent-bound skills", () => {
+	it("requires context when a recipe declares agent-bound skills", () => {
 		const spec = normalizeAgentSpec({
 			id: "skillful",
 			name: "Skillful",
@@ -240,7 +240,7 @@ describe("contracts/agents", () => {
 		});
 		const errors = agentSpecPolicyErrors(spec);
 		strictEqual(errors.length, 1);
-		match(errors[0] ?? "", /declares skills but does not expose read_skill/);
+		match(errors[0] ?? "", /declares skills but does not expose context/);
 	});
 
 	it("keeps shipped built-in recipes aligned with their declared capability class", () => {

@@ -16,6 +16,12 @@ export interface RunTerminationEvidence {
 	exitCode: number | null;
 	/** Operator abort (SIGINT, /abort, batch cancel, drain). */
 	abortedByOperator: boolean;
+	/**
+	 * Cause detail when the abort was not an operator cancel (e.g. a dispatch
+	 * `timeout_ms` kill). Names the timeout on the receipt so it stays
+	 * distinguishable from an operator abort; the outcome remains `canceled`.
+	 */
+	abortDetail?: string | null;
 	/** The reconciler declared the worker dead (heartbeat) or stalled (ACP inactivity) and killed it. */
 	stallKilled: boolean;
 	/** Turn or run timeout was exceeded (ACP turn request timeout). */
@@ -44,7 +50,8 @@ export function resolveRunOutcome(evidence: RunTerminationEvidence): ResolvedOut
 		return { outcome: "stalled", detail: "no worker activity within the stall window" };
 	}
 	if (evidence.abortedByOperator || evidence.stopReason === "cancelled") {
-		return { outcome: "canceled", detail: evidence.abortedByOperator ? "operator abort" : "peer cancelled" };
+		const detail = evidence.abortedByOperator ? (evidence.abortDetail ?? "operator abort") : "peer cancelled";
+		return { outcome: "canceled", detail };
 	}
 	if (evidence.timedOut) {
 		return { outcome: "timed_out", detail: "turn timeout exceeded" };

@@ -20,9 +20,10 @@ import {
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/index.js";
+import { createArtifactTool } from "../../src/tools/artifact.js";
+import { createContextTool } from "../../src/tools/context/index.js";
 import { createSkillActivationObserver } from "../../src/tools/observers.js";
 import { createRegistry } from "../../src/tools/registry.js";
-import { createReadSkillTool, createSkillTool } from "../../src/tools/skills.js";
 
 const scratchRoots: string[] = [];
 
@@ -327,11 +328,11 @@ describe("contracts/skills compatibility roots", () => {
 });
 
 describe("contracts/skills on-demand listing", () => {
-	it("read_skill with no name lists model-visible skills without a pending request", async () => {
+	it("context scope=skills with no name lists model-visible skills without a pending request", async () => {
 		const project = scratchDir("clio-proj-");
 		writeSkillDir(join(project, ".clio", "skills"), "visible", ['name: "visible"', 'description: "Catalog entry."']);
-		const tool = createReadSkillTool({ getCwd: () => project });
-		const result = await tool.run({}, undefined);
+		const tool = createContextTool({ getCwd: () => project });
+		const result = await tool.run({ scope: "skills" }, undefined);
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(result.output.includes("- visible (project): Catalog entry."));
@@ -339,15 +340,15 @@ describe("contracts/skills on-demand listing", () => {
 		}
 	});
 
-	it("read_skill listing excludes disable-model-invocation skills", async () => {
+	it("context scope=skills listing excludes disable-model-invocation skills", async () => {
 		const project = scratchDir("clio-proj-");
 		writeSkillDir(join(project, ".clio", "skills"), "manual-only", [
 			'name: "manual-only"',
 			'description: "Only via slash command."',
 			"disable-model-invocation: true",
 		]);
-		const tool = createReadSkillTool({ getCwd: () => project });
-		const result = await tool.run({}, undefined);
+		const tool = createContextTool({ getCwd: () => project });
+		const result = await tool.run({ scope: "skills" }, undefined);
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			strictEqual(result.output.includes("manual-only"), false);
@@ -575,7 +576,7 @@ describe("contracts/skills tools", () => {
 		resetXdgCache();
 	});
 
-	it("read_skill returns structured metadata, hash, base_dir, and body", async () => {
+	it("context scope=skills returns structured metadata, hash, base_dir, and body", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
 			join(cwd, ".clio", "skills"),
@@ -583,8 +584,11 @@ describe("contracts/skills tools", () => {
 			['name: "readable"', 'description: "Readable skill."', 'license: "MIT"'],
 			"READ ME BODY",
 		);
-		const tool = createReadSkillTool({ getCwd: () => cwd });
-		const result = await tool.run({ name: "readable" }, { pendingSkillPolicy: pendingPolicy("readable") });
+		const tool = createContextTool({ getCwd: () => cwd });
+		const result = await tool.run(
+			{ scope: "skills", name: "readable" },
+			{ pendingSkillPolicy: pendingPolicy("readable") },
+		);
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		ok(result.output.includes("READ ME BODY"));
@@ -596,7 +600,7 @@ describe("contracts/skills tools", () => {
 		ok(String(details.baseDir).includes(".clio"));
 	});
 
-	it("read_skill pending policy rejects non-requested and repeated skill loads", async () => {
+	it("context skill loads honor the pending policy for non-requested and repeated loads", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
 			join(cwd, ".clio", "skills"),
@@ -611,33 +615,33 @@ describe("contracts/skills tools", () => {
 			"PRIME CONTEXT",
 		);
 		const policy = pendingPolicy("grill-me", "about adding science skills");
-		const tool = createReadSkillTool({ getCwd: () => cwd });
+		const tool = createContextTool({ getCwd: () => cwd });
 
-		const wrong = await tool.run({ name: "context-prime" }, { pendingSkillPolicy: policy });
+		const wrong = await tool.run({ scope: "skills", name: "context-prime" }, { pendingSkillPolicy: policy });
 		strictEqual(wrong.kind, "error");
 		if (wrong.kind === "error") {
 			strictEqual(
 				wrong.message,
-				"read_skill: this turn has pending skill request(s): grill-me. Load only those before doing anything else.",
+				"context: this turn has pending skill request(s): grill-me. Load only those before doing anything else.",
 			);
 		}
 
-		const first = await tool.run({ name: "grill-me" }, { pendingSkillPolicy: policy });
+		const first = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: policy });
 		strictEqual(first.kind, "ok");
 		ok(policy.loadedSkillNames.has("grill-me"));
 		ok(policy.loadedSkillPolicies.has("grill-me"));
 
-		const repeated = await tool.run({ name: "grill-me" }, { pendingSkillPolicy: policy });
+		const repeated = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: policy });
 		strictEqual(repeated.kind, "error");
 		if (repeated.kind === "error") {
 			strictEqual(
 				repeated.message,
-				"read_skill: pending skill grill-me already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.",
+				"context: pending skill grill-me already loaded this turn; continue with the loaded workflow and call ask_user if an interview/choice is needed.",
 			);
 		}
 	});
 
-	it("read_skill activation reaches the observer registration with turn metadata", async () => {
+	it("context skill activation reaches the observer registration with turn metadata", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
 			join(cwd, ".clio", "skills"),
@@ -658,10 +662,10 @@ describe("contracts/skills tools", () => {
 			registrations: [createSkillActivationObserver((activation) => activations.push(activation))],
 		});
 		const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
-		registry.register(createReadSkillTool({ getCwd: () => cwd }));
+		registry.register(createContextTool({ getCwd: () => cwd }));
 
 		const missing = await registry.invoke(
-			{ tool: ToolNames.ReadSkill, args: { name: "missing" } },
+			{ tool: ToolNames.Context, args: { scope: "skills", name: "missing" } },
 			{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("missing") },
 		);
 		strictEqual(missing.kind, "ok");
@@ -669,7 +673,7 @@ describe("contracts/skills tools", () => {
 		strictEqual(activations.length, 0);
 
 		const result = await registry.invoke(
-			{ tool: ToolNames.ReadSkill, args: { name: "readable" } },
+			{ tool: ToolNames.Context, args: { scope: "skills", name: "readable" } },
 			{ turnId: "turn-1", pendingSkillPolicy: pendingPolicy("readable") },
 		);
 		strictEqual(result.kind, "ok");
@@ -684,7 +688,7 @@ describe("contracts/skills tools", () => {
 		ok(activation.filePath.endsWith("SKILL.md"));
 	});
 
-	it("read_skill annotates marketplace provenance drift without blocking", async () => {
+	it("context skill loads annotate marketplace provenance drift without blocking", async () => {
 		const cwd = join(scratch, "project");
 		const skillPath = writeSkillDir(
 			join(cwd, ".clio", "skills"),
@@ -694,7 +698,7 @@ describe("contracts/skills tools", () => {
 		);
 		const manifestDir = join(cwd, "skills");
 		mkdirSync(manifestDir, { recursive: true });
-		const tool = createReadSkillTool({ getCwd: () => cwd });
+		const tool = createContextTool({ getCwd: () => cwd });
 		const skillHash = sha256(readFileSync(skillPath, "utf8"));
 
 		writeFileSync(
@@ -702,7 +706,10 @@ describe("contracts/skills tools", () => {
 			["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${skillHash}`, ""].join("\n"),
 			"utf8",
 		);
-		const matchResult = await tool.run({ name: "pinned" }, { pendingSkillPolicy: pendingPolicy("pinned") });
+		const matchResult = await tool.run(
+			{ scope: "skills", name: "pinned" },
+			{ pendingSkillPolicy: pendingPolicy("pinned") },
+		);
 		strictEqual(matchResult.kind, "ok");
 		if (matchResult.kind !== "ok") return;
 		strictEqual((matchResult.details as Record<string, unknown>).drift, "match");
@@ -713,20 +720,26 @@ describe("contracts/skills tools", () => {
 			["skills:", "  - name: pinned", "    version: 1.0.0", `    sha256: ${"b".repeat(64)}`, ""].join("\n"),
 			"utf8",
 		);
-		const mismatchResult = await tool.run({ name: "pinned" }, { pendingSkillPolicy: pendingPolicy("pinned") });
+		const mismatchResult = await tool.run(
+			{ scope: "skills", name: "pinned" },
+			{ pendingSkillPolicy: pendingPolicy("pinned") },
+		);
 		strictEqual(mismatchResult.kind, "ok");
 		if (mismatchResult.kind !== "ok") return;
 		strictEqual((mismatchResult.details as Record<string, unknown>).drift, "mismatch");
 		ok(mismatchResult.output.includes("WARNING skill_drift"));
 
 		rmSync(join(manifestDir, "registry.yaml"), { force: true });
-		const absentResult = await tool.run({ name: "pinned" }, { pendingSkillPolicy: pendingPolicy("pinned") });
+		const absentResult = await tool.run(
+			{ scope: "skills", name: "pinned" },
+			{ pendingSkillPolicy: pendingPolicy("pinned") },
+		);
 		strictEqual(absentResult.kind, "ok");
 		if (absentResult.kind !== "ok") return;
 		strictEqual((absentResult.details as Record<string, unknown>).drift, undefined);
 	});
 
-	it("read_skill include_tree lists sibling resources without executing them", async () => {
+	it("context skill include_tree lists sibling resources without executing them", async () => {
 		const cwd = join(scratch, "project");
 		const dir = join(cwd, ".clio", "skills", "with-tree");
 		mkdirSync(join(dir, "scripts"), { recursive: true });
@@ -737,9 +750,9 @@ describe("contracts/skills tools", () => {
 		);
 		writeFileSync(join(dir, "scripts", "run.sh"), "echo hi\n");
 		writeFileSync(join(dir, "references", "doc.md"), "# Doc\n");
-		const tool = createReadSkillTool({ getCwd: () => cwd });
+		const tool = createContextTool({ getCwd: () => cwd });
 		const result = await tool.run(
-			{ name: "with-tree", include_tree: true },
+			{ scope: "skills", name: "with-tree", include_tree: true },
 			{ pendingSkillPolicy: pendingPolicy("with-tree") },
 		);
 		strictEqual(result.kind, "ok");
@@ -749,26 +762,27 @@ describe("contracts/skills tools", () => {
 		ok(result.output.includes("references/doc.md"));
 	});
 
-	it("read_skill refuses skills hidden from model invocation", async () => {
+	it("context skill loads refuse skills hidden from model invocation", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(join(cwd, ".clio", "skills"), "hidden", [
 			'name: "hidden"',
 			'description: "Hidden skill."',
 			"disable-model-invocation: true",
 		]);
-		const tool = createReadSkillTool({ getCwd: () => cwd });
-		const result = await tool.run({ name: "hidden" }, { pendingSkillPolicy: pendingPolicy("hidden") });
+		const tool = createContextTool({ getCwd: () => cwd });
+		const result = await tool.run({ scope: "skills", name: "hidden" }, { pendingSkillPolicy: pendingPolicy("hidden") });
 		strictEqual(result.kind, "error");
 	});
 
-	it("create_skill writes a SKILL.md folder", async () => {
+	it("artifact kind=skill writes a SKILL.md folder", async () => {
 		const cwd = join(scratch, "project");
 		mkdirSync(cwd, { recursive: true });
-		const tool = createSkillTool({ getCwd: () => cwd });
+		const tool = createArtifactTool({ getCwd: () => cwd });
 		const result = await tool.run({
-			name: "made-skill",
+			kind: "skill",
+			title: "made-skill",
 			description: "A created skill.",
-			body: "# Steps\n\nDo work.",
+			content: "# Steps\n\nDo work.",
 		});
 		strictEqual(result.kind, "ok");
 		const file = join(cwd, ".clio", "skills", "made-skill", "SKILL.md");
@@ -779,29 +793,36 @@ describe("contracts/skills tools", () => {
 		ok(content.includes("Do work."));
 	});
 
-	it("create_skill refuses to overwrite without the overwrite flag", async () => {
+	it("artifact kind=skill refuses to overwrite without the overwrite flag", async () => {
 		const cwd = join(scratch, "project");
 		mkdirSync(cwd, { recursive: true });
-		const tool = createSkillTool({ getCwd: () => cwd });
-		const first = await tool.run({ name: "dup-skill", description: "First.", body: "One." });
+		const tool = createArtifactTool({ getCwd: () => cwd });
+		const first = await tool.run({ kind: "skill", title: "dup-skill", description: "First.", content: "One." });
 		strictEqual(first.kind, "ok");
-		const second = await tool.run({ name: "dup-skill", description: "Second.", body: "Two." });
+		const second = await tool.run({ kind: "skill", title: "dup-skill", description: "Second.", content: "Two." });
 		strictEqual(second.kind, "error");
-		const third = await tool.run({ name: "dup-skill", description: "Third.", body: "Three.", overwrite: true });
+		const third = await tool.run({
+			kind: "skill",
+			title: "dup-skill",
+			description: "Third.",
+			content: "Three.",
+			overwrite: true,
+		});
 		strictEqual(third.kind, "ok");
 		const file = join(cwd, ".clio", "skills", "dup-skill", "SKILL.md");
 		strictEqual(readFileSync(file, "utf8").includes("Three."), true);
 		strictEqual(readFileSync(`${file}.bak`, "utf8").includes("One."), true);
 	});
 
-	it("create_skill renders allowed-tools frontmatter that round-trips through the loader", async () => {
+	it("artifact kind=skill renders allowed-tools frontmatter that round-trips through the loader", async () => {
 		const cwd = join(scratch, "project");
 		mkdirSync(cwd, { recursive: true });
-		const tool = createSkillTool({ getCwd: () => cwd });
+		const tool = createArtifactTool({ getCwd: () => cwd });
 		const result = await tool.run({
-			name: "rich-skill",
+			kind: "skill",
+			title: "rich-skill",
 			description: "Rich frontmatter skill.",
-			body: "Body.",
+			content: "Body.",
 			allowed_tools: ["Read", "Edit"],
 		});
 		strictEqual(result.kind, "ok");
@@ -811,23 +832,25 @@ describe("contracts/skills tools", () => {
 		deepStrictEqual(skill.allowedTools, ["Read", "Edit"]);
 	});
 
-	it("create_skill renders validated requires frontmatter the loader diagnoses", async () => {
+	it("artifact kind=skill renders validated requires frontmatter the loader diagnoses", async () => {
 		const cwd = join(scratch, "project");
 		mkdirSync(cwd, { recursive: true });
-		const tool = createSkillTool({ getCwd: () => cwd });
+		const tool = createArtifactTool({ getCwd: () => cwd });
 		const invalid = await tool.run({
-			name: "needy-skill",
+			kind: "skill",
+			title: "needy-skill",
 			description: "Skill with dependencies.",
-			body: "Body.",
+			content: "Body.",
 			requires: ["skill:UPPER CASE"],
 		});
 		strictEqual(invalid.kind, "error");
 		if (invalid.kind === "error") ok(invalid.message.includes("invalid requires entry"));
 
 		const result = await tool.run({
-			name: "needy-skill",
+			kind: "skill",
+			title: "needy-skill",
 			description: "Skill with dependencies.",
-			body: "Body.",
+			content: "Body.",
 			// A bare name normalizes to skill:<name>; duplicates collapse.
 			requires: ["skill:arxiv-literature", "context-prime", "skill:arxiv-literature"],
 		});
@@ -846,35 +869,35 @@ describe("contracts/skills tools", () => {
 		strictEqual(warnings.length, 2);
 	});
 
-	it("read_skill with a recipe-bound policy admits exactly the declared skills", async () => {
+	it("context skill loads with a recipe-bound policy admit exactly the declared skills", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(join(cwd, ".clio", "skills"), "cut-it", ['name: "cut-it"', 'description: "Slice plans."'], "SLICE");
 		writeSkillDir(join(cwd, ".clio", "skills"), "other", ['name: "other"', 'description: "Other skill."'], "OTHER");
 		const policy = agentSkillToolPolicy(["cut-it"]);
 		ok(policy);
-		const tool = createReadSkillTool({ getCwd: () => cwd });
+		const tool = createContextTool({ getCwd: () => cwd });
 
-		const denied = await tool.run({ name: "other" }, { pendingSkillPolicy: policy });
+		const denied = await tool.run({ scope: "skills", name: "other" }, { pendingSkillPolicy: policy });
 		strictEqual(denied.kind, "error");
 		if (denied.kind === "error") {
-			strictEqual(denied.message, "read_skill: this agent run may load only its declared skill(s): cut-it.");
+			strictEqual(denied.message, "context: this agent run may load only its declared skill(s): cut-it.");
 		}
 
-		const loaded = await tool.run({ name: "cut-it" }, { pendingSkillPolicy: policy });
+		const loaded = await tool.run({ scope: "skills", name: "cut-it" }, { pendingSkillPolicy: policy });
 		strictEqual(loaded.kind, "ok");
 		if (loaded.kind === "ok") {
 			ok(loaded.output.includes("SLICE"));
 			strictEqual(loaded.output.includes("Pending skill request"), false);
 		}
 
-		const repeated = await tool.run({ name: "cut-it" }, { pendingSkillPolicy: policy });
+		const repeated = await tool.run({ scope: "skills", name: "cut-it" }, { pendingSkillPolicy: policy });
 		strictEqual(repeated.kind, "error");
 		if (repeated.kind === "error") {
-			strictEqual(repeated.message, "read_skill: skill cut-it is already loaded in this run; continue with its workflow.");
+			strictEqual(repeated.message, "context: skill cut-it is already loaded in this run; continue with its workflow.");
 		}
 	});
 
-	it("read_skill records the skill's declared tool policy on the pending policy", async () => {
+	it("context skill loads record the skill's declared tool policy on the pending policy", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(
 			join(cwd, ".clio", "skills"),
@@ -891,8 +914,8 @@ describe("contracts/skills tools", () => {
 			"NARROW BODY",
 		);
 		const policy = pendingPolicy("narrow");
-		const tool = createReadSkillTool({ getCwd: () => cwd });
-		const result = await tool.run({ name: "narrow" }, { pendingSkillPolicy: policy });
+		const tool = createContextTool({ getCwd: () => cwd });
+		const result = await tool.run({ scope: "skills", name: "narrow" }, { pendingSkillPolicy: policy });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const details = result.details as Record<string, unknown>;

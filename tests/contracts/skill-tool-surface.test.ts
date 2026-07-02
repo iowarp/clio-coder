@@ -15,8 +15,8 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { createContextTool } from "../../src/tools/context/index.js";
 import { createRegistry, type ToolResult, type ToolSpec } from "../../src/tools/registry.js";
-import { createReadSkillTool } from "../../src/tools/skills.js";
 
 function surfacePolicy(policies: Record<string, SkillDeclaredToolPolicy>): PendingSkillToolPolicy {
 	const names = Object.keys(policies);
@@ -43,9 +43,9 @@ describe("contracts/skill-tool-surface evaluator", () => {
 		strictEqual(evaluateSkillToolSurface(policy, "dispatch"), null);
 	});
 
-	it("always exempts read_skill and ask_user", () => {
+	it("always exempts context and ask_user", () => {
 		const policy = surfacePolicy({ narrow: { allowedTools: ["read"], disallowedTools: ["ask_user"] } });
-		strictEqual(evaluateSkillToolSurface(policy, "read_skill"), null);
+		strictEqual(evaluateSkillToolSurface(policy, "context"), null);
 		strictEqual(evaluateSkillToolSurface(policy, "ask_user"), null);
 	});
 
@@ -139,7 +139,7 @@ describe("contracts/skill-tool-surface registry enforcement", () => {
 		resetXdgCache();
 	});
 
-	it("blocks out-of-surface calls after read_skill loads a narrowing skill", async () => {
+	it("blocks out-of-surface calls after context loads a narrowing skill", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(join(cwd, ".clio", "skills"), "narrow", [
 			'name: "narrow"',
@@ -149,7 +149,7 @@ describe("contracts/skill-tool-surface registry enforcement", () => {
 		]);
 		const rows: ToolCallAuditInput[] = [];
 		const registry = createRegistry({ safety: auditingSafety(rows) });
-		registry.register(createReadSkillTool({ getCwd: () => cwd }));
+		registry.register(createContextTool({ getCwd: () => cwd }));
 		registry.register(mockSpec(ToolNames.Read, { kind: "ok", output: "read ok" }));
 		registry.register(mockSpec(ToolNames.Write, { kind: "ok", output: "wrote" }));
 		registry.register(mockSpec(ToolNames.AskUser, { kind: "ok", output: "asked" }));
@@ -168,7 +168,7 @@ describe("contracts/skill-tool-surface registry enforcement", () => {
 		const preWrite = await registry.invoke({ tool: ToolNames.Write, args: {} }, options);
 		strictEqual(preWrite.kind, "ok");
 
-		const load = await registry.invoke({ tool: ToolNames.ReadSkill, args: { name: "narrow" } }, options);
+		const load = await registry.invoke({ tool: ToolNames.Context, args: { scope: "skills", name: "narrow" } }, options);
 		strictEqual(load.kind, "ok");
 		if (load.kind === "ok") strictEqual(load.result.kind, "ok");
 		ok(policy.loadedSkillPolicies.has("narrow"));

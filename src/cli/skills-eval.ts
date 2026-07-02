@@ -331,7 +331,7 @@ async function runScenario(
 			});
 		}
 		// The judge also runs with --json: a model that ends the turn through a
-		// terminating tool (write_plan/write_review) prints nothing in text mode,
+		// terminating tool (artifact plan/review/report) prints nothing in text mode,
 		// while the event stream still carries the verdict content.
 		const judge = await captureHeadlessRun(
 			[
@@ -591,7 +591,7 @@ function parseRunStdout(stdout: string): { sessionId: string | null; transcript:
 			lines.push(`TOOL ${tool} args=${preview(args)}`);
 			// Terminating tools end the turn with no assistant text; their content
 			// IS the answer, so keep it whole (the judge verdict may live here).
-			if ((tool === "write_plan" || tool === "write_review") && isRecord(args) && typeof args.content === "string") {
+			if (tool === "artifact" && isRecord(args) && typeof args.content === "string") {
 				lines.push(`TERMINAL ${tool} content:\n${args.content}`);
 			}
 			continue;

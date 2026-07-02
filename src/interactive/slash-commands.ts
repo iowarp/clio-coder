@@ -53,6 +53,7 @@ export type SlashCommand =
 	| { kind: "tree" }
 	| { kind: "fork" }
 	| { kind: "compact"; instructions: string | undefined }
+	| { kind: "export"; path: string | undefined }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
 
@@ -201,6 +202,8 @@ export interface SlashCommandContext {
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown: () => void;
 	runInit: (options: InitCommandOptions) => void;
+	/** Write the current session transcript (all tool segments expanded, ANSI-stripped) to a Markdown file. */
+	exportTranscript: (path?: string) => void;
 	runContextClear: (options: ContextClearCommandOptions) => void;
 	openSkillsHub?: () => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
@@ -824,6 +827,21 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind !== "compact") return;
 			ctx.runCompact(command.instructions);
+		},
+	},
+	{
+		name: "export",
+		description: "Export the session transcript to Markdown",
+		kinds: ["export"],
+		args: {
+			positionals: [{ name: "path", required: false }],
+		},
+		fromArgs(parsed) {
+			return { kind: "export", path: parsed.positionals[0] };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "export") return;
+			ctx.exportTranscript(command.path);
 		},
 	},
 ];

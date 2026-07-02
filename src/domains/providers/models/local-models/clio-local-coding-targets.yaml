@@ -864,7 +864,7 @@
       "16gb": "Use this as the local 16GB emulation target. It keeps the output cap below the 32GB-class MoE defaults."
     runtimePreference:
       lmstudioNative: "Primary local laptop path. Verified through LM Studio /api/v1/models with 262144 loaded context, flash attention, GPU KV offload, and trained_for_tool_use."
-      openaiCompat: "Verified through the LM Studio gateway for read and write_plan tool calls; use when the native SDK produces thinking-only length stops or malformed tools."
+      openaiCompat: "Verified through the LM Studio gateway for read and artifact tool calls; use when the native SDK produces thinking-only length stops or malformed tools."
       anthropicCompat: "LM Studio's Anthropic Messages surface streams simple text with the server root URL as baseUrl; keep as a protocol fallback until tool and reasoning behavior are proven."
     thinking:
       mechanism: budget-tokens

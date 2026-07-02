@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
 	applyEditsToNormalizedContent,
 	detectLineEnding,
+	generateDiffString,
 	normalizeToLF,
 	restoreLineEndings,
 } from "../../src/tools/edit-diff.js";
@@ -196,5 +197,36 @@ describe("contracts/edit-diff matching", () => {
 				),
 			/overlap/,
 		);
+	});
+});
+
+describe("contracts/edit-diff size discipline", () => {
+	const HUGE = "A".repeat(21 * 1024 * 1024); // 21MB single line
+
+	it("caps a huge unchanged context line instead of embedding it in the diff", () => {
+		// A change adjacent to a 21MB unchanged line must not pull that whole line
+		// into details.diff as context (BUG-006: details larger than the file).
+		const oldContent = `large-needle-start\n${HUGE}\nlarge-needle-end`;
+		const newContent = `large-needle-start\n${HUGE}\nlarge-needle-edited`;
+		const { diff, firstChangedLine } = generateDiffString(oldContent, newContent);
+		ok(Buffer.byteLength(diff, "utf8") < 64 * 1024, `diff must be bounded, got ${Buffer.byteLength(diff, "utf8")} bytes`);
+		ok(!diff.includes(HUGE), "diff must not embed the full 21MB context line");
+		ok(diff.includes("large-needle-edited"), "diff still shows the actual change");
+		strictEqual(firstChangedLine, 3);
+	});
+
+	it("caps a huge changed line", () => {
+		const oldContent = `head\n${HUGE}\ntail`;
+		const newContent = `head\n${HUGE}B\ntail`;
+		const { diff } = generateDiffString(oldContent, newContent);
+		ok(Buffer.byteLength(diff, "utf8") < 64 * 1024, "diff for a huge changed line must be bounded");
+		ok(!diff.includes(HUGE), "diff must not embed the full huge changed line");
+	});
+
+	it("leaves ordinary diffs intact", () => {
+		const { diff } = generateDiffString("one\ntwo\nthree\n", "one\nTWO\nthree\n");
+		ok(diff.includes("two"), "removed line present");
+		ok(diff.includes("TWO"), "added line present");
+		ok(!diff.includes("more chars"), "no truncation marker on a small diff");
 	});
 });

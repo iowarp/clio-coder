@@ -54,7 +54,7 @@ export interface WorkerSpec {
 	middlewareSnapshot?: MiddlewareSnapshot;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
-	/** Skill names the agent recipe binds to this run; read_skill admits exactly these. */
+	/** Skill names the agent recipe binds to this run; context(scope=skills) admits exactly these. */
 	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 	/**

@@ -10,7 +10,7 @@ import {
 	type SkillUpdateReport,
 	updateSkills,
 } from "../domains/resources/index.js";
-import { createSkillTool } from "../tools/skills.js";
+import { createArtifactTool } from "../tools/artifact.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio skills <command>
@@ -325,11 +325,12 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				process.stderr.write("usage: clio skills create <name> [--user|--project]\n");
 				return 2;
 			}
-			const tool = createSkillTool({ getCwd: () => process.cwd() });
+			const tool = createArtifactTool({ getCwd: () => process.cwd() });
 			const result = await tool.run({
-				name,
+				kind: "skill",
+				title: name,
 				description: defaultDescription(name),
-				body: defaultBody(name),
+				content: defaultBody(name),
 				scope: parsed.scope ?? "project",
 			});
 			if (result.kind === "error") {

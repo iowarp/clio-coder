@@ -62,7 +62,7 @@ export interface WorkerRunInput {
 	signal?: AbortSignal;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
-	/** Recipe-bound skill names; read_skill admits exactly these for the run. */
+	/** Recipe-bound skill names; context(scope=skills) admits exactly these for the run. */
 	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 	/** Non-stall posture for permission-requiring tool calls; default "deny". */
@@ -198,7 +198,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// They have no operator to widen a missing tool, so the active surface is
 	// exactly the admitted set.
 	const agentSkillPolicy =
-		input.allowedTools.includes(ToolNames.ReadSkill) && input.noSkills !== true
+		input.allowedTools.includes(ToolNames.Context) && input.noSkills !== true
 			? agentSkillToolPolicy(input.agentSkills ?? [])
 			: undefined;
 	const activeWorkerTools = workerProviderSupportsTools(input) ? input.allowedTools : [];
