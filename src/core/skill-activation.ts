@@ -25,6 +25,55 @@ export interface PendingSkillToolPolicy {
 }
 
 /**
+ * Tools admitted regardless of any active skill narrowing: read_skill so the
+ * remaining requested skills of the same turn can still load, and ask_user as
+ * the escape hatch the block message points at when a workflow genuinely
+ * needs a tool its skill did not declare.
+ */
+export const SKILL_SURFACE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["read_skill", "ask_user"]);
+
+export interface SkillToolSurfaceViolation {
+	/** Every loaded skill that contributed a declaration to the merged surface. */
+	skills: ReadonlyArray<string>;
+	/** Merged allowed-tools union when allow-narrowing applies; null for a disallow hit. */
+	mergedAllowedTools: ReadonlyArray<string> | null;
+	/** Skills whose disallowed-tools name the tool directly. */
+	disallowedBy: ReadonlyArray<string>;
+}
+
+/**
+ * Evaluate a tool call against the tool surface declared by the skills loaded
+ * so far under `policy`. Narrowing only ever blocks; it never grants anything
+ * the safety net or autonomy mapping would refuse. Merge semantics:
+ *
+ * - Denials win: a tool named in any loaded skill's disallowed-tools is out.
+ * - Allow-narrowing applies only while every loaded skill declares
+ *   allowed-tools; the merged surface is their union. A loaded skill with no
+ *   allowed-tools keeps the full surface for its own workflow, so it lifts
+ *   the allow-narrowing (but not the denials) for the turn.
+ *
+ * Returns null when the call is inside the surface or no narrowing is active.
+ */
+export function evaluateSkillToolSurface(
+	policy: PendingSkillToolPolicy | undefined,
+	tool: string,
+): SkillToolSurfaceViolation | null {
+	if (!policy || policy.loadedSkillPolicies.size === 0) return null;
+	if (SKILL_SURFACE_EXEMPT_TOOLS.has(tool)) return null;
+	const entries = [...policy.loadedSkillPolicies.entries()];
+	const skills = entries.map(([name]) => name);
+	const disallowedBy = entries
+		.filter(([, declared]) => declared.disallowedTools?.includes(tool) === true)
+		.map(([name]) => name);
+	if (disallowedBy.length > 0) return { skills, mergedAllowedTools: null, disallowedBy };
+	const allowLists = entries.map(([, declared]) => declared.allowedTools);
+	if (allowLists.some((list) => list === undefined || list.length === 0)) return null;
+	const merged = [...new Set(allowLists.flatMap((list) => [...(list ?? [])]))];
+	if (merged.includes(tool)) return null;
+	return { skills, mergedAllowedTools: merged, disallowedBy: [] };
+}
+
+/**
  * Per-run skill policy for a dispatched worker whose agent recipe declares
  * skills. The worker may read_skill exactly these names; anything else gets
  * the same deterministic rejection an unrequested skill gets interactively.

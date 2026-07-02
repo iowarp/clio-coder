@@ -9,6 +9,18 @@ interfaces.
 
 ### Added
 
+- Skill `allowed-tools` / `disallowed-tools` declarations are now enforced at
+  tool admission instead of being prose. When `read_skill` loads a skill that
+  declares a tool surface, calls outside the merged surface are blocked (audit
+  reason code `skill_surface`) from activation to the end of the turn for the
+  main agent and to the end of the run for recipe workers, on the interactive,
+  headless `clio run`, and dispatch surfaces alike. Denials win across skills;
+  allow-narrowing is the union of declared lists and applies only while every
+  loaded skill declares one; `read_skill` and `ask_user` stay admitted as the
+  harness escape hatches. Narrowing never grants anything the safety net or
+  autonomy mapping would refuse. Semantics documented in docs/safety-model.md
+  ("Skill tool surface narrowing").
+
 - Two new marketplace skills port the LifeOS Science pack method onto Clio's
   evidence-first posture. `scientific-debugging` forces a one-sentence goal, at
   least three falsifiable hypotheses spanning distinct fault classes, cheapest
