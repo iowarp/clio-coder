@@ -9,6 +9,26 @@ interfaces.
 
 ### Added
 
+- Credential damage control closed three verified gaps. B1: Clio's own secret
+  store is zero-access by default; the `credentials.yaml` literal joins the
+  default deny-list and the expanded `<configDir>/credentials.yaml` path is
+  appended at policy construction (a repo file named `credentials.yaml`
+  becoming zero-access is intended). B2: bash reads of zero-access paths are
+  now blocked; argument tokens (quote-aware, tilde-expanded, `--flag=path`
+  and `VAR=path` forms included) are tested against `zeroAccessPaths`, so
+  `cat .env` or `less ~/.aws/credentials` blocks with reason code
+  `secret_path_bash` and a remediation naming the safe protocol, while the
+  exit-code-only presence form (`grep -q`/`grep -sq` with a `^NAME=` pattern)
+  still passes and `disableDefaultPathPolicy` remains the escape hatch. B3:
+  evidence bundles redact secret-shaped values (PEM blocks, AWS `AKIA` keys,
+  GitHub/Slack/Google/OpenAI-style tokens, JWTs, and generic
+  key/token/secret/password assignments) from envelopes, receipts including
+  delegation tool-call logs, tool-event previews, audit rows, and
+  `transcript.md` at build time, replacing each with `[redacted:<kind>]`;
+  the overview gains an additive `redactionCount` field so bundles are
+  truthful about their own filtering. Raw local session files are untouched;
+  the bundle is the export boundary.
+
 - Skill `allowed-tools` / `disallowed-tools` declarations are now enforced at
   tool admission instead of being prose. When `read_skill` loads a skill that
   declares a tool surface, calls outside the merged surface are blocked (audit
@@ -203,13 +223,12 @@ interfaces.
   skills arm the loader's unmet-dependency warning directly. The
   workflow-distiller Phase 3/5 wording and evals were updated to pass the
   entries instead of handing the user a manual line to add.
-- `ask_user` is now registered on every surface, including headless
-  `clio run` turns and ACP sessions, where no operator handler exists and the
-  tool answers immediately as a cancelled interview. Interview skills keep
-  their contract headless by falling back to their stated defaults instead of
-  silently losing the tool from the surface; the decision is also noted in
-  `clio run --help`. This makes the compiled tool surface identical across
-  surfaces, which shifts prompt-cache telemetry for headless runs once.
+- `ask_user` stays interactive-only by decision: it is a human interview tool
+  and headless `clio run` offers no operator to interview, so registering a
+  stub would misrepresent the surface. The absence is now documented in
+  `clio run --help` (permission asks are denied, ask_user is not registered,
+  interview skills fall back to their stated defaults; supply decisions in
+  the task prompt).
 - Dispatch no longer schedules retries for deterministic worker failures. A
   model-residency fit miss (the reconciler's will-not-fit verdict) fails the
   run immediately with the reason already carried in the receipt, instead of
