@@ -68,3 +68,45 @@ describe("chat-panel live thinking streaming", () => {
 		ok(!rendered.includes("thinking line 15"));
 	});
 });
+
+describe("chat-panel tool-body export rendering", () => {
+	function feedLargeGrep(panel: ReturnType<typeof createChatPanel>): void {
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "grep-1",
+			toolName: "grep",
+			args: { pattern: "e", path: "src" },
+		} as ChatLoopEvent);
+		const lines: string[] = [];
+		for (let i = 1; i <= 300; i += 1) lines.push(`many.txt:${i}: e match line ${String(i).padStart(4, "0")}`);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "grep-1",
+			toolName: "grep",
+			result: lines.join("\n"),
+			isError: false,
+		} as ChatLoopEvent);
+	}
+
+	it("bounded panel middle-elides a large expanded tool body (live-view default)", () => {
+		const panel = createChatPanel();
+		feedLargeGrep(panel);
+		const rendered = panel.render(100).join("\n");
+		// Middle-elision keeps the head and the tail and drops the middle, so a
+		// central row disappears while the first and last survive.
+		ok(rendered.includes("lines hidden"), "live view should middle-elide a >120-row body");
+		ok(rendered.includes("many.txt:1:"), "the head survives the elision");
+		ok(rendered.includes("many.txt:300:"), "the tail survives the elision");
+		ok(!rendered.includes("many.txt:150:"), "a central row is hidden by the middle-elision");
+	});
+
+	it("unboundedToolBodies renders the full expanded tool body with no middle-elision (for /export)", () => {
+		const panel = createChatPanel({ unboundedToolBodies: true });
+		feedLargeGrep(panel);
+		const rendered = panel.render(100).join("\n");
+		ok(!rendered.includes("lines hidden"), "export must not carry the UI middle-elision placeholder");
+		ok(rendered.includes("many.txt:1:"), "export must keep the head of the body");
+		ok(rendered.includes("many.txt:150:"), "export must keep the middle rows the live view elides");
+		ok(rendered.includes("many.txt:300:"), "export must keep the tail of the body");
+	});
+});

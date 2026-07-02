@@ -66,6 +66,25 @@ export interface ToolExecutionFinished {
 	resultSummary?: Record<string, unknown> | undefined;
 }
 
+export interface ToolBodyRenderOptions {
+	/**
+	 * Render the full tool result body with no middle-elision and no character
+	 * truncation. The live view keeps bodies bounded so a single tool cannot
+	 * flood the pane; `/export` sets this so the written transcript reproduces
+	 * the complete tool output the model actually received.
+	 */
+	unbounded?: boolean;
+}
+
+/** Row cap for a tool body: unbounded lifts both the row and char limits. */
+function resultRowLimit(opts: ToolBodyRenderOptions): number {
+	return opts.unbounded === true ? Number.POSITIVE_INFINITY : FULL_RESULT_ROW_LIMIT;
+}
+
+function resultCharLimit(opts: ToolBodyRenderOptions): number {
+	return opts.unbounded === true ? Number.POSITIVE_INFINITY : FULL_RESULT_PREVIEW_LIMIT;
+}
+
 // Counts UTF-16 code units; can split a surrogate pair on non-BMP input. Acceptable for ASCII paths/commands.
 function truncate(value: string, limit: number): string {
 	if (value.length <= limit) return value;
@@ -646,7 +665,13 @@ function asBashArgs(args: unknown): BashArgs | null {
  * was executed before the output. Failures use the same command and output
  * body while the caller selects the red rail and error status.
  */
-function renderBashResultBlock(args: BashArgs, result: unknown, width: number, isError: boolean): string[] {
+function renderBashResultBlock(
+	args: BashArgs,
+	result: unknown,
+	width: number,
+	isError: boolean,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const out: string[] = [];
 	const commandLine = `${cyanBold("$")} ${highlightBashCommand(stripShellWrapperForDisplay(args.command))}`;
 	out.push(...indentAndWrap(commandLine, width, isError));
@@ -655,18 +680,23 @@ function renderBashResultBlock(args: BashArgs, result: unknown, width: number, i
 		out.push(...indentAndWrap(dim("(no output)"), width, isError));
 		return out;
 	}
-	out.push(...renderOutputRows(resultText(unwrapped), width, isError, FULL_RESULT_ROW_LIMIT));
+	out.push(...renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts)));
 	return out;
 }
 
-function renderResultBlock(result: unknown, isError: boolean, width: number): string[] {
+function renderResultBlock(
+	result: unknown,
+	isError: boolean,
+	width: number,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
 		return indentAndWrap(dim("(no output)"), width, isError);
 	}
-	const structured = renderStructuredOutputRows(unwrapped, width, isError, FULL_RESULT_ROW_LIMIT);
+	const structured = renderStructuredOutputRows(unwrapped, width, isError, resultRowLimit(opts));
 	if (structured) return structured;
-	return renderOutputRows(resultText(unwrapped), width, isError, FULL_RESULT_ROW_LIMIT);
+	return renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts));
 }
 
 /**
@@ -732,7 +762,11 @@ export function renderToolSubline(
  * green check on success and a red cross on error so the user can scan tool
  * outcomes without reading the body.
  */
-export function renderToolExecution(finished: ToolExecutionFinished, width: number): string[] {
+export function renderToolExecution(
+	finished: ToolExecutionFinished,
+	width: number,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
@@ -761,7 +795,7 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 	if (finished.toolName === "bash") {
 		const bashArgs = asBashArgs(finished.args);
 		if (bashArgs !== null) {
-			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError));
+			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError, opts));
 			return out;
 		}
 	}
@@ -774,7 +808,7 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 	if (capturedPrimaryArg(finished.toolName, finished.args) === null) {
 		out.push(...renderArgsBody(finished.args, width, finished.isError));
 	}
-	out.push(...renderResultBlock(finished.result, finished.isError, width));
+	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	return out;
 }
 
@@ -783,7 +817,11 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
  * matching prior tool-call entry (orphan results in the session log).
  * Identical to `renderToolExecution` minus the args body.
  */
-export function renderToolResultOnly(finished: Omit<ToolExecutionFinished, "args">, width: number): string[] {
+export function renderToolResultOnly(
+	finished: Omit<ToolExecutionFinished, "args">,
+	width: number,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
@@ -791,7 +829,7 @@ export function renderToolResultOnly(finished: Omit<ToolExecutionFinished, "args
 	};
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, undefined, status, statusMeta), width));
-	out.push(...renderResultBlock(finished.result, finished.isError, width));
+	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	return out;
 }
 

@@ -137,6 +137,13 @@ export interface ChatPanelOptions {
 	getToolExpandKey?: () => string | undefined;
 	/** Clock injection for deterministic duration tests. Defaults to Date.now. */
 	now?: () => number;
+	/**
+	 * Render every expanded tool body in full, without the live view's
+	 * middle-elision or character truncation. `/export` builds a throwaway panel
+	 * with this set so the written transcript reproduces the complete tool output
+	 * instead of the terminal's bounded view.
+	 */
+	unboundedToolBodies?: boolean;
 }
 
 function extractAssistantText(message: unknown): string {
@@ -294,6 +301,7 @@ function renderToolSegmentLines(
 	expandKey: string | undefined,
 	latestHintToolId: string | null,
 	nowMs: number,
+	unboundedToolBodies: boolean,
 ): string[] {
 	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
 	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, nowMs - seg.startedAtMs) : undefined;
@@ -335,6 +343,7 @@ function renderToolSegmentLines(
 			resultSummary: seg.resultSummary,
 		},
 		width,
+		{ unbounded: unboundedToolBodies },
 	);
 }
 
@@ -344,6 +353,7 @@ function renderEntryLines(
 	expandKey: string | undefined,
 	latestHintToolId: string | null,
 	nowMs: number,
+	unboundedToolBodies: boolean,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width);
@@ -380,7 +390,7 @@ function renderEntryLines(
 			}
 			continue;
 		}
-		lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId, nowMs));
+		lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId, nowMs, unboundedToolBodies));
 	}
 	const shouldRenderStatus =
 		entry.pending &&
@@ -406,6 +416,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let cachedLines: string[] = [];
 	let cachedExpandKey: string | undefined;
 	let thinkingExpanded = false;
+	const unboundedToolBodies = options.unboundedToolBodies === true;
 
 	const markDirty = (): void => {
 		dirty = true;
@@ -488,7 +499,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (i > 0) out.push("");
-			out.push(...renderEntryLines(entry, width, expandKey, latestHintToolId, nowMs));
+			out.push(...renderEntryLines(entry, width, expandKey, latestHintToolId, nowMs, unboundedToolBodies));
 		}
 		cachedLines = out;
 		cachedWidth = width;

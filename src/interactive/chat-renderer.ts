@@ -112,6 +112,13 @@ export interface RehydrateChatPanelOptions {
 	 * pre-fork transcript. Unset (default) replays the entire list.
 	 */
 	uptoTurnId?: string;
+	/**
+	 * Render orphan tool results (results with no matching prior call) in full,
+	 * without the live view's middle-elision. `/export` sets this so its
+	 * throwaway panel writes complete tool bodies; the paired-result path reads
+	 * the same intent from the panel's `unboundedToolBodies` option.
+	 */
+	unboundedToolBodies?: boolean;
 }
 
 function extractTurnText(payload: unknown): string {
@@ -838,6 +845,7 @@ export function rehydrateChatPanelFromTurns(
 									...(result.resultSummary !== undefined ? { resultSummary: result.resultSummary } : {}),
 								},
 								width,
+								{ unbounded: options.unboundedToolBodies === true },
 							),
 						);
 					}
