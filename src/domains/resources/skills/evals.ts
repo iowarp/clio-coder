@@ -26,7 +26,9 @@ export interface SkillEvalParseResult {
 }
 
 // Tolerates ASCII dash/colon and the en/em dashes older evals.md files used.
-const SCENARIO_HEADING = /^##\s+S(\d+)\s*[-:–—]\s*(.+?)\s*$/;
+// The canonical prefix is S ("## S1 - title"); discipline skills use other
+// letters (clio-dev's D1), so any single capital letter is accepted.
+const SCENARIO_HEADING = /^##\s+([A-Z])(\d+)\s*[-:–—]\s*(.+?)\s*$/;
 
 export function parseSkillEvals(markdown: string): SkillEvalParseResult {
 	const lines = markdown.split("\n");
@@ -43,12 +45,12 @@ export function parseSkillEvals(markdown: string): SkillEvalParseResult {
 		let blockEnd = blockStart;
 		while (blockEnd < lines.length && !/^##\s+/.test(lines[blockEnd] ?? "")) blockEnd += 1;
 		const block = lines.slice(blockStart, blockEnd);
-		const number = Number.parseInt(heading[1] ?? "", 10);
-		const id = `S${number}`;
-		const title = heading[2] ?? "";
+		const number = Number.parseInt(heading[2] ?? "", 10);
+		const id = `${heading[1] ?? "S"}${number}`;
+		const title = heading[3] ?? "";
 		const setup = extractSetup(block);
 		const expected = extractExpected(block);
-		if (setup === null) diagnostics.push(`${id} (${title}): no "Setup:" paragraph found; scenario skipped`);
+		if (setup === null) diagnostics.push(`${id} (${title}): no "Setup:" or "Prompt:" paragraph found; scenario skipped`);
 		else if (expected.length === 0) diagnostics.push(`${id} (${title}): no "Expected:" bullets found; scenario skipped`);
 		else scenarios.push({ id, number, title, setup, expected });
 		index = blockEnd;
@@ -56,11 +58,19 @@ export function parseSkillEvals(markdown: string): SkillEvalParseResult {
 	return { scenarios, diagnostics };
 }
 
-/** Join the paragraph starting at the first `Setup:` line, stripping the label. */
+/**
+ * Join the paragraph starting at the first `Setup:` line, stripping the
+ * label. Scenario blocks that open with a bare `Prompt:` paragraph (no
+ * Setup line) fall back to that paragraph.
+ */
 function extractSetup(block: ReadonlyArray<string>): string | null {
+	return extractLabeledParagraph(block, /^Setup:\s*(.*)$/i) ?? extractLabeledParagraph(block, /^(Prompt:.*)$/i);
+}
+
+function extractLabeledParagraph(block: ReadonlyArray<string>, label: RegExp): string | null {
 	for (let i = 0; i < block.length; i += 1) {
 		const line = block[i] ?? "";
-		const match = /^Setup:\s*(.*)$/i.exec(line.trim());
+		const match = label.exec(line.trim());
 		if (match === null) continue;
 		const parts: string[] = [];
 		if ((match[1] ?? "").length > 0) parts.push(match[1] ?? "");
