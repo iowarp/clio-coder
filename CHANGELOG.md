@@ -53,6 +53,16 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
+- **`/context` command hub.** One command now owns both context nouns.
+  `/context` with no arguments opens the context-window ledger overlay
+  (previously `/context-view`); `/context compact [instructions]` replaces
+  `/compact`; `/context init [flags]` replaces `/context-init` with the same
+  flags; `/context refresh` re-indexes the codewiki and restamps the CLIO.md
+  fingerprint footer; `/context reset [--all] [--confirm] [--confirm-all]`
+  replaces `/context-clear` and its confirm prompt now names the exact paths
+  deleted and states that CLIO.md is preserved without `--all`. The old
+  spellings still parse for one release, hidden from help and autocomplete,
+  and print a one-line deprecation notice. Session reset stays `/new`.
 - **Ignore coherence.** grep and find answer "which parts of the tree are
   visible" from one shared policy: `.gitignore` is honored natively by rg/fd,
   `.clio`/`.fallow`/`.git` are always excluded, one generated-dirs list

@@ -239,10 +239,12 @@ export interface InteractiveDeps {
 	 * engine, and persists a compactionSummary entry.
 	 */
 	onCompact?: (instructions: string | undefined) => Promise<void>;
-	/** Run /context-init for the current working directory. */
+	/** Run /context init for the current working directory. */
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
-	/** Run /context-clear for the current working directory. */
+	/** Run /context reset for the current working directory. */
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
+	/** Run /context refresh: re-index codewiki and restamp the CLIO.md fingerprint footer. */
+	onContextRefresh?: () => Promise<void>;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
 	/** Advance the orchestrator target one step backward through `provider.scope`. */
@@ -1526,11 +1528,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		runInit: (options) => {
 			const onInit = deps.onInit;
 			if (!onInit) {
-				io.stderr("[/context-init] context-init not wired; pass onInit to startInteractive\n");
+				io.stderr("[/context init] context init not wired; pass onInit to startInteractive\n");
 				return;
 			}
 			if (activeContextInit) {
-				io.stderr("[/context-init] bootstrap already running\n");
+				io.stderr("[/context init] bootstrap already running\n");
 				return;
 			}
 			activeContextInit = true;
@@ -1542,7 +1544,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				})
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/context-init] ${msg}\n`);
+					io.stderr(`[/context init] ${msg}\n`);
 				})
 				.finally(() => {
 					activeContextInit = false;
@@ -1551,19 +1553,35 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		},
 		runContextClear: (options) => {
 			if (!deps.onContextClear) {
-				io.stderr("[/context-clear] context clear not wired; pass onContextClear to startInteractive\n");
+				io.stderr("[/context reset] context reset not wired; pass onContextClear to startInteractive\n");
 				return;
 			}
 			if (options.confirmed !== true) {
-				const suffix = options.all === true ? " --all --confirm --confirm-all" : " --confirm";
-				io.stdout(`[/context-clear] rerun /context-clear${suffix} to remove accumulated context artifacts.\n`);
+				const line =
+					options.all === true
+						? "[/context reset] will delete .clio/codewiki.json, .clio/state.json, .clio/handoffs/, .clio/proposals/, and CLIO.md. Rerun /context reset --all --confirm --confirm-all to proceed.\n"
+						: "[/context reset] will delete .clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/; CLIO.md is preserved. Rerun /context reset --confirm to proceed.\n";
+				io.stdout(line);
 				return;
 			}
 			void deps
 				.onContextClear(options)
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/context-clear] ${msg}\n`);
+					io.stderr(`[/context reset] ${msg}\n`);
+				})
+				.finally(() => tui.requestRender());
+		},
+		runContextRefresh: () => {
+			if (!deps.onContextRefresh) {
+				io.stderr("[/context refresh] context refresh not wired; pass onContextRefresh to startInteractive\n");
+				return;
+			}
+			void deps
+				.onContextRefresh()
+				.catch((err) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					io.stderr(`[/context refresh] ${msg}\n`);
 				})
 				.finally(() => tui.requestRender());
 		},

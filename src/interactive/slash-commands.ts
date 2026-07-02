@@ -11,7 +11,7 @@ import { parseSkillCommand } from "../domains/resources/index.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES, type ToolProfileName } from "../tools/profiles.js";
 import type { NoticeLevel } from "./command-output.js";
-import type { CommandArgsSpec, ParsedArgs } from "./slash-spec.js";
+import type { CommandArgsSpec, CommandFlagSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
 
 /**
@@ -21,11 +21,22 @@ import { matchFromSpec, usageLine } from "./slash-spec.js";
  * rather than extending two parallel switches.
  */
 
-export type SlashCommand =
+/**
+ * Present when the command was typed through a deprecated spelling. The
+ * dispatcher emits one notice pointing at the replacement before routing.
+ * Both fields omit the leading slash.
+ */
+export interface SlashDeprecation {
+	from: string;
+	to: string;
+}
+
+type SlashCommandVariant =
 	| { kind: "quit" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
+	| { kind: "context-refresh" }
 	| { kind: "skill-selector" }
 	| { kind: "skill-invocation"; text: string }
 	| { kind: "prompts" }
@@ -56,6 +67,8 @@ export type SlashCommand =
 	| { kind: "export"; path: string | undefined }
 	| { kind: "unknown"; text: string }
 	| { kind: "empty" };
+
+export type SlashCommand = SlashCommandVariant & { deprecation?: SlashDeprecation };
 
 export type SlashCommandKind = SlashCommand["kind"];
 
@@ -205,6 +218,11 @@ export interface SlashCommandContext {
 	/** Write the current session transcript (all tool segments expanded, ANSI-stripped) to a Markdown file. */
 	exportTranscript: (path?: string) => void;
 	runContextClear: (options: ContextClearCommandOptions) => void;
+	/**
+	 * Re-index the codewiki and restamp the CLIO.md fingerprint footer without
+	 * touching handbook prose. Optional until the host wires onContextRefresh.
+	 */
+	runContextRefresh?: () => void;
 	openSkillsHub?: () => void;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
@@ -271,6 +289,11 @@ export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
 	aliases?: ReadonlyArray<string>;
+	/**
+	 * Excluded from /help, autocomplete, and the docs command table. Used for
+	 * deprecated spellings kept parseable for one release.
+	 */
+	hidden?: boolean;
 	args?: CommandArgsSpec;
 	/** The set of SlashCommand kinds this entry is responsible for dispatching. */
 	kinds: ReadonlyArray<SlashCommandKind>;
@@ -285,6 +308,47 @@ const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", 
 
 function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 	return RUN_THINKING_LEVELS.some((level) => level === value);
+}
+
+/** Flag set shared by `/context init` and the deprecated `/context-init`. */
+const CONTEXT_INIT_FLAGS: ReadonlyArray<CommandFlagSpec> = [
+	{ name: "--preview" },
+	{ name: "--adopt" },
+	{ name: "--apply", aliases: ["--rewrite"] },
+	{ name: "--propose" },
+	{ name: "--global", aliases: ["--include-global"] },
+	{ name: "--heuristic", aliases: ["--no-generate"] },
+];
+
+/** Flag set shared by `/context reset` and the deprecated `/context-clear`. */
+const CONTEXT_RESET_FLAGS: ReadonlyArray<CommandFlagSpec> = [
+	{ name: "--all" },
+	{ name: "--confirm" },
+	{ name: "--confirm-all" },
+];
+
+/** Positional shape shared by `/context compact` and the deprecated `/compact`. */
+const COMPACT_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [
+	{ name: "instructions", required: false, rest: true },
+];
+
+function initOptionsFromParsed(parsed: ParsedArgs): InitCommandOptions {
+	const options: InitCommandOptions = {};
+	if (parsed.flags.has("--preview")) options.preview = true;
+	if (parsed.flags.has("--adopt")) options.adopt = true;
+	if (parsed.flags.has("--apply")) options.applyClioMd = true;
+	if (parsed.flags.has("--propose")) options.proposeClioMd = true;
+	if (parsed.flags.has("--global")) options.includeGlobalImports = true;
+	if (parsed.flags.has("--heuristic")) options.heuristic = true;
+	return options;
+}
+
+function contextClearOptionsFromParsed(parsed: ParsedArgs): ContextClearCommandOptions {
+	const options: ContextClearCommandOptions = {};
+	if (parsed.flags.has("--all")) options.all = true;
+	if (parsed.flags.has("--confirm")) options.confirmed = true;
+	if (parsed.flags.has("--confirm-all")) options.confirmedAll = true;
+	return options;
 }
 
 function fromArgsOrUnknown(command: SlashCommand): (parsed: ParsedArgs, trimmed: string) => SlashCommand {
@@ -318,56 +382,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			ctx.openHelp(command.kind === "help" ? command.query : undefined);
-		},
-	},
-	{
-		name: "context-init",
-		description: "Explore the repo and bootstrap project context: CLIO.md and codewiki",
-		kinds: ["init"],
-		args: {
-			flags: [
-				{ name: "--preview" },
-				{ name: "--adopt" },
-				{ name: "--apply", aliases: ["--rewrite"] },
-				{ name: "--propose" },
-				{ name: "--global", aliases: ["--include-global"] },
-				{ name: "--heuristic", aliases: ["--no-generate"] },
-			],
-		},
-		fromArgs(parsed, trimmed) {
-			if (parsed.error) return { kind: "unknown", text: trimmed };
-			const options: InitCommandOptions = {};
-			if (parsed.flags.has("--preview")) options.preview = true;
-			if (parsed.flags.has("--adopt")) options.adopt = true;
-			if (parsed.flags.has("--apply")) options.applyClioMd = true;
-			if (parsed.flags.has("--propose")) options.proposeClioMd = true;
-			if (parsed.flags.has("--global")) options.includeGlobalImports = true;
-			if (parsed.flags.has("--heuristic")) options.heuristic = true;
-			return { kind: "init", options };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "init") return;
-			ctx.runInit(command.options);
-		},
-	},
-	{
-		name: "context-clear",
-		description: "Clear accumulated project context artifacts",
-		kinds: ["context-clear"],
-		args: {
-			flags: [{ name: "--all" }, { name: "--confirm" }, { name: "--confirm-all" }],
-		},
-		fromArgs(parsed, trimmed) {
-			if (parsed.error) return { kind: "unknown", text: trimmed };
-			const options: ContextClearCommandOptions = {};
-			if (parsed.flags.has("--all")) options.all = true;
-			if (parsed.flags.has("--confirm")) options.confirmed = true;
-			if (parsed.flags.has("--confirm-all")) options.confirmedAll = true;
-			return { kind: "context-clear", options };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "context-clear") return;
-			ctx.runContextClear(command.options);
 		},
 	},
 	{
@@ -641,14 +655,57 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "context-view",
-		description: "Visualize the active context window and its breakdown",
-		aliases: ["context", "ctx"],
-		kinds: ["context-view"],
-		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "context-view" }),
-		handle(_command, ctx) {
-			ctx.openContextView();
+		name: "context",
+		description: "Context hub: window overlay plus compact, init, refresh, and reset",
+		aliases: ["ctx"],
+		kinds: ["context-view", "compact", "init", "context-clear", "context-refresh"],
+		args: {
+			subcommands: {
+				compact: { positionals: [...COMPACT_POSITIONALS] },
+				init: { flags: CONTEXT_INIT_FLAGS },
+				refresh: {},
+				reset: { flags: CONTEXT_RESET_FLAGS },
+			},
+		},
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return { kind: "unknown", text: trimmed };
+			switch (parsed.subcommand) {
+				case "compact":
+					return { kind: "compact", instructions: parsed.rest };
+				case "init":
+					return { kind: "init", options: initOptionsFromParsed(parsed) };
+				case "refresh":
+					return { kind: "context-refresh" };
+				case "reset":
+					return { kind: "context-clear", options: contextClearOptionsFromParsed(parsed) };
+				default:
+					return { kind: "context-view" };
+			}
+		},
+		handle(command, ctx) {
+			switch (command.kind) {
+				case "context-view":
+					ctx.openContextView();
+					return;
+				case "compact":
+					ctx.runCompact(command.instructions);
+					return;
+				case "init":
+					ctx.runInit(command.options);
+					return;
+				case "context-clear":
+					ctx.runContextClear(command.options);
+					return;
+				case "context-refresh":
+					if (ctx.runContextRefresh) {
+						ctx.runContextRefresh();
+					} else {
+						ctx.notice("error", "context refresh is not wired; pass onContextRefresh to startInteractive");
+					}
+					return;
+				default:
+					return;
+			}
 		},
 	},
 	{
@@ -814,22 +871,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "compact",
-		description: "Compact earlier context",
-		kinds: ["compact"],
-		args: {
-			positionals: [{ name: "instructions", required: false, rest: true }],
-		},
-		fromArgs(parsed) {
-			const instructions = parsed.positionals[0];
-			return { kind: "compact", instructions };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "compact") return;
-			ctx.runCompact(command.instructions);
-		},
-	},
-	{
 		name: "export",
 		description: "Export the session transcript to Markdown",
 		kinds: ["export"],
@@ -843,6 +884,71 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "export") return;
 			ctx.exportTranscript(command.path);
 		},
+	},
+	// Deprecated spellings: hidden from /help, autocomplete, and docs. They
+	// parse exactly like their /context replacements, own no kinds (the hub
+	// entry handles dispatch), and stamp a deprecation notice on the parse.
+	// Scheduled for removal one release after the /context hub ships.
+	{
+		name: "compact",
+		description: "Deprecated spelling of /context compact",
+		hidden: true,
+		kinds: [],
+		args: {
+			positionals: [...COMPACT_POSITIONALS],
+		},
+		fromArgs(parsed) {
+			return {
+				kind: "compact",
+				instructions: parsed.rest,
+				deprecation: { from: "compact", to: "context compact" },
+			};
+		},
+		handle() {},
+	},
+	{
+		name: "context-init",
+		description: "Deprecated spelling of /context init",
+		hidden: true,
+		kinds: [],
+		args: { flags: CONTEXT_INIT_FLAGS },
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return { kind: "unknown", text: trimmed };
+			return {
+				kind: "init",
+				options: initOptionsFromParsed(parsed),
+				deprecation: { from: "context-init", to: "context init" },
+			};
+		},
+		handle() {},
+	},
+	{
+		name: "context-clear",
+		description: "Deprecated spelling of /context reset",
+		hidden: true,
+		kinds: [],
+		args: { flags: CONTEXT_RESET_FLAGS },
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return { kind: "unknown", text: trimmed };
+			return {
+				kind: "context-clear",
+				options: contextClearOptionsFromParsed(parsed),
+				deprecation: { from: "context-clear", to: "context reset" },
+			};
+		},
+		handle() {},
+	},
+	{
+		name: "context-view",
+		description: "Deprecated spelling of /context",
+		hidden: true,
+		kinds: [],
+		args: {},
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return { kind: "unknown", text: trimmed };
+			return { kind: "context-view", deprecation: { from: "context-view", to: "context" } };
+		},
+		handle() {},
 	},
 ];
 
@@ -886,6 +992,9 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		ctx.submitChat(command.text);
 		return;
 	}
+	if (command.deprecation) {
+		ctx.notice("info", `/${command.deprecation.from} is deprecated; use /${command.deprecation.to}`);
+	}
 	const entry = HANDLER_BY_KIND.get(command.kind);
 	if (!entry) return;
 	entry.handle(command, ctx);
@@ -899,7 +1008,7 @@ export interface CommandReferenceEntry {
 }
 
 export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
-	return BUILTIN_SLASH_COMMANDS.map((entry) => {
+	return BUILTIN_SLASH_COMMANDS.filter((entry) => entry.hidden !== true).map((entry) => {
 		const usage = usageLine(entry)
 			.replace(/^\nusage:\s*/, "")
 			.replace(/\n$/, "");

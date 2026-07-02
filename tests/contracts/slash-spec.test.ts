@@ -128,26 +128,43 @@ describe("contracts/slash-spec", () => {
 			["/help foo", { kind: "help", query: "foo" }],
 			["/help foo bar", { kind: "help", query: "foo bar" }],
 
-			// context-init
-			["/context-init", { kind: "init", options: {} }],
-			["/context-init --preview", { kind: "init", options: { preview: true } }],
-			["/context-init --adopt", { kind: "init", options: { adopt: true } }],
-			["/context-init --apply", { kind: "init", options: { applyClioMd: true } }],
-			["/context-init --rewrite", { kind: "init", options: { applyClioMd: true } }],
-			["/context-init --propose", { kind: "init", options: { proposeClioMd: true } }],
-			["/context-init --global", { kind: "init", options: { includeGlobalImports: true } }],
-			["/context-init --include-global", { kind: "init", options: { includeGlobalImports: true } }],
-			["/context-init --heuristic", { kind: "init", options: { heuristic: true } }],
-			["/context-init --no-generate", { kind: "init", options: { heuristic: true } }],
-			["/context-init --preview --adopt", { kind: "init", options: { preview: true, adopt: true } }],
+			// context init (hub) and the deprecated /context-init spelling
+			["/context init", { kind: "init", options: {} }],
+			["/context init --preview", { kind: "init", options: { preview: true } }],
+			["/context init --adopt", { kind: "init", options: { adopt: true } }],
+			["/context init --apply", { kind: "init", options: { applyClioMd: true } }],
+			["/context init --rewrite", { kind: "init", options: { applyClioMd: true } }],
+			["/context init --propose", { kind: "init", options: { proposeClioMd: true } }],
+			["/context init --global", { kind: "init", options: { includeGlobalImports: true } }],
+			["/context init --include-global", { kind: "init", options: { includeGlobalImports: true } }],
+			["/context init --heuristic", { kind: "init", options: { heuristic: true } }],
+			["/context init --no-generate", { kind: "init", options: { heuristic: true } }],
+			["/context init --preview --adopt", { kind: "init", options: { preview: true, adopt: true } }],
+			["/context init --invalid", { kind: "unknown", text: "/context init --invalid" }],
+			[
+				"/context-init --preview",
+				{ kind: "init", options: { preview: true }, deprecation: { from: "context-init", to: "context init" } },
+			],
 			["/context-init --invalid", { kind: "unknown", text: "/context-init --invalid" }],
 
-			// context-clear
-			["/context-clear", { kind: "context-clear", options: {} }],
-			["/context-clear --all", { kind: "context-clear", options: { all: true } }],
-			["/context-clear --confirm", { kind: "context-clear", options: { confirmed: true } }],
-			["/context-clear --confirm-all", { kind: "context-clear", options: { confirmedAll: true } }],
+			// context reset (hub) and the deprecated /context-clear spelling
+			["/context reset", { kind: "context-clear", options: {} }],
+			["/context reset --all", { kind: "context-clear", options: { all: true } }],
+			["/context reset --confirm", { kind: "context-clear", options: { confirmed: true } }],
+			["/context reset --confirm-all", { kind: "context-clear", options: { confirmedAll: true } }],
+			["/context reset --invalid", { kind: "unknown", text: "/context reset --invalid" }],
+			[
+				"/context-clear --all",
+				{ kind: "context-clear", options: { all: true }, deprecation: { from: "context-clear", to: "context reset" } },
+			],
 			["/context-clear --invalid", { kind: "unknown", text: "/context-clear --invalid" }],
+
+			// context refresh (hub)
+			["/context refresh", { kind: "context-refresh" }],
+			["/context refresh extra", { kind: "unknown", text: "/context refresh extra" }],
+
+			// session reset stays /new; there is deliberately no /context clear subcommand
+			["/context clear", { kind: "unknown", text: "/context clear" }],
 
 			// skill selector and invocation forms
 			["/skill", { kind: "skill-selector" }],
@@ -276,15 +293,23 @@ describe("contracts/slash-spec", () => {
 			["/model provider/model:high:extra", { kind: "model-set", pattern: "provider/model:high:extra" }],
 			["/models pattern:thinking", { kind: "model-set", pattern: "pattern:thinking" }],
 
-			// compact
-			["/compact", { kind: "compact", instructions: undefined }],
-			["/compact    ", { kind: "compact", instructions: undefined }],
-			["/compact my instructions", { kind: "compact", instructions: "my instructions" }],
+			// context compact (hub) and the deprecated /compact spelling
+			["/context compact", { kind: "compact", instructions: undefined }],
+			["/context compact my instructions", { kind: "compact", instructions: "my instructions" }],
+			["/compact", { kind: "compact", instructions: undefined, deprecation: { from: "compact", to: "context compact" } }],
+			[
+				"/compact    ",
+				{ kind: "compact", instructions: undefined, deprecation: { from: "compact", to: "context compact" } },
+			],
+			[
+				"/compact my instructions",
+				{ kind: "compact", instructions: "my instructions", deprecation: { from: "compact", to: "context compact" } },
+			],
 
-			// context-view & aliases
-			["/context-view", { kind: "context-view" }],
+			// context overlay (hub, no args) and the deprecated /context-view spelling
 			["/context", { kind: "context-view" }],
 			["/ctx", { kind: "context-view" }],
+			["/context-view", { kind: "context-view", deprecation: { from: "context-view", to: "context" } }],
 
 			// status (deleted) -> falls through to unknown
 			["/status", { kind: "unknown", text: "/status" }],
@@ -360,12 +385,10 @@ describe("contracts/slash-spec", () => {
 		}
 	});
 
-	it("locks the v0.2.3 post-sprint command registry", () => {
-		const expected = [
+	it("locks the v0.2.8 post-context-hub command registry", () => {
+		const visible = [
 			"quit",
 			"help",
-			"context-init",
-			"context-clear",
 			"skill",
 			"prompts",
 			"extensions",
@@ -375,7 +398,7 @@ describe("contracts/slash-spec", () => {
 			"agents",
 			"targets",
 			"cost",
-			"context-view",
+			"context",
 			"fleet",
 			"view",
 			"thinking",
@@ -386,20 +409,46 @@ describe("contracts/slash-spec", () => {
 			"new",
 			"tree",
 			"fork",
-			"compact",
 			"export",
 		];
+		const deprecatedHidden = ["compact", "context-init", "context-clear", "context-view"];
 		deepStrictEqual(
 			BUILTIN_SLASH_COMMANDS.map((entry) => entry.name),
-			expected,
+			[...visible, ...deprecatedHidden],
 		);
 		deepStrictEqual(
 			commandReference().map((entry) => entry.name),
-			expected,
+			visible,
 		);
+		for (const name of deprecatedHidden) {
+			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === name);
+			strictEqual(entry?.hidden, true, `deprecated spelling "${name}" stays hidden`);
+			deepStrictEqual(entry?.kinds, [], `deprecated spelling "${name}" owns no kinds`);
+		}
 		for (const deleted of ["status", "hotkeys", "skills", "connect", "disconnect", "receipts"]) {
 			deepStrictEqual(parseSlashCommand(`/${deleted}`), { kind: "unknown", text: `/${deleted}` });
 		}
+	});
+
+	it("emits one deprecation notice and still routes deprecated spellings", () => {
+		const notices: string[] = [];
+		const routed: string[] = [];
+		const ctx = {
+			notice: (_level: string, text: string) => notices.push(text),
+			openContextView: () => routed.push("context-view"),
+			runCompact: () => routed.push("compact"),
+			submitChat: () => routed.push("chat"),
+		} as unknown as SlashCommandContext;
+
+		dispatchSlashCommand(parseSlashCommand("/context-view"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/compact tidy up"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/context"), ctx);
+
+		deepStrictEqual(routed, ["context-view", "compact", "context-view"]);
+		deepStrictEqual(notices, [
+			"/context-view is deprecated; use /context",
+			"/compact is deprecated; use /context compact",
+		]);
 	});
 
 	it("builds slash autocomplete commands from commandReference usage", () => {
@@ -407,6 +456,13 @@ describe("contracts/slash-spec", () => {
 		const byName = new Map(commands.map((command) => [command.name, command]));
 
 		ok(!byName.has("status"), "retired /status command is not suggested");
+		for (const hiddenName of ["compact", "context-init", "context-clear", "context-view"]) {
+			ok(!byName.has(hiddenName), `deprecated /${hiddenName} is not suggested`);
+		}
+		strictEqual(
+			byName.get("context")?.argumentHint,
+			"compact [instructions] | init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic] | refresh | reset [--all] [--confirm] [--confirm-all]",
+		);
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
 		strictEqual(byName.get("help")?.argumentHint, "[query]");
 		strictEqual(byName.get("share")?.argumentHint, "export <path> | import [--dry-run] [--force] <path>");
