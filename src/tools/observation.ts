@@ -282,7 +282,9 @@ export function observationBudgetExhausted(input: {
 		shownCount: 0,
 		totalCount: null,
 		shownBytes,
-		totalBytes: 0,
+		// The notice message is the whole rendering here (the search never ran), so
+		// the full size is the message itself; keep totalBytes >= shownBytes.
+		totalBytes: shownBytes,
 		truncated: true,
 		format: "text",
 		...(budget !== null ? { budget } : {}),
@@ -386,7 +388,11 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 		shownCount: input.shownCount,
 		totalCount: input.totalCount,
 		shownBytes,
-		totalBytes,
+		// shownBytes counts the appended notice/limited-budget lines; totalBytes
+		// measured only the pre-notice rendering (and equals it when a count-limited
+		// tool like ls offloads nothing). Floor the full-rendering size at the bytes
+		// actually returned so the envelope invariant totalBytes >= shownBytes holds.
+		totalBytes: Math.max(totalBytes, shownBytes),
 		truncated,
 		format,
 		...(next !== undefined && next.length > 0 ? { next } : {}),
