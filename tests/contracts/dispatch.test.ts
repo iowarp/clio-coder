@@ -695,6 +695,37 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	// BUG-007: a timeout abort seals outcome "canceled" like an operator cancel,
+	// but the receipt and ledger row must name the timeout so the two are
+	// distinguishable. The cause rides the abort path, not a new mechanism.
+	it("seals the timeout cause on the receipt when a run is aborted for a timeout", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1011,
+				promise: exit.promise,
+				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				heartbeatAt: { current: Date.now() },
+				events: emptyEvents(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "timed-out task" });
+			bundle.contract.abort(handle.runId, { cause: "timeout", detail: "timed out after 1000ms" });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "canceled");
+			strictEqual(receipt.outcomeDetail, "timed out after 1000ms");
+			notStrictEqual(receipt.outcomeDetail, "operator abort");
+			const row = bundle.contract.getRun(handle.runId);
+			strictEqual(row?.outcome, "canceled");
+			strictEqual(row?.outcomeDetail, "timed out after 1000ms");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("contains a finalization failure: a rejected worker promise still seals the ledger row and emits a terminal event", async () => {
 		const context = stubContext();
 		const failedEvents: unknown[] = [];
@@ -1204,6 +1235,13 @@ rl.once("line", () => {
 				evidence: { ...base, exitCode: 1, abortedByOperator: true },
 				outcome: "canceled",
 				detail: "operator abort",
+			},
+			{
+				// BUG-007: a dispatch timeout rides the abort path but names its cause.
+				name: "dispatch timeout abort",
+				evidence: { ...base, exitCode: 1, abortedByOperator: true, abortDetail: "timed out after 1000ms" },
+				outcome: "canceled",
+				detail: "timed out after 1000ms",
 			},
 			{
 				name: "admission rejection",
@@ -1933,6 +1971,42 @@ describe("contracts/dispatch tool activity honesty", () => {
 			if (result.kind === "ok") {
 				ok(result.output.includes("note=completed without executing any tools"), result.output);
 			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	// BUG-007: a dispatch timeout_ms fires the same abort() path as an operator
+	// cancel, so the receipt and ledger row sealed the timeout as "operator
+	// abort" with no timeout cause. A time-boxed run must name the timeout so it
+	// is distinguishable from an operator/user cancel.
+	it("names the timeout cause on the receipt when a dispatch times out (BUG-007)", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 8207,
+				promise: exit.promise,
+				// The tool's timeout fires abort(); a killed worker exits nonzero.
+				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				heartbeatAt: { current: Date.now() },
+				events: emptyEvents(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const result = await tool.run(
+				{ tasks: [{ agent: "coder", task: "sleep well past the timeout" }], mode: "parallel", timeout_ms: 30 },
+				undefined as never,
+			);
+			strictEqual(result.kind, "error");
+			const runId = (result.details as { runIds?: string[] } | undefined)?.runIds?.[0];
+			ok(runId, "dispatch tool did not surface a run id");
+			const row = bundle.contract.getRun(runId);
+			strictEqual(row?.outcome, "canceled");
+			strictEqual(row?.outcomeDetail, "timed out after 30ms");
+			notStrictEqual(row?.outcomeDetail, "operator abort");
 		} finally {
 			await bundle.extension.stop?.();
 		}
