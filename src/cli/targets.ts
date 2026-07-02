@@ -156,6 +156,13 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 		}
 	}
 	const entries = providers.list();
+	if (parsed.target !== undefined && !entries.some((e) => e.target.id === parsed.target)) {
+		printError(
+			`no target with id ${parsed.target}. ${entries.length} target${entries.length === 1 ? "" : "s"} configured.`,
+		);
+		await loaded.stop();
+		return 2;
+	}
 	const filtered = parsed.target ? entries.filter((e) => e.target.id === parsed.target) : entries;
 
 	if (parsed.json) {
