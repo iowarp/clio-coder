@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionProvider, AdoptionScope, AdoptionSourceKind, AdoptionSourceSnapshot } from "./adoption.js";
 import type { Fingerprint } from "./fingerprint.js";
@@ -102,9 +102,5 @@ export function readClioState(cwd: string): ClioProjectState | null {
 }
 
 export function writeClioState(cwd: string, state: ClioProjectState): void {
-	const filePath = statePath(cwd);
-	mkdirSync(dirname(filePath), { recursive: true });
-	const tmpPath = join(dirname(filePath), `.state-${process.pid}-${randomUUID()}.tmp`);
-	writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-	renameSync(tmpPath, filePath);
+	safeResourceWrite(statePath(cwd), `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8" });
 }
