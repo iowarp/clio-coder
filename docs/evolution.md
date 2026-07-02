@@ -136,7 +136,7 @@ Optional budget deltas:
 2. Run `clio components snapshot --out before.json` if the change affects prompts, tools, runtimes, safety, schemas, or recipes.
 3. Draft the change manifest.
 4. Implement the smallest change set.
-5. Run the validation plan and update `evidenceRefs` with receipts/evidence/eval artifacts where available.
+5. Run the validation plan and update `evidenceRefs` with resolved evidence bundle IDs such as `run-<id>` or `session-<id>` where available.
 6. Run `clio evolve manifest validate` and include the manifest in review notes.
 7. If the change fails, use `rollbackPlan` rather than ad hoc cleanup.
 
