@@ -57,9 +57,9 @@ Flags:
   --skill <path>            load one explicit skill for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 
-There is no operator in a headless run: permission asks are denied, and
-ask_user answers immediately as a cancelled interview so skills fall back to
-their stated defaults.
+There is no operator in a headless run: permission asks are denied, and the
+ask_user interview tool is not registered. Skills that interview fall back to
+their stated defaults; supply decisions in the task prompt instead.
 `;
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
