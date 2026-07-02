@@ -44,6 +44,7 @@ auto-loads. That gap is deliberate.
 | [`experiment-protocol`](experiment-protocol/) | workflow | A benchmark, optimization, or numerical comparison needs success criteria locked before results exist. Pre-registers thresholds into the repo validation contract. |
 | [`design-council`](design-council/) | workflow | A design decision has real tradeoffs and needs several composed expert perspectives that debate through read-only dispatched workers before code is written. |
 | [`credentials`](credentials/) | discipline | A task needs an API key, token, or facility credential. Verifies presence without exposing values, collects new secrets via hidden terminal input, and contains leaks. |
+| [`workflow-distiller`](workflow-distiller/) | workflow | A workflow that just ran should become a reusable skill. Reconstructs it from the session record, interviews, checks overlap, gates on approval, then creates it. |
 
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
 loads, Clio merges that declaration with host policy; a skill can narrow its

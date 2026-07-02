@@ -42,6 +42,16 @@ interfaces.
   defines the leak containment sequence: stop, name the credential and the
   surfaces reached without repeating the value, rotate at the issuer, warn
   that exported evidence outlives chat deletion, resume on acknowledgment.
+- The `workflow-distiller` marketplace skill turns a workflow that just ran
+  into a reusable skill grounded in runtime truth. It reconstructs the steps
+  from what visibly executed in the session before asking anything (unobserved
+  steps are tagged assumptions), interviews one question at a time through
+  `ask_user` under the grill-me operating contract, checks installed skills
+  per step via `read_skill` so covered steps become references instead of
+  reimplementations (with the `requires: [skill:<name>]` frontmatter line
+  handed to the user, arming the loader's unmet-dependency warning), gates on
+  an explicitly approved design summary before any `create_skill` call, and
+  records a RED-GREEN validation scenario with the result.
 
 - Dispatch runs now auto-produce a forensic evidence bundle and a sidecar
   index on completion. When a run finalizes, the observability domain subscribes
