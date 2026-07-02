@@ -59,12 +59,9 @@ describe("contracts/ci scripts", () => {
 	it("keeps the deterministic local ci script aligned with the release-relevant checks", () => {
 		const scripts = packageScripts();
 
-		strictEqual(
-			scripts.ci,
-			"npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test",
-		);
+		strictEqual(scripts.ci, "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test");
 		strictEqual(scripts["skills:check"], "node --import tsx scripts/pin-skills.ts --check");
-		strictEqual(scripts["ci:release"], "npm run ci && node scripts/check-dist.mjs");
+		strictEqual(scripts["ci:release"], "npm run ci && node scripts/check-dist.mjs && node scripts/check-pack.mjs");
 		strictEqual(scripts["test:repeat"], "node tests/harness/repeat-tests.mjs");
 		ok(scripts["test:coverage"]?.includes("--experimental-test-coverage"));
 		ok(scripts["test:coverage"]?.includes("--test-coverage-include='src/**/*.ts'"));
@@ -86,6 +83,25 @@ describe("contracts/ci scripts", () => {
 			commands.join("\n"),
 		);
 		ok(!commands.includes("npm run test:live"), "ordinary CI must not run live/model-dependent smoke tests");
+	});
+
+	it("publishes from version tags through the release gate with provenance", () => {
+		const parsed = workflow(".github/workflows/release.yml");
+		const trigger = parsed.on as { push?: { tags?: unknown } };
+		deepStrictEqual(trigger.push?.tags, ["v*"], "release must trigger on v* tags only");
+
+		const permissions = parsed.permissions as Record<string, string>;
+		strictEqual(permissions["id-token"], "write", "npm provenance needs the OIDC id-token permission");
+
+		const commands = runCommands(".github/workflows/release.yml", "release");
+		ok(
+			commands.some((command) => command.includes("npm publish --provenance")),
+			commands.join("\n"),
+		);
+		ok(
+			commands.some((command) => command.includes("does not match tag")),
+			"release must refuse a tag that disagrees with package.json's version",
+		);
 	});
 
 	it("keeps live smoke explicit and outside the deterministic gate", () => {

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Only argument parsing and boot tracing load statically. Every subcommand is
 // imported dynamically inside its switch case (see `dispatch`), so a bare `clio`
 // (interactive) or `clio --version` pays for its own module graph and nothing

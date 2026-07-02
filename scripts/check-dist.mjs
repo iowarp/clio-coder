@@ -1,18 +1,23 @@
 #!/usr/bin/env node
-import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const SHEBANG = "#!/usr/bin/env node";
-const targets = ["dist/cli/index.js", "dist/worker/entry.js"];
+const entries = ["dist/cli/index.js", "dist/worker/entry.js"];
 
 function fail(reason) {
 	process.stderr.write(`check-dist: ${reason}\n`);
 	process.exit(1);
 }
 
-for (const rel of targets) {
-	const abs = `${root}${rel}`;
+function firstLine(abs) {
+	return readFileSync(abs, "utf8").slice(0, SHEBANG.length);
+}
+
+for (const rel of entries) {
+	const abs = join(root, rel);
 	let stat;
 	try {
 		stat = statSync(abs);
@@ -20,14 +25,19 @@ for (const rel of targets) {
 		fail(`missing ${rel}`);
 	}
 	if (!stat.isFile()) fail(`not a regular file: ${rel}`);
-	const buf = Buffer.alloc(SHEBANG.length);
-	const fd = openSync(abs, "r");
-	try {
-		readSync(fd, buf, 0, SHEBANG.length, 0);
-	} finally {
-		closeSync(fd);
-	}
-	if (buf.toString("utf8") !== SHEBANG) fail(`bad shebang in ${rel}`);
+	if (firstLine(abs) !== SHEBANG) fail(`bad shebang in ${rel}`);
+}
+
+// Only the executable entry points may carry a shebang. A shebang on shared
+// chunks means a global banner leaked back into the bundler config.
+const entrySet = new Set(entries);
+const distFiles = readdirSync(join(root, "dist"), { recursive: true, withFileTypes: true });
+for (const dirent of distFiles) {
+	if (!dirent.isFile() || !dirent.name.endsWith(".js")) continue;
+	const abs = join(dirent.parentPath, dirent.name);
+	const rel = abs.slice(root.length).replaceAll("\\", "/");
+	if (entrySet.has(rel)) continue;
+	if (firstLine(abs) === SHEBANG) fail(`unexpected shebang on non-entry chunk: ${rel}`);
 }
 
 process.stdout.write("check-dist: ok\n");
