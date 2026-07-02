@@ -26,9 +26,19 @@ export type WorkerAgentBindings = Record<string, string>;
  * Non-stall posture for dispatched native workers. A worker tool call that
  * requires interactive permission resolves within bounded time: "deny" turns
  * it into a structured tool denial and the run continues; "fail" finalizes
- * the run immediately with outcome failed/permission_required.
+ * the run immediately with outcome failed/permission_required; "escalate"
+ * parks the call and hands it to the interactive operator, applying the
+ * escalation fallback on timeout so the run still cannot hang. Escalate is
+ * only meaningful with an interactive operator attached; headless sessions
+ * have no subscriber, so the timeout fallback governs.
  */
-export type WorkerPermissionMode = "deny" | "fail";
+export type WorkerPermissionMode = "deny" | "fail" | "escalate";
+
+/** Bounds for the escalate posture; the timeout fallback keeps runs non-stall. */
+export interface WorkerEscalationSettings {
+	timeoutMs: number;
+	fallback: "deny" | "fail";
+}
 
 export interface WorkersSettings {
 	default: WorkerTarget;
@@ -37,6 +47,8 @@ export interface WorkersSettings {
 	/** Bounded automatic retries for retryable run outcomes. 0 disables. */
 	maxRetries: number;
 	onPermission: WorkerPermissionMode;
+	/** Escalate-posture bounds; defaults 120000 ms with a deny fallback. */
+	escalation?: WorkerEscalationSettings;
 	resilienceCooldownMs?: number;
 }
 
@@ -151,6 +163,7 @@ export const DEFAULT_SETTINGS = {
 		agentBindings: {} as WorkerAgentBindings,
 		maxRetries: 2,
 		onPermission: "deny" as WorkerPermissionMode,
+		escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		resilienceCooldownMs: 15000,
 	} as WorkersSettings,
 	scope: [] as string[],
@@ -288,8 +301,15 @@ workers:
   maxRetries: 2
   # onPermission: what a worker does when a tool call needs interactive
   # permission. "deny" turns it into a structured tool denial and the run
-  # continues; "fail" finalizes the run as failed/permission_required.
+  # continues; "fail" finalizes the run as failed/permission_required;
+  # "escalate" hands the ask to the interactive operator (timeout fallback
+  # below keeps the run non-stall).
   onPermission: deny
+  # escalation: bounds for the escalate posture. A parked ask with no operator
+  # decision within timeoutMs applies the fallback deny/fail.
+  escalation:
+    timeoutMs: 120000
+    fallback: deny
   resilienceCooldownMs: 15000
   # fast-local:
   #   target: local-lmstudio

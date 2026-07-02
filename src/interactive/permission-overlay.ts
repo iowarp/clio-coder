@@ -47,18 +47,23 @@ export function createPermissionOverlayBody(
 	call: ClassifierCall,
 	decision: SafetyDecision,
 	autonomy?: string,
+	worker?: { agentId: string; runId: string },
 ): Component {
 	const action = decision.classification.actionClass;
 	const reason = decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${action}`;
 	const axis = askAxis(decision);
-	const askedBy = axis.kind === "net" ? `safety-net rail ${axis.ruleId}` : `autonomy level (${autonomy ?? "auto-edit"})`;
+	const askedBy = worker
+		? `worker ${worker.agentId} (run ${worker.runId})`
+		: axis.kind === "net"
+			? `safety-net rail ${axis.ruleId}`
+			: `autonomy level (${autonomy ?? "auto-edit"})`;
 	return new PermissionOverlayBody([
 		`Tool: ${truncate(call.tool, 46)}`,
 		`Action: ${truncate(action, 44)}`,
 		`Asked by: ${truncate(askedBy, 44)}`,
 		truncate(reason, 54),
 		"",
-		"Allowing resumes only this parked tool call.",
+		worker ? "Allowing resumes the parked call inside the worker." : "Allowing resumes only this parked tool call.",
 		"Hard-blocked actions remain blocked.",
 	]);
 }

@@ -201,6 +201,15 @@ The setting `budget.concurrency` restricts the number of concurrent subagent tas
 ### 4. Heartbeats and Reconciler
 For native subprocess workers, Clio uses a heartbeat mechanism. The reconciler monitors the active heartbeat timestamp. If a worker stops responding and updates no heartbeats, the reconciler terminates the stalled subprocess automatically.
 
+### 5. Worker Permission Postures
+A dispatched worker has no operator by default, so a tool call that requires interactive permission must resolve within bounded time. The `workers.onPermission` setting picks the posture:
+
+- `deny` (default): the parked call becomes a structured tool denial and the run continues.
+- `fail`: the run finalizes immediately with outcome `failed`/`permission_required`.
+- `escalate`: the parked call is handed up to the interactive operator. The worker emits a `clio_permission_escalated` event over its stdout; the dispatch domain republishes it on the bus as a permission request tagged with the run id; the operator resolves it in the TUI permission overlay; and the decision travels back down the worker's stdin as a `permission_decision` line (the same pipe steers use). No model can approve a worker permission; resolution is human-only.
+
+Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `workers.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied on the receipt's `safety.decisions` escalation counters. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
+
 ---
 
 

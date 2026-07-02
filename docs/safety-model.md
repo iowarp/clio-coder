@@ -58,6 +58,12 @@ graph TD
 
 Net `confirm` is never auto-allowed by autonomy, including full-auto. Net `block` is never downgraded by anything. A tool hidden by target capability or explicit suppression is not shown to the model; a tool that is shown still must pass this path before it can run.
 
+### Worker permission escalation
+
+Dispatched workers run non-interactively, so step 3 resolves per `workers.onPermission`: `deny` turns the parked call into a structured denial, `fail` ends the run, and `escalate` hands the ask up to the interactive operator. Under `escalate` the worker parks the call, emits a `clio_permission_escalated` event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker's stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch `resolveWorkerPermission` method is reachable only from the interactive layer. This preserves the receipt's honesty, since a model approving its own fleet's asks would collapse the audit trail.
+
+Escalation can never hang a run. Every escalated ask resolves by an operator decision or by the `workers.escalation` timeout fallback (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`); a headless session has no subscriber, so the timeout fallback always governs there. The worker keeps emitting heartbeats while parked, so the reconciler does not reap it, and every escalation and its resolution source (operator or timeout) is recorded on the receipt.
+
 ---
 
 ## Operating Posture and Visible Tools

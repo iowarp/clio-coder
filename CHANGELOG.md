@@ -50,6 +50,21 @@ and grep/find answer tree visibility from a single ignore policy.
   composed run's `staticCompositionHash`; recipe runs remain byte-identical
   and omit the field. This changes the `dispatch` tool's parameter schema and
   description, invalidating provider prompt caches on first use after upgrade.
+- **Worker permission escalation.** A third worker permission posture,
+  `workers.onPermission=escalate`, lets a dispatched worker hand a parked
+  permission ask up to the interactive operator instead of auto-denying or
+  failing. The worker emits `clio_permission_escalated` on its event stream;
+  dispatch republishes it on the bus tagged with the run id; the operator
+  resolves it in the TUI permission overlay (labeled with the worker's agent
+  and run id); and the decision returns down the worker's stdin as a
+  `permission_decision` line (the same pipe steers use). Resolution is
+  human-only: no model-facing tool can approve a worker permission. A
+  `workers.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and
+  `deny`) timeout fallback guarantees the run never hangs, and headless
+  sessions with no subscriber always resolve by that fallback. Each escalation
+  and its resolution source is tallied on the receipt's `safety.decisions`
+  escalation counters. Existing `deny`/`fail` behavior is unchanged, and no
+  tool schema or prompt text changed. ACP delegations are out of scope.
 - **monitor and steer.** `monitor(run_id?, mode=list|status|peek|receipt)`
   inspects dispatched runs, including an in-process rolling event tail
   (`peek`) and the stored receipt JSON (`receipt`, 14KB cap).

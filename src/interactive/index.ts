@@ -1853,6 +1853,19 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		leaderTimer.unref?.();
 	};
 	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision } | null = null;
+	// A parked worker escalation currently shown in the permission overlay. When
+	// set, the overlay's confirm/deny routes to resolveWorkerPermission over the
+	// dispatch contract instead of the local tool registry. Additional
+	// escalations that arrive while the overlay is busy wait in the queue.
+	let pendingWorkerEscalation: { runId: string; requestId: string; agentId: string } | null = null;
+	const workerEscalationQueue: Array<{
+		runId: string;
+		requestId: string;
+		agentId: string;
+		tool: string;
+		actionClass: string;
+		summary: string;
+	}> = [];
 	let permissionConfirmJustFired = false;
 	let pendingAskUserCancel: (() => void) | null = null;
 	let askUserSession: ReturnType<typeof openAskUserOverlay> | null = null;
@@ -1968,9 +1981,28 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (leaving === "permission-confirm") {
 			const permission = pendingPermission;
 			const confirmed = permissionConfirmJustFired;
+			const workerEscalation = pendingWorkerEscalation;
 			pendingPermission = null;
+			pendingWorkerEscalation = null;
 			permissionConfirmJustFired = false;
-			if (confirmed && permission) {
+			if (workerEscalation) {
+				// The worker owns the resolution: send the decision down its stdin.
+				// It emits clio_permission_resolved, which dispatch republishes on
+				// the bus, so no PermissionResolved is emitted here.
+				try {
+					deps.dispatch.resolveWorkerPermission?.(
+						workerEscalation.runId,
+						workerEscalation.requestId,
+						confirmed ? "approve" : "deny",
+					);
+				} catch (err) {
+					appendNotice(
+						"warn",
+						`Could not deliver permission decision to run ${workerEscalation.runId}: ${err instanceof Error ? err.message : String(err)}`,
+						busNoticeSink,
+					);
+				}
+			} else if (confirmed && permission) {
 				deps.bus.emit(BusChannels.PermissionResolved, {
 					status: "granted",
 					tool: permission.call.tool,
@@ -1999,6 +2031,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls() && pendingPermission) {
 			openPermissionOverlay(pendingPermission.call, pendingPermission.decision);
 		}
+		// A worker escalation that arrived while the overlay was busy waits its turn.
+		maybeOpenWorkerEscalation();
 		renderContextIsland();
 		renderTaskIsland();
 		tui.requestRender();
@@ -2238,6 +2272,66 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			pendingPermission = { call, decision };
 			openPermissionOverlay(call, decision);
 		}) ?? (() => {});
+
+	const openWorkerPermissionOverlay = (entry: {
+		runId: string;
+		requestId: string;
+		agentId: string;
+		tool: string;
+		actionClass: string;
+		summary: string;
+	}): void => {
+		if (overlayState !== "closed") return;
+		// Adapt the bus payload into the shapes the shared overlay renders, then
+		// remember the escalation so confirm/deny routes to resolveWorkerPermission.
+		const call: ClassifierCall = { tool: entry.tool, args: {} };
+		const decision = {
+			kind: "ask",
+			classification: { actionClass: entry.actionClass, reasons: [] },
+			rejection: { short: entry.summary, detail: entry.summary, hints: [] },
+		} as unknown as SafetyDecision;
+		pendingWorkerEscalation = { runId: entry.runId, requestId: entry.requestId, agentId: entry.agentId };
+		pendingPermission = { call, decision };
+		permissionConfirmJustFired = false;
+		overlayState = "permission-confirm";
+		overlayHandle = showClioOverlayFrame(
+			tui,
+			createPermissionOverlayBody(call, decision, currentAutonomy(), { agentId: entry.agentId, runId: entry.runId }),
+			{
+				anchor: "center",
+				width: PERMISSION_OVERLAY_WIDTH,
+				title: permissionOverlayTitle(),
+				footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
+			},
+		);
+		tui.requestRender();
+	};
+
+	const maybeOpenWorkerEscalation = (): void => {
+		if (overlayState !== "closed") return;
+		const next = workerEscalationQueue.shift();
+		if (next) openWorkerPermissionOverlay(next);
+	};
+
+	// Worker permission escalations arrive as PermissionRequested bus events
+	// carrying a run id in requestedBy. Main-agent asks (no requestId) are driven
+	// by the tool registry above and are ignored here. Headless sessions have no
+	// subscriber, so the worker's timeout fallback governs there.
+	const unsubscribeWorkerEscalation = deps.bus.on(BusChannels.PermissionRequested, (payload) => {
+		if (typeof payload.requestedBy !== "string" || typeof payload.requestId !== "string") return;
+		const entry = {
+			runId: payload.requestedBy,
+			requestId: payload.requestId,
+			agentId: typeof payload.agentId === "string" ? payload.agentId : "worker",
+			tool: typeof payload.tool === "string" ? payload.tool : "unknown",
+			actionClass: typeof payload.actionClass === "string" ? payload.actionClass : "unknown",
+			summary: typeof payload.summary === "string" ? payload.summary : `${payload.tool ?? "worker"} requires approval`,
+		};
+		const notice = `Worker ${entry.agentId} (run ${entry.runId}) asks to run ${entry.tool} (${entry.actionClass}).`;
+		appendNotice("warn", notice, busNoticeSink);
+		workerEscalationQueue.push(entry);
+		maybeOpenWorkerEscalation();
+	});
 
 	// Autonomy auto-denials (read-only) never park, so without this notice the
 	// only trace is the rejection in the transcript, which reads like a model
@@ -2813,6 +2907,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		unsubscribeSafetyBlocked();
 		unsubscribeMiddlewareHookFailed();
 		unsubscribePermissionRequired();
+		unsubscribeWorkerEscalation();
 		unsubscribeAutonomyDenied();
 		unregisterAskUserHandler?.();
 		unregisterAskUserHandler = null;
