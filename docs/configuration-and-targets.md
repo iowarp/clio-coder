@@ -120,7 +120,7 @@ Terminology used in code and receipts:
 | Target / `TargetDescriptor` | Persisted user-configured target plus runtime id, model defaults, auth metadata, and capability overrides. |
 | Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
 | Orchestrator target | Main chat/print target. HTTP/native/pi-ai-backed. |
-| Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, or one of the sanctioned Claude Code subscription runtimes. |
+| Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
 
 ```yaml
 version: 1
@@ -148,7 +148,9 @@ workers:
     model: your-model-id
     thinkingLevel: off
   profiles: {}
+  agentBindings: {}
   maxRetries: 2
+  onPermission: deny
   resilienceCooldownMs: 15000
 
 
@@ -166,9 +168,16 @@ defaults:
 theme: default
 terminal:
   showTerminalProgress: false
-keybindings: {}
 skills:
   trustProjectCompatRoots: false
+delegation:
+  defaults:
+    connectTimeoutMs: 30000
+    turnTimeoutMs: 300000
+    permissionTimeoutMs: 120000
+    toolGovernance: clio-policy
+  agents: []
+keybindings: {}
 compaction:
   auto: true
   threshold: 0.8
@@ -186,7 +195,7 @@ Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reas
 
 `defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
 
-The setting `workers.maxRetries` controls the maximum number of automated retries for retryable failures during fleet dispatch. Setting this value to `0` disables retries entirely. The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
+The setting `workers.maxRetries` controls the maximum number of automated retries for retryable failures during fleet dispatch. Setting this value to `0` disables retries entirely. The setting `workers.onPermission` decides how noninteractive workers handle a tool call that asks for permission: `deny` returns a structured denial and lets the run continue, while `fail` finalizes the run as failed with permission required. The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
 
 
 ---
@@ -318,9 +327,11 @@ clio auth login openai-codex
 clio auth login anthropic-max
 
 # Configure orchestrator targets
-clio configure --id chatgpt-sub --runtime openai-codex --model gpt-4o --set-orchestrator
-clio configure --id claude-sub --runtime anthropic-max --model sonnet --set-orchestrator
+clio configure --id chatgpt-sub --runtime openai-codex --model your-codex-model --set-orchestrator
+clio configure --id claude-sub --runtime anthropic-max --model claude-3-5-sonnet-20241022 --set-orchestrator
 ```
+
+Choose model ids from `clio configure --list` or from `clio models --target <id>` after login.
 
 ### 2. ALCF Globus Runtime (Orchestrator + Worker)
 
@@ -409,11 +420,17 @@ Useful flags:
 | `--orchestrator-model <id>` | Model to save for chat default. |
 | `--fleet-model <id>` | Model to save for fleet default. |
 | `--agent-profile <name>` | Save this target/model as a named fleet profile. |
+| `--agent-profile-model <id>` | Model to save for the named fleet profile. |
 | `--api-key-env <VAR>` | Read API key from the environment at call time. |
 | `--api-key <literal>` | Store an API key in `credentials.yaml`. |
 | `--force` | Allow model/capability choices outside the local catalog guardrails. |
 | `--gateway` | Mark target as a gateway. |
 | `--lifecycle <user-managed|clio-managed>` | Resident model lifecycle policy. |
+| `--set-orchestrator` | Use this target as the chat default. |
+| `--set-fleet-default` | Use this target as the fleet default. |
+| `--context-window <N>` | Override the target context-window capability. |
+| `--max-tokens <N>` | Override the target output-token capability. |
+| `--reasoning <true|false>` | Override the target reasoning capability. |
 
 ---
 
@@ -422,21 +439,29 @@ Useful flags:
 ```bash
 clio targets [--json] [--probe] [--target <id>]
 clio targets add [configure flags]
-clio targets use <id> [--model <id>]
+clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]
 clio targets fleet [--json]
-clio targets profile <name> <id> [--model <id>] [--thinking off|minimal|low|medium|high|xhigh]
+clio targets profile list [--json]
+clio targets profile set <name> <id> [--model <id>] [--thinking <level>]
+clio targets profile <name> <id> [--model <id>] [--thinking <level>]
+clio targets profile remove <name> [--force]
+clio targets profile rename <old> <new>
+clio targets profile bind <agentId> <profileName>
+clio targets profile unbind <agentId>
+clio targets profile bindings [--json]
 clio targets convert <id> --runtime <runtimeId>
 clio targets remove <id>
 clio targets rename <old> <new>
 ```
 
-`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat. Use `clio configure --set-fleet-default` or `clio targets profile` when dispatch should prefer worker-only runtimes such as `claude-sdk` or `claude-code`.
+`clio targets use <id>` sets both the orchestrator and the default fleet target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat. Use `clio configure --set-fleet-default` or `clio targets profile` when dispatch should prefer worker-only runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`.
 
 ### Target-Profile Subcommands
 
 The command `clio targets profile` supports several subcommands to manage fleet worker profiles and agent bindings:
 
 - **list**: Show configured fleet profiles. Use `clio targets profile list [--json]` to output details in JSON format.
+- **set**: Create or update a named fleet profile. Use `clio targets profile set <name> <id> [--model <id>] [--thinking <level>]`; the compatibility form `clio targets profile <name> <id> ...` is also accepted.
 - **remove**: Remove a profile from settings. Use `clio targets profile remove <name> [--force]`. The `--force` flag is required if the profile has active agent bindings.
 - **rename**: Rename a fleet profile. Use `clio targets profile rename <old> <new>`. Active agent bindings are updated to point to the new profile name automatically.
 - **bind**: Bind an agent to a fleet profile. Use `clio targets profile bind <agentId> <profileName>`. Active ACP delegation agents are rejected.
@@ -487,7 +512,7 @@ traces.
 ## Model listing and refresh
 
 ```bash
-clio models [search] [--target <id>] [--json] [--probe]
+clio models [search] [--target <id>] [--json] [--offline] [--probe]
 ```
 
 Model rows combine:
@@ -517,14 +542,14 @@ Representative built-in runtime IDs:
 | Category | Runtime IDs |
 | --- | --- |
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
-| Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex`, `openrouter` |
-| Subscription | `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers |
+| Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter` |
+| Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for `agy --print` subprocess workers |
 | Local native | `llamacpp`, `lmstudio-native`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio configure --list --all` to see them.
 
 > [!NOTE]
-> Chat and print targets are HTTP/native/pi-ai-backed adapters. Dispatch workers also admit the sanctioned Claude Code subscription runtimes: `claude-sdk` and `claude-code`.
+> Chat and print targets are HTTP/native/pi-ai-backed adapters. Dispatch workers also admit the sanctioned subscription worker runtimes: `claude-sdk`, `claude-code`, and `antigravity-code`.
 
 ---
 
