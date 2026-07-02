@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive dashboard is located at [docs/html/skills_blueprint.html](html/skills_blueprint.html) (Version: 0.2.7).
 
-The Skills Hub (`/skill`) shows three groups: project skills, user skills, and the marketplace. The marketplace group is backed by the `skills/` tree of [github.com/iowarp/clio-coder](https://github.com/iowarp/clio-coder/tree/main/skills) on `main`.
+The Skills Hub (`/skill`) shows three groups: project skills, user skills, and the marketplace. The live marketplace listing is backed by the `skills/` tree of [github.com/iowarp/clio-coder](https://github.com/iowarp/clio-coder/tree/main/skills) on `main`. Skill installation resolves through Clio's local marketplace sources: a repo/catalog `skills/` directory, `CLIO_SKILL_CATALOG_DIR`, or `skill-marketplace.json`.
 
 ## How the hub reaches the marketplace
 
@@ -11,7 +11,7 @@ The hub opens instantly on local data and never blocks on the network. Marketpla
 
 1. **Live listing.** The GitHub contents API lists `skills/` directories. Each selected row lazily fetches its `SKILL.md` from `raw.githubusercontent.com` for the detail pane.
 2. **Disk cache.** Listings and details are cached at `<cacheDir>/marketplace-cache.json` with a 24-hour TTL, which also keeps the unauthenticated GitHub rate limit comfortable. A corrupt cache file is treated as a miss.
-3. **Pinned fallback.** Offline or rate-limited sessions fall back first to the stale cache, then to the pinned local marketplace list maintained by `npm run skills:pin`. The default fetcher performs that fallback internally, so the hub may still show the marketplace section even when the backing source was cache or local metadata.
+3. **Local fallback.** Offline or rate-limited sessions fall back first to the stale cache, then to local marketplace entries discovered from a catalog directory or JSON index. The default fetcher performs that fallback internally, so the hub may still show the marketplace section even when the backing source was cache or local metadata.
 
 ## Using the hub
 
@@ -20,10 +20,10 @@ The hub opens instantly on local data and never blocks on the network. Marketpla
 | type | Filter all groups |
 | `Enter` | Insert `/skill:<name> ` into the editor for the task text |
 | `Tab` | Toggle the detail pane (split layout on wide terminals) |
-| `i` | Install the selected marketplace skill into the project scope |
+| `i` | Attempt to install the selected marketplace skill into the project scope through the local marketplace resolver |
 | `PgUp`/`PgDn` | Scroll the detail pane |
 
-Invoking an uninstalled marketplace skill with `/skill:<name>` still installs it on first use; `i` simply does it eagerly from the hub.
+Invoking an uninstalled marketplace skill with `/skill:<name>` prompts before installation when a local marketplace entry is available. `i` runs the same install path eagerly from the hub.
 
 The CLI `clio skills` commands manage local skill discovery, validation, and
 creation. Extension resource roots and share archives are documented in
