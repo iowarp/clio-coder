@@ -66,9 +66,7 @@ function baseClassify(tool: string): ActionClass | null {
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:
-		case ToolNames.WritePlan:
-		case ToolNames.WriteReview:
-		case ToolNames.CreateSkill:
+		case ToolNames.Artifact:
 			return "write";
 		case ToolNames.Bash:
 		case ToolNames.Verify:

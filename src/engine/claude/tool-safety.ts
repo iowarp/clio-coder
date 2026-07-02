@@ -106,7 +106,7 @@ export function mapClaudeToolCall(toolName: string, input: Record<string, unknow
 		case "Task":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Dispatch, args: { ...input }, known: true };
 		case "TodoWrite":
-			return { claudeToolName: toolName, clioToolName: ToolNames.WritePlan, args: { ...input }, known: true };
+			return { claudeToolName: toolName, clioToolName: ToolNames.Artifact, args: { ...input }, known: true };
 		default:
 			return { claudeToolName: toolName, clioToolName: dynamicToolName(toolName), args: { ...input }, known: false };
 	}

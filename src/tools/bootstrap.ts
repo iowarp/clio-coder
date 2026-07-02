@@ -4,6 +4,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
+import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
 import { codeNavTool } from "./codewiki/code-nav.js";
@@ -19,14 +20,11 @@ import { assertBuiltinToolPolicy } from "./policy.js";
 import { readMaxBytes, readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import { gitTool } from "./safe-exec.js";
-import { createSkillTool } from "./skills.js";
 import { createSteerTool } from "./steer.js";
 import { DEFAULT_MAX_BYTES } from "./truncate.js";
 import { verifyTool } from "./verify/index.js";
 import { webFetchTool } from "./web-fetch.js";
 import { writeTool } from "./write.js";
-import { writePlanTool } from "./write-plan.js";
-import { writeReviewTool } from "./write-review.js";
 
 export interface ToolBootstrapDeps {
 	session?: SessionContract;
@@ -164,16 +162,9 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: boundedValidationPolicy,
 		costLatency: "local_slow",
 	},
-	[ToolNames.WritePlan]: {
-		objective: "Write a terminal plan artifact.",
-		uiLabel: "Plan",
-		retrySafety: "not_retry_safe",
-		resultSizePolicy: exactMutationPolicy,
-		costLatency: "local_fast",
-	},
-	[ToolNames.WriteReview]: {
-		objective: "Write a terminal review artifact.",
-		uiLabel: "Review",
+	[ToolNames.Artifact]: {
+		objective: "Write terminal plan/review/report documents or a reusable skill.",
+		uiLabel: "Artifact",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
 		costLatency: "local_fast",
@@ -212,13 +203,6 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			maxBytes: 4_096,
 			followUpHint: "Use the boolean result only; never ask to print the credential value.",
 		},
-		costLatency: "local_fast",
-	},
-	[ToolNames.CreateSkill]: {
-		objective: "Create a reusable coding skill file.",
-		uiLabel: "Create Skill",
-		retrySafety: "not_retry_safe",
-		resultSizePolicy: exactMutationPolicy,
 		costLatency: "local_fast",
 	},
 	[ToolNames.Dispatch]: {
@@ -301,12 +285,6 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...builtin(verifyTool, { path: "src/tools/verify/index.ts", scope: "core" }),
 	});
 	registry.register({
-		...builtin(writePlanTool, { path: "src/tools/write-plan.ts", scope: "core" }),
-	});
-	registry.register({
-		...builtin(writeReviewTool, { path: "src/tools/write-review.ts", scope: "core" }),
-	});
-	registry.register({
 		...builtin(codeNavTool, { path: "src/tools/codewiki/code-nav.ts", scope: "core" }),
 	});
 	const skillToolDeps = {
@@ -347,7 +325,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		),
 	});
 	registry.register({
-		...builtin(createSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
+		...builtin(createArtifactTool({ getCwd: skillToolDeps.getCwd }), { path: "src/tools/artifact.ts", scope: "core" }),
 	});
 	if (deps.dispatch) {
 		const dispatchToolDeps = {

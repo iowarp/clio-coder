@@ -412,10 +412,12 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 			const target = pathArg(args);
 			return target === null ? [] : [{ operation: "write", path: target }];
 		}
-		case ToolNames.WritePlan:
-			return [{ operation: "write", path: pathArg(args) ?? "PLAN.md" }];
-		case ToolNames.WriteReview:
-			return [{ operation: "write", path: pathArg(args) ?? "REVIEW.md" }];
+		case ToolNames.Artifact: {
+			// kind=skill writes into the managed skill store, not a caller path.
+			if (args?.kind === "skill") return [];
+			const fallback = args?.kind === "review" ? "REVIEW.md" : args?.kind === "report" ? "REPORT.md" : "PLAN.md";
+			return [{ operation: "write", path: pathArg(args) ?? fallback }];
+		}
 		case ToolNames.CredentialPresent:
 			// Sanctioned typed presence check: it may inspect secret-shaped paths
 			// internally, but its tool contract can return only boolean metadata.
