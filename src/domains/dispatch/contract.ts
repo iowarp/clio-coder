@@ -98,6 +98,20 @@ export interface DispatchContract {
 	 */
 	steer(runId: string, text: string): void;
 
+	/**
+	 * Apply an operator's decision to a parked permission escalation on a
+	 * running native worker (onPermission="escalate"). Writes a
+	 * `permission_decision` JSON line on the worker's open stdin; the worker
+	 * releases or denies the parked tool call and acks with a
+	 * `clio_permission_resolved` event. Human-only: no model-facing tool can
+	 * reach this. Throws with an operator-facing message when the run is
+	 * unknown or no longer active, when the run kind has no stdin channel
+	 * (acp-delegation), or when the worker's stdin is already gone. Mirrors
+	 * steer's validation and error wording. Optional so lightweight contract
+	 * fakes need not implement it; the real dispatch extension always does.
+	 */
+	resolveWorkerPermission?(runId: string, requestId: string, decision: "approve" | "deny"): void;
+
 	/** Read-only runtime snapshot for operator surfaces. */
 	snapshot(): DispatchSnapshot;
 
