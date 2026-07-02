@@ -1504,9 +1504,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				const turns = openSession(sessionId).turns();
 				// Same pure render pipeline as the live panel and /resume replay:
 				// a throwaway panel rehydrated from the ledger, every tool segment
-				// expanded, rendered at a fixed width, ANSI stripped.
-				const exportPanel = createChatPanel();
-				rehydrateChatPanelFromTurns(exportPanel, turns);
+				// expanded, rendered at a fixed width, ANSI stripped. Unlike the
+				// live view, export renders full tool bodies (no middle-elision or
+				// char truncation) so the transcript reproduces the complete output.
+				const exportPanel = createChatPanel({ unboundedToolBodies: true });
+				rehydrateChatPanelFromTurns(exportPanel, turns, { unboundedToolBodies: true });
 				exportPanel.toggleAllToolsExpanded();
 				const lines = exportPanel.render(EXPORT_RENDER_WIDTH).map(stripAnsiForExport);
 				const date = new Date().toISOString().slice(0, 10);
