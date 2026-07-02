@@ -32,6 +32,16 @@ interfaces.
   recommendation, and preserved dissent, all receipt-linked. A settled
   question terminates early with the consensus instead of manufactured
   debate, and an unavailable fleet degrades to a labeled inline debate.
+- The `credentials` marketplace skill teaches safe credential handling on top
+  of the default damage-control net. It verifies presence without exposing
+  values (`ask_user` confirmation first, exit-code-only `grep -sq` second,
+  printing never), has the user add missing secrets through a hidden-input
+  `read -s` terminal command with the issuer link instead of pasting into
+  chat, keeps secrets out of argv, exports, and job scripts, covers facility
+  surfaces (kerberos, ssh agents, globus and scheduler tokens, netrc), and
+  defines the leak containment sequence: stop, name the credential and the
+  surfaces reached without repeating the value, rotate at the issuer, warn
+  that exported evidence outlives chat deletion, resume on acknowledgment.
 
 - Dispatch runs now auto-produce a forensic evidence bundle and a sidecar
   index on completion. When a run finalizes, the observability domain subscribes
