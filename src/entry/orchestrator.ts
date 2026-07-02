@@ -653,13 +653,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		autonomy: () => (config?.get() ?? readSettings()).autonomy ?? "auto-edit",
 	});
 	let askUserHandler: AskUserHandler | null = null;
+	// ask_user registers on every surface. Interactive sessions install a real
+	// handler; headless and ACP runs have none, so the bridge answers with an
+	// immediate cancelled interview and the model proceeds with its stated
+	// defaults instead of losing the tool (and interview skills their contract)
+	// silently. This keeps the compiled tool surface identical across surfaces.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
 		dispatch,
 		bus,
-		...(interactive ? { askUser: askUserBridge } : {}),
+		askUser: askUserBridge,
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
