@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { evalHarnessMetricsFromCommands, ZERO_EVAL_HARNESS_METRICS } from "./metrics.js";
 import type {
 	EvalCommandResult,
@@ -63,9 +64,12 @@ export function createEvalId(startedAt: Date, taskFileHash: string): string {
 }
 
 export async function writeEvalArtifact(dataDir: string, artifact: EvalRunArtifact): Promise<string> {
+	// safeResourceWrite is sync, but the eval harness writes artifacts at run end
+	// in a CLI batch context, so a synchronous fsync there is fine. Delegating
+	// closes the real bug: the previous bare writeFile had no tmp+rename or fsync,
+	// so a crash mid-write left a torn ${evalId}.json that loadEvalArtifact rejects.
 	const path = evalArtifactPath(dataDir, artifact.evalId);
-	await mkdir(evalRoot(dataDir), { recursive: true });
-	await writeFile(path, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+	safeResourceWrite(path, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: "utf8" });
 	return path;
 }
 

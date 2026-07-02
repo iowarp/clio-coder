@@ -9,8 +9,9 @@
  * settings.yaml because they are deliberate user configuration.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { safeResourceWrite } from "./safe-resource-write.js";
 import { clioStateDir } from "./xdg.js";
 
 export function recentModelsPath(): string {
@@ -43,10 +44,7 @@ function readFromDisk(path: string): string[] | null {
 }
 
 function writeToDisk(path: string, refs: ReadonlyArray<string>): void {
-	mkdirSync(dirname(path), { recursive: true });
-	const tmp = `${path}.tmp-${process.pid}`;
-	writeFileSync(tmp, `${JSON.stringify(refs, null, "\t")}\n`, "utf8");
-	renameSync(tmp, path);
+	safeResourceWrite(path, `${JSON.stringify(refs, null, "\t")}\n`, { encoding: "utf8" });
 }
 
 /**
