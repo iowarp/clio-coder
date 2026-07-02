@@ -16,7 +16,7 @@ import {
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
-import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream } from "./spawn-hygiene.js";
+import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
 import { stringEnum } from "./string-enum.js";
 import { GREP_MAX_LINE_LENGTH, truncateHead, truncateLine } from "./truncate.js";
 
@@ -437,6 +437,10 @@ export const grepTool: ToolSpec = {
 	async run(args, options): Promise<ToolResult> {
 		const pattern = typeof args.pattern === "string" && args.pattern.length > 0 ? args.pattern : null;
 		if (!pattern) return { kind: "error", message: "grep: missing pattern argument" };
+		// Reject an oversized pattern before spawning rg or compiling a fallback
+		// regex; an over-MAX_ARG_STRLEN argv entry would otherwise throw spawn E2BIG.
+		const patternSize = validateSearchPatternSize(pattern);
+		if (!patternSize.ok) return { kind: "error", message: `grep: ${patternSize.message}` };
 		const mode: GrepMode = args.mode === "files" || args.mode === "count" ? args.mode : "content";
 		if (args.mode !== undefined && args.mode !== "content" && args.mode !== "files" && args.mode !== "count") {
 			return { kind: "error", message: `grep: mode must be content, files, or count; got '${String(args.mode)}'` };

@@ -16,7 +16,7 @@ import {
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
-import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream } from "./spawn-hygiene.js";
+import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateHead } from "./truncate.js";
 
@@ -231,6 +231,10 @@ export const findTool: ToolSpec = {
 	async run(args, options): Promise<ToolResult> {
 		const pattern = typeof args.pattern === "string" && args.pattern.length > 0 ? args.pattern : null;
 		if (!pattern) return { kind: "error", message: "find: missing pattern argument" };
+		// Reject an oversized pattern before spawning fd or compiling a fallback
+		// glob regex; an over-MAX_ARG_STRLEN argv entry would otherwise throw E2BIG.
+		const patternSize = validateSearchPatternSize(pattern);
+		if (!patternSize.ok) return { kind: "error", message: `find: ${patternSize.message}` };
 		const order: FindOrder = args.order === "mtime" ? "mtime" : "path";
 		if (args.order !== undefined && args.order !== "path" && args.order !== "mtime") {
 			return { kind: "error", message: `find: order must be path or mtime; got '${String(args.order)}'` };
