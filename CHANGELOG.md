@@ -131,6 +131,36 @@ interfaces.
 
 ### Fixed
 
+- Dispatch finalization failures are now contained on both native workers and
+  ACP delegated agents. A rejected worker promise or failed ledger persist no
+  longer leaves a run row stuck in `running` with no receipt and a leaked active
+  entry; the finalizer seals a failed row, emits `DispatchFailed`, drops the
+  active entry, and then rethrows. Worker ledger rows are also created before
+  subprocess spawn now, so a row-creation failure aborts the worker before it
+  can hold a concurrency slot without a durable run record.
+- Dispatch receipts now wait for active event consumers to drain before
+  finalization, bounded to two seconds, so token meters, tool stats, and
+  finish-contract text folded by the consumer land in the receipt that closes
+  the run. ACP usage accounting now treats the adapter aggregate as
+  authoritative and uses event metering only as a fallback, avoiding the
+  double-counting that could appear while reconciling delegated agent usage.
+- ACP delegated runs now share the native worker finish semantics. The high-rigor
+  finish gate applies to delegated agents, and a delegated run whose outcome is
+  not succeeded but whose process exits zero is normalized to a nonzero receipt
+  exit code, so failed ACP work is represented consistently in receipts and
+  evidence.
+- The `llamacpp` SSE parser now counts malformed frames it skips and writes one
+  stderr diagnostic per stream, with the `[DONE]` sentinel exempted. Dropped
+  mid-stream frames therefore leave an operator-visible trace instead of looking
+  like an ordinary truncated response. Marketplace skill installation also
+  reports config-directory resolution failures to stderr instead of continuing
+  silently, and the Ollama fingerprint probe now documents its intentional
+  swallow path.
+- The generated first-run settings YAML now includes `workers.onPermission` with
+  its `deny` and `fail` semantics, matching the typed defaults that already had
+  the field. New users therefore see the same permission-stall policy that
+  Clio applies at runtime, and the default YAML no longer drifts from
+  `DEFAULT_SETTINGS`.
 - Headless `clio run` and ACP sessions now stop on a loop-guard interrupt
   instead of spinning until an external timeout. Previously only the interactive
   TUI subscribed to the loop-block / tool-call-ceiling bus events and aborted the
