@@ -53,6 +53,17 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Added (context wiring)
 
+- **`/context refresh` and `clio context refresh`.** The cheap staleness fix:
+  rebuilds the codewiki index and restamps the CLIO.md fingerprint footer
+  (gitHead/treeHash/loc) without touching any handbook prose. The stale
+  codewiki marker in the compiled prompt now points at `/context refresh`
+  instead of `/context-init`.
+- **Preload class visibility.** `/context init` output now reports how the
+  session prompt will treat project context: `preload: full (N.NkB, N lines)`
+  or `preload: synopsis (reason: size|lines)`, warning when a full preload is
+  within 10% of the 8000-char/220-line cliff. The same class appears in
+  `clio config inspect` (CLIO.md entry detail) and as a `project preload:`
+  line in the `/context` overlay.
 - **Worker context injection.** Dispatched workers with capability class
   `workspace-edit`, `verification`, or `artifact-write` now receive a bounded
   dynamic prompt message with the project name, conventions, and hard

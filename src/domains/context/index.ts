@@ -47,7 +47,7 @@ export {
 	updateCodewikiPaths,
 	writeCodewiki,
 } from "./codewiki/indexer.js";
-export type { ContextContract, ContextState, ProjectPromptContext } from "./contract.js";
+export type { ContextContract, ContextState, ProjectPromptContext, ProjectStructuredContext } from "./contract.js";
 export { computeFingerprint, isStale } from "./fingerprint.js";
 export {
 	type LoadedOperatorProfile,
@@ -62,4 +62,11 @@ export {
 	type ProjectRulesLoad,
 	selectActiveRules,
 } from "./project-rules.js";
+export { renderPromptContext } from "./prompt-context.js";
+export {
+	type RunContextRefreshInput,
+	type RunContextRefreshResult,
+	restampFingerprintFooter,
+	runContextRefresh,
+} from "./refresh.js";
 export { readClioState, writeClioState } from "./state.js";

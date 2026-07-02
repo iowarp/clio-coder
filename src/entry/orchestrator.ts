@@ -1051,6 +1051,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							confirmAll: () => options.confirmedAll === true,
 						});
 					},
+					onContextRefresh: async () => {
+						await contextDomain.runContextRefresh({
+							cwd: process.cwd(),
+							io: {
+								stdout: (s) => process.stdout.write(s),
+								stderr: (s) => process.stderr.write(s),
+							},
+						});
+					},
 				}
 			: {}),
 		onSetThinkingLevel: (level) => {

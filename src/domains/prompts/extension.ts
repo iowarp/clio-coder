@@ -16,6 +16,7 @@ import { compile, type RenderedPromptFragment } from "./compiler.js";
 import type { CompileSessionPromptInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
+import { classifyProjectPreload, type ProjectPreloadClass } from "./preload.js";
 
 export interface PromptsBundleOptions {
 	/** When true, the dynamic context.files fragment renders the empty string. */
@@ -66,18 +67,25 @@ export function createPromptsBundle(
 			const safety = input.autonomy ?? settings?.autonomy ?? "auto-edit";
 			const cwd = input.cwd ?? process.cwd();
 			let contextFiles = "";
+			let projectPreload: ProjectPreloadClass | null = null;
 			if (!suppressContextFiles) {
 				const projectContext = contextDomain()?.renderPromptContext(cwd);
 				contextFiles = projectContext
 					? selectProjectContext(projectContext, input.sessionInputs.providerSupportsTools ?? null)
 					: "";
+				if (projectContext) {
+					projectPreload = classifyProjectPreload({
+						hasClioMd: projectContext.clioMd !== null,
+						text: projectContext.text,
+					});
+				}
 				for (const warning of projectContext?.warnings ?? []) process.stderr.write(`${warning}\n`);
 			}
 			const sessionInputs = {
 				...input.sessionInputs,
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
 			};
-			return compile(table, {
+			const compiled = compile(table, {
 				identity: "identity.clio",
 				operatingContract: "operating.contract",
 				safety: `safety.${safety}`,
@@ -87,6 +95,7 @@ export function createPromptsBundle(
 					...customizationFragments(cwd, input.workingContextPaths ?? []),
 				],
 			});
+			return { ...compiled, projectPreload };
 		},
 		reload,
 	};
@@ -219,24 +228,16 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 	return lines.join("\n");
 }
 
-const FULL_PROJECT_CONTEXT_MAX_CHARS = 8000;
-const FULL_PROJECT_CONTEXT_MAX_LINES = 220;
-
-function shouldPreloadProjectContext(context: ProjectPromptContext): boolean {
-	if (!context.clioMd) return false;
-	if (context.text.length > FULL_PROJECT_CONTEXT_MAX_CHARS) return false;
-	const lines = context.text.split("\n").length;
-	return lines <= FULL_PROJECT_CONTEXT_MAX_LINES;
-}
-
 /**
  * Project context is selected once per session compile: the full CLIO.md
  * preload when it is small enough, a compact synopsis otherwise. No per-turn
- * selection — the session prompt is stable for the session's lifetime.
+ * selection — the session prompt is stable for the session's lifetime. The
+ * cliff itself lives in prompts/preload.ts so reporting surfaces classify
+ * with the same rule.
  */
 function selectProjectContext(context: ProjectPromptContext, providerSupportsTools: boolean | null): string {
-	const contextText = context.text.trim();
-	if (contextText.length === 0) return "";
-	if (shouldPreloadProjectContext(context)) return contextText;
+	const preload = classifyProjectPreload({ hasClioMd: context.clioMd !== null, text: context.text });
+	if (preload.mode === "none") return "";
+	if (preload.mode === "full") return context.text.trim();
 	return renderProjectSynopsis(context, providerSupportsTools);
 }

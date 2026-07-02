@@ -8,15 +8,12 @@ import { detectProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
-import {
-	type ParsedClioMd,
-	renderProjectContextFragment,
-	renderProjectTypeFragment,
-	tryReadClioMd,
-} from "./clio-md.js";
+import { tryReadClioMd } from "./clio-md.js";
 import { buildCodewiki, codewikiPath, readCodewiki, updateCodewikiPaths, writeCodewiki } from "./codewiki/indexer.js";
-import type { ContextContract, ContextState, ProjectPromptContext } from "./contract.js";
+import type { ContextContract, ContextState } from "./contract.js";
 import { computeFingerprint } from "./fingerprint.js";
+import { renderPromptContext } from "./prompt-context.js";
+import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
 
 /**
@@ -62,26 +59,6 @@ function ensureCodewikiFresh(cwd: string): void {
 	const projectType = state?.projectType ?? detectProjectType(cwd);
 	writeCodewiki(cwd, buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
 	persistState(cwd, fingerprint, indexedAt, state);
-}
-
-function renderPromptContext(cwd: string): ProjectPromptContext {
-	const projectType = detectProjectType(cwd);
-	const pieces = [renderProjectTypeFragment(projectType)];
-	const warnings: string[] = [];
-	const clio = tryReadClioMd(cwd);
-	let clioMd: ParsedClioMd | null = null;
-	if (clio?.ok) {
-		clioMd = clio.value;
-		pieces.push(renderProjectContextFragment(clio.value));
-	}
-	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
-	if (readCodewiki(cwd)) {
-		const state = readClioState(cwd);
-		const stale = state ? state.fingerprint.treeHash !== computeFingerprint(cwd).treeHash : true;
-		const suffix = stale ? " (stale; run /context-init to refresh)" : "";
-		pieces.push(`<codewiki>available${suffix}; use code_nav</codewiki>`);
-	}
-	return { text: pieces.join("\n\n"), clioMd, warnings };
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
@@ -258,6 +235,13 @@ export function createContextBundle(
 				});
 				throw err;
 			}
+		},
+		async runContextRefresh(input) {
+			const result = await runContextRefresh(input);
+			const cwd = input?.cwd ?? process.cwd();
+			contextState.invalidate(cwd);
+			if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
+			return result;
 		},
 		renderPromptContext,
 		projectStructuredContext(cwd = process.cwd()) {

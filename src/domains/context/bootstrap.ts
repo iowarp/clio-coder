@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
+import { classifyProjectPreload, type ProjectPreloadClass } from "../prompts/preload.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
 	type AdoptionScanResult,
@@ -12,6 +13,7 @@ import {
 import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 import { buildCodewikiWithTreeSitter, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint } from "./fingerprint.js";
+import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 import { readClioState, statePath as resolveStatePath, writeClioState } from "./state.js";
 
@@ -84,6 +86,13 @@ export interface RunBootstrapResult {
 	projectType: ProjectType;
 	summary: RunBootstrapSummary;
 	adoption: AdoptionScanResult;
+	/**
+	 * How the session compiler will preload the project context that exists
+	 * on disk after this run: full, synopsis (with the limit that forced it),
+	 * or none. In preview mode this reflects the current on-disk state, since
+	 * preview writes nothing.
+	 */
+	preload: ProjectPreloadClass;
 }
 
 export interface RunBootstrapSummary {
@@ -311,6 +320,12 @@ function topTwoSegments(path: string): string {
 
 function indexedSourceFileCount(codewiki: Codewiki): number {
 	return codewiki.files.filter((file) => file.lang !== "config").length;
+}
+
+/** Measure how the session compiler will preload the on-disk project context. */
+function measureProjectPreload(cwd: string): ProjectPreloadClass {
+	const promptContext = renderPromptContext(cwd);
+	return classifyProjectPreload({ hasClioMd: promptContext.clioMd !== null, text: promptContext.text });
 }
 
 function topCodewikiDirectories(codewiki: Codewiki, limit = 8): string[] {
@@ -903,6 +918,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			projectType,
 			summary,
 			adoption,
+			preload: measureProjectPreload(cwd),
 		};
 	}
 
@@ -961,10 +977,18 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		...(proposalPath ? { proposalPath } : {}),
 	};
 	out(input.io, formatBootstrapSummary(summary));
+	const preload = measureProjectPreload(cwd);
+	out(input.io, `  preload: ${preload.label}\n`);
+	if (preload.mode === "full" && preload.nearLimit) {
+		warn(
+			input.io,
+			`  warning: project context is within 10% of the preload limit (${preload.chars} chars of 8000, ${preload.lines} lines of 220); the next growth may flip it to a synopsis\n`,
+		);
+	}
 	progress(input, {
 		phase: "done",
 		status: "completed",
-		message: `${summary.action} CLIO.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}`,
+		message: `${summary.action} CLIO.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}; preload: ${preload.label}`,
 	});
 	return {
 		clioMdPath,
@@ -974,5 +998,6 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		projectType,
 		summary,
 		adoption,
+		preload,
 	};
 }
