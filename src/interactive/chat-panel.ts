@@ -4,6 +4,7 @@ import { AGENT_GLYPH, AMBER, BLUE_REASON, DIM, GREEN_OK, RED_CRIT, RESET, TEAL, 
 import { highlightCode } from "./renderers/highlight.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
+	classifyResourceRead,
 	previewResult,
 	renderToolCallHeader,
 	renderToolExecution,
@@ -58,8 +59,10 @@ type ToolSegment = {
 	expanded: boolean;
 	/** Wall-clock start time captured by the chat panel for live duration display. */
 	startedAtMs?: number;
-	/** Completed call duration in milliseconds when measured locally. */
+	/** Completed call duration in milliseconds (event-supplied or measured locally). */
 	durationMs?: number;
+	/** Persisted result summary (bytes, truncated, offloadPath, observation) from the chat loop. */
+	resultSummary?: Record<string, unknown> | undefined;
 	/**
 	 * Latest cumulative partial output from `tool_execution_update`. Cleared
 	 * back to `undefined` on `tool_execution_end` so the finished `result`
@@ -290,8 +293,10 @@ function renderToolSegmentLines(
 	width: number,
 	expandKey: string | undefined,
 	latestHintToolId: string | null,
+	nowMs: number,
 ): string[] {
 	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
+	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, nowMs - seg.startedAtMs) : undefined;
 	if (!seg.expanded) {
 		return renderToolSubline(
 			seg.finished
@@ -302,8 +307,9 @@ function renderToolSegmentLines(
 						result: seg.result,
 						isError: seg.isError,
 						durationMs: seg.durationMs,
+						resultSummary: seg.resultSummary,
 					}
-				: { toolCallId: seg.id, toolName: seg.name, args: seg.args },
+				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs },
 			width,
 			hintKey,
 		);
@@ -311,12 +317,12 @@ function renderToolSegmentLines(
 	if (!seg.finished) {
 		if (seg.partialOutput !== undefined) {
 			return renderToolStreamingExecution(
-				{ toolCallId: seg.id, toolName: seg.name, args: seg.args },
+				{ toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs },
 				width,
 				seg.partialOutput,
 			);
 		}
-		return renderToolCallHeader({ toolCallId: seg.id, toolName: seg.name, args: seg.args }, width);
+		return renderToolCallHeader({ toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs }, width);
 	}
 	return renderToolExecution(
 		{
@@ -326,6 +332,7 @@ function renderToolSegmentLines(
 			result: seg.result,
 			isError: seg.isError,
 			durationMs: seg.durationMs,
+			resultSummary: seg.resultSummary,
 		},
 		width,
 	);
@@ -336,6 +343,7 @@ function renderEntryLines(
 	width: number,
 	expandKey: string | undefined,
 	latestHintToolId: string | null,
+	nowMs: number,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width);
@@ -372,7 +380,7 @@ function renderEntryLines(
 			}
 			continue;
 		}
-		lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId));
+		lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId, nowMs));
 	}
 	const shouldRenderStatus =
 		entry.pending &&
@@ -475,11 +483,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (!dirty && cachedWidth === width && cachedExpandKey === expandKey) return cachedLines;
 		const out: string[] = [];
 		const latestHintToolId = latestCollapsedFinishedToolId();
+		const nowMs = now();
 		for (let i = 0; i < transcript.length; i += 1) {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (i > 0) out.push("");
-			out.push(...renderEntryLines(entry, width, expandKey, latestHintToolId));
+			out.push(...renderEntryLines(entry, width, expandKey, latestHintToolId, nowMs));
 		}
 		cachedLines = out;
 		cachedWidth = width;
@@ -584,7 +593,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			if (event.type === "tool_execution_start") {
 				const assistant = ensureAssistant();
-				const expanded = assistant.pending === false;
+				// Compact resource reads (SKILL.md, CLIO.md, AGENTS.md, docs/) stay
+				// collapsed to one labeled line until explicitly expanded.
+				const expanded = assistant.pending === false && classifyResourceRead(event.toolName, event.args) === null;
 				assistant.pending = true;
 				assistant.segments.push({
 					kind: "tool",
@@ -631,9 +642,23 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.result = event.result;
 					tool.isError = event.isError;
 					tool.finished = true;
-					if (tool.startedAtMs !== undefined) {
+					// The chat loop enriches tool_execution_end with durationMs and the
+					// persisted resultSummary (bytes, truncated, offloadPath,
+					// observation counts); carry both so the ledger line and replay
+					// render identical facts.
+					const enriched = event as { durationMs?: unknown; resultSummary?: unknown };
+					if (typeof enriched.durationMs === "number" && Number.isFinite(enriched.durationMs)) {
+						tool.durationMs = enriched.durationMs;
+					} else if (tool.startedAtMs !== undefined) {
 						const elapsed = Math.max(0, now() - tool.startedAtMs);
 						if (elapsed > 0) tool.durationMs = elapsed;
+					}
+					if (
+						enriched.resultSummary !== null &&
+						typeof enriched.resultSummary === "object" &&
+						!Array.isArray(enriched.resultSummary)
+					) {
+						tool.resultSummary = enriched.resultSummary as Record<string, unknown>;
 					}
 					// Drop the streaming buffer once the final result has landed; the
 					// expanded render switches to `renderToolExecution` and stays

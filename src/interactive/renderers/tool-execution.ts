@@ -51,6 +51,8 @@ export interface ToolExecutionStart {
 	toolCallId: string;
 	toolName: string;
 	args: unknown;
+	/** Live elapsed time supplied by the panel for running segments. */
+	elapsedMs?: number | undefined;
 }
 
 export interface ToolExecutionFinished {
@@ -60,6 +62,8 @@ export interface ToolExecutionFinished {
 	result: unknown;
 	isError: boolean;
 	durationMs?: number | undefined;
+	/** Persisted summary (bytes, truncated, offloadPath, observation counts). */
+	resultSummary?: Record<string, unknown> | undefined;
 }
 
 // Counts UTF-16 code units; can split a surrogate pair on non-BMP input. Acceptable for ASCII paths/commands.
@@ -197,6 +201,135 @@ function summarizeArgs(toolName: string, args: unknown): string {
 }
 
 /**
+ * Compact resource-read classification. Reads of skill/handbook/agent
+ * instruction files and docs pages collapse to one labeled line and never
+ * auto-expand; their bodies are reference material, not task output.
+ */
+export function classifyResourceRead(toolName: string, args: unknown): string | null {
+	if (toolName !== "read") return null;
+	const path = readStringField(args, "path");
+	if (path === null) return null;
+	const normalized = path.replace(/\\/g, "/");
+	const base = normalized.split("/").pop() ?? "";
+	if (base === "SKILL.md") return "skill";
+	if (base === "CLIO.md") return "handbook";
+	if (base === "AGENTS.md") return "agents";
+	if (/(^|\/)docs\//.test(normalized)) return "docs";
+	return null;
+}
+
+function detailsOf(result: unknown): Record<string, unknown> | null {
+	if (!isPlainObject(result)) return null;
+	return isPlainObject(result.details) ? result.details : null;
+}
+
+function observationOf(finished: ToolExecutionFinished): Record<string, unknown> | null {
+	const fromDetails = detailsOf(finished.result)?.observation;
+	if (isPlainObject(fromDetails)) return fromDetails;
+	const fromSummary = finished.resultSummary?.observation;
+	return isPlainObject(fromSummary) ? fromSummary : null;
+}
+
+function numberField(record: Record<string, unknown> | null, key: string): number | null {
+	const value = record?.[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringField(record: Record<string, unknown> | null, key: string): string | null {
+	const value = record?.[key];
+	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes}B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function countSummary(observation: Record<string, unknown>): string | null {
+	const unit = stringField(observation, "unit") ?? "results";
+	const shown = numberField(observation, "shownCount");
+	if (shown === null) return null;
+	const total = numberField(observation, "totalCount");
+	if (total === null) return `${shown}+ ${unit}`;
+	if (total === shown) return `${shown} ${unit}`;
+	return `${shown}/${total} ${unit}`;
+}
+
+/**
+ * Outcome facts for the collapsed ledger line, derived from the observation
+ * envelope (OBSERVE plane), the exec record (git/verify), or the dispatch
+ * receipt counts. Returns null when the result carries no recognizable facts.
+ */
+function outcomeSummary(finished: ToolExecutionFinished): string | null {
+	const observation = observationOf(finished);
+	if (observation !== null) {
+		if (finished.toolName === "read") {
+			const shown = numberField(observation, "shownCount");
+			const total = numberField(observation, "totalCount");
+			if (shown !== null && total !== null) {
+				const offsetRaw = isPlainObject(finished.args) ? finished.args.offset : undefined;
+				const start = typeof offsetRaw === "number" && offsetRaw > 0 ? Math.floor(offsetRaw) : 1;
+				return shown > 0 ? `lines ${start}-${start + shown - 1} of ${total}` : `0 of ${total} lines`;
+			}
+		}
+		return countSummary(observation);
+	}
+	const details = detailsOf(finished.result);
+	if (finished.toolName === "git" || finished.toolName === "verify") {
+		const exitCode = numberField(details, "exitCode");
+		if (exitCode !== null) return `exit ${exitCode}`;
+		const status = stringField(details, "status");
+		if (status !== null) return status;
+		return null;
+	}
+	if (finished.toolName === "dispatch") {
+		const receipts = numberField(details, "receiptCount");
+		const failed = numberField(details, "failedCount") ?? 0;
+		if (receipts !== null) return `${receipts} task${receipts === 1 ? "" : "s"} -> ${receipts - failed} ok`;
+		return null;
+	}
+	return null;
+}
+
+function offloadPathOf(finished: ToolExecutionFinished): string | null {
+	const observation = observationOf(finished);
+	const fromObservation = stringField(observation, "offloadPath");
+	if (fromObservation !== null) return fromObservation;
+	const summary = finished.resultSummary ?? null;
+	const fromSummary = stringField(summary, "offloadPath");
+	if (fromSummary !== null) return fromSummary;
+	const resultSize = detailsOf(finished.result)?.resultSize;
+	return isPlainObject(resultSize) ? stringField(resultSize, "offloadPath") : null;
+}
+
+function shownBytesOf(finished: ToolExecutionFinished): number | null {
+	const observation = observationOf(finished);
+	const fromObservation = numberField(observation, "shownBytes");
+	if (fromObservation !== null) return fromObservation;
+	return numberField(finished.resultSummary ?? null, "bytes");
+}
+
+/**
+ * The dim ledger tail appended to a finished collapsed subline: outcome facts,
+ * then byte size (duration rides on the status glyph), then the offload path
+ * for truncated calls. One line of plain text carries signature and outcome
+ * when copied.
+ */
+function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: string } {
+	const parts: string[] = [];
+	const outcome = outcomeSummary(finished);
+	if (outcome !== null) parts.push(outcome);
+	const bytes = shownBytesOf(finished);
+	if (bytes !== null && bytes > 0) parts.push(formatBytes(bytes));
+	const offloadPath = offloadPathOf(finished);
+	return {
+		facts: parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : "",
+		offload: offloadPath !== null ? dim(` · full: ${offloadPath}`) : "",
+	};
+}
+
+/**
  * Header status: `undefined` when the call is still in flight (no glyph),
  * `"ok"` for success (green check), `"error"` for failure (red cross). The
  * glyph hangs off the right of the header line so the tool name + args read
@@ -266,6 +399,11 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	artifact: (args) => buildFieldSublineBody(args, "kind", "writing "),
 	monitor: (args) => buildFieldSublineBody(args, "run_id", "monitoring "),
 	steer: (args) => buildFieldSublineBody(args, "run_id", "steering "),
+	dispatch: (args) => {
+		if (!isPlainObject(args) || !Array.isArray(args.tasks)) return null;
+		const count = args.tasks.length;
+		return `dispatching ${count} task${count === 1 ? "" : "s"}`;
+	},
 };
 
 /**
@@ -302,15 +440,18 @@ function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus,
 	return buildUnknownToolBody(toolName, args);
 }
 
-function sublineLine(
-	toolName: string,
-	args: unknown,
-	status: HeaderStatus,
-	meta: StatusMeta = {},
-	result?: unknown,
-): string {
-	const body = styleSublineBody(buildSublineBody(toolName, args, status, result));
-	return `${dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status, meta)}`;
+function sublineLine(call: ToolExecutionStart | ToolExecutionFinished, status: HeaderStatus, meta: StatusMeta): string {
+	const finished = "result" in call ? call : null;
+	const body = styleSublineBody(buildSublineBody(call.toolName, call.args, status, finished?.result));
+	const resourceLabel = classifyResourceRead(call.toolName, call.args);
+	const resource = resourceLabel !== null ? dim(` · ${resourceLabel}`) : "";
+	if (finished !== null) {
+		const tail = ledgerTail(finished);
+		return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${tail.facts}${statusGlyph(status, meta)}${tail.offload}`;
+	}
+	const elapsed = formatDurationMs("elapsedMs" in call ? call.elapsedMs : undefined);
+	const running = elapsed !== null ? dim(` · ${elapsed}`) : "";
+	return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${running}`;
 }
 
 function wrap(line: string, width: number): string[] {
@@ -574,10 +715,7 @@ export function renderToolSubline(
 					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
 				}
 			: {};
-	const wrapped = wrap(
-		sublineLine(call.toolName, call.args, status, meta, "result" in call ? call.result : undefined),
-		width,
-	);
+	const wrapped = wrap(sublineLine(call, status, meta), width);
 	if (status === undefined) return wrapped;
 	if (expandKey === undefined || expandKey.length === 0) return wrapped;
 	if (wrapped.length === 0) return wrapped;
@@ -680,6 +818,7 @@ export function renderToolStreamingExecution(call: ToolExecutionStart, width: nu
 	} else {
 		out.push(...renderOutputRows(partialOutput, width, false, STREAMING_RESULT_ROW_LIMIT));
 	}
-	out.push(...indentAndWrap(dim("(running...)"), width, false));
+	const elapsed = formatDurationMs(call.elapsedMs);
+	out.push(...indentAndWrap(dim(elapsed !== null ? `(running... ${elapsed})` : "(running...)"), width, false));
 	return out;
 }
