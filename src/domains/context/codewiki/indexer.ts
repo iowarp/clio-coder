@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
 import { createTreeSitterExtractor } from "./tree-sitter.js";
 
@@ -749,11 +750,9 @@ export function codewikiPath(cwd: string): string {
 }
 
 export function writeCodewiki(cwd: string, codewiki: Codewiki): void {
-	const filePath = codewikiPath(cwd);
-	mkdirSync(dirname(filePath), { recursive: true });
-	const tmpPath = join(dirname(filePath), `.codewiki-${process.pid}-${randomUUID()}.tmp`);
-	writeFileSync(tmpPath, `${JSON.stringify(normalizeCodewiki(codewiki), null, 2)}\n`, "utf8");
-	renameSync(tmpPath, filePath);
+	safeResourceWrite(codewikiPath(cwd), `${JSON.stringify(normalizeCodewiki(codewiki), null, 2)}\n`, {
+		encoding: "utf8",
+	});
 }
 
 export function readCodewiki(cwd: string): Codewiki | null {
