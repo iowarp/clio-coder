@@ -96,7 +96,8 @@ const TOOL_KIND_BY_NAME: Record<string, AcpToolKind> = {
 	web_fetch: "fetch",
 	git: "other",
 	dispatch: "other",
-	dispatch_batch: "other",
+	monitor: "read",
+	steer: "other",
 };
 
 function toolKind(name: string | undefined): AcpToolKind {

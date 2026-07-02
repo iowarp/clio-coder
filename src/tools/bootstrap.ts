@@ -9,16 +9,18 @@ import { bashTool } from "./bash.js";
 import { codeNavTool } from "./codewiki/code-nav.js";
 import { createContextTool } from "./context/index.js";
 import { credentialPresentTool } from "./credential-present.js";
-import { createDispatchBatchTool, createDispatchTool } from "./dispatch.js";
+import { createDispatchTool } from "./dispatch.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
+import { createMonitorTool } from "./monitor.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readMaxBytes, readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import { gitTool } from "./safe-exec.js";
 import { createSkillTool } from "./skills.js";
+import { createSteerTool } from "./steer.js";
 import { DEFAULT_MAX_BYTES } from "./truncate.js";
 import { verifyTool } from "./verify/index.js";
 import { webFetchTool } from "./web-fetch.js";
@@ -220,26 +222,37 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.Dispatch]: {
-		objective: "Dispatch a bounded task to a configured Clio worker.",
+		objective: "Dispatch bounded tasks to configured Clio workers.",
 		uiLabel: "Dispatch",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "summary",
 			maxBytes: 16_384,
-			followUpHint: "Use the dispatch receipt path or ask a narrower worker follow-up for omitted output.",
+			followUpHint: "Use the dispatch receipt paths or ask a narrower worker follow-up for omitted output.",
 		},
 		costLatency: "agent",
 	},
-	[ToolNames.DispatchBatch]: {
-		objective: "Dispatch several bounded tasks to configured Clio workers as one grouped batch.",
-		uiLabel: "Dispatch Batch",
-		retrySafety: "not_retry_safe",
+	[ToolNames.Monitor]: {
+		objective: "Inspect dispatched runs: state, recent events, receipts.",
+		uiLabel: "Monitor",
+		retrySafety: "idempotent",
 		resultSizePolicy: {
 			kind: "summary",
 			maxBytes: 16_384,
-			followUpHint: "Use the batch run ids or receipts for omitted worker details.",
+			followUpHint: "Use monitor(mode=receipt) or read the receipt path for full details.",
 		},
-		costLatency: "agent",
+		costLatency: "local_fast",
+	},
+	[ToolNames.Steer]: {
+		objective: "Guide or cancel a running dispatched worker.",
+		uiLabel: "Steer",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 4_096,
+			followUpHint: "Use monitor(mode=status) to confirm the run state after steering.",
+		},
+		costLatency: "local_fast",
 	},
 };
 
@@ -349,8 +362,14 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			}),
 		});
 		registry.register({
-			...builtin(createDispatchBatchTool(dispatchToolDeps), {
-				path: "src/tools/dispatch.ts",
+			...builtin(createMonitorTool({ dispatch: deps.dispatch }), {
+				path: "src/tools/monitor.ts",
+				scope: "core",
+			}),
+		});
+		registry.register({
+			...builtin(createSteerTool({ dispatch: deps.dispatch }), {
+				path: "src/tools/steer.ts",
 				scope: "core",
 			}),
 		});

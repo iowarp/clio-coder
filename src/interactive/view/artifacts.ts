@@ -459,7 +459,7 @@ function dispatchResultForRun(entries: ReadonlyArray<SessionEntry>, runId: strin
 		const payload = messagePayload(entry);
 		if (!payload) continue;
 		const toolName = typeof payload.toolName === "string" ? payload.toolName : "";
-		if (toolName !== "dispatch" && toolName !== "dispatch_batch") continue;
+		if (toolName !== "dispatch") continue;
 		const details = resultDetails(payload.result);
 		const detailRunId = details?.runId;
 		const runIds = details?.runIds;

@@ -3,7 +3,7 @@ import { classify } from "../domains/safety/action-classifier.js";
 import type { ToolSpec } from "./registry.js";
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([]);
-const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.DispatchBatch]);
+const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.Monitor, ToolNames.Steer]);
 const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser]);
 
 export interface BuiltinToolPolicyOptions {
