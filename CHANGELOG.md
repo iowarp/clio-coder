@@ -26,8 +26,8 @@ and grep/find answer tree visibility from a single ignore policy.
   `write_plan`, `write_review`, and `create_skill` behind
   `kind=plan|review|report|skill`, adding the new terminal `report` kind; and
   `dispatch` absorbs `dispatch_batch` with a `tasks` array and
-  `mode=parallel|sequential`. The `gateway` name is design-reserved for the
-  future MCP/DB proxy and is not implemented.
+  `mode=parallel|sequential|pipeline`. The `gateway` name is design-reserved
+  for the future MCP/DB proxy and is not implemented.
 - **dispatch pipeline mode.** `dispatch(tasks, mode=pipeline)` runs tasks one
   at a time and threads each step's final assistant output to the next step as
   a delimited dynamic prompt message treated as data, not instructions (step 1
@@ -40,6 +40,16 @@ and grep/find answer tree visibility from a single ignore policy.
   This changes the `dispatch` tool's parameter schema (the `mode` enum gains
   `pipeline`) and its description, which invalidates provider prompt caches on
   first use after upgrade.
+- **dispatch ad-hoc specialists.** Dispatch task objects can now include
+  `persona` and `tool_profile` to compose one bounded specialist at dispatch
+  time. `persona` replaces the recipe body inside the existing stable worker
+  shell (8000-character cap; rejected for shadow and ACP delegation agents),
+  while `tool_profile` narrows tools through
+  `minimal-local|science-local|full-agent`. Composed runs carry
+  `personaOverride.promptHash` on the run ledger and receipt, equal to the
+  composed run's `staticCompositionHash`; recipe runs remain byte-identical
+  and omit the field. This changes the `dispatch` tool's parameter schema and
+  description, invalidating provider prompt caches on first use after upgrade.
 - **monitor and steer.** `monitor(run_id?, mode=list|status|peek|receipt)`
   inspects dispatched runs, including an in-process rolling event tail
   (`peek`) and the stored receipt JSON (`receipt`, 14KB cap).

@@ -5,6 +5,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
+import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -12,6 +13,7 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 const DEFAULT_AGENT_ID = "coder";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
 const TRUNCATION_MARKER = "\n[agent output truncated]";
+const PERSONA_MAX_CHARS = 8_000;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 
@@ -136,6 +138,23 @@ function dispatchRequestFromArgs(
 	if (model) request.model = model;
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
+
+	if ("persona" in args && args.persona !== undefined) {
+		if (typeof args.persona !== "string") return { ok: false, message: "persona must be a string" };
+		const persona = args.persona.trim();
+		if (persona.length > PERSONA_MAX_CHARS) {
+			return { ok: false, message: `persona must be ${PERSONA_MAX_CHARS} characters or fewer` };
+		}
+		if (persona.length > 0) request.systemPrompt = persona;
+	}
+
+	const toolProfile = stringArg(args, "tool_profile");
+	if (toolProfile) {
+		if (!isToolProfileName(toolProfile)) {
+			return { ok: false, message: `tool_profile must be one of ${TOOL_PROFILE_NAMES.join("|")}` };
+		}
+		request.toolProfile = toolProfile;
+	}
 
 	const thinkingLevel = stringArg(args, "thinking_level");
 	if (thinkingLevel) {
@@ -346,7 +365,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. Call with list:true to see available agents. Use the returned receipts/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. Call with list:true to see available agents. Use the returned receipts/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
 			tasks: Type.Optional(
@@ -356,6 +375,13 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 						Type.Object({
 							task: Type.String({ description: "Concrete agent task with expected output and constraints." }),
 							agent: Type.Optional(Type.String({ description: "Agent recipe id (default coder)." })),
+							persona: Type.Optional(
+								Type.String({
+									description:
+										"Ad-hoc specialist persona to substitute for the recipe body inside the stable worker shell, max 8000 chars.",
+								}),
+							),
+							tool_profile: Type.Optional(stringEnum(TOOL_PROFILE_NAMES, "Narrow this worker's available tools.")),
 							target: Type.Optional(Type.String()),
 							model: Type.Optional(Type.String()),
 							cwd: Type.Optional(Type.String()),
@@ -371,6 +397,12 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 				),
 			),
 			agent: Type.Optional(Type.String({ description: "Default agent recipe for string tasks (default coder)." })),
+			persona: Type.Optional(
+				Type.String({
+					description: "Default ad-hoc specialist persona for dispatched tasks, max 8000 chars.",
+				}),
+			),
+			tool_profile: Type.Optional(stringEnum(TOOL_PROFILE_NAMES, "Default worker tool profile.")),
 			target: Type.Optional(Type.String({ description: "Default configured target id (omit for fleet default)." })),
 			model: Type.Optional(Type.String({ description: "Default model override." })),
 			thinking_level: Type.Optional(stringEnum(THINKING_LEVELS)),
