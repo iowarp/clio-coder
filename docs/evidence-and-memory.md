@@ -107,9 +107,9 @@ A subset of the taxonomy represents actual failure causes (governed by the `FAIL
 1. **`timeout`**: Triggered if the run outcome is `"timed_out"` or `"stalled"`, or if the error/failure text contains `"timed out"` or `"timeout"`.
 2. **`auth-failure`**: Triggered if failure text contains keywords like `"auth"`, `"api key"`, `"credential"`, or `"unauthorized"`.
 3. **`missing-dependency`**: Triggered if failure logs contain `"module not found"`, `"missing package"`, or `"missing dependency"`.
-4. **`blocked-tool`**: Triggered if the tool execution statistics show a blocked count greater than `0`.
-5. **`build-failure`**: Triggered if a command exits with a non-zero status and matches build tool needles (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`).
-6. **`test-failure`**: Triggered if a command exits with a non-zero status and matches test/lint needles (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`).
+4. **`build-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with build tool names in `toolStats` (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`). Forensic evidence can also classify a non-zero run from build language in the recorded task text.
+5. **`test-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with test or lint tool names in `toolStats` (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`). Forensic evidence can also classify a non-zero run from validation language in the recorded task text.
+6. **`blocked-tool`**: Triggered if tool execution statistics show a blocked count greater than `0`.
 
 ---
 
