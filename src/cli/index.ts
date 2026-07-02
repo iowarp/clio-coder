@@ -54,9 +54,22 @@ async function main(argv: string[]): Promise<number> {
 	// First application statement after the static import graph resolved: the
 	// elapsed here is the cold module-load tax (see CLIO_TRACE_BOOT).
 	traceBoot("cli entry");
-	const { apiKey, rest: afterApiKey } = extractApiKeyFlag(argv);
+	const { apiKey, rest: afterApiKey, error: apiKeyError } = extractApiKeyFlag(argv, isRecognizedSubcommand);
+	if (apiKeyError) {
+		printError(apiKeyError);
+		return 2;
+	}
 	const { noContextFiles, rest: afterNoContextFiles } = extractNoContextFilesFlag(afterApiKey);
-	const { noSkills, skillPaths, rest } = extractSkillsFlags(afterNoContextFiles);
+	const {
+		noSkills,
+		skillPaths,
+		rest,
+		error: skillError,
+	} = extractSkillsFlags(afterNoContextFiles, isRecognizedSubcommand);
+	if (skillError) {
+		printError(skillError);
+		return 2;
+	}
 	const { flags, positional } = parseFlags(rest);
 	const subcommand = positional[0];
 	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
@@ -83,6 +96,46 @@ async function main(argv: string[]): Promise<number> {
 	}
 
 	return dispatch(subcommand, subArgs, bootOptions);
+}
+
+// Every subcommand name dispatch() routes. The top-level value flags
+// (--api-key, --skill) consult this so they refuse to consume an intended
+// subcommand as their value. Keep in sync with the dispatch() switch below.
+const RECOGNIZED_SUBCOMMANDS = new Set<string>([
+	"acp",
+	"auth",
+	"config",
+	"configure",
+	"targets",
+	"models",
+	"agents",
+	"components",
+	"evidence",
+	"eval",
+	"memory",
+	"evolve",
+	"extensions",
+	"ext",
+	"fleet",
+	"skills",
+	"docs",
+	"share",
+	"export",
+	"import",
+	"context-init",
+	"context-index",
+	"context-clear",
+	"run",
+	"doctor",
+	"paths",
+	"reset",
+	"uninstall",
+	"upgrade",
+	"version",
+]);
+
+function isRecognizedSubcommand(token: string): boolean {
+	return RECOGNIZED_SUBCOMMANDS.has(token);
 }
 
 /**
