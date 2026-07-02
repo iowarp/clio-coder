@@ -10,6 +10,19 @@ import type { DispatchRequestOrigin, RunLineage } from "./types.js";
 
 export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+/**
+ * Data threaded from one pipeline step to the next. `fromRunId` is the source
+ * run (null when unknown), `position` is the 1-based index of the receiving
+ * step, and `text` is the source's final assistant output (empty allowed; an
+ * empty previous output still threads with an explicit empty marker so the
+ * chain stays deterministic).
+ */
+export interface PipelineInput {
+	fromRunId: string | null;
+	position: number;
+	text: string;
+}
+
 export interface JobSpec {
 	agentId: string;
 	task: string;
@@ -27,6 +40,13 @@ export interface JobSpec {
 	skillPaths?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
 	requestOrigin?: DispatchRequestOrigin;
+	/**
+	 * Threaded output from the previous pipeline step. Set only by the dispatch
+	 * tool's pipeline mode; step 1 and all non-pipeline runs omit it. The text
+	 * is delivered to the worker as data through the dynamic-message channel,
+	 * never substituted into the task string.
+	 */
+	pipelineInput?: PipelineInput;
 	/**
 	 * Caller-supplied lineage for retries and nested dispatch (fleet steps).
 	 * Omitted for root runs; the dispatch extension then mints a root lineage
@@ -54,6 +74,7 @@ const KNOWN_KEYS = new Set([
 	"skillPaths",
 	"trustProjectCompatRoots",
 	"requestOrigin",
+	"pipelineInput",
 	"lineage",
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
@@ -170,6 +191,12 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("pipelineInput" in spec && spec.pipelineInput !== undefined) {
+		if (!isValidPipelineInput(spec.pipelineInput)) {
+			errors.push("pipelineInput must carry fromRunId (string|null), position (integer >= 1), text (string)");
+		}
+	}
+
 	if ("lineage" in spec && spec.lineage !== undefined) {
 		if (!isValidLineage(spec.lineage)) {
 			errors.push("lineage must carry parentRunId (string|null), rootRunId (string), attempt >= 0, depth >= 0");
@@ -202,8 +229,17 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.requestOrigin === "string" && VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;
 	}
+	if (isValidPipelineInput(spec.pipelineInput)) out.pipelineInput = spec.pipelineInput;
 	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
 	return { ok: true, spec: out };
+}
+
+function isValidPipelineInput(value: unknown): value is PipelineInput {
+	if (!isPlainObject(value)) return false;
+	const fromRunOk = value.fromRunId === null || (typeof value.fromRunId === "string" && value.fromRunId.length > 0);
+	const positionOk = typeof value.position === "number" && Number.isInteger(value.position) && value.position >= 1;
+	const textOk = typeof value.text === "string";
+	return fromRunOk && positionOk && textOk;
 }
 
 function isValidLineage(value: unknown): value is RunLineage {

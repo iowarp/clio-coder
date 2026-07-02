@@ -305,16 +305,18 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
 		"",
-		...runs.flatMap(({ receipt, receiptPath, summary }) => {
+		...runs.flatMap(({ receipt, receiptPath, summary }, index) => {
 			const note = successNote(receipt);
 			const noteSuffix = note !== null ? ` note=${note}` : "";
 			const failure = receipt.failureMessage ? ` failure=${receipt.failureMessage}` : "";
+			// Pipeline runs are an ordered chain, so each line names its step.
+			const stepLabel = mode === "pipeline" ? `step ${index + 1}/${runs.length} ` : "";
 			const output =
 				summary.lastAssistantText.length > 0
 					? truncateUtf8(summary.lastAssistantText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured)";
 			return [
-				`- ${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${noteSuffix}${failure}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${noteSuffix}${failure}`,
 				"  agent output:",
 				...output.split("\n").map((line) => `  ${line}`),
 			];
@@ -344,7 +346,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default) or sequential. Call with list:true to see available agents. Use the returned receipts/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. Call with list:true to see available agents. Use the returned receipts/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
 			tasks: Type.Optional(
@@ -362,7 +364,12 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 					{ description: "Tasks to dispatch; a single object or string is accepted and wrapped." },
 				),
 			),
-			mode: Type.Optional(stringEnum(["parallel", "sequential"], "Run tasks concurrently (default) or one at a time.")),
+			mode: Type.Optional(
+				stringEnum(
+					["parallel", "sequential", "pipeline"],
+					"Run tasks concurrently (default), one at a time, or as a pipeline where each task receives the previous task's output as input data.",
+				),
+			),
 			agent: Type.Optional(Type.String({ description: "Default agent recipe for string tasks (default coder)." })),
 			target: Type.Optional(Type.String({ description: "Default configured target id (omit for fleet default)." })),
 			model: Type.Optional(Type.String({ description: "Default model override." })),
@@ -385,19 +392,28 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 			}
 			const parsed = dispatchRequestsFromArgs(args);
 			if (!parsed.ok) return { kind: "error", message: parsed.message };
-			const mode = args.mode === "sequential" ? "sequential" : "parallel";
-			if (args.mode !== undefined && args.mode !== "parallel" && args.mode !== "sequential") {
-				return { kind: "error", message: `dispatch: mode must be parallel or sequential; got '${String(args.mode)}'` };
+			const mode = args.mode === "sequential" ? "sequential" : args.mode === "pipeline" ? "pipeline" : "parallel";
+			if (args.mode !== undefined && args.mode !== "parallel" && args.mode !== "sequential" && args.mode !== "pipeline") {
+				return {
+					kind: "error",
+					message: `dispatch: mode must be parallel, sequential, or pipeline; got '${String(args.mode)}'`,
+				};
 			}
 			if (options?.signal?.aborted) return { kind: "error", message: "dispatch: aborted" };
 			const maxOutputBytes = maxOutputBytesArg(args);
 			const timeoutMs = timeoutMsArg(args);
 
 			try {
-				const runs =
-					mode === "sequential" || parsed.requests.length === 1
-						? await runSequential(deps, parsed.requests, mode, timeoutMs, options?.signal)
-						: await runBatch(deps, parsed.requests, timeoutMs, options?.signal);
+				let runs: CompletedRun[];
+				if (mode === "pipeline" && parsed.requests.length > 1) {
+					runs = await runPipeline(deps, parsed.requests, timeoutMs, options?.signal);
+				} else if (mode === "sequential" || mode === "pipeline" || parsed.requests.length === 1) {
+					// A single-task pipeline has nothing to thread, so it degrades to
+					// plain sequential and no pipeline-input message is sent.
+					runs = await runSequential(deps, parsed.requests, mode, timeoutMs, options?.signal);
+				} else {
+					runs = await runBatch(deps, parsed.requests, timeoutMs, options?.signal);
+				}
 				const output = formatDispatchOutput(mode, runs, maxOutputBytes);
 				const details = dispatchDetails(mode, runs);
 				const failed = runs.filter((run) => run.receipt.exitCode !== 0);
@@ -458,6 +474,89 @@ async function runSequential(
 				receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
 				summary,
 			});
+		}
+		return runs;
+	} finally {
+		if (timer) clearTimeout(timer);
+		signal?.removeEventListener("abort", onSignalAbort);
+	}
+}
+
+/** A pipeline step failed when its worker exited nonzero or its outcome is not success. */
+function isPipelineStepFailure(receipt: RunReceipt): boolean {
+	if (receipt.exitCode !== 0) return true;
+	return receipt.outcome !== undefined && receipt.outcome !== "succeeded";
+}
+
+function pipelineFailureReason(receipt: RunReceipt): string {
+	if (receipt.outcome !== undefined && receipt.outcome !== "succeeded") return `outcome=${receipt.outcome}`;
+	return `exit=${receipt.exitCode}`;
+}
+
+/**
+ * Chain worker outputs: each step runs to completion, then its final assistant
+ * text is threaded to the next step as `pipelineInput` (data, not instruction
+ * text). Step 1 receives none. A failed step halts the chain and the thrown
+ * error names the step and how many later steps were skipped, mirroring
+ * runSequential's "stopped after N/M" phrasing. Whole-sequence timeout and
+ * abort handling match runSequential.
+ */
+async function runPipeline(
+	deps: DispatchToolDeps,
+	requests: ReadonlyArray<DispatchRequest>,
+	timeoutMs: number | undefined,
+	signal: AbortSignal | undefined,
+): Promise<CompletedRun[]> {
+	const runs: CompletedRun[] = [];
+	let expired = false;
+	let activeRunId: string | null = null;
+	// The operator signal is a cancel; the timer is a timeout. Both stop the
+	// chain, but the timeout carries a cause so the receipt names it.
+	const abortActive = (bySignal: boolean): void => {
+		expired = true;
+		if (activeRunId !== null) {
+			deps.dispatch.abort(
+				activeRunId,
+				bySignal ? undefined : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
+			);
+		}
+	};
+	const onSignalAbort = (): void => abortActive(true);
+	const timer = timeoutMs !== undefined ? setTimeout(() => abortActive(false), timeoutMs) : null;
+	timer?.unref?.();
+	signal?.addEventListener("abort", onSignalAbort, { once: true });
+	try {
+		let previous: { runId: string; text: string } | null = null;
+		for (const [index, base] of requests.entries()) {
+			if (expired || signal?.aborted) {
+				throw new Error(
+					`pipeline dispatch stopped after ${runs.length}/${requests.length} task(s): ${signal?.aborted ? "aborted" : `timed out after ${timeoutMs}ms`}`,
+				);
+			}
+			// Thread the previous step's output as data; the task string the
+			// orchestrator authored is sent verbatim. Step 1 (previous === null)
+			// carries no pipeline input.
+			const request: DispatchRequest =
+				previous === null
+					? base
+					: { ...base, pipelineInput: { fromRunId: previous.runId, position: index + 1, text: previous.text } };
+			const handle = await deps.dispatch.dispatch(request);
+			activeRunId = handle.runId;
+			const summary = await consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus);
+			const receipt = await handle.finalPromise;
+			activeRunId = null;
+			runs.push({
+				receipt,
+				receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
+				summary,
+			});
+			if (isPipelineStepFailure(receipt)) {
+				const skipped = requests.length - (index + 1);
+				throw new Error(
+					`pipeline dispatch halted at step ${index + 1}/${requests.length} (run ${receipt.runId}, ${pipelineFailureReason(receipt)}); skipped ${skipped} later step(s)`,
+				);
+			}
+			previous = { runId: receipt.runId, text: summary.lastAssistantText };
 		}
 		return runs;
 	} finally {
