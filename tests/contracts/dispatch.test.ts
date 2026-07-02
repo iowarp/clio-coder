@@ -2234,3 +2234,65 @@ describe("contracts/dispatch tool activity honesty", () => {
 		);
 	});
 });
+
+describe("contracts/dispatch agent alias precedence", () => {
+	async function captureRoutedAgents(args: Record<string, unknown>): Promise<Array<{ agentId: string; task: string }>> {
+		const captured: Array<{ agentId: string; task: string }> = [];
+		const dispatch = {
+			dispatch: async (request: { agentId: string; task: string }) => {
+				captured.push({ agentId: request.agentId, task: request.task });
+				const receipt = {
+					runId: "r1",
+					agentId: request.agentId,
+					targetId: "fixture-target",
+					wireModelId: "fixture-model",
+					tokenCount: 0,
+					exitCode: 0,
+					outcome: "succeeded" as const,
+				};
+				return {
+					runId: "r1",
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve(receipt as never),
+				};
+			},
+			dispatchBatch: async () => {
+				throw new Error("unexpected batch path");
+			},
+			getRun: () => ({ receiptPath: "/tmp/r1.json" }),
+			abort: () => undefined,
+			listRuns: () => [],
+			steer: () => undefined,
+			snapshot: () => ({}),
+			drain: async () => undefined,
+		};
+		const tool = createDispatchTool({ dispatch: dispatch as never });
+		const result = await tool.run(args, undefined as never);
+		ok(result.kind === "ok", `dispatch run failed: ${JSON.stringify(result)}`);
+		return captured;
+	}
+
+	it("task-level agent_id alias overrides the shared agent default (JSON-string tasks)", async () => {
+		const captured = await captureRoutedAgents({
+			tasks: '[{"agent_id":"scout","task":"BUG005_ALIAS_TASK"}]',
+			agent: "coder",
+			mode: "parallel",
+		});
+		deepStrictEqual(captured, [{ agentId: "scout", task: "BUG005_ALIAS_TASK" }]);
+	});
+
+	it("task-level agent_id alias overrides the shared agent default (object tasks)", async () => {
+		const captured = await captureRoutedAgents({ tasks: [{ agent_id: "scout", task: "t" }], agent: "coder" });
+		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
+	});
+
+	it("task-level agent still overrides the shared agent default", async () => {
+		const captured = await captureRoutedAgents({ tasks: [{ agent: "scout", task: "t" }], agent: "coder" });
+		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
+	});
+
+	it("a shared agent_id applies when the task names no agent", async () => {
+		const captured = await captureRoutedAgents({ tasks: [{ task: "t" }], agent_id: "scout" });
+		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
+	});
+});
