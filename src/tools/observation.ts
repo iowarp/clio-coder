@@ -98,6 +98,19 @@ function byteLength(text: string): number {
 	return Buffer.byteLength(text, "utf8");
 }
 
+// A `next` continuation is a compact call fragment (`limit=200`, `offset=451`).
+// A tool that folds an input argument into it (`mode=path query=<arg>`) can grow
+// it without bound when the argument is huge, and the JSON cap stub echoes it
+// verbatim — turning a "result exceeded 16KB" placeholder into a 256KB payload.
+// Bound the fragment so the stub, the notice line, and the observation envelope
+// stay small; the offloaded full result is where the untruncated data lives.
+const MAX_CONTINUATION_CHARS = 200;
+
+function boundContinuation(next: string | undefined): string | undefined {
+	if (next === undefined || next.length <= MAX_CONTINUATION_CHARS) return next;
+	return `${Array.from(next).slice(0, MAX_CONTINUATION_CHARS).join("")}…`;
+}
+
 export function observationTurnBudgetLimit(env: NodeJS.ProcessEnv = process.env): number {
 	const raw = env[OBSERVATION_TURN_BUDGET_ENV];
 	if (raw === undefined || raw.trim().length === 0) return DEFAULT_OBSERVATION_TURN_BUDGET_BYTES;
@@ -312,13 +325,14 @@ function noticeLine(
 	bodyBytes: number,
 	totalBytes: number,
 	offloadPath: string | null,
+	next: string | undefined,
 ): string {
 	const totalSegment = input.totalCount === null ? `${input.shownCount}+` : String(input.totalCount);
 	const parts = [
 		`${input.tool}: ${input.shownCount}/${totalSegment} ${input.unit} shown (${formatSize(bodyBytes)} of ${formatSize(totalBytes)})`,
 	];
 	if (offloadPath !== null) parts.push(`full: ${offloadPath}`);
-	if (input.next !== undefined && input.next.length > 0) parts.push(`next: ${input.next}`);
+	if (next !== undefined && next.length > 0) parts.push(`next: ${next}`);
 	return `[${parts.join(" | ")}]`;
 }
 
@@ -340,6 +354,7 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 	let offloadPath: string | null = null;
 	const bodyBytes = byteLength(output);
 	const totalBytes = input.totalBytes ?? byteLength(input.fullOutput ?? input.output);
+	const next = boundContinuation(input.next);
 
 	if (format === "json" && bodyBytes > input.reservation.callCapBytes) {
 		// A JSON payload must parse or be replaced whole; never cut mid-document.
@@ -348,14 +363,15 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 		output = JSON.stringify({
 			error: `result exceeded ${formatSize(input.reservation.callCapBytes)}`,
 			...(offloadPath !== null ? { offloadPath } : {}),
-			...(input.next !== undefined && input.next.length > 0 ? { next: input.next } : {}),
+			...(next !== undefined && next.length > 0 ? { next } : {}),
 		});
 	} else if (truncated && input.fullOutput !== undefined) {
 		offloadPath = writeToolOffload(input.fullOutput, input.options);
 	}
 
 	if (format === "text") {
-		if (truncated && input.omitNotice !== true) output += `\n\n${noticeLine(input, bodyBytes, totalBytes, offloadPath)}`;
+		if (truncated && input.omitNotice !== true)
+			output += `\n\n${noticeLine(input, bodyBytes, totalBytes, offloadPath, next)}`;
 		if (input.reservation.limited && !input.reservation.exhausted) {
 			output += `\n\n${limitedBudgetNote(input.reservation)}`;
 		}
@@ -373,7 +389,7 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 		totalBytes,
 		truncated,
 		format,
-		...(input.next !== undefined && input.next.length > 0 ? { next: input.next } : {}),
+		...(next !== undefined && next.length > 0 ? { next } : {}),
 		...(offloadPath !== null ? { offloadPath } : {}),
 		...(budget !== null ? { budget } : {}),
 	};
