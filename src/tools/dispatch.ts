@@ -426,13 +426,21 @@ async function runSequential(
 	const runs: CompletedRun[] = [];
 	let expired = false;
 	let activeRunId: string | null = null;
-	const abortActive = (): void => {
+	// The operator signal is a cancel; the timer is a timeout. Both stop the
+	// sequence, but the timeout carries a cause so the receipt names it.
+	const abortActive = (bySignal: boolean): void => {
 		expired = true;
-		if (activeRunId !== null) deps.dispatch.abort(activeRunId);
+		if (activeRunId !== null) {
+			deps.dispatch.abort(
+				activeRunId,
+				bySignal ? undefined : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
+			);
+		}
 	};
-	const timer = timeoutMs !== undefined ? setTimeout(abortActive, timeoutMs) : null;
+	const onSignalAbort = (): void => abortActive(true);
+	const timer = timeoutMs !== undefined ? setTimeout(() => abortActive(false), timeoutMs) : null;
 	timer?.unref?.();
-	signal?.addEventListener("abort", abortActive, { once: true });
+	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
 		for (const request of requests) {
 			if (expired || signal?.aborted) {
@@ -454,7 +462,7 @@ async function runSequential(
 		return runs;
 	} finally {
 		if (timer) clearTimeout(timer);
-		signal?.removeEventListener("abort", abortActive);
+		signal?.removeEventListener("abort", onSignalAbort);
 	}
 }
 
@@ -465,12 +473,16 @@ async function runBatch(
 	signal: AbortSignal | undefined,
 ): Promise<CompletedRun[]> {
 	const handle = await deps.dispatch.dispatchBatch(requests);
-	const abort = (): void => {
-		for (const runId of handle.runIds) deps.dispatch.abort(runId);
+	// The operator signal is a cancel; the timer is a timeout. The timeout
+	// carries a cause so each killed run's receipt names it.
+	const abort = (bySignal: boolean): void => {
+		const reason = bySignal ? undefined : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
+		for (const runId of handle.runIds) deps.dispatch.abort(runId, reason);
 	};
-	const timer = timeoutMs !== undefined ? setTimeout(abort, timeoutMs) : null;
+	const onSignalAbort = (): void => abort(true);
+	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;
 	timer?.unref?.();
-	signal?.addEventListener("abort", abort, { once: true });
+	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
 		const summaries = await consumeBatchEvents(handle.batchId, handle.events, deps.bus);
 		const receipts = await handle.finalPromise;
@@ -481,6 +493,6 @@ async function runBatch(
 		}));
 	} finally {
 		if (timer) clearTimeout(timer);
-		signal?.removeEventListener("abort", abort);
+		signal?.removeEventListener("abort", onSignalAbort);
 	}
 }

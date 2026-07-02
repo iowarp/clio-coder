@@ -125,6 +125,8 @@ interface ActiveRun {
 	task: string;
 	cwd: string;
 	aborted: boolean;
+	/** Non-operator abort cause (e.g. a dispatch timeout); null for operator cancels. */
+	abortDetail: string | null;
 	/** Set by the reconciler before terminating a dead/stalled worker. */
 	stallKilled: boolean;
 	/** ACP event-inactivity window; null for native runs (heartbeat spec governs those). */
@@ -1801,6 +1803,7 @@ export function createDispatchBundle(
 			task: req.task,
 			cwd: lifecycle.cwd,
 			aborted: false,
+			abortDetail: null,
 			stallKilled: false,
 			stallTimeoutMs: lifecycle.agentConfig.stallTimeoutMs ?? DEFAULT_ACP_STALL_TIMEOUT_MS,
 			lineage,
@@ -1981,6 +1984,7 @@ export function createDispatchBundle(
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode,
 					abortedByOperator: activeRun.aborted,
+					abortDetail: activeRun.abortDetail,
 					stallKilled: activeRun.stallKilled,
 					timedOut: result.timedOut === true,
 					permissionFailure: false,
@@ -2366,6 +2370,7 @@ export function createDispatchBundle(
 			task: req.task,
 			cwd: lifecycle.cwd,
 			aborted: false,
+			abortDetail: null,
 			stallKilled: false,
 			stallTimeoutMs: null,
 			lineage,
@@ -2537,6 +2542,7 @@ export function createDispatchBundle(
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode ?? null,
 					abortedByOperator: activeRun.aborted,
+					abortDetail: activeRun.abortDetail,
 					stallKilled: activeRun.stallKilled,
 					timedOut: false,
 					permissionFailure: false,
@@ -2897,11 +2903,14 @@ export function createDispatchBundle(
 			if (!ledger) return null;
 			return ledger.get(runId);
 		},
-		abort(runId) {
+		abort(runId, reason) {
 			const run = active.get(runId);
 			if (!run) return;
 			emitRunAborted(run, "dispatch_abort");
 			run.aborted = true;
+			// A timeout kill rides the abort path but must not launder into an
+			// operator abort: record the cause so the receipt names the timeout.
+			if (reason) run.abortDetail = reason.detail;
 			try {
 				run.abort();
 			} catch {

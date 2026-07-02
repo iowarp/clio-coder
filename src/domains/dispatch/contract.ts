@@ -46,6 +46,16 @@ export interface DispatchSnapshot {
 	};
 }
 
+/**
+ * Why a run is being aborted. Absent means an operator/user cancel. A caller
+ * that time-boxes a run (dispatch `timeout_ms`) passes the timeout cause so the
+ * receipt names the timeout instead of laundering it into "operator abort".
+ */
+export interface AbortReason {
+	cause: "timeout";
+	detail: string;
+}
+
 export interface DispatchContract {
 	/** Validate + admit + spawn a native worker. Returns run id + promise. */
 	dispatch(req: DispatchRequest): Promise<{
@@ -68,8 +78,14 @@ export interface DispatchContract {
 	/** Get a specific run envelope. */
 	getRun(runId: string): RunEnvelope | null;
 
-	/** Abort a running run. */
-	abort(runId: string): void;
+	/**
+	 * Abort a running run. Absent `reason` means an operator/user cancel, sealed
+	 * as `outcome=canceled, outcomeDetail="operator abort"`. Pass a reason to
+	 * record a non-operator cause (e.g. a dispatch `timeout_ms`) in the receipt's
+	 * outcomeDetail so a time-boxed kill is distinguishable from an operator
+	 * cancel; the outcome stays `canceled`.
+	 */
+	abort(runId: string, reason?: AbortReason): void;
 
 	/**
 	 * Queue an operator steer on a running native worker. The text is sent as
