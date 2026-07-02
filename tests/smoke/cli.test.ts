@@ -19,12 +19,32 @@ const PACKAGE_JSON = JSON.parse(readFileSync(new URL("../../package.json", impor
 const VERSION_STDOUT = `Clio Coder ${PACKAGE_JSON.version}\n`;
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const CLI_ENTRY = join(REPO_ROOT, "dist", "cli", "index.js");
+const FORBIDDEN_TERMINAL_STREAM_TYPES = new Set([
+	"message_start",
+	"message_update",
+	"text_start",
+	"text_delta",
+	"text_end",
+	"thinking",
+	"thinking_start",
+	"thinking_delta",
+	"thinking_end",
+	"toolcall_delta",
+]);
 
 interface JsonRpcProcessClient {
 	request<T>(method: string, params?: unknown): Promise<T>;
 	notifications: unknown[];
 	close(): void;
 	wait(timeoutMs?: number): Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>;
+}
+
+function jsonLines(stdout: string): Array<Record<string, unknown>> {
+	return stdout
+		.trim()
+		.split("\n")
+		.filter((line) => line.length > 0)
+		.map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 function createJsonRpcProcessClient(args: string[], env: NodeJS.ProcessEnv, cwd: string): JsonRpcProcessClient {
@@ -538,6 +558,34 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "mock reply\n");
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("streams only terminal events with main-agent --json-events terminal", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("terminal mock reply");
+		try {
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const result = await runCli(["--no-context-files", "run", "--json-events", "terminal", "hello"], {
+				env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+				timeoutMs: 20_000,
+			});
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			const events = jsonLines(result.stdout);
+			const types = events.map((event) => event.type);
+			for (const expected of ["session", "turn_start", "agent_start", "message_end", "agent_end", "turn_end"]) {
+				ok(types.includes(expected), `missing ${expected}: ${result.stdout}`);
+			}
+			for (const type of types) {
+				ok(typeof type === "string");
+				ok(!FORBIDDEN_TERMINAL_STREAM_TYPES.has(type), `unexpected partial event ${type}: ${result.stdout}`);
+			}
+			const messageEnd = events.find(
+				(event) => event.type === "message_end" && JSON.stringify(event).includes("assistant"),
+			);
+			ok(JSON.stringify(messageEnd).includes("terminal mock reply"), `stdout=${result.stdout}`);
 		} finally {
 			await closeServer(fixture.server);
 		}

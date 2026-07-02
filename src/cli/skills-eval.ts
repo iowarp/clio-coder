@@ -262,12 +262,22 @@ async function runScenario(
 			});
 		}
 		const baseline = await captureHeadlessRun(
-			["run", "--json", "--no-skills", ...targetArgs, scenario.setup],
+			["run", "--json", "--json-events", "terminal", "--no-skills", ...targetArgs, scenario.setup],
 			workspace,
 			timeoutMs,
 		);
 		const treatment = await captureHeadlessRun(
-			["run", "--json", "--no-skills", "--skill", skillBaseDir, ...targetArgs, `/skill:${skillName} ${scenario.setup}`],
+			[
+				"run",
+				"--json",
+				"--json-events",
+				"terminal",
+				"--no-skills",
+				"--skill",
+				skillBaseDir,
+				...targetArgs,
+				`/skill:${skillName} ${scenario.setup}`,
+			],
 			workspace,
 			timeoutMs,
 		);
@@ -288,7 +298,15 @@ async function runScenario(
 		// terminating tool (write_plan/write_review) prints nothing in text mode,
 		// while the event stream still carries the verdict content.
 		const judge = await captureHeadlessRun(
-			["run", "--json", "--no-skills", ...targetArgs, judgePrompt(scenario, baseline.transcript, treatment.transcript)],
+			[
+				"run",
+				"--json",
+				"--json-events",
+				"terminal",
+				"--no-skills",
+				...targetArgs,
+				judgePrompt(scenario, baseline.transcript, treatment.transcript),
+			],
 			workspace,
 			timeoutMs,
 		);
@@ -438,25 +456,6 @@ function errorBullets(scenario: SkillEvalScenario, reason: string): ScoredBullet
 	return scenario.expected.map((text, index) => ({ index: index + 1, text, verdict: "error", reason }));
 }
 
-/**
- * Streaming delta events (`message_update`, `thinking_delta`, `text_delta`)
- * each carry the entire partial assistant message, so a long turn emits tens
- * of megabytes of JSONL that would blow the capture cap and drop the terminal
- * `message_end`/`tool_execution_*` events. Filter them out line-by-line while
- * streaming; the transcript builder never reads them.
- */
-const NOISE_EVENT_MARKERS = [
-	'"type":"message_update"',
-	'"type":"thinking_delta"',
-	'"type":"text_delta"',
-	'"type":"message_start"',
-];
-
-function isNoiseEventLine(line: string): boolean {
-	if (!line.startsWith("{")) return false;
-	return NOISE_EVENT_MARKERS.some((marker) => line.includes(marker));
-}
-
 function captureHeadlessRun(args: ReadonlyArray<string>, cwd: string, timeoutMs: number): Promise<CapturedRun> {
 	const startedMs = Date.now();
 	return new Promise((resolvePromise) => {
@@ -466,7 +465,7 @@ function captureHeadlessRun(args: ReadonlyArray<string>, cwd: string, timeoutMs:
 		let timedOut = false;
 		let settled = false;
 		const keepLine = (line: string): void => {
-			if (line.length === 0 || isNoiseEventLine(line)) return;
+			if (line.length === 0) return;
 			if (stdout.length < CHILD_OUTPUT_LIMIT) stdout += `${line}\n`;
 		};
 		const child = spawn(process.execPath, [process.argv[1] ?? "", ...args], {
@@ -517,7 +516,8 @@ function captureHeadlessRun(args: ReadonlyArray<string>, cwd: string, timeoutMs:
 
 /**
  * Fold a headless run's stdout into a compact transcript. `--json` runs emit
- * one JSONL event per line (session header, message_end, tool_execution_*);
+ * one terminal JSONL event per line (session header, message_end,
+ * tool_execution_*, turn_start, turn_end);
  * text-mode runs emit the final assistant text, which passes through as-is.
  */
 function parseRunStdout(stdout: string): { sessionId: string | null; transcript: string; finalText: string } {

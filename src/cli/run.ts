@@ -28,7 +28,7 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--json] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--json] [--json-events full|terminal] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio run [flags] "<task>"
 
@@ -48,6 +48,7 @@ Flags:
   --max-context-tokens <N>  one-run context-window override for supported local runtimes
   --kv-cache-mode <mode>    one-run KV-cache mode override: f16|f32|none|false|q8_0|q4_0|q4_1|iq4_nl|q5_0|q5_1
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
+  --json-events <mode>      main-agent JSON stream mode: full|terminal; implies --json
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
@@ -200,6 +201,7 @@ export async function runClioRun(
 					headless: {
 						prompt: assembled.prompt,
 						mode: parsed.json ? "json" : "text",
+						jsonEvents: parsed.jsonEvents,
 						...(noSkills ? { noSkills: true } : {}),
 						...(skillPaths.length > 0 ? { skillPaths } : {}),
 						...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),

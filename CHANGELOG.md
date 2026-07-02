@@ -15,6 +15,12 @@ interfaces.
   receipts under `<stateDir>/receipts/`, are backed by `runs.json`, and are
   counted by `clio usage report` and evidence consumers instead of leaving
   main-agent usage invisible.
+- Headless main-agent `clio run --json-events terminal` now emits a compact
+  JSONL stream containing only session, turn boundary, agent boundary,
+  assistant message finalization, and tool execution boundary events. The
+  default `--json` stream is unchanged, and dispatch JSON streaming remains on
+  its existing path. `clio skills eval` now consumes the terminal stream
+  instead of filtering growing partial message updates itself.
 - `clio skills eval <name|path>` (experimental) executes a skill's `evals.md`
   RED-GREEN scenarios instead of trusting the prose. Per scenario it runs a
   baseline headless turn without the skill, a treatment turn with the skill
