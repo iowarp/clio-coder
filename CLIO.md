@@ -27,7 +27,11 @@ The codewiki indexes the repository; refresh it after structural edits. For navi
 
 ## Verification expectations
 
-Run `npm run typecheck` and `npm run lint` before any handoff. Use targeted lanes for narrow risk: `npm run test:contracts`, `npm run test:smoke`, `npm run check:boundaries`. Run `npm run test` when behavior crosses domains, tool contracts, smoke flows, or boundaries, and `npm run build` after CLI, worker, packaging, or generated-dist changes. `npm run ci` is the full local gate before committing shared behavior changes; `npm run ci:release` adds check-dist packaging verification and gates every tag.
+Run `npm run typecheck` and `npm run lint` before any handoff. Use targeted lanes for narrow risk: `npm run test:contracts`, `npm run test:smoke`, `npm run check:boundaries`. Run `npm run test` when behavior crosses domains, tool contracts, smoke flows, or boundaries, and `npm run build` after CLI, worker, packaging, or generated-dist changes. `npm run ci` is the full local gate before committing shared behavior changes; `npm run ci:release` adds the check-release dist and packaging audit and gates every tag.
+
+## Build, packaging, and release
+
+`npm run build` (tsup) bundles two ESM entries, src/cli/index.ts and src/worker/entry.ts, into dist/ with code splitting on. The splitting is deliberate: src/cli/index.ts imports every subcommand dynamically, so each command loads only its own chunk and `clio --version` never parses the interactive graph; keep new subcommands behind dynamic imports. The shebang comes from the hashbang line in each entry source; never add a tsup `banner`, which would stamp it onto every chunk. The npm tarball is an allowlist (package.json `files`): dist without source maps, the runtime resource trees under src (prompt fragments, builtin agents, model catalogs), docs, and the 128px logo. A new resource read from the installed package root must be added both to `files` and to the required list in scripts/check-release.mjs, which enforces entry-only shebangs, forbidden and required package contents, and size budgets. Releases are tag-driven: tag vX.Y.Z matching package.json's version and push; .github/workflows/release.yml runs the gate once through prepublishOnly, publishes to npm with provenance, and creates the GitHub release. The step-by-step process lives in CONTRIBUTING.md under Releasing.
 
 ## Workflow traps
 

@@ -50,6 +50,49 @@ Optional hook:
 npm run hooks:install
 ```
 
+## Releasing
+
+Releases are tag-driven and publish from CI. Nothing is published from a
+workstation.
+
+1. Bump `version` in `package.json` and retitle the `unreleased` section in
+   `CHANGELOG.md` to the version being cut.
+2. Run `npm run ci:release`. It runs the full `ci` gate, then
+   `scripts/check-release.mjs`, which verifies the built `dist/` and audits
+   the exact npm package contents.
+3. Land the release commit through the normal PR flow.
+4. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must
+   match `package.json`'s version; the release workflow refuses mismatches.
+5. `.github/workflows/release.yml` reruns the gate once via `prepublishOnly`,
+   publishes to npm with provenance, and creates the GitHub release with the
+   tarball attached. One-time setup: the `NPM_TOKEN` repository secret must
+   hold an automation token that can publish `@iowarp` packages.
+
+What `scripts/check-release.mjs` enforces, and how to respond when it fails:
+
+- Only `dist/cli/index.js` and `dist/worker/entry.js` carry a shebang. The
+  shebang comes from the hashbang line in each entry source file. Never add
+  a tsup `banner`; it would stamp every chunk in `dist/`.
+- The package ships no source maps, benchmarks, caches, or repo scripts. If
+  a forbidden file appears, fix the `files` allowlist in `package.json`
+  rather than deleting the file from the repo.
+- Runtime resources must resolve from the installed package root: prompt
+  fragments, builtin agents, model catalogs, `docs/html`, the 128px logo,
+  and `damage-control-rules.yaml`. A new runtime resource must be listed in
+  both package.json `files` and the required list in `check-release.mjs`.
+  The double bookkeeping is deliberate: neither edit can silently drop a
+  resource the CLI needs at runtime.
+- Size budgets: 2 MB tarball, 6 MB unpacked. If a legitimate change exceeds
+  them, raise the budget in the same PR with a justification, never as a
+  drive-by.
+
+Build shape, for anyone changing `tsup.config.ts`: two ESM entries with code
+splitting on. `src/cli/index.ts` imports every subcommand dynamically, so a
+command pays only for its own chunk and `clio --version` stays fast. Keep new
+subcommands behind dynamic imports, and keep heavyweight runtime dependencies
+in the `external` list so they load from `node_modules` only when a chunk
+that needs them runs.
+
 ## Hard Rules
 
 1. Do not push to `main`.

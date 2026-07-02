@@ -181,10 +181,12 @@ interfaces.
   `esbuild` moved to devDependencies (only tsup/tsx pull them), shrinking the
   production install. The shebang now comes from a hashbang line in the two
   entry sources instead of a tsup banner, so shared chunks are no longer
-  stamped executable. A new `scripts/check-pack.mjs` audit (wired into
-  `ci:release`) enforces all of this: forbidden files, required runtime
-  resources, and tarball/unpacked size budgets; `scripts/check-dist.mjs`
-  additionally fails if a shebang leaks onto a non-entry chunk.
+  stamped executable. The local install helper scripts also left the tarball;
+  they operate on a source checkout only. A single `scripts/check-release.mjs`
+  gate (wired into `ci:release`, replacing `check-dist.mjs`) enforces all of
+  this: entry-only shebangs, forbidden files, required runtime resources, and
+  tarball/unpacked size budgets. The build and release model is documented in
+  CONTRIBUTING.md under "Releasing" and in CLIO.md.
 - Publishing is now automated. `.github/workflows/release.yml` triggers on
   `v*` tags, refuses a tag that disagrees with package.json's version, runs
   the full `ci:release` gate via `prepublishOnly`, publishes to npm with

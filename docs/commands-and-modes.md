@@ -229,8 +229,8 @@ to execute through the existing Pi-backed worker path, the sanctioned Claude Cod
 
 | Command | Purpose |
 | --- | --- |
-| `npm run ci` | Local and GitHub PR gate: typecheck, Biome check, build, and deterministic tests. |
-| `npm run ci:release` | Maintainer release gate: `npm run ci`, then `check-dist` packaging verification. |
+| `npm run ci` | Local and GitHub PR gate: typecheck, Biome check, skills pin check, build, and deterministic tests. |
+| `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
 | `npm run test:live` | Manual live-model smoke. Requires `CLIO_LIVE_SMOKE=1` and a configured real model target. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run lint` | Biome checks; warnings are reported in the release gate output. |

@@ -308,8 +308,9 @@ Every release is gated by a deterministic suite:
 npm run ci:release
 ```
 
-It runs typecheck, Biome checks, the production build, the contract, smoke,
-and boundary test suites, and `check-dist` packaging verification. Live model
+It runs typecheck, Biome checks, the skills pin check, the production build,
+the contract, smoke, and boundary test suites, and the `check-release` dist
+and package audit. Live model
 validation is separate, manual, and opt-in:
 
 ```bash
