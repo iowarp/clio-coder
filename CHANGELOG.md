@@ -187,6 +187,35 @@ interfaces.
 
 ### Fixed
 
+- `npm run skills:pin` no longer silently pins a skill under its folder name
+  with `version: null` when the SKILL.md frontmatter is unparseable YAML (for
+  example an unquoted colon-space inside a description). Malformed files now
+  fail the script loudly with the file path and the YAML error, in both pin
+  and check modes, and nothing is written. `skills validate` already rejected
+  these files via the loader.
+- Registry pin drift now has a structural guard. `npm run skills:check` (the
+  pin script's new `--check` mode) fails when `skills/registry.yaml` does not
+  match the catalog content hashes, names the stale, missing, or orphaned
+  pins, and runs as part of `npm run ci`. Previously an edit that skipped
+  `skills:pin` could ship stale pins unnoticed (as commit 7273129 did).
+- `create_skill` can now emit `requires` frontmatter through a validated
+  `requires` parameter (entries normalize to `skill:<name>`), so generated
+  skills arm the loader's unmet-dependency warning directly. The
+  workflow-distiller Phase 3/5 wording and evals were updated to pass the
+  entries instead of handing the user a manual line to add.
+- `ask_user` is now registered on every surface, including headless
+  `clio run` turns and ACP sessions, where no operator handler exists and the
+  tool answers immediately as a cancelled interview. Interview skills keep
+  their contract headless by falling back to their stated defaults instead of
+  silently losing the tool from the surface; the decision is also noted in
+  `clio run --help`. This makes the compiled tool surface identical across
+  surfaces, which shifts prompt-cache telemetry for headless runs once.
+- Dispatch no longer schedules retries for deterministic worker failures. A
+  model-residency fit miss (the reconciler's will-not-fit verdict) fails the
+  run immediately with the reason already carried in the receipt, instead of
+  re-running the same slow load probe until `workers.maxRetries` is exhausted;
+  a wedged fleet target observed spending 12+ minutes in such retries now
+  surfaces the failure on the first attempt.
 - Dispatch finalization failures are now contained on both native workers and
   ACP delegated agents. A rejected worker promise or failed ledger persist no
   longer leaves a run row stuck in `running` with no receipt and a leaked active
