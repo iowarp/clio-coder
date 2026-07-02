@@ -44,6 +44,7 @@ export {
 	type PromptTemplateRoot,
 } from "./prompts/loader.js";
 export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
+export { parseSkillEvals, type SkillEvalParseResult, type SkillEvalScenario } from "./skills/evals.js";
 export {
 	type InstallSkillInput,
 	type InstallSkillResult,

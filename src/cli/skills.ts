@@ -26,9 +26,16 @@ Commands:
   clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
   clio skills update <name> | --all [--force]
   clio skills sync [--force]
+  clio skills eval <name|path> [--scenario <id>] [--target <id>] [--timeout <seconds>] [--json]
 
 search covers installed skills plus the local marketplace (a repo skills/
 catalog, CLIO_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
+
+eval (experimental) executes the skill's evals.md RED-GREEN scenarios: per
+scenario a baseline headless run without the skill, a treatment run with it,
+and a judge run scoring each Expected bullet from the transcripts. Exit is
+nonzero when any treatment bullet fails. --json emits one JSONL row per
+(scenario, bullet) with schema: "experimental".
 `;
 
 type SkillCreateScope = "user" | "project";
@@ -42,6 +49,9 @@ interface Parsed {
 	force: boolean;
 	name?: string;
 	scope?: SkillCreateScope;
+	scenario?: string;
+	target?: string;
+	timeoutSeconds?: number;
 }
 
 function parse(argv: ReadonlyArray<string>): Parsed {
@@ -67,6 +77,28 @@ function parse(argv: ReadonlyArray<string>): Parsed {
 				const value = argv[i + 1];
 				if (!value || value.startsWith("-")) throw new Error("--name requires a value");
 				out.name = value;
+				i++;
+				break;
+			}
+			case "--scenario": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) throw new Error("--scenario requires a value");
+				out.scenario = value;
+				i++;
+				break;
+			}
+			case "--target": {
+				const value = argv[i + 1];
+				if (!value || value.startsWith("-")) throw new Error("--target requires a value");
+				out.target = value;
+				i++;
+				break;
+			}
+			case "--timeout": {
+				const value = argv[i + 1];
+				const seconds = value === undefined ? Number.NaN : Number.parseInt(value, 10);
+				if (!Number.isInteger(seconds) || seconds <= 0) throw new Error("--timeout requires a positive integer");
+				out.timeoutSeconds = seconds;
 				i++;
 				break;
 			}
@@ -336,6 +368,24 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				printError(err instanceof Error ? err.message : String(err));
 				return 1;
 			}
+		}
+		case "eval": {
+			const name = parsed.positional[0];
+			if (!name || parsed.positional.length !== 1) {
+				process.stderr.write(
+					"usage: clio skills eval <name|path> [--scenario <id>] [--target <id>] [--timeout <seconds>] [--json]\n",
+				);
+				return 2;
+			}
+			// Dynamic import keeps the eval lane (evidence + eval domains) out of
+			// the chunk that clio skills list/search load.
+			const { runSkillsEvalCommand } = await import("./skills-eval.js");
+			return runSkillsEvalCommand(name, {
+				json: parsed.json,
+				...(parsed.scenario !== undefined ? { scenario: parsed.scenario } : {}),
+				...(parsed.target !== undefined ? { target: parsed.target } : {}),
+				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+			});
 		}
 		default:
 			printError(`unknown skills command: ${parsed.command}`);
