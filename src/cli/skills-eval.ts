@@ -53,14 +53,16 @@ export interface SkillsEvalOptions {
 
 type BulletVerdict = "pass" | "fail" | "error";
 
-interface ScoredBullet {
+/** Exported for contracts tests. */
+export interface ScoredBullet {
 	index: number;
 	text: string;
 	verdict: BulletVerdict;
 	reason: string;
 }
 
-interface CapturedRun {
+/** Exported for contracts tests. */
+export interface CapturedRun {
 	sessionId: string | null;
 	transcript: string;
 	finalText: string;
@@ -447,7 +449,8 @@ function judgePrompt(scenario: SkillEvalScenario, baselineTranscript: string, tr
 	].join("\n");
 }
 
-function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): ScoredBullet[] {
+/** Exported for contracts tests. */
+export function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): ScoredBullet[] {
 	const parsed = extractBulletsObject(judge.finalText) ?? extractBulletsObject(judge.transcript);
 	const entries = new Map<number, { pass: boolean; reason: string }>();
 	if (parsed !== null && Array.isArray(parsed.bullets)) {
@@ -477,19 +480,25 @@ function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): Sc
  * content, so this walks candidate `{` openers around the first "bullets" key
  * and balance-scans to the matching close brace.
  */
-function extractBulletsObject(text: string): Record<string, unknown> | null {
+export function extractBulletsObject(text: string): Record<string, unknown> | null {
 	const stripped = text.replace(/```(?:json)?/g, "");
 	const bulletsAt = stripped.indexOf('"bullets"');
 	if (bulletsAt < 0) return null;
-	for (let start = stripped.lastIndexOf("{", bulletsAt); start >= 0; start = stripped.lastIndexOf("{", start - 1)) {
+	let start = stripped.lastIndexOf("{", bulletsAt);
+	while (start >= 0) {
 		const candidate = balancedJsonSlice(stripped, start);
-		if (candidate === null) continue;
-		try {
-			const parsed = JSON.parse(candidate) as unknown;
-			if (isRecord(parsed) && Array.isArray(parsed.bullets)) return parsed;
-		} catch {
-			// Try the next opener out.
+		if (candidate !== null) {
+			try {
+				const parsed = JSON.parse(candidate) as unknown;
+				if (isRecord(parsed) && Array.isArray(parsed.bullets)) return parsed;
+			} catch {
+				// Try the next opener out.
+			}
 		}
+		// lastIndexOf clamps a negative fromIndex to 0, so stepping from 0 would
+		// loop forever on a leading brace.
+		if (start === 0) break;
+		start = stripped.lastIndexOf("{", start - 1);
 	}
 	return null;
 }

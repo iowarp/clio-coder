@@ -1,8 +1,11 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { clioConfigDir } from "../../src/core/xdg.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
@@ -308,5 +311,100 @@ describe("contracts/safety", () => {
 		const colonBehindPrefix = contract.evaluate(bash("echo rotating; : > server.log"));
 		strictEqual(colonBehindPrefix.kind, "ask");
 		strictEqual(colonBehindPrefix.kind === "ask" && colonBehindPrefix.match?.ruleId, "colon-truncate");
+	});
+});
+
+describe("contracts/safety credential damage control", () => {
+	const ORIGINAL_ENV = { ...process.env };
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = newScratchClioHome("clio-safety-cred-");
+	});
+
+	afterEach(() => {
+		for (const k of Object.keys(process.env)) {
+			if (!(k in ORIGINAL_ENV)) Reflect.deleteProperty(process.env, k);
+		}
+		for (const [k, v] of Object.entries(ORIGINAL_ENV)) {
+			if (v !== undefined) process.env[k] = v;
+		}
+		clearScratchClioHome(scratch);
+	});
+
+	function freshBundle() {
+		const bus = createSafeEventBus();
+		const mockContext: DomainContext = { bus, getContract: () => undefined };
+		return createSafetyBundle(mockContext);
+	}
+
+	it("B1: blocks read and write of credentials.yaml in both the literal and expanded forms", () => {
+		const contract = freshBundle().contract;
+		// Repo-relative literal: a project file named credentials.yaml going
+		// zero-access is intended behavior.
+		strictEqual(contract.evaluate({ tool: ToolNames.Read, args: { path: "credentials.yaml" } }).kind, "block");
+		strictEqual(
+			contract.evaluate({ tool: ToolNames.Write, args: { path: "credentials.yaml", content: "x" } }).kind,
+			"block",
+		);
+		// Expanded provider secret store under the config dir, appended at
+		// policy construction.
+		const storePath = join(clioConfigDir(), "credentials.yaml");
+		strictEqual(contract.evaluate({ tool: ToolNames.Read, args: { path: storePath } }).kind, "block");
+		strictEqual(contract.evaluate({ tool: ToolNames.Write, args: { path: storePath, content: "x" } }).kind, "block");
+	});
+
+	it("B2: blocks bash reads of zero-access paths with reason code secret_path_bash", () => {
+		const contract = freshBundle().contract;
+		const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+		for (const command of ["cat .env", "less ~/.aws/credentials", "base64 ~/.ssh/id_rsa"]) {
+			const decision = contract.evaluate(bash(command));
+			strictEqual(decision.kind, "block", `${command} must block`);
+			strictEqual(decision.policy?.reasonCode, "secret_path_bash", `${command} carries the reason code`);
+		}
+	});
+
+	it("B2: admits the exit-code presence protocol and stays quiet on lookalikes", () => {
+		const contract = freshBundle().contract;
+		const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+		const admitted = [
+			// The safe presence protocol the credentials skill teaches.
+			'grep -sq "^API_KEY=" .env',
+			// Lookalike file name is not a secret path.
+			"cat ./envelope.json",
+			// A bare word, not a path.
+			"echo env",
+			// Quoted prose mentioning .env is not a path argument.
+			'git commit -m "handle .env parsing"',
+		];
+		for (const command of admitted) {
+			const decision = contract.evaluate(bash(command));
+			ok(decision.kind !== "block", `${command} must not block: ${JSON.stringify(decision.policy?.reasons)}`);
+			ok(decision.policy?.reasonCode !== "secret_path_bash", `${command} must not trip secret_path_bash`);
+		}
+	});
+
+	it("B2: the audit row for a blocked bash secret read carries secret_path_bash", async () => {
+		const bundle = freshBundle();
+		await bundle.extension.start?.();
+		try {
+			const decision = bundle.contract.evaluate({ tool: ToolNames.Bash, args: { command: "cat .env" } });
+			strictEqual(decision.kind, "block");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+		const auditDir = join(scratch, "state", "audit");
+		const rows = readdirSync(auditDir)
+			.filter((name) => name.endsWith(".jsonl"))
+			.flatMap((name) =>
+				readFileSync(join(auditDir, name), "utf8")
+					.split("\n")
+					.filter((line) => line.length > 0)
+					.map((line) => JSON.parse(line) as Record<string, unknown>),
+			);
+		const row = rows.find((entry) => entry.reasonCode === "secret_path_bash");
+		ok(row, `audit rows: ${JSON.stringify(rows)}`);
+		strictEqual(row.tool, "bash");
+		strictEqual(row.decision, "blocked");
 	});
 });
