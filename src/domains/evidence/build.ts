@@ -14,6 +14,7 @@ import {
 	protectedArtifactStateFromSessionEntries,
 	type SessionEntry,
 } from "../session/index.js";
+import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
 import {
 	EVIDENCE_VERSION,
@@ -114,29 +115,54 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	const sessionLinks = await linkSessionEntries(options.stateDir, source, runSources);
 	const auditLinks = await linkAuditRows(options.stateDir, source, runSources, sessionLinks);
 	const toolEventRows = toolEvents(runSources, sessionLinks, auditLinks);
-	const protectedArtifacts = protectedArtifactsFile(sessionLinks);
-	const findings = buildFindings(runSources, sessionLinks, auditLinks, protectedArtifacts);
+	const protectedArtifactsRaw = protectedArtifactsFile(sessionLinks);
+	const findings = buildFindings(runSources, sessionLinks, auditLinks, protectedArtifactsRaw);
+	// Export-boundary redaction (cold path): secret-shaped values are scrubbed
+	// from everything the bundle serializes: envelopes, receipts (including
+	// delegation toolCallLog arguments), tool-event previews, audit rows,
+	// protected-artifact records, and the rendered transcript. Raw local
+	// session files are untouched; the bundle is the boundary, and the
+	// overview's redactionCount keeps the bundle honest about its filtering.
+	const tally = createRedactionTally();
+	const redactedRunSources: EvidenceRunSource[] = runSources.map((item) => ({
+		...item,
+		envelope: redactSecretsDeep(item.envelope, tally),
+		receipt: item.receipt === null ? null : redactSecretsDeep(item.receipt, tally),
+	}));
+	const redactedToolEvents: EvidenceToolEvent[] = toolEventRows.map((event) => ({
+		...event,
+		...(event.argsPreview !== undefined ? { argsPreview: redactSecretsText(event.argsPreview, tally) } : {}),
+		...(event.resultPreview !== undefined ? { resultPreview: redactSecretsText(event.resultPreview, tally) } : {}),
+	}));
+	const redactedAuditLinks: AuditLinkResult = {
+		rows: auditLinks.rows.map((row) => redactSecretsDeep(row, tally)),
+		readErrors: auditLinks.readErrors,
+	};
+	const protectedArtifacts = redactSecretsDeep(protectedArtifactsRaw, tally);
 	const overview = buildOverview(
 		evidenceId,
 		source,
-		runSources,
+		redactedRunSources,
 		findings,
 		sessionLinks,
-		auditLinks,
-		toolEventRows,
+		redactedAuditLinks,
+		redactedToolEvents,
 		protectedArtifacts,
 	);
+	const transcript = redactSecretsText(renderTranscript(overview, redactedRunSources, sessionLinks), tally);
+	const finalOverview: EvidenceOverview = { ...overview, redactionCount: tally.count };
 	await writeEvidenceFiles(
 		directory,
-		overview,
-		runSources,
+		finalOverview,
+		redactedRunSources,
 		findings,
 		sessionLinks,
-		auditLinks,
-		toolEventRows,
+		redactedAuditLinks,
+		redactedToolEvents,
 		protectedArtifacts,
+		transcript,
 	);
-	return { evidenceId, directory, overview, findings };
+	return { evidenceId, directory, overview: finalOverview, findings };
 }
 
 function buildOverview(
@@ -451,10 +477,15 @@ async function writeEvidenceFiles(
 	auditLinks: AuditLinkResult,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
+	transcript?: string,
 ): Promise<void> {
 	await mkdir(directory, { recursive: true });
 	await writeJson(join(directory, "overview.json"), overview);
-	await writeFile(join(directory, "transcript.md"), renderTranscript(overview, runSources, sessionLinks), "utf8");
+	await writeFile(
+		join(directory, "transcript.md"),
+		transcript ?? renderTranscript(overview, runSources, sessionLinks),
+		"utf8",
+	);
 	await writeJsonl(join(directory, "trace.raw.jsonl"), rawTraceRows(runSources));
 	await writeJsonl(join(directory, "trace.cleaned.jsonl"), cleanedTraceRows(runSources, findings, toolEventRows));
 	await writeJsonl(join(directory, "tool-events.jsonl"), toolEventRows);

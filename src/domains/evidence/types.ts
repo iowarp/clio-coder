@@ -90,6 +90,13 @@ export interface EvidenceOverview {
 	totals: EvidenceTotals;
 	tags: EvidenceTag[];
 	files: string[];
+	/**
+	 * Number of secret-shaped values replaced with `[redacted:<kind>]` across
+	 * the bundle's export surfaces (previews, transcript, receipts) at build
+	 * time. Additive field: older bundles simply lack it. Zero means the
+	 * patterns matched nothing; raw local session files are never touched.
+	 */
+	redactionCount?: number;
 }
 
 export type EvidenceSeverity = "info" | "warn";
