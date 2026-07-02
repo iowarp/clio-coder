@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -657,6 +657,39 @@ describe("contracts/dispatch", () => {
 			exit.resolve({ exitCode: 1, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	// BUG-009: an operator abort seals status "interrupted"/outcome "canceled",
+	// but a killed worker often reports exit 0. The receipt and ledger row must
+	// not claim success. The native path used to keep exit 0 here while the ACP
+	// path already coerced "interrupted" to nonzero.
+	it("seals a nonzero exit code when an operator aborts a run reporting exit 0", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1010,
+				promise: exit.promise,
+				events: emptyEvents(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "aborted task" });
+			bundle.contract.abort(handle.runId);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "canceled");
+			strictEqual(receipt.outcomeDetail, "operator abort");
+			notStrictEqual(receipt.exitCode, 0);
+			const row = bundle.contract.getRun(handle.runId);
+			strictEqual(row?.status, "interrupted");
+			notStrictEqual(row?.exitCode, 0);
 		} finally {
 			await bundle.extension.stop?.();
 		}
