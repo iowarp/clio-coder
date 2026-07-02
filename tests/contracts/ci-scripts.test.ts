@@ -61,7 +61,7 @@ describe("contracts/ci scripts", () => {
 
 		strictEqual(scripts.ci, "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test");
 		strictEqual(scripts["skills:check"], "node --import tsx scripts/pin-skills.ts --check");
-		strictEqual(scripts["ci:release"], "npm run ci && node scripts/check-dist.mjs && node scripts/check-pack.mjs");
+		strictEqual(scripts["ci:release"], "npm run ci && node scripts/check-release.mjs");
 		strictEqual(scripts["test:repeat"], "node tests/harness/repeat-tests.mjs");
 		ok(scripts["test:coverage"]?.includes("--experimental-test-coverage"));
 		ok(scripts["test:coverage"]?.includes("--test-coverage-include='src/**/*.ts'"));

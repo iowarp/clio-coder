@@ -1,16 +1,25 @@
 #!/usr/bin/env node
 /**
- * Audits the npm package contents via `npm pack --dry-run --json`.
+ * Release gate for the built dist/ and the npm package contents.
  *
- * Fails on files that must never ship (caches, source maps, benchmarks),
- * missing runtime resources (dist entries, prompt fragments, builtin agents,
- * model catalogs, bundled docs), and size regressions. Runs in `ci:release`
- * so a publish cannot ship an unaudited tarball.
+ * Dist integrity: the two executable entries must exist and carry the
+ * shebang, and no shared chunk may carry one (a shebang on a chunk means a
+ * global banner leaked back into tsup.config.ts).
+ *
+ * Package audit via `npm pack --dry-run --json`: forbids files that must
+ * never ship (caches, source maps, benchmarks), requires the runtime
+ * resources the CLI resolves from the installed package root, and enforces
+ * size budgets. Runs in `ci:release`, so a publish cannot ship an unaudited
+ * tarball.
  */
 import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const SHEBANG = "#!/usr/bin/env node";
+const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 
 // Tarball is ~0.93 MB and unpacked ~3.9 MB today; budgets leave headroom for
 // organic growth but catch accidental payloads (maps alone were 5.3 MB).
@@ -21,6 +30,7 @@ const FORBIDDEN = [
 	{ test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"), reason: "python bytecode cache" },
 	{ test: (f) => f.endsWith(".map"), reason: "source map (excluded by release policy)" },
 	{ test: (f) => f.startsWith("benchmarks/"), reason: "benchmarks are not part of the package" },
+	{ test: (f) => f.startsWith("scripts/"), reason: "repo scripts operate on a source checkout only" },
 	{ test: (f) => f.endsWith(".tsbuildinfo"), reason: "typescript build cache" },
 	{ test: (f) => /(^|\/)\.env(\.|$)/.test(f), reason: "environment file" },
 	{ test: (f) => f.includes("node_modules/"), reason: "vendored node_modules" },
@@ -28,8 +38,7 @@ const FORBIDDEN = [
 
 // Exact files the CLI resolves from the installed package root at runtime.
 const REQUIRED_FILES = [
-	"dist/cli/index.js",
-	"dist/worker/entry.js",
+	...ENTRIES,
 	"src/domains/prompts/fragments/identity/clio.md",
 	"assets/clio-coder-logo-128.webp",
 	"docs/html/index.html",
@@ -52,6 +61,29 @@ const REQUIRED_PREFIXES = [
 
 const errors = [];
 
+function firstLine(abs) {
+	try {
+		return readFileSync(abs, "utf8").slice(0, SHEBANG.length);
+	} catch {
+		return null;
+	}
+}
+
+for (const rel of ENTRIES) {
+	const head = firstLine(join(root, rel));
+	if (head === null) errors.push(`missing ${rel}`);
+	else if (head !== SHEBANG) errors.push(`bad shebang in ${rel}`);
+}
+
+const entrySet = new Set(ENTRIES);
+for (const dirent of readdirSync(join(root, "dist"), { recursive: true, withFileTypes: true })) {
+	if (!dirent.isFile() || !dirent.name.endsWith(".js")) continue;
+	const abs = join(dirent.parentPath, dirent.name);
+	const rel = abs.slice(root.length).replaceAll("\\", "/");
+	if (entrySet.has(rel)) continue;
+	if (firstLine(abs) === SHEBANG) errors.push(`unexpected shebang on non-entry chunk: ${rel}`);
+}
+
 let report;
 try {
 	const raw = execFileSync("npm", ["pack", "--dry-run", "--json"], {
@@ -62,7 +94,9 @@ try {
 	});
 	report = JSON.parse(raw)[0];
 } catch (err) {
-	process.stderr.write(`check-pack: npm pack --dry-run failed: ${err instanceof Error ? err.message : String(err)}\n`);
+	process.stderr.write(
+		`check-release: npm pack --dry-run failed: ${err instanceof Error ? err.message : String(err)}\n`,
+	);
 	process.exit(1);
 }
 
@@ -91,11 +125,11 @@ if (report.unpackedSize > MAX_UNPACKED_BYTES) {
 }
 
 if (errors.length > 0) {
-	for (const error of errors) process.stderr.write(`check-pack: ${error}\n`);
+	for (const error of errors) process.stderr.write(`check-release: ${error}\n`);
 	process.exit(1);
 }
 
 process.stdout.write(
-	`check-pack: ok (${report.entryCount} files, tarball ${(report.size / 1e6).toFixed(2)} MB, unpacked ${(report.unpackedSize / 1e6).toFixed(2)} MB)\n`,
+	`check-release: ok (${report.entryCount} files, tarball ${(report.size / 1e6).toFixed(2)} MB, unpacked ${(report.unpackedSize / 1e6).toFixed(2)} MB)\n`,
 );
 process.exit(0);
