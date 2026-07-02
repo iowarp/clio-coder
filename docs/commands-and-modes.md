@@ -102,8 +102,6 @@ The registry table below lists the available interactive slash commands. The "Al
 | --- | --- | --- | --- |
 | `/quit` | - | `/quit` | Exit Clio Coder |
 | `/help` | - | `/help [query]` | Open the interactive help center showing commands and keys |
-| `/context-init` | - | `/context-init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]` | Explore the repo and bootstrap project context: CLIO.md and codewiki |
-| `/context-clear` | - | `/context-clear [--all] [--confirm] [--confirm-all]` | Clear accumulated project context artifacts |
 | `/skill` | `/skill:`, `/skills:` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
 | `/prompts` | - | `/prompts` | List prompt templates |
 | `/extensions` | - | `/extensions` | List installed extensions |
@@ -113,7 +111,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | - | `/targets` | Show target hub for health, auth, models, and actions |
 | `/cost` | - | `/cost` | Show session token and cost totals |
-| `/context-view` | `/context`, `/ctx` | `/context-view` | Visualize the active context window and its breakdown |
+| `/context` | `/ctx` | `/context compact [instructions] \| /context init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic] \| /context refresh \| /context reset [--all] [--confirm] [--confirm-all]` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | - | `/thinking` | Open thinking-level selector |
@@ -124,8 +122,20 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/new` | - | `/new` | Start a fresh session |
 | `/tree` | - | `/tree` | Open session tree navigator |
 | `/fork` | - | `/fork` | Fork from an assistant turn |
-| `/compact` | - | `/compact [instructions]` | Compact earlier context |
 | `/export` | - | `/export [path]` | Export the session transcript to Markdown |
+
+`/context` with no arguments opens the context-window ledger overlay. The
+subcommands own the durable project-context noun: `compact` summarizes older
+turns in the session window, `init` bootstraps or updates `CLIO.md` and the
+codewiki, `refresh` re-indexes the codewiki and restamps the `CLIO.md`
+fingerprint footer without touching prose, and `reset` deletes accumulated
+context artifacts (`.clio/codewiki.json`, `.clio/state.json`,
+`.clio/handoffs/`, `.clio/proposals/`), preserving `CLIO.md` unless `--all`
+plus `--confirm-all` is given. Session reset stays `/new`; there is
+deliberately no `/context clear`. The pre-0.2.8 spellings `/compact`,
+`/context-init`, `/context-clear`, and `/context-view` still parse but are
+hidden from help and autocomplete and print a one-line deprecation notice;
+they will be removed in a future release.
 
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.

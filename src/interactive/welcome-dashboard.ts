@@ -289,7 +289,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
 	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
 
-	const hintStr = `Type ${theme.fg("accent", "/settings")} to edit · ${theme.fg("accent", "/context-init")} to bootstrap · ${theme.fg("accent", "Alt+U")} to toggle dashboard`;
+	const hintStr = `Type ${theme.fg("accent", "/settings")} to edit · ${theme.fg("accent", "/context init")} to bootstrap · ${theme.fg("accent", "Alt+U")} to toggle dashboard`;
 
 	if (safeWidth >= WIDE_MIN) {
 		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
