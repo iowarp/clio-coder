@@ -139,6 +139,21 @@ Dispatch admission enforces three gates:
 2. The requested action classes must be allowed by the agent's scope.
 3. The worker scope must be a subset of the orchestrator's active scope.
 
+### Ad-hoc specialists
+
+The dispatch tool can compose an ephemeral specialist for one task object with
+`persona` and `tool_profile`. `persona` replaces the recipe body inside the
+same stable worker shell used for recipe runs; it does not replace Clio's task
+contract or safety scaffolding. `tool_profile` narrows tools through the same
+validated profiles as recipe dispatch (`minimal-local`, `science-local`, or
+`full-agent`).
+
+Personas are capped at 8000 characters and are rejected for shadow agents and
+ACP delegation agents. A composed run legitimately gets its own
+`staticCompositionHash`, and its receipt and run ledger carry
+`personaOverride.promptHash` so the override is explicit and queryable.
+Recipe-based runs omit `personaOverride`.
+
 ### Worker context injection
 
 Every dispatched worker receives per-run context through dynamic prompt

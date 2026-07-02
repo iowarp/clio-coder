@@ -59,6 +59,14 @@ export interface RunPipelineProvenance {
 }
 
 /**
+ * Explicit marker for an ad-hoc specialist whose orchestrator-authored persona
+ * replaced the recipe body in the stable worker prompt.
+ */
+export interface RunPersonaOverride {
+	promptHash: string; // same hash as staticCompositionHash for the composed prompt
+}
+
+/**
  * Host and HPC-scheduler identity captured at run start. A receipt produced
  * inside a Slurm/PBS/LSF allocation carries the allocation identity so the
  * provenance chain anchors to the scheduler job, not folklore.
@@ -126,6 +134,8 @@ export interface RunEnvelope {
 	identity?: RunIdentity;
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */
 	pipeline?: RunPipelineProvenance;
+	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
+	personaOverride?: RunPersonaOverride;
 	exitCode: number | null;
 	pid: number | null;
 	heartbeatAt: string | null;
@@ -273,6 +283,8 @@ export interface RunReceipt {
 	identity?: RunIdentity;
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */
 	pipeline?: RunPipelineProvenance;
+	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
+	personaOverride?: RunPersonaOverride;
 	exitCode: number;
 	failureMessage?: string;
 	tokenCount: number;

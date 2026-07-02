@@ -91,6 +91,7 @@ import {
 	type RunKind,
 	type RunLineage,
 	type RunOutcome,
+	type RunPersonaOverride,
 	type RunPipelineProvenance,
 	type RunReceipt,
 	type RunReceiptDraft,
@@ -521,6 +522,15 @@ function pipelineProvenanceFor(req: DispatchRequest): RunPipelineProvenance | nu
 	return renderPipelineInput(req.pipelineInput).provenance;
 }
 
+function hasPersonaOverride(req: DispatchRequest): boolean {
+	return typeof req.systemPrompt === "string" && req.systemPrompt.trim().length > 0;
+}
+
+function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string | null): RunPersonaOverride | null {
+	if (!hasPersonaOverride(req) || staticCompositionHash === null) return null;
+	return { promptHash: staticCompositionHash };
+}
+
 /**
  * Per-run context for the dynamic worker prompt messages. Everything here
  * flows through dynamic messages, never through the stable system prompt, so
@@ -683,6 +693,7 @@ interface DispatchLifecycleStage {
 	requestOrigin: DispatchRequestOrigin;
 	runtimeLimitations: string[];
 	pipeline: RunPipelineProvenance | null;
+	personaOverride: RunPersonaOverride | null;
 }
 
 interface AcpDelegationLifecycleStage {
@@ -700,6 +711,7 @@ interface AcpDelegationLifecycleStage {
 	runtimeLimitations: string[];
 	requestOrigin: DispatchRequestOrigin;
 	pipeline: RunPipelineProvenance | null;
+	personaOverride: RunPersonaOverride | null;
 }
 
 function capabilityInfoForTarget(providers: ProvidersContract, targetId: string): CapabilityFlags | null {
@@ -1594,6 +1606,9 @@ export function createDispatchBundle(
 				`dispatch: agent '${req.agentId}' is a ${spec.audience} agent reserved for Clio internal orchestration`,
 			);
 		}
+		if (hasPersonaOverride(req) && (spec.audience === "shadow" || spec.audience === "internal")) {
+			throw new Error(`dispatch: persona overrides are not allowed for ${spec.audience} agent '${req.agentId}'`);
+		}
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
 		const targets = readWorkerTargets(options?.getSettings?.() ?? config?.get());
 		const target = resolveDispatchTarget(
@@ -1625,6 +1640,7 @@ export function createDispatchBundle(
 		const staticCompositionHash = promptHash(systemPrompt);
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
+		const personaOverride = personaOverrideFor(req, staticCompositionHash);
 		const currentToolSignature = toolSignature(admission.allowedTools);
 		const auth = targetRequiresAuth(target.target, target.runtime)
 			? await providers.auth.resolveForTarget(target.target, target.runtime)
@@ -1656,12 +1672,16 @@ export function createDispatchBundle(
 			requestOrigin: requestOriginFor(req),
 			runtimeLimitations: limitations,
 			pipeline: pipelineProvenanceFor(req),
+			personaOverride,
 		};
 	}
 
 	function resolveAcpDelegationLifecycle(req: DispatchRequest): AcpDelegationLifecycleStage {
 		const agentId = req.delegationAgentId;
 		if (!agentId) throw new Error("dispatch: missing delegationAgentId");
+		if (hasPersonaOverride(req)) {
+			throw new Error(`dispatch: persona overrides are not allowed for ACP delegation agent '${agentId}'`);
+		}
 		if (req.agentId && maybeAgents) {
 			const spec = maybeAgents.getSpec(req.agentId);
 			if (spec && (spec.audience === "shadow" || spec.audience === "internal")) {
@@ -1687,6 +1707,7 @@ export function createDispatchBundle(
 		const staticCompositionHash = promptHash(systemPrompt);
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
+		const personaOverride = personaOverrideFor(req, staticCompositionHash);
 		const currentToolSignature = toolSignature(admission.allowedTools);
 		return {
 			admission,
@@ -1703,6 +1724,7 @@ export function createDispatchBundle(
 			requestOrigin: requestOriginFor(req),
 			runtimeLimitations: acpRuntimeLimitations(),
 			pipeline: pipelineProvenanceFor(req),
+			personaOverride,
 		};
 	}
 
@@ -1895,6 +1917,7 @@ export function createDispatchBundle(
 				lineage,
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 			});
 			// One durable write at start so sibling processes (clio fleet status)
 			// can observe the running row; finalization persists the terminal state.
@@ -2002,6 +2025,7 @@ export function createDispatchBundle(
 				lineage,
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				startedAt,
 				endedAt,
 				exitCode:
@@ -2457,6 +2481,7 @@ export function createDispatchBundle(
 				lineage,
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
 			});
 			// One durable write at start so sibling processes (clio fleet status)
@@ -2578,6 +2603,7 @@ export function createDispatchBundle(
 				lineage,
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				startedAt,
 				endedAt,
 				exitCode: receiptExitCode,
