@@ -5,7 +5,7 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## 0.2.8 - unreleased
+## 0.2.8 - 2026-07-02
 
 The toolkit-rework release: the tool surface was redesigned into seven planes
 with 18 tools, every OBSERVE tool now closes through one observation envelope,
