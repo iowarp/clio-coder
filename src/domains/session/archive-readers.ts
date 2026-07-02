@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isSessionEntry, type MessageEntry, type MessageRole, type SessionEntry } from "../session/index.js";
+import { isSessionEntry, type MessageEntry, type MessageRole, type SessionEntry } from "./index.js";
 
 /**
  * Shared read-only readers over the local usage archive: the per-day audit
@@ -8,10 +8,11 @@ import { isSessionEntry, type MessageEntry, type MessageRole, type SessionEntry 
  * building and the cross-session usage report both consume these; they were
  * factored out of evidence/build.ts so the parsers exist exactly once.
  *
- * Import note: consumers outside this domain import this module by direct
- * path (not the observability index) because the observability extension
- * imports the evidence domain; an index-level import from evidence would
- * cycle.
+ * The module lives in the session domain because that is its only dependency,
+ * and it is re-exported from the session index so consumers reach it through
+ * the barrel. It used to live under observability, where the barrel could not
+ * be used: the observability extension imports the evidence domain, so an
+ * evidence-side import through the observability index would cycle.
  */
 
 export interface AuditJsonRow {

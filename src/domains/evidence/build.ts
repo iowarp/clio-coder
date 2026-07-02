@@ -3,16 +3,16 @@ import { join } from "node:path";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "../dispatch/index.js";
 import { verifyReceiptIntegrity } from "../dispatch/index.js";
-// Direct module import (not the observability index): the observability
-// extension imports this domain, so an index-level import would cycle.
-import { type AuditJsonRow, readAuditRows, readSessionEntriesForId } from "../observability/archive-readers.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import {
+	type AuditJsonRow,
 	type BashExecutionEntry,
 	type MessageEntry,
 	type ProtectedArtifactEntry,
 	protectedArtifactFromSessionEntry,
 	protectedArtifactStateFromSessionEntries,
+	readAuditRows,
+	readSessionEntriesForId,
 	type SessionEntry,
 } from "../session/index.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";

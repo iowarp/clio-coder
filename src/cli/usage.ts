@@ -2,9 +2,9 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
-import { listSessionLedgerRefs, parseSessionEntries, readAuditRows } from "../domains/observability/archive-readers.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
 import { loadSkills } from "../domains/resources/index.js";
+import { listSessionLedgerRefs, parseSessionEntries, readAuditRows } from "../domains/session/index.js";
 import { cwdHash } from "../engine/session.js";
 import { formatColumns, printError } from "./shared.js";
 

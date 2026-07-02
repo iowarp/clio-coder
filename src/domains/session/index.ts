@@ -8,6 +8,18 @@ export const SessionDomainModule: DomainModule = {
 };
 
 export type {
+	AuditJsonRow,
+	AuditReadResult,
+	SessionLedgerRef,
+	SessionReadResult,
+} from "./archive-readers.js";
+export {
+	listSessionLedgerRefs,
+	parseSessionEntries,
+	readAuditRows,
+	readSessionEntriesForId,
+} from "./archive-readers.js";
+export type {
 	ClioSessionMetaExtension,
 	DeleteSessionOptions,
 	SessionContract,
