@@ -39,6 +39,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
+import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { clioStateDir } from "../core/xdg.js";
 
 export interface ClioSessionMeta {
@@ -133,24 +134,11 @@ export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
 	};
 }
 
+// meta.json and tree.json rewrites delegate to the canonical writer. Neither
+// file is recovered from a leftover temp, so the randomized hidden temp name is
+// safe here (unlike current.jsonl, which promotes a deterministic `.tmp`).
 export function atomicWrite(targetPath: string, contents: string | Uint8Array): void {
-	const dir = dirname(targetPath);
-	mkdirSync(dir, { recursive: true });
-	const suffix = randomBytes(6).toString("hex");
-	const tmp = `${targetPath}.tmp-${suffix}`;
-	const fd = openSync(tmp, "w");
-	try {
-		if (typeof contents === "string") {
-			writeSync(fd, contents);
-		} else {
-			writeSync(fd, contents);
-		}
-		fsyncSync(fd);
-	} finally {
-		closeSync(fd);
-	}
-	renameSync(tmp, targetPath);
-	fsyncDirectory(dir);
+	safeResourceWrite(targetPath, contents);
 }
 
 export interface SessionJsonlWarning {
