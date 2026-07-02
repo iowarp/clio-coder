@@ -25,8 +25,10 @@ import {
 	type ProvidersContract,
 	type ResolvedRuntimeTarget,
 	type RuntimeDescriptor,
+	type RuntimeTargetSnapshot,
 	refineRuntimeTargetWithModelHints,
 	resolveRuntimeTarget,
+	runtimeTargetSnapshot,
 	type TargetDescriptor,
 	type ThinkingLevel,
 	targetRequiresAuth,
@@ -215,6 +217,7 @@ export interface ChatLoop {
 	cancel(options?: ChatCancelOptions): void;
 	onEvent(handler: (event: ChatLoopEvent) => void): () => void;
 	getSessionId(): string | null;
+	lastRunSnapshot?(): ChatLoopRunSnapshot | null;
 	isStreaming(): boolean;
 	contextUsage(): ContextUsageSnapshot;
 	/**
@@ -243,6 +246,20 @@ export interface ChatLoop {
 	resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
 	/** Abort the live agent and release pi-ai session-scoped resources before shutdown. */
 	dispose(): void;
+}
+
+export interface ChatLoopRunSnapshot {
+	targetId: string;
+	runtimeId: string;
+	runtimeKind: RuntimeDescriptor["kind"];
+	wireModelId: string;
+	compiledPromptHash: string | null;
+	staticCompositionHash: string | null;
+	promptSignature: string | null;
+	toolSignature: string | null;
+	runtimeResolution?: RuntimeTargetSnapshot;
+	sessionId: string | null;
+	cwd: string;
 }
 
 export interface CreateChatLoopDeps {
@@ -381,6 +398,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let pendingPromptLogEntry: { previousHash: string | null; hash: string; tokenEstimate: number } | null = null;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
+	let lastRunSnapshot: ChatLoopRunSnapshot | null = null;
 	// Set by a loop-guard interrupt (cancel with a reason). While set, the empty
 	// aborted assistant message the abort produces is suppressed at persistence
 	// time because a durable closing turn carrying the reason was already
@@ -1927,6 +1945,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 
+			lastRunSnapshot = null;
 			let agentRuntime: AgentRuntime | null;
 			try {
 				await ensureLiveCapabilitiesForSelectedModel();
@@ -2034,6 +2053,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
 			currentContextSnapshot = turnSnapshot;
 			persistContextSnapshot(turnSnapshot);
+			const promptHash = compiledPrompt?.systemPromptHash ?? null;
+			lastRunSnapshot = {
+				targetId: agentRuntime.targetId,
+				runtimeId: agentRuntime.runtimeId,
+				runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
+				wireModelId: agentRuntime.wireModelId,
+				compiledPromptHash: promptHash,
+				staticCompositionHash: promptHash,
+				promptSignature: promptHash,
+				toolSignature: toolSignatureFromState(agentRuntime.agent.state.tools),
+				runtimeResolution: runtimeTargetSnapshot(agentRuntime.runtimeResolution),
+				sessionId: deps.session?.current()?.id ?? null,
+				cwd: process.cwd(),
+			};
 
 			agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 			currentThinkingLevel = agentRuntime.agent.state.thinkingLevel;
@@ -2165,6 +2198,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		getSessionId(): string | null {
 			return deps.session?.current()?.id ?? null;
+		},
+		lastRunSnapshot(): ChatLoopRunSnapshot | null {
+			return lastRunSnapshot ? structuredClone(lastRunSnapshot) : null;
 		},
 		isStreaming(): boolean {
 			return streaming;
