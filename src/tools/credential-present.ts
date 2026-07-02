@@ -17,6 +17,12 @@ interface CredentialPresenceSummary {
 	source: CredentialPresenceResultSource;
 	checked: Array<"environment" | "file">;
 	file?: string;
+	/**
+	 * True when the file source does not exist. Distinguishes "the env file
+	 * has no such key" from "there is no env file at that path", so a typoed
+	 * path never silently reads as an absent credential.
+	 */
+	fileMissing?: boolean;
 }
 
 function trimString(value: unknown): string | null {
@@ -116,12 +122,14 @@ export const credentialPresentTool: ToolSpec = {
 			checked.push("environment");
 			envPresent = hasEnvKey(name);
 		}
+		let fileMissing = false;
 		if (checkFile && file !== null) {
 			checked.push("file");
 			const resolved = resolveReadPath(file);
 			try {
 				const result = await fileHasKey(resolved, name);
 				filePresent = result.present;
+				fileMissing = result.missing;
 			} catch (error) {
 				return {
 					kind: "error",
@@ -136,6 +144,7 @@ export const credentialPresentTool: ToolSpec = {
 			source: sourceOf(envPresent, filePresent),
 			checked,
 			...(file !== null && checkFile ? { file } : {}),
+			...(fileMissing ? { fileMissing: true } : {}),
 		};
 		return ok(summary);
 	},

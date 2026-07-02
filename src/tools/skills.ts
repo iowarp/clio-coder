@@ -152,7 +152,7 @@ function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undef
 function renderSkillsList(skills: ReadonlyArray<Skill>): string {
 	if (skills.length === 0) return "No skills are installed.";
 	const lines = [
-		"Available skills. Skill bodies load only after an explicit operator request; when one fits the task, suggest the operator run /skill <name>.",
+		"Available skills. Skill bodies load only after an explicit operator request; when one fits the task, suggest the operator run /skill:<name>.",
 		"",
 	];
 	for (const skill of skills) {

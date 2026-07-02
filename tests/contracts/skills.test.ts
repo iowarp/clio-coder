@@ -335,7 +335,7 @@ describe("contracts/skills on-demand listing", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(result.output.includes("- visible (project): Catalog entry."));
-			ok(result.output.includes("/skill <name>"));
+			ok(result.output.includes("/skill:<name>"));
 		}
 	});
 
