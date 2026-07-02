@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { expandInlineFileReferences, readFileArgsAsync } from "../../src/core/file-references.js";
-import { expandInteractiveSubmit } from "../../src/interactive/index.js";
+import { expandInteractiveSubmitAsync } from "../../src/interactive/index.js";
 
 const roots: string[] = [];
 
@@ -29,7 +29,7 @@ describe("contracts/file references working paths", () => {
 		ok(inline.text.includes("<file name="));
 		deepStrictEqual(inline.referencedPaths, [target]);
 
-		const interactive = expandInteractiveSubmit("read @src/index.ts", undefined, cwd);
+		const interactive = await expandInteractiveSubmitAsync("read @src/index.ts", undefined, cwd);
 		deepStrictEqual(interactive.workingContextPaths, [target]);
 
 		const explicit = await readFileArgsAsync(["src/index.ts"], { cwd, missing: "error" });
