@@ -1,3 +1,4 @@
+import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { EvidenceOverview } from "../domains/evidence/index.js";
 import { buildEvalEvidence, buildEvidence, inspectEvidence, listEvidenceOverviews } from "../domains/evidence/index.js";
@@ -152,7 +153,7 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 		return 2;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		return 1;
+		return error instanceof InvalidIdError ? 2 : 1;
 	}
 }
 
