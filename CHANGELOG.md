@@ -5,6 +5,11 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## 0.2.8 - unreleased
+
+The toolkit-rework release: refactoring the tool surface available to Clio
+Coder.
+
 ## 0.2.7 - 2026-07-02
 
 A skills-and-accountability release: the marketplace catalog grew five
