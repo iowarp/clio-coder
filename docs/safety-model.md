@@ -80,6 +80,18 @@ Target capability, dispatch tool profiles, and recipe constraints can further na
 
 ---
 
+## Skill tool surface narrowing
+
+A `SKILL.md` may declare `allowed-tools` and `disallowed-tools`. The declaration is enforced at tool admission, between the safety net and the autonomy mapping, on every surface that activates skills (interactive turns, headless `clio run` turns, and dispatched workers whose recipes declare skills).
+
+- **Window.** Narrowing arms when `read_skill` successfully loads the skill and lasts for the lifetime of the pending-skill policy: to the end of the current turn for the main agent, and to the end of the run for a worker. A later turn is unrestricted until a skill is requested and loaded again.
+- **Merge.** Denials win: a tool named in any loaded skill's `disallowed-tools` is blocked. Allow-narrowing applies only while every loaded skill declares `allowed-tools`; the merged surface is the union of those lists. A loaded skill that declares no `allowed-tools` keeps the full surface for its own workflow, which lifts the allow-narrowing (never the denials) for that window.
+- **Exemptions.** `read_skill` (the remaining requested skills of the turn must still load) and `ask_user` (the escape hatch the block message points at) are always admitted.
+- **Direction.** Narrowing only blocks. It never grants a tool the safety net, damage-control rules, or autonomy mapping would refuse, and an out-of-surface call blocks terminally instead of parking for confirmation.
+- **Block message.** The rejection names the tool, the active skill(s), and the merged surface, and states the remediation: work within the declared surface, or use `ask_user` (when available) to hand the step to the operator. The audit row carries reason code `skill_surface`.
+
+---
+
 ## Damage-control rules
 
 `damage-control-rules.yaml` is compiled into rule packs. Base rules apply broadly. Rules with `ask: true` park for one-shot confirmation (for example `git stash drop` and remote-branch deletion); hard-block rules and classifier-pattern `git_destructive` hits are always blocked. Both behaviors apply at every autonomy level.

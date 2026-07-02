@@ -47,8 +47,11 @@ auto-loads. That gap is deliberate.
 | [`workflow-distiller`](workflow-distiller/) | workflow | A workflow that just ran should become a reusable skill. Reconstructs it from the session record, interviews, checks overlap, gates on approval, then creates it. |
 
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
-loads, Clio merges that declaration with host policy; a skill can narrow its
-tool surface but never grant tools the host would not allow.
+loads, Clio enforces that declaration at tool admission until the turn (or
+worker run) ends: calls outside the merged surface are blocked with reason
+code `skill_surface`, with `read_skill` and `ask_user` always admitted. A
+skill can narrow its tool surface but never grant tools the host would not
+allow. Full semantics: docs/safety-model.md, "Skill tool surface narrowing".
 
 ## Install (activate a marketplace skill)
 

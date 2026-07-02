@@ -1,5 +1,9 @@
 import type { TSchema } from "typebox";
-import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
+import {
+	evaluateSkillToolSurface,
+	type PendingSkillToolPolicy,
+	type SkillToolSurfaceViolation,
+} from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
@@ -322,7 +326,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		| { kind: "execute"; spec: ToolSpec; decision: SafetyDecision }
 		| { kind: "park"; decision: SafetyDecision };
 
-	const admit = (call: ClassifierCall, grant?: OneShotGrant): AdmitOutcome => {
+	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
 		const spec = tools.get(call.tool as ToolName);
 		if (!spec) {
 			return { kind: "terminal", verdict: { kind: "not_visible", reason: `tool not registered: ${call.tool}` } };
@@ -335,6 +339,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// confirm rail resolves as the same auto-deny as any other mutation.
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
+		}
+		// Stage 1.5, the skill tool surface: a loaded SKILL.md that declares
+		// allowed-tools or disallowed-tools narrows the surface until the
+		// policy's lifetime ends (turn end for the main agent, run end for
+		// workers). Narrowing only blocks; it never grants, and an out-of-
+		// surface call blocks terminally instead of parking for confirmation.
+		const surfaceViolation = evaluateSkillToolSurface(options?.pendingSkillPolicy, call.tool);
+		if (surfaceViolation) {
+			const verdict = skillSurfaceBlockedVerdict(decision, call.tool, surfaceViolation);
+			recordRegistryDisposition(call, verdict.decision, "blocked", {
+				reasonCode: "skill_surface",
+				reasons: [verdict.reason],
+			});
+			return { kind: "terminal", verdict };
 		}
 		const actionClass = decision.classification.actionClass;
 		if (decision.kind === "ask") {
@@ -474,7 +492,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listRegistered: () => Array.from(tools.keys()),
 		listVisible: () => Array.from(tools.values()),
 		async invoke(call, options) {
-			const outcome = admit(call);
+			const outcome = admit(call, undefined, options);
 			if (outcome.kind === "terminal") {
 				observeBlockedAttempt(call, outcome.verdict, options);
 				return outcome.verdict;
@@ -496,7 +514,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// parked while the overlay was already open remain queued and need
 				// their own confirmation, so a late or concurrent privileged call
 				// cannot ride along on a grant the user approved for another call.
-				const outcome = admit(entry.call, grant);
+				const outcome = admit(entry.call, grant, entry.options);
 				if (outcome.kind === "park") {
 					parked.push(entry);
 					continue;
@@ -560,6 +578,34 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 		reasons: [`registered tool: ${spec.name}`],
 	};
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
+}
+
+/**
+ * Terminal blocked verdict for a call outside the merged tool surface the
+ * loaded skills declared. The reason carries the remediation, since blocked
+ * reasons are what the model reads; read_skill and ask_user stay exempt at
+ * the evaluator so the message can honestly point at ask_user.
+ */
+function skillSurfaceBlockedVerdict(
+	decision: SafetyDecision,
+	tool: string,
+	violation: SkillToolSurfaceViolation,
+): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const reason =
+		violation.disallowedBy.length > 0
+			? `${tool} is disallowed by the active skill(s) ${violation.disallowedBy.join(", ")} (disallowed-tools). The narrowing ends when the skill policy's turn or worker run ends. Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`
+			: `${tool} is outside the tool surface declared by the active skill(s) ${violation.skills.join(", ")}. Tools are narrowed to: ${(violation.mergedAllowedTools ?? []).join(", ")} (plus read_skill and ask_user). The narrowing ends when the skill policy's turn or worker run ends. Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`;
+	const blocked: SafetyDecision = {
+		kind: "block",
+		classification: decision.classification,
+		rejection: {
+			short: `${tool} blocked: outside active skill tool surface`,
+			detail: reason,
+			hints: ["Skill narrowing never grants tools; it only blocks calls outside the declared workflow surface."],
+		},
+		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+	};
+	return { kind: "blocked", reason, decision: blocked };
 }
 
 /**
