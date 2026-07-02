@@ -50,6 +50,23 @@ Optional hook:
 npm run hooks:install
 ```
 
+## Testing conventions
+
+CLI-facing contract tests drive the built binary through the child-process
+harness in `tests/harness/spawn.ts`: `makeScratchHome()` gives the run an
+isolated `CLIO_HOME`, and `runCli(args, { env, cwd })` spawns `dist/cli` and
+returns its captured `stdout`, `stderr`, and exit code. Rebuild `dist/` with
+`npm run build` after changing CLI source, since these tests exercise the
+built output.
+
+Do not assert a CLI subcommand's output by capturing `process.stdout.write`
+in-process. In-process stdout capture fights the node:test spec reporter:
+async flushes land in the capture buffer and the reporter's pass/fail counters
+get eaten, so a passing test can report as no output. Spawn the CLI through the
+harness instead. Patching `process.stdout`/`stderr` to assert a small library
+function's own output is fine; the trap is capturing a whole subcommand's
+output in-process while the reporter runs.
+
 ## Releasing
 
 Releases are tag-driven and publish from CI. Nothing is published from a
