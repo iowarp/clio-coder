@@ -39,7 +39,7 @@ export const writeTool: ToolSpec = {
 			if (previousEndedWithNewline && !content.endsWith("\n")) {
 				output += `\nnote: ${pathArg} no longer ends with a newline; the previous content did`;
 			}
-			return { kind: "ok", output };
+			return { kind: "ok", output, details: { paths: [filePath] } };
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `write: ${msg}` };

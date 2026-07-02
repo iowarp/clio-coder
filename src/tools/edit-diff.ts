@@ -1,8 +1,26 @@
 import * as Diff from "diff";
+import { truncateUtf8 } from "./truncate-utf8.js";
 
 export interface Edit {
 	oldText: string;
 	newText: string;
+}
+
+/**
+ * MUTATE size posture for `details.diff`: the diff is a bounded review surface,
+ * not an offloadable OBSERVE payload. A single changed-or-context line is capped
+ * in width so a multi-megabyte line (e.g. a change adjacent to a 21MB minified
+ * line) cannot make the diff larger than the file, and the whole diff carries a
+ * byte backstop for pathological multi-line changes. Line accounting
+ * (`firstChangedLine`, elision counts) is unaffected because only the rendered
+ * text is capped, never the line count.
+ */
+const MAX_DIFF_LINE_CHARS = 500;
+const MAX_DIFF_BYTES = 32_768;
+
+function capDiffLine(text: string): string {
+	if (text.length <= MAX_DIFF_LINE_CHARS) return text;
+	return `${text.slice(0, MAX_DIFF_LINE_CHARS)}… (+${text.length - MAX_DIFF_LINE_CHARS} chars)`;
 }
 
 interface MatchedEdit {
@@ -429,8 +447,11 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 	for (let i = 0; i < parts.length; i += 1) {
 		const part = parts[i];
 		if (!part) continue;
-		const raw = part.value.split("\n");
+		let raw = part.value.split("\n");
 		if (raw[raw.length - 1] === "") raw.pop();
+		// Cap each line's width up front; array length (and thus every downstream
+		// count/slice) is preserved, so only the rendered text shrinks.
+		raw = raw.map(capDiffLine);
 
 		if (part.added || part.removed) {
 			firstChangedLine ??= newLineNum;
@@ -508,5 +529,6 @@ export function generateDiffString(oldContent: string, newContent: string, conte
 		lastWasChange = false;
 	}
 
-	return { diff: output.join("\n"), firstChangedLine };
+	const diff = truncateUtf8(output.join("\n"), MAX_DIFF_BYTES, "\n… diff truncated (details capped)");
+	return { diff, firstChangedLine };
 }

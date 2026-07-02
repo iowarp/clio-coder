@@ -186,7 +186,7 @@ export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
 	/** Files already expanded into this session's working context. */
 	workingContextPaths?: ReadonlyArray<string>;
-	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until read_skill succeeds. */
+	/** Skill requests parsed by the harness for this turn. Not recorded as loaded until the skill body loads. */
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	/** Internal middleware resubmit; does not reset the per-user-prompt stalled-turn nudge cap. */
 	requestContinuation?: boolean;
@@ -1186,7 +1186,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// backend reused the session prefix; later calls in a tool loop are
 		// trivially warm.
 		let runFirstCallVerdict: BackendCacheVerdict | null = null;
-		// write_plan/write_review set ToolResult.terminate=true so the agent
+		// artifact plan/review/report set ToolResult.terminate=true so the agent
 		// loop skips the follow-up LLM call that would otherwise produce the
 		// assistant message carrying the turn's terminal stopReason. Track the
 		// most recent terminating tool result here; a real assistant
@@ -2042,7 +2042,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 5. Append the user turn, then stamp and persist the snapshot.
 			// PendingSkillRequest is intent only; SkillActivation ledger entries
-			// are recorded by read_skill success.
+			// are recorded on skill-load success.
 			const userTurnId = appendSubmittedUserTurn(
 				agentRuntime,
 				submittedText,

@@ -1,7 +1,7 @@
 ---
 name: Debugger
 description: Diagnoses failing code, tests, receipts, or runtime behavior without making edits.
-tools: [read, grep, glob, ls, git, run_task]
+tools: [read, grep, find, ls, git, verify]
 audience: base
 category: quality
 capabilityClass: verification

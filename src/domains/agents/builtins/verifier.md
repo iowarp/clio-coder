@@ -1,7 +1,7 @@
 ---
 name: Verifier
 description: Independently runs and reports test, lint, build, review, and release gates.
-tools: [read, grep, glob, ls, git, run_task, validate_frontend]
+tools: [read, grep, find, ls, git, verify]
 audience: base
 category: quality
 capabilityClass: verification

@@ -1,15 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { Type } from "typebox";
-import { resolvePackageRoot } from "../core/package-root.js";
-import { ToolNames } from "../core/tool-names.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
+import { resolvePackageRoot } from "../../core/package-root.js";
 
-// Deterministic, dependency-free retrieval over Clio's bundled human docs.
-// This intentionally avoids embeddings or network calls so docs_search works
-// in a packaged offline CLI, but it is still richer than grep: it builds a
-// section index with heading hierarchy, line ranges, light stemming, controlled
-// Clio vocabulary aliases, phrase boosts, and BM25-style body scoring.
+// Deterministic, dependency-free retrieval over Clio's bundled human docs,
+// serving context(scope=docs). This intentionally avoids embeddings or network
+// calls so docs retrieval works in a packaged offline CLI, but it is still
+// richer than grep: it builds a section index with heading hierarchy, line
+// ranges, light stemming, controlled Clio vocabulary aliases, phrase boosts,
+// and BM25-style body scoring.
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 12;
@@ -78,7 +76,7 @@ const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expan
 	},
 	{
 		triggers: ["validate", "validated", "validation", "verify", "verified", "test", "tests", "rigor"],
-		expansions: ["validation", "verify", "evidence", "rigor", "finish", "contract", "run_task"],
+		expansions: ["validation", "verify", "evidence", "rigor", "finish", "contract", "check"],
 	},
 	{
 		triggers: ["bash", "command", "commands", "shell", "terminal", "tool", "tools"],
@@ -98,11 +96,11 @@ const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expan
 	},
 	{
 		triggers: ["skill", "skills", "marketplace"],
-		expansions: ["skill", "skills", "marketplace", "discovery", "read_skill"],
+		expansions: ["skill", "skills", "marketplace", "discovery", "context"],
 	},
 	{
 		triggers: ["docs", "documentation", "manual", "self"],
-		expansions: ["documentation", "docs", "docs_search", "blueprint", "guide"],
+		expansions: ["documentation", "docs", "context", "blueprint", "guide"],
 	},
 ];
 
@@ -147,7 +145,6 @@ interface WeightedTerm {
 
 interface QueryPlan {
 	query: string;
-	fileFilter: string | null;
 	originalTokens: string[];
 	weightedTerms: WeightedTerm[];
 	expandedTerms: string[];
@@ -328,12 +325,12 @@ function loadDocsIndex(): { ok: true; index: DocsIndex } | { ok: false; message:
 	try {
 		root = resolvePackageRoot();
 	} catch (err) {
-		return { ok: false, message: `docs_search: ${err instanceof Error ? err.message : String(err)}` };
+		return { ok: false, message: err instanceof Error ? err.message : String(err) };
 	}
 	const docsDir = join(root, "docs");
 	if (cachedIndex && cachedIndex.dir === docsDir) return { ok: true, index: cachedIndex };
 	const files = candidateDocFiles(root);
-	if (files.length === 0) return { ok: false, message: `docs_search: bundled docs directory not found at ${docsDir}` };
+	if (files.length === 0) return { ok: false, message: `bundled docs directory not found at ${docsDir}` };
 
 	const sections: IndexedSection[] = [];
 	const indexedFiles: string[] = [];
@@ -349,7 +346,7 @@ function loadDocsIndex(): { ok: true; index: DocsIndex } | { ok: false; message:
 		indexedFiles.push(file);
 		for (const section of parseSections(file, raw)) sections.push(indexSection(section));
 	}
-	if (sections.length === 0) return { ok: false, message: `docs_search: no markdown sections found under ${docsDir}` };
+	if (sections.length === 0) return { ok: false, message: `no markdown sections found under ${docsDir}` };
 	const totalLength = sections.reduce((sum, section) => sum + section.bodyLength, 0);
 	cachedIndex = {
 		dir: docsDir,
@@ -362,7 +359,7 @@ function loadDocsIndex(): { ok: true; index: DocsIndex } | { ok: false; message:
 	return { ok: true, index: cachedIndex };
 }
 
-function makeQueryPlan(query: string, fileFilter: string | null): QueryPlan {
+function makeQueryPlan(query: string): QueryPlan {
 	const originalTokens = unique(tokenize(query));
 	const originalSet = new Set(originalTokens);
 	const expanded: string[] = [];
@@ -384,7 +381,7 @@ function makeQueryPlan(query: string, fileFilter: string | null): QueryPlan {
 			.map((token, index, tokens) => `${token} ${tokens[index + 1] ?? ""}`.trim()),
 	];
 	const phrases = unique(phraseCandidates.filter((phrase) => phrase.includes(" ") && phrase.length >= 5));
-	return { query, fileFilter, originalTokens, weightedTerms, expandedTerms, phrases };
+	return { query, originalTokens, weightedTerms, expandedTerms, phrases };
 }
 
 function idf(index: DocsIndex, term: string): number {
@@ -486,20 +483,9 @@ function snippetFor(section: IndexedSection, plan: QueryPlan): { text: string; s
 	};
 }
 
-function normalizedFileFilter(value: unknown): string | null {
-	if (typeof value !== "string") return null;
-	const trimmed = value.trim().replace(/^\/+/, "");
-	if (trimmed.length === 0) return null;
-	return trimmed.toLowerCase();
-}
-
-function clampLimit(value: unknown): number {
+export function clampDocsLimit(value: unknown): number {
 	if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.min(Math.floor(value), MAX_LIMIT);
 	return DEFAULT_LIMIT;
-}
-
-function renderJson(value: unknown): string {
-	return JSON.stringify(value, null, 2);
 }
 
 function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<ScoredSection>) {
@@ -523,7 +509,6 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 	return {
 		version: 2,
 		query: plan.query,
-		filter: plan.fileFilter === null ? undefined : { file: plan.fileFilter },
 		corpus: {
 			docs: index.docCount,
 			sections: index.sections.length,
@@ -544,48 +529,49 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 	};
 }
 
-export const docsSearchTool: ToolSpec = {
-	name: ToolNames.DocsSearch,
-	description:
-		"Search Clio's bundled markdown documentation with deterministic section retrieval. Uses BM25-style scoring, heading/phrase boosts, and Clio vocabulary aliases; returns compact JSON with file, heading breadcrumb, line range, snippet, matched terms, and score. Use this for questions about Clio's own commands, tools, safety, agents, targets, docs, middleware, evidence, and capabilities.",
-	parameters: Type.Object({
-		query: Type.String({
-			description: "Question or terms, for example 'how do approvals work' or 'finish contract validation evidence'.",
-		}),
-		limit: Type.Optional(Type.Number({ description: `Max results (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` })),
-		file: Type.Optional(
-			Type.String({ description: "Optional doc path or filename substring filter, for example 'safety-model.md'." }),
-		),
-	}),
-	baseActionClass: "read",
-	executionMode: "parallel",
-	async run(args): Promise<ToolResult> {
-		const query = typeof args.query === "string" ? args.query.trim() : "";
-		if (query.length === 0) return { kind: "error", message: "docs_search: query is required" };
-		const fileFilter = normalizedFileFilter(args.file);
-		const plan = makeQueryPlan(query, fileFilter);
-		if (plan.originalTokens.length === 0) return { kind: "error", message: "docs_search: query has no searchable terms" };
-		const loaded = loadDocsIndex();
-		if (!loaded.ok) return { kind: "error", message: loaded.message };
-		const limit = clampLimit(args.limit);
-		const sections =
-			fileFilter === null
-				? loaded.index.sections
-				: loaded.index.sections.filter((section) => section.file.toLowerCase().includes(fileFilter));
-		const ranked = sections
-			.map((section) => scoreSection(loaded.index, section, plan))
-			.filter((entry): entry is ScoredSection => entry !== null)
-			.sort(
-				(a, b) =>
-					b.score - a.score ||
-					b.coverage - a.coverage ||
-					a.section.file.localeCompare(b.section.file) ||
-					a.section.startLine - b.section.startLine ||
-					a.section.heading.localeCompare(b.section.heading),
-			)
-			.slice(0, limit);
-		const payload = resultPayload(loaded.index, plan, ranked);
-		const output = renderJson(payload);
-		return { kind: "ok", output: ranked.length === 0 ? `${output}\n[no matches]` : output };
-	},
-};
+export type DocsSearchOutcome =
+	| {
+			ok: true;
+			payload: Record<string, unknown>;
+			/** Sections returned after ranking and the limit. */
+			resultCount: number;
+			/** Sections that scored at all; the omitted count is total - result. */
+			rankedTotal: number;
+			/** Exact continuation suggestion for empty results. */
+			next: string | null;
+	  }
+	| { ok: false; message: string };
+
+/**
+ * Rank bundled-doc sections for a query. Pure retrieval: the caller (the
+ * context tool) owns argument validation, the observation envelope, and JSON
+ * rendering of the returned payload.
+ */
+export function searchDocs(query: string, limitArg: unknown): DocsSearchOutcome {
+	const plan = makeQueryPlan(query);
+	if (plan.originalTokens.length === 0) return { ok: false, message: "query has no searchable terms" };
+	const loaded = loadDocsIndex();
+	if (!loaded.ok) return { ok: false, message: loaded.message };
+	const limit = clampDocsLimit(limitArg);
+	const ranked = loaded.index.sections
+		.map((section) => scoreSection(loaded.index, section, plan))
+		.filter((entry): entry is ScoredSection => entry !== null)
+		.sort(
+			(a, b) =>
+				b.score - a.score ||
+				b.coverage - a.coverage ||
+				a.section.file.localeCompare(b.section.file) ||
+				a.section.startLine - b.section.startLine ||
+				a.section.heading.localeCompare(b.section.heading),
+		);
+	const shown = ranked.slice(0, limit);
+	// Empty results still carry an exact continuation: retry with the closest
+	// vocabulary expansion when one triggered, otherwise a broad known term.
+	const next = shown.length === 0 ? `query=${plan.expandedTerms[0] ?? "overview"}` : null;
+	const payload = {
+		...resultPayload(loaded.index, plan, shown),
+		omitted: ranked.length - shown.length,
+		...(next !== null ? { next } : {}),
+	};
+	return { ok: true, payload, resultCount: shown.length, rankedTotal: ranked.length, next };
+}

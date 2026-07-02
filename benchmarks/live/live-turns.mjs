@@ -114,13 +114,20 @@ function readLedgerEntries(ledgerPath) {
 
 const TERMINAL_STOP = new Set(["stop", "length", "error", "aborted"]);
 
-// write_plan/write_review set ToolResult.terminate=true so pi-agent-core
-// skips the follow-up LLM call; that call would otherwise have produced the
-// assistant message carrying the terminal stopReason this function looks
-// for. A turn that ends on one of these tools never gets that message, so
-// it is recognized here as settled once its tool_result is the last entry
-// for the turn (see FINDINGS.md F2).
-const TERMINAL_TOOLS = new Set(["write_plan", "write_review"]);
+// artifact(kind="plan"|"review"|"report") sets ToolResult.terminate=true so
+// pi-agent-core skips the follow-up LLM call; that call would otherwise have
+// produced the assistant message carrying the terminal stopReason this
+// function looks for. A turn that ends on a terminal artifact write never
+// gets that message, so it is recognized here as settled once its
+// tool_result is the last entry for the turn (see FINDINGS.md F2).
+// artifact(kind="skill") is not terminal and must not settle the turn.
+const TERMINAL_ARTIFACT_KINDS = new Set(["plan", "review", "report"]);
+
+function isTerminalToolCall(payload) {
+	if (payload?.name !== "artifact") return false;
+	const kind = payload?.args?.kind;
+	return typeof kind === "string" && TERMINAL_ARTIFACT_KINDS.has(kind);
+}
 
 function isSyntheticUserMessage(entry) {
 	return entry?.kind === "message" && entry?.role === "user" && entry?.payload?.synthetic === true;
@@ -130,7 +137,7 @@ function turnState(entries, turnIndex) {
 	let users = 0;
 	let sawNthUser = false;
 	let settled = null;
-	let lastToolCallName = null;
+	let lastToolCallWasTerminal = false;
 	let sawTerminalToolResult = false;
 	for (const e of entries) {
 		if (e?.kind === "message" && e?.role === "user" && !isSyntheticUserMessage(e)) {
@@ -140,11 +147,11 @@ function turnState(entries, turnIndex) {
 		}
 		if (!sawNthUser || users !== turnIndex) continue;
 		if (e?.kind === "message" && e?.role === "tool_call" && typeof e?.payload?.name === "string") {
-			lastToolCallName = e.payload.name;
+			lastToolCallWasTerminal = isTerminalToolCall(e.payload);
 			continue;
 		}
 		if (e?.kind === "message" && e?.role === "tool_result") {
-			sawTerminalToolResult = lastToolCallName !== null && TERMINAL_TOOLS.has(lastToolCallName);
+			sawTerminalToolResult = lastToolCallWasTerminal;
 			continue;
 		}
 		if (e?.kind === "message" && e?.role === "assistant") {

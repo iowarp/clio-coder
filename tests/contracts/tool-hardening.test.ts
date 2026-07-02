@@ -14,13 +14,13 @@ import {
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
-import { buildFdArgs } from "../../src/tools/find.js";
-import { globTool } from "../../src/tools/glob.js";
-import { excludeGlobsFor, grepTool } from "../../src/tools/grep.js";
+import { buildFdArgs, findTool } from "../../src/tools/find.js";
+import { grepTool } from "../../src/tools/grep.js";
+import { fdIgnoreArgs, rgIgnoreArgs } from "../../src/tools/ignore-policy.js";
 import { DEFAULT_READ_MAX_BYTES, readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { truncateHead, truncateTail } from "../../src/tools/truncate.js";
-import { validateFrontendTool } from "../../src/tools/validate-frontend.js";
+import { verifyTool } from "../../src/tools/verify/index.js";
 import { extractWebFetchContent } from "../../src/tools/web-fetch.js";
 
 const TIMEOUT_MAX = 2_147_483_647;
@@ -143,8 +143,8 @@ describe("contracts/tool-hardening grep pure-Node fallback", () => {
 		ok(!result.output.includes("b.md"), "glob *.ts must exclude the markdown match");
 	});
 
-	it("honors ignoreCase and literal in the fallback", async () => {
-		const insensitive = await grepTool.run({ pattern: "FINDME", path: scratch, ignoreCase: true }, undefined);
+	it("honors ignore_case and literal in the fallback", async () => {
+		const insensitive = await grepTool.run({ pattern: "FINDME", path: scratch, ignore_case: true }, undefined);
 		strictEqual(insensitive.kind, "ok");
 		if (insensitive.kind === "ok") ok(insensitive.output.includes("src/a.ts:1:"), insensitive.output);
 
@@ -153,13 +153,19 @@ describe("contracts/tool-hardening grep pure-Node fallback", () => {
 		if (literal.kind === "ok") ok(literal.output.includes("src/a.ts:1:"), literal.output);
 	});
 
-	it("no longer force-hides matches under dist/build", async () => {
+	it("hides generated dirs by default and reveals them with include_ignored", async () => {
 		mkdirSync(join(scratch, "dist"), { recursive: true });
 		writeFileSync(join(scratch, "dist", "bundle.js"), "var findMe = 42;\n", "utf8");
-		const result = await grepTool.run({ pattern: "findMe", path: scratch }, undefined);
-		strictEqual(result.kind, "ok");
-		if (result.kind !== "ok") return;
-		ok(result.output.includes("dist/bundle.js:1:"), `dist should be searchable: ${result.output}`);
+
+		const hidden = await grepTool.run({ pattern: "findMe", path: scratch }, undefined);
+		strictEqual(hidden.kind, "ok");
+		if (hidden.kind !== "ok") return;
+		ok(!hidden.output.includes("dist/bundle.js"), `generated dist must be excluded by default: ${hidden.output}`);
+
+		const revealed = await grepTool.run({ pattern: "findMe", path: scratch, include_ignored: true }, undefined);
+		strictEqual(revealed.kind, "ok");
+		if (revealed.kind !== "ok") return;
+		ok(revealed.output.includes("dist/bundle.js:1:"), `include_ignored must reveal dist: ${revealed.output}`);
 	});
 });
 
@@ -174,38 +180,58 @@ describe("contracts/tool-hardening find/grep gitignore visibility", () => {
 	});
 
 	it("find passes --no-require-git only outside a git repo", () => {
-		const outside = buildFdArgs("*.ts", scratch, 1000);
+		const outside = buildFdArgs("*.ts", scratch, 1000, false);
 		ok(outside.includes("--no-require-git"), "outside a repo fd must honor ignore files via --no-require-git");
 
 		mkdirSync(join(scratch, ".git"), { recursive: true });
-		const inside = buildFdArgs("*.ts", scratch, 1000);
+		const inside = buildFdArgs("*.ts", scratch, 1000, false);
 		ok(!inside.includes("--no-require-git"), "inside a repo fd must use git-aware behavior (nested-repo boundaries)");
 	});
 
-	it("grep drops dist/build from forced excludes and respects explicit targeting", () => {
-		strictEqual(excludeGlobsFor("/home/u/proj").join(" "), "!**/.clio/** !**/.fallow/** !**/node_modules/**");
-		// Targeting node_modules directly must not suppress it.
-		strictEqual(excludeGlobsFor("/home/u/proj/node_modules/pkg").join(" "), "!**/.clio/** !**/.fallow/**");
+	it("grep and find answer tree visibility from one shared ignore policy", () => {
+		// Layer 1 (clio-internal) and layer 3 (generated dirs) are force-excluded.
+		const rg = rgIgnoreArgs(scratch, false);
+		for (const excluded of ["!**/.clio/**", "!**/.git/**", "!**/node_modules/**", "!**/dist/**"]) {
+			ok(rg.includes(excluded), `rg must exclude ${excluded}: ${rg.join(" ")}`);
+		}
+
+		// include_ignored disables gitignore + generated layers; layer 1 stands.
+		const revealed = rgIgnoreArgs(scratch, true);
+		ok(revealed.includes("--no-ignore"));
+		ok(revealed.includes("!**/.clio/**"));
+		ok(!revealed.includes("!**/dist/**"), "include_ignored must lift the generated-dirs layer");
+
+		// Targeting an excluded dir directly must not suppress it.
+		const targeted = rgIgnoreArgs(join(scratch, "node_modules", "pkg"), false);
+		ok(!targeted.includes("!**/node_modules/**"), "explicit node_modules target must stay visible");
+		ok(targeted.includes("!**/.clio/**"));
+
+		// fd mirrors the same exclusions through its own argv dialect.
+		const fd = fdIgnoreArgs(scratch, false);
+		ok(fd.includes("--exclude"));
+		for (const dir of [".clio", "node_modules", "dist"]) {
+			ok(fd.includes(dir), `fd must exclude ${dir}: ${fd.join(" ")}`);
+		}
 	});
 });
 
-describe("contracts/tool-hardening glob dir filtering + read line count", () => {
+describe("contracts/tool-hardening find dir filtering + read line count", () => {
 	let scratch: string;
 
 	beforeEach(() => {
-		scratch = mkdtempSync(join(tmpdir(), "clio-glob-"));
+		scratch = mkdtempSync(join(tmpdir(), "clio-find-"));
 	});
 	afterEach(() => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
-	it("glob skips node_modules and .git like find", async () => {
+	it("find skips node_modules and .git like grep", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		mkdirSync(join(scratch, "node_modules", "pkg"), { recursive: true });
 		writeFileSync(join(scratch, "src", "a.ts"), "x\n", "utf8");
 		writeFileSync(join(scratch, "node_modules", "pkg", "b.ts"), "y\n", "utf8");
 
-		const result = await globTool.run({ pattern: "**/*.ts", path: scratch });
+		const result = await findTool.run({ pattern: "**/*.ts", path: scratch });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		ok(result.output.includes("src/a.ts"), result.output);
@@ -218,10 +244,10 @@ describe("contracts/tool-hardening glob dir filtering + read line count", () => 
 		const result = await readTool.run({ path: file, limit: 2 }, undefined);
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
-		// Only line "c" remains; the notice must say 1 more line, not 2, and the
-		// total must be 3, not 4.
-		ok(result.output.includes("[1 more line"), result.output);
-		ok(!result.output.includes("2 more lines"), result.output);
+		// Only line "c" remains; the envelope notice must count 3 total lines, not
+		// 4, and continue at offset 3.
+		ok(result.output.includes("read: 2/3 lines shown"), result.output);
+		ok(result.output.includes("next: offset=3"), result.output);
 	});
 });
 
@@ -243,7 +269,8 @@ describe("contracts/tool-hardening read large-file ergonomics", () => {
 		if (result.kind !== "ok") return;
 		ok(result.output.includes("line 18\nline 19\nline 20"), result.output);
 		ok(!result.output.includes("line 17"), "tail=3 must not include earlier lines");
-		ok(result.output.includes("Showing last 3 of 20 lines"), result.output);
+		ok(result.output.includes("read: 3/20 lines shown"), result.output);
+		ok(result.output.includes("next: offset=15 limit=3"), result.output);
 	});
 
 	it("reads a >16KB file (under the 50KB cap) in a single call without truncating", async () => {
@@ -257,7 +284,7 @@ describe("contracts/tool-hardening read large-file ergonomics", () => {
 		if (result.kind !== "ok") return;
 		ok(result.output.includes("const x0 ="), "first line present");
 		ok(result.output.includes("const x599 ="), "last line present in one call");
-		ok(!result.output.includes("Showing lines"), `must not truncate under the cap: ${result.output.slice(-200)}`);
+		ok(!result.output.includes("lines shown"), `must not truncate under the cap: ${result.output.slice(-200)}`);
 	});
 
 	it("registry result-shaping does not re-truncate a full read below the read cap", async () => {
@@ -300,7 +327,7 @@ describe("contracts/tool-hardening web_fetch extraction", () => {
 	});
 });
 
-describe("contracts/tool-hardening validate_frontend html structure", () => {
+describe("contracts/tool-hardening verify frontend html structure", () => {
 	let scratch: string;
 	let originalCwd: string;
 
@@ -317,7 +344,7 @@ describe("contracts/tool-hardening validate_frontend html structure", () => {
 
 	async function structureCheck(html: string): Promise<{ status: string; message: string }> {
 		writeFileSync(join(scratch, "page.html"), html, "utf8");
-		const result = await validateFrontendTool.run({ path: "page.html", browser: "off" }, undefined);
+		const result = await verifyTool.run({ check: "frontend", path: "page.html", browser: "off" }, undefined);
 		const details = result.details as { checks?: Array<{ name: string; status: string; message: string }> } | undefined;
 		const check = details?.checks?.find((c) => c.name === "html structure");
 		return { status: check?.status ?? "missing", message: check?.message ?? "" };
@@ -411,12 +438,12 @@ describe("contracts/tool-hardening finish-contract action-scoped trigger", () =>
 		const validated: Array<[string, unknown[]]> = [
 			["npm test", [...editPair(), call("bash", { command: "npm test" }, "v"), okResult("bash", "v", { exitCode: 0 })]],
 			[
-				"run_task",
-				[...editPair(), call("run_task", { task: "test:contracts" }, "v"), okResult("run_task", "v", { exitCode: 0 })],
+				"verify script",
+				[...editPair(), call("verify", { check: "test:contracts" }, "v"), okResult("verify", "v", { exitCode: 0 })],
 			],
 			[
-				"validate_frontend",
-				[...editPair(), call("validate_frontend", { path: "page.html" }, "v"), okResult("validate_frontend", "v")],
+				"verify frontend",
+				[...editPair(), call("verify", { check: "frontend", path: "page.html" }, "v"), okResult("verify", "v")],
 			],
 			["dispatch", [...editPair(), call("dispatch", { agent_id: "coder", task: "do" }, "v"), dispatchResult("v")]],
 			["protected-artifact", [...editPair(), protectedArtifact("report.md")]],
@@ -556,5 +583,51 @@ describe("contracts/tool-hardening finish-contract action-scoped trigger", () =>
 		const continuation = high.find((effect) => effect.kind === "request_continuation");
 		ok(continuation?.kind === "request_continuation" && continuation.message === HIGH_RIGOR_REVALIDATION_MESSAGE);
 		ok(high.some((effect) => effect.kind === "inject_reminder" && effect.severity === "warn"));
+	});
+});
+
+describe("contracts/tool-hardening oversized search pattern validation", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "clio-huge-pattern-"));
+		writeFileSync(join(scratch, "a.txt"), "hello world\n", "utf8");
+	});
+	afterEach(() => {
+		rmSync(scratch, { recursive: true, force: true });
+	});
+
+	// A single argv entry over MAX_ARG_STRLEN (128 KiB on Linux) makes spawn throw
+	// a raw `spawn E2BIG` before rg/fd ever runs. BUG-008 (grep) and BUG-009 (find)
+	// share this root cause: the pattern is the one unbounded argument, so both
+	// searchers must reject an oversized pattern with a bounded validation error
+	// before spawning — never throw, never leak the raw platform fault.
+	const huge = "x".repeat(256_000);
+
+	it("grep rejects an oversized pattern before spawn (BUG-008)", async () => {
+		const result = await grepTool.run({ pattern: huge, path: scratch }, undefined);
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.startsWith("grep:"), `must be a grep-scoped tool error: ${result.message}`);
+		ok(/too large/i.test(result.message), `must explain the pattern is too large: ${result.message}`);
+		ok(!/E2BIG/i.test(result.message), `must not leak the raw spawn error: ${result.message}`);
+		ok(result.message.length < 500, `validation error must stay bounded: ${result.message.length} bytes`);
+	});
+
+	it("find rejects an oversized pattern before spawn (BUG-009)", async () => {
+		const result = await findTool.run({ pattern: huge, path: scratch }, undefined);
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.startsWith("find:"), `must be a find-scoped tool error: ${result.message}`);
+		ok(/too large/i.test(result.message), `must explain the pattern is too large: ${result.message}`);
+		ok(!/E2BIG/i.test(result.message), `must not leak the raw spawn error: ${result.message}`);
+		ok(result.message.length < 500, `validation error must stay bounded: ${result.message.length} bytes`);
+	});
+
+	it("both searchers still accept a normal-sized pattern", async () => {
+		const grepped = await grepTool.run({ pattern: "hello", path: scratch }, undefined);
+		strictEqual(grepped.kind, "ok");
+		const found = await findTool.run({ pattern: "*.txt", path: scratch }, undefined);
+		strictEqual(found.kind, "ok");
 	});
 });

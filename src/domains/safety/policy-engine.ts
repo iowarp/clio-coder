@@ -104,7 +104,7 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ },
 ];
 
-const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.RunTask]);
+const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
@@ -265,8 +265,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 			if (hit?.match.ruleId !== undefined) allowInput.ruleId = hit.match.ruleId;
 			if (hit?.match !== undefined) allowInput.match = hit.match;
-			// Typed execution tools (run_task, validate_frontend) are bounded by
-			// their own allowlists, so they sit in the no-prompt set.
+			// The typed execution tool (verify) is bounded by its own check
+			// allowlist, so it sits in the no-prompt set.
 			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
 			return allowDecision(base, allowInput);
 		},
@@ -403,8 +403,7 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 		case ToolNames.Read:
 		case ToolNames.Ls:
 		case ToolNames.Grep:
-		case ToolNames.Find:
-		case ToolNames.Glob: {
+		case ToolNames.Find: {
 			const target = pathArg(args) ?? ".";
 			return [{ operation: "read", path: target }];
 		}
@@ -413,10 +412,12 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 			const target = pathArg(args);
 			return target === null ? [] : [{ operation: "write", path: target }];
 		}
-		case ToolNames.WritePlan:
-			return [{ operation: "write", path: pathArg(args) ?? "PLAN.md" }];
-		case ToolNames.WriteReview:
-			return [{ operation: "write", path: pathArg(args) ?? "REVIEW.md" }];
+		case ToolNames.Artifact: {
+			// kind=skill writes into the managed skill store, not a caller path.
+			if (args?.kind === "skill") return [];
+			const fallback = args?.kind === "review" ? "REVIEW.md" : args?.kind === "report" ? "REPORT.md" : "PLAN.md";
+			return [{ operation: "write", path: pathArg(args) ?? fallback }];
+		}
 		case ToolNames.CredentialPresent:
 			// Sanctioned typed presence check: it may inspect secret-shaped paths
 			// internally, but its tool contract can return only boolean metadata.

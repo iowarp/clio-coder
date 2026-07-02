@@ -1,7 +1,7 @@
 ---
 name: Documenter
 description: Updates developer-facing docs, examples, and concise operational runbooks.
-tools: [read, write, edit, grep, glob, ls, git, run_task]
+tools: [read, write, edit, grep, find, ls, git, verify]
 audience: base
 category: implement
 capabilityClass: workspace-edit

@@ -37,16 +37,24 @@ function followUpHint(spec: ToolSpec): string {
 	);
 }
 
-function resultSizeDetails(details: ToolResultDetails | undefined): Record<string, unknown> | null {
-	const candidate = details?.resultSize;
+function detailsRecord(details: ToolResultDetails | undefined, key: string): Record<string, unknown> | null {
+	const candidate = details?.[key];
 	return candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
 		? (candidate as Record<string, unknown>)
 		: null;
 }
 
+/**
+ * A result that already spilled its full text to scratch (bash's tail-biased
+ * shaping via `resultSize.offloadPath`, or an OBSERVE tool's envelope via
+ * `observation.offloadPath`) is left alone; the tool shaped it deliberately
+ * and the backstop would only cut the tool's own continuation notice.
+ */
 function existingOffloadPath(details: ToolResultDetails | undefined): string | null {
-	const offloadPath = resultSizeDetails(details)?.offloadPath;
-	return typeof offloadPath === "string" && offloadPath.length > 0 ? offloadPath : null;
+	const fromResultSize = detailsRecord(details, "resultSize")?.offloadPath;
+	if (typeof fromResultSize === "string" && fromResultSize.length > 0) return fromResultSize;
+	const fromObservation = detailsRecord(details, "observation")?.offloadPath;
+	return typeof fromObservation === "string" && fromObservation.length > 0 ? fromObservation : null;
 }
 
 function safePathSegment(value: string): string {
@@ -100,12 +108,52 @@ function bracketedHint(spec: ToolSpec, offloadPath: string | null): string {
 	return `${hint} Full output saved to ${offloadPath}; read it with offset and limit to inspect the rest.`;
 }
 
+/**
+ * Backstop for an oversize result that declared itself JSON via
+ * `details.observation.format`. Cutting mid-document would hand the model
+ * unparseable JSON, so the whole payload is offloaded and replaced with a
+ * parseable stub carrying the path and the exact continuation call.
+ */
+function shapeJsonOverflow(
+	spec: ToolSpec,
+	result: ToolResult,
+	text: string,
+	bytes: number,
+	maxBytes: number,
+	context: ToolResultShapeContext | undefined,
+): ToolResult {
+	const observation = detailsRecord(result.details, "observation");
+	const offloadPath = writeToolOffload(text, context);
+	const next =
+		typeof observation?.next === "string" && observation.next.length > 0 ? observation.next : followUpHint(spec);
+	const stub = JSON.stringify({
+		error: `result exceeded ${maxBytes} bytes`,
+		...(offloadPath !== null ? { offloadPath } : {}),
+		next,
+	});
+	const resultSize = {
+		bytes,
+		shownBytes: byteLength(stub),
+		maxBytes,
+		truncated: true,
+		policy: spec.metadata?.resultSizePolicy?.kind ?? "truncate",
+		followUpHint: followUpHint(spec),
+		...(offloadPath !== null ? { offloadPath } : {}),
+	};
+	if (result.kind === "ok") {
+		return { ...result, output: stub, details: mergeDetails(result.details, resultSize) };
+	}
+	return { ...result, message: stub, details: mergeDetails(result.details, resultSize) };
+}
+
 export function shapeToolResult(spec: ToolSpec, result: ToolResult, context?: ToolResultShapeContext): ToolResult {
 	if (existingOffloadPath(result.details) !== null) return result;
 	const maxBytes = maxBytesFor(spec);
 	const text = result.kind === "ok" ? result.output : result.message;
 	const bytes = byteLength(text);
 	if (bytes <= maxBytes) return result;
+	const observation = detailsRecord(result.details, "observation");
+	if (observation?.format === "json") return shapeJsonOverflow(spec, result, text, bytes, maxBytes, context);
 	const truncated = truncateUtf8(text, maxBytes, RESULT_TRUNCATION_MARKER);
 	const offloadPath = writeToolOffload(text, context);
 	const resultSize = {

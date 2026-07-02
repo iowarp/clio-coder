@@ -98,7 +98,7 @@ Use in the TUI:
 /skill:hdf5-review review the output validation path
 ```
 
-`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` submits `args` with a pending skill request; the model must call `read_skill` for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
+`/skill` opens the Skills Hub with discovered project skills, user skills, and marketplace entries. `/skill:name args` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. The same pending-request path runs in headless mode, so `clio run "/skill:name args"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -111,20 +111,20 @@ Recognized frontmatter fields:
 - `name`, `description`: core identity.
 - `disable-model-invocation: true`: hides the skill from the model-visible catalog while keeping it loadable by `/skill:name`.
 - `allowed-tools`, `disallowed-tools`: parsed as tool policy fields for the loaded skill workflow.
-- `license`, `version`, `compatibility`, and other non-core keys: captured as skill metadata and surfaced by `read_skill`.
+- `license`, `version`, `compatibility`, and other non-core keys: captured as skill metadata and surfaced when the skill loads through `context`.
 - `source-url`, `registry-id`, `installed-at`, `updated-at`, `audit`: captured as install provenance when present.
 
 ### Trust and compatibility roots
 
-Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skill` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded by `read_skill`. This prevents an unreviewed project checkout from injecting skills the model will act on.
+Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skill` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded through `context`. This prevents an unreviewed project checkout from injecting skills the model will act on.
 
 Opt in to model-visible project compatibility roots by setting `skills.trustProjectCompatRoots: true` in `settings.yaml`. `CLIO_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio/skills` is always trusted as the Clio-native project root.
 
-### read_skill and create_skill
+### Loading with context, creating with artifact
 
-`read_skill` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. `read_skill` never executes bundled scripts and only resolves skills the model is allowed to see.
+`context(scope="skills")` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. The skills scope never executes bundled scripts and only resolves skills the model is allowed to see.
 
-`create_skill` writes a single `SKILL.md` file under a project or user skill folder. It accepts `name`, `description`, `body`, optional `scope` (`project` by default), optional `overwrite`, and optional `allowed_tools` for `allowed-tools` frontmatter. It refuses to overwrite without `overwrite: true` and warns when the destination is gitignored.
+`artifact(kind="skill")` writes a single `SKILL.md` file under a project or user skill folder. `title` is the skill name and `content` is the body; it also accepts a required `description`, optional `scope` (`project` by default), optional `overwrite`, optional `allowed_tools` for `allowed-tools` frontmatter, and optional `requires` dependencies normalized to `skill:<name>` entries. It refuses to overwrite without `overwrite: true` and warns when the destination is gitignored.
 
 ### Skills CLI
 
@@ -160,7 +160,7 @@ Clio does not call Skills.sh during startup or prompt assembly, and does not emi
 
 ### Prompt envelope and safety
 
-Skill bodies never enter the prompt uninvited. The model discovers skills only through the `read_skill` tool: a call with no `name` returns a one-line listing (name, scope, description) of model-visible skills, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill:<name>`. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
+Skill bodies never enter the prompt uninvited. The model discovers skills only through `context(scope="skills")`: a call with no `name` returns a one-line listing (name, scope, description) of model-visible skills, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill:<name>`. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
 
 ---
 

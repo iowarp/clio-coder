@@ -548,7 +548,7 @@ describe("contracts/dispatch", () => {
 					id: "bad-validator",
 					name: "Bad Validator",
 					description: "Invalid validation recipe.",
-					tools: ["read", "run_task"],
+					tools: ["read", "verify"],
 					capabilityClass: "read-only",
 					source: "builtin",
 					filepath: "/test/bad-validator.md",
@@ -625,7 +625,7 @@ describe("contracts/dispatch", () => {
 			id: "researcher",
 			name: "Researcher",
 			description: "Docs researcher.",
-			tools: ["read", "read_skill"],
+			tools: ["read", "context"],
 			skills: ["context7-docs", "pdf-reader"],
 			source: "builtin",
 			filepath: "/test/researcher.md",
@@ -690,6 +690,37 @@ describe("contracts/dispatch", () => {
 			const row = bundle.contract.getRun(handle.runId);
 			strictEqual(row?.status, "interrupted");
 			notStrictEqual(row?.exitCode, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	// BUG-007: a timeout abort seals outcome "canceled" like an operator cancel,
+	// but the receipt and ledger row must name the timeout so the two are
+	// distinguishable. The cause rides the abort path, not a new mechanism.
+	it("seals the timeout cause on the receipt when a run is aborted for a timeout", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1011,
+				promise: exit.promise,
+				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				heartbeatAt: { current: Date.now() },
+				events: emptyEvents(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "timed-out task" });
+			bundle.contract.abort(handle.runId, { cause: "timeout", detail: "timed out after 1000ms" });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "canceled");
+			strictEqual(receipt.outcomeDetail, "timed out after 1000ms");
+			notStrictEqual(receipt.outcomeDetail, "operator abort");
+			const row = bundle.contract.getRun(handle.runId);
+			strictEqual(row?.outcome, "canceled");
+			strictEqual(row?.outcomeDetail, "timed out after 1000ms");
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -1204,6 +1235,13 @@ rl.once("line", () => {
 				evidence: { ...base, exitCode: 1, abortedByOperator: true },
 				outcome: "canceled",
 				detail: "operator abort",
+			},
+			{
+				// BUG-007: a dispatch timeout rides the abort path but names its cause.
+				name: "dispatch timeout abort",
+				evidence: { ...base, exitCode: 1, abortedByOperator: true, abortDetail: "timed out after 1000ms" },
+				outcome: "canceled",
+				detail: "timed out after 1000ms",
 			},
 			{
 				name: "admission rejection",
@@ -1931,8 +1969,44 @@ describe("contracts/dispatch tool activity honesty", () => {
 			const result = await tool.run({ task: "impossible write task" }, undefined as never);
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") {
-				ok(result.output.includes("completed (completed without executing any tools)"), result.output);
+				ok(result.output.includes("note=completed without executing any tools"), result.output);
 			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	// BUG-007: a dispatch timeout_ms fires the same abort() path as an operator
+	// cancel, so the receipt and ledger row sealed the timeout as "operator
+	// abort" with no timeout cause. A time-boxed run must name the timeout so it
+	// is distinguishable from an operator/user cancel.
+	it("names the timeout cause on the receipt when a dispatch times out (BUG-007)", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 8207,
+				promise: exit.promise,
+				// The tool's timeout fires abort(); a killed worker exits nonzero.
+				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				heartbeatAt: { current: Date.now() },
+				events: emptyEvents(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const result = await tool.run(
+				{ tasks: [{ agent: "coder", task: "sleep well past the timeout" }], mode: "parallel", timeout_ms: 30 },
+				undefined as never,
+			);
+			strictEqual(result.kind, "error");
+			const runId = (result.details as { runIds?: string[] } | undefined)?.runIds?.[0];
+			ok(runId, "dispatch tool did not surface a run id");
+			const row = bundle.contract.getRun(runId);
+			strictEqual(row?.outcome, "canceled");
+			strictEqual(row?.outcomeDetail, "timed out after 30ms");
+			notStrictEqual(row?.outcomeDetail, "operator abort");
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -2067,13 +2141,13 @@ describe("contracts/dispatch tool activity honesty", () => {
 					yield {
 						type: "tool_execution_start",
 						toolCallId: "test-1",
-						toolName: "run_task",
-						args: { task: "test" },
+						toolName: "verify",
+						args: { check: "test" },
 					};
 					yield {
 						type: "tool_execution_end",
 						toolCallId: "test-1",
-						toolName: "run_task",
+						toolName: "verify",
 						isError: false,
 						result: { details: { exitCode: 0 } },
 					};
@@ -2232,5 +2306,67 @@ describe("contracts/dispatch tool activity honesty", () => {
 			snapshotToolStats(stats).map((entry) => entry.tool),
 			["Bash", "apply"],
 		);
+	});
+});
+
+describe("contracts/dispatch agent alias precedence", () => {
+	async function captureRoutedAgents(args: Record<string, unknown>): Promise<Array<{ agentId: string; task: string }>> {
+		const captured: Array<{ agentId: string; task: string }> = [];
+		const dispatch = {
+			dispatch: async (request: { agentId: string; task: string }) => {
+				captured.push({ agentId: request.agentId, task: request.task });
+				const receipt = {
+					runId: "r1",
+					agentId: request.agentId,
+					targetId: "fixture-target",
+					wireModelId: "fixture-model",
+					tokenCount: 0,
+					exitCode: 0,
+					outcome: "succeeded" as const,
+				};
+				return {
+					runId: "r1",
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve(receipt as never),
+				};
+			},
+			dispatchBatch: async () => {
+				throw new Error("unexpected batch path");
+			},
+			getRun: () => ({ receiptPath: "/tmp/r1.json" }),
+			abort: () => undefined,
+			listRuns: () => [],
+			steer: () => undefined,
+			snapshot: () => ({}),
+			drain: async () => undefined,
+		};
+		const tool = createDispatchTool({ dispatch: dispatch as never });
+		const result = await tool.run(args, undefined as never);
+		ok(result.kind === "ok", `dispatch run failed: ${JSON.stringify(result)}`);
+		return captured;
+	}
+
+	it("task-level agent_id alias overrides the shared agent default (JSON-string tasks)", async () => {
+		const captured = await captureRoutedAgents({
+			tasks: '[{"agent_id":"scout","task":"BUG005_ALIAS_TASK"}]',
+			agent: "coder",
+			mode: "parallel",
+		});
+		deepStrictEqual(captured, [{ agentId: "scout", task: "BUG005_ALIAS_TASK" }]);
+	});
+
+	it("task-level agent_id alias overrides the shared agent default (object tasks)", async () => {
+		const captured = await captureRoutedAgents({ tasks: [{ agent_id: "scout", task: "t" }], agent: "coder" });
+		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
+	});
+
+	it("task-level agent still overrides the shared agent default", async () => {
+		const captured = await captureRoutedAgents({ tasks: [{ agent: "scout", task: "t" }], agent: "coder" });
+		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
+	});
+
+	it("a shared agent_id applies when the task names no agent", async () => {
+		const captured = await captureRoutedAgents({ tasks: [{ task: "t" }], agent_id: "scout" });
+		deepStrictEqual(captured, [{ agentId: "scout", task: "t" }]);
 	});
 });

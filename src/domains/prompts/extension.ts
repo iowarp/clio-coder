@@ -213,7 +213,7 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 	if (providerSupportsTools === false) {
 		lines.push("Tools: unavailable for this target; use this synopsis only as fallback context.");
 	} else {
-		lines.push("Retrieve exact repository facts with workspace_context, codewiki tools, grep, and read.");
+		lines.push('Retrieve exact repository facts with context(scope="workspace"), code_nav, grep, and read.');
 	}
 	lines.push("</project-synopsis>");
 	return lines.join("\n");

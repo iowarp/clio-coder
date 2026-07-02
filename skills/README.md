@@ -49,7 +49,7 @@ auto-loads. That gap is deliberate.
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
 loads, Clio enforces that declaration at tool admission until the turn (or
 worker run) ends: calls outside the merged surface are blocked with reason
-code `skill_surface`, with `read_skill` and `ask_user` always admitted. A
+code `skill_surface`, with `context` and `ask_user` always admitted. A
 skill can narrow its tool surface but never grant tools the host would not
 allow. Full semantics: docs/safety-model.md, "Skill tool surface narrowing".
 

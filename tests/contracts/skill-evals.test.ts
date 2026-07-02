@@ -213,8 +213,8 @@ describe("contracts/skill-evals judge parsing", () => {
 
 	it("falls back to the transcript when the final text has no verdict (terminating-tool turns)", () => {
 		const transcript = [
-			"TOOL write_review args={...}",
-			"TERMINAL write_review content:",
+			"TOOL artifact args={...}",
+			"TERMINAL artifact content:",
 			'{"bullets":[{"index":1,"pass":false,"reason":"gap"},{"index":2,"pass":true,"reason":"ok"}]}',
 		].join("\n");
 		const bullets = parseJudgeVerdicts(scenario, judgeRun("", transcript));

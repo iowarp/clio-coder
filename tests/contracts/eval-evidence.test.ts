@@ -109,7 +109,7 @@ describe("contracts/eval evidence linking", () => {
 						platform: process.platform,
 						nodeVersion: process.version,
 						toolCalls: 1,
-						toolStats: [{ tool: "run_task", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 12 }],
+						toolStats: [{ tool: "verify", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 12 }],
 						sessionId: "session-nested",
 						integrity: { version: 3, algorithm: "sha256", digest: "fixture" },
 					},

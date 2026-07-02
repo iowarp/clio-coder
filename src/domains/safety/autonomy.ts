@@ -30,7 +30,7 @@ export interface AutonomyMappingOptions {
 	/**
 	 * Execute-class calls only: true when the command is in the no-prompt set
 	 * (built-in allowlist, project policy command) or is a typed execution tool
-	 * (run_task, validate_frontend). Raw bash outside that set is unrecognized.
+	 * (verify). Raw bash outside that set is unrecognized.
 	 */
 	executeRecognized?: boolean;
 }

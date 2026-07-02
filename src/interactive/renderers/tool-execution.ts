@@ -51,6 +51,8 @@ export interface ToolExecutionStart {
 	toolCallId: string;
 	toolName: string;
 	args: unknown;
+	/** Live elapsed time supplied by the panel for running segments. */
+	elapsedMs?: number | undefined;
 }
 
 export interface ToolExecutionFinished {
@@ -60,6 +62,27 @@ export interface ToolExecutionFinished {
 	result: unknown;
 	isError: boolean;
 	durationMs?: number | undefined;
+	/** Persisted summary (bytes, truncated, offloadPath, observation counts). */
+	resultSummary?: Record<string, unknown> | undefined;
+}
+
+export interface ToolBodyRenderOptions {
+	/**
+	 * Render the full tool result body with no middle-elision and no character
+	 * truncation. The live view keeps bodies bounded so a single tool cannot
+	 * flood the pane; `/export` sets this so the written transcript reproduces
+	 * the complete tool output the model actually received.
+	 */
+	unbounded?: boolean;
+}
+
+/** Row cap for a tool body: unbounded lifts both the row and char limits. */
+function resultRowLimit(opts: ToolBodyRenderOptions): number {
+	return opts.unbounded === true ? Number.POSITIVE_INFINITY : FULL_RESULT_ROW_LIMIT;
+}
+
+function resultCharLimit(opts: ToolBodyRenderOptions): number {
+	return opts.unbounded === true ? Number.POSITIVE_INFINITY : FULL_RESULT_PREVIEW_LIMIT;
 }
 
 // Counts UTF-16 code units; can split a surrogate pair on non-BMP input. Acceptable for ASCII paths/commands.
@@ -151,8 +174,14 @@ const PRIMARY_ARG_FIELD: Record<string, string> = {
 	bash: "command",
 	grep: "pattern",
 	find: "pattern",
-	glob: "pattern",
 	web_fetch: "url",
+	git: "op",
+	verify: "check",
+	code_nav: "query",
+	context: "scope",
+	artifact: "kind",
+	monitor: "run_id",
+	steer: "run_id",
 };
 
 /**
@@ -188,6 +217,135 @@ function summarizeArgs(toolName: string, args: unknown): string {
 	const primary = capturedPrimaryArg(toolName, args);
 	if (primary !== null) return truncate(displayArg(toolName, primary), ARG_PREVIEW_LIMIT);
 	return truncate(jsonStringifySafe(args), ARG_PREVIEW_LIMIT);
+}
+
+/**
+ * Compact resource-read classification. Reads of skill/handbook/agent
+ * instruction files and docs pages collapse to one labeled line and never
+ * auto-expand; their bodies are reference material, not task output.
+ */
+export function classifyResourceRead(toolName: string, args: unknown): string | null {
+	if (toolName !== "read") return null;
+	const path = readStringField(args, "path");
+	if (path === null) return null;
+	const normalized = path.replace(/\\/g, "/");
+	const base = normalized.split("/").pop() ?? "";
+	if (base === "SKILL.md") return "skill";
+	if (base === "CLIO.md") return "handbook";
+	if (base === "AGENTS.md") return "agents";
+	if (/(^|\/)docs\//.test(normalized)) return "docs";
+	return null;
+}
+
+function detailsOf(result: unknown): Record<string, unknown> | null {
+	if (!isPlainObject(result)) return null;
+	return isPlainObject(result.details) ? result.details : null;
+}
+
+function observationOf(finished: ToolExecutionFinished): Record<string, unknown> | null {
+	const fromDetails = detailsOf(finished.result)?.observation;
+	if (isPlainObject(fromDetails)) return fromDetails;
+	const fromSummary = finished.resultSummary?.observation;
+	return isPlainObject(fromSummary) ? fromSummary : null;
+}
+
+function numberField(record: Record<string, unknown> | null, key: string): number | null {
+	const value = record?.[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringField(record: Record<string, unknown> | null, key: string): string | null {
+	const value = record?.[key];
+	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes}B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function countSummary(observation: Record<string, unknown>): string | null {
+	const unit = stringField(observation, "unit") ?? "results";
+	const shown = numberField(observation, "shownCount");
+	if (shown === null) return null;
+	const total = numberField(observation, "totalCount");
+	if (total === null) return `${shown}+ ${unit}`;
+	if (total === shown) return `${shown} ${unit}`;
+	return `${shown}/${total} ${unit}`;
+}
+
+/**
+ * Outcome facts for the collapsed ledger line, derived from the observation
+ * envelope (OBSERVE plane), the exec record (git/verify), or the dispatch
+ * receipt counts. Returns null when the result carries no recognizable facts.
+ */
+function outcomeSummary(finished: ToolExecutionFinished): string | null {
+	const observation = observationOf(finished);
+	if (observation !== null) {
+		if (finished.toolName === "read") {
+			const shown = numberField(observation, "shownCount");
+			const total = numberField(observation, "totalCount");
+			if (shown !== null && total !== null) {
+				const offsetRaw = isPlainObject(finished.args) ? finished.args.offset : undefined;
+				const start = typeof offsetRaw === "number" && offsetRaw > 0 ? Math.floor(offsetRaw) : 1;
+				return shown > 0 ? `lines ${start}-${start + shown - 1} of ${total}` : `0 of ${total} lines`;
+			}
+		}
+		return countSummary(observation);
+	}
+	const details = detailsOf(finished.result);
+	if (finished.toolName === "git" || finished.toolName === "verify") {
+		const exitCode = numberField(details, "exitCode");
+		if (exitCode !== null) return `exit ${exitCode}`;
+		const status = stringField(details, "status");
+		if (status !== null) return status;
+		return null;
+	}
+	if (finished.toolName === "dispatch") {
+		const receipts = numberField(details, "receiptCount");
+		const failed = numberField(details, "failedCount") ?? 0;
+		if (receipts !== null) return `${receipts} task${receipts === 1 ? "" : "s"} -> ${receipts - failed} ok`;
+		return null;
+	}
+	return null;
+}
+
+function offloadPathOf(finished: ToolExecutionFinished): string | null {
+	const observation = observationOf(finished);
+	const fromObservation = stringField(observation, "offloadPath");
+	if (fromObservation !== null) return fromObservation;
+	const summary = finished.resultSummary ?? null;
+	const fromSummary = stringField(summary, "offloadPath");
+	if (fromSummary !== null) return fromSummary;
+	const resultSize = detailsOf(finished.result)?.resultSize;
+	return isPlainObject(resultSize) ? stringField(resultSize, "offloadPath") : null;
+}
+
+function shownBytesOf(finished: ToolExecutionFinished): number | null {
+	const observation = observationOf(finished);
+	const fromObservation = numberField(observation, "shownBytes");
+	if (fromObservation !== null) return fromObservation;
+	return numberField(finished.resultSummary ?? null, "bytes");
+}
+
+/**
+ * The dim ledger tail appended to a finished collapsed subline: outcome facts,
+ * then byte size (duration rides on the status glyph), then the offload path
+ * for truncated calls. One line of plain text carries signature and outcome
+ * when copied.
+ */
+function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: string } {
+	const parts: string[] = [];
+	const outcome = outcomeSummary(finished);
+	if (outcome !== null) parts.push(outcome);
+	const bytes = shownBytesOf(finished);
+	if (bytes !== null && bytes > 0) parts.push(formatBytes(bytes));
+	const offloadPath = offloadPathOf(finished);
+	return {
+		facts: parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : "",
+		offload: offloadPath !== null ? dim(` · full: ${offloadPath}`) : "",
+	};
 }
 
 /**
@@ -253,7 +411,18 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
 	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
 	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
-	glob: (args) => buildFieldSublineBody(args, "pattern", "matching ", { wrapInBackticks: true }),
+	git: (args) => buildFieldSublineBody(args, "op", "git "),
+	verify: (args) => buildFieldSublineBody(args, "check", "verifying "),
+	code_nav: (args) => buildFieldSublineBody(args, "query", "navigating ", { wrapInBackticks: true }),
+	context: (args) => buildFieldSublineBody(args, "scope", "context "),
+	artifact: (args) => buildFieldSublineBody(args, "kind", "writing "),
+	monitor: (args) => buildFieldSublineBody(args, "run_id", "monitoring "),
+	steer: (args) => buildFieldSublineBody(args, "run_id", "steering "),
+	dispatch: (args) => {
+		if (!isPlainObject(args) || !Array.isArray(args.tasks)) return null;
+		const count = args.tasks.length;
+		return `dispatching ${count} task${count === 1 ? "" : "s"}`;
+	},
 };
 
 /**
@@ -290,15 +459,18 @@ function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus,
 	return buildUnknownToolBody(toolName, args);
 }
 
-function sublineLine(
-	toolName: string,
-	args: unknown,
-	status: HeaderStatus,
-	meta: StatusMeta = {},
-	result?: unknown,
-): string {
-	const body = styleSublineBody(buildSublineBody(toolName, args, status, result));
-	return `${dim(HEADER_PREFIX_PLAIN)}${body}${statusGlyph(status, meta)}`;
+function sublineLine(call: ToolExecutionStart | ToolExecutionFinished, status: HeaderStatus, meta: StatusMeta): string {
+	const finished = "result" in call ? call : null;
+	const body = styleSublineBody(buildSublineBody(call.toolName, call.args, status, finished?.result));
+	const resourceLabel = classifyResourceRead(call.toolName, call.args);
+	const resource = resourceLabel !== null ? dim(` · ${resourceLabel}`) : "";
+	if (finished !== null) {
+		const tail = ledgerTail(finished);
+		return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${tail.facts}${statusGlyph(status, meta)}${tail.offload}`;
+	}
+	const elapsed = formatDurationMs("elapsedMs" in call ? call.elapsedMs : undefined);
+	const running = elapsed !== null ? dim(` · ${elapsed}`) : "";
+	return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${running}`;
 }
 
 function wrap(line: string, width: number): string[] {
@@ -493,7 +665,13 @@ function asBashArgs(args: unknown): BashArgs | null {
  * was executed before the output. Failures use the same command and output
  * body while the caller selects the red rail and error status.
  */
-function renderBashResultBlock(args: BashArgs, result: unknown, width: number, isError: boolean): string[] {
+function renderBashResultBlock(
+	args: BashArgs,
+	result: unknown,
+	width: number,
+	isError: boolean,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const out: string[] = [];
 	const commandLine = `${cyanBold("$")} ${highlightBashCommand(stripShellWrapperForDisplay(args.command))}`;
 	out.push(...indentAndWrap(commandLine, width, isError));
@@ -502,18 +680,23 @@ function renderBashResultBlock(args: BashArgs, result: unknown, width: number, i
 		out.push(...indentAndWrap(dim("(no output)"), width, isError));
 		return out;
 	}
-	out.push(...renderOutputRows(resultText(unwrapped), width, isError, FULL_RESULT_ROW_LIMIT));
+	out.push(...renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts)));
 	return out;
 }
 
-function renderResultBlock(result: unknown, isError: boolean, width: number): string[] {
+function renderResultBlock(
+	result: unknown,
+	isError: boolean,
+	width: number,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
 		return indentAndWrap(dim("(no output)"), width, isError);
 	}
-	const structured = renderStructuredOutputRows(unwrapped, width, isError, FULL_RESULT_ROW_LIMIT);
+	const structured = renderStructuredOutputRows(unwrapped, width, isError, resultRowLimit(opts));
 	if (structured) return structured;
-	return renderOutputRows(resultText(unwrapped), width, isError, FULL_RESULT_ROW_LIMIT);
+	return renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts));
 }
 
 /**
@@ -562,10 +745,7 @@ export function renderToolSubline(
 					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
 				}
 			: {};
-	const wrapped = wrap(
-		sublineLine(call.toolName, call.args, status, meta, "result" in call ? call.result : undefined),
-		width,
-	);
+	const wrapped = wrap(sublineLine(call, status, meta), width);
 	if (status === undefined) return wrapped;
 	if (expandKey === undefined || expandKey.length === 0) return wrapped;
 	if (wrapped.length === 0) return wrapped;
@@ -582,7 +762,11 @@ export function renderToolSubline(
  * green check on success and a red cross on error so the user can scan tool
  * outcomes without reading the body.
  */
-export function renderToolExecution(finished: ToolExecutionFinished, width: number): string[] {
+export function renderToolExecution(
+	finished: ToolExecutionFinished,
+	width: number,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
@@ -611,7 +795,7 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 	if (finished.toolName === "bash") {
 		const bashArgs = asBashArgs(finished.args);
 		if (bashArgs !== null) {
-			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError));
+			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError, opts));
 			return out;
 		}
 	}
@@ -624,7 +808,7 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
 	if (capturedPrimaryArg(finished.toolName, finished.args) === null) {
 		out.push(...renderArgsBody(finished.args, width, finished.isError));
 	}
-	out.push(...renderResultBlock(finished.result, finished.isError, width));
+	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	return out;
 }
 
@@ -633,7 +817,11 @@ export function renderToolExecution(finished: ToolExecutionFinished, width: numb
  * matching prior tool-call entry (orphan results in the session log).
  * Identical to `renderToolExecution` minus the args body.
  */
-export function renderToolResultOnly(finished: Omit<ToolExecutionFinished, "args">, width: number): string[] {
+export function renderToolResultOnly(
+	finished: Omit<ToolExecutionFinished, "args">,
+	width: number,
+	opts: ToolBodyRenderOptions = {},
+): string[] {
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
@@ -641,7 +829,7 @@ export function renderToolResultOnly(finished: Omit<ToolExecutionFinished, "args
 	};
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, undefined, status, statusMeta), width));
-	out.push(...renderResultBlock(finished.result, finished.isError, width));
+	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	return out;
 }
 
@@ -668,6 +856,7 @@ export function renderToolStreamingExecution(call: ToolExecutionStart, width: nu
 	} else {
 		out.push(...renderOutputRows(partialOutput, width, false, STREAMING_RESULT_ROW_LIMIT));
 	}
-	out.push(...indentAndWrap(dim("(running...)"), width, false));
+	const elapsed = formatDurationMs(call.elapsedMs);
+	out.push(...indentAndWrap(dim(elapsed !== null ? `(running... ${elapsed})` : "(running...)"), width, false));
 	return out;
 }

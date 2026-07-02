@@ -508,7 +508,7 @@
                   <label class="checkbox-item"><input type="checkbox" id="cap-write" checked onchange="runInspection()"> write</label>
                   <label class="checkbox-item"><input type="checkbox" id="cap-edit" checked onchange="runInspection()"> edit</label>
                   <label class="checkbox-item"><input type="checkbox" id="cap-git" checked onchange="runInspection()"> git</label>
-                  <label class="checkbox-item"><input type="checkbox" id="cap-run" checked onchange="runInspection()"> run_task</label>
+                  <label class="checkbox-item"><input type="checkbox" id="cap-run" checked onchange="runInspection()"> verify</label>
                   <label class="checkbox-item"><input type="checkbox" id="cap-web" checked onchange="runInspection()"> web_fetch</label>
                 </div>
               </div>
@@ -594,42 +594,42 @@
           <tbody>
             <tr>
               <td><code>architect</code></td>
-              <td>read, grep, glob, ls, code_nav, git, write_plan</td>
+              <td>read, grep, find, ls, code_nav, git, artifact, context</td>
               <td>Designs changes across boundaries, contracts, and validation gates.</td>
               <td><code>artifact-write</code></td>
               <td>deep</td>
             </tr>
             <tr>
               <td><code>coder</code></td>
-              <td>read, write, edit, grep, glob, ls, web_fetch, git, run_task, validate_frontend</td>
+              <td>read, write, edit, grep, find, ls, web_fetch, git, verify</td>
               <td>Implements bounded code changes and behavior-preserving refactors.</td>
               <td><code>workspace-edit</code></td>
               <td>balanced</td>
             </tr>
             <tr>
               <td><code>debugger</code></td>
-              <td>read, grep, glob, ls, git, run_task</td>
+              <td>read, grep, find, ls, git, verify</td>
               <td>Diagnoses failing code, tests, or receipts without making edits.</td>
               <td><code>verification</code></td>
               <td>balanced</td>
             </tr>
             <tr>
               <td><code>documenter</code></td>
-              <td>read, write, edit, grep, glob, ls, git, run_task</td>
+              <td>read, write, edit, grep, find, ls, git, verify</td>
               <td>Updates developer-facing docs, examples, and operational runbooks.</td>
               <td><code>workspace-edit</code></td>
               <td>balanced</td>
             </tr>
             <tr>
               <td><code>tester</code></td>
-              <td>read, write, edit, grep, glob, ls, git, run_task</td>
+              <td>read, write, edit, grep, find, ls, git, verify</td>
               <td>Adds focused deterministic tests for regressions and missing coverage.</td>
               <td><code>workspace-edit</code></td>
               <td>balanced</td>
             </tr>
             <tr>
               <td><code>verifier</code></td>
-              <td>read, grep, glob, ls, git, run_task, validate_frontend</td>
+              <td>read, grep, find, ls, git, verify</td>
               <td>Independently runs and reports test, lint, build, and release gates.</td>
               <td><code>verification</code></td>
               <td>fast</td>
@@ -651,21 +651,21 @@
           <tbody>
             <tr class="shadow-agent">
               <td><code>scout</code></td>
-              <td>read, grep, glob, ls, workspace_context, code_nav, git</td>
+              <td>read, grep, find, ls, context, code_nav, git</td>
               <td>Shadow fast codebase reconnaissance, symbol mapping, and context.</td>
               <td><code>read-only</code></td>
               <td>fast</td>
             </tr>
             <tr class="shadow-agent">
               <td><code>researcher</code></td>
-              <td>read, web_fetch, read_skill</td>
+              <td>read, web_fetch, context</td>
               <td>Shadow docs and external-source researcher for coding decisions.</td>
               <td><code>read-only</code></td>
               <td>deep</td>
             </tr>
             <tr class="shadow-agent">
               <td><code>provenance</code></td>
-              <td>read, grep, glob, ls, git</td>
+              <td>read, grep, find, ls, git</td>
               <td>Shadow evidence, receipt, diff, and telemetry reader for handoffs.</td>
               <td><code>read-only</code></td>
               <td>balanced</td>
@@ -699,7 +699,7 @@
       coder: `---
 name: Coder
 description: Bounded code changes
-tools: [read, edit, write, run_task]
+tools: [read, edit, write, verify]
 category: implement
 capabilityClass: workspace-edit
 latencyClass: balanced
@@ -719,7 +719,7 @@ You are Architect. Outline architectural specifications...`,
       verifier: `---
 name: Verifier
 description: Independently runs and reports test/lint gates
-tools: [read, run_task]
+tools: [read, verify]
 category: quality
 capabilityClass: verification
 latencyClass: fast
@@ -796,7 +796,7 @@ You are Scout. Map symbols and indices...`
       if (document.getElementById('cap-write').checked) targetCaps.push('write');
       if (document.getElementById('cap-edit').checked) targetCaps.push('edit');
       if (document.getElementById('cap-git').checked) targetCaps.push('git');
-      if (document.getElementById('cap-run').checked) targetCaps.push('run_task');
+      if (document.getElementById('cap-run').checked) targetCaps.push('verify');
       if (document.getElementById('cap-web').checked) targetCaps.push('web_fetch');
 
       // ------------------------------------------------

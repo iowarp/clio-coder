@@ -6,14 +6,13 @@ license: Apache-2.0
 allowed-tools:
   - read
   - grep
-  - glob
   - ls
   - find
   - git
-  - workspace_context
+  - context
   - code_nav
   - write
-  - write_plan
+  - artifact
   - ask_user
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/cut-it

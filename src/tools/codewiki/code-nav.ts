@@ -3,14 +3,21 @@ import { join, normalize } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../../core/tool-names.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/indexer.js";
-import { compileGlobRegex } from "../glob.js";
+import { compileGlobRegex } from "../ignore-policy.js";
+import {
+	finalizeObservation,
+	OBSERVE_SELF_CAPS,
+	observationBudgetExhausted,
+	reserveObservation,
+} from "../observation.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
 import { stringEnum } from "../string-enum.js";
 import { loadCodewikiForTool, renderJson } from "./shared.js";
 
 const REGEX_SYNTAX_HINTS = /\.\*|\.\+|\^|\$|\\[dDwWsSbB]|\(\?:|\(\?=|\(\?!/;
+const DEFAULT_LIMIT = 50;
 const DEFAULT_ENTRY_LIMIT = 25;
-const MAX_ENTRY_LIMIT = 200;
+const MAX_LIMIT = 200;
 
 interface NavIndex {
 	filesById: Map<string, CodewikiFile>;
@@ -20,6 +27,14 @@ interface NavIndex {
 	symbolsByFileId: Map<string, CodewikiSymbol[]>;
 	depsByFileId: Map<string, { internal: string[]; external: string[] }>;
 	dependentsByFileId: Map<string, string[]>;
+}
+
+/** One mode's result: a JSON-clean payload plus the envelope counts. */
+interface NavPayload {
+	payload: Record<string, unknown>;
+	shownCount: number;
+	totalCount: number;
+	next?: string;
 }
 
 function regexFromPattern(pattern: string): RegExp | null {
@@ -162,7 +177,7 @@ function buildNavIndex(codewiki: Codewiki): NavIndex {
 	return { filesById, filesByPath, paths, symbolToFileIds, symbolsByFileId, depsByFileId, dependentsByFileId };
 }
 
-function runSymbol(index: NavIndex, query: string): ToolResult {
+function runSymbol(index: NavIndex, query: string, limit: number): NavPayload {
 	const ids = index.symbolToFileIds.get(query) ?? [];
 	const files = ids.map((id) => index.filesById.get(id)).filter((file): file is CodewikiFile => Boolean(file));
 	// Return the matching symbol records with their path, line, and signature so the model
@@ -179,39 +194,60 @@ function runSymbol(index: NavIndex, query: string): ToolResult {
 			a.symbol.line - b.symbol.line ||
 			a.symbol.kind.localeCompare(b.symbol.kind),
 	);
-	const symbols = matched.map(({ file, symbol }) => ({ ...symbolSummary(symbol), path: file.path }));
-	return { kind: "ok", output: renderJson({ symbols, files: files.sort(comparePath).map(fileSummary) }) };
+	const shown = matched.slice(0, limit);
+	const omitted = matched.length - shown.length;
+	const symbols = shown.map(({ file, symbol }) => ({ ...symbolSummary(symbol), path: file.path }));
+	const next = matched.length === 0 ? `mode=path query=${query}` : omitted > 0 ? `limit=${limit * 2}` : undefined;
+	return {
+		payload: {
+			symbols,
+			files: files.sort(comparePath).slice(0, limit).map(fileSummary),
+			omitted,
+			...(next !== undefined ? { next } : {}),
+		},
+		shownCount: shown.length,
+		totalCount: matched.length,
+		...(next !== undefined ? { next } : {}),
+	};
 }
 
-function runPath(index: NavIndex, query: string): ToolResult {
+function runPath(index: NavIndex, query: string, limit: number): NavPayload {
 	const regex = regexFromPattern(query);
 	const matches = index.paths
 		.filter((path) => (regex ? regex.test(path) : path.includes(query)))
 		.map((path) => index.filesByPath.get(path))
 		.filter((file): file is CodewikiFile => Boolean(file));
-	const output = renderJson({ files: matches.map(fileSummary) });
-	return matches.length === 0 ? { kind: "ok", output: `${output}\n[no matches]` } : { kind: "ok", output };
+	const shown = matches.slice(0, limit);
+	const omitted = matches.length - shown.length;
+	const next = matches.length === 0 ? "mode=entries" : omitted > 0 ? `limit=${limit * 2}` : undefined;
+	return {
+		payload: { files: shown.map(fileSummary), omitted, ...(next !== undefined ? { next } : {}) },
+		shownCount: shown.length,
+		totalCount: matches.length,
+		...(next !== undefined ? { next } : {}),
+	};
 }
 
-function runEntries(index: NavIndex, limitArg: unknown): ToolResult {
+function runEntries(index: NavIndex, limit: number): NavPayload {
 	const cwd = process.cwd();
 	const packageEntries = readPackageEntryPaths(cwd);
 	const candidates = [...index.filesByPath.values()].filter(
 		(file) => file.lang !== "config" && (file.role === "entry" || packageEntries.has(file.path)),
 	);
-	const limit =
-		typeof limitArg === "number" && Number.isFinite(limitArg) && limitArg > 0
-			? Math.min(Math.floor(limitArg), MAX_ENTRY_LIMIT)
-			: DEFAULT_ENTRY_LIMIT;
 	const ranked = candidates.sort((a, b) => {
 		const aPkg = packageEntries.has(a.path) ? 0 : 1;
 		const bPkg = packageEntries.has(b.path) ? 0 : 1;
 		return aPkg === bPkg ? a.path.localeCompare(b.path) : aPkg - bPkg;
 	});
-	const limited = ranked.slice(0, limit);
-	const omitted = ranked.length - limited.length;
-	const output = renderJson({ files: limited.map(fileSummary), omitted });
-	return { kind: "ok", output };
+	const shown = ranked.slice(0, limit);
+	const omitted = ranked.length - shown.length;
+	const next = ranked.length === 0 ? "mode=path query=src/" : omitted > 0 ? `limit=${limit * 2}` : undefined;
+	return {
+		payload: { files: shown.map(fileSummary), omitted, ...(next !== undefined ? { next } : {}) },
+		shownCount: shown.length,
+		totalCount: ranked.length,
+		...(next !== undefined ? { next } : {}),
+	};
 }
 
 function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: string } {
@@ -228,25 +264,72 @@ function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: st
 	return { error: `path '${query}' is not in the codewiki` };
 }
 
-function runOutline(index: NavIndex, query: string): ToolResult {
+function runOutline(index: NavIndex, query: string, limit: number): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const symbols = index.symbolsByFileId.get(file.id) ?? [];
-	return { kind: "ok", output: renderJson({ file: fileSummary(file), symbols: symbols.map(symbolSummary) }) };
+	const shown = symbols.slice(0, limit);
+	const omitted = symbols.length - shown.length;
+	const next = omitted > 0 ? `limit=${limit * 2}` : undefined;
+	return {
+		payload: {
+			file: fileSummary(file),
+			symbols: shown.map(symbolSummary),
+			omitted,
+			...(next !== undefined ? { next } : {}),
+		},
+		shownCount: shown.length,
+		totalCount: symbols.length,
+		...(next !== undefined ? { next } : {}),
+	};
 }
 
-function runDeps(index: NavIndex, query: string): ToolResult {
+function runDeps(index: NavIndex, query: string, limit: number): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const deps = index.depsByFileId.get(file.id) ?? { internal: [], external: [] };
-	return { kind: "ok", output: renderJson({ file: fileSummary(file), deps }) };
+	const internal = deps.internal.slice(0, limit);
+	const external = deps.external.slice(0, limit);
+	const total = deps.internal.length + deps.external.length;
+	const shown = internal.length + external.length;
+	const omitted = total - shown;
+	const next = omitted > 0 ? `limit=${limit * 2}` : undefined;
+	return {
+		payload: {
+			file: fileSummary(file),
+			deps: { internal, external },
+			omitted,
+			...(next !== undefined ? { next } : {}),
+		},
+		shownCount: shown,
+		totalCount: total,
+		...(next !== undefined ? { next } : {}),
+	};
 }
 
-function runDependents(index: NavIndex, query: string): ToolResult {
+function runDependents(index: NavIndex, query: string, limit: number): NavPayload | ToolResult {
 	const file = resolveFile(index, query);
 	if ("error" in file) return { kind: "error", message: `code_nav: ${file.error}` };
 	const dependents = index.dependentsByFileId.get(file.id) ?? [];
-	return { kind: "ok", output: renderJson({ file: fileSummary(file), dependents }) };
+	const shown = dependents.slice(0, limit);
+	const omitted = dependents.length - shown.length;
+	const next = omitted > 0 ? `limit=${limit * 2}` : undefined;
+	return {
+		payload: {
+			file: fileSummary(file),
+			dependents: shown,
+			omitted,
+			...(next !== undefined ? { next } : {}),
+		},
+		shownCount: shown.length,
+		totalCount: dependents.length,
+		...(next !== undefined ? { next } : {}),
+	};
+}
+
+function parseLimit(value: unknown, fallback: number): number {
+	if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.min(Math.floor(value), MAX_LIMIT);
+	return fallback;
 }
 
 export const codeNavTool: ToolSpec = {
@@ -256,36 +339,66 @@ export const codeNavTool: ToolSpec = {
 	parameters: Type.Object({
 		mode: stringEnum(["symbol", "path", "entries", "outline", "deps", "dependents"], "Lookup mode."),
 		query: Type.Optional(Type.String({ description: "Symbol name, indexed path, path pattern, or path substring." })),
-		limit: Type.Optional(Type.Number({ description: `mode=entries: max results (default ${DEFAULT_ENTRY_LIMIT}).` })),
+		limit: Type.Optional(
+			Type.Number({
+				description: `Max results (default ${DEFAULT_LIMIT}, entries ${DEFAULT_ENTRY_LIMIT}, max ${MAX_LIMIT}).`,
+			}),
+		),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
-	async run(args): Promise<ToolResult> {
+	async run(args, options): Promise<ToolResult> {
 		const mode = typeof args.mode === "string" ? args.mode : "";
 		const loaded = loadCodewikiForTool();
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const index = buildNavIndex(loaded.codewiki);
 		const query = typeof args.query === "string" ? args.query.trim() : "";
+		const limit = parseLimit(args.limit, mode === "entries" ? DEFAULT_ENTRY_LIMIT : DEFAULT_LIMIT);
+		const reservation = reserveObservation(OBSERVE_SELF_CAPS.codeNav, options);
+		if (reservation.exhausted) {
+			return observationBudgetExhausted({
+				tool: ToolNames.CodeNav,
+				unit: "results",
+				reservation,
+				subject: `mode=${mode}`,
+				hint: "Use a lower limit or continue in a follow-up turn.",
+			});
+		}
+		const close = (nav: NavPayload | ToolResult): ToolResult => {
+			if ("kind" in nav) return nav;
+			return finalizeObservation({
+				tool: ToolNames.CodeNav,
+				unit: "results",
+				format: "json",
+				output: renderJson(nav.payload),
+				shownCount: nav.shownCount,
+				totalCount: nav.totalCount,
+				truncated: nav.shownCount < nav.totalCount,
+				...(nav.next !== undefined ? { next: nav.next } : {}),
+				reservation,
+				...(options ? { options } : {}),
+			});
+		};
 		if (mode === "symbol") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };
-			return runSymbol(index, query);
+			return close(runSymbol(index, query, limit));
 		}
 		if (mode === "path") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=path requires query" };
-			return runPath(index, query);
+			return close(runPath(index, query, limit));
 		}
-		if (mode === "entries") return runEntries(index, args.limit);
+		if (mode === "entries") return close(runEntries(index, limit));
 		if (mode === "outline") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=outline requires query path" };
-			return runOutline(index, query);
+			return close(runOutline(index, query, limit));
 		}
 		if (mode === "deps") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=deps requires query path" };
-			return runDeps(index, query);
+			return close(runDeps(index, query, limit));
 		}
 		if (mode === "dependents") {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
-			return runDependents(index, query);
+			return close(runDependents(index, query, limit));
 		}
 		return {
 			kind: "error",

@@ -5,7 +5,7 @@
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
-Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, and `damage-control-rules.yaml`.
+Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, and `damage-control-rules.yaml`.
 
 ---
 
@@ -62,19 +62,21 @@ Net `confirm` is never auto-allowed by autonomy, including full-auto. Net `block
 
 ## Operating Posture and Visible Tools
 
-Clio operates under a single operating posture with a standard, unified visible toolset. This posture provides the model with read, write, edit, and execution capabilities.
+Clio operates under a single operating posture with a standard, unified visible toolset. The 18 built-in tools are organized in seven planes; each plane is one policy unit for action class, size posture, and concurrency, asserted at bootstrap by `src/tools/policy.ts` so the classifier and the registered specs can never drift apart silently.
 
-Representative built-in tools:
+| Plane | Tools | Action class |
+| --- | --- | --- |
+| OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present` | `read` |
+| MUTATE | `write`, `edit` | `write` |
+| EXECUTE | `bash`, `verify` | `execute` |
+| EXECUTE | `git` | `read` |
+| ORCHESTRATE | `dispatch`, `steer` | `dispatch` |
+| ORCHESTRATE | `monitor` | `read` |
+| RETRIEVE | `web_fetch` | `read` |
+| INTERACT | `ask_user` | `read` |
+| ARTIFACT | `artifact` | `write` |
 
-| Group | Tools |
-| --- | --- |
-| File/search | `read`, `write`, `edit`, `grep`, `find`, `glob`, `ls` |
-| Web/context/codewiki | `web_fetch`, `workspace_context`, `code_nav` |
-| Git/safe exec | `git`, `run_task` |
-| Frontend | `validate_frontend` |
-| Advice artifacts | `write_plan`, `write_review` |
-| Skills/fleet | `read_skill`, `create_skill`, `dispatch` |
-| Escape hatch | `bash` |
+`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane; `monitor` never mutates a run, so it stays read class inside the ORCHESTRATE plane. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
 
 Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
 
@@ -84,9 +86,9 @@ Target capability, dispatch tool profiles, and recipe constraints can further na
 
 A `SKILL.md` may declare `allowed-tools` and `disallowed-tools`. The declaration is enforced at tool admission, between the safety net and the autonomy mapping, on every surface that activates skills (interactive turns, headless `clio run` turns, and dispatched workers whose recipes declare skills).
 
-- **Window.** Narrowing arms when `read_skill` successfully loads the skill and lasts for the lifetime of the pending-skill policy: to the end of the current turn for the main agent, and to the end of the run for a worker. A later turn is unrestricted until a skill is requested and loaded again.
+- **Window.** Narrowing arms when `context` (scope="skills") successfully loads the skill and lasts for the lifetime of the pending-skill policy: to the end of the current turn for the main agent, and to the end of the run for a worker. A later turn is unrestricted until a skill is requested and loaded again.
 - **Merge.** Denials win: a tool named in any loaded skill's `disallowed-tools` is blocked. Allow-narrowing applies only while every loaded skill declares `allowed-tools`; the merged surface is the union of those lists. A loaded skill that declares no `allowed-tools` keeps the full surface for its own workflow, which lifts the allow-narrowing (never the denials) for that window.
-- **Exemptions.** `read_skill` (the remaining requested skills of the turn must still load) and `ask_user` (the escape hatch the block message points at) are always admitted.
+- **Exemptions.** `context` (the remaining requested skills of the turn must still load) and `ask_user` (the escape hatch the block message points at) are always admitted.
 - **Direction.** Narrowing only blocks. It never grants a tool the safety net, damage-control rules, or autonomy mapping would refuse, and an out-of-surface call blocks terminally instead of parking for confirmation.
 - **Block message.** The rejection names the tool, the active skill(s), and the merged surface, and states the remediation: work within the declared surface, or use `ask_user` (when available) to hand the step to the operator. The audit row carries reason code `skill_surface`.
 
@@ -179,10 +181,10 @@ Command entry notes:
 Prefer typed tools over Bash:
 
 - `git` (op=status/diff/log) uses fixed command vectors.
-- `run_task` uses bounded execution helpers with an allowlisted script set.
-- `validate_frontend` validates frontend artifacts without granting arbitrary shell access.
+- `verify(check="<script>")` runs a declared package.json verification script (the `test*/lint*/build*/typecheck*/check*/format*/ci*` family) through bounded execution helpers with no shell; `verify()` with no arguments lists the declared checks.
+- `verify(check="frontend", path=...)` validates frontend artifacts without granting arbitrary shell access.
 
-`validate_frontend` accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` under the workspace root. It checks HTML tag balance, local script/style references, JavaScript syntax, CSS brace/comment/string balance, and optionally loads HTML with an available headless Chromium/Chrome/Edge executable (`browser: auto|required|off`).
+The frontend check accepts `.html`, `.htm`, `.css`, `.js`, `.mjs`, and `.cjs` under the workspace root. It checks HTML tag balance, local script/style references, JavaScript syntax, CSS brace/comment/string balance, and optionally loads HTML with an available headless Chromium/Chrome/Edge executable (`browser: auto|required|off`).
 
 The `edit` tool also carries conservative matching rules. It preserves
 unchanged bytes, handles common quote, dash, whitespace, and indentation drift
@@ -272,7 +274,7 @@ On every settled `turn_end`, the finish-contract assessor scans entries since th
 The assessor decision order is:
 
 1. If the window has no successful mutating receipt or settled mutating `!` bash execution, the contract passes with `no_mutation`.
-2. If the window has validation evidence, the contract passes with `validation_evidence`. Evidence includes successful validation commands, verification `run_task` scripts, `validate_frontend`, passed dispatch receipts, and protected-artifact validation records.
+2. If the window has validation evidence, the contract passes with `validation_evidence`. Evidence includes successful validation commands, `verify` checks (declared verification scripts and the frontend check), passed dispatch receipts, and protected-artifact validation records.
 3. If the assistant explicitly states what could not be verified and why, the contract passes with `explicit_limitation`.
 4. Otherwise, the contract engages with `unvalidated_mutation`.
 
