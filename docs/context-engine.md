@@ -64,6 +64,20 @@ Settings validation is strict: an older file still carrying the removed `compact
 
 ---
 
+## Project-context preload class
+
+The compiled session prompt preloads the full rendered project context (the `CLIO.md` fragment plus project-type and codewiki markers) only when a parseable `CLIO.md` exists and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in `src/domains/prompts/preload.ts` and every reporting surface classifies with it:
+
+- `/context init` and `clio context-init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
+- `clio config inspect` shows the preload class in the `CLIO.md` entry's detail.
+- The `/context` overlay shows a `project preload:` line under the category legend once a session prompt has compiled.
+
+## Context refresh
+
+`/context refresh` (and `clio context refresh`) is the cheap staleness fix: it rebuilds the codewiki index, updates `.clio/state.json`, and restamps the `CLIO.md` fingerprint footer (gitHead/treeHash/loc) without modifying any prose outside the footer comment. The stale codewiki marker in the compiled prompt points at it. Regenerating or updating the handbook prose stays with `/context init`.
+
+---
+
 ## Codewiki Indexing and Navigation
 
 The command `clio context-index` builds the Stage 1 codewiki index without invoking any models. It writes the results to `.clio/codewiki.json` and updates the fingerprint state in `.clio/state.json`. Indexing is deterministic. The same tree produces the identical structural hash on every run, making it safe to run in CI pipelines or compare across environments. The indexer walks selected source and config extensions. Extraction uses web-tree-sitter WASM grammars where available and regex fallback extractors for TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and Ruby. Unsupported file types are skipped rather than parsed as plain text. The schema tracks:

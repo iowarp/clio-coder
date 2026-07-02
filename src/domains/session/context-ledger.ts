@@ -75,6 +75,12 @@ export interface BuildContextLedgerInput {
 	compactionThreshold?: number | null;
 	/** Whether automatic compaction is enabled. */
 	compactionAuto?: boolean;
+	/**
+	 * Project-context preload class label from the compiled session prompt,
+	 * e.g. "full (5.2kB, 130 lines)" or "synopsis (reason: size)". Null before
+	 * a prompt has compiled.
+	 */
+	projectPreload?: string | null;
 	lastCompaction?: {
 		stage: string;
 		tokensBefore: number;
@@ -134,6 +140,8 @@ export interface ContextLedger {
 	measured: boolean;
 	compactionThreshold: number | null;
 	compactionAuto: boolean;
+	/** Preload class label for the project category detail line; null when unknown. */
+	projectPreload: string | null;
 	toolCount: number;
 	/** Non-empty content categories in display order (excludes reserve/free). */
 	groups: ReadonlyArray<ContextLedgerGroup>;
@@ -316,6 +324,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 		measured: input.measured === true && liveTotal > 0,
 		compactionThreshold: effectiveThreshold,
 		compactionAuto: input.compactionAuto === true,
+		projectPreload: input.projectPreload ?? null,
 		toolCount: Math.max(0, Math.floor(input.toolCount ?? 0)),
 		groups,
 		meter,

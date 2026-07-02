@@ -32,6 +32,7 @@ Usage:
   clio doctor [--fix]       diagnose state; --fix creates or repairs it
   clio paths [--json]       print resolved config/data/cache directories
   clio reset                recover or wipe Clio Coder state
+  clio context refresh      re-index the codewiki and restamp the CLIO.md fingerprint footer
   clio context-clear [--all]  clear accumulated project context artifacts
   clio context-index [--json]  build the codewiki index without model calls
   clio uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
@@ -148,6 +149,7 @@ const RECOGNIZED_SUBCOMMANDS = new Set<string>([
 	"share",
 	"export",
 	"import",
+	"context",
 	"context-init",
 	"context-index",
 	"context-clear",
@@ -222,6 +224,8 @@ async function dispatch(
 			return (await import("./share.js")).runExportCommand(subArgs);
 		case "import":
 			return (await import("./share.js")).runImportCommand(subArgs);
+		case "context":
+			return (await import("./context.js")).runContextCommand(subArgs);
 		case "context-init":
 			return (await import("./init.js")).runInitCommand(subArgs);
 		case "context-index":

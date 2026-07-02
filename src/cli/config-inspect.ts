@@ -16,10 +16,16 @@ import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readLayeredSettings, type SettingsOrigin, settingsSourceFor } from "../core/settings-layers.js";
 import { clioDataDir } from "../core/xdg.js";
-import { loadOperatorProfile, loadProjectRules, renderOperatorProfile } from "../domains/context/index.js";
+import {
+	loadOperatorProfile,
+	loadProjectRules,
+	renderOperatorProfile,
+	renderPromptContext,
+} from "../domains/context/index.js";
 import { listInstalledExtensions } from "../domains/extensions/index.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/index.js";
 import { loadUserHooks, readHookSources } from "../domains/middleware/index.js";
+import { classifyProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
 
@@ -103,6 +109,8 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 	if (!existsSync(path)) return;
 	try {
 		const text = readFileSync(path, "utf8");
+		const promptContext = renderPromptContext(cwd);
+		const preload = classifyProjectPreload({ hasClioMd: promptContext.clioMd !== null, text: promptContext.text });
 		graph.entries.push({
 			category: "clio-md",
 			id: "CLIO.md",
@@ -113,6 +121,12 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 			precedence: "single",
 			reloadClass: "next-turn",
 			contextCostTokens: ceilChars(text.length),
+			detail: {
+				preload: preload.label,
+				preloadChars: preload.chars,
+				preloadLines: preload.lines,
+				...(preload.nearLimit ? { preloadNearLimit: true } : {}),
+			},
 		});
 	} catch (err) {
 		graph.issues.push(`clio-md: ${err instanceof Error ? err.message : String(err)}`);

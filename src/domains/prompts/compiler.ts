@@ -1,6 +1,7 @@
 import { ceilChars } from "../session/context-accounting.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
+import type { ProjectPreloadClass } from "./preload.js";
 
 /**
  * Session-prompt compiler. The system prompt is compiled once per session
@@ -68,6 +69,12 @@ export interface CompiledSessionPrompt {
 	tokenEstimate: number;
 	sections: ReadonlyArray<PromptSection>;
 	fragmentManifest: ReadonlyArray<FragmentManifestEntry>;
+	/**
+	 * How the project context entered this prompt (full preload, synopsis, or
+	 * none). Set by the prompts extension, which owns project-context
+	 * selection; the pure compiler leaves it absent.
+	 */
+	projectPreload?: ProjectPreloadClass | null;
 }
 
 function lookupFragment(table: FragmentTable, id: string, role: string): LoadedFragment {

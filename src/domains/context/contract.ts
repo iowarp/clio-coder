@@ -2,6 +2,7 @@ import type { DomainContract } from "../../core/domain-loader.js";
 import type { RunBootstrapInput, RunBootstrapResult } from "./bootstrap.js";
 import type { RunContextClearInput, RunContextClearResult } from "./clear.js";
 import type { ParsedClioMd } from "./clio-md.js";
+import type { RunContextRefreshInput, RunContextRefreshResult } from "./refresh.js";
 
 export interface ProjectPromptContext {
 	text: string;
@@ -27,6 +28,12 @@ export interface ContextState {
 export interface ContextContract extends DomainContract {
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
+	/**
+	 * Rebuild the codewiki index and restamp the CLIO.md fingerprint footer
+	 * without modifying any prose outside the footer comment. Backs
+	 * `/context refresh` and `clio context refresh`.
+	 */
+	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
 	/**
 	 * Parsed CLIO.md structured fields (project name, conventions, invariants)

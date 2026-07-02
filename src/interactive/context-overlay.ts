@@ -65,6 +65,9 @@ export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: nu
 	for (const group of ledger.meter) lines.push(legendRow(group, contentWidth));
 
 	lines.push("");
+	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
+		lines.push(theme.fg("dim", `project preload: ${ledger.projectPreload}`));
+	}
 	const compaction =
 		ledger.compactionThreshold !== null
 			? `autocompact at ${Math.round(ledger.compactionThreshold * 100)}% (${ledger.compactionAuto ? "auto" : "manual"})`

@@ -2281,6 +2281,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				skillsTokens: currentContextSnapshot.categories.skills,
 				memoryTokens: currentContextSnapshot.categories.memory,
 				projectTokens: currentContextSnapshot.categories.project,
+				projectPreload: sessionPrompt?.projectPreload?.label ?? null,
 				pendingTokens,
 				streamingTokens: streamingOutput,
 				liveTotalTokens: totalUsed > 0 ? totalUsed : null,
