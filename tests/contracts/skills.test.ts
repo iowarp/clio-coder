@@ -811,6 +811,41 @@ describe("contracts/skills tools", () => {
 		deepStrictEqual(skill.allowedTools, ["Read", "Edit"]);
 	});
 
+	it("create_skill renders validated requires frontmatter the loader diagnoses", async () => {
+		const cwd = join(scratch, "project");
+		mkdirSync(cwd, { recursive: true });
+		const tool = createSkillTool({ getCwd: () => cwd });
+		const invalid = await tool.run({
+			name: "needy-skill",
+			description: "Skill with dependencies.",
+			body: "Body.",
+			requires: ["skill:UPPER CASE"],
+		});
+		strictEqual(invalid.kind, "error");
+		if (invalid.kind === "error") ok(invalid.message.includes("invalid requires entry"));
+
+		const result = await tool.run({
+			name: "needy-skill",
+			description: "Skill with dependencies.",
+			body: "Body.",
+			// A bare name normalizes to skill:<name>; duplicates collapse.
+			requires: ["skill:arxiv-literature", "context-prime", "skill:arxiv-literature"],
+		});
+		strictEqual(result.kind, "ok");
+		const content = readFileSync(join(cwd, ".clio", "skills", "needy-skill", "SKILL.md"), "utf8");
+		ok(content.includes("requires:"));
+		ok(content.includes("skill:arxiv-literature"));
+		ok(content.includes("skill:context-prime"));
+
+		// The loader treats requires as metadata and warns for each missing dep.
+		const list = loadSkills({ roots: [projectRoot(join(cwd, ".clio", "skills"))] });
+		const skill = list.items.find((s) => s.name === "needy-skill");
+		ok(skill);
+		deepStrictEqual(skill.metadata.requires, ["skill:arxiv-literature", "skill:context-prime"]);
+		const warnings = list.diagnostics.filter((d) => d.message.includes("requires skill"));
+		strictEqual(warnings.length, 2);
+	});
+
 	it("read_skill with a recipe-bound policy admits exactly the declared skills", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(join(cwd, ".clio", "skills"), "cut-it", ['name: "cut-it"', 'description: "Slice plans."'], "SLICE");
