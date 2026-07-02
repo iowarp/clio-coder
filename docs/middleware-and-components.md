@@ -8,7 +8,7 @@ Clio Coder has two related but separate surfaces:
 1. **Components**: deterministic inventory of files that can affect harness behavior.
 2. **Middleware**: an experimental hook/effect contract around tool, turn, and compaction lifecycle points.
 
-The components surface is active and user-facing through `clio components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types, validation helpers, declarative rule engine, and built-in registrations exist, but repository or user middleware packages are not yet a shipped public extension point. Enforcing guard registrations ride the same hook runtime at the composition root: the loop guard, protected-artifacts guard, dispatch dedup, file and skill observers, tool-prose checks, and finish-contract assessor form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
+The components surface is active and user-facing through `clio components`. The middleware runtime is intentionally conservative in the current alpha: the hook/effect types, validation helpers, declarative rule engine, built-in registrations, and a receipted hook-file surface exist, but arbitrary repository or user middleware packages are not a shipped public extension point. Enforcing guard registrations ride the same hook runtime at the composition root: the loop guard, protected-artifacts guard, dispatch dedup, file and skill observers, tool-prose checks, and finish-contract assessor form the middleware tier of the safety net (see [safety-model.md](safety-model.md)).
 
 ---
 
@@ -105,6 +105,8 @@ Declarative rules run before coded registrations. Scoped registrations match by 
 
 Middleware reminders are visible request text, not hidden prompt state. `turn_start` reminders flush into the same accepted request; `turn_end` reminders flush once on the next request. The built-in stalled-turn rule can request one automatic continuation for a user prompt, then stops rather than looping forever.
 
+User-defined hook declarations load from three places: `<extensionRoot>/hooks.yaml`, `.clio/hooks.yaml`, and `.clio/hooks.local.yaml`. A hook can be `prompt`, `effect`, or `command`. Command hooks run an argv array without a shell, under the workspace with a timeout and bounded output, and every hook execution emits a receipt.
+
 ---
 
 ## Validation helpers
@@ -132,4 +134,4 @@ Minimal valid effect object examples:
 { "kind": "protect_path", "path": "out/checkpoint.nc", "reason": "validated output" }
 ```
 
-The current `MiddlewareRuleSource` is only `builtin`; repository/user middleware package loading is not yet a shipped public extension point.
+The current `MiddlewareRuleSource` is only `builtin`. Hook files compile into coded registrations on the same runtime, but they are not custom declarative rule sources and do not grant new tool authority.
