@@ -60,6 +60,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Git:
 		case ToolNames.CodeNav:
 		case ToolNames.Context:
+		case ToolNames.Monitor:
 		case ToolNames.AskUser:
 		case ToolNames.CredentialPresent:
 			return "read";
@@ -73,7 +74,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Verify:
 			return "execute";
 		case ToolNames.Dispatch:
-		case ToolNames.DispatchBatch:
+		case ToolNames.Steer:
 			return "dispatch";
 		default:
 			return null;
