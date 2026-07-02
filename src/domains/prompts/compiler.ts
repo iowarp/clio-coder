@@ -11,6 +11,12 @@ import { sha256 } from "./hash.js";
  * stay byte-stable so local prefix caches survive across turns and sessions.
  */
 
+/** One per-tool guidance sentence sourced from the tool registry's metadata. */
+export interface ToolPromptHint {
+	tool: string;
+	hint: string;
+}
+
 export interface SessionPromptInputs {
 	provider?: string | null;
 	model?: string | null;
@@ -18,8 +24,12 @@ export interface SessionPromptInputs {
 	providerSupportsTools?: boolean | null;
 	/** Model-stable thinking guidance from local-model quirks (changes only on model change). */
 	thinkingGuidance?: string | null;
-	/** The session's frozen tool surface, used only to tailor static contract lines. */
-	activeToolNames?: ReadonlyArray<string>;
+	/**
+	 * Per-tool prompt hints derived once from the frozen surface at compile
+	 * time (registry metadata `promptHint`). Rendered into the Tool Contract
+	 * sorted by tool name so the compiled text is byte-stable per surface.
+	 */
+	toolPromptHints?: ReadonlyArray<ToolPromptHint>;
 	contextFiles?: string;
 	memorySection?: string;
 }
@@ -114,28 +124,24 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 			"This target cannot call tools; answer from the visible user request and compact context only.",
 		].join("\n");
 	}
-	const activeToolNames = normalizeToolNames(inputs.activeToolNames) ?? [];
 	const lines = [
 		"# Tool Contract",
 		"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 		'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
 	];
-	if (activeToolNames.includes("code_nav")) {
-		lines.push("Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).");
-	}
-	if (activeToolNames.includes("context")) {
-		lines.push(
-			'Call context with scope="skills" to list available skills. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
-		);
-	}
-	if (activeToolNames.includes("dispatch")) {
-		lines.push("Call dispatch with list:true to see the agent fleet.");
-	}
-	if (activeToolNames.includes("ask_user")) {
-		lines.push(
-			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
-		);
+	// One hint per tool, sorted by tool name: deterministic bytes regardless
+	// of surface or registration order, and removing a tool from the surface
+	// removes its hint with no compiler edit.
+	const seen = new Set<string>();
+	const hints = [...(inputs.toolPromptHints ?? [])]
+		.map((entry) => ({ tool: entry.tool.trim(), hint: entry.hint.trim() }))
+		.filter((entry) => entry.tool.length > 0 && entry.hint.length > 0)
+		.sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+	for (const entry of hints) {
+		if (seen.has(entry.tool)) continue;
+		seen.add(entry.tool);
+		lines.push(entry.hint);
 	}
 	return lines.join("\n");
 }
@@ -153,11 +159,6 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 		"Compact CLIO.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
 		"For questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
-}
-
-function normalizeToolNames(tools: ReadonlyArray<string> | undefined): string[] | null {
-	if (!tools) return null;
-	return [...new Set(tools.map((tool) => tool.trim()).filter((tool) => tool.length > 0))];
 }
 
 function renderProjectBlock(contextFiles: string | undefined): string {

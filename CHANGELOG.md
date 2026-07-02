@@ -53,6 +53,14 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
+- **Registry-owned tool prompt hints.** The per-tool guidance sentences in the
+  session Tool Contract (code_nav, context, dispatch, ask_user) moved verbatim
+  from a compiler if-chain onto the tool registry metadata
+  (`ToolMetadata.promptHint`); the compiler now renders whatever hints the
+  frozen surface carries, sorted by tool name. Deliberate one-time prompt-text
+  change: the ask_user hint moves from last to first among the hints, so the
+  compiled system prompt bytes shift once at upgrade and local prompt-prefix
+  caches re-prime on the first session.
 - **`/context` command hub.** One command now owns both context nouns.
   `/context` with no arguments opens the context-window ledger overlay
   (previously `/context-view`); `/context compact [instructions]` replaces

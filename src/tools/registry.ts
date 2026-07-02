@@ -61,6 +61,13 @@ export interface ToolMetadata {
 	resultSizePolicy: ToolResultSizePolicy;
 	/** Coarse cost/latency bucket for dashboard diagnostics. */
 	costLatency: ToolCostLatencyClass;
+	/**
+	 * One sentence of usage guidance rendered into the session Tool Contract
+	 * when this tool is on the frozen surface. Hints render sorted by tool
+	 * name, so the compiled prompt stays byte-stable per surface. Most tools
+	 * need none; the schema description covers them.
+	 */
+	promptHint?: string;
 }
 
 export interface ToolSpec {

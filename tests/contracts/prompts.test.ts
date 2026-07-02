@@ -29,6 +29,33 @@ afterEach(() => {
 	}
 });
 
+/**
+ * Golden copies of the registry-owned prompt hints (bootstrap TOOL_METADATA).
+ * tools.test.ts asserts the registry carries these exact strings; this file
+ * asserts the compiler renders them byte-exactly. A drift in either place is
+ * a deliberate prompt-text change and needs a CHANGELOG note.
+ */
+const TOOL_HINTS = {
+	ask_user: {
+		tool: "ask_user",
+		hint:
+			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
+	},
+	code_nav: {
+		tool: "code_nav",
+		hint: "Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).",
+	},
+	context: {
+		tool: "context",
+		hint:
+			'Call context with scope="skills" to list available skills. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+	},
+	dispatch: {
+		tool: "dispatch",
+		hint: "Call dispatch with list:true to see the agent fleet.",
+	},
+} as const;
+
 function scratchProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-prompts-"));
 	scratchRoots.push(root);
@@ -78,7 +105,7 @@ async function compileProjectPrompt(cwd: string) {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["context", "grep", "read"],
+				toolPromptHints: [TOOL_HINTS.context],
 			},
 		});
 	} finally {
@@ -107,7 +134,7 @@ async function compileProjectPromptWithWorkingPaths(cwd: string, workingContextP
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["context", "grep", "read"],
+				toolPromptHints: [TOOL_HINTS.context],
 			},
 		});
 	} finally {
@@ -207,7 +234,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read", "grep"],
+				toolPromptHints: [],
 			},
 		});
 
@@ -227,7 +254,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read", "grep", "context", "dispatch"],
+				toolPromptHints: [TOOL_HINTS.context, TOOL_HINTS.dispatch],
 			},
 		});
 
@@ -245,6 +272,55 @@ describe("contracts/prompts compiler logic", () => {
 		ok(result.systemPrompt.includes("Call dispatch with list:true"));
 	});
 
+	it("renders the Tool Contract hint block byte-exactly, sorted by tool name", () => {
+		const table = loadFragments();
+		const compileWithHints = (hints: ReadonlyArray<{ tool: string; hint: string }>) =>
+			compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.auto-edit",
+				sessionInputs: {
+					provider: "stub",
+					model: "stub-model",
+					providerSupportsTools: true,
+					toolPromptHints: hints,
+				},
+			});
+
+		// Deliberately unsorted with a duplicate: compiled bytes depend only on
+		// the hint set, never on surface or registration order.
+		const result = compileWithHints([
+			TOOL_HINTS.dispatch,
+			TOOL_HINTS.context,
+			TOOL_HINTS.ask_user,
+			TOOL_HINTS.code_nav,
+			TOOL_HINTS.dispatch,
+		]);
+		const expectedBlock = [
+			"# Tool Contract",
+			"The attached schemas are the session's complete tool surface; follow each schema exactly.",
+			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
+			'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
+			TOOL_HINTS.ask_user.hint,
+			TOOL_HINTS.code_nav.hint,
+			TOOL_HINTS.context.hint,
+			TOOL_HINTS.dispatch.hint,
+		].join("\n");
+		ok(
+			result.systemPrompt.includes(expectedBlock),
+			"Tool Contract block must render base lines then hints sorted by tool name",
+		);
+
+		const reordered = compileWithHints([
+			TOOL_HINTS.ask_user,
+			TOOL_HINTS.code_nav,
+			TOOL_HINTS.context,
+			TOOL_HINTS.dispatch,
+		]);
+		strictEqual(reordered.systemPrompt, result.systemPrompt);
+		strictEqual(reordered.systemPromptHash, result.systemPromptHash);
+	});
+
 	it("omits the catalog one-liners when context and dispatch are not in the session surface", () => {
 		const table = loadFragments();
 		const result = compile(table, {
@@ -255,7 +331,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read", "grep"],
+				toolPromptHints: [],
 			},
 		});
 
@@ -273,7 +349,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["read", "grep", "dispatch", "context", "ask_user"],
+				toolPromptHints: [TOOL_HINTS.dispatch, TOOL_HINTS.context, TOOL_HINTS.ask_user],
 			},
 		});
 		strictEqual(result.systemPrompt.includes("send policy"), false);
@@ -292,7 +368,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["context", "ask_user"],
+				toolPromptHints: [TOOL_HINTS.context, TOOL_HINTS.ask_user],
 			},
 		});
 		ok(active.systemPrompt.includes("first load that skill via context"));
@@ -307,7 +383,7 @@ describe("contracts/prompts compiler logic", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["context"],
+				toolPromptHints: [TOOL_HINTS.context],
 			},
 		});
 		strictEqual(inactive.systemPrompt.includes("Use ask_user for operator interviews"), false);
@@ -385,7 +461,7 @@ describe("contracts/prompts grounding, invalidation, and tools policy", () => {
 				provider: "stub",
 				model: "stub-model",
 				providerSupportsTools: true,
-				activeToolNames: ["context", "grep", "read"],
+				toolPromptHints: [TOOL_HINTS.context],
 			};
 			const first = await promptsBundle.contract.compileSessionPrompt({ cwd, sessionInputs });
 			ok(first.systemPrompt.includes("Keep prompt context compact."));
