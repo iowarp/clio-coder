@@ -35,7 +35,7 @@ interface Parsed {
 	help: boolean;
 }
 
-function parse(argv: ReadonlyArray<string>): Parsed | null {
+function parse(argv: ReadonlyArray<string>): Parsed {
 	const out: Parsed = { positional: [], json: false, all: false, force: false, help: false };
 	for (const arg of argv) {
 		if (!out.command && !arg.startsWith("-")) {
@@ -54,11 +54,11 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 				out.force = true;
 				break;
 			case "--user":
-				if (out.scope && out.scope !== "user") return null;
+				if (out.scope && out.scope !== "user") throw new Error("--user and --project are mutually exclusive");
 				out.scope = "user";
 				break;
 			case "--project":
-				if (out.scope && out.scope !== "project") return null;
+				if (out.scope && out.scope !== "project") throw new Error("--user and --project are mutually exclusive");
 				out.scope = "project";
 				break;
 			case "--help":
@@ -66,7 +66,7 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 				out.help = true;
 				break;
 			default:
-				if (arg.startsWith("-")) return null;
+				if (arg.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
 				out.positional.push(arg);
 		}
 	}
@@ -117,10 +117,17 @@ function printList(items: ReadonlyArray<InstalledExtension>): void {
 }
 
 export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
-	const parsed = parse(argv);
-	if (!parsed || parsed.help || !parsed.command) {
+	let parsed: Parsed;
+	try {
+		parsed = parse(argv);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		process.stderr.write(HELP);
+		return 2;
+	}
+	if (parsed.help || !parsed.command) {
 		process.stdout.write(HELP);
-		return parsed ? 0 : 2;
+		return 0;
 	}
 	const scopeOptions = { ...(parsed.scope ? { scope: parsed.scope } : {}) };
 	switch (parsed.command) {
@@ -192,7 +199,7 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 		}
 		default:
 			printError(`unknown extensions command: ${parsed.command}`);
-			process.stdout.write(HELP);
+			process.stderr.write(HELP);
 			return 2;
 	}
 }

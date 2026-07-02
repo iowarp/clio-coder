@@ -87,7 +87,7 @@ export async function runComponentsCommand(args: ReadonlyArray<string>): Promise
 		parsed = parseComponentsArgs(args);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (parsed.help) {

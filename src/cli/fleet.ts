@@ -400,9 +400,13 @@ function runStatus(args: ReadonlyArray<string>): number {
 
 export async function runFleetCommand(args: ReadonlyArray<string>): Promise<number> {
 	const sub = args[0];
-	if (sub === undefined || sub === "--help" || sub === "-h" || sub === "help") {
+	if (sub === "--help" || sub === "-h" || sub === "help") {
 		process.stdout.write(HELP);
-		return sub === undefined ? 2 : 0;
+		return 0;
+	}
+	if (sub === undefined) {
+		process.stderr.write(HELP);
+		return 2;
 	}
 	switch (sub) {
 		case "list":
@@ -413,7 +417,7 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return runStatus(args.slice(1));
 		default:
 			process.stderr.write(`clio fleet: unknown subcommand '${sub}'\n`);
-			process.stdout.write(HELP);
+			process.stderr.write(HELP);
 			return 2;
 	}
 }

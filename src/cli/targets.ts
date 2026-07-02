@@ -132,7 +132,7 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 		parsed = parseListArgs(args);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (parsed.help) {
