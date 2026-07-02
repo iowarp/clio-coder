@@ -10,6 +10,7 @@ import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.j
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { credentialPresentTool } from "../../src/tools/credential-present.js";
 import { createDispatchBatchTool, createDispatchTool } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
 import { findTool } from "../../src/tools/find.js";
@@ -290,6 +291,46 @@ describe("contracts/tools basic happy paths", () => {
 		strictEqual(result.kind, "error");
 		ok(result.message.includes("err"));
 		ok(result.message.includes("exit 7"));
+	});
+
+	it("credential_present reports presence without exposing values", async () => {
+		const root = scratchDir();
+		const envPath = join(root, ".env");
+		writeFileSync(envPath, "CLIO_FILE_KEY=file-secret\nCLIO_BOTH_KEY=file-secret\n", "utf8");
+		const previousEnv = process.env.CLIO_ENV_KEY;
+		const previousBoth = process.env.CLIO_BOTH_KEY;
+		process.env.CLIO_ENV_KEY = "env-secret";
+		process.env.CLIO_BOTH_KEY = "env-secret";
+		try {
+			const envResult = await credentialPresentTool.run({ name: "CLIO_ENV_KEY", source: "environment" });
+			strictEqual(envResult.kind, "ok");
+			const envText = JSON.stringify(envResult);
+			ok(envText.includes('"present":true'));
+			ok(envText.includes('"source":"environment"'));
+			ok(!envText.includes("env-secret"));
+
+			const fileResult = await credentialPresentTool.run({ name: "CLIO_FILE_KEY", file: envPath, source: "file" });
+			strictEqual(fileResult.kind, "ok");
+			const fileText = JSON.stringify(fileResult);
+			ok(fileText.includes('"present":true'));
+			ok(fileText.includes('"source":"file"'));
+			ok(!fileText.includes("file-secret"));
+
+			const bothResult = await credentialPresentTool.run({ name: "CLIO_BOTH_KEY", file: envPath });
+			strictEqual(bothResult.kind, "ok");
+			ok(JSON.stringify(bothResult).includes('"source":"both"'));
+
+			const absentResult = await credentialPresentTool.run({ name: "CLIO_ABSENT_KEY", file: envPath });
+			strictEqual(absentResult.kind, "ok");
+			const absentText = JSON.stringify(absentResult);
+			ok(absentText.includes('"present":false'));
+			ok(absentText.includes('"source":"none"'));
+		} finally {
+			if (previousEnv === undefined) delete process.env.CLIO_ENV_KEY;
+			else process.env.CLIO_ENV_KEY = previousEnv;
+			if (previousBoth === undefined) delete process.env.CLIO_BOTH_KEY;
+			else process.env.CLIO_BOTH_KEY = previousBoth;
+		}
 	});
 
 	it("runTaskTool runs declared verification-family scripts", async () => {

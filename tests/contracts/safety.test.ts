@@ -384,6 +384,23 @@ describe("contracts/safety credential damage control", () => {
 		}
 	});
 
+	it("B2: admits credential_present without widening bash presence forms", () => {
+		const contract = freshBundle().contract;
+		const typed = contract.evaluate({
+			tool: ToolNames.CredentialPresent,
+			args: { name: "API_KEY", file: ".env" },
+		});
+		strictEqual(typed.kind, "allow");
+		strictEqual(typed.classification.actionClass, "read");
+
+		const widened = contract.evaluate({
+			tool: ToolNames.Bash,
+			args: { command: 'grep -sq "^API_KEY=" .env; echo $?' },
+		});
+		strictEqual(widened.kind, "block");
+		strictEqual(widened.policy?.reasonCode, "secret_path_bash");
+	});
+
 	it("B2: the audit row for a blocked bash secret read carries secret_path_bash", async () => {
 		const bundle = freshBundle();
 		await bundle.extension.start?.();

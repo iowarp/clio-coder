@@ -10,6 +10,7 @@ allowed-tools:
   - ls
   - bash
   - ask_user
+  - credential_present
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/credentials
 audit: pass
@@ -33,11 +34,15 @@ an example. Then check presence, in strict preference order:
 
 1. Ask the user to confirm the credential is configured (`ask_user` when
    active). Zero file access.
-2. `grep -sq "^NAME=" <envfile>` exactly. Quiet mode, no output flags, only
-   when a shell check is genuinely needed. The exit code answers the
+2. `credential_present` with the exact credential name and source. Prefer
+   `source: "environment"` for process variables and pass `file: ".env"` when
+   the task names an env file. It returns only present/absent and which source
+   was checked.
+3. `grep -sq "^NAME=" <envfile>` exactly, only if the typed tool is
+   unavailable. Quiet mode, no output flags. The exit code answers the
    question; the value never enters context. The `-q` flag is the protocol,
    not a style choice.
-3. There is no third option. Never verify by printing.
+4. There is no fourth option. Never verify by printing.
 
 ## Missing Credential
 
@@ -51,6 +56,7 @@ printf "Enter STRESSLAB_API_KEY (typing hidden): " && read -s val && echo \
 
 Always include where to obtain the value (issuer registration link or
 instructions). After the user confirms, re-check presence with `grep -sq`.
+Use `credential_present` for that re-check when it is available.
 
 ## Consuming Credentials
 
@@ -92,12 +98,13 @@ Task: run `fetch_data.py`. Running it fails with "missing STRESSLAB_API_KEY
 (register at https://stresslab.example/keys)", which names the credential.
 
 1. Presence: user is active, so ask "Is STRESSLAB_API_KEY configured in .env?"
-   User is unsure. Fall back to `grep -sq "^STRESSLAB_API_KEY=" .env` (exit 1,
-   absent).
+   User is unsure. Use `credential_present` with `name: "STRESSLAB_API_KEY"`
+   and `file: ".env"`; it reports absent.
 2. Missing: send the `read -s` fill-in command above plus the issuer link
    ("create a key at https://stresslab.example/keys"). User runs it, confirms.
-3. Re-check: `grep -sq` now exits 0. Run the script; it loads the key via
-   dotenv. The value never appeared in chat, argv, or logs.
+3. Re-check: `credential_present` reports present from `.env`. Run the script;
+   it loads the key via dotenv. The value never appeared in chat, argv, or
+   logs.
 4. If the script had printed the key in a stack trace: stop, report
    "STRESSLAB_API_KEY leaked into the transcript via the traceback", instruct
    rotation at the issuer, warn about exported evidence, wait for

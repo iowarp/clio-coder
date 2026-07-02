@@ -7,6 +7,7 @@ import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
 import { codeNavTool } from "./codewiki/code-nav.js";
+import { credentialPresentTool } from "./credential-present.js";
 import { createDispatchBatchTool, createDispatchTool } from "./dispatch.js";
 import { docsSearchTool } from "./docs-search.js";
 import { editTool } from "./edit.js";
@@ -223,6 +224,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		},
 		costLatency: "local_slow",
 	},
+	[ToolNames.CredentialPresent]: {
+		objective: "Check whether a credential key is present without returning its value.",
+		uiLabel: "Credential",
+		retrySafety: "idempotent",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 4_096,
+			followUpHint: "Use the boolean result only; never ask to print the credential value.",
+		},
+		costLatency: "local_fast",
+	},
 	[ToolNames.CreateSkill]: {
 		objective: "Create a reusable coding skill file.",
 		uiLabel: "Create Skill",
@@ -335,6 +347,9 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			}),
 		});
 	}
+	registry.register({
+		...builtin(credentialPresentTool, { path: "src/tools/credential-present.ts", scope: "core" }),
+	});
 	registry.register({
 		...builtin(createReadSkillTool(skillToolDeps), { path: "src/tools/skills.ts", scope: "core" }),
 	});

@@ -21,6 +21,11 @@ interfaces.
   default `--json` stream is unchanged, and dispatch JSON streaming remains on
   its existing path. `clio skills eval` now consumes the terminal stream
   instead of filtering growing partial message updates itself.
+- `credential_present` is now a built-in read-only tool for checking whether
+  a named credential key is present in the process environment or an env-style
+  file. It returns only boolean presence and source metadata, never the
+  credential value, and the credentials skill now prefers it over quiet `grep`
+  checks when available.
 - `clio skills eval <name|path>` (experimental) executes a skill's `evals.md`
   RED-GREEN scenarios instead of trusting the prose. Per scenario it runs a
   baseline headless turn without the skill, a treatment turn with the skill
