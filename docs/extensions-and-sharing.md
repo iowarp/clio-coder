@@ -137,7 +137,14 @@ clio skills create <name> [--user|--project]
 clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
 clio skills update <name> | --all [--force]
 clio skills sync [--force]
+clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]
 ```
+
+`eval` (experimental) executes a skill's `evals.md` RED-GREEN scenarios with
+baseline, treatment, and judge runs; see
+[skills-marketplace.md](skills-marketplace.md) for the catalog contract it
+verifies. Fixture commands in an `evals.md` are real shell and only run with
+`--trust-fixtures`.
 
 Headless runs also accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory for that run. Explicit `--skill` paths are honored even when `--no-skills` is set.
 
@@ -153,7 +160,7 @@ Clio does not call Skills.sh during startup or prompt assembly, and does not emi
 
 ### Prompt envelope and safety
 
-The skills catalog is included in the prompt only when `read_skill` or `create_skill` is active for the turn, and it is suppressed entirely on no-tool turns. The catalog lists names, scopes, sources, and short content hashes plus a `catalog_hash`; full bodies are never sent until a skill is explicitly activated. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates.
+Skill bodies never enter the prompt uninvited. The model discovers skills only through the `read_skill` tool: a call with no `name` returns a one-line listing (name, scope, description) of model-visible skills, and a body loads only when the pending-skill policy authorizes that name for the turn, which requires an explicit operator invocation such as `/skill:<name>`. Skills are prompt resources, not execution grants: any script a skill references still runs through normal Clio tools and safety gates, and a loaded skill's `allowed-tools` declaration narrows the tool surface at admission (reason code `skill_surface`) without ever granting anything the host would refuse.
 
 ---
 
