@@ -57,10 +57,9 @@ Call `read_skill` with no name to list installed skills. Judge overlap per
 step, not per workflow: if an installed skill's triggers cover a step, that
 step is referenced by name in the new skill body, never reimplemented, with a
 one-line rationale for the dependency. A different end goal does not excuse
-reimplementing a covered step. Each reference also belongs in the generated
-skill's frontmatter as `requires: [skill:<name>]` so the loader warns when
-the dependency is missing; `create_skill` cannot write that field itself, so
-after creation hand the user the exact line to add.
+reimplementing a covered step. Record each reference in the generated skill's
+frontmatter by passing `requires: ["skill:<name>"]` to `create_skill` in
+Phase 5, so the loader warns when the dependency is missing.
 
 ## Phase 4 - Design Gate
 
@@ -81,7 +80,8 @@ means revise and re-present.
 ## Phase 5 - Create
 
 Call `create_skill` with the approved name, a triggers-only third-person
-description, and the body. Scope defaults to project; use user scope only when
+description, the body, and `requires: ["skill:<name>"]` for every skill the
+overlap check referenced. Scope defaults to project; use user scope only when
 the user said the workflow crosses repositories. Placeholders replace every
 session-specific path, name, and value; distill the pattern, not the incident.
 Keep the generated skill under 120 lines; reference instead of inlining. If

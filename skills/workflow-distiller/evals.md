@@ -31,9 +31,9 @@ Expected:
 - The overlap check finds the installed skill.
 - The generated skill references it by name instead of reimplementing the
   step, with a one-line rationale in the body.
-- The distiller hands the user the exact `requires: [skill:<name>]`
-  frontmatter line to add (create_skill cannot write that field), arming the
-  loader's unmet-dependency warning.
+- The `create_skill` call passes `requires: ["skill:<name>"]` so the
+  generated frontmatter arms the loader's unmet-dependency warning when the
+  referenced skill is absent.
 
 ## S3 - no recurrence
 
@@ -85,9 +85,10 @@ prompt; the phases still had to run in order.
   Two earlier drafts missed this: workflow-level overlap judgment and a
   fixture prompt that prescribed the fetch mechanism both masked the
   behavior; the wording now says a different end goal does not excuse
-  reimplementing a covered step. `create_skill` cannot emit `requires`
-  frontmatter (name, description, allowed-tools only), so the skill hands
-  the user the line to add; adding `requires: [skill:arxiv-literature]` to
-  the generated skill was verified to produce the loader's
-  "requires skill ... which is not available" warning when the dependency is
-  absent.
+  reimplementing a covered step. At the time of that run `create_skill`
+  could not emit `requires` frontmatter, so the skill handed the user the
+  line to add; `requires: [skill:arxiv-literature]` on the generated skill
+  was verified to produce the loader's "requires skill ... which is not
+  available" warning when the dependency is absent. 2026-07-02: create_skill
+  gained a validated `requires` parameter and the skill now passes the
+  entries directly in Phase 5.

@@ -252,6 +252,7 @@ interface FrontmatterFields {
 	name: string;
 	description: string;
 	allowedTools?: string[];
+	requires?: string[];
 }
 
 function renderSkillFile(fields: FrontmatterFields, body: string): string {
@@ -260,8 +261,31 @@ function renderSkillFile(fields: FrontmatterFields, body: string): string {
 		description: fields.description,
 	};
 	if (fields.allowedTools && fields.allowedTools.length > 0) frontmatter["allowed-tools"] = fields.allowedTools;
+	if (fields.requires && fields.requires.length > 0) frontmatter.requires = fields.requires;
 	const yaml = stringifyYaml(frontmatter).trimEnd();
 	return ["---", yaml, "---", "", body.trimEnd(), ""].join("\n");
+}
+
+/**
+ * Normalize a create_skill `requires` list to `skill:<name>` entries, the form
+ * the loader's unmet-dependency diagnostics understand. Bare skill names are
+ * accepted and prefixed; anything else is a validation error.
+ */
+function normalizeRequires(raw: unknown): { requires?: string[]; error?: string } {
+	if (raw === undefined) return {};
+	if (!Array.isArray(raw)) return { error: "requires must be an array of skill:<name> entries" };
+	const requires: string[] = [];
+	for (const entry of raw) {
+		if (typeof entry !== "string") return { error: "requires entries must be strings" };
+		const trimmed = entry.trim();
+		const name = trimmed.startsWith("skill:") ? trimmed.slice("skill:".length).trim() : trimmed;
+		if (validateSkillName(name) !== null) {
+			return { error: `invalid requires entry "${entry}"; use skill:<lowercase-hyphen-name>` };
+		}
+		const normalized = `skill:${name}`;
+		if (!requires.includes(normalized)) requires.push(normalized);
+	}
+	return requires.length > 0 ? { requires } : {};
 }
 
 function destinationIsGitignored(cwd: string, filePath: string): boolean {
@@ -285,6 +309,11 @@ export function createSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 			scope: Type.Optional(stringEnum(["project", "user"], "Default: project.")),
 			overwrite: Type.Optional(Type.Boolean({ description: "Overwrite an existing skill." })),
 			allowed_tools: Type.Optional(Type.Array(Type.String(), { description: "allowed-tools frontmatter list." })),
+			requires: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Skill dependencies as skill:<name> entries; the loader warns when one is missing.",
+				}),
+			),
 		}),
 		baseActionClass: "write",
 		executionMode: "sequential",
@@ -309,12 +338,18 @@ export function createSkillTool(deps: SkillToolDeps = {}): ToolSpec {
 				return { kind: "error", message: `create_skill: skill already exists: ${filePath}` };
 			}
 
+			const normalizedRequires = normalizeRequires(args.requires);
+			if (normalizedRequires.error) {
+				return { kind: "error", message: `create_skill: ${normalizedRequires.error}` };
+			}
+
 			const fields: FrontmatterFields = {
 				name,
 				description,
 				...(Array.isArray(args.allowed_tools)
 					? { allowedTools: args.allowed_tools.filter((t): t is string => typeof t === "string") }
 					: {}),
+				...(normalizedRequires.requires ? { requires: normalizedRequires.requires } : {}),
 			};
 
 			mkdirSync(skillDir, { recursive: true });
