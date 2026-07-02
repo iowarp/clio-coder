@@ -32,18 +32,18 @@ You can redirect Clio Coder's folders using environment variables:
 
 ## 2. File & Permissions Matrix
 
-All files are created automatically during the first run. The configuration directories have strict file permission bits to protect user secrets.
+The core files are created automatically during the first run. `credentials.yaml` is the secret-bearing file and is forced to owner-only read-write permissions. Other initialized files and directories use either the explicit mode shown below or the platform default produced by the writer and process umask.
 
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
 | **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall; `uninstall-local.sh --keep-settings-auth` preserves it. |
 | **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Removed by uninstall; `uninstall-local.sh --keep-settings-auth` preserves it. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
-| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), and `upgradedAt` (stamped on upgrade). | `0o644` (rw-r--r--) | Removed by uninstall / `reset --state`. |
-| **State** | `migrations.json` | Log of successfully applied schema/state migrations. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --state`. |
-| **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --data`. |
-| **State** | `audit/YYYY-MM-DD.jsonl` | Daily fsynced safety audit logs showing allowed/blocked tool actions. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --state`. |
-| **State** | `sessions/<cwdHash>/<id>/` | Session details: `meta.json`, `current.jsonl`, and fork hierarchies `tree.json`. | `0o700` / `0o644` | Removed by uninstall / `reset --state`. |
+| **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), and `upgradedAt` (stamped on upgrade). | Writer/umask default | Removed by uninstall / `reset --state`. |
+| **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
+| **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
+| **State** | `audit/YYYY-MM-DD.jsonl` | Daily safety audit logs showing allowed/blocked tool actions. | Writer/umask default | Removed by uninstall / `reset --state`. |
+| **State** | `sessions/<cwdHash>/<id>/` | Session details: `meta.json`, `current.jsonl`, and fork hierarchies `tree.json`. | Writer/umask default | Removed by uninstall / `reset --state`. |
 
 ---
 
@@ -52,7 +52,7 @@ All files are created automatically during the first run. The configuration dire
 When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `src/core/init.ts`) to bootstrap missing structures:
 1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory`/`evidence`/`evals` under data, and `sessions`/`audit`/`receipts`/`interviews`/`scratch` under state.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config. An existing file is never read, validated, or rewritten by initialization.
-3.  **Credentials Security**: If `credentials.yaml` is absent, creates an empty JSON credentials template and locks its permissions immediately to owner-only read-write (`0o600`).
+3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`).
 4.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once at first install; a later version, platform, or node change preserves `installedAt` and stamps `upgradedAt`.
 
 ---
@@ -102,10 +102,10 @@ clio auth login anthropic-max
 claude auth login
 
 # Configure OAuth subscription target
-clio configure --id claude-sub --runtime anthropic-max --model sonnet --set-orchestrator
+clio configure --id claude-sub --runtime anthropic-max --model your-claude-model --set-orchestrator
 
 # Configure Claude Code SDK worker target
-clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
+clio configure --id claude-sdk-worker --runtime claude-sdk --model your-claude-model --set-fleet-default
 
 clio targets use claude-sub
 clio targets --probe
@@ -123,7 +123,8 @@ Clio Coder provides CLI utilities to manage operations safely.
 Runs a series of health sweeps across the environment:
 *   Validates `settings.yaml` against the strict schema, reporting exact key paths, read-only.
 *   Asserts owner-only permissions on credentials (`0o600`).
-*   Checks for version updates or environment configuration drifts.
+*   Reports the installed Clio, Node, platform, and engine package readiness.
+*   Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.
 *   *Recovery:* Run `clio doctor --fix` to create missing directories and templates, repair credential permissions, refresh install metadata, and repair known legacy settings keys. The settings repair path rewrites `settings.yaml` only when those legacy keys are present, backs up the original as `settings.yaml.bak`, and leaves unrelated unknown keys for deliberate operator cleanup.
 
 ### B. Upgrades (`clio upgrade`)
@@ -140,11 +141,10 @@ only to a genuinely npm-installed binary, once the package is published.
 ### C. System Resets (`clio reset`)
 Selective recovery wipes:
 ```bash
-clio reset [--state | --data | --cache | --auth | --config | --all] --force
+clio reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]
 ```
-Each level clears exactly the root or file it names and nothing else, then
-bootstraps the missing structure again:
-*   `--state` *(Default)*: Deletes the state root only: sessions, audit logs, receipts, run ledger, install metadata.
+Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution:
+*   `--state` *(Default)*: Deletes the state root only: sessions, audit logs, receipts, runs, install metadata, migrations, interviews, and scratch state.
 *   `--data`: Deletes the data root only: memory, evidence, evals (durable products).
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml`. Removes all saved keys.
@@ -184,10 +184,10 @@ printed.
 `clio uninstall` removes all four roots (config, data, state, cache):
 
 ```bash
-clio uninstall [--remove-binary] --force
+clio uninstall [--remove-binary] [--dry-run] [--force]
 ```
 
-`--remove-binary` also removes the launcher symlink when it resolves into a
+`--dry-run` prints the roots and optional launcher action without changing anything. `--remove-binary` also removes the launcher symlink when it resolves into a
 clio dist; anything else (a real file, a foreign symlink) is left in place.
 It prints binary-removal guidance for the active launcher, npm-global installs,
 npm links, and the local source symlink. Prefer `npm run uninstall:local` for
@@ -219,6 +219,6 @@ If you are removing Clio Coder completely from your system, verify that all cate
 Clio Coder supports headless operation for automation and continuous integration.
 
 When executing tasks headlessly using `clio run`, interactive permission prompting is unavailable. The engine resolves permission requests using a deterministic model:
-- **Auto-Denial:** Any action requiring operator authorization is immediately and deterministically denied by the runtime.
-- **Rejection Reason:** Rejections carry a standard message indicating that the action must be executed in interactive mode to approve.
-- **Fail-Safe Exit:** The engine cancels all pending and parked tool calls, and exits immediately with an error status. This prevents silent script stalls or unsafe mutations during CI builds.
+- **Main-agent auto-denial:** Any main-agent tool call that parks for operator authorization is denied with `clio run cannot confirm permission requests; rerun interactively to approve this action.` The parked call is cancelled with that reason, and the headless turn finishes according to the resulting assistant outcome.
+- **Worker non-stall policy:** Dispatched workers use `workers.onPermission`. The default `deny` turns a permission ask into a structured tool denial and lets the worker continue. `fail` aborts the worker and records the dispatch outcome as `failed/permission_required`.
+- **CI behavior:** Neither path waits for an interactive prompt. Exit status still reflects the final headless or dispatch result rather than the mere fact that a permission ask occurred.
