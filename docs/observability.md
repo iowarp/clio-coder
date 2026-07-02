@@ -11,7 +11,7 @@
 /view verify <runId>
 ```
 
-`/view` opens a full-screen split viewer. The left pane groups artifacts by category and supports type-to-filter. The right pane renders the selected artifact with pager controls. `Tab` switches panes. `v` verifies a selected receipt. `o` shows the absolute backing path through the notice channel so the file can be opened outside the TUI.
+`/view` opens a full-screen split viewer. The left pane groups artifacts by category and supports type-to-filter. The right pane renders the selected artifact with pager controls. `Tab` switches panes. `v` verifies a selected receipt. `o` shows the absolute backing path through the notice channel when the selected artifact has one; pathless artifacts produce a warning notice instead.
 
 ---
 
@@ -46,8 +46,8 @@ To prevent concurrent Clio processes from corrupting the index, writes are queue
 An `EvidenceIndexRow` has the following schema:
 ```json
 {
-  "runId": "run-4f89d2a",
-  "evidenceId": "run-run-4f89d2a",
+  "runId": "4f89d2a9c12",
+  "evidenceId": "run-4f89d2a9c12",
   "tags": ["test-failure", "session-linked"],
   "firstPassSuccess": false,
   "findingCount": 2,
@@ -102,7 +102,7 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
 3. **Verify Integrity**: Recomputes the SHA256 digest using the version 3 fields. The v3 digest covers the new `findingsSummary` field (containing tags, firstPassSuccess, and findingCount) to prevent tampering.
-4. **Wipe Stale Receipts**: If a receipt fails verification, it is renamed to `<name>.json.corrupt` and wiped from active memory. Pre-existing v2 receipts continue to verify through the retained v2 digest branch.
+4. **Report Result**: The viewer reports success or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 
@@ -114,7 +114,7 @@ Here is a step-by-step trace of how a run passes through the spine.
 A dispatched task to execute tests finishes. The dispatch domain persists the run envelope and the receipt, then emits the completion event:
 ```json
 {
-  "runId": "run-abc1234",
+  "runId": "abc1234",
   "status": "completed",
   "exitCode": 0,
   "lineage": { "attempt": 0 }
