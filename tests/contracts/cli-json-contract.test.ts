@@ -1,4 +1,6 @@
 import { match, strictEqual } from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
@@ -84,5 +86,24 @@ describe("contracts/cli-json-contract run --target", () => {
 		strictEqual(result.code, 2, `stderr=${result.stderr}`);
 		strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
 		match(result.stderr, /target 'missing' not found/);
+	});
+});
+
+describe("contracts/cli-json-contract null settings.yaml", () => {
+	const scratch = makeScratchHome("clio-json-null-settings-");
+	after(() => scratch.cleanup());
+
+	// BUG-008: a present but null/empty settings.yaml is malformed, not a valid
+	// default. The strict readSettings gate must reject it with a root-shape error
+	// rather than booting on silent defaults.
+	it("targets --json rejects a null settings.yaml with a root-shape error", async () => {
+		const configDir = scratch.env.CLIO_CONFIG_DIR as string;
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(join(configDir, "settings.yaml"), "null\n");
+		const result = await runCli(["targets", "--json"], { env: scratch.env });
+		strictEqual(result.code, 1, `stderr=${result.stderr}`);
+		strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
+		match(result.stderr, /settings\.yaml failed validation/);
+		match(result.stderr, /\(root\): expected a map, got null/);
 	});
 });
