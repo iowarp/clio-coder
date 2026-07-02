@@ -115,7 +115,7 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	if (event.isError) stat.errors += 1;
 	else stat.ok += 1;
 	stats.toolStats.set(tool, stat);
-	if (tool === ToolNames.ReadSkill) {
+	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
 		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
 		const activation = skillActivationFromToolDetails(

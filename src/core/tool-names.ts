@@ -10,7 +10,6 @@ export const ToolNames = {
 	Bash: "bash",
 	Grep: "grep",
 	Find: "find",
-	Glob: "glob",
 	Ls: "ls",
 	WebFetch: "web_fetch",
 	Git: "git",
@@ -18,14 +17,12 @@ export const ToolNames = {
 	ValidateFrontend: "validate_frontend",
 	WritePlan: "write_plan",
 	WriteReview: "write_review",
-	WorkspaceContext: "workspace_context",
 	CodeNav: "code_nav",
-	DocsSearch: "docs_search",
+	Context: "context",
 	Dispatch: "dispatch",
 	DispatchBatch: "dispatch_batch",
 	AskUser: "ask_user",
 	CredentialPresent: "credential_present",
-	ReadSkill: "read_skill",
 	CreateSkill: "create_skill",
 } as const;
 

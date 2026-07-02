@@ -231,7 +231,7 @@ export function pendingSkillRequestPreamble(requests: ReadonlyArray<PendingSkill
 	return [
 		"[Skill request]",
 		...lines,
-		`First call read_skill for: ${allowed.join(", ")}. Only these pending skill names are allowed this turn. After read_skill succeeds, follow the loaded workflow.`,
+		`First call context with scope="skills" and name for: ${allowed.join(", ")}. Only these pending skill names are allowed this turn. After the skill loads, follow the loaded workflow.`,
 	].join("\n");
 }
 

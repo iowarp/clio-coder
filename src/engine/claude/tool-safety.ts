@@ -96,7 +96,7 @@ export function mapClaudeToolCall(toolName: string, input: Record<string, unknow
 		case "Grep":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Grep, args: pathArgs(input), known: true };
 		case "Glob":
-			return { claudeToolName: toolName, clioToolName: ToolNames.Glob, args: pathArgs(input), known: true };
+			return { claudeToolName: toolName, clioToolName: ToolNames.Find, args: pathArgs(input), known: true };
 		case "LS":
 		case "Ls":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Ls, args: pathArgs(input), known: true };

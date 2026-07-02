@@ -55,16 +55,13 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Read:
 		case ToolNames.Grep:
 		case ToolNames.Find:
-		case ToolNames.Glob:
 		case ToolNames.Ls:
 		case ToolNames.WebFetch:
 		case ToolNames.Git:
-		case ToolNames.WorkspaceContext:
 		case ToolNames.CodeNav:
-		case ToolNames.DocsSearch:
+		case ToolNames.Context:
 		case ToolNames.AskUser:
 		case ToolNames.CredentialPresent:
-		case ToolNames.ReadSkill:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

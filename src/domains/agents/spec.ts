@@ -219,8 +219,8 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	if (spec.tools.includes(ToolNames.AskUser)) {
 		errors.push(`agent '${spec.id}' exposes ask_user, which is only available to the orchestrator`);
 	}
-	if (spec.skills.length > 0 && !spec.tools.includes(ToolNames.ReadSkill)) {
-		errors.push(`agent '${spec.id}' declares skills but does not expose read_skill`);
+	if (spec.skills.length > 0 && !spec.tools.includes(ToolNames.Context)) {
+		errors.push(`agent '${spec.id}' declares skills but does not expose context`);
 	}
 	return errors;
 }

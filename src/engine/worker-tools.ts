@@ -143,7 +143,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	}
 	const toolDetails = isRecord(verdict.result.details) ? verdict.result.details : {};
 	const skillActivation =
-		spec.name === ToolNames.ReadSkill ? skillActivationFromToolDetails(toolDetails, input.invokeOptions?.turnId) : null;
+		spec.name === ToolNames.Context ? skillActivationFromToolDetails(toolDetails, input.invokeOptions?.turnId) : null;
 	const result: AgentToolResult<WorkerToolOkDetails> = {
 		content: [{ type: "text", text: verdict.result.output }],
 		details: { ...toolDetails, kind: "ok" },
