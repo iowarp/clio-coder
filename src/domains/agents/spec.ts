@@ -106,8 +106,7 @@ function inferCategory(recipe: AgentRecipe, tools: ReadonlyArray<ToolName>): Age
 	if (recipe.id.includes("review") || recipe.id.includes("test") || recipe.id.includes("valid")) return "quality";
 	if (recipe.id.includes("implement") || recipe.id.includes("simplif")) return "implement";
 	if (recipe.id.includes("research")) return "research";
-	if (recipe.id.includes("plan") || recipe.id.includes("architect") || hasTool(tools, ToolNames.WritePlan))
-		return "plan";
+	if (recipe.id.includes("plan") || recipe.id.includes("architect") || hasTool(tools, ToolNames.Artifact)) return "plan";
 	if (recipe.id.includes("debug") || recipe.id.includes("attrib") || recipe.id.includes("evol")) return "evolution";
 	if (recipe.id.includes("memory") || recipe.id.includes("middleware")) return "operations";
 	return "explore";
@@ -116,13 +115,13 @@ function inferCategory(recipe: AgentRecipe, tools: ReadonlyArray<ToolName>): Age
 function inferCapabilityClass(recipe: AgentRecipe, tools: ReadonlyArray<ToolName>): AgentCapabilityClass {
 	if (recipe.id === "worker") return "internal";
 	const actions = actionClassesForTools(tools);
-	const writesOnlyPlanOrReview = tools.every((tool) => {
+	const writesOnlyArtifacts = tools.every((tool) => {
 		const action = classify({ tool }).actionClass;
-		return action !== "write" || tool === ToolNames.WritePlan || tool === ToolNames.WriteReview;
+		return action !== "write" || tool === ToolNames.Artifact;
 	});
 	if (actions.has("dispatch")) return "orchestration";
 	if (actions.has("execute") && !actions.has("write")) return "verification";
-	if (actions.has("write") && writesOnlyPlanOrReview) return "artifact-write";
+	if (actions.has("write") && writesOnlyArtifacts) return "artifact-write";
 	if (actions.has("write") || actions.has("execute")) return "workspace-edit";
 	return "read-only";
 }
@@ -198,8 +197,8 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 			if (action === "execute" || action === "dispatch" || action === "system_modify" || action === "git_destructive") {
 				errors.push(`artifact-write agent '${spec.id}' requests ${action} tool '${tool}'`);
 			}
-			if (action === "write" && tool !== ToolNames.WritePlan && tool !== ToolNames.WriteReview) {
-				errors.push(`artifact-write agent '${spec.id}' can only write PLAN.md or REVIEW.md; got '${tool}'`);
+			if (action === "write" && tool !== ToolNames.Artifact) {
+				errors.push(`artifact-write agent '${spec.id}' can only write terminal artifacts; got '${tool}'`);
 			}
 		}
 	}

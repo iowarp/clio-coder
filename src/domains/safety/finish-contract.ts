@@ -133,7 +133,7 @@ export function hasExplicitLimitation(text: string): boolean {
 /**
  * Paths the turn actually mutated, drawn only from successful (non-error)
  * receipts inside the window:
- *   - write / edit / write_plan / write_review, via `toolMutationPaths`.
+ *   - write / edit / artifact, via `toolMutationPaths`.
  *   - bash whose command carries a workspace write or delete target, via
  *     `extractCommandWriteTargets` / `extractCommandDeleteTargets`.
  * Read-only git and pure read/grep/find/ls/exec/web_fetch receipts contribute

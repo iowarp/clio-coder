@@ -42,7 +42,7 @@ interface HeadlessMainAgentResult {
 	error: string | null;
 	/**
 	 * True when the most recent tool result ended the turn via
-	 * `ToolResult.terminate` (write_plan, write_review) with no error. These
+	 * `ToolResult.terminate` (artifact plan/review/report) with no error. These
 	 * tools are the whole turn by design: the agent loop skips the follow-up
 	 * call that would otherwise produce assistant text, so an empty `text`
 	 * here is the turn completing exactly as intended, not a missing

@@ -14,8 +14,7 @@ export const ToolNames = {
 	WebFetch: "web_fetch",
 	Git: "git",
 	Verify: "verify",
-	WritePlan: "write_plan",
-	WriteReview: "write_review",
+	Artifact: "artifact",
 	CodeNav: "code_nav",
 	Context: "context",
 	Dispatch: "dispatch",
@@ -23,7 +22,6 @@ export const ToolNames = {
 	Steer: "steer",
 	AskUser: "ask_user",
 	CredentialPresent: "credential_present",
-	CreateSkill: "create_skill",
 } as const;
 
 export type BuiltinToolName = (typeof ToolNames)[keyof typeof ToolNames];

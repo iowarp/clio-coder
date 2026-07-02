@@ -1186,7 +1186,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// backend reused the session prefix; later calls in a tool loop are
 		// trivially warm.
 		let runFirstCallVerdict: BackendCacheVerdict | null = null;
-		// write_plan/write_review set ToolResult.terminate=true so the agent
+		// artifact plan/review/report set ToolResult.terminate=true so the agent
 		// loop skips the follow-up LLM call that would otherwise produce the
 		// assistant message carrying the turn's terminal stopReason. Track the
 		// most recent terminating tool result here; a real assistant

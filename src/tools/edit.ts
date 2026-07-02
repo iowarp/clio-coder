@@ -104,7 +104,7 @@ export const editTool: ToolSpec = {
 				return {
 					kind: "ok",
 					output: `edited ${pathArg}: ${applied.replacements} replacement(s)`,
-					details: { diff: diff.diff, firstChangedLine: diff.firstChangedLine },
+					details: { diff: diff.diff, firstChangedLine: diff.firstChangedLine, paths: [filePath] },
 				};
 			});
 		} catch (err) {
