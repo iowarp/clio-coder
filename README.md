@@ -34,8 +34,7 @@ happened.
 
 CLIO stands for Context Layer for Input/Output. Clio Coder is part of
 IOWarp's agentic science ecosystem, named for the Greek muse of history and
-developed by the Gnosis Research Center at Illinois Tech under PI Alexandros
-Kougkas.
+developed by the Gnosis Research Center at Illinois Tech.
 
 It is built for developers working on research software and HPC codebases who
 want agentic help with inspection, planning, edits, reviews, and validation
