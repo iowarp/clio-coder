@@ -60,10 +60,18 @@ export interface WorkerSpec {
 	/**
 	 * Non-stall posture for permission-requiring tool calls. "deny" converts
 	 * the call into a structured tool denial and the run continues; "fail"
-	 * aborts the run, which then exits with WORKER_EXIT_PERMISSION_REQUIRED.
-	 * Default "deny".
+	 * aborts the run, which then exits with WORKER_EXIT_PERMISSION_REQUIRED;
+	 * "escalate" parks the call, emits clio_permission_escalated, and waits for
+	 * an operator permission_decision on stdin (falling back to the configured
+	 * deny/fail on timeout). Default "deny".
 	 */
-	onPermission?: "deny" | "fail";
+	onPermission?: "deny" | "fail" | "escalate";
+	/**
+	 * Escalation bounds, honored only when onPermission="escalate". A parked
+	 * call that receives no operator decision within timeoutMs applies fallback.
+	 * Defaults: 120000 ms, "deny".
+	 */
+	escalation?: WorkerEscalationConfig;
 	/**
 	 * Session autonomy level captured at dispatch admission (sd-01 §2.5). The
 	 * worker registry applies the same mapping as the orchestrator's, so a
@@ -78,6 +86,18 @@ export interface WorkerPromptMessage {
 	body: string;
 	contentHash: string;
 }
+
+/** Bounds for the escalate posture; see WorkerSpec.escalation. */
+export interface WorkerEscalationConfig {
+	/** Wall-clock budget before the parked call applies the fallback. */
+	timeoutMs: number;
+	/** Posture applied when the operator does not decide within timeoutMs. */
+	fallback: "deny" | "fail";
+}
+
+/** Default escalation bounds when onPermission="escalate" but no override is given. */
+export const DEFAULT_ESCALATION_TIMEOUT_MS = 120_000;
+export const DEFAULT_ESCALATION_FALLBACK: "deny" | "fail" = "deny";
 
 const RUNTIME_KINDS = ["http", "sdk", "subprocess"] as const satisfies ReadonlyArray<RuntimeKind>;
 const RUNTIME_API_FAMILIES = [
@@ -397,8 +417,23 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
 	}
-	if (spec.onPermission !== undefined && spec.onPermission !== "deny" && spec.onPermission !== "fail") {
-		throw new Error('WorkerSpec.onPermission must be "deny" or "fail"');
+	if (
+		spec.onPermission !== undefined &&
+		spec.onPermission !== "deny" &&
+		spec.onPermission !== "fail" &&
+		spec.onPermission !== "escalate"
+	) {
+		throw new Error('WorkerSpec.onPermission must be "deny", "fail", or "escalate"');
+	}
+	if (spec.escalation !== undefined) {
+		const escalation = readRecord(spec.escalation, "WorkerSpec.escalation");
+		const timeoutMs = escalation.timeoutMs;
+		if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+			throw new Error("WorkerSpec.escalation.timeoutMs must be a positive finite number");
+		}
+		if (escalation.fallback !== "deny" && escalation.fallback !== "fail") {
+			throw new Error('WorkerSpec.escalation.fallback must be "deny" or "fail"');
+		}
 	}
 	if (spec.autonomy !== undefined) {
 		readEnum(spec.autonomy, "WorkerSpec.autonomy", SPEC_AUTONOMY_LEVELS);

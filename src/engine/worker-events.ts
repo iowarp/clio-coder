@@ -23,8 +23,41 @@ export interface ClioPermissionResolvedEvent {
 	payload: {
 		tool: string;
 		actionClass: string;
-		mode: "deny" | "fail";
+		mode: "deny" | "fail" | "escalate";
 		reason: string;
+		/**
+		 * Resolution provenance. Absent on the existing policy deny/fail path so
+		 * those events stay byte-identical; set only for escalate resolutions so
+		 * consumers can distinguish operator decisions from timeout fallbacks.
+		 */
+		source?: "operator" | "timeout" | "policy";
+		/** Escalation request id this resolution answers; escalate path only. */
+		requestId?: string;
+		/** Resolved outcome for an escalation; escalate path only. */
+		decision?: "approved" | "denied";
+	};
+}
+
+/**
+ * Emitted when an escalate-posture worker parks a permission-requiring tool
+ * call and hands the decision up to the operator. The orchestrator republishes
+ * it as a PermissionRequested bus event; an operator permission_decision line
+ * on stdin (or the timeout fallback) resolves it.
+ */
+export interface ClioPermissionEscalatedEvent {
+	type: "clio_permission_escalated";
+	payload: {
+		requestId: string;
+		tool: string;
+		summary: string;
+		decision: {
+			actionClass: string;
+			reasons: ReadonlyArray<string>;
+			reasonCode?: string;
+			ruleId?: string;
+			policySource?: string;
+		};
+		timeoutMs: number;
 	};
 }
 
@@ -45,4 +78,5 @@ export type ClioWorkerEvent =
 	| ClioToolStartEvent
 	| ClioToolFinishEvent
 	| ClioPermissionResolvedEvent
+	| ClioPermissionEscalatedEvent
 	| ClioSteerReceivedEvent;
