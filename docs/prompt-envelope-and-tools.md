@@ -7,11 +7,11 @@ Clio Coder keeps the model-facing envelope stable and moves enforcement into the
 
 ## One system prompt per session
 
-The chat loop compiles one provider-facing system prompt for a session. The compile key is `target|model|autonomy|sessionId`.
+The chat loop compiles one provider-facing system prompt for a session. The compile key is `target|model|autonomy|sessionId|workingContextPaths`, with the working-context paths sorted before hashing into the key.
 
-The compiled prompt is reused byte-for-byte on ordinary submits. It recompiles only when that key changes or when config hot-reload invalidates the prompt cache. When recompilation changes the text, the session ledger records a `promptRecompiled` entry with the previous hash, new hash, and token estimate.
+The compiled prompt is reused byte-for-byte on ordinary submits. It recompiles only when that key changes or when config hot-reload invalidates the prompt cache. Path-scoped project rules can therefore recompile the prompt when a matching file enters working context. When recompilation changes the text, the session ledger records a `promptRecompiled` entry with the previous hash, new hash, and token estimate.
 
-There are no dynamic per-turn prompt fragments. Pending skill requests are visible text in the user message, not hidden prompt machinery.
+Prompt extensions can add dynamic fragments for project rules, the operator profile, and Clio source-tree awareness. Pending skill requests and middleware reminders are visible text in the user message, not hidden prompt machinery.
 
 ## One tool surface per session
 
@@ -25,7 +25,7 @@ Providers that cannot call tools receive no schemas, and the prompt tells the mo
 
 Clio uses two context-protection mechanisms.
 
-1. Tool results are capped at the source. The default tool-result source cap is 6KB with continuation text for offset and limit style follow-up. Result shaping has an 8KB backstop. Summary-kind tools such as `bash`, `run_task`, `validate_frontend`, `dispatch`, and `web_fetch` have explicit 16KB policies. `ask_user` has a 20KB policy. Over-cap generic results are shown briefly and, when possible, saved under `<stateDir>/scratch/<sessionId>/<toolCallId>.txt` with an `offloadPath` detail and a 10MB scratch-file cap.
+1. Tool results are capped at the source and again at the registry boundary. Bounded search/list tools use a 16KB source cap plus 2KB registry slack so continuation notices survive shaping. `read` defaults to a 50KB per-call cap plus 2KB registry slack, and still reports offset/limit follow-up details when truncated. Tools without an explicit result-size policy use an approximately 18KB generic backstop. Exact mutation tools such as `write`, `edit`, `write_plan`, `write_review`, and `create_skill` use 8KB. Summary-kind tools such as `bash`, `run_task`, `validate_frontend`, `dispatch`, `dispatch_batch`, and `web_fetch` use 16KB at the registry boundary. `ask_user` has a 20KB policy. `web_fetch` may read more before shaping: its `max_bytes` argument defaults to 600KB and is hard-capped at 5MB. Over-cap generic results are shown briefly and, when possible, saved under `<stateDir>/scratch/<sessionId>/<toolCallId>.txt` with an `offloadPath` detail and a 10MB scratch-file cap.
 2. Auto-compaction uses one pressure threshold. The default threshold is 0.8. When pressure crosses the threshold, Clio first masks stale tool observations and stale thinking older than `excludeLastTurns`. If pressure remains above the threshold, it runs the LLM summary compaction path and replays from the compacted session view.
 
 Manual `/compact`, `CLIO_FORCE_COMPACT=1`, and overflow recovery force the LLM summary path directly.
