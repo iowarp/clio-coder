@@ -5,473 +5,159 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## 0.2.7 - unreleased
+## 0.2.7 - 2026-07-02
+
+A skills-and-accountability release: the marketplace catalog grew five
+reviewed skills and gained executable evals, enforced tool surfaces, and
+supply-chain integrity checks; credential handling got a real damage-control
+net; and every dispatch run now leaves forensic evidence behind.
 
 ### Added
 
-- Headless main-agent `clio run` turns now write integrity-covered run
-  receipts with `agentId: "main-agent"`, session id, token and cost totals,
-  tool stats, and skill activations. The receipts live beside dispatch
-  receipts under `<stateDir>/receipts/`, are backed by `runs.json`, and are
-  counted by `clio usage report` and evidence consumers instead of leaving
-  main-agent usage invisible.
-- Headless main-agent `clio run --json-events terminal` now emits a compact
-  JSONL stream containing only session, turn boundary, agent boundary,
-  assistant message finalization, and tool execution boundary events. The
-  default `--json` stream is unchanged, and dispatch JSON streaming remains on
-  its existing path. `clio skills eval` now consumes the terminal stream
-  instead of filtering growing partial message updates itself.
-- `credential_present` is now a built-in read-only tool for checking whether
-  a named credential key is present in the process environment or an env-style
-  file. It returns only boolean presence and source metadata, never the
-  credential value, and the credentials skill now prefers it over quiet `grep`
-  checks when available.
-- `clio skills eval <name|path>` (experimental) executes a skill's `evals.md`
-  RED-GREEN scenarios instead of trusting the prose. Per scenario it runs a
-  baseline headless turn without the skill, a treatment turn with the skill
-  loaded through the explicit `--skill` path and invoked via `/skill:<name>`,
-  and a judge turn that scores each Expected bullet pass/fail from the two
-  transcripts (strict JSON, parsed tolerantly from the judge's final text or
-  terminating-tool content). Scenario blocks are parsed prose-tolerantly
-  (`## S<n> - <title>`, Setup paragraph, Expected bullets); unparseable
-  scenario blocks are skipped with a diagnostic. Scenarios may also declare
-  fixture commands with `Fixture:` or `Setup commands:` blocks; the runner
-  executes them in the scenario workspace before baseline and treatment, and
-  `--workspace <path>` runs against an existing checkout instead of a
-  throwaway temp directory. Exit is nonzero when any treatment bullet fails;
-  `--json` emits one JSONL row per (scenario, bullet) with
-  `schema: "experimental"`. Results land as a standard eval evidence bundle
-  via a synthesized eval artifact, with the recorded deltas: bullet verdicts
-  are judge-scored rather than command-verified, token/cost totals are rolled
-  up from headless main-agent receipts when present, and the per-bullet
-  detail (verdicts, transcripts, stderr tails, fixture commands, usage) lives
-  in a `skill-eval.json` sidecar registered in the bundle's `overview.json`
-  file list (evidence builds now accept additive sidecar files so a consumer
-  enumerating `overview.json` learns they exist).
-- `clio usage report` (experimental, read-only) analyzes the local usage
-  archive across sessions: receipts, session ledgers, audit rows, the
-  evidence index, the memory store, and the installed-skill listing. The
-  facts section reports sessions and dispatch runs in the window (default 30
-  days, `--days` to change, `--repo` to scope), top tools from receipt
-  toolStats, normalized bash command shapes (verb plus flag skeleton,
-  arguments stripped), skills activated versus installed-but-never-activated,
-  dispatch recipes used, failure tags from the evidence index, and memory
-  counts. The opportunities section cites ids and counts on every line: a
-  recurring bash shape across three or more sessions with no skill activation
-  suggests `/skill:workflow-distiller` (trivial shell furniture like `cd` and
-  `ls` is excluded), two or more dispatches with near-identical task prefixes
-  suggest a recipe, and a recurring failure tag with no matching memory
-  record suggests `clio memory propose --from-evidence <id>`. `--json` emits
-  one JSONL row per fact and opportunity with `schema: "experimental"`;
-  malformed rows are skipped and counted on stderr, and receipts beyond a
-  1000-file cap are truncated oldest-first with an honest notice. The command
-  writes nothing. The audit and session-ledger parsers it shares with
-  evidence building were factored into
-  `src/domains/observability/archive-readers.ts`.
-- Credential damage control closed three verified gaps. B1: Clio's own secret
-  store is zero-access by default; the `credentials.yaml` literal joins the
-  default deny-list and the expanded `<configDir>/credentials.yaml` path is
-  appended at policy construction (a repo file named `credentials.yaml`
-  becoming zero-access is intended). B2: bash reads of zero-access paths are
-  now blocked; argument tokens (quote-aware, tilde-expanded, `--flag=path`
-  and `VAR=path` forms included) are tested against `zeroAccessPaths`, so
-  `cat .env` or `less ~/.aws/credentials` blocks with reason code
-  `secret_path_bash` and a remediation naming the safe protocol, while the
-  exit-code-only presence form (`grep -q`/`grep -sq` with a `^NAME=` pattern)
-  still passes and `disableDefaultPathPolicy` remains the escape hatch. B3:
-  evidence bundles redact secret-shaped values (PEM blocks, AWS `AKIA` keys,
-  GitHub/Slack/Google/OpenAI-style tokens, JWTs, and generic
-  key/token/secret/password assignments) from envelopes, receipts including
-  delegation tool-call logs, tool-event previews, audit rows, and
-  `transcript.md` at build time, replacing each with `[redacted:<kind>]`;
-  the overview gains an additive `redactionCount` field so bundles are
-  truthful about their own filtering. Raw local session files are untouched;
-  the bundle is the export boundary.
-
-- Skill `allowed-tools` / `disallowed-tools` declarations are now enforced at
-  tool admission instead of being prose. When `read_skill` loads a skill that
-  declares a tool surface, calls outside the merged surface are blocked (audit
-  reason code `skill_surface`) from activation to the end of the turn for the
-  main agent and to the end of the run for recipe workers, on the interactive,
-  headless `clio run`, and dispatch surfaces alike. Denials win across skills;
-  allow-narrowing is the union of declared lists and applies only while every
-  loaded skill declares one; `read_skill` and `ask_user` stay admitted as the
-  harness escape hatches. Narrowing never grants anything the safety net or
-  autonomy mapping would refuse. Semantics documented in docs/safety-model.md
-  ("Skill tool surface narrowing").
-
-- Two new marketplace skills port the LifeOS Science pack method onto Clio's
-  evidence-first posture. `scientific-debugging` forces a one-sentence goal, at
-  least three falsifiable hypotheses spanning distinct fault classes, cheapest
-  test first, and an evidence-cited verdict per hypothesis before any fix, with
-  a fifteen-minute escalation from quick diagnosis to a written investigation
-  file. `experiment-protocol` pre-registers thresholds, per-metric tolerance
-  semantics, environment pins, input checksums, and verdict conditions into the
-  repo validation contract (`.clio/validation.yaml` or `VALIDATION.md`) before
-  any measurement, so creating the contract raises repo-derived rigor and the
-  finish gate demands matching evidence; iteration keeps a dead-ends ledger.
-  Both carry catalog provenance and RED-GREEN `evals.md` scenarios verified
-  against live headless runs. `skills/registry.yaml` was re-pinned, which also
-  heals five stale pins left by an earlier skill edit that skipped the pin.
-- The `design-council` marketplace skill runs a bounded multi-perspective
-  debate on design decisions with real tradeoffs. Three to five perspectives
-  are composed from the topic (name, stance, expertise, attack target) and
-  dispatched as read-only workers (`scout`, `researcher`, `provenance`) with
-  the persona and accumulated transcript in the task prompt, parallel within a
-  round and sequential across the position, response, and convergence rounds.
-  The synthesis names agreements, the crux of each live disagreement, a
-  recommendation, and preserved dissent, all receipt-linked. A settled
-  question terminates early with the consensus instead of manufactured
-  debate, and an unavailable fleet degrades to a labeled inline debate.
-- The `credentials` marketplace skill teaches safe credential handling on top
-  of the default damage-control net. It verifies presence without exposing
-  values (`ask_user` confirmation first, exit-code-only `grep -sq` second,
-  printing never), has the user add missing secrets through a hidden-input
-  `read -s` terminal command with the issuer link instead of pasting into
-  chat, keeps secrets out of argv, exports, and job scripts, covers facility
-  surfaces (kerberos, ssh agents, globus and scheduler tokens, netrc), and
-  defines the leak containment sequence: stop, name the credential and the
-  surfaces reached without repeating the value, rotate at the issuer, warn
-  that exported evidence outlives chat deletion, resume on acknowledgment.
-- The `workflow-distiller` marketplace skill turns a workflow that just ran
-  into a reusable skill grounded in runtime truth. It reconstructs the steps
-  from what visibly executed in the session before asking anything (unobserved
-  steps are tagged assumptions), interviews one question at a time through
-  `ask_user` under the grill-me operating contract, checks installed skills
-  per step via `read_skill` so covered steps become references instead of
-  reimplementations (with the `requires: [skill:<name>]` frontmatter line
-  handed to the user, arming the loader's unmet-dependency warning), gates on
-  an explicitly approved design summary before any `create_skill` call, and
-  records a RED-GREEN validation scenario with the result.
-
-- Dispatch runs now auto-produce a forensic evidence bundle and a sidecar
-  index on completion. When a run finalizes, the observability domain subscribes
-  to the `dispatch.completed` / `dispatch.failed` bus events and builds the full
+- **Five marketplace skills.** `scientific-debugging` (falsifiable hypotheses
+  across fault classes, cheapest test first, evidence-cited verdicts before
+  any fix), `experiment-protocol` (thresholds, tolerances, environment pins,
+  and input checksums pre-registered into the repo validation contract before
+  any measurement), `design-council` (a bounded multi-perspective debate run
+  through read-only dispatched workers, with receipt-linked synthesis and
+  early termination on consensus), `credentials` (presence checks without
+  value exposure, hidden-input terminal collection, and a leak containment
+  sequence), and `workflow-distiller` (reconstructs a just-run workflow from
+  the session record, interviews one question at a time, checks overlap with
+  installed skills, and gates `create_skill` on an approved design). All
+  carry catalog provenance and RED-GREEN `evals.md` scenarios.
+- **Executable skill evals.** `clio skills eval <name|path>` (experimental)
+  runs each `evals.md` scenario as a baseline headless turn without the
+  skill, a treatment turn with it, and a judge turn scoring every Expected
+  bullet from the two transcripts. Scenario fixture commands are real shell
+  from the skill author and execute only behind `--trust-fixtures`. Exit 1
+  means a rubric bullet failed; exit 3 means verdicts stand but the evidence
+  archive write failed. `--json` emits one experimental-schema JSONL row per
+  bullet, and results land as a standard eval evidence bundle with a
+  `skill-eval.json` sidecar registered in `overview.json`.
+- **Skill tool surfaces are enforced.** `allowed-tools` / `disallowed-tools`
+  frontmatter now blocks out-of-surface calls at tool admission (audit reason
+  `skill_surface`) from activation to end of turn (main agent) or end of run
+  (recipe workers), on the interactive, headless, and dispatch surfaces
+  alike. Denials win across skills; narrowing never grants anything the
+  safety net would refuse; `read_skill` and `ask_user` stay admitted.
+- **Skill supply-chain integrity.** `skills/registry.yaml` pins the
+  provenance-stripped sha256 of every catalog skill, so install-lifecycle
+  stamps are not drift while content and registry-identity edits are.
+  `clio skills install` preserves `registry-id` through installation, keeping
+  activation drift checks alive on installed copies. `npm run skills:pin`
+  refuses to pin a catalog missing required frontmatter, `audit: pass`, or an
+  `evals.md`, and `npm run skills:check` fails CI on any pin drift.
+- **Credential damage control.** Clio's own `credentials.yaml` store is
+  zero-access by default; bash reads of zero-access paths are blocked with
+  reason `secret_path_bash` (the exit-code-only `grep -q "^NAME="` presence
+  form still passes); and evidence bundles redact secret-shaped values (PEM,
+  AWS, GitHub, Slack, Google, OpenAI-style tokens, JWTs, generic assignments)
+  from every export surface at build time, recording a `redactionCount` in
+  the overview. The new read-only `credential_present` tool reports boolean
+  presence of a key in the environment or an env-style file, never the value,
+  and distinguishes a missing file from an absent key.
+- **`clio usage report`** (experimental, read-only) analyzes receipts,
+  session ledgers, audit rows, the evidence index, memory, and installed
+  skills across sessions: top tools, normalized bash command shapes, skills
+  activated versus never activated, recipes used, and failure tags, plus an
+  opportunities section that cites evidence ids on every suggestion
+  (recurring bash shape with no skill activation, near-identical dispatch
+  prefixes, recurring failure tag with no memory record).
+- **Headless main-agent accountability.** `clio run` turns write
+  integrity-covered receipts (`agentId: "main-agent"`) beside dispatch
+  receipts, and `--json-events terminal` emits a compact JSONL stream of
+  session, turn, agent, message-final, and tool-boundary events for
+  automation (the default `--json` stream is unchanged).
+- **Forensic evidence on every dispatch run.** Run completion auto-builds the
   evidence bundle under `<dataDir>/evidence/run-<id>/` plus a compact row in
-  `<stateDir>/evidence-index.json` keyed by runId (`evidenceId`, failure-cause
-  `tags`, `firstPassSuccess`, `findingCount`, `generatedAt`). No `clio evidence`
-  CLI call is needed. The build is best-effort: a failure is logged and
-  swallowed, never blocking or crashing a run. The headless `clio run` dispatch
-  path loads the observability domain too, and the domain tracks its in-flight
-  builds and flushes them on shutdown, so a one-shot dispatch that tears down
-  right after the run still persists the bundle and index row instead of
-  building nothing or abandoning the build mid-flight. Successful runs with no
-  linked validation evidence are tagged `no-validation` and are not counted as
-  first-pass successes. Sidecar index read/merge/write sections reuse the same
-  cross-process state-file lock as `runs.json`, with a local process queue to
-  reduce same-process contention, so concurrent Clio processes preserve every
-  completed run row.
-- Run receipts now carry a compact, integrity-covered `findingsSummary`
-  (`tags`, `firstPassSuccess`, `findingCount`). It is computed cheaply at
-  receipt-record time from the envelope, outcome, exit code, and tool stats,
-  not by reading the receipt back through `buildEvidence`, so it is the durable
-  half of the "both sinks" findings decision. A conservative classifier maps
-  unambiguous signals to canonical evidence tags (a nonzero exit alongside a
-  build or test command, a blocked tool attempt, a timeout or auth failure in
-  the outcome detail). `firstPassSuccess` is true only for a succeeded outcome
-  with zero dispatch retries, a cheap positive validation signal in the receipt
-  tool stats, and no failure-cause tag; if a draft omits lineage, the classifier
-  falls back to the envelope retry state before treating it as attempt zero.
-- A single `rigor` attribute (`normal` | `high`) now decides how the finish-gate
-  behaves, orthogonal to the autonomy permission levels. Rigor resolves from a
-  `CLIO_RIGOR` env override layered over a repo-derived default: `high` when the
-  workspace declares a scientific-validation contract (any of
-  `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`,
-  `validation.yml`, or `VALIDATION.md` at the root), otherwise `normal`. At
-  `high` rigor, an unvalidated completion claim is re-prompted: the turn_end hook
-  withholds the completion with a `request_continuation` and a paired directive
-  reminder that tells the model to run a verification-family command
-  (`test*/lint*/build*/typecheck*/check*/format*/ci*`) or state what could not be
-  verified before claiming done. At `normal` rigor the soft `warn` advisory is
-  unchanged. Read-only / status-recall turns and turns with no completion claim
-  stay exempt at any rigor. All directive text is injected dynamically via
-  effects, never added to the static prompt prefix. A prior hard-block effect
-  from the tool-prose guard suppresses the high-rigor continuation so local
-  model recovery guidance is not overwritten by a finish-gate re-prompt.
-- Change manifests are now evidence-linked. `clio evolve manifest validate` and
-  `summarize` resolve each non-empty `evidenceRef` against the local evidence
-  store: a ref must be a well-formed `run-<id>` / `session-<id>` bundle id and
-  must point at a bundle that actually exists, otherwise validation fails with
-  the dangling ref named. The exploratory-1 empty-refs exemption is unchanged,
-  and both commands now print how many refs resolved against how many local
-  bundles. Resolution is injected into `validateChangeManifest` as a pure
-  predicate, so the evolution domain still never imports the evidence domain;
-  callers that pass no resolver keep the prior schema-only behavior.
-- The `/view` overlay now opens with an Accountability panel that surfaces the
-  session's rolling first-pass-success rate (`first-pass success: <n>/<total>
-  (<pct>%)`) and a top failure-cause tag histogram, aggregated read-only from the
-  `<stateDir>/evidence-index.json` sidecar without re-running `buildEvidence`. The
-  observability contract gains an `accountability()` read model
-  (`summarizeEvidenceIndex` / `readAccountabilitySummary`) backing it; a missing
-  or corrupt index renders the empty summary rather than failing. The failure
-  histogram filters through the canonical failure-cause subset only, so
-  provenance and quality tags such as `audit-linked`, `session-linked`, and
-  `no-validation` do not appear as failure causes.
-- Deferred (tracked, not shipped): gating high-authority harness self-edits on a
-  current validated, evidence-linked manifest (Slice 5b). There is no clean
-  enforcement point today that can tell "Clio editing her own harness" apart
-  from "the user asked Clio to edit this repo's source", and a path-glob gate
-  would wrongly block ordinary user-requested edits. Per the release spec, 5a
-  ships now and 5b is tracked in `src/domains/evolution/SELF_EDIT_GATE.md`,
-  including the concrete middleware gate design and the minimal missing
-  `selfEditOrigin` signal needed before enforcement can ship safely.
-- Local model catalog gains two families in `clio-local-coding-targets.yaml`.
-  `gemma-4-31b-it-qat-mtp` describes the `Gemma-4-31B-it-qat-UD-Q4_K_XL-MTP-262K`
-  build served on mini's llama.cpp router: 262144 context (not the NVFP4 turbo
-  family's 122880), q8 KV, flash attention, F16 gemma4v mmproj vision, and
-  draft-mtp speculative decoding, with gemma-4 on/off thinking served reasoning
-  off. Its `gemma-4-31b-it-qat…` match patterns are longer than the NVFP4
-  family's `gemma-4-31b-it`, so the longest-substring resolver routes the qat id
-  to the correct 262K profile while the NVFP4 turbo id keeps its own.
-  `qwopus3.6-35b-a3b-coder` describes the locked mini orchestrator
-  (`Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K`): a thinking-off-by-default agentic
-  coder that would otherwise fall back to the shorter `qwopus3.6` (27B) family
-  and inherit the wrong sampler and thinking profile. A bundled-catalog contract
-  test pins both resolutions and guards the 12B/26B/NVFP4 gemma ids against
-  capture by the new qat family.
+  `<stateDir>/evidence-index.json` (failure-cause tags, first-pass success,
+  finding count), best-effort and non-blocking, flushed on shutdown so
+  one-shot dispatches still persist. Receipts carry a `findingsSummary`
+  folded into a v3 integrity digest (v1/v2 receipts still verify; there are
+  no migrations).
+- **Validation rigor.** A single `rigor` attribute (`normal` | `high`)
+  resolves from `CLIO_RIGOR` over a repo-derived default (`high` when a
+  validation contract like `.clio/validation.yaml` or `VALIDATION.md`
+  exists). At high rigor an unvalidated completion claim is re-prompted to
+  run a verification command or state what could not be verified.
+- **Evidence-linked change manifests.** `clio evolve manifest
+  validate|summarize` resolve every `evidenceRefs` entry against the local
+  evidence store and fail on dangling refs (the `exploratory-1` exemption
+  stands). Gating high-authority self-edits (Slice 5b) is deferred and
+  documented in `src/domains/evolution/SELF_EDIT_GATE.md`.
+- **/view accountability panel.** The overlay opens with the session's
+  rolling first-pass-success rate and a failure-cause tag histogram, read
+  from the evidence index sidecar.
+- Local model catalog: the `gemma-4-31b-it-qat-mtp` 262K MTP build and the
+  `qwopus3.6-35b-a3b-coder` orchestrator get their own families so the
+  longest-substring resolver stops routing them to wrong profiles.
 
 ### Changed
 
-- The npm package was cut from 3.91 MB to 0.93 MB (unpacked 10.93 MB to
-  3.91 MB). Source maps, benchmarks (including stray Python bytecode caches),
-  the README banner images, and all logo sizes except the runtime
-  `clio-coder-logo-128.webp` no longer ship; the README banner now loads from
-  raw.githubusercontent.com so it renders on npm too. `typescript` and
-  `esbuild` moved to devDependencies (only tsup/tsx pull them), shrinking the
-  production install. The shebang now comes from a hashbang line in the two
-  entry sources instead of a tsup banner, so shared chunks are no longer
-  stamped executable. The local install helper scripts also left the tarball;
-  they operate on a source checkout only. A single `scripts/check-release.mjs`
-  gate (wired into `ci:release`, replacing `check-dist.mjs`) enforces all of
-  this: entry-only shebangs, forbidden files, required runtime resources, and
-  tarball/unpacked size budgets. The build and release model is documented in
-  CONTRIBUTING.md under "Releasing" and in CLIO.md.
-- Publishing is now automated. `.github/workflows/release.yml` triggers on
-  `v*` tags, refuses a tag that disagrees with package.json's version, runs
-  the full `ci:release` gate via `prepublishOnly`, publishes to npm with
-  provenance, and creates a GitHub release carrying the tarball. It needs the
-  `NPM_TOKEN` repository secret until npm trusted publishing is configured.
-- The hosted CI matrix stopped running the full test suite twice on the
-  Node 24 lane. Node 22, the engines floor, runs the whole `ci:release` gate;
-  the Node 24 lane now only builds dist and treats the coverage-instrumented
-  suite as its single full-suite run (under `pipefail`, so `tee` cannot mask
-  failures), followed by the flake-detection repeat lane. The node-version
-  insensitive steps (typecheck, lint, skills pins, package audit) no longer
-  repeat, cutting roughly a third of the lane's wall clock.
-- Upgraded the pinned pi SDK packages (`@earendil-works/pi-agent-core`,
-  `@earendil-works/pi-ai`, and `@earendil-works/pi-tui`) from `0.79.10` to
-  `0.80.3`. Clio keeps the 0.80.x `pi-ai/compat` bridge for the legacy global
-  provider registry while preserving the engine boundary, and the
-  OpenAI-compatible adapter now avoids adding a fallback reasoning-token alias
-  when upstream already reports `usage.reasoning`.
-- Receipt integrity bumped from v2 to v3. The v3 digest additionally folds the
-  new `findingsSummary` so tampering with it is detected. Per the no-migrations
-  mandate there is no receipt migration: the v1 and v2 verification branches are
-  retained, so pre-existing v2 receipts still verify and pre-v2 stale receipts
-  still wipe on read. Breaking note: any in-flight, never-persisted v2 receipt
-  that has not yet been written is re-sealed at v3 on record; v2 receipts already
-  on disk remain valid and are read through the retained v2 branch. A v2 receipt
-  that carries the v3-only `findingsSummary` field is rejected so an
-  unauthenticated summary cannot be presented beside a verified v2 digest.
-- The `intelligence` domain is parked. It is no longer in the orchestrator's
-  domain load list, so each session loads one fewer domain. The domain was a
-  disabled types-only no-op (its extension threw if enabled and the contract
-  returned empty observations), so nothing changes for the operator. The source
-  stays in the tree under `src/domains/intelligence/` with a `PARKED.md` that
-  records the intent and the re-entry condition.
-- `docs_search` now behaves as a deterministic self-documentation retriever
-  instead of a raw section grep. It indexes the bundled markdown corpus with
-  heading breadcrumbs and line ranges, expands queries through a controlled
-  Clio vocabulary, applies light stemming, phrase boosts, and BM25-style body
-  scoring, and returns compact structured JSON with corpus metadata, normalized
-  and expanded terms, ranked file/heading citations, bounded snippets, matched
-  terms, coverage, and ranking signals. The human `clio docs` server remains
-  responsible for `docs/html/**`; agent search intentionally excludes those
-  interactive HTML blueprints.
-- Documentation guides (docs/observability.md, docs/safety-model.md, docs/evidence-and-memory.md, docs/scientific-validation.md, docs/evolution.md, and docs/commands-and-modes.md) and the agent handbook CLIO.md are updated and verified against the implementation code to accurately reflect the shipped v0.2.7 behavior (including forensic auto-builds, v3 receipt integrity checks, validation-rigor integration, TUI /view accountability summaries, environment variable overrides, evidence-linked change manifests, and parked intelligence domain status).
+- The npm package shrank from 3.91 MB to 0.93 MB (source maps, benchmarks,
+  banner images, and repo scripts no longer ship), gated by
+  `scripts/check-release.mjs` (entry-only shebangs, forbidden files, required
+  runtime resources, size budgets) inside `ci:release`. Releases are
+  tag-driven via `.github/workflows/release.yml`, which verifies the tag
+  against package.json, runs the full gate, and attaches the tarball to a
+  GitHub release; the npm publish step is disabled until stable v0.3.0.
+- The hosted CI matrix runs the full suite once per lane instead of twice on
+  Node 24, cutting roughly a third of that lane's wall clock.
+- Pinned pi SDK packages upgraded from 0.79.10 to 0.80.3.
+- The `intelligence` domain is parked (types-only no-op removed from the
+  domain load list; source retained with a `PARKED.md`).
+- `docs_search` became a deterministic self-documentation retriever with
+  breadcrumbed headings, controlled vocabulary expansion, BM25-style scoring,
+  and structured citations.
+- The CLI states its Node `>=22.19.0` floor with a clear error instead of
+  failing arbitrarily on older Node, and the docs set (observability, safety,
+  evidence, validation, evolution, commands, skills, extensions, lifecycle)
+  was verified against the shipped implementation.
 
 ### Fixed
 
-- `npm run skills:pin` no longer silently pins a skill under its folder name
-  with `version: null` when the SKILL.md frontmatter is unparseable YAML (for
-  example an unquoted colon-space inside a description). Malformed files now
-  fail the script loudly with the file path and the YAML error, in both pin
-  and check modes, and nothing is written. `skills validate` already rejected
-  these files via the loader.
-- Registry pin drift now has a structural guard. `npm run skills:check` (the
-  pin script's new `--check` mode) fails when `skills/registry.yaml` does not
-  match the catalog content hashes, names the stale, missing, or orphaned
-  pins, and runs as part of `npm run ci`. Previously an edit that skipped
-  `skills:pin` could ship stale pins unnoticed (as commit 7273129 did).
-- `create_skill` can now emit `requires` frontmatter through a validated
-  `requires` parameter (entries normalize to `skill:<name>`), so generated
-  skills arm the loader's unmet-dependency warning directly. The
-  workflow-distiller Phase 3/5 wording and evals were updated to pass the
-  entries instead of handing the user a manual line to add.
-- `ask_user` stays interactive-only by decision: it is a human interview tool
-  and headless `clio run` offers no operator to interview, so registering a
-  stub would misrepresent the surface. The absence is now documented in
-  `clio run --help` (permission asks are denied, ask_user is not registered,
-  interview skills fall back to their stated defaults; supply decisions in
-  the task prompt).
-- Dispatch no longer schedules retries for deterministic worker failures. A
-  model-residency fit miss (the reconciler's will-not-fit verdict) fails the
-  run immediately with the reason already carried in the receipt, instead of
-  re-running the same slow load probe until `workers.maxRetries` is exhausted;
-  a wedged fleet target observed spending 12+ minutes in such retries now
-  surfaces the failure on the first attempt.
-- Dispatch finalization failures are now contained on both native workers and
-  ACP delegated agents. A rejected worker promise or failed ledger persist no
-  longer leaves a run row stuck in `running` with no receipt and a leaked active
-  entry; the finalizer seals a failed row, emits `DispatchFailed`, drops the
-  active entry, and then rethrows. Worker ledger rows are also created before
-  subprocess spawn now, so a row-creation failure aborts the worker before it
-  can hold a concurrency slot without a durable run record.
-- Dispatch receipts now wait for active event consumers to drain before
-  finalization, bounded to two seconds, so token meters, tool stats, and
-  finish-contract text folded by the consumer land in the receipt that closes
-  the run. ACP usage accounting now treats the adapter aggregate as
-  authoritative and uses event metering only as a fallback, avoiding the
-  double-counting that could appear while reconciling delegated agent usage.
-- ACP delegated runs now share the native worker finish semantics. The high-rigor
-  finish gate applies to delegated agents, and a delegated run whose outcome is
-  not succeeded but whose process exits zero is normalized to a nonzero receipt
-  exit code, so failed ACP work is represented consistently in receipts and
-  evidence.
-- The `llamacpp` SSE parser now counts malformed frames it skips and writes one
-  stderr diagnostic per stream, with the `[DONE]` sentinel exempted. Dropped
-  mid-stream frames therefore leave an operator-visible trace instead of looking
-  like an ordinary truncated response. Marketplace skill installation also
-  reports config-directory resolution failures to stderr instead of continuing
-  silently, and the Ollama fingerprint probe now documents its intentional
-  swallow path.
-- The generated first-run settings YAML now includes `workers.onPermission` with
-  its `deny` and `fail` semantics, matching the typed defaults that already had
-  the field. New users therefore see the same permission-stall policy that
-  Clio applies at runtime, and the default YAML no longer drifts from
-  `DEFAULT_SETTINGS`.
-- Headless `clio run` and ACP sessions now stop on a loop-guard interrupt
-  instead of spinning until an external timeout. Previously only the interactive
-  TUI subscribed to the loop-block / tool-call-ceiling bus events and aborted the
-  run; on the operatorless surfaces the `block_tool` effect blocked each call
-  while the agent loop kept iterating, so a degenerate local model that fell into
-  an identical-call loop never terminated (a live `clio run` against a 35B local
-  model reached 200+ blocked tool-call attempts in one turn before a wall-clock
-  timeout). A shared `subscribeLoopGuardStop` helper now wires the same
-  interrupt-to-stop path on the headless and ACP branches, so the run ends with
-  the same durable closing turn the interactive surface produces, and the
-  closing-message text is shared so the three surfaces never drift.
-- A loop-guard interrupt no longer ends the turn with an empty aborted message.
-  When the per-turn loop-block budget or the tool-call hard ceiling stops a
-  runaway turn, the chat loop now writes a durable, visible assistant message
-  that states why it stopped (the looping tool and repeat count, or the ceiling
-  it hit) and suppresses the hollow "request aborted" turn the abort would
-  otherwise leave behind. Previously the operator saw only a transient notice and
-  an empty turn, so a session that hit the guard returned nothing and the user
-  had to ask "what happened?". The cancel path takes an optional reason/source so
-  the same seam serves both a bare operator Esc/Ctrl+C and a system-initiated
-  loop stop.
-- Loop-guard interrupts are now audited under a distinct `loop_guard` abort
-  source instead of being recorded as `stream_cancel` ("user cancelled stream").
-  A guard-stopped runaway turn and a real operator cancel were previously
-  indistinguishable in `state/audit`, which made post-hoc root-causing rely on
-  cross-referencing the transcript.
-- The identical-call loop detector trips sooner on weak local models. The
-  verbatim-repeat threshold drops from five to three (`loop-detector.ts`) and the
-  per-turn loop-block budget from three to two (`loop-guard.ts`), bounding a
-  degenerate identical-call loop to about four calls instead of seven before the
-  turn is stopped. Distinct canonical arguments returning identical results are
-  never productive past a couple of tries, so the tighter bound carries little
-  false-positive risk while cutting the dead time a stuck model burns.
-- The finish-contract advisory no longer fires on informational answers. A
-  "how/what/why" question with no work request now suppresses the
-  "no validation evidence" advisory (`informational_question_turn`), so a long
-  explanation that incidentally trips the completion-claim regex ("added",
-  "updated", "changed") is not flagged as an unvalidated work claim. Prompts that
-  request a code or file change, or ask to run validation, are unaffected.
-- The interactive orchestrator now enforces a per-turn tool-call budget, closing
-  a gap where a weak local model asked to "audit the repo" sprayed roughly 40
-  distinct bash commands over six minutes before the loop guard stopped it. The
-  identical-call loop detector only catches verbatim repeats, and the
-  orchestrator is otherwise uncapped on the premise that an operator can
-  intervene, a premise that fails for weak models. The loop guard
-  (`src/engine/loop-guard.ts`) now counts every distinct tool-call attempt in a
-  user turn. At the soft budget (default 25, overridable via
-  `CLIO_ORCH_MAX_TOOL_CALLS`) it blocks the attempt and injects a re-plan
-  directive that tells the model to stop exploring and summarize, narrow, or ask;
-  at the hard ceiling (soft + 15) it interrupts the turn over the new
-  `safety.toolBudgetExceeded` bus event, the same way the per-turn loop-block
-  budget cancels a turn. Workers are unaffected: they keep relying on the
-  lifetime `CLIO_MAX_TOOL_CALLS` cap. The budget is delivered dynamically through
-  the effect machinery, so the static system-prompt prefix stays byte-stable.
-- `scripts/live-turns.mjs` (the live-turn measurement harness) now resolves the
-  Clio state directory correctly. `stateDir()` read `dirs.data` from
-  `clio paths --json` instead of `dirs.state`, so every run against a checkout
-  with a local `dist` build polled the data directory for the session ledger
-  and never found it, failing every run with "no session directory appeared
-  after the first submit" even though the TUI turn completed normally. The
-  harness also gained `--clio-entry` (drive the installed clio against an
-  arbitrary target repo via `--cwd`, instead of requiring `dist` inside the
-  target) and `--capture-dir` (timestamped `capture-pane` snapshots at boot,
-  mid-turn, on settle, through each of the six overlay commands, and before
-  exit), in support of the v0.2.7 battletest. Its turn-settle detection also
-  now recognizes a `write_plan`/`write_review`-terminated turn as settled:
-  these tools set `terminate: true` and skip the assistant message that
-  would otherwise carry the terminal `stopReason` the harness polls for, so
-  the harness previously waited out the full turn timeout on every such
-  turn. The underlying gap (no terminal ledger entry is ever written for a
-  `terminate: true` tool result) is a session-wide ledger-completion gap,
-  not specific to this harness, and is still open.
-- Bare `/skill` (the Skills Hub selector, typed with nothing after it) no
-  longer risks invoking the wrong skill on submit. The skill-name completion
-  regex in `createSlashCommandAutocompleteProvider`
-  (`src/interactive/slash-autocomplete.ts`) treated the separator after
-  `/skill` as optional, so a bare `/skill` matched with an empty captured
-  prefix and the autocomplete offered every installed skill with the first
-  one pre-selected. The terminal-engine editor commits the highlighted
-  autocomplete item on the same Enter key that submits a line, so pressing
-  Enter on a bare `/skill` silently committed whichever skill sorted first
-  into the editor (for example `/skill:arxiv-literature`) instead of opening
-  the Skills Hub, and any text typed immediately afterward landed inside
-  that fabricated invocation's task field. The separator (`:` or whitespace)
-  is now required before the skill-name completion branch activates, so a
-  bare `/skill` falls through to the generic command suggestion (a single,
-  harmless self-match on the `/skill` command) and opens the Skills Hub on
-  the first Enter, the same as `/model`, `/targets`, `/settings`, `/agents`,
-  and `/help` already do. `/skill:name`, `/skill:`, and `/skill name` keep
-  listing and filtering installed skills exactly as before.
-- `scripts/turn-report.mjs` had the same `dirs.data`-instead-of-`dirs.state`
-  bug as `scripts/live-turns.mjs` above, independently found while
-  re-verifying the `/skill` fix: it could never locate a session ledger for
-  a checkout with a local `dist` build. Fixed the same way.
-- A turn that ends because `write_plan` or `write_review` wrote its artifact
-  (`ToolResult.terminate = true`) now gets a real terminal ledger entry and a
-  correct headless exit code. These tools are deliberately the whole turn:
-  pi-agent-core skips the follow-up LLM call that would otherwise produce the
-  assistant message carrying the turn's `stopReason`, so no ledger row ever
-  marked the turn as settled, and headless `clio run`, which only derives its
-  result from assistant `message_end` events, saw no text and reported
-  `clio run: no assistant response` with exit code 1 even though the tool had
-  done real, successful work (confirmed live: a model asked to call
-  `write_plan` and nothing else wrote a real `PLAN.md` and still exited 1).
-  The chat loop (`src/interactive/chat-loop.ts`) now tracks the most recent
-  terminating tool result across the `tool_execution_end`/`message_end`
-  events of a run; if it is still pending when `agent_end` fires (no real
-  assistant message followed), it synthesizes a contentless
-  `kind: "assistant"`, `stopReason: "stop"` ledger row tagged
-  `terminalToolResult: true`. The synthesized row is never added to the
-  agent's in-memory message history or sent to a provider, so the
-  byte-stable prompt/cache invariant is unaffected, and chat replay already
-  treats a contentless, non-`length` assistant row as a no-op, so nothing
-  new renders in the transcript. Headless mode
-  (`src/cli/modes/print.ts`) separately now treats a turn that ends on a
-  successful terminating tool result, with no assistant text at all, as
-  success (exit 0, empty output) instead of an error, since the written
-  artifact is the real output of that turn. Re-verified live against the
-  graphify battletest clone: the session ledger now ends the `write_plan`
-  turn with `stopReason: "stop"` instead of nothing, and
-  `clio run "call write_plan and nothing else"` now exits 0 instead of 1.
+- `npm run skills:pin` fails loudly on malformed frontmatter instead of
+  silently pinning folder names, and pin drift is a CI failure.
+- `create_skill` emits validated `requires: [skill:<name>]` frontmatter, so
+  generated skills arm the loader's unmet-dependency warning.
+- `ask_user` stays interactive-only by decision; the headless gap is
+  documented in `clio run --help`.
+- Dispatch fails fast on deterministic model-residency misses instead of
+  burning retries; finalization failures seal a failed row and receipt
+  instead of leaking a stuck `running` entry; receipts wait (bounded) for
+  event consumers to drain; ACP delegated runs share native finish semantics
+  and no longer double-count usage.
+- Headless and ACP runs stop on loop-guard interrupts like the TUI does; a
+  guard stop writes a visible closing message and audits under a distinct
+  `loop_guard` source; the identical-call detector trips at three repeats;
+  and the orchestrator enforces a per-turn tool budget (default 25 soft,
+  `CLIO_ORCH_MAX_TOOL_CALLS` to override, hard interrupt at +15).
+- A turn ended by `write_plan`/`write_review` (`terminate: true`) now writes
+  a terminal ledger entry and exits 0 headlessly; previously the artifact was
+  written but the run reported "no assistant response" with exit 1.
+- Bare `/skill` opens the Skills Hub on first Enter instead of silently
+  committing the first autocomplete match.
+- The finish-contract advisory no longer flags purely informational answers
+  as unvalidated work claims.
+- The `llamacpp` SSE parser counts skipped malformed frames with one stderr
+  diagnostic per stream; marketplace install reports config-dir resolution
+  failures instead of continuing silently; first-run `settings.yaml`
+  includes `workers.onPermission`.
+- Lifecycle: `uninstall-local.sh` runs on stock macOS bash 3.2 (no
+  `mapfile`, `set -u`-safe arrays); `skills/install.sh --user` resolves the
+  loader's real `<configDir>/skills` root under `CLIO_HOME` and on macOS;
+  `install-local.sh` warns when another `clio` on PATH shadows the fresh
+  link; the live-turn harness scripts resolve the state dir correctly.
 
+### Upgrade notes
+
+- No migrations. Receipts sealed under v2 still verify; new receipts seal at
+  v3.
+- The provenance hash scheme changed (registry identity now counts as
+  content), so `clio skills update` can report `local-changes` for catalog
+  skills installed under 0.2.6 even though you never edited them; rerun with
+  `--force` to refresh the copy and its stamp.
 
 ## 0.2.6 - 2026-06-24
 
