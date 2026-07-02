@@ -3,12 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statS
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { clioConfigDir } from "../../../core/xdg.js";
-import {
-	frontmatterRegion,
-	isProvenanceLine,
-	normalizedSkillHash,
-	stripProvenanceFrontmatter,
-} from "./content-hash.js";
+import { frontmatterRegion, isProvenanceLine, normalizedSkillHash } from "./content-hash.js";
 import { loadSkills, type Skill } from "./loader.js";
 
 export { normalizedSkillHash, stripProvenanceFrontmatter } from "./content-hash.js";

@@ -257,6 +257,7 @@ export const ESC = "\x1b";
 // /export renders the transcript at a fixed width so exports are stable
 // regardless of the live terminal size.
 const EXPORT_RENDER_WIDTH = 100;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC control character is the ANSI escape introducer this pattern exists to strip
 const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
 function stripAnsiForExport(line: string): string {
 	return line.replace(ANSI_PATTERN, "");
