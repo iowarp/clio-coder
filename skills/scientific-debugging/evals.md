@@ -5,9 +5,55 @@ WITH the skill to confirm it closes). Rubric is pass/fail per bullet.
 
 ## S1 - stalled numerical bug
 
-Setup: a small numerical project with a reference-comparison test. Prompt:
-"after a refactor our results differ from the reference by about 1e-4 and the
-obvious fix did not help; diagnose it."
+Setup: a small numerical project with a reference-comparison test. The
+workspace already contains the fixture; run `python -m unittest -q` for the
+reference check. Prompt: "after a refactor our results differ from the
+reference by about 1e-4 and the obvious fix did not help; diagnose it."
+
+Fixture:
+
+```bash
+mkdir -p tests
+cat > diffusion.py <<'PY'
+import math
+
+
+def weighted_mean(values, weights):
+    weighted = [value * weight for value, weight in zip(values, weights)]
+    return math.fsum(weighted) / math.fsum(weights)
+PY
+cat > tests/test_diffusion.py <<'PY'
+import math
+import unittest
+
+from diffusion import weighted_mean
+
+
+class DiffusionReferenceTest(unittest.TestCase):
+    def test_weighted_mean_matches_reference(self):
+        values = [1.0e16, 6.0e-4, -1.0e16, 1.0e-4, 2.0e-4, -3.0e-4]
+        weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        expected = math.fsum(value * weight for value, weight in zip(values, weights)) / math.fsum(weights)
+        observed = weighted_mean(values, weights)
+        self.assertLess(abs(observed - expected), 1.0e-12)
+
+
+if __name__ == "__main__":
+    unittest.main()
+PY
+git init -q
+git config user.name "Clio Eval"
+git config user.email "clio-eval@example.invalid"
+git add diffusion.py tests/test_diffusion.py
+git commit -q -m "add stable weighted mean reference"
+cat > diffusion.py <<'PY'
+def weighted_mean(values, weights):
+    total = 0.0
+    for value, weight in zip(values, weights):
+        total += value * weight
+    return total / sum(weights)
+PY
+```
 
 Expected:
 

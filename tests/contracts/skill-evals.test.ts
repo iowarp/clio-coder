@@ -6,6 +6,12 @@ import { afterEach, describe, it } from "node:test";
 import { runSkillsCommand } from "../../src/cli/skills.js";
 import { extractBulletsObject, parseJudgeVerdicts } from "../../src/cli/skills-eval.js";
 import { parseSkillEvals } from "../../src/domains/resources/skills/evals.js";
+import {
+	closeServer,
+	seedOpenAICompatOrchestrator,
+	startOpenAICompatFixture,
+} from "../harness/openai-compat-fixture.js";
+import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 const scratchRoots: string[] = [];
 
@@ -94,6 +100,32 @@ describe("contracts/skill-evals parser", () => {
 		const parsed = parseSkillEvals("## S1 — em dash\nSetup: x.\nExpected:\n- Bullet.\n");
 		strictEqual(parsed.scenarios.length, 1);
 		strictEqual(parsed.scenarios[0]?.title, "em dash");
+	});
+
+	it("parses optional fenced fixture commands without changing prose-only scenarios", () => {
+		const parsed = parseSkillEvals(
+			[
+				"## S1 - fixture",
+				"Setup: read the generated input file.",
+				"Fixture:",
+				"```bash",
+				"mkdir -p src",
+				"printf 'ready\\n' > src/input.txt",
+				"```",
+				"Expected:",
+				"- Mentions the generated file.",
+				"",
+				"## S2 - prose only",
+				"Setup: answer directly.",
+				"Expected:",
+				"- Answers directly.",
+				"",
+			].join("\n"),
+		);
+		strictEqual(parsed.diagnostics.length, 0);
+		strictEqual(parsed.scenarios.length, 2);
+		strictEqual(parsed.scenarios[0]?.fixtureCommands, "mkdir -p src\nprintf 'ready\\n' > src/input.txt");
+		strictEqual(parsed.scenarios[1]?.fixtureCommands, undefined);
 	});
 
 	it("skips scenario-shaped blocks missing Setup or Expected with a diagnostic each", () => {
@@ -247,5 +279,78 @@ describe("contracts/skill-evals CLI argument contract", () => {
 		const { result, stderr } = await captureStderr(() => runSkillsCommand(["eval", "anything", "--timeout", "0"]));
 		strictEqual(result, 2);
 		ok(stderr.includes("--timeout"));
+	});
+
+	it("runs fixture commands in the scenario workspace before child runs", async () => {
+		const scratch = makeScratchHome("clio-skill-eval-fixture-");
+		const fixture = await startOpenAICompatFixture(
+			'{"bullets":[{"index":1,"pass":true,"reason":"fixture marker observed"}]}',
+		);
+		try {
+			const env = { ...scratch.env, HOME: scratch.dir, CLIO_TEST_OPENAI_KEY: "sk-test" };
+			const doctor = await runCli(["doctor", "--fix"], { cwd: scratch.dir, env, timeoutMs: 30_000 });
+			strictEqual(doctor.code, 0, doctor.stderr);
+			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
+			const skillDir = join(scratch.dir, "fixture-skill");
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(
+				join(skillDir, "SKILL.md"),
+				[
+					"---",
+					'name: "fixture-skill"',
+					'description: "Fixture skill for eval contracts."',
+					"---",
+					"",
+					"Report the marker file status.",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			writeFileSync(
+				join(skillDir, "evals.md"),
+				[
+					"# Fixture evals",
+					"",
+					"## S1 - materialized workspace",
+					"Setup: inspect marker.txt and report whether it exists.",
+					"Fixture:",
+					"```bash",
+					"printf 'ready\\n' > marker.txt",
+					"```",
+					"Expected:",
+					"- The treatment transcript has evidence that marker.txt was available.",
+					"",
+				].join("\n"),
+				"utf8",
+			);
+			const workspace = join(scratch.dir, "workspace");
+			mkdirSync(workspace);
+			const result = await runCli(
+				["skills", "eval", skillDir, "--scenario", "1", "--workspace", workspace, "--target", "mock-chat", "--json"],
+				{ cwd: scratch.dir, env, timeoutMs: 90_000 },
+			);
+			strictEqual(result.code, 0, result.stderr);
+			strictEqual(readFileSync(join(workspace, "marker.txt"), "utf8"), "ready\n");
+			const rows = result.stdout
+				.trim()
+				.split("\n")
+				.filter((line) => line.length > 0)
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			strictEqual(rows.length, 1);
+			strictEqual(rows[0]?.verdict, "pass");
+			const evalId = rows[0]?.evalId;
+			strictEqual(typeof evalId, "string");
+			const artifact = JSON.parse(readFileSync(join(scratch.dir, "data", "evals", `${evalId}.json`), "utf8")) as {
+				summary: { tokens: number; harness: { receiptCount: number } };
+				results: Array<{ tokens: number; harness: { receiptCount: number } }>;
+			};
+			ok(artifact.summary.tokens > 0);
+			ok(artifact.summary.harness.receiptCount >= 3);
+			ok((artifact.results[0]?.tokens ?? 0) > 0);
+			ok((artifact.results[0]?.harness.receiptCount ?? 0) >= 3);
+		} finally {
+			await closeServer(fixture.server);
+			scratch.cleanup();
+		}
 	});
 });

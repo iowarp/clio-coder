@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import {
+	type EvalHarnessMetrics,
 	type EvalRunArtifact,
 	type EvalRunRecord,
 	summarizeEvalResults,
@@ -33,9 +35,9 @@ import { formatColumns, printError } from "./shared.js";
  * the evals domain verifies with setup/verifier commands and has no judge, so
  * bullet verdicts here come from a model run, not command exit codes. The
  * synthesized EvalRunArtifact carries scenario-level records with empty
- * command lists and zero token/cost totals (headless main-agent runs do not
- * produce receipts), and the per-bullet detail lands in a `skill-eval.json`
- * sidecar registered in the bundle's `overview.json` files list.
+ * command lists, receipt-backed token/cost totals when headless main-agent
+ * receipts are present, and per-bullet detail in a `skill-eval.json` sidecar
+ * registered in the bundle's `overview.json` files list.
  */
 
 const DEFAULT_RUN_TIMEOUT_MS = 600_000;
@@ -51,6 +53,7 @@ export interface SkillsEvalOptions {
 	scenario?: string;
 	target?: string;
 	timeoutSeconds?: number;
+	workspace?: string;
 }
 
 type BulletVerdict = "pass" | "fail" | "error";
@@ -74,6 +77,12 @@ export interface CapturedRun {
 	stderr: string;
 }
 
+interface ScenarioUsage {
+	tokens: number;
+	costUsd: number;
+	harness: EvalHarnessMetrics;
+}
+
 interface ScenarioOutcome {
 	scenario: SkillEvalScenario;
 	bullets: ScoredBullet[];
@@ -84,6 +93,7 @@ interface ScenarioOutcome {
 	workspace: string;
 	wallTimeMs: number;
 	infraError: string | null;
+	usage: ScenarioUsage;
 }
 
 export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptions): Promise<number> {
@@ -123,11 +133,18 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	}
 
 	const timeoutMs = options.timeoutSeconds !== undefined ? options.timeoutSeconds * 1000 : DEFAULT_RUN_TIMEOUT_MS;
+	const workspaceOverride = await resolveWorkspaceOverride(options.workspace);
+	if (typeof workspaceOverride !== "string" && workspaceOverride !== null) {
+		printError(workspaceOverride.error);
+		return 2;
+	}
 	const startedAt = new Date().toISOString();
 	const outcomes: ScenarioOutcome[] = [];
 	for (const scenario of scenarios) {
 		process.stderr.write(`clio skills eval: ${skill.name} ${scenario.id} baseline/treatment/judge...\n`);
-		outcomes.push(await runScenario(skill.name, resolved.baseDir, scenario, options.target, timeoutMs));
+		outcomes.push(
+			await runScenario(skill.name, resolved.baseDir, scenario, options.target, timeoutMs, workspaceOverride),
+		);
 	}
 	const endedAt = new Date().toISOString();
 
@@ -205,17 +222,45 @@ function normalizeScenarioId(value: string): number | null {
 	return Number.parseInt(match[1] ?? "", 10);
 }
 
+async function resolveWorkspaceOverride(workspace: string | undefined): Promise<string | null | { error: string }> {
+	if (workspace === undefined) return null;
+	const resolved = resolve(workspace);
+	try {
+		const info = await stat(resolved);
+		if (!info.isDirectory()) return { error: `--workspace is not a directory: ${resolved}` };
+		return resolved;
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		return { error: `--workspace is not readable: ${resolved}: ${detail}` };
+	}
+}
+
 async function runScenario(
 	skillName: string,
 	skillBaseDir: string,
 	scenario: SkillEvalScenario,
 	target: string | undefined,
 	timeoutMs: number,
+	workspaceOverride: string | null,
 ): Promise<ScenarioOutcome> {
 	const scenarioStart = Date.now();
-	const workspace = await mkdtemp(join(tmpdir(), "clio-skill-eval-"));
+	const workspace = workspaceOverride ?? (await mkdtemp(join(tmpdir(), "clio-skill-eval-")));
+	const removeWorkspace = workspaceOverride === null;
 	const targetArgs = target === undefined ? [] : ["--target", target];
 	try {
+		const fixtureError = await runFixtureCommands(scenario, workspace, timeoutMs);
+		if (fixtureError !== null) {
+			return await completeScenarioOutcome({
+				scenario,
+				bullets: errorBullets(scenario, fixtureError),
+				baseline: null,
+				treatment: null,
+				judge: null,
+				workspace,
+				wallTimeMs: Date.now() - scenarioStart,
+				infraError: fixtureError,
+			});
+		}
 		const baseline = await captureHeadlessRun(
 			["run", "--json", "--no-skills", ...targetArgs, scenario.setup],
 			workspace,
@@ -228,7 +273,7 @@ async function runScenario(
 		);
 		const infra = runInfraError("baseline", baseline) ?? runInfraError("treatment", treatment);
 		if (infra !== null) {
-			return {
+			return await completeScenarioOutcome({
 				scenario,
 				bullets: errorBullets(scenario, infra),
 				baseline,
@@ -237,7 +282,7 @@ async function runScenario(
 				workspace,
 				wallTimeMs: Date.now() - scenarioStart,
 				infraError: infra,
-			};
+			});
 		}
 		// The judge also runs with --json: a model that ends the turn through a
 		// terminating tool (write_plan/write_review) prints nothing in text mode,
@@ -249,7 +294,7 @@ async function runScenario(
 		);
 		const judgeInfra = runInfraError("judge", judge);
 		if (judgeInfra !== null) {
-			return {
+			return await completeScenarioOutcome({
 				scenario,
 				bullets: errorBullets(scenario, judgeInfra),
 				baseline,
@@ -258,10 +303,10 @@ async function runScenario(
 				workspace,
 				wallTimeMs: Date.now() - scenarioStart,
 				infraError: judgeInfra,
-			};
+			});
 		}
 		const bullets = parseJudgeVerdicts(scenario, judge);
-		return {
+		return await completeScenarioOutcome({
 			scenario,
 			bullets,
 			baseline,
@@ -270,10 +315,111 @@ async function runScenario(
 			workspace,
 			wallTimeMs: Date.now() - scenarioStart,
 			infraError: null,
-		};
+		});
 	} finally {
-		await rm(workspace, { recursive: true, force: true });
+		if (removeWorkspace) await rm(workspace, { recursive: true, force: true });
 	}
+}
+
+async function completeScenarioOutcome(outcome: Omit<ScenarioOutcome, "usage">): Promise<ScenarioOutcome> {
+	return {
+		...outcome,
+		usage: await usageForCapturedRuns([outcome.baseline, outcome.treatment, outcome.judge]),
+	};
+}
+
+async function runFixtureCommands(
+	scenario: SkillEvalScenario,
+	workspace: string,
+	timeoutMs: number,
+): Promise<string | null> {
+	const commands = scenario.fixtureCommands?.trim();
+	if (commands === undefined || commands.length === 0) return null;
+	const validationError = validateFixtureCommands(commands);
+	if (validationError !== null) return `fixture setup rejected: ${validationError}`;
+	const result = await runBashCommand(commands, {
+		cwd: workspace,
+		timeoutMs: Math.min(timeoutMs, 120_000),
+	});
+	const output = combineBashOutput(result).trim();
+	if (result.timedOut) return `fixture setup timed out${output.length > 0 ? `: ${truncate(output, 300)}` : ""}`;
+	if (result.outputCapped) {
+		return `fixture setup output exceeded limit${output.length > 0 ? `: ${truncate(output, 300)}` : ""}`;
+	}
+	if (result.error !== null) {
+		return `fixture setup failed${output.length > 0 ? `: ${truncate(output, 300)}` : `: ${result.error.message}`}`;
+	}
+	return null;
+}
+
+function validateFixtureCommands(commands: string): string | null {
+	const checks: Array<{ pattern: RegExp; reason: string }> = [
+		{
+			pattern: /(^|[\s;&|(<>=])\/(?!dev\/null(?:\s|$))(?=\S)/,
+			reason: "absolute paths are not allowed in fixture commands",
+		},
+		{
+			pattern: /(^|[\s;&|()])\.\.(?=$|[/\s;&|()])/,
+			reason: "parent-directory path segments are not allowed in fixture commands",
+		},
+		{
+			pattern: /(^|[\s;&|()])~(?=$|[/\s;&|()])/,
+			reason: "home-directory expansion is not allowed in fixture commands",
+		},
+		{
+			pattern:
+				/\$(?:\{(?:HOME|CLIO_HOME|CLIO_CONFIG_DIR|CLIO_DATA_DIR|CLIO_STATE_DIR|CLIO_CACHE_DIR)\}|(?:HOME|CLIO_HOME|CLIO_CONFIG_DIR|CLIO_DATA_DIR|CLIO_STATE_DIR|CLIO_CACHE_DIR)\b)/,
+			reason: "home and Clio directory environment variables are not allowed in fixture commands",
+		},
+		{
+			pattern: /(^|[\s;&|()])(?:cd|pushd|popd)\b/,
+			reason: "directory-changing commands are not allowed in fixture commands",
+		},
+		{
+			pattern: /(^|[\s;&|()])(?:sudo|su|ssh|scp|rsync)\b/,
+			reason: "privilege-changing or remote commands are not allowed in fixture commands",
+		},
+	];
+	for (const check of checks) {
+		if (check.pattern.test(commands)) return check.reason;
+	}
+	return null;
+}
+
+async function usageForCapturedRuns(runs: ReadonlyArray<CapturedRun | null>): Promise<ScenarioUsage> {
+	const sessionIds = new Set(
+		runs.flatMap((run) => (run?.sessionId !== null && run?.sessionId !== undefined ? [run.sessionId] : [])),
+	);
+	const usage: ScenarioUsage = {
+		tokens: 0,
+		costUsd: 0,
+		harness: { ...ZERO_EVAL_HARNESS_METRICS },
+	};
+	if (sessionIds.size === 0) return usage;
+	const receiptRoot = join(clioStateDir(), "receipts");
+	let files: string[];
+	try {
+		files = (await readdir(receiptRoot)).filter((name) => name.endsWith(".json"));
+	} catch {
+		return usage;
+	}
+	for (const file of files) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(await readFile(join(receiptRoot, file), "utf8"));
+		} catch {
+			continue;
+		}
+		if (!isRecord(parsed) || typeof parsed.sessionId !== "string" || !sessionIds.has(parsed.sessionId)) continue;
+		usage.tokens += readNumber(parsed.tokenCount);
+		usage.costUsd += readNumber(parsed.costUsd);
+		usage.harness.receiptCount += 1;
+		usage.harness.toolCalls += readNumber(parsed.toolCalls);
+		if (isRecord(parsed.safety) && isRecord(parsed.safety.decisions)) {
+			usage.harness.safetyBlocks += readNumber(parsed.safety.decisions.blocked);
+		}
+	}
+	return usage;
 }
 
 function runInfraError(label: string, run: CapturedRun): string | null {
@@ -565,10 +711,10 @@ function synthesizeArtifact(
 			],
 			pass,
 			exitCode: pass ? 0 : 1,
-			tokens: 0,
-			costUsd: 0,
+			tokens: outcome.usage.tokens,
+			costUsd: outcome.usage.costUsd,
 			wallTimeMs: outcome.wallTimeMs,
-			harness: { ...ZERO_EVAL_HARNESS_METRICS },
+			harness: outcome.usage.harness,
 			commands: [],
 		};
 		if (!pass) record.failureClass = "verifier_failed";
@@ -596,14 +742,16 @@ function sidecar(skillName: string, evalId: string, outcomes: ReadonlyArray<Scen
 		evalId,
 		deltas: [
 			"bullet verdicts are judge-scored from run transcripts, not command exit codes; the evals-domain artifact carries scenario-level records with empty command lists",
-			"tokens and cost are zero: headless main-agent runs produce no receipts",
+			"tokens and cost are rolled up from headless main-agent receipts when those receipts are present",
 			"this sidecar is additive and is registered in overview.json files[]",
 		],
 		scenarios: outcomes.map((outcome) => ({
 			id: outcome.scenario.id,
 			title: outcome.scenario.title,
 			setup: outcome.scenario.setup,
+			fixtureCommands: outcome.scenario.fixtureCommands ?? null,
 			infraError: outcome.infraError,
+			usage: outcome.usage,
 			bullets: outcome.bullets,
 			baseline: sidecarRun(outcome.baseline),
 			treatment: sidecarRun(outcome.treatment),
@@ -687,6 +835,10 @@ function truncate(text: string, maxChars: number): string {
 
 function readString(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readNumber(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
