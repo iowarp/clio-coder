@@ -44,7 +44,7 @@ interface Parsed {
 	scope?: SkillCreateScope;
 }
 
-function parse(argv: ReadonlyArray<string>): Parsed | null {
+function parse(argv: ReadonlyArray<string>): Parsed {
 	const out: Parsed = { positional: [], json: false, all: false, help: false, force: false };
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -65,17 +65,17 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 				break;
 			case "--name": {
 				const value = argv[i + 1];
-				if (!value || value.startsWith("-")) return null;
+				if (!value || value.startsWith("-")) throw new Error("--name requires a value");
 				out.name = value;
 				i++;
 				break;
 			}
 			case "--user":
-				if (out.scope && out.scope !== "user") return null;
+				if (out.scope && out.scope !== "user") throw new Error("--user and --project are mutually exclusive");
 				out.scope = "user";
 				break;
 			case "--project":
-				if (out.scope && out.scope !== "project") return null;
+				if (out.scope && out.scope !== "project") throw new Error("--user and --project are mutually exclusive");
 				out.scope = "project";
 				break;
 			case "--help":
@@ -83,7 +83,7 @@ function parse(argv: ReadonlyArray<string>): Parsed | null {
 				out.help = true;
 				break;
 			default:
-				if (arg.startsWith("-")) return null;
+				if (arg.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
 				out.positional.push(arg);
 		}
 	}
@@ -169,10 +169,17 @@ function defaultBody(name: string): string {
 }
 
 export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<number> {
-	const parsed = parse(argv);
-	if (!parsed || parsed.help || !parsed.command) {
+	let parsed: Parsed;
+	try {
+		parsed = parse(argv);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		process.stderr.write(HELP);
+		return 2;
+	}
+	if (parsed.help || !parsed.command) {
 		process.stdout.write(HELP);
-		return parsed ? 0 : 2;
+		return 0;
 	}
 	switch (parsed.command) {
 		case "list": {
@@ -320,7 +327,7 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		}
 		default:
 			printError(`unknown skills command: ${parsed.command}`);
-			process.stdout.write(HELP);
+			process.stderr.write(HELP);
 			return 2;
 	}
 }

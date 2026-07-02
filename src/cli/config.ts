@@ -58,7 +58,7 @@ export function runConfigCommand(args: ReadonlyArray<string> = []): number {
 	const sub = positional[0] ?? "inspect";
 	if (sub !== "inspect") {
 		printError(`unknown config subcommand: ${sub}`);
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	const json = args.includes("--json");

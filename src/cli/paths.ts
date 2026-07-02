@@ -22,7 +22,7 @@ export function runPathsCommand(args: ReadonlyArray<string> = []): number {
 	const unknown = args.find((arg) => arg !== "--json");
 	if (unknown) {
 		printError(`unknown flag: ${unknown}`);
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	const dirs = resolveClioDirs();
