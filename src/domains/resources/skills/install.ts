@@ -1,34 +1,20 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { clioConfigDir } from "../../../core/xdg.js";
+import {
+	frontmatterRegion,
+	isProvenanceLine,
+	normalizedSkillHash,
+	stripProvenanceFrontmatter,
+} from "./content-hash.js";
 import { loadSkills, type Skill } from "./loader.js";
+
+export { normalizedSkillHash, stripProvenanceFrontmatter } from "./content-hash.js";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CLONE_TIMEOUT_MS = 60_000;
-
-/**
- * Top-level frontmatter keys owned by the install lifecycle. Stripped before
- * hashing so upstream and installed copies compare on content, not provenance.
- */
-const PROVENANCE_KEYS = new Set([
-	"source-url",
-	"sourceUrl",
-	"install-url",
-	"registry-id",
-	"registryId",
-	"registry-url",
-	"registryUrl",
-	"installed-at",
-	"installedAt",
-	"updated-at",
-	"updatedAt",
-	"installed-hash",
-	"installedHash",
-	"audit",
-]);
 
 export type SkillSourceSpec =
 	| { kind: "local"; path: string; original: string }
@@ -101,51 +87,6 @@ export function parseSkillSourceSpec(source: string): SkillSourceSpec | null {
 	return { kind: "local", path: path.resolve(expanded), original: trimmed };
 }
 
-function sha256(value: string): string {
-	return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-interface FrontmatterRegion {
-	/** Raw text before the frontmatter lines (opening delimiter inclusive). */
-	head: string;
-	lines: string[];
-	/** Raw text from the closing delimiter to the end. */
-	tail: string;
-}
-
-function frontmatterRegion(rawText: string): FrontmatterRegion | null {
-	const opening = rawText.match(/^---\r?\n/);
-	if (!opening) return null;
-	const closeRegex = /\r?\n---(?:\r?\n|$)/g;
-	closeRegex.lastIndex = opening[0].length;
-	const closing = closeRegex.exec(rawText);
-	if (!closing) return null;
-	const frontmatterText = rawText.slice(opening[0].length, closing.index);
-	return {
-		head: opening[0],
-		lines: frontmatterText.split(/\r?\n/),
-		tail: rawText.slice(closing.index),
-	};
-}
-
-function isProvenanceLine(line: string): boolean {
-	const match = line.match(/^([A-Za-z][A-Za-z0-9-]*):/);
-	return match?.[1] !== undefined && PROVENANCE_KEYS.has(match[1]);
-}
-
-/** Remove install-lifecycle frontmatter lines so content compares across copies. */
-export function stripProvenanceFrontmatter(rawText: string): string {
-	const region = frontmatterRegion(rawText);
-	if (!region) return rawText;
-	const kept = region.lines.filter((line) => !isProvenanceLine(line));
-	return `${region.head}${kept.join("\n")}${region.tail}`;
-}
-
-/** Content hash of a SKILL.md, ignoring provenance frontmatter. */
-export function normalizedSkillHash(rawText: string): string {
-	return sha256(stripProvenanceFrontmatter(rawText));
-}
-
 function yamlQuote(value: string): string {
 	return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
@@ -157,7 +98,12 @@ interface ProvenanceFields {
 	installedHash: string;
 }
 
-/** Replace any provenance frontmatter with the recorded install lifecycle fields. */
+/**
+ * Replace install-lifecycle frontmatter with the recorded fields. Registry
+ * identity lines (`registry-id`, `registry-url`) are content, not lifecycle,
+ * so they survive the install and keep pinned drift checks working on the
+ * installed copy.
+ */
 export function injectProvenanceFrontmatter(rawText: string, fields: ProvenanceFields): string {
 	const region = frontmatterRegion(rawText);
 	if (!region) throw new Error("skill file is missing YAML frontmatter");

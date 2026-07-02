@@ -7,6 +7,7 @@ import { clioConfigDir } from "../../../core/xdg.js";
 import { enabledExtensionResourceRoots } from "../../extensions/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
+import { normalizedSkillHash } from "./content-hash.js";
 import { getMarketplaceSkills } from "./marketplace.js";
 
 const MAX_NAME_LENGTH = 64;
@@ -62,6 +63,13 @@ export interface Skill {
 	scope: ResourceScope;
 	/** sha256 of the raw SKILL.md file content. */
 	hash: string;
+	/**
+	 * sha256 of the SKILL.md with install-lifecycle provenance frontmatter
+	 * stripped. This is the hash pinned in a catalog registry.yaml, so an
+	 * installed copy compares equal to its audited source regardless of
+	 * install timestamps.
+	 */
+	normalizedHash: string;
 	/** Directory or file subject the skill was discovered under. */
 	pathSubject: string;
 	/** Whether the skill is model-visible by default (compat project roots are not). */
@@ -478,6 +486,7 @@ function loadSkillFile(
 		source: root.source ?? "clio",
 		scope,
 		hash: sha256(raw),
+		normalizedHash: normalizedSkillHash(raw),
 		pathSubject,
 		trusted: root.trusted ?? true,
 		precedence: root.precedence ?? defaultPrecedenceForScope(scope),
