@@ -203,7 +203,9 @@ remove_local_link() {
 	if path_is_under "$repo_root" "$resolved_target"; then
 		allowed=1
 	else
-		for accepted in "${accepted_bin_targets[@]}"; do
+		# ${arr[@]+...} keeps the empty-array expansion safe under `set -u`
+		# on the bash 3.2 that ships with macOS.
+		for accepted in ${accepted_bin_targets[@]+"${accepted_bin_targets[@]}"}; do
 			if path_is_under "$accepted" "$resolved_target"; then
 				allowed=1
 				break
@@ -354,7 +356,15 @@ else
 fi
 link_path="$bin_dir/clio"
 
-mapfile -t resolved_dirs < <(resolve_clio_dirs)
+# A portable read loop instead of `mapfile`: macOS ships bash 3.2, which
+# has no mapfile builtin.
+resolved_dirs=()
+while IFS= read -r resolved_line; do
+	resolved_dirs+=("$resolved_line")
+done < <(resolve_clio_dirs)
+if [[ ${#resolved_dirs[@]} -ne 4 ]]; then
+	fail "could not resolve the four Clio directories (got ${#resolved_dirs[@]} lines)"
+fi
 config_dir="$(normalize_path "${resolved_dirs[0]}")"
 data_dir="$(normalize_path "${resolved_dirs[1]}")"
 state_dir="$(normalize_path "${resolved_dirs[2]}")"

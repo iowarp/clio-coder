@@ -212,6 +212,13 @@ fi
 
 if path_contains_dir "$bin_dir"; then
 	ok "$bin_dir is on PATH"
+	# Being on PATH is not enough: an earlier PATH entry (for example an old
+	# npm-global clio) can shadow the freshly linked binary.
+	resolved_clio="$(command -v clio 2>/dev/null || true)"
+	if [[ $dry_run -eq 0 && -n "$resolved_clio" && "$resolved_clio" != "$link_path" ]]; then
+		warn "'clio' resolves to $resolved_clio, which shadows $link_path"
+		warn "remove the shadowing install or reorder PATH, then run: hash -r"
+	fi
 else
 	warn "$bin_dir is not on PATH"
 	printf '[install-local] add it for this shell with:\n  export PATH="%s:$PATH"\n' "$bin_dir" >&2
