@@ -10,6 +10,7 @@ interface PackageJson {
 interface WorkflowStep {
 	run?: string;
 	uses?: string;
+	if?: string;
 	with?: Record<string, unknown>;
 	env?: Record<string, string>;
 }
@@ -70,19 +71,25 @@ describe("contracts/ci scripts", () => {
 
 	it("runs the release gate, including dist integrity, in hosted CI", () => {
 		const commands = runCommands(".github/workflows/ci.yml", "ci");
-		const setupNode = workflowJob(".github/workflows/ci.yml", "ci").steps.find(
-			(step) => step.uses === "actions/setup-node@v6",
-		);
+		const steps = workflowJob(".github/workflows/ci.yml", "ci").steps;
+		const setupNode = steps.find((step) => step.uses === "actions/setup-node@v6");
 
 		deepStrictEqual(matrixValues(".github/workflows/ci.yml", "ci", "node-version"), [22, 24]);
 		strictEqual(setupNode?.with?.["node-version"], "$" + "{{ matrix.node-version }}");
-		ok(commands.includes("npm run ci:release"), commands.join("\n"));
-		ok(commands.includes("npm run test:repeat"), commands.join("\n"));
-		ok(
-			commands.some((command) => command.includes("npm run test:coverage")),
-			commands.join("\n"),
-		);
 		ok(!commands.includes("npm run test:live"), "ordinary CI must not run live/model-dependent smoke tests");
+
+		// One full-suite run per lane: the engines floor runs the canonical
+		// gate; the 24 lane's only full-suite run is coverage-instrumented.
+		const gate = steps.find((step) => step.run === "npm run ci:release");
+		strictEqual(gate?.if, "matrix.node-version == 22", "the full release gate runs once, on the engines floor");
+		const build = steps.find((step) => step.run === "npm run build");
+		strictEqual(build?.if, "matrix.node-version == 24", "the 24 lane must build dist for the smoke tests");
+		const coverage = steps.find((step) => step.run?.includes("npm run test:coverage"));
+		strictEqual(coverage?.if, "matrix.node-version == 24");
+		ok(coverage?.run?.includes("set -o pipefail"), "tee must not mask a failing coverage suite");
+		const repeat = steps.find((step) => step.run === "npm run test:repeat");
+		strictEqual(repeat?.if, "matrix.node-version == 24");
+		ok(!commands.includes("npm run test"), "no lane runs the plain suite alongside the gate or coverage run");
 	});
 
 	it("publishes from version tags through the release gate with provenance", () => {

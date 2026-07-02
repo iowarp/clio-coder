@@ -192,6 +192,13 @@ interfaces.
   the full `ci:release` gate via `prepublishOnly`, publishes to npm with
   provenance, and creates a GitHub release carrying the tarball. It needs the
   `NPM_TOKEN` repository secret until npm trusted publishing is configured.
+- The hosted CI matrix stopped running the full test suite twice on the
+  Node 24 lane. Node 22, the engines floor, runs the whole `ci:release` gate;
+  the Node 24 lane now only builds dist and treats the coverage-instrumented
+  suite as its single full-suite run (under `pipefail`, so `tee` cannot mask
+  failures), followed by the flake-detection repeat lane. The node-version
+  insensitive steps (typecheck, lint, skills pins, package audit) no longer
+  repeat, cutting roughly a third of the lane's wall clock.
 - Upgraded the pinned pi SDK packages (`@earendil-works/pi-agent-core`,
   `@earendil-works/pi-ai`, and `@earendil-works/pi-tui`) from `0.79.10` to
   `0.80.3`. Clio keeps the 0.80.x `pi-ai/compat` bridge for the legacy global
