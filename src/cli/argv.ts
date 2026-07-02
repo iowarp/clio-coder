@@ -65,8 +65,18 @@ export function parseFlags(argv: string[]): { flags: Set<string>; positional: st
  * Only flags before the first subcommand are global; after the first
  * positional token, `--api-key` belongs to that subcommand (for example
  * `clio auth login openai --api-key ...` or `clio configure --api-key ...`).
+ *
+ * A top-level `--api-key` requires a value. A missing value (end of argv or a
+ * following `-`-prefixed flag) and a following token that is itself a recognized
+ * subcommand both return an `error`; the flag must not silently disappear nor
+ * swallow the intended subcommand as its value. `isSubcommand` lets the caller
+ * (which owns the dispatch table) supply that recognition without this
+ * dependency-light module importing the command graph.
  */
-export function extractApiKeyFlag(argv: ReadonlyArray<string>): { apiKey?: string; rest: string[] } {
+export function extractApiKeyFlag(
+	argv: ReadonlyArray<string>,
+	isSubcommand: (token: string) => boolean = () => false,
+): { apiKey?: string; rest: string[]; error?: string } {
 	const rest: string[] = [];
 	let apiKey: string | undefined;
 	let sawSubcommand = false;
@@ -78,7 +88,9 @@ export function extractApiKeyFlag(argv: ReadonlyArray<string>): { apiKey?: strin
 			continue;
 		}
 		const value = argv[i + 1];
-		if (value === undefined || value.startsWith("-")) continue;
+		if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
+			return { rest, error: "--api-key requires a value" };
+		}
 		apiKey = value;
 		i += 1;
 	}
@@ -114,11 +126,20 @@ export function extractNoContextFilesFlag(argv: ReadonlyArray<string>): { noCont
 /**
  * Pre-extract the top-level --no-skills and --skill flags from argv.
  * This ensures that both interactive and headless run modes share identical command line flag support.
+ *
+ * A top-level `--skill` requires a value, with the same contract as
+ * `extractApiKeyFlag`: a missing value or a following recognized subcommand
+ * returns an `error` rather than dropping the flag or consuming the subcommand
+ * as a skill path.
  */
-export function extractSkillsFlags(argv: ReadonlyArray<string>): {
+export function extractSkillsFlags(
+	argv: ReadonlyArray<string>,
+	isSubcommand: (token: string) => boolean = () => false,
+): {
 	noSkills: boolean;
 	skillPaths: string[];
 	rest: string[];
+	error?: string;
 } {
 	const rest: string[] = [];
 	let noSkills = false;
@@ -134,11 +155,12 @@ export function extractSkillsFlags(argv: ReadonlyArray<string>): {
 			}
 			if (arg === "--skill") {
 				const value = argv[i + 1];
-				if (value !== undefined && !value.startsWith("-")) {
-					skillPaths.push(value);
-					i += 1;
-					continue;
+				if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
+					return { noSkills, skillPaths, rest, error: "--skill requires a value" };
 				}
+				skillPaths.push(value);
+				i += 1;
+				continue;
 			}
 		}
 		rest.push(arg);
