@@ -24,7 +24,7 @@ At startup, Clio loads recipes from three roots:
 | Source | Root | Notes |
 | --- | --- | --- |
 | **Built-in** | `src/domains/agents/builtins/*.md` in the installed package | Shipped defaults. |
-| **User** | `<dataDir>/agents/*.md` | Per-user recipes. `<dataDir>` follows Clio's XDG/platform data directory. |
+| **User** | `<configDir>/agents/*.md` | Per-user recipes. `<configDir>` follows Clio's XDG/platform config directory. |
 | **Project** | `.clio/agents/*.md` under the current repo | Repository-local overrides and additions (custom/domain agents). |
 
 Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Recipes must live directly under their respective directories.
@@ -46,12 +46,12 @@ User-facing agents visible in `clio agents` and `/agents`.
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `architect` | read, grep, glob, ls, code_nav, git, write_plan | Designs changes across boundaries, contracts, and validation gates. | `artifact-write` | `deep` |
+| `architect` | read, grep, glob, ls, code_nav, git, write_plan, read_skill | Designs changes across boundaries, contracts, migrations, and validation gates. | `artifact-write` | `deep` |
 | `coder` | read, write, edit, grep, glob, ls, web_fetch, git, run_task, validate_frontend | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
 | `debugger` | read, grep, glob, ls, git, run_task | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
 | `documenter` | read, write, edit, grep, glob, ls, git, run_task | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
 | `tester` | read, write, edit, grep, glob, ls, git, run_task | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
-| `verifier` | read, grep, glob, ls, git, run_task, validate_frontend | Independently runs and reports test, lint, build, and release gates. | `verification` | `fast` |
+| `verifier` | read, grep, glob, ls, git, run_task, validate_frontend | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
 
 ### Shipped Shadow Agents
 Internal orchestration helpers. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
@@ -117,6 +117,7 @@ To ensure security and proper boundary isolation, shadow and internal agents are
 In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agents, Clio dispatches subagents to sanctioned subscription worker runtimes:
 - **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. It integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) alongside Clio's native subagent workers (like a local [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or [SGLang](https://github.com/sgl-project/sglang) fleet) to execute tasks under a Claude subscription. Since it routes tool calls through Clio safety, it behaves as a native worker.
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes.
+- **`antigravity-code` (Antigravity CLI):** Runs an Antigravity CLI subprocess as a subscription worker target for fleet dispatch.
 
 Interactive TUI:
 
