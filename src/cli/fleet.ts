@@ -366,6 +366,8 @@ export function statusSnapshot(): {
 }
 
 function runStatus(args: ReadonlyArray<string>): number {
+	const unknown = args.find((arg) => arg !== "--json");
+	if (unknown) return fail(`status: unknown flag: ${unknown}`);
 	const snapshot = statusSnapshot();
 	if (args.includes("--json")) {
 		process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
