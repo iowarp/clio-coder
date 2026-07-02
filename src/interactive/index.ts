@@ -11,7 +11,7 @@ import {
 } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { expandInlineFileReferences, expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { routingChangeNotices } from "../core/session-routing.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { clioConfigDir } from "../core/xdg.js";
@@ -260,26 +260,6 @@ export interface InteractiveSubmitExpansion {
 	images: ImageContent[];
 	workingContextPaths: string[];
 	pendingSkillRequests: PendingSkillRequest[];
-}
-
-export function expandInteractiveSubmit(
-	text: string,
-	resources: ResourcesContract | undefined,
-	cwd = process.cwd(),
-): InteractiveSubmitExpansion {
-	const parsed = resources?.parsePendingSkillRequests(text, cwd, { naturalLanguageTriggers: false }) ?? {
-		text,
-		pendingSkillRequests: [],
-	};
-	const promptExpansion = resources?.expandPromptTemplate(parsed.text, cwd);
-	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
-	const fileExpansion = expandInlineFileReferences(promptText, { cwd, includeImages: true, missing: "leave" });
-	return {
-		text: fileExpansion.text,
-		images: fileExpansion.images,
-		workingContextPaths: fileExpansion.referencedPaths,
-		pendingSkillRequests: parsed.pendingSkillRequests,
-	};
 }
 
 export async function expandInteractiveSubmitAsync(
@@ -915,18 +895,21 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		return typeof metaTurns === "number" ? Math.max(metaTurns, projected) : projected > 0 ? projected : null;
 	};
 
+	// Shared by the welcome banner and the footer: active counts extensions that
+	// are enabled and effective after precedence; installed counts all discovered.
+	const getExtensionStats = () => {
+		const items = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
+		return {
+			active: items.filter((entry) => entry.enabled && entry.effective).length,
+			installed: items.length,
+		};
+	};
 	const banner = createWelcomeDashboard({
 		providers: deps.providers,
 		observability: deps.observability,
 		getContextUsage: () => deps.chat.contextUsage(),
 		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? bootWorkspace,
-		getExtensionStats: () => {
-			const items = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
-			return {
-				active: items.filter((entry) => entry.enabled && entry.effective).length,
-				installed: items.length,
-			};
-		},
+		getExtensionStats,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
 	const chatPanel = createChatPanel({
@@ -1013,13 +996,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			? { getContextState: () => deps.getContextState?.(process.cwd()) ?? { clioMd: "none", memoryCount: 0 } }
 			: {}),
 		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
-		getExtensionStats: () => {
-			const items = deps.extensions?.list(process.cwd(), { all: true }) ?? [];
-			return {
-				active: items.filter((entry) => entry.enabled && entry.effective).length,
-				installed: items.length,
-			};
-		},
+		getExtensionStats,
 		getSessionInfo: () => {
 			const meta = deps.session?.current();
 			return {

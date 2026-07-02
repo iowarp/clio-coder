@@ -19,7 +19,7 @@ import {
 } from "../../src/domains/resources/index.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
-import { expandInteractiveSubmit } from "../../src/interactive/index.js";
+import { expandInteractiveSubmitAsync } from "../../src/interactive/index.js";
 import { createSkillActivationObserver } from "../../src/tools/observers.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { createReadSkillTool, createSkillTool } from "../../src/tools/skills.js";
@@ -462,7 +462,7 @@ describe("contracts/skills slash-command parity", () => {
 		strictEqual(parsed.pendingSkillRequests.length, 0);
 	});
 
-	it("interactive submit asks the model to load slash-command skills without preloading the body", () => {
+	it("interactive submit asks the model to load slash-command skills without preloading the body", async () => {
 		const root = scratchDir();
 		writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
 		const list = loadSkills({ roots: [projectRoot(root)] });
@@ -493,13 +493,13 @@ describe("contracts/skills slash-command parity", () => {
 			resolvePath: (value: string) => value,
 			reload: async () => undefined,
 		};
-		const expanded = expandInteractiveSubmit("/skill:expandable do the thing", resources);
+		const expanded = await expandInteractiveSubmitAsync("/skill:expandable do the thing", resources);
 		strictEqual(expanded.pendingSkillRequests.length, 1);
 		strictEqual(expanded.text, "do the thing");
 		strictEqual(expanded.text.includes("FOLLOW STEPS"), false);
 	});
 
-	it("interactive submit does not auto-activate prompt-triggered skills from plain text", () => {
+	it("interactive submit does not auto-activate prompt-triggered skills from plain text", async () => {
 		const root = scratchDir();
 		writeSkillDir(
 			root,
@@ -535,7 +535,7 @@ describe("contracts/skills slash-command parity", () => {
 			resolvePath: (value: string) => value,
 			reload: async () => undefined,
 		};
-		const expanded = expandInteractiveSubmit("grill me about science skills", resources);
+		const expanded = await expandInteractiveSubmitAsync("grill me about science skills", resources);
 		strictEqual(expanded.pendingSkillRequests.length, 0);
 		strictEqual(expanded.text, "grill me about science skills");
 		strictEqual(expanded.text.includes("ASK ONE QUESTION"), false);
