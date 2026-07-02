@@ -6,11 +6,10 @@ license: Apache-2.0
 allowed-tools:
   - read
   - grep
-  - glob
   - ls
   - find
   - git
-  - workspace_context
+  - context
   - code_nav
   - ask_user
 registry-id: iowarp/clio-coder
@@ -94,7 +93,7 @@ or "fill" when the decision is genuinely missing.
 
 Read what the user already gave you. If the task references files, plans, code,
 tests, or project conventions, inspect them before asking. Prefer
-`workspace_context`, `grep`, `read`, and codewiki tools over guessing.
+`context(scope="workspace")`, `grep`, `read`, and codewiki tools over guessing.
 
 Privately build a phase map:
 

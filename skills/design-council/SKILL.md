@@ -5,12 +5,11 @@ version: 0.1.0
 license: Apache-2.0
 allowed-tools:
   - dispatch
-  - dispatch_batch
   - read
   - grep
-  - glob
+  - find
   - ls
-  - workspace_context
+  - context
   - code_nav
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/design-council
@@ -54,11 +53,12 @@ perspective from the read-only recipes in the live catalog:
 - `researcher` for stances that lean on external docs, standards, or papers
 - `provenance` for stances arguing from runtime evidence and receipts
 
-Run one round's perspectives in parallel (several `dispatch` calls in one
-message, or one `dispatch_batch`), rounds sequential. Workers never edit;
-the debate is analysis. Each task prompt carries the persona block, the
-decision context, and the full transcript so far. Dispatch receipts link every
-statement to a worker run, so the debate is evidence, not vibes.
+Run one round's perspectives in parallel (one `dispatch` call carrying the
+round's task prompts in `tasks` with `mode="parallel"`), rounds sequential.
+Workers never edit; the debate is analysis. Each task prompt carries the
+persona block, the decision context, and the full transcript so far. Dispatch
+receipts link every statement to a worker run, so the debate is evidence, not
+vibes.
 
 ## Rounds
 

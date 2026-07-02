@@ -7,11 +7,10 @@ allowed-tools:
   - read
   - write
   - grep
-  - glob
   - ls
   - find
   - git
-  - workspace_context
+  - context
   - code_nav
   - bash
 registry-id: iowarp/clio-coder
