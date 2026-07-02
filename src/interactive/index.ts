@@ -424,19 +424,7 @@ export interface SettingsOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
-export interface ResumeOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface TreeOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
 export interface MessagePickerOverlayKeyDeps {
-	closeOverlay: () => void;
-}
-
-export interface CwdFallbackOverlayKeyDeps {
 	closeOverlay: () => void;
 }
 
@@ -455,10 +443,7 @@ export interface OverlayKeyDeps
 		ModelOverlayKeyDeps,
 		ScopedModelsOverlayKeyDeps,
 		SettingsOverlayKeyDeps,
-		ResumeOverlayKeyDeps,
-		TreeOverlayKeyDeps,
 		MessagePickerOverlayKeyDeps,
-		CwdFallbackOverlayKeyDeps,
 		AskUserOverlayKeyDeps {
 	requestShutdown: () => void;
 }
@@ -696,25 +681,6 @@ export function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDe
 }
 
 /**
- * Pure overlay key router for the /resume overlay. The session selector owns
- * Esc because it buffers raw escape bytes long enough to distinguish a real
- * Escape key from a latency-split arrow sequence.
- */
-export function routeResumeOverlayKey(_data: string, _deps: ResumeOverlayKeyDeps): boolean {
-	return false;
-}
-
-/**
- * Pure overlay key router for the /tree overlay. Esc is intentionally NOT
- * consumed here because the overlay runs in browse and edit-label submodes.
- * TreeOverlayBox.handleInput calls the onClose dep itself when Esc is pressed
- * in browse mode; every other key also falls through to the Box.
- */
-export function routeTreeOverlayKey(_data: string, _deps: TreeOverlayKeyDeps): boolean {
-	return false;
-}
-
-/**
  * Pure overlay key router for the /fork message-picker. Esc closes; arrows
  * and Enter fall through to the focused SelectList (same policy as /resume).
  */
@@ -723,19 +689,6 @@ export function routeMessagePickerOverlayKey(data: string, deps: MessagePickerOv
 		deps.closeOverlay();
 		return true;
 	}
-	return false;
-}
-
-/**
- * Pure overlay key router for the cwd-fallback overlay. Esc is intentionally
- * NOT consumed here: the SelectList inside the overlay owns its own
- * cancel-on-Esc handling and routes it through onCancel, which restores the
- * prior session via switchBranch (or reopens /resume when there was no prior
- * session). Intercepting Esc at the router level bypassed that path and left
- * the user inside the broken-cwd session; the SelectList's handler is the
- * single source of truth for Cancel. Mirrors routeTreeOverlayKey.
- */
-export function routeCwdFallbackOverlayKey(_data: string, _deps: CwdFallbackOverlayKeyDeps): boolean {
 	return false;
 }
 
@@ -862,21 +815,19 @@ export function routeOverlayKey(
 	}
 	if (overlayState === "resume") {
 		// Session selector owns Esc, arrows, Enter, and search input.
-		return routeResumeOverlayKey(data, deps);
+		return false;
 	}
 	if (overlayState === "tree") {
-		// TreeOverlayBox owns its full keymap including Esc (submode-aware);
-		// routeTreeOverlayKey is a no-op stub kept for shape symmetry.
-		return routeTreeOverlayKey(data, deps);
+		// TreeOverlayBox owns its full keymap including Esc (submode-aware).
+		return false;
 	}
 	if (overlayState === "message-picker") {
 		// SelectList owns arrows and Enter; route only Esc here.
 		return routeMessagePickerOverlayKey(data, deps);
 	}
 	if (overlayState === "cwd-fallback") {
-		// SelectList owns its full keymap including Esc (cancel parity);
-		// routeCwdFallbackOverlayKey is a no-op stub kept for shape symmetry.
-		return routeCwdFallbackOverlayKey(data, deps);
+		// SelectList owns its full keymap including Esc (cancel parity).
+		return false;
 	}
 	if (overlayState === "ask-user") {
 		return routeAskUserOverlayKey(data, deps);
