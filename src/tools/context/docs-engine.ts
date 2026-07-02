@@ -76,7 +76,7 @@ const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expan
 	},
 	{
 		triggers: ["validate", "validated", "validation", "verify", "verified", "test", "tests", "rigor"],
-		expansions: ["validation", "verify", "evidence", "rigor", "finish", "contract", "run_task"],
+		expansions: ["validation", "verify", "evidence", "rigor", "finish", "contract", "check"],
 	},
 	{
 		triggers: ["bash", "command", "commands", "shell", "terminal", "tool", "tools"],

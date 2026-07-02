@@ -104,7 +104,7 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ },
 ];
 
-const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.RunTask]);
+const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
@@ -265,8 +265,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 			if (hit?.match.ruleId !== undefined) allowInput.ruleId = hit.match.ruleId;
 			if (hit?.match !== undefined) allowInput.match = hit.match;
-			// Typed execution tools (run_task, validate_frontend) are bounded by
-			// their own allowlists, so they sit in the no-prompt set.
+			// The typed execution tool (verify) is bounded by its own check
+			// allowlist, so it sits in the no-prompt set.
 			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
 			return allowDecision(base, allowInput);
 		},

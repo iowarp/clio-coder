@@ -20,11 +20,7 @@ const MINIMAL_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [
 	ToolNames.CodeNav,
 ];
 
-const SCIENCE_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [
-	...MINIMAL_LOCAL_TOOLS,
-	ToolNames.RunTask,
-	ToolNames.ValidateFrontend,
-];
+const SCIENCE_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [...MINIMAL_LOCAL_TOOLS, ToolNames.Verify];
 
 const NARROW_TOOL_PROFILES: Readonly<Record<Exclude<ToolProfileName, "full-agent">, ReadonlySet<BuiltinToolName>>> = {
 	"minimal-local": new Set(MINIMAL_LOCAL_TOOLS),

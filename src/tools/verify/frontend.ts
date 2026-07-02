@@ -3,20 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Script } from "node:vm";
-import { Type } from "typebox";
 import {
 	combineSafeOutput,
 	runCommandVector,
 	SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
 	SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-} from "../core/safe-exec.js";
-import { ToolNames } from "../core/tool-names.js";
-import { resolveReadPath } from "./path-utils.js";
-import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
-import { stringEnum } from "./string-enum.js";
-import { truncateUtf8 } from "./truncate-utf8.js";
+} from "../../core/safe-exec.js";
+import { resolveReadPath } from "../path-utils.js";
+import type { ToolResult, ToolResultDetails } from "../registry.js";
+import { truncateUtf8 } from "../truncate-utf8.js";
 
-const BROWSER_MODES = ["auto", "required", "off"] as const;
+export const BROWSER_MODES = ["auto", "required", "off"] as const;
 type BrowserMode = (typeof BROWSER_MODES)[number];
 
 type CheckStatus = "pass" | "warn" | "fail" | "skip";
@@ -80,42 +77,31 @@ const JAVASCRIPT_TYPES = new Set([
 	"text/ecmascript",
 ]);
 
-export const validateFrontendTool: ToolSpec = {
-	name: ToolNames.ValidateFrontend,
-	description:
-		"Validate an HTML, CSS, or JavaScript artifact without shell access: structure, local references, syntax, and an optional headless-browser load.",
-	parameters: Type.Object({
-		path: Type.String({ description: "File under the workspace root." }),
-		browser: Type.Optional(stringEnum(BROWSER_MODES, "Headless browser check (default auto).")),
-		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms per subprocess." })),
-	}),
-	baseActionClass: "execute",
-	executionMode: "sequential",
-	async run(args, options) {
-		return runValidateFrontend(args, options);
-	},
-};
-
-async function runValidateFrontend(
+/**
+ * verify(check="frontend"): validate an HTML, CSS, or JavaScript artifact
+ * without shell access. Structure, local references, syntax, and an optional
+ * headless-browser load. Internal module of the verify tool; not registered
+ * as its own surface entry.
+ */
+export async function runFrontendCheck(
 	args: Record<string, unknown>,
 	options?: { signal?: AbortSignal },
 ): Promise<ToolResult> {
 	const pathArg = typeof args.path === "string" ? args.path.trim() : "";
-	if (pathArg.length === 0) return { kind: "error", message: "validate_frontend: missing path argument" };
+	if (pathArg.length === 0) return { kind: "error", message: "verify: check=frontend requires a path argument" };
 
 	let artifactPath: string;
 	try {
 		artifactPath = resolveReadPath(pathArg);
 	} catch (err) {
-		return { kind: "error", message: `validate_frontend: ${err instanceof Error ? err.message : String(err)}` };
+		return { kind: "error", message: `verify: ${err instanceof Error ? err.message : String(err)}` };
 	}
 	if (!isInsideWorkspace(artifactPath)) {
-		return { kind: "error", message: `validate_frontend: path escapes workspace root: ${artifactPath}` };
+		return { kind: "error", message: `verify: path escapes workspace root: ${artifactPath}` };
 	}
 
-	if (!existsSync(artifactPath)) return { kind: "error", message: `validate_frontend: file not found: ${artifactPath}` };
-	if (!statSync(artifactPath).isFile())
-		return { kind: "error", message: `validate_frontend: not a file: ${artifactPath}` };
+	if (!existsSync(artifactPath)) return { kind: "error", message: `verify: file not found: ${artifactPath}` };
+	if (!statSync(artifactPath).isFile()) return { kind: "error", message: `verify: not a file: ${artifactPath}` };
 
 	const browserMode = browserModeArg(args.browser);
 	const validateOptions: ValidationOptions = {
@@ -142,7 +128,7 @@ async function runValidateFrontend(
 	if (failed.length > 0) {
 		return {
 			kind: "error",
-			message: `validate_frontend: ${failed.length} check${failed.length === 1 ? "" : "s"} failed\n${output}`,
+			message: `verify: ${failed.length} frontend check${failed.length === 1 ? "" : "s"} failed\n${output}`,
 			details,
 		};
 	}
@@ -670,7 +656,8 @@ function resultDetails(
 	checks: ReadonlyArray<FrontendCheck>,
 ): ToolResultDetails {
 	return {
-		action: "validate_frontend",
+		action: "verify",
+		check: "frontend",
 		path: artifactPath,
 		browserMode,
 		status: checks.some((check) => check.status === "fail") ? "failed" : "passed",
@@ -680,7 +667,7 @@ function resultDetails(
 
 function renderChecks(artifactPath: string, checks: ReadonlyArray<FrontendCheck>): string {
 	const lines = [
-		`validate_frontend: ${checks.some((check) => check.status === "fail") ? "failed" : "ok"}`,
+		`frontend validation: ${checks.some((check) => check.status === "fail") ? "failed" : "ok"}`,
 		`artifact: ${artifactPath}`,
 		"checks:",
 	];
