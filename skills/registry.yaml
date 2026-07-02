@@ -38,3 +38,6 @@ skills:
   - name: scientific-debugging
     version: 0.1.0
     sha256: 4a3664cedd1b954f7d3abc38bcb73e161234b8084b90ff1c7b7e12ddf9a14c55
+  - name: workflow-distiller
+    version: 0.1.0
+    sha256: bd075e990f9053c522cf4608e59dfdf30badf691cc3595e66966f370b8fe4bce
