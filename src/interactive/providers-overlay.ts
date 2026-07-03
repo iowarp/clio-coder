@@ -24,7 +24,7 @@ import {
 } from "../engine/tui.js";
 import { buildHint, FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 import { applySettingChange } from "./overlays/settings.js";
-import { type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
+import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const TARGET_COL_WIDTH = 20;
@@ -286,19 +286,33 @@ function formatCollapsedTargetRow(
 	const id = truncateToWidth(status.target.id, targetBudget, "", true);
 	const target = options.active ? `${theme.style("title", id, { bold: true })} ${theme.fg("success", "active")}` : id;
 	const runtime = status.runtime?.displayName ?? status.target.runtime;
+	// Runtime, auth, and model are secondary values, so they read muted; the
+	// target id and the tokened health cell carry the row's brighter marks.
 	const prefix = [
 		`${marker} ${padAnsi(target, TARGET_COL_WIDTH)}`,
-		padAnsi(runtime, RUNTIME_COL_WIDTH),
+		theme.fg("muted", padAnsi(runtime, RUNTIME_COL_WIDTH)),
 		padAnsi(formatHealthCompact(status), HEALTH_COL_WIDTH),
-		padAnsi(options.auth.summary, AUTH_COL_WIDTH),
+		theme.fg("muted", padAnsi(options.auth.summary, AUTH_COL_WIDTH)),
 	].join("  ");
 	const model = modelLabelForStatus(status, options.activeTargetId, options.activeModelId);
 	const modelPrefix = `${prefix}  `;
 	if (visibleWidth(modelPrefix) >= options.width) return truncateToWidth(prefix, options.width, "", true);
-	return `${modelPrefix}${truncateToWidth(model, options.width - visibleWidth(modelPrefix), "", true)}`;
+	return `${modelPrefix}${theme.fg("muted", truncateToWidth(model, options.width - visibleWidth(modelPrefix), "", true))}`;
+}
+
+/**
+ * Paint an indented `key: value` detail line in the key-value grammar: the
+ * padded key and its colon dim, the value muted. Lines without a colon fall
+ * back to muted so no detail row renders completely unstyled.
+ */
+function dimKeyMutedValue(theme: ClioTheme, line: string): string {
+	const colon = line.indexOf(":");
+	if (colon < 0) return theme.fg("muted", line);
+	return `${theme.fg("dim", line.slice(0, colon + 1))}${theme.fg("muted", line.slice(colon + 1))}`;
 }
 
 function formatTargetDetailLines(status: TargetStatus, auth: TargetAuthDisplay, width: number): string[] {
+	const theme = clioTheme();
 	const lines = [
 		`    url: ${targetLocation(status)}`,
 		formatRuntimeRow(status),
@@ -308,7 +322,7 @@ function formatTargetDetailLines(status: TargetStatus, auth: TargetAuthDisplay, 
 		formatReasonRow(status),
 		formatDiscoveredRow(status),
 	];
-	return lines.map((line) => truncateToWidth(line, width, "", true));
+	return lines.map((line) => truncateToWidth(dimKeyMutedValue(theme, line), width, "", true));
 }
 
 export function formatTargetsHubBodyLines(
@@ -323,13 +337,16 @@ export function formatTargetsHubBodyLines(
 	} = {},
 	width = DEFAULT_CONTENT_WIDTH,
 ): string[] {
+	const theme = clioTheme();
 	const lines: string[] = [];
 	if (options.error) {
-		lines.push(formatRuntimeResolutionDiagnostic(options.error));
+		const errorToken: ClioToken =
+			options.error.severity === "error" ? "error" : options.error.severity === "warning" ? "warning" : "muted";
+		lines.push(theme.fg(errorToken, formatRuntimeResolutionDiagnostic(options.error)));
 		lines.push("");
 	}
 	if (statuses.length === 0) {
-		lines.push("no targets configured (run clio configure)");
+		lines.push(theme.fg("muted", "no targets configured (run clio configure)"));
 		return lines;
 	}
 	const activeTargetId = options.activeTargetId ?? null;
