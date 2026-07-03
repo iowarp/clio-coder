@@ -131,7 +131,7 @@ describe("IT2: Harness-state pill", () => {
 			{ phase: "tool_blocked", expected: "⏸ blocked", token: "warning" },
 			{ phase: "retrying", expected: "↻ retry 2/5", token: "warning" },
 			{ phase: "compacting", expected: "♻ compacting", token: "reason" },
-			{ phase: "dispatching", expected: "⇲ dispatch", token: "highlight" },
+			{ phase: "dispatching", expected: "⇲ dispatch", token: "action" },
 			{ phase: "stuck", expected: "⚠ stuck 1s", token: "error" },
 			{ phase: "ended", expected: "✓ done", token: "success" },
 		];

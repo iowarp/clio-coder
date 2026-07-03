@@ -12,6 +12,7 @@ import {
 	type TUI,
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { GLYPH } from "../theme/index.js";
 
 export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 12;
@@ -103,7 +104,7 @@ function formatTimestampForRow(timestamp: string): string {
 function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): SelectItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
-		label: `● ${row.shortId}  ${row.preview}`,
+		label: `${GLYPH.running} ${row.shortId}  ${row.preview}`,
 		description: formatTimestampForRow(row.at),
 	}));
 }

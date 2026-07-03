@@ -13,19 +13,19 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 		let token: ClioToken = "dim";
 		switch (level) {
 			case "info":
-				glyph = GLYPH.noticeInfo;
+				glyph = "·";
 				token = "dim";
 				break;
 			case "success":
-				glyph = GLYPH.noticeSuccess;
+				glyph = GLYPH.ok;
 				token = "success";
 				break;
 			case "warn":
-				glyph = GLYPH.noticeWarn;
+				glyph = GLYPH.warnInline;
 				token = "warning";
 				break;
 			case "error":
-				glyph = GLYPH.noticeError;
+				glyph = GLYPH.error;
 				token = "error";
 				break;
 		}

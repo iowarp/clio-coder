@@ -737,7 +737,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 			: statusRow(null),
 	);
 	rows.push(
-		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "highlight" : "dim"),
+		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "action" : "dim"),
 	);
 	for (const row of facts.dispatchRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row)));
 	rows.push(kv("tools", facts.toolTally));
@@ -792,39 +792,39 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 	const ultraNarrow = width < 48;
 	switch (status.phase) {
 		case "idle":
-			return { glyph: "◌", label: "idle", token: "muted", live: false };
+			return { glyph: GLYPH.queued, label: "idle", token: "muted", live: false };
 		case "preparing":
-			return { glyph: "◔", label: "prep", token: "info", live: true };
+			return { glyph: GLYPH.phaseWaiting, label: "prep", token: "info", live: true };
 		case "waiting_model":
-			return { glyph: "◔", label: "waiting", token: "info", live: true };
+			return { glyph: GLYPH.phaseWaiting, label: "waiting", token: "info", live: true };
 		case "thinking":
-			return { glyph: "◐", label: "thinking", token: "reason", live: true };
+			return { glyph: GLYPH.phaseThinking, label: "thinking", token: "reason", live: true };
 		case "writing":
-			return { glyph: "◑", label: "writing", token: "accent", live: true };
+			return { glyph: GLYPH.phaseWriting, label: "writing", token: "accent", live: true };
 		case "tool_running":
-			return { glyph: "⚙", label: shortToolLabel(status, width), token: "accent", live: true };
+			return { glyph: GLYPH.phaseTool, label: shortToolLabel(status, width), token: "accent", live: true };
 		case "tool_blocked":
-			return { glyph: "⏸", label: "blocked", token: "warning", live: true };
+			return { glyph: GLYPH.phaseBlocked, label: "blocked", token: "warning", live: true };
 		case "retrying": {
 			const attempt = status.retry?.attempt ?? 0;
 			const maxAttempts = status.retry?.maxAttempts ?? 0;
 			return {
-				glyph: "↻",
+				glyph: GLYPH.phaseRetry,
 				label: ultraNarrow ? "retry" : `retry ${attempt}/${maxAttempts}`,
 				token: "warning",
 				live: true,
 			};
 		}
 		case "compacting":
-			return { glyph: "♻", label: "compacting", token: "reason", live: true };
+			return { glyph: GLYPH.phaseCompact, label: "compacting", token: "reason", live: true };
 		case "dispatching":
-			return { glyph: "⇲", label: "dispatch", token: "highlight", live: true };
+			return { glyph: GLYPH.phaseDispatch, label: "dispatch", token: "action", live: true };
 		case "stuck": {
 			const seconds = Math.max(0, Math.floor((now - status.since) / 1000));
-			return { glyph: "⚠", label: ultraNarrow ? "stuck" : `stuck ${seconds}s`, token: "error", live: true };
+			return { glyph: GLYPH.warn, label: ultraNarrow ? "stuck" : `stuck ${seconds}s`, token: "error", live: true };
 		}
 		case "ended":
-			return { glyph: "✓", label: "done", token: "success", live: false };
+			return { glyph: GLYPH.ok, label: "done", token: "success", live: false };
 	}
 }
 
@@ -840,8 +840,8 @@ function harnessBadge(
 ): string {
 	const workers = activeWorkerCount(dispatchRows);
 	const activeTools = finiteNonNegative(toolCounts.active);
-	// Active fleet work is a Clio-signature state; it gets the highlight color.
-	if (workers > 0) return ` ${theme.fg("dim", "·")} ${theme.fg("highlight", `fleet ${workers}`)}`;
+	// Active fleet work is a Clio-signature state; it gets the action color.
+	if (workers > 0) return ` ${theme.fg("dim", "·")} ${theme.fg("action", `fleet ${workers}`)}`;
 	let badgeText: string | null = null;
 	if (activeTools > 0) badgeText = `tools ${activeTools}`;
 	else if (status.phase === "idle") badgeText = "tools none";

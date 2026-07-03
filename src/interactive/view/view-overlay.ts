@@ -9,7 +9,7 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, markdownTheme } from "../theme/index.js";
+import { clioTheme, GLYPH, markdownTheme } from "../theme/index.js";
 import {
 	type ArtifactProvider,
 	listViewArtifacts,
@@ -376,7 +376,7 @@ export class ViewOverlayView implements Component {
 			}
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
-			const cursor = selected ? theme.fg("accent", "▸ ") : "  ";
+			const cursor = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 			const title = selected ? theme.style("accent", row.item.title, { bold: true }) : row.item.title;
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);
 			const meta = metaParts.length > 0 ? theme.fg("dim", metaParts.join(" ")) : "";

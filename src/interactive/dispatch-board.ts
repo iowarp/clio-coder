@@ -121,9 +121,9 @@ export function dispatchStatusPresentation(
 		case "aborted":
 			return { glyph: GLYPH.cancelled, label: compact ? "abort" : "aborted", token: "dim" };
 		case "stale":
-			return { glyph: GLYPH.noticeWarn, label: "stale", token: "warning" };
+			return { glyph: GLYPH.warnInline, label: "stale", token: "warning" };
 		case "enqueued":
-			return { glyph: GLYPH.queued, label: "queued", token: "highlight" };
+			return { glyph: GLYPH.queued, label: "queued", token: "action" };
 	}
 }
 

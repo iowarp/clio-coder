@@ -24,7 +24,7 @@ import {
 } from "../engine/tui.js";
 import { buildHint, FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 import { applySettingChange } from "./overlays/settings.js";
-import { type ClioToken, clioTheme } from "./theme/index.js";
+import { type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const TARGET_COL_WIDTH = 20;
@@ -72,7 +72,7 @@ function healthLabel(status: TargetStatus): string {
 function healthGlyph(status: TargetStatus): string {
 	switch (status.health.status) {
 		case "healthy":
-			return "●";
+			return GLYPH.running;
 		case "degraded":
 			return "◐";
 		case "down":
@@ -281,7 +281,7 @@ function formatCollapsedTargetRow(
 	},
 ): string {
 	const theme = clioTheme();
-	const marker = options.selected ? theme.fg("accent", "▸") : " ";
+	const marker = options.selected ? theme.fg("accent", GLYPH.cursor) : " ";
 	const targetBudget = options.active ? Math.max(1, TARGET_COL_WIDTH - " active".length) : TARGET_COL_WIDTH;
 	const id = truncateToWidth(status.target.id, targetBudget, "", true);
 	const target = options.active ? `${theme.style("title", id, { bold: true })} ${theme.fg("success", "active")}` : id;

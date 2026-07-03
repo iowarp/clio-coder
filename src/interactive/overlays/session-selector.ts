@@ -11,6 +11,7 @@ import {
 	type TUI,
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { GLYPH } from "../theme/index.js";
 import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
@@ -73,7 +74,7 @@ function previewLine(meta: SessionMeta): string {
 }
 
 function metaStrip(meta: SessionMeta, now: number): string {
-	const status = meta.endedAt ? "✓" : "●";
+	const status = meta.endedAt ? "✓" : GLYPH.running;
 	const when = formatRelativeTime(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt, now);
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 msg" : `${count} msgs`;
