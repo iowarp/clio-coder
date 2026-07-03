@@ -13,15 +13,8 @@ import {
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import {
-	type Component,
-	getCapabilities,
-	Image,
-	type ImageTheme,
-	truncateToWidth,
-	visibleWidth,
-} from "../engine/tui.js";
-import { abbreviateModelId, type ClioTheme, clioTheme, GLYPH } from "./theme/index.js";
+import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
+import { abbreviateModelId, type ClioTheme, clioTheme, frame, GLYPH } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	providers: ProvidersContract;
@@ -237,31 +230,14 @@ function createLogoImage(theme: ClioTheme): Component | null {
 	});
 }
 
-function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, width, "", true);
-	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-}
-
-// Draw the top border so the panel is exactly `safeWidth` columns wide
-// regardless of the rendered title. The title carries ANSI styling and a
-// variable-width version suffix, so the fill is derived from the title's
-// visible width rather than a hardcoded reference string.
-function framedTopBorder(title: string, safeWidth: number, theme: ClioTheme): string {
-	const prefix = "┌── ";
-	const suffix = "──┐";
-	const fill = Math.max(0, safeWidth - visibleWidth(prefix) - visibleWidth(title) - visibleWidth(suffix));
-	return `${theme.fg("frame", prefix)}${title}${theme.fg("frame", "─".repeat(fill))}${theme.fg("frame", suffix)}`;
-}
-
-function framedBottomBorder(safeWidth: number, theme: ClioTheme): string {
-	return `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(Math.max(0, safeWidth - 2)))}${theme.fg("frame", "┘")}`;
-}
-
 export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: number): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
+	const contentWidth = safeWidth - 4;
 
-	const title = `${theme.fg("frame", GLYPH.agent)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
+	// The whole styled title (brand glyph, bold name, dim version) is handed to
+	// the canonical island frame, which places it with one space on each side.
+	const title = `${theme.fg("frame", GLYPH.brand)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
 
 	const targetVal = `${theme.fg("accent", stats.targetLabel)}/${abbreviateModelId(stats.modelLabel)}`;
 	const thinkVal = `think ${theme.fg("reason", stats.thinkingLevel)}`;
@@ -291,37 +267,25 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 
 	const hintStr = `Type ${theme.fg("accent", "/settings")} to edit · ${theme.fg("accent", "/context init")} to bootstrap · ${theme.fg("accent", "Alt+U")} to toggle dashboard`;
 
+	// The hint row is the one line long enough to overflow; truncate it with a
+	// trailing ellipsis so it never cuts a word mid-glyph.
+	const fitHint = (line: string): string => truncateToWidth(line, Math.max(0, contentWidth), "…", false);
+
 	if (safeWidth >= WIDE_MIN) {
 		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
 		const targetLine = `  ${theme.fg("muted", "Target:")}   ${targetVal} · ${thinkVal}${healthStr}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
 		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${profileStr} · ${compactStr}`;
-		const hintLine = `  ${theme.fg("muted", "Hint:")}     ${hintStr}`;
+		const hintLine = fitHint(`  ${theme.fg("muted", "Hint:")}     ${hintStr}`);
 
-		const innerWidth = safeWidth - 4;
-		const body = [
-			`${theme.fg("frame", "│")} ${padAnsi(targetLine, innerWidth)} ${theme.fg("frame", "│")}`,
-			`${theme.fg("frame", "│")} ${padAnsi(contextLine, innerWidth)} ${theme.fg("frame", "│")}`,
-			`${theme.fg("frame", "│")} ${padAnsi(settingsLine, innerWidth)} ${theme.fg("frame", "│")}`,
-			`${theme.fg("frame", "│")} ${padAnsi(hintLine, innerWidth)} ${theme.fg("frame", "│")}`,
-		];
-
-		return [framedTopBorder(title, safeWidth, theme), ...body, framedBottomBorder(safeWidth, theme)];
+		return frame(theme, title, [targetLine, contextLine, settingsLine, hintLine], safeWidth);
 	} else if (safeWidth >= MID_MIN) {
 		const targetLine = `  ${theme.fg("muted", "Target:")}  ${targetVal} · ${thinkVal}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")} ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
 		const configLine = `  ${theme.fg("muted", "Config:")}  ${safetyStr} · ${profileStr}`;
-		const hintLine = `  ${theme.fg("muted", "Hint:")}    ${hintStr}`;
+		const hintLine = fitHint(`  ${theme.fg("muted", "Hint:")}    ${hintStr}`);
 
-		const innerWidth = safeWidth - 4;
-		const body = [
-			`${theme.fg("frame", "│")} ${padAnsi(targetLine, innerWidth)} ${theme.fg("frame", "│")}`,
-			`${theme.fg("frame", "│")} ${padAnsi(contextLine, innerWidth)} ${theme.fg("frame", "│")}`,
-			`${theme.fg("frame", "│")} ${padAnsi(configLine, innerWidth)} ${theme.fg("frame", "│")}`,
-			`${theme.fg("frame", "│")} ${padAnsi(hintLine, innerWidth)} ${theme.fg("frame", "│")}`,
-		];
-
-		return [framedTopBorder(title, safeWidth, theme), ...body, framedBottomBorder(safeWidth, theme)];
+		return frame(theme, title, [targetLine, contextLine, configLine, hintLine], safeWidth);
 	} else {
 		return [
 			title,
