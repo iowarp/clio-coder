@@ -529,6 +529,36 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 	};
 }
 
+export type DocsCorpusOutcome =
+	| { ok: true; payload: Record<string, unknown>; fileCount: number }
+	| { ok: false; message: string };
+
+/**
+ * List the bundled-docs corpus without running a query: the file set plus the
+ * doc/section counts a successful search already carries under `corpus`. This
+ * is what the model wants when it sends `scope=docs` with no query — an index
+ * to pick a search term from — and it saves the wasted round the old
+ * `requires query` error forced. Bounded: the corpus is a handful of files.
+ */
+export function listDocsCorpus(): DocsCorpusOutcome {
+	const loaded = loadDocsIndex();
+	if (!loaded.ok) return { ok: false, message: loaded.message };
+	const index = loaded.index;
+	const payload = {
+		version: 2,
+		corpus: {
+			docs: index.docCount,
+			sections: index.sections.length,
+			files: index.files,
+			excludes: ["docs/html/**"],
+		},
+		followUp:
+			"Pass query=<terms> to search these docs; each result cites the file and line range to read. " +
+			"Try Clio vocabulary such as target, autonomy, dispatch, evidence, middleware, context, validation, install, or model catalog.",
+	};
+	return { ok: true, payload, fileCount: index.files.length };
+}
+
 export type DocsSearchOutcome =
 	| {
 			ok: true;

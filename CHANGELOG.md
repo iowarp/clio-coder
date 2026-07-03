@@ -166,6 +166,13 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
+- **`context(scope="docs")` with no query lists the corpus instead of erroring.**
+  Omitting the query used to return `context: scope=docs requires query`,
+  costing the model a wasted round before it could search. It now returns the
+  corpus listing — the file set plus doc and section counts, the same `corpus`
+  shape a search already carries — so the model can pick a search term from the
+  index in one call. Bounded (the corpus is a handful of files); a query still
+  runs the ranked search as before.
 - **Skill awareness across the prompt and tool surfaces.** Four wording-level
   nudges now incline the main agent to surface installed skills: the
   operating contract carries a static Skills passage (skill-shaped tasks,
