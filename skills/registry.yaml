@@ -30,6 +30,9 @@ skills:
   - name: experiment-protocol
     version: 0.1.1
     sha256: 82959ae707139fb9984ea27b5c600d9cefda0c77f901ec05f3e0430e9e125036
+  - name: find-skills
+    version: 0.1.0
+    sha256: 082678c097845f02cf01affd49312c908ee8a75b7ee7ee035c6e8f2d729415a2
   - name: grill-me
     version: 0.3.1
     sha256: 77d4c69d5d08d9aace725d372c7d682eb537fd6d5545a8285dbcbef57b083063

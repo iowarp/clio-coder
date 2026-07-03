@@ -43,6 +43,7 @@ auto-loads. That gap is deliberate.
 | [`scientific-debugging`](scientific-debugging/) | workflow | Debugging has stalled or produces wrong numbers, NaNs, or flaky results. Forces falsifiable hypotheses across fault classes and evidence-cited verdicts before any fix. |
 | [`experiment-protocol`](experiment-protocol/) | workflow | A benchmark, optimization, or numerical comparison needs success criteria locked before results exist. Pre-registers thresholds into the repo validation contract. |
 | [`design-council`](design-council/) | workflow | A design decision has real tradeoffs and needs several composed expert perspectives that debate through read-only dispatched workers before code is written. |
+| [`find-skills`](find-skills/) | workflow | A capability might exist as an installable skill. Searches with `clio skills search`, browses the ecosystem read-only, and installs only through `clio skills install`. |
 | [`credentials`](credentials/) | discipline | A task needs an API key, token, or facility credential. Verifies presence without exposing values, collects new secrets via hidden terminal input, and contains leaks. |
 | [`workflow-distiller`](workflow-distiller/) | workflow | A workflow that just ran should become a reusable skill. Reconstructs it from the session record, interviews, checks overlap, gates on approval, then writes it following `skill-craft`. |
 | [`skill-craft`](skill-craft/) | reference | Writing, reviewing, or pruning any SKILL.md: invocation cost, trigger-only descriptions, completion criteria, progressive disclosure, and the pruning pass. |
@@ -86,6 +87,20 @@ catalog skill, load it directly without installing:
 Uninstall is just removing the copy: `rm -r .clio/skills/<name>` (or the
 user-scope equivalent). Installs never write outside `.clio/skills` or the
 user config skills dir, both of which are gitignored / outside the repo.
+
+### Skill discovery and find-skills precedence
+
+Clio ships [`find-skills`](find-skills/) so that discovery and installation
+both route through `clio skills`. A community skill of the same name is
+commonly present in the compat roots (`~/.agents/skills`,
+`~/.claude/skills`) and drives the external `npx skills` installer, which
+bypasses Clio. Compat roots stay enabled, and the loader resolves name
+collisions by precedence: the Clio user root and `.clio/skills` outrank the
+compat roots. Install the catalog copy so it wins:
+
+```bash
+clio skills install find-skills --user   # or --project for one repo
+```
 
 ## Contributing / approval
 
