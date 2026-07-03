@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
 	createSkillsReminderRegistration,
+	isSubstantiveUserTurn,
 	SKILL_SUGGESTION_ANCHOR,
 	SKILLS_REMINDER_REGISTRATION_ID,
 	skillsReminderMessage,
@@ -21,12 +22,17 @@ function turnStart(input: {
 	sessionId?: string;
 	conversationMessages?: number;
 	pendingSkillRequests?: number;
+	text?: string;
 }): MiddlewareHookInput {
+	// Default to a substantive task so the existing "fires on the first turn"
+	// cases still exercise a real task turn; greeting cases pass text explicitly.
+	const text = input.text ?? "refactor the failing parser and add a regression test";
 	return {
 		hook: "turn_start",
 		...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+		text,
 		metadata: {
-			promptChars: 42,
+			promptChars: text.length,
 			queued: false,
 			conversationMessages: input.conversationMessages ?? 0,
 			pendingSkillRequests: input.pendingSkillRequests ?? 0,
@@ -34,7 +40,49 @@ function turnStart(input: {
 	};
 }
 
+describe("contracts/skills substance classifier", () => {
+	it("treats bare greetings as non-substantive and any real task as substantive", () => {
+		const table: Array<[string, boolean]> = [
+			["hi", false],
+			["Hello!", false],
+			["hey there", false],
+			["good morning", false],
+			["thanks 🙏", false],
+			["ok", false],
+			["", false],
+			["   ", false],
+			["hi clio", false],
+			["fix the bug", true],
+			["how does bootstrapping work", true],
+			["hello, can you read src/index.ts", true],
+			["test the parser", true], // "parser" is a real token even though "test" alone is a greeting
+			["good work on the refactor", true],
+		];
+		for (const [text, expected] of table) {
+			strictEqual(isSubstantiveUserTurn(text), expected, `"${text}" should be substantive=${expected}`);
+		}
+	});
+});
+
 describe("contracts/skills first-turn reminder", () => {
+	it("spends the shot on the first real task turn, not on a greeting-first session", () => {
+		const registration = createSkillsReminderRegistration({ countModelVisibleSkills: () => 3 });
+		// "hi" opens a fresh session: no reminder, and the shot is NOT spent.
+		strictEqual(registration.evaluate(turnStart({ conversationMessages: 0, text: "hi" })).length, 0);
+		// A second greeting still carries the shot even though the conversation grew.
+		strictEqual(registration.evaluate(turnStart({ sessionId: "s1", conversationMessages: 2, text: "hello" })).length, 0);
+		// The first real task turn fires, despite a non-empty conversation.
+		strictEqual(
+			registration.evaluate(turnStart({ sessionId: "s1", conversationMessages: 4, text: "fix the failing test" })).length,
+			1,
+		);
+		// And only once.
+		strictEqual(
+			registration.evaluate(turnStart({ sessionId: "s1", conversationMessages: 6, text: "now add docs" })).length,
+			0,
+		);
+	});
+
 	it("injects one reminder on the first substantive turn and never again in the session", () => {
 		const registration = createSkillsReminderRegistration({ countModelVisibleSkills: () => 4 });
 		strictEqual(registration.id, SKILLS_REMINDER_REGISTRATION_ID);
