@@ -19,7 +19,12 @@ import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
 import { isClaudeCodeSessionId } from "./session-id.js";
-import { type ClaudeToolPermissionDecision, coerceToolInput, emitClaudeToolPermissionDecision } from "./tool-safety.js";
+import {
+	type ClaudeToolPermissionDecision,
+	claudeToolsOutsideProfile,
+	coerceToolInput,
+	emitClaudeToolPermissionDecision,
+} from "./tool-safety.js";
 
 const DEFAULT_CLAUDE_TOOLS = { type: "preset", preset: "claude_code" } as const;
 
@@ -290,6 +295,8 @@ interface PermissionGateInput {
 	emit: WorkerEventEmit;
 	onPermissionFailure(): void;
 	handledToolDecisions: Map<string, ClaudeToolPermissionDecision>;
+	/** Admitted tool surface (Clio builtin names) narrowed by any tool_profile. */
+	allowedTools: ReadonlySet<string>;
 }
 
 function permissionResultForDecision(
@@ -327,6 +334,7 @@ function decideToolUse(input: PermissionGateInput, toolName: string, toolInput: 
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
 		onPermission: input.onPermission,
 		emit: input.emit,
+		allowedTools: input.allowedTools,
 	});
 }
 
@@ -393,6 +401,11 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	// worker's stdin; the Claude SDK path has neither, so it collapses the
 	// escalate posture to the non-stall deny fallback.
 	const onPermission: "deny" | "fail" = input.onPermission === "fail" ? "fail" : "deny";
+	// The admitted surface (already narrowed by any tool_profile) is the
+	// authoritative allowlist. The mediation gate denies out-of-profile calls;
+	// the SDK disallowedTools option below is defense-in-depth so the model is
+	// not even offered them.
+	const allowedToolSet = new Set<string>(input.allowedTools);
 	const permissionGate: PermissionGateInput = {
 		safety,
 		cwd: process.cwd(),
@@ -404,6 +417,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			permissionFailure = true;
 			abort();
 		},
+		allowedTools: allowedToolSet,
 	};
 	const canUseTool = buildCanUseTool(permissionGate);
 	const preToolUseHook = buildPreToolUseHook(permissionGate);
@@ -422,6 +436,8 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		settingSources: [],
 		env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: `@iowarp/clio-coder/${readClioVersion()}` },
 	};
+	const disallowedTools = claudeToolsOutsideProfile(allowedToolSet);
+	if (disallowedTools.length > 0) options.disallowedTools = disallowedTools;
 	const thinking = thinkingForInput(input);
 	if (thinking !== undefined) options.thinking = thinking;
 	const effort = (input.runtimeResolution?.request.reasoningEffort ??

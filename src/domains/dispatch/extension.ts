@@ -916,6 +916,9 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		const escalation = config?.get().workers.escalation;
 		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
 	}
+	// Carry the tool profile so external CLI runtimes that cannot mediate
+	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
+	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
 	// Workers inherit the session's autonomy level at admission time (sd-01
 	// §2.5); the worker registry applies the same mapping the orchestrator's
 	// does, with asks resolving through onPermission above.

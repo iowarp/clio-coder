@@ -11,6 +11,7 @@ import type {
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { ToolProfileName } from "../tools/profiles.js";
 
 export const WORKER_SPEC_VERSION = 1;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
@@ -57,6 +58,13 @@ export interface WorkerSpec {
 	/** Skill names the agent recipe binds to this run; context(scope=skills) admits exactly these. */
 	agentSkills?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
+	/**
+	 * Dispatch-time tool profile that narrowed `allowedTools`. Carried so
+	 * black-box external CLI runtimes that cannot mediate per-tool calls can
+	 * refuse a narrowing profile. Undefined or "full-agent" imposes no
+	 * narrowing.
+	 */
+	toolProfile?: ToolProfileName;
 	/**
 	 * Non-stall posture for permission-requiring tool calls. "deny" converts
 	 * the call into a structured tool denial and the run continues; "fail"
@@ -133,6 +141,11 @@ const THINKING_LEVELS = [
 	"high",
 	"xhigh",
 ] as const satisfies ReadonlyArray<ThinkingLevel>;
+const TOOL_PROFILE_NAMES = [
+	"minimal-local",
+	"science-local",
+	"full-agent",
+] as const satisfies ReadonlyArray<ToolProfileName>;
 const TARGET_LIFECYCLES = ["user-managed", "clio-managed"] as const;
 const MIDDLEWARE_HOOKS = ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"] as const;
 const MIDDLEWARE_EFFECT_KINDS = [
@@ -417,6 +430,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
 	}
+	readOptionalEnum(spec, "toolProfile", "WorkerSpec", TOOL_PROFILE_NAMES);
 	if (
 		spec.onPermission !== undefined &&
 		spec.onPermission !== "deny" &&

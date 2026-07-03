@@ -8,6 +8,7 @@ import {
 	mapAutonomy,
 } from "../../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../domains/safety/contract.js";
+import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../worker-tools.js";
 
@@ -48,6 +49,14 @@ export interface EvaluateClaudeToolPermissionInput {
 	safety: SafetyContract;
 	cwd: string;
 	autonomy?: AutonomyLevel;
+	/**
+	 * The worker's admitted tool surface (Clio builtin names), already narrowed
+	 * by any tool_profile. When present, a mapped Claude tool whose Clio builtin
+	 * is not in this set is denied before the safety net runs, so external CLI
+	 * runtimes cannot execute out-of-profile tools even if they ignore the
+	 * SDK/CLI allow options. Absent means no surface check (legacy callers).
+	 */
+	allowedTools?: ReadonlySet<string>;
 }
 
 export interface EmitClaudeToolPermissionInput extends EvaluateClaudeToolPermissionInput {
@@ -79,6 +88,41 @@ function commandArgs(input: Record<string, unknown>, cwd: string): Record<string
 
 function dynamicToolName(name: string): string {
 	return name.trim().length > 0 ? `claude:${name}` : "claude:unknown";
+}
+
+/**
+ * Static map from Claude preset tool names to the Clio builtin they mediate as.
+ * The single source of truth for both `mapClaudeToolCall` (forward, per-call)
+ * and `claudeToolsOutsideProfile` (reverse, for the SDK/CLI disallow list).
+ * Keep in lockstep with the `mapClaudeToolCall` switch below.
+ */
+const CLAUDE_TOOL_TO_CLIO: Readonly<Record<string, string>> = {
+	Bash: ToolNames.Bash,
+	Read: ToolNames.Read,
+	NotebookRead: ToolNames.Read,
+	Edit: ToolNames.Edit,
+	MultiEdit: ToolNames.Edit,
+	Write: ToolNames.Write,
+	Grep: ToolNames.Grep,
+	Glob: ToolNames.Find,
+	LS: ToolNames.Ls,
+	Ls: ToolNames.Ls,
+	WebFetch: ToolNames.WebFetch,
+	WebSearch: ToolNames.WebFetch,
+	Task: ToolNames.Dispatch,
+	TodoWrite: ToolNames.Artifact,
+};
+
+/**
+ * Claude preset tool names whose Clio builtin is not in the worker's allowed
+ * surface. Fed to the SDK's `disallowedTools` option (and the same list is used
+ * by the mediation gate as the authoritative check). Only mapped/known tools
+ * participate; unmapped Claude-internal tools are left to the safety net.
+ */
+export function claudeToolsOutsideProfile(allowedTools: ReadonlySet<string>): string[] {
+	return Object.entries(CLAUDE_TOOL_TO_CLIO)
+		.filter(([, clioName]) => !allowedTools.has(clioName))
+		.map(([claudeName]) => claudeName);
 }
 
 export function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd: string): MappedClaudeToolCall {
@@ -140,6 +184,29 @@ function rejectionText(decision: SafetyDecision): string {
 export function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput): ClaudeToolPermissionDecision {
 	const mapped = mapClaudeToolCall(input.toolName, input.input, input.cwd);
 	const call: ClassifierCall = { tool: mapped.clioToolName, args: mapped.args };
+	// Tool-profile / admitted-surface gate. This is the authoritative narrowing
+	// enforcement for SDK workers: it runs before the safety net so an
+	// out-of-profile tool (e.g. bash under minimal-local) is denied regardless
+	// of the autonomy verdict, and it does not depend on the external CLI
+	// honoring the allow/disallow options. Only mapped (known) Claude tools are
+	// gated; unmapped Claude-internal tools defer to the safety net as before.
+	if (input.allowedTools !== undefined && mapped.known && !input.allowedTools.has(mapped.clioToolName)) {
+		const classification = input.safety.classify(call);
+		const rejection: RejectionMessage = {
+			short: `${mapped.clioToolName} is not in this worker's tool profile`,
+			detail: `Tool '${mapped.clioToolName}' is outside the dispatched worker's admitted tool surface, so the request is denied. Use only the tools granted to this run.`,
+			hints: [],
+		};
+		const blocked: SafetyDecision = { kind: "block", classification, rejection };
+		return {
+			kind: "deny",
+			mapped,
+			decision: blocked,
+			reason: rejection.short,
+			reasonCode: "tool-profile",
+			permissionRequired: false,
+		};
+	}
 	const decision = input.safety.evaluate(call);
 	const level = input.autonomy ?? DEFAULT_AUTONOMY_LEVEL;
 	if (decision.kind === "block") {

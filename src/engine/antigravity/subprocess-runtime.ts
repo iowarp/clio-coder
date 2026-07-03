@@ -2,6 +2,7 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
+import { assertToolProfileEnforceable } from "../../tools/profiles.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 
@@ -63,6 +64,7 @@ export function buildAntigravityPrompt(input: WorkerRunInput): string {
 }
 
 export function buildAgyArgs(input: WorkerRunInput): string[] {
+	assertToolProfileEnforceable(input.toolProfile, "antigravity-code");
 	const permission = antigravitySubprocessConfigForAutonomy(input.autonomy);
 	const args = ["--print", ...permission.extraArgs];
 	if (input.wireModelId.trim().length > 0) args.push("--model", input.wireModelId.trim());

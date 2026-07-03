@@ -30,6 +30,7 @@ import {
 import type { ActionClass } from "../domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
+import type { ToolProfileName } from "../tools/profiles.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -64,6 +65,14 @@ export interface WorkerRunInput {
 	runtimeResolution?: RuntimeTargetSnapshot;
 	/** Tool ids the worker is allowed to expose for this run. */
 	allowedTools: ReadonlyArray<ToolName>;
+	/**
+	 * Dispatch-time tool profile that narrowed `allowedTools`. Carried so
+	 * black-box external CLI runtimes (claude-code, antigravity) that cannot
+	 * mediate per-tool calls can refuse a narrowing profile instead of silently
+	 * running their full builtin surface. Undefined or "full-agent" imposes no
+	 * narrowing.
+	 */
+	toolProfile?: ToolProfileName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
 	middlewareSnapshot?: MiddlewareSnapshot;
 	signal?: AbortSignal;
