@@ -106,6 +106,30 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 
 ---
 
+## Receipt Fields for Dispatch Provenance
+
+A receipt carries three optional provenance field sets that answer "what happened" for a chained (pipeline), composed (persona override), or escalated run. Each set is folded onto the receipt only when the run actually exercised the feature, so a run that used none of them produces a receipt byte-identical to a pre-0.2.8 receipt. Automation consumers must treat every field below as optional and absent by default.
+
+The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
+
+The `Status` column follows the `docs/model-catalog.md` labeling convention. All three sets are new in the unreleased 0.2.8 and are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
+
+| Field path | Type | When present | Meaning | Status |
+| --- | --- | --- | --- | --- |
+| `pipeline.fromRunId` | `string \| null` | Pipeline step after the first | Run whose final output was threaded in as input data; `null` when the upstream run id is unknown | experimental |
+| `pipeline.position` | `number` | Pipeline step after the first | 1-based index of this step in the chain | experimental |
+| `pipeline.inputBytes` | `number` | Pipeline step after the first | UTF-8 byte length of the threaded upstream text before the 12000-char cap | experimental |
+| `pipeline.inputTruncated` | `boolean` | Pipeline step after the first | `true` when the 12000-char cap clipped the threaded input | experimental |
+| `personaOverride.promptHash` | `string` | Ad-hoc specialist whose persona replaced the recipe body | Hash of the composed static prompt; equals `staticCompositionHash` for the run | experimental |
+| `safety.decisions.escalationRequested` | `number` | Run saw at least one permission escalation | Parked permission asks handed to the operator | experimental |
+| `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |
+| `safety.decisions.escalationDenied` | `number` | Run saw at least one permission escalation | Escalations the operator denied | experimental |
+| `safety.decisions.escalationTimedOut` | `number` | Run saw at least one permission escalation | Escalations resolved by the timeout fallback (no operator decision) | experimental |
+
+The escalation counters appear together and only when `escalationRequested` is present (at least one escalation occurred), so a deny-all or non-escalating run keeps its `safety.decisions` block unchanged.
+
+---
+
 ## Worked Example: End-to-End Spine Flow
 
 Here is a step-by-step trace of how a run passes through the spine.
