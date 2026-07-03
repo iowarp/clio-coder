@@ -13,6 +13,17 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Added
 
+- **Slash command argument completion.** The editor now completes past the
+  command name by walking the same args grammar the parser uses: subcommand
+  names complete in first position with their flags as the row hint, declared
+  flags complete wherever the grammar still parses flags (spent flags drop
+  out, and unmatched tokens fall back to aliases so `--rew` completes to
+  `--rewrite`), and closed value sets complete inside a flag's value slot.
+  Alias spellings like `/ctx` complete exactly like their canonical command
+  while accepting keeps the typed alias. Top-level suggestion hints shrink to
+  fit the row: subcommand commands list their subcommand names and flag
+  commands elide overflow behind an ellipsis, all within a pinned budget, so
+  the old 150-character `/context` pipe chain no longer hard-clips mid-flag.
 - **First-turn skills reminder.** Once per session, on the first substantive
   task turn, when model-visible skills exist and the operator has not already
   requested one, middleware injects a single visible line into the user
@@ -274,6 +285,9 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **The compact ctx ledger row joins the kv grammar.** Its `ctx` key reads
+  dim and the percent muted, and the pre-measurement `?%` placeholder reads
+  dim instead of rendering as bare text.
 - **The loop guard forces a final answer instead of killing a turn that already
   holds it.** A live session asked how CLIO.md bootstrapping works; the model
   ran nine successful retrievals (the exact answer landed four times) and then
