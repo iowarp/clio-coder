@@ -33,6 +33,8 @@ from terminal_bench.terminal.models import TerminalCommand
 # Shared fleet defaults (benchmarks/community/clio_fleet.py). Guarded so the
 # agent still loads if the private config is missing.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from result_manifest import target_profile, write_result_manifest
+
 try:
     from clio_fleet import load_fleet
 
@@ -68,6 +70,12 @@ class ClioAgent(AbstractInstalledAgent):
             "worker_model", os.environ.get("CLIO_WORKER_MODEL", _DEF["worker_model"])
         )
         self._timeout_sec = int(kwargs.get("timeout_sec", os.environ.get("CLIO_TASK_TIMEOUT", "1800")))
+        self._result_dir = Path(
+            os.environ.get(
+                "CLIO_TB_RESULT_DIR",
+                str(Path(__file__).resolve().parents[1] / "runs" / "latest"),
+            )
+        )
 
     @property
     def _env(self) -> dict[str, str]:
@@ -93,6 +101,7 @@ class ClioAgent(AbstractInstalledAgent):
     def _run_agent_commands(self, instruction: str) -> list[TerminalCommand]:
         # One headless full-auto episode. Clio's own bash/edit tools act on the container
         # filesystem; the model lives on the remote fleet.
+        self._write_scheduled_manifest(instruction)
         cmd = (
             f"clio run --target {shlex.quote(self._main_target)} "
             f"--model {shlex.quote(self._main_model)} {shlex.quote(instruction)}"
@@ -104,3 +113,32 @@ class ClioAgent(AbstractInstalledAgent):
                 block=True,
             )
         ]
+
+    def _write_scheduled_manifest(self, instruction: str) -> None:
+        summary = {
+            "suite": "terminal-bench",
+            "dataset": os.environ.get("CLIO_TB_DATASET", "terminal-bench"),
+            "datasetSplit": os.environ.get("CLIO_TB_DATASET_SPLIT", "unspecified"),
+            "instances": 1,
+            "resolved": 0,
+            "errors": 0,
+            "status": "scheduled",
+            "instructionBytes": len(instruction.encode("utf-8")),
+            "timeoutSeconds": self._timeout_sec,
+        }
+        write_result_manifest(
+            self._result_dir,
+            suite="terminal-bench",
+            dataset=summary["dataset"],
+            dataset_split=summary["datasetSplit"],
+            model=self._main_model,
+            profile=target_profile(target=self._main_target, model=self._main_model),
+            instances=1,
+            resolved=0,
+            errors=0,
+            artifact_paths=[],
+            summary=summary,
+            notes=[
+                "Terminal-Bench final scoring is produced by the tb runner. This manifest records the scheduled Clio episode."
+            ],
+        )

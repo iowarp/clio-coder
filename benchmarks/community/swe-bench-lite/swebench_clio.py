@@ -32,6 +32,8 @@ CLIO = os.environ.get("CLIO_BIN", "clio")
 # source of truth for fleet endpoints/model names. The import is guarded so the
 # adapter still runs if the config is missing; env vars override either way.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from result_manifest import target_profile, write_result_manifest
+
 try:
     from clio_fleet import load_fleet
 
@@ -235,6 +237,7 @@ def main():
     metrics_path = workdir / "metrics.jsonl"
     print(f"generating {len(chosen)} prediction(s) -> {preds_path}", file=sys.stderr)
 
+    metrics_rows = []
     with open(preds_path, "w") as pf, open(metrics_path, "w") as mf:
         for i, inst in enumerate(chosen, 1):
             iid = inst["instance_id"]
@@ -249,10 +252,58 @@ def main():
                 metric = {"instance_id": iid, "error": str(e)[:300]}
             pf.write(json.dumps(pred) + "\n"); pf.flush()
             mf.write(json.dumps(metric) + "\n"); mf.flush()
+            metrics_rows.append(metric)
             print(f"  -> wall={metric.get('wall_s')}s tokens={metric.get('tokens')} "
                   f"patch_bytes={metric.get('patch_bytes')} empty={metric.get('empty_patch')}",
                   file=sys.stderr)
+    errors = sum(
+        1
+        for metric in metrics_rows
+        if metric.get("error") or metric.get("timed_out") or metric.get("exit") not in (0, None)
+    )
+    resolved = sum(
+        1
+        for metric in metrics_rows
+        if not metric.get("error") and metric.get("exit") == 0 and not metric.get("empty_patch")
+    )
+    summary = {
+        "suite": "swe-bench-lite",
+        "dataset": DATASET,
+        "datasetSplit": "test",
+        "instances": len(chosen),
+        "predictions": len(metrics_rows),
+        "resolved": resolved,
+        "errors": errors,
+        "emptyPatches": sum(1 for metric in metrics_rows if metric.get("empty_patch")),
+        "timedOut": sum(1 for metric in metrics_rows if metric.get("timed_out")),
+        "wallSeconds": round(sum(float(metric.get("wall_s") or 0) for metric in metrics_rows), 3),
+        "tokens": sum(int(metric.get("tokens") or 0) for metric in metrics_rows),
+    }
+    manifest_path, summary_path = write_result_manifest(
+        workdir,
+        suite="swe-bench-lite",
+        dataset=DATASET,
+        dataset_split="test",
+        model=args.model_name,
+        profile=target_profile(
+            profile=(_FLEET or {}).get("profile") if isinstance(_FLEET, dict) else None,
+            target=args.target or os.environ.get("CLIO_MAIN_TARGET"),
+            model=args.model or os.environ.get("CLIO_MAIN_MODEL"),
+            thinking=os.environ.get("CLIO_MAIN_THINKING"),
+        ),
+        instances=len(chosen),
+        resolved=resolved,
+        errors=errors,
+        artifact_paths=[preds_path, metrics_path],
+        summary=summary,
+        notes=[
+            "Resolved counts reflect successful non-empty patch generation. Official SWE-bench resolution requires external harness scoring."
+        ],
+        clio_bin=CLIO,
+    )
     print(f"done. predictions: {preds_path}", file=sys.stderr)
+    print(f"manifest: {manifest_path}", file=sys.stderr)
+    print(f"summary: {summary_path}", file=sys.stderr)
     return 0
 
 

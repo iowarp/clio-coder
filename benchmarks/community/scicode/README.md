@@ -50,6 +50,10 @@ python benchmarks/community/scicode/scicode_clio.py grade-problem \
   --h5py-file /path/to/scicode/test_data.h5
 ```
 
+`run-problem` writes `manifest.json` and `summary.json` with generated step
+attempt counts and hashes for produced artifacts. `grade-problem` rewrites
+those files with scored counts after target-based validation completes.
+
 ## Scoring rule
 
 The grader executes each generated sub-step file with SciCode's visible test

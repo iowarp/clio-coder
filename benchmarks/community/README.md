@@ -43,6 +43,7 @@ paths.
 
 The SWE-bench adapter clones each selected instance, runs `clio run --json`
 with the issue text, and writes a source-only patch to `predictions.jsonl`.
+It also writes `manifest.json` and `summary.json` in the run directory.
 Evaluation with the official harness is a separate Docker workflow.
 
 ```sh
@@ -61,11 +62,19 @@ python benchmarks/community/swe-bench-lite/recompute_patches.py \
   clio-coder-example
 ```
 
+When a Clio eval artifact is the source of truth, export SWE-style JSONL with:
+
+```sh
+clio eval report <evalId> --format swe-jsonl > predictions.jsonl
+```
+
 ## Terminal-Bench
 
 `terminal-bench/tb_clio_agent/` implements a Terminal-Bench installed agent. The
 agent requires `CLIO_MAIN_URL` and `CLIO_WORKER_URL`; it has no endpoint
-defaults.
+defaults. The adapter writes a scheduled-run `manifest.json` and `summary.json`
+under `benchmarks/community/terminal-bench/runs/latest` unless
+`CLIO_TB_RESULT_DIR` points elsewhere.
 
 Build and serve a Clio tarball where the container can reach it, then run
 Terminal-Bench with the adapter import path:
@@ -88,6 +97,8 @@ tb run -d terminal-bench-core==0.1.1 --n-concurrent 1 \
 `scicode/scicode_clio.py` generates normal `clio eval` task files and grades
 generated Python. Official scoring requires the SciCode target artifact and the
 upstream SciCode Python package, both supplied outside this repository.
+`run-problem` writes generated-attempt manifests, and `grade-problem` rewrites
+the same run directory with scored manifests.
 
 ```sh
 npm run bench:scicode -- inspect-data \

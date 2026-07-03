@@ -40,6 +40,9 @@ DEFAULT_TEMPLATE = Path(
 )
 CLIO = os.environ.get("CLIO_BIN", "clio")
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from result_manifest import target_profile, write_result_manifest
+
 SPECIAL_STEP_SNIPPETS = {
     "13.6": DEFAULT_DATA.parent / "13.6.txt",
     "62.1": DEFAULT_DATA.parent / "62.1.txt",
@@ -51,6 +54,38 @@ PYTHON_BLOCK_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL | re.IGNO
 
 class DataBlocked(RuntimeError):
     """Raised when the adapter is wired but official scoring data is absent."""
+
+
+def scicode_dataset_name(path: Path) -> str:
+    return os.environ.get("SCICODE_DATASET_NAME", path.name)
+
+
+def scicode_dataset_split() -> str:
+    return os.environ.get("SCICODE_DATASET_SPLIT", "external")
+
+
+def scicode_model(model: str | None) -> str:
+    return model or os.environ.get("CLIO_MODEL") or os.environ.get("CLIO_MAIN_MODEL") or "unspecified"
+
+
+def scicode_target_profile(target: str | None, model: str | None) -> dict[str, str]:
+    return target_profile(
+        target=target or os.environ.get("CLIO_MAIN_TARGET"),
+        model=model or os.environ.get("CLIO_MAIN_MODEL"),
+        thinking=os.environ.get("CLIO_MAIN_THINKING"),
+    )
+
+
+def generated_artifacts(run_dir: Path, *extra: Path) -> list[Path]:
+    generated_dir = run_dir / "generated_code"
+    generated = sorted(generated_dir.glob("*.py")) if generated_dir.exists() else []
+    return [
+        *extra,
+        run_dir / "metrics.jsonl",
+        run_dir / "problem.json",
+        run_dir / "solution.py",
+        *generated,
+    ]
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -384,6 +419,7 @@ def run_problem(args: argparse.Namespace) -> int:
     template = load_template(Path(args.template) if args.template else None)
     metrics_path = run_dir / "metrics.jsonl"
     failures = 0
+    records: list[dict[str, Any]] = []
     with metrics_path.open("w", encoding="utf-8") as metrics:
         for index, step in enumerate(problem.get("sub_steps", [])):
             step_id = step_number(step)
@@ -407,11 +443,45 @@ def run_problem(args: argparse.Namespace) -> int:
                 if metric["exit"] != 0:
                     failures += 1
             snapshot_step_code(problem, run_dir, step_id)
-            metrics.write(json.dumps({"problem_id": problem["problem_id"], "step_id": step_id, **metric}) + "\n")
+            record = {"problem_id": problem["problem_id"], "step_id": step_id, **metric}
+            records.append(record)
+            metrics.write(json.dumps(record) + "\n")
             metrics.flush()
             if failures and not args.continue_on_error:
                 break
     (run_dir / "problem.json").write_text(json.dumps(problem, indent=2) + "\n", encoding="utf-8")
+    errors = sum(1 for record in records if record.get("timed_out") or record.get("exit") not in (0, None))
+    resolved = sum(1 for record in records if record.get("exit") == 0)
+    summary = {
+        "suite": "scicode",
+        "dataset": scicode_dataset_name(data),
+        "datasetSplit": scicode_dataset_split(),
+        "problemId": str(problem["problem_id"]),
+        "steps": len(records),
+        "resolved": resolved,
+        "errors": errors,
+        "dryRun": bool(args.dry_run),
+        "wallSeconds": round(sum(float(record.get("wall_s") or 0) for record in records), 3),
+    }
+    manifest_path, summary_path = write_result_manifest(
+        run_dir,
+        suite="scicode",
+        dataset=scicode_dataset_name(data),
+        dataset_split=scicode_dataset_split(),
+        model=scicode_model(args.model),
+        profile=scicode_target_profile(args.target, args.model),
+        instances=len(records),
+        resolved=resolved,
+        errors=errors,
+        artifact_paths=generated_artifacts(run_dir),
+        summary=summary,
+        notes=[
+            "run-problem records generated step attempts. grade-problem rewrites the manifest with scored results."
+        ],
+        clio_bin=CLIO,
+    )
+    print(f"manifest: {manifest_path}", file=sys.stderr)
+    print(f"summary: {summary_path}", file=sys.stderr)
     return 0 if failures == 0 else 1
 
 
@@ -577,6 +647,40 @@ def grade_problem(args: argparse.Namespace) -> int:
     report_path = Path(args.report) if args.report else run_dir / "scicode-grade.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    summary = {
+        "suite": "scicode",
+        "dataset": scicode_dataset_name(data),
+        "datasetSplit": scicode_dataset_split(),
+        "problemId": str(problem["problem_id"]),
+        "problemName": problem.get("problem_name"),
+        "steps": len(results),
+        "resolved": 1 if main_pass else 0,
+        "errors": len(failed) + len(blocked),
+        "passedSteps": len(passed),
+        "failedSteps": len(failed),
+        "blockedSteps": len(blocked),
+        "mainPass": main_pass,
+        "scoringRule": "main_pass requires every sub-step to pass",
+    }
+    manifest_path, summary_path = write_result_manifest(
+        run_dir,
+        suite="scicode",
+        dataset=scicode_dataset_name(data),
+        dataset_split=scicode_dataset_split(),
+        model=scicode_model(None),
+        profile=scicode_target_profile(None, None),
+        instances=1,
+        resolved=1 if main_pass else 0,
+        errors=len(failed) + len(blocked),
+        artifact_paths=generated_artifacts(run_dir, report_path),
+        summary=summary,
+        notes=[
+            "Resolved counts use the adapter grader with externally supplied SciCode target artifacts."
+        ],
+        clio_bin=CLIO,
+    )
+    print(f"manifest: {manifest_path}", file=sys.stderr)
+    print(f"summary: {summary_path}", file=sys.stderr)
     print(json.dumps(report, indent=2))
     if blocked:
         return 2
