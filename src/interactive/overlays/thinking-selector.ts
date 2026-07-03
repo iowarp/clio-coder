@@ -29,7 +29,8 @@ export interface OpenThinkingOverlayDeps {
 	onClose: () => void;
 }
 
-function buildThinkingItems(
+/** @internal */
+export function buildThinkingItems(
 	current: ThinkingLevel,
 	available: readonly ThinkingLevel[],
 	labelFor: (level: ThinkingLevel) => string = (level) => level,
@@ -38,7 +39,9 @@ function buildThinkingItems(
 		const label = labelFor(lvl);
 		return {
 			value: lvl,
-			label: `${lvl === current ? GLYPH.running : " "} ${label}`,
+			// The current level carries the active mark; the design reserves the
+			// running dot for live work, not for a settled selection.
+			label: `${lvl === current ? GLYPH.active : " "} ${label}`,
 			description: label === "on" ? "thinking enabled" : (DESCRIPTIONS[lvl] ?? ""),
 		};
 	});
