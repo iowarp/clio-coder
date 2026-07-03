@@ -66,6 +66,10 @@ export function detectClioCoderRepo(cwd = process.cwd()): ClioCoderRepoAwareness
 		if (isClioCoderRepoRoot(current)) {
 			return { isClioCoderRepo: true, repoRoot: current };
 		}
+		// The session's own repository wins: the walk ends at the first git
+		// root, so a project nested under a clio-coder checkout never
+		// inherits the source-tree awareness fragment.
+		if (hasGitMarker(current)) break;
 		const parent = path.dirname(current);
 		if (parent === current) break;
 		current = parent;
