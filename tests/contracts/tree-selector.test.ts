@@ -1,8 +1,13 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { TreeSnapshot } from "../../src/domains/session/tree/navigator.js";
-import { TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
+import { visibleWidth } from "../../src/engine/tui.js";
+import { formatTreeRow, TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+
+const ESC = "\x1b";
+const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 
 const snapshot: TreeSnapshot = {
 	sessionId: "session-1",
@@ -77,6 +82,37 @@ describe("contracts/tree-selector", () => {
 
 		deepStrictEqual(switched, ["turn-2"]);
 		strictEqual(closed, true);
+	});
+
+	it("points the focused row with the accent chevron and styles rows on the system", () => {
+		const view = new TreeOverlayView(
+			{
+				session: session(),
+				onSwitchTurn: () => {},
+				onClose: () => {},
+			},
+			snapshot,
+		);
+		const theme = clioTheme();
+		const lines = view.render(60);
+
+		const focused = lines[0];
+		ok(focused?.includes(GLYPH.cursor), focused);
+		ok(focused?.includes(theme.fgSequence("accent")), focused);
+		// The kind is dim scaffolding and the id and preview are muted content.
+		ok(focused?.includes(theme.fgSequence("dim")), focused);
+		ok(focused?.includes(theme.fgSequence("muted")), focused);
+		// No rendered row overflows the overlay content width.
+		for (const line of lines) ok(visibleWidth(line) <= 60, `${visibleWidth(line)}: ${line}`);
+	});
+
+	it("aligns the timestamp column on visible width, not escape bytes", () => {
+		const node = { ...snapshot.nodesById["turn-2"], label: "checkpoint" };
+		const line = formatTreeRow({ depth: 1, node, sessionId: "session-1" } as never, { showTimestamps: true, width: 80 });
+
+		strictEqual(visibleWidth(line), 80);
+		ok(stripAnsi(line).includes(`label:"checkpoint"`), stripAnsi(line));
+		ok(stripAnsi(line).trimEnd().endsWith("2026-06-11 00:00:01"), stripAnsi(line));
 	});
 
 	it("footer advertises only working /tree actions", () => {

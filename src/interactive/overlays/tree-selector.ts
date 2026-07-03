@@ -9,7 +9,7 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import { buildHint, clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { GLYPH } from "../theme/index.js";
+import { type ClioTheme, clioTheme, GLYPH } from "../theme/index.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 16;
@@ -48,6 +48,16 @@ function shortTurnId(id: string): string {
 function clampPreview(text: string, max: number): string {
 	const firstLine = text.split("\n", 1)[0] ?? "";
 	return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine;
+}
+
+/**
+ * Paint a bracketed status notice: the `[tag]` reads dim and the message muted.
+ * A status with no bracketed tag falls back to muted so it never renders plain.
+ */
+function bracketNotice(theme: ClioTheme, text: string): string {
+	const close = text.indexOf("] ");
+	if (close < 0) return theme.fg("muted", text);
+	return `${theme.fg("dim", text.slice(0, close + 1))}${theme.fg("muted", text.slice(close + 1))}`;
 }
 
 /**
@@ -96,25 +106,33 @@ const ROW_PREVIEW_BUDGET = 55;
 
 /** @internal */
 export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
+	const theme = clioTheme();
 	const indent = "  ".repeat(row.depth);
 	const glyph = isLeaf(row.node) ? GLYPH.running : "○";
 	const turnId = shortTurnId(row.node.id);
 	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
-	const labelSuffix = row.node.label ? ` · label:"${row.node.label}"` : "";
-	const prefix = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  `;
+	const labelText = row.node.label ? ` · label:"${row.node.label}"` : "";
+	// A plain copy of the prefix and label drives the width math; the rendered
+	// versions below carry color, so every measurement uses visibleWidth.
+	const plainPrefix = `${indent}${glyph} ${row.node.kind.padEnd(12)} ${turnId}  `;
 	const previewBudget = Math.min(
 		ROW_PREVIEW_BUDGET,
-		Math.max(1, opts.width - visibleWidth(prefix) - visibleWidth(labelSuffix)),
+		Math.max(1, opts.width - visibleWidth(plainPrefix) - visibleWidth(labelText)),
 	);
 	const preview = clampPreview(rawPreview, previewBudget);
-	const main = `${prefix}${preview}${labelSuffix}`;
+	// The node glyph and kind are structural scaffolding and render dim; the turn
+	// id and preview are content and render muted; the optional label reads as a
+	// dim key with a muted value.
+	const styledPrefix = `${theme.fg("dim", `${indent}${glyph} ${row.node.kind.padEnd(12)}`)} ${theme.fg("muted", turnId)}  `;
+	const styledLabel = labelText ? `${theme.fg("dim", " · label:")}${theme.fg("muted", `"${row.node.label}"`)}` : "";
+	const main = `${styledPrefix}${theme.fg("muted", preview)}${styledLabel}`;
 	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);
 	const ts = row.node.at.slice(0, 19).replace("T", " ");
 	if (opts.width < ts.length + 12) return truncateToWidth(main, opts.width, "", true);
 	const budget = Math.max(1, opts.width - ts.length - 2);
 	const primary = truncateToWidth(main, budget, "", true);
-	const pad = " ".repeat(Math.max(1, opts.width - primary.length - ts.length));
-	return `${primary}${pad}${ts}`;
+	const pad = " ".repeat(Math.max(1, opts.width - visibleWidth(primary) - ts.length));
+	return `${primary}${pad}${theme.fg("dim", ts)}`;
 }
 
 /** @internal */
@@ -168,15 +186,17 @@ export class TreeOverlayView implements Component {
 
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, width);
+		const theme = clioTheme();
 		const lines: string[] = [];
 		if (this.rows.length === 0) {
-			lines.push("(no sessions yet)");
+			lines.push(theme.fg("muted", "(no sessions yet)"));
 		} else {
 			const end = Math.min(this.rows.length, this.scrollTop + VISIBLE_ROWS);
 			for (let i = this.scrollTop; i < end; i++) {
 				const row = this.rows[i];
 				if (!row) continue;
-				const prefix = i === this.highlight ? `${GLYPH.cursor} ` : "  ";
+				const focused = i === this.highlight;
+				const prefix = focused ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 				const body = formatTreeRow(row, {
 					showTimestamps: this.showTimestamps,
 					width: Math.max(1, contentWidth - visibleWidth(prefix)),
@@ -189,8 +209,10 @@ export class TreeOverlayView implements Component {
 			}
 		}
 		if (this.status) {
-			const status = truncateToWidth(this.status, contentWidth, "", true);
-			lines.push(this.statusKind === "error" ? clioError(status) : status);
+			// A status is a bracketed notice: the tag reads dim and the message
+			// muted, except a failure which renders red end to end.
+			const colored = this.statusKind === "error" ? clioError(this.status) : bracketNotice(theme, this.status);
+			lines.push(truncateToWidth(colored, contentWidth, "", true));
 		}
 		return lines;
 	}
