@@ -17,7 +17,7 @@ import {
 } from "../../src/interactive/footer/widgets.js";
 import { buildSegmentedContextBar } from "../../src/interactive/footer-panel.js";
 import type { AgentStatus } from "../../src/interactive/status/types.js";
-import { clioTheme } from "../../src/interactive/theme/index.js";
+import { clioTheme, spinnerFrame } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -116,28 +116,34 @@ describe("IT2: Harness-state pill", () => {
 		localRuntime: false,
 	};
 
-	it("maps every phase to its glyph, label, and color token", () => {
+	it("leads every phase with a spinner or static glyph, then label and color token", () => {
+		// Live phases lead with the animated spinner in place of the static phase
+		// glyph. Idle, the attention states (blocked, retry, stuck), and the ended
+		// state stay static, so their glyph anchors the pill.
 		const testPhases: Array<{
 			phase: AgentStatus["phase"];
-			expected: string;
+			label: string;
+			live: boolean;
+			staticGlyph: string;
 			token: Parameters<typeof theme.fgSequence>[0];
 		}> = [
-			{ phase: "idle", expected: "◌ idle", token: "muted" },
-			{ phase: "preparing", expected: "◔ prep", token: "info" },
-			{ phase: "waiting_model", expected: "◔ waiting", token: "info" },
-			{ phase: "thinking", expected: "◐ thinking", token: "reason" },
-			{ phase: "writing", expected: "◑ writing", token: "accent" },
-			{ phase: "tool_running", expected: "⚙ tool bash", token: "accent" },
-			{ phase: "tool_blocked", expected: "⏸ blocked", token: "warning" },
-			{ phase: "retrying", expected: "↻ retry 2/5", token: "warning" },
-			{ phase: "compacting", expected: "♻ compacting", token: "reason" },
-			{ phase: "dispatching", expected: "⇲ dispatch", token: "action" },
-			{ phase: "stuck", expected: "⚠ stuck 1s", token: "error" },
-			{ phase: "ended", expected: "✓ done", token: "success" },
+			{ phase: "idle", label: "idle", live: false, staticGlyph: "◌", token: "muted" },
+			{ phase: "preparing", label: "prep", live: true, staticGlyph: "◔", token: "info" },
+			{ phase: "waiting_model", label: "waiting", live: true, staticGlyph: "◔", token: "info" },
+			{ phase: "thinking", label: "thinking", live: true, staticGlyph: "◐", token: "reason" },
+			{ phase: "writing", label: "writing", live: true, staticGlyph: "◑", token: "accent" },
+			{ phase: "tool_running", label: "tool bash", live: true, staticGlyph: "⚙", token: "accent" },
+			{ phase: "tool_blocked", label: "blocked", live: false, staticGlyph: "⏸", token: "warning" },
+			{ phase: "retrying", label: "retry 2/5", live: false, staticGlyph: "↻", token: "warning" },
+			{ phase: "compacting", label: "compacting", live: true, staticGlyph: "♻", token: "reason" },
+			{ phase: "dispatching", label: "dispatch", live: true, staticGlyph: "⇲", token: "action" },
+			{ phase: "stuck", label: "stuck 1s", live: false, staticGlyph: "⚠", token: "error" },
+			{ phase: "ended", label: "done", live: false, staticGlyph: "✓", token: "success" },
 		];
 
 		const now = 2000;
-		for (const { phase, expected, token } of testPhases) {
+		const tick = 0;
+		for (const { phase, label, live, staticGlyph, token } of testPhases) {
 			const status: AgentStatus = {
 				...baseStatus,
 				phase,
@@ -145,10 +151,14 @@ describe("IT2: Harness-state pill", () => {
 				tool: { toolName: "bash", toolPreview: "" },
 				retry: { attempt: 2, maxAttempts: 5, waitMs: 1000 },
 			};
-			const pill = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, 0, now, 100, false);
+			const pill = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, tick, now, 100, false);
 			const stripped = strip(pill);
-			ok(stripped.includes(expected), `phase ${phase} should contain "${expected}", got "${stripped}"`);
+			const lead = live ? spinnerFrame(tick) : staticGlyph;
+			strictEqual(stripped, `${lead} ${label}`, `phase ${phase} should render "${lead} ${label}", got "${stripped}"`);
 			ok(pill.includes(theme.fgSequence(token)), `phase ${phase} should use ${token}`);
+			if (live) {
+				ok(!stripped.includes(staticGlyph), `phase ${phase} spinner should replace, not sit beside, "${staticGlyph}"`);
+			}
 		}
 	});
 
@@ -167,6 +177,20 @@ describe("IT2: Harness-state pill", () => {
 		const endedPill = buildHarnessStatePill(theme, endedStatus, toolCounts, dispatchRows, 0, 1000, 80, false);
 		const endedStripped = strip(endedPill);
 		ok(!endedStripped.startsWith("⣾"), `ended pill should not start with spinner`);
+
+		// Attention states are not live-spinning; they hold their static glyph.
+		for (const phase of ["tool_blocked", "retrying", "stuck"] as const) {
+			const attentionStatus: AgentStatus = {
+				...baseStatus,
+				phase,
+				since: 900,
+				retry: { attempt: 2, maxAttempts: 5, waitMs: 1000 },
+			};
+			const attentionPill = strip(
+				buildHarnessStatePill(theme, attentionStatus, toolCounts, dispatchRows, 0, 1000, 80, false),
+			);
+			ok(!attentionPill.startsWith("⣾"), `${phase} pill should not start with spinner, got "${attentionPill}"`);
+		}
 	});
 
 	it("applies badge priority: fleet > tools > none", () => {

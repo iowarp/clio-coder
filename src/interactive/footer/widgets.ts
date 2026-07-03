@@ -785,7 +785,9 @@ function shortToolLabel(status: AgentStatus, width: number): string {
 	if (name === ToolNames.AskUser) return width < 72 ? "ask" : "waiting for user";
 	if (!name || width < 72) return "tool";
 	const nameWidth = width >= 100 ? 18 : 12;
-	return `tool ${truncateToWidth(name, nameWidth, "…", true)}`;
+	// The pill label is never padded; truncate without pad so the tool name is
+	// followed by a single space before the badge, not a column of blanks.
+	return `tool ${truncateToWidth(name, nameWidth, "…", false)}`;
 }
 
 function harnessPhasePresentation(status: AgentStatus, width: number, now: number): HarnessPhasePresentation {
@@ -804,7 +806,9 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 		case "tool_running":
 			return { glyph: GLYPH.phaseTool, label: shortToolLabel(status, width), token: "accent", live: true };
 		case "tool_blocked":
-			return { glyph: GLYPH.phaseBlocked, label: "blocked", token: "warning", live: true };
+			// Attention states hold a static glyph rather than spinning: the work
+			// has paused for a human, so the pill should not read as live progress.
+			return { glyph: GLYPH.phaseBlocked, label: "blocked", token: "warning", live: false };
 		case "retrying": {
 			const attempt = status.retry?.attempt ?? 0;
 			const maxAttempts = status.retry?.maxAttempts ?? 0;
@@ -812,7 +816,7 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 				glyph: GLYPH.phaseRetry,
 				label: ultraNarrow ? "retry" : `retry ${attempt}/${maxAttempts}`,
 				token: "warning",
-				live: true,
+				live: false,
 			};
 		}
 		case "compacting":
@@ -821,7 +825,7 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 			return { glyph: GLYPH.phaseDispatch, label: "dispatch", token: "action", live: true };
 		case "stuck": {
 			const seconds = Math.max(0, Math.floor((now - status.since) / 1000));
-			return { glyph: GLYPH.warn, label: ultraNarrow ? "stuck" : `stuck ${seconds}s`, token: "error", live: true };
+			return { glyph: GLYPH.warn, label: ultraNarrow ? "stuck" : `stuck ${seconds}s`, token: "error", live: false };
 		}
 		case "ended":
 			return { glyph: GLYPH.ok, label: "done", token: "success", live: false };
@@ -860,10 +864,13 @@ export function buildHarnessStatePill(
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const phase = harnessPhasePresentation(status, safeWidth, now);
-	const spinner = phase.live ? `${theme.fg(phase.token, spinnerFrame(tick))} ` : "";
-	const mainPill = theme.style(phase.token, `${phase.glyph} ${phase.label}`);
+	// A live phase leads with the animated spinner; the spinner stands in for the
+	// static phase glyph rather than sitting beside it. Static glyphs render only
+	// for the non-live states (idle, the attention states, and the ended forms).
+	const lead = phase.live ? spinnerFrame(tick) : phase.glyph;
+	const mainPill = theme.style(phase.token, `${lead} ${phase.label}`);
 	const badge = showBadge && safeWidth >= 48 ? harnessBadge(theme, status, toolCounts, dispatchRows) : "";
-	return `${spinner}${mainPill}${badge}`;
+	return `${mainPill}${badge}`;
 }
 
 export function buildMetricStrip(
