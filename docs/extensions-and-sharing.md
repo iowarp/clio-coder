@@ -120,11 +120,11 @@ Shared user roots are model-visible by default, like the Clio user root. Project
 
 Opt in to model-visible project compatibility roots by setting `skills.trustProjectCompatRoots: true` in `settings.yaml`. `CLIO_TRUST_PROJECT_SKILLS=1` remains an environment override. `.clio/skills` is always trusted as the Clio-native project root.
 
-### Loading with context, creating with artifact
+### Loading with context, writing directly
 
 `context(scope="skills")` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. The skills scope never executes bundled scripts and only resolves skills the model is allowed to see.
 
-`artifact(kind="skill")` writes a single `SKILL.md` file under a project or user skill folder. `title` is the skill name and `content` is the body; it also accepts a required `description`, optional `scope` (`project` by default), optional `overwrite`, optional `allowed_tools` for `allowed-tools` frontmatter, and optional `requires` dependencies normalized to `skill:<name>` entries. It refuses to overwrite without `overwrite: true` and warns when the destination is gitignored.
+Creating a skill is writing a `SKILL.md` file with the ordinary write tool: `.clio/skills/<name>/SKILL.md` for project scope, or the Clio config skills directory for user scope. The loader validates frontmatter on load (`clio skills validate` reports diagnostics), and the `skill-craft` shipped skill documents the frontmatter contract and craft rules.
 
 ### Skills CLI
 
@@ -133,7 +133,6 @@ clio skills list [--json] [--all]
 clio skills search <query> [--json]
 clio skills inspect <name> [--json]
 clio skills validate [path] [--json]
-clio skills create <name> [--user|--project]
 clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
 clio skills update <name> | --all [--force]
 clio skills sync [--force]

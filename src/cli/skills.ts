@@ -10,7 +10,6 @@ import {
 	type SkillUpdateReport,
 	updateSkills,
 } from "../domains/resources/index.js";
-import { createArtifactTool } from "../tools/artifact.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio skills <command>
@@ -22,7 +21,6 @@ Commands:
   clio skills search <query> [--json]
   clio skills inspect <name> [--json]
   clio skills validate [path] [--json]
-  clio skills create <name> [--user|--project]
   clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
   clio skills update <name> | --all [--force]
   clio skills sync [--force]
@@ -41,7 +39,7 @@ declared in evals.md are real shell run in the scenario workspace; they only
 execute with --trust-fixtures, after you have reviewed the evals.md.
 `;
 
-type SkillCreateScope = "user" | "project";
+type SkillInstallScope = "user" | "project";
 
 interface Parsed {
 	command?: string;
@@ -51,7 +49,7 @@ interface Parsed {
 	help: boolean;
 	force: boolean;
 	name?: string;
-	scope?: SkillCreateScope;
+	scope?: SkillInstallScope;
 	scenario?: string;
 	target?: string;
 	workspace?: string;
@@ -207,14 +205,6 @@ function validationLoad(pathArg: string | undefined): ReturnType<typeof loadSkil
 	return loadSkills({ disableDiscovery: true, explicitSkillPaths: [resolve(pathArg)] });
 }
 
-function defaultDescription(name: string): string {
-	return `Use when ${name.replace(/-/g, " ")} guidance is needed.`;
-}
-
-function defaultBody(name: string): string {
-	return [`# ${name}`, "", "Describe the workflow, constraints, and files this skill should use.", ""].join("\n");
-}
-
 export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<number> {
 	let parsed: Parsed;
 	try {
@@ -318,27 +308,6 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				process.stdout.write(`${ok ? "valid" : "invalid"}: ${list.items.length} skill(s)\n`);
 			}
 			return ok ? 0 : 1;
-		}
-		case "create": {
-			const name = parsed.positional[0];
-			if (!name || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio skills create <name> [--user|--project]\n");
-				return 2;
-			}
-			const tool = createArtifactTool({ getCwd: () => process.cwd() });
-			const result = await tool.run({
-				kind: "skill",
-				title: name,
-				description: defaultDescription(name),
-				content: defaultBody(name),
-				scope: parsed.scope ?? "project",
-			});
-			if (result.kind === "error") {
-				printError(result.message);
-				return 1;
-			}
-			printOk(result.output.split("\n")[0] ?? `created skill ${name}`);
-			return 0;
 		}
 		case "install": {
 			const source = parsed.positional[0];

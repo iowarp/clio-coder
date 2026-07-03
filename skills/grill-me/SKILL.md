@@ -1,7 +1,7 @@
 ---
 name: grill-me
 description: Use when the user wants a plan, design, or idea stress-tested through a phased one-question-at-a-time interview before any code is written, or when intent is too ambiguous to plan from. Scans available context first, reviews known facts, fills missing decisions, respects stop signals, and ends with a compact decision log. Triggers on "grill me", "interview me", "stress-test this plan", "poke holes in this".
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -23,10 +23,6 @@ Run a rigorous, repo-aware interview that turns a vague plan into explicit
 decisions. The point is not to interrogate for sport; it is to surface hidden
 branches before anyone writes code.
 
-This workflow is inspired by phased context-review interviews: scan first,
-decide which areas are review versus fill, ask one question at a time, persist
-the structured decisions through `ask_user`, and close with a decision log.
-
 ## Operating Contract
 
 - Use `ask_user` for the interview whenever it is active.
@@ -41,36 +37,6 @@ the structured decisions through `ask_user`, and close with a decision log.
   decision keys and rationale when you call `ask_user` with `action: "complete"`.
 - If `ask_user` is unavailable, ask in plain text, still one question at a
   time, and keep an internal decision log.
-
-Example first ask:
-
-```json
-{
-  "action": "ask",
-  "mode": "single_question",
-  "max_rounds": 12,
-  "questions": [
-    {
-      "header": "Primary Outcome",
-      "question": "What should this plan optimize for first?",
-      "options": [
-        {
-          "label": "Smallest useful slice",
-          "description": "Ship a narrow version quickly and defer broader polish."
-        },
-        {
-          "label": "Clean foundation",
-          "description": "Spend more time on architecture before user-visible behavior."
-        },
-        {
-          "label": "Risk retirement",
-          "description": "Prototype the uncertain part before committing to scope."
-        }
-      ]
-    }
-  ]
-}
-```
 
 ## Phase Map
 
@@ -117,8 +83,8 @@ For each phase:
 - **Fill mode**: context is sparse or ambiguous. Ask the highest-leverage
   missing decision first.
 
-Always resolve root decisions before leaves. Scope and success criteria come
-before names, data fields, UI copy, test details, or task slicing.
+Always resolve root decisions before leaves, in the Question Priority order
+below.
 
 ### Step 3 - Ask One Question
 

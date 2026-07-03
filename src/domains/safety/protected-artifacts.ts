@@ -60,8 +60,6 @@ const SHELL_WRAPPERS = new Set(["command", "builtin", "sudo", "doas"]);
  */
 export function toolMutationPaths(toolName: string, args: Record<string, unknown> | undefined): string[] {
 	if (toolName === ToolNames.Artifact) {
-		// kind=skill writes into the managed skill store, not a caller path.
-		if (args?.kind === "skill") return [];
 		return [mutationPathArg(args) ?? artifactDefaultPath(args)];
 	}
 	if (toolName === ToolNames.Write || toolName === ToolNames.Edit) {

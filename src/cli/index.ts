@@ -46,7 +46,7 @@ Usage:
   clio usage report         cross-session usage facts and opportunities (experimental)
   clio evolve manifest      create, validate, or summarize change manifests
   clio extensions           install, list, enable, disable, or remove extension packages
-  clio skills               list, inspect, validate, or create skills
+  clio skills               list, inspect, validate, or install skills
   clio docs [topic]         serve bundled HTML docs on 127.0.0.1 (--no-open to skip browser)
   clio share export|import  export or import Clio project/resource archives
   clio context-init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki

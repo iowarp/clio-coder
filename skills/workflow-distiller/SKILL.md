@@ -1,7 +1,7 @@
 ---
 name: workflow-distiller
-description: Use when a workflow that just happened should become reusable, when the user says "make this a skill", "package what we just did", "turn this into a workflow", or when the same multi-step process has been repeated across sessions. Reconstructs the workflow from what actually ran in the session rather than from memory, interviews the user one question at a time to fix scope, rigidity, and error handling, checks installed skills for overlap so nothing is reimplemented, produces a design summary for explicit approval, then creates the skill through the artifact tool and defines a validation scenario. Not for authoring a skill from scratch with no prior workflow; write it directly with artifact(kind="skill"). Not for distilling into an agent recipe; propose that to the user as a follow-up when the workflow is dispatch-shaped.
-version: 0.1.0
+description: Use when a workflow that just happened should become reusable, when the user says "make this a skill", "package what we just did", "turn this into a workflow", or when the same multi-step process has been repeated across sessions. Reconstructs the workflow from the session record, interviews, checks overlap with installed skills, gates on approval, then writes the SKILL.md following skill-craft. Not for authoring a skill from scratch with no prior workflow; write the SKILL.md directly following skill-craft. Not for distilling into an agent recipe; propose that as a follow-up when the workflow is dispatch-shaped.
+version: 0.2.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -9,8 +9,10 @@ allowed-tools:
   - find
   - ls
   - context
-  - artifact
+  - write
   - ask_user
+requires:
+  - skill:skill-craft
 registry-id: iowarp/clio-coder
 source-url: https://github.com/iowarp/clio-coder/tree/main/skills/workflow-distiller
 audit: pass
@@ -21,8 +23,10 @@ audit: pass
 Turn a workflow that actually ran into a reusable skill. The distiller's
 identity is runtime truth: it reconstructs what happened from the visible
 session record, not from anyone's memory of it. Skip the ceremony when there
-is no prior workflow; a from-scratch skill is a direct
-`artifact(kind="skill")` call.
+is no prior workflow; a from-scratch skill is a SKILL.md written directly,
+following skill-craft. skill-craft also governs how every skill this
+distiller produces is written: description, body, and pruning rules live
+there, not here.
 
 ## Phase 1 - Reconstruct From Evidence
 
@@ -58,10 +62,9 @@ Call `context(scope="skills")` with no name to list installed skills. Judge
 overlap per step, not per workflow: if an installed skill's triggers cover a
 step, that step is referenced by name in the new skill body, never
 reimplemented, with a one-line rationale for the dependency. A different end
-goal does not excuse reimplementing a covered step. Record each reference in
-the generated skill's frontmatter by passing `requires: ["skill:<name>"]` to
-`artifact(kind="skill")` in Phase 5, so the loader warns when the dependency
-is missing.
+goal does not excuse reimplementing a covered step. Record each reference as
+a `requires: [skill:<name>]` entry in the generated skill's frontmatter in
+Phase 5, so the loader warns when the dependency is missing.
 
 ## Phase 4 - Design Gate
 
@@ -76,17 +79,19 @@ Scope: project | user (user only if the workflow crosses repositories)
 Validation scenario: <prompt, expected observable behavior>
 ```
 
-No `artifact(kind="skill")` call before the user approves. "Looks fine, but
-change X" means revise and re-present.
+No skill file is written before the user approves. "Looks fine, but change X"
+means revise and re-present.
 
 ## Phase 5 - Create
 
-Call `artifact(kind="skill")` with the approved name as `title`, a
-triggers-only third-person description, the body as `content`, and
-`requires: ["skill:<name>"]` for every skill the overlap check referenced. Scope defaults to project; use user scope only when
-the user said the workflow crosses repositories. Placeholders replace every
-session-specific path, name, and value; distill the pattern, not the incident.
-Keep the generated skill under 120 lines; reference instead of inlining. If
+Write `SKILL.md` under `.clio/skills/<approved-name>/`, following skill-craft
+for the frontmatter contract, a triggers-only third-person description, and
+the pruning pass, with `requires: [skill:<name>]` for every skill the overlap
+check referenced. Confirm it loads with `clio skills validate`. Scope
+defaults to project; use the user skill store only when the user said the
+workflow crosses repositories. Placeholders replace every session-specific
+path, name, and value; distill the pattern, not the incident. Keep the
+generated skill under 120 lines; reference instead of inlining. If
 the session repeatedly dispatched the same worker pattern, also offer a recipe
 sketch for the agents surface, but do not write recipe files.
 
@@ -112,8 +117,8 @@ script, and verified row counts against the source, three sessions in a row.
 3. Overlap: the `context(scope="skills")` listing shows no fetch or CSV skill
    installed; no references.
 4. Gate: summary presented; user approves after tightening the description.
-5. Create: `artifact(kind="skill")` title `csv-ingest`, project scope,
-   placeholders for the export URL and column map.
+5. Create: write `.clio/skills/csv-ingest/SKILL.md`, placeholders for the
+   export URL and column map; `clio skills validate` passes.
 6. Validate: scenario "ingest this month's export" must show fetch,
    normalize, count-verify, spot-check in that order; recorded in the body.
 

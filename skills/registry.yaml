@@ -10,35 +10,38 @@ skills:
     version: 0.1.0
     sha256: 587685747a96168f49c6ebac7f0e425d9bbf48619fda5cd14685788605201ead
   - name: clio-test
-    version: 0.1.1
-    sha256: 8582cfc80d542037918623658a495371758fae90c838daac2414db52f605f1e6
+    version: 0.1.2
+    sha256: c3f4fbfc15767e579c034a5428f81cdbea9be016589bc1b11fb6ded25f3d97e5
   - name: context-handoff
-    version: 0.2.0
-    sha256: a535968ccedf4d7049a39bc3d43e9290b5fd7084eda63cff67bb747b002a3b4f
+    version: 0.2.1
+    sha256: 9486da61a872838c8bd3d89160d4b017995fe8e96e6a5c074233faed46f30316
   - name: context-prime
-    version: 0.2.0
-    sha256: e6aea95a5b673b824de603cc1048c9271ab480481e74d781d7f9312f2fa8a8d7
+    version: 0.2.1
+    sha256: fc3595dd4296148d45e34a1471e4eef80b85818c8320d567ac7319f6970b58c1
   - name: credentials
-    version: 0.1.0
-    sha256: 3678925060a96285b15caabbff3e3f6f3bd31763a67ff8b963d2c4519f2eb594
+    version: 0.1.1
+    sha256: 9958758a95f0ea3fc7dba167371fb43d1a729789ee80bad8b77ce3f58809a570
   - name: cut-it
     version: 0.2.0
     sha256: 5bc7620e478fc7404884c9b4f57d3cceabda5b9413b71a3e6d159a626e772979
   - name: design-council
-    version: 0.1.0
-    sha256: 766515866814cbf7dacc92312ca35300393ec2ff690fa991737d20473f9791c5
+    version: 0.1.1
+    sha256: 0b31ccfd35085f5585a4a5c05be455362afcfb41de04ae929a501cc7aea71d71
   - name: experiment-protocol
-    version: 0.1.0
-    sha256: e87c7de8bf4678c50d5d1192d628078cae6645d0cfa61d9458e060dd40f2a703
+    version: 0.1.1
+    sha256: 82959ae707139fb9984ea27b5c600d9cefda0c77f901ec05f3e0430e9e125036
   - name: grill-me
-    version: 0.3.0
-    sha256: 0f889abb2b509cf92039ff3f2ec126dbbc43f2343bb16e12942d0177376a6c4a
+    version: 0.3.1
+    sha256: 77d4c69d5d08d9aace725d372c7d682eb537fd6d5545a8285dbcbef57b083063
   - name: prd
     version: 0.2.0
     sha256: 34b825ce494c702aba3b9a5ca36cd56bee5aa8bd50cf2de9ca84aee7476b291c
   - name: scientific-debugging
+    version: 0.1.1
+    sha256: d3e7888dcab6f0264c190a693522a33bfcb3ed3e091505db403852b351f9e255
+  - name: skill-craft
     version: 0.1.0
-    sha256: 78709827b42d975722f84d3c5786491e2128debad0042377e1c4dee8804dfa8b
+    sha256: 09276e213488d8c08e45251e58b0c062791302460a0def23358f9cc92fe55c9e
   - name: workflow-distiller
-    version: 0.1.0
-    sha256: 71afdf26fd89bc78bf9125a9e77dd1bfd84aaa2f682386cf80575431e09c5fcf
+    version: 0.2.0
+    sha256: 3ed85ff0da3f865346e23d87a3f0be85f337479b01e88d3d499406e84cd84f52
