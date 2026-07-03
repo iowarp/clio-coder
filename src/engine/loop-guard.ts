@@ -25,7 +25,7 @@ import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
-import { createLoopState } from "../domains/safety/loop-detector.js";
+import { createLoopState, hashToolCall } from "../domains/safety/loop-detector.js";
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
 
@@ -78,17 +78,31 @@ export const ORCH_TURN_TOOL_CALL_HARD_MARGIN = 15;
 /** Bounded turn-id memory, matching the registry's dispatch-guard policy. */
 const LOOP_GUARD_TURN_LIMIT = 32;
 
+/** Bounded per-fingerprint success memory for the block-reason evidence anchor. */
+const SUCCEEDED_FINGERPRINT_LIMIT = 128;
+
 /** Bucket for calls arriving without a turn id (e.g. pre-session probes). */
 const NO_TURN_BUCKET = "no-turn";
 
 const LOOP_WINDOW_MS = createLoopState().windowMs;
 
-/** Base block reason: names the loop and asks for a strategy change (block #1). */
-function loopBlockBaseReason(tool: string, repeatCount: number): string {
+/**
+ * Base block reason: names the loop and asks for a strategy change (block #1).
+ * When the same call already returned a successful result earlier this run, the
+ * reason says so and points the model at that result — for a weak local model
+ * "you already have this answer" is the strongest available anchor, stronger
+ * than a generic "change strategy".
+ */
+function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: number): string {
 	const windowSeconds = Math.round(LOOP_WINDOW_MS / 1000);
+	const evidence =
+		priorSuccesses > 0
+			? `This exact call already succeeded ${priorSuccesses} ${priorSuccesses === 1 ? "time" : "times"} this run; ` +
+				`its result is already in the conversation above — re-read that result before calling tools again. `
+			: "";
 	return (
 		`loop detected: ${tool} was called ${repeatCount} times with identical arguments within ${windowSeconds}s. ` +
-		`Repeating the exact call is blocked. Change strategy: vary the arguments, use a different tool, ` +
+		`Repeating the exact call is blocked. ${evidence}Change strategy: vary the arguments, use a different tool, ` +
 		`or explain what new information you expect before retrying.`
 	);
 }
@@ -189,19 +203,37 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		string,
 		{ tool: string; repeatCount: number; blocksThisTurn: number; denials: number }
 	>();
+	/**
+	 * Per-fingerprint count of successful executions this run, for the evidence
+	 * anchor: when a looped call already returned a result, the block reason
+	 * points the model at that result instead of only asking for a new strategy.
+	 * Bounded LRU (larger than the turn maps because a turn can retrieve from
+	 * many distinct calls before it starts repeating one).
+	 */
+	const succeededFingerprints = new Map<string, number>();
 	let count = 0;
 
-	const bumpBoundedCounter = (store: Map<string, number>, turnId: string): number => {
-		if (!store.has(turnId)) {
-			while (store.size >= LOOP_GUARD_TURN_LIMIT) {
+	const bumpBoundedCounter = (store: Map<string, number>, key: string, limit = LOOP_GUARD_TURN_LIMIT): number => {
+		if (!store.has(key)) {
+			while (store.size >= limit) {
 				const oldest = store.keys().next().value;
 				if (typeof oldest !== "string") break;
 				store.delete(oldest);
 			}
 		}
-		const next = (store.get(turnId) ?? 0) + 1;
-		store.set(turnId, next);
+		const next = (store.get(key) ?? 0) + 1;
+		store.set(key, next);
 		return next;
+	};
+
+	// after_tool touchpoint: a successful call (result kind "ok") records a
+	// success for its canonical fingerprint. Blocked calls never reach here
+	// (admission returns before execution), so only real results anchor.
+	const recordSuccessfulResult = (input: MiddlewareHookInput): void => {
+		if (input.metadata?.resultKind !== "ok") return;
+		const tool = input.toolName;
+		if (typeof tool !== "string" || tool.length === 0) return;
+		bumpBoundedCounter(succeededFingerprints, hashToolCall(tool, input.toolArgs ?? {}), SUCCEEDED_FINGERPRINT_LIMIT);
 	};
 
 	const bumpTurnBlocks = (turnId: string): number => bumpBoundedCounter(blocksByTurn, turnId);
@@ -299,10 +331,15 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 
 	return {
 		id: LOOP_GUARD_REGISTRATION_ID,
-		description: "blocks verbatim-repeated tool calls and enforces the per-run tool-call cap",
-		hooks: ["before_tool"],
+		description:
+			"blocks verbatim-repeated tool calls, enforces the per-run tool-call cap, and records successful results for the block-reason evidence anchor",
+		hooks: ["before_tool", "after_tool"],
 		callCount: () => count,
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+			if (input.hook === "after_tool") {
+				recordSuccessfulResult(input);
+				return [];
+			}
 			const now = options.now?.() ?? Date.now();
 			count += 1;
 			if (cap !== undefined && count > cap) {
@@ -352,7 +389,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const tool = input.toolName ?? "unknown";
 			const blocksThisTurn = bumpTurnBlocks(turnKey);
 			const reachedBudget = blocksThisTurn >= budget;
-			const base = loopBlockBaseReason(tool, verdict.count);
+			const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
+			const base = loopBlockBaseReason(tool, verdict.count, priorSuccesses);
 
 			// Budget reached with the synthesis lockout wired: enter the lockout
 			// instead of stopping the turn. The block reason becomes the

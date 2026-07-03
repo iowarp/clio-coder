@@ -247,6 +247,16 @@ and grep/find answer tree visibility from a single ignore policy.
   30s, two blocks per turn) are unchanged; the per-turn tool-call ceiling
   already had this shape (soft budget locks, hard ceiling stops) and is
   untouched.
+- **A loop block confronts the model with its own result.** When the guard
+  blocks an identical call that already returned a successful result earlier in
+  the run, the block reason now says so explicitly — "this exact call already
+  succeeded N times; its result is already in the conversation above, re-read
+  it before calling tools again" — instead of only asking for a new strategy.
+  For a weak local model that anchor is the strongest available nudge: it
+  points at the answer it already has. The guard records successful results per
+  canonical call fingerprint through an after-tool touchpoint (no threading of
+  result bodies through the middleware contract); a call that only ever errored
+  gets no false "already succeeded" claim.
 - **Bash can no longer create files outside the session workspace unnoticed.**
   A full-auto battery run recorded the escape: with the session cwd in a
   fixture copy, `mkdir -p /abs/path && cd /abs/path` built a whole project at
