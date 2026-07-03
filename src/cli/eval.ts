@@ -270,8 +270,20 @@ async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 				? { fail: [{ metric: "result.pass", op: "eq" as const, value: false }] }
 				: loadThresholds(parsed.thresholds);
 		const gate = evaluateGate(candidate, thresholds);
-		process.stdout.write(gate.pass ? "gate: pass\n" : `gate: fail (${gate.failures.length} threshold failure)\n`);
-		return gate.pass ? 0 : 1;
+		if (gate.pass) {
+			process.stdout.write("gate: pass\n");
+			return 0;
+		}
+		process.stdout.write(`gate: fail (${gate.failures.length} threshold failure)\n`);
+		for (const failure of gate.failures) {
+			const { metric, op, value } = failure.assertion;
+			process.stdout.write(
+				failure.unresolved
+					? `  ${metric}: unresolved metric (fail closed)\n`
+					: `  ${metric} ${op} ${JSON.stringify(value)}: actual ${JSON.stringify(failure.actual)}\n`,
+			);
+		}
+		return 1;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return error instanceof InvalidIdError ? 2 : 1;

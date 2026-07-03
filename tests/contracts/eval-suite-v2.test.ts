@@ -215,6 +215,36 @@ describe("contracts/eval suite v2", { concurrency: false }, () => {
 			const gateFail = await runCli(["eval", "gate", failEvalId, "--baseline", passEvalId], { env: scratch.env });
 			strictEqual(gateFail.code, 1, `stderr=${gateFail.stderr}`);
 			ok(gateFail.stdout.startsWith("gate: fail"));
+
+			// A thresholds file firing on a summary metric must fail the gate.
+			const firingThresholds = join(scratch.dir, "firing-thresholds.yaml");
+			writeFileSync(firingThresholds, "fail:\n  - metric: summary.passRate\n    op: lt\n    value: 2\n");
+			const gateThresholdFail = await runCli(
+				["eval", "gate", passEvalId, "--baseline", passEvalId, "--thresholds", firingThresholds],
+				{ env: scratch.env },
+			);
+			strictEqual(gateThresholdFail.code, 1, `stderr=${gateThresholdFail.stderr}`);
+			ok(gateThresholdFail.stdout.includes("summary.passRate"));
+
+			// An unresolvable metric fails closed instead of silently passing.
+			const unknownThresholds = join(scratch.dir, "unknown-thresholds.yaml");
+			writeFileSync(unknownThresholds, "fail:\n  - metric: summary.doesNotExist\n    op: gt\n    value: 0\n");
+			const gateUnresolved = await runCli(
+				["eval", "gate", passEvalId, "--baseline", passEvalId, "--thresholds", unknownThresholds],
+				{ env: scratch.env },
+			);
+			strictEqual(gateUnresolved.code, 1, `stderr=${gateUnresolved.stderr}`);
+			ok(gateUnresolved.stdout.includes("unresolved metric"));
+
+			// A non-firing thresholds file keeps the gate green.
+			const quietThresholds = join(scratch.dir, "quiet-thresholds.yaml");
+			writeFileSync(quietThresholds, "fail:\n  - metric: summary.passRate\n    op: lt\n    value: 1\n");
+			const gateThresholdPass = await runCli(
+				["eval", "gate", passEvalId, "--baseline", passEvalId, "--thresholds", quietThresholds],
+				{ env: scratch.env },
+			);
+			strictEqual(gateThresholdPass.code, 0, `stderr=${gateThresholdPass.stderr}`);
+			strictEqual(gateThresholdPass.stdout, "gate: pass\n");
 		} finally {
 			scratch.cleanup();
 		}
