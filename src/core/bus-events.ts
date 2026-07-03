@@ -115,10 +115,23 @@ export interface ContextActivityPayload {
 }
 
 /**
+ * Where a loop block sits on the identical-call escalation:
+ * - `"block"`: a per-call block below the per-turn budget. The interactive
+ *   layer renders a warn notice; the denial reason flows back to the model.
+ * - `"lockout"`: the per-turn budget is reached. Tool use is disabled for the
+ *   rest of the turn so the model answers from what it already gathered; the
+ *   turn is NOT cancelled. Orchestrator surfaces with the synthesis lockout.
+ * - `"stop"`: the post-lockout backstop fired (the model kept calling tools),
+ *   or a surface without the synthesis lockout reached the budget. The turn is
+ *   cancelled with the durable closing message.
+ */
+export type LoopBlockedDisposition = "block" | "lockout" | "stop";
+
+/**
  * Payload published on {@link BusChannels.LoopBlocked} when the interactive
  * loop guard blocks a verbatim-repeated tool call before execution. The
- * interactive layer renders a warn notice per block and, when `interrupted`
- * is true, cancels the active turn with an error notice. The backend never
+ * interactive layer renders a warn notice per block, a distinct notice on
+ * `"lockout"`, and cancels the active turn only on `"stop"`. The backend never
  * imports TUI code; this event is the only seam between them.
  */
 export interface LoopBlockedPayload {
@@ -129,8 +142,14 @@ export interface LoopBlockedPayload {
 	blocksThisTurn: number;
 	/** Per-turn block budget, carried so renderers never hardcode the threshold. */
 	budget: number;
-	/** True when the per-turn block budget is exhausted and the turn must stop. */
+	/**
+	 * True when the turn must stop (equivalently `disposition === "stop"`).
+	 * A `"lockout"` sets this false: the turn keeps running with tools disabled
+	 * so the model can synthesize a final answer.
+	 */
 	interrupted: boolean;
+	/** Escalation stage of this block; see {@link LoopBlockedDisposition}. */
+	disposition: LoopBlockedDisposition;
 	at: number;
 	turnId?: string;
 }

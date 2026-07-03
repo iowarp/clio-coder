@@ -1214,9 +1214,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const unsubscribeLoopBlocked = deps.bus.on(BusChannels.LoopBlocked, (payload) => {
 		const evt = payload as LoopBlockedPayload | null | undefined;
 		if (!evt || typeof evt !== "object" || typeof evt.tool !== "string" || typeof evt.repeatCount !== "number") return;
-		if (evt.interrupted) {
-			// Stop the runaway turn with a durable, visible closing message instead
-			// of the empty aborted turn a bare cancel leaves behind. The chat loop
+		if (evt.disposition === "stop") {
+			// Backstop reached: the turn stayed in tool loops after the synthesis
+			// lockout, so stop it with a durable, visible closing message instead of
+			// the empty aborted turn a bare cancel leaves behind. The chat loop
 			// persists and renders it; the audit trail is tagged "loop_guard". The
 			// message text is shared with the headless/ACP subscriber.
 			deps.chat.cancel({
@@ -1224,6 +1225,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				source: "loop_guard",
 				auditReason: loopBlockedAuditReason(evt),
 			});
+		} else if (evt.disposition === "lockout") {
+			// Budget reached: tools are locked for the rest of the turn so the model
+			// answers from what it gathered. The turn keeps running (no cancel); the
+			// operator gets one notice that the guard took over.
+			appendNotice(
+				"warn",
+				`[loop-guard] ${evt.tool} looped ${evt.repeatCount}x; tools disabled for the rest of this turn — the model is answering from what it gathered.`,
+				busNoticeSink,
+			);
 		} else {
 			appendNotice(
 				"warn",

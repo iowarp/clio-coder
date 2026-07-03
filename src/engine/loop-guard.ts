@@ -14,7 +14,12 @@
  * nothing here imports TUI code.
  */
 
-import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../core/bus-events.js";
+import {
+	BusChannels,
+	type LoopBlockedDisposition,
+	type LoopBlockedPayload,
+	type ToolBudgetExceededPayload,
+} from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
@@ -31,6 +36,15 @@ export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
  * rather than spinning for tens of seconds before the stop lands.
  */
 export const INTERACTIVE_LOOP_BLOCK_BUDGET = 2;
+
+/**
+ * Post-lockout tool calls tolerated before the synthesis lockout falls back to
+ * a hard turn stop. Once a turn reaches its loop-block budget the guard locks
+ * tools for the rest of the turn and tells the model to answer from what it
+ * gathered; a model that keeps calling tools instead of answering is stopped
+ * after this many further denials so a degenerate model cannot spin forever.
+ */
+export const LOOP_SYNTHESIS_BACKSTOP_DENIALS = 2;
 
 /**
  * Default lifetime tool-call cap for a worker run. Value and env override live
@@ -68,6 +82,38 @@ const LOOP_GUARD_TURN_LIMIT = 32;
 const NO_TURN_BUCKET = "no-turn";
 
 const LOOP_WINDOW_MS = createLoopState().windowMs;
+
+/** Base block reason: names the loop and asks for a strategy change (block #1). */
+function loopBlockBaseReason(tool: string, repeatCount: number): string {
+	const windowSeconds = Math.round(LOOP_WINDOW_MS / 1000);
+	return (
+		`loop detected: ${tool} was called ${repeatCount} times with identical arguments within ${windowSeconds}s. ` +
+		`Repeating the exact call is blocked. Change strategy: vary the arguments, use a different tool, ` +
+		`or explain what new information you expect before retrying.`
+	);
+}
+
+/**
+ * Directive returned when a turn is locked to synthesis: tool use is over, so
+ * the model must answer from what it already gathered. Fed back to the model as
+ * the blocked call's result; the agent loop ends naturally on the first round
+ * that emits text without a tool call.
+ */
+function synthesisLockoutDirective(): string {
+	return (
+		"loop guard: this turn reached its tool-call limit after repeated identical calls, so tool calls are now " +
+		"disabled for the rest of this turn. Everything you retrieved is already in the conversation above. Answer " +
+		"the operator now, in plain text, from what you have gathered — do not call any more tools."
+	);
+}
+
+/** Blocked-call result text for the backstop stop (the operator sees loopBlockedStopReason). */
+function synthesisBackstopReason(tool: string): string {
+	return (
+		`loop guard: tool calls stayed disabled and ${tool} was called again instead of answering, so the turn is ` +
+		"being stopped. Summarize what you found for the operator."
+	);
+}
 
 /** Worker lifetime tool-call cap: env > settings guardrails > default. */
 export function readWorkerToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
@@ -107,6 +153,17 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * {@link toolCallCap} instead.
 	 */
 	turnToolCallBudget?: OrchTurnToolCallBudget;
+	/**
+	 * Orchestrator only: when the per-turn loop-block budget is exhausted, lock
+	 * tool use for the rest of the turn instead of cancelling it outright. Every
+	 * further call is denied with a synthesize-now directive so the model
+	 * produces a final answer from what it already gathered; only a bounded
+	 * backstop of extra denials ({@link LOOP_SYNTHESIS_BACKSTOP_DENIALS}) falls
+	 * back to the hard stop. Absent for workers, which have no interactive turn
+	 * boundary and rely on the lifetime {@link toolCallCap}; leaving it off
+	 * preserves the immediate at-budget stop those surfaces expect.
+	 */
+	turnSynthesisLockout?: boolean;
 	now?: () => number;
 }
 
@@ -119,8 +176,19 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const budget = options.turnBlockBudget ?? INTERACTIVE_LOOP_BLOCK_BUDGET;
 	const cap = options.toolCallCap;
 	const turnBudget = options.turnToolCallBudget;
+	const synthesisLockout = options.turnSynthesisLockout === true;
 	const blocksByTurn = new Map<string, number>();
 	const callsByTurn = new Map<string, number>();
+	/**
+	 * Turns whose tool use is locked to synthesis after reaching the block
+	 * budget. Key present means locked; the value carries the block that tripped
+	 * the lockout (so the backstop's stop message names the looping tool) plus a
+	 * running count of denials since the lockout for the backstop threshold.
+	 */
+	const lockoutByTurn = new Map<
+		string,
+		{ tool: string; repeatCount: number; blocksThisTurn: number; denials: number }
+	>();
 	let count = 0;
 
 	const bumpBoundedCounter = (store: Map<string, number>, turnId: string): number => {
@@ -137,6 +205,35 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	};
 
 	const bumpTurnBlocks = (turnId: string): number => bumpBoundedCounter(blocksByTurn, turnId);
+
+	const enterLockout = (turnKey: string, state: { tool: string; repeatCount: number; blocksThisTurn: number }): void => {
+		if (!lockoutByTurn.has(turnKey)) {
+			while (lockoutByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+				const oldest = lockoutByTurn.keys().next().value;
+				if (typeof oldest !== "string") break;
+				lockoutByTurn.delete(oldest);
+			}
+		}
+		lockoutByTurn.set(turnKey, { ...state, denials: 0 });
+	};
+
+	const emitLoopBlocked = (
+		input: MiddlewareHookInput,
+		info: { tool: string; repeatCount: number; blocksThisTurn: number; disposition: LoopBlockedDisposition },
+		at: number,
+	): void => {
+		const payload: LoopBlockedPayload = {
+			tool: info.tool,
+			repeatCount: info.repeatCount,
+			blocksThisTurn: info.blocksThisTurn,
+			budget,
+			interrupted: info.disposition === "stop",
+			disposition: info.disposition,
+			at,
+			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+		};
+		options.bus?.emit(BusChannels.LoopBlocked, payload);
+	};
 
 	const emitBudgetEvent = (
 		input: MiddlewareHookInput,
@@ -211,6 +308,35 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (cap !== undefined && count > cap) {
 				return [{ kind: "block_tool", reason: `tool-call cap reached (${cap}); abort turn`, severity: "hard-block" }];
 			}
+			const turnKey = input.turnId ?? NO_TURN_BUCKET;
+
+			// Synthesis lockout (orchestrator only). Once a turn has exhausted its
+			// loop-block budget, tool use is over: every further call is denied
+			// with a synthesize-now directive so the model answers from what it
+			// already gathered, and only a bounded backstop of extra denials falls
+			// back to the hard stop. This replaces the immediate turn-cancel that
+			// used to fire at the budget, which threw away turns already holding
+			// the answer. The check runs before the fingerprint so a locked turn
+			// denies distinct calls too: the model must answer, not pivot tools.
+			const lockout = synthesisLockout ? lockoutByTurn.get(turnKey) : undefined;
+			if (lockout !== undefined) {
+				lockout.denials += 1;
+				if (lockout.denials > LOOP_SYNTHESIS_BACKSTOP_DENIALS) {
+					emitLoopBlocked(
+						input,
+						{
+							tool: lockout.tool,
+							repeatCount: lockout.repeatCount,
+							blocksThisTurn: lockout.blocksThisTurn,
+							disposition: "stop",
+						},
+						now,
+					);
+					return [{ kind: "block_tool", reason: synthesisBackstopReason(lockout.tool), severity: "hard-block" }];
+				}
+				return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
+			}
+
 			// Identical-repeat detection runs BEFORE the volume budget so verbatim
 			// retries of budget-blocked calls still reach the detector. Its tighter
 			// interrupt (a couple of blocks per turn) is what ends the retry spiral
@@ -224,24 +350,30 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const verdict = options.safety.observeLoop(fingerprint, now);
 			if (!verdict.looping) return evaluateTurnBudget(input, now) ?? [];
 			const tool = input.toolName ?? "unknown";
-			const blocksThisTurn = bumpTurnBlocks(input.turnId ?? NO_TURN_BUCKET);
-			const interrupted = blocksThisTurn >= budget;
-			const payload: LoopBlockedPayload = {
-				tool,
-				repeatCount: verdict.count,
-				blocksThisTurn,
-				budget,
-				interrupted,
-				at: now,
-				...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
-			};
-			options.bus?.emit(BusChannels.LoopBlocked, payload);
-			const windowSeconds = Math.round(LOOP_WINDOW_MS / 1000);
-			const base =
-				`loop detected: ${tool} was called ${verdict.count} times with identical arguments within ${windowSeconds}s. ` +
-				`Repeating the exact call is blocked. Change strategy: vary the arguments, use a different tool, ` +
-				`or explain what new information you expect before retrying.`;
-			const reason = interrupted
+			const blocksThisTurn = bumpTurnBlocks(turnKey);
+			const reachedBudget = blocksThisTurn >= budget;
+			const base = loopBlockBaseReason(tool, verdict.count);
+
+			// Budget reached with the synthesis lockout wired: enter the lockout
+			// instead of stopping the turn. The block reason becomes the
+			// synthesize-now directive; the LoopBlocked event carries "lockout"
+			// (not "stop") so no surface cancels — the model gets its one bounded
+			// chance to answer from what it gathered.
+			if (synthesisLockout && reachedBudget) {
+				enterLockout(turnKey, { tool, repeatCount: verdict.count, blocksThisTurn });
+				emitLoopBlocked(input, { tool, repeatCount: verdict.count, blocksThisTurn, disposition: "lockout" }, now);
+				return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
+			}
+
+			// Below budget, or a surface without the lockout (workers): the
+			// existing per-block behavior. Reaching the budget without a lockout
+			// still stops the turn with the "being stopped" reason.
+			emitLoopBlocked(
+				input,
+				{ tool, repeatCount: verdict.count, blocksThisTurn, disposition: reachedBudget ? "stop" : "block" },
+				now,
+			);
+			const reason = reachedBudget
 				? `${base} Loop budget exhausted (${blocksThisTurn} blocks this turn); the agent is being stopped.`
 				: base;
 			return [{ kind: "block_tool", reason, severity: "hard-block" }];

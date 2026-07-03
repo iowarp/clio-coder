@@ -624,6 +624,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			bus,
 			turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
 			turnToolCallBudget: readOrchTurnToolCallBudget(),
+			// Interactive/headless/ACP all share this orchestrator guard: at the
+			// block budget, lock tools for the rest of the turn so the model
+			// answers from what it gathered instead of hard-cancelling a turn that
+			// may already hold the answer. The bounded backstop still cancels a
+			// model that keeps calling tools.
+			turnSynthesisLockout: true,
 		}),
 	);
 	const protectedArtifactsGuard = createProtectedArtifactsRegistration({

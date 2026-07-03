@@ -16,6 +16,7 @@ import {
 	DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
 	LOOP_GUARD_REGISTRATION_ID,
+	LOOP_SYNTHESIS_BACKSTOP_DENIALS,
 	ORCH_TURN_TOOL_CALL_HARD_MARGIN,
 	readOrchTurnToolCallBudget,
 	readWorkerToolCallCap,
@@ -266,6 +267,116 @@ describe("unified loop guard registration", () => {
 		);
 		ok(hashToolCall("read", { path: "a" }) !== hashToolCall("read", { path: "b" }));
 		strictEqual(createLoopGuardRegistration({ safety: testSafety() }).id, LOOP_GUARD_REGISTRATION_ID);
+	});
+});
+
+describe("synthesis lockout at the block budget", () => {
+	function lockoutRegistry(): {
+		registry: ReturnType<typeof createRegistry>;
+		events: LoopBlockedPayload[];
+	} {
+		const safety = testSafety();
+		const bus = createSafeEventBus();
+		const events: LoopBlockedPayload[] = [];
+		bus.on(BusChannels.LoopBlocked, (payload) => {
+			events.push(payload);
+		});
+		const bundle = createMiddlewareBundle({
+			registrations: [
+				createLoopGuardRegistration({
+					safety,
+					bus,
+					turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
+					turnSynthesisLockout: true,
+				}),
+			],
+		});
+		return { registry: guardedRegistry({ safety, middleware: bundle.contract }), events };
+	}
+
+	async function driveToLockout(
+		registry: ReturnType<typeof createRegistry>,
+		call: { tool: ToolName; args: Record<string, unknown> },
+	): Promise<void> {
+		// LOOP_THRESHOLD-1 calls run; the next trips block #1; the one after is
+		// block #2, which enters the lockout rather than stopping the turn.
+		for (let i = 1; i < LOOP_THRESHOLD; i++) {
+			strictEqual((await registry.invoke(call, { turnId: "t1" })).kind, "ok");
+		}
+		const block1 = await registry.invoke(call, { turnId: "t1" });
+		ok(block1.kind === "blocked" && block1.reason.includes("loop detected"), "block #1 names the loop");
+		ok(block1.kind === "blocked" && !block1.reason.includes("disabled"), "block #1 is not yet a lockout");
+		const block2 = await registry.invoke(call, { turnId: "t1" });
+		ok(block2.kind === "blocked" && block2.reason.includes("tool calls are now disabled"), "block #2 locks tools");
+		ok(block2.kind === "blocked" && block2.reason.includes("Answer the operator now"), "block #2 tells it to answer");
+	}
+
+	it("enters a synthesis lockout at the budget and never emits a stop while the model can still answer", async () => {
+		const { registry, events } = lockoutRegistry();
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		await driveToLockout(registry, call);
+		// The lockout is the ONLY interrupt-class event so far: a "lockout"
+		// disposition with interrupted:false, so no surface cancels the turn.
+		strictEqual(events.length, 2, "one block event, one lockout event");
+		strictEqual(events[0]?.disposition, "block");
+		strictEqual(events[0]?.interrupted, false);
+		strictEqual(events[1]?.disposition, "lockout");
+		strictEqual(events[1]?.interrupted, false);
+		strictEqual(
+			events.filter((evt) => evt.disposition === "stop").length,
+			0,
+			"no stop event fires: a model that stops calling tools now answers and the turn ends naturally",
+		);
+	});
+
+	it("denies distinct calls while locked so the model must answer, not pivot tools", async () => {
+		const { registry } = lockoutRegistry();
+		await driveToLockout(registry, { tool: ToolNames.Read, args: { path: "README.md" } });
+		// A genuinely different call is still denied: the turn is answering-only now.
+		const distinct = await registry.invoke({ tool: ToolNames.Read, args: { path: "OTHER.md" } }, { turnId: "t1" });
+		ok(distinct.kind === "blocked" && distinct.reason.includes("tool calls are now disabled"), "distinct call denied");
+	});
+
+	it("falls back to a hard stop after the bounded post-lockout backstop", async () => {
+		const { registry, events } = lockoutRegistry();
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		await driveToLockout(registry, call);
+		// The model ignores the directive and keeps calling tools. Exactly
+		// LOOP_SYNTHESIS_BACKSTOP_DENIALS further denials are tolerated; the next
+		// call trips the backstop stop.
+		let stopReason = "";
+		for (let i = 0; i < LOOP_SYNTHESIS_BACKSTOP_DENIALS; i++) {
+			const denied = await registry.invoke(call, { turnId: "t1" });
+			ok(denied.kind === "blocked" && denied.reason.includes("disabled"), `denial ${i + 1} keeps directing to answer`);
+			strictEqual(
+				events.filter((evt) => evt.disposition === "stop").length,
+				0,
+				"still no stop within the backstop window",
+			);
+		}
+		const stopped = await registry.invoke(call, { turnId: "t1" });
+		if (stopped.kind === "blocked") stopReason = stopped.reason;
+		ok(stopReason.includes("being stopped"), "the backstop stop names the turn stop");
+		const stop = events.find((evt) => evt.disposition === "stop");
+		ok(stop !== undefined, "a stop event is published");
+		strictEqual(stop?.interrupted, true, "the stop event interrupts the turn");
+		strictEqual(stop?.tool, ToolNames.Read, "the stop names the looping tool");
+		// The stop reuses the block that tripped the lockout (block #2, the
+		// LOOP_THRESHOLD+1-th identical call) so the closing message names a real
+		// repeat count rather than a placeholder.
+		strictEqual(
+			stop?.repeatCount,
+			LOOP_THRESHOLD + 1,
+			"the stop carries the looping repeat count for the closing message",
+		);
+	});
+
+	it("locks each turn independently: a fresh turn is not born locked", async () => {
+		const { registry } = lockoutRegistry();
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		await driveToLockout(registry, call);
+		// A different turn starts clean and its below-threshold calls execute.
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "b.md" } }, { turnId: "t2" })).kind, "ok");
 	});
 });
 
