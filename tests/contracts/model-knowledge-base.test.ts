@@ -11,6 +11,7 @@ import {
 	resolveProviderModelCatalogDirs,
 } from "../../src/domains/providers/knowledge-base-path.js";
 import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
+import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 
 function scratchDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -135,5 +136,35 @@ describe("contracts/model knowledge base", () => {
 		// the 12B or 26B ids, so those must not be captured by it.
 		strictEqual(kb.lookup("Gemma-4-12B-it-UD-Q4_K_XL-262K")?.entry.family !== "gemma-4-31b-it-qat-mtp", true);
 		strictEqual(kb.lookup("Gemma-4-26B-A4B-it-Q4_K_M-262K")?.entry.family, "gemma4-26b-a4b");
+	});
+
+	it("pins reasoning classes for the blessed local families as catalog data", () => {
+		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
+		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
+
+		// Coder-MTP variants are reasoning class "never": reasoning=false so no
+		// per-request path (pi-ai qwen-chat-template kwargs included) can flip
+		// enable_thinking back on over the server's launch default, and the
+		// thinking mechanism is none so the dial clamps to off.
+		for (const [wireId, family] of [
+			["Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K", "qwopus3.6-35b-a3b-coder"],
+			["Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K", "qwopus3.6-27b-coder"],
+			["Qwopus3.5-9B-Coder-Q8_0-262K", "qwopus3.5-9b-coder"],
+		] as const) {
+			const hit = kb.lookup(wireId);
+			strictEqual(hit?.entry.family, family, `${wireId} family`);
+			strictEqual(hit?.entry.capabilities.reasoning, false, `${wireId} reasoning`);
+			const quirks = hit?.entry.quirks as LocalModelQuirks | undefined;
+			strictEqual(quirks?.thinking?.mechanism, "none", `${wireId} mechanism`);
+		}
+
+		// The 27B Coder-MTP id must not fall through to the reasoning-capable
+		// v1-preview family via its broader `qwopus3.6-27b` pattern.
+		strictEqual(kb.lookup("qwopus3.6-27b-v1-preview")?.entry.family, "qwopus3.6-27b-v1-preview");
+		strictEqual(kb.lookup("qwopus3.6-27b-v1-preview")?.entry.capabilities.reasoning, true);
+
+		// Ornith is reasoning class "always": it cannot be silenced.
+		const ornithQuirks = kb.lookup("Ornith-1.0-35B-Q4_K_M-262K")?.entry.quirks as LocalModelQuirks | undefined;
+		strictEqual(ornithQuirks?.thinking?.mechanism, "always-on");
 	});
 });

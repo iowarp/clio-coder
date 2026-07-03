@@ -5,7 +5,9 @@ import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
 import {
+	type ReasoningClass,
 	type ResolvedModelRuntimeCapabilities,
+	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilities,
 	resolveTargetRuntimeCapabilities,
 } from "./model-runtime-capabilities.js";
@@ -97,6 +99,8 @@ export interface RuntimeTargetSnapshot {
 	capabilities: RuntimeCapabilityDecision;
 	thinking: {
 		mechanism: ResolvedModelRuntimeCapabilities["thinking"]["mechanism"];
+		/** Derived reasoning class: never | switchable | always. */
+		class: ReasoningClass;
 		display: string;
 		supportedLevels: ReadonlyArray<ThinkingLevel>;
 		budgetEnforcement: ResolvedModelRuntimeCapabilities["thinking"]["budgetEnforcement"];
@@ -476,6 +480,7 @@ export function runtimeTargetSnapshot(target: ResolvedRuntimeTarget): RuntimeTar
 		capabilities: { ...target.capabilityDecisions },
 		thinking: {
 			mechanism: target.modelRuntime.thinking.mechanism,
+			class: reasoningClassForMechanism(target.modelRuntime.thinking.mechanism),
 			display: target.modelRuntime.thinking.display,
 			supportedLevels: [...target.modelRuntime.thinking.supportedLevels],
 			budgetEnforcement: target.modelRuntime.thinking.budgetEnforcement,

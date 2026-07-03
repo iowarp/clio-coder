@@ -164,6 +164,20 @@ export function harmonyReasoningEffort(level: string | undefined): HarmonyReason
 	return "low";
 }
 
+/**
+ * Reasoning class of a model, derived from its thinking mechanism. Catalog
+ * data (quirks.thinking.mechanism plus capabilities.reasoning) is the single
+ * source: "never" must not emit thinking at any dial, "always" cannot be
+ * silenced, "switchable" follows the dial through a wire/template control.
+ */
+export type ReasoningClass = "never" | "switchable" | "always";
+
+export function reasoningClassForMechanism(mechanism: ThinkingMechanism | null | undefined): ReasoningClass {
+	if (mechanism === "none") return "never";
+	if (mechanism === "always-on") return "always";
+	return "switchable";
+}
+
 export function inferThinkingMechanism(
 	quirks: LocalModelQuirks | undefined,
 	caps: CapabilityHints | undefined,
