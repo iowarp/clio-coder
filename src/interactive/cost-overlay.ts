@@ -2,7 +2,9 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
+import { formatUsd } from "./footer/widgets.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { clioTheme, rule } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 80;
 
@@ -26,10 +28,10 @@ function formatTokens(n: number): string {
 	return n.toLocaleString("en-US");
 }
 
-function formatUsd(n: number): string {
-	return `$${n.toFixed(2)}`;
-}
-
+// A zero cost is local and free, so it reads `$0.00 local`. Every other amount
+// goes through the shared USD formatter, which keeps two decimals normally and
+// widens to four only under one cent so a sub-cent row never rounds to a
+// misleading `$0.00`.
 function formatUsdCell(usd: number): string {
 	return usd === 0 ? `${formatUsd(0)} local` : formatUsd(usd);
 }
@@ -90,30 +92,53 @@ function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "mo
 	);
 }
 
-function formatCacheLine(cacheRead: number, cacheWrite: number, apiCalls: number): string {
-	const avg = apiCalls > 1 && cacheRead > 0 ? `  avg/request ${formatTokens(Math.round(cacheRead / apiCalls))}` : "";
-	return `cached prefix read ${formatTokens(cacheRead)}${avg}  write ${formatTokens(cacheWrite)}`;
+function cacheReadValue(cacheRead: number, apiCalls: number): string {
+	if (apiCalls > 1 && cacheRead > 0) {
+		return `${formatTokens(cacheRead)} (avg/request ${formatTokens(Math.round(cacheRead / apiCalls))})`;
+	}
+	return formatTokens(cacheRead);
 }
 
-function formatSummaryLines(totalUsd: number, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
+// A block of key-value rows in the design-system grammar: a dim padded key and
+// a muted value. Values are right-aligned inside the block so the numbers line
+// up under one another.
+function kvBlock(entries: ReadonlyArray<readonly [string, string]>): string[] {
+	const theme = clioTheme();
+	const keyWidth = entries.reduce((max, [key]) => Math.max(max, key.length), 0);
+	const valueWidth = entries.reduce((max, [, value]) => Math.max(max, value.length), 0);
+	return entries.map(
+		([key, value]) => `${theme.fg("dim", key.padEnd(keyWidth))}  ${theme.fg("muted", value.padStart(valueWidth))}`,
+	);
+}
+
+function summaryBlock(totalUsd: number, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
 	const totals = sumRows(rows);
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
-	return [
-		`turns ${formatTokens(totals.runs)}  model requests ${formatTokens(totals.apiCalls)}  cost ${formatUsdCell(totalUsd)}`,
-		`fresh input ${formatTokens(totals.input)}  output ${formatTokens(totals.output)}  reasoning ${formatTokens(totals.reasoningTokens)}`,
-		formatCacheLine(totals.cacheRead, totals.cacheWrite, totals.apiCalls),
-		`processed total ${formatTokens(resolvedTotal)} tokens`,
-	];
+	return kvBlock([
+		["turns", formatTokens(totals.runs)],
+		["requests", formatTokens(totals.apiCalls)],
+		["cost", formatUsdCell(totalUsd)],
+		["input", formatTokens(totals.input)],
+		["output", formatTokens(totals.output)],
+		["reasoning", formatTokens(totals.reasoningTokens)],
+		["cache read", cacheReadValue(totals.cacheRead, totals.apiCalls)],
+		["cache write", formatTokens(totals.cacheWrite)],
+		["processed", `${formatTokens(resolvedTotal)} tokens`],
+	]);
 }
 
-function formatRowLines(row: CostRow): string[] {
-	return [
-		`${row.providerId} · ${row.modelId}`,
-		`  turns ${formatTokens(row.runs)}  model requests ${formatTokens(row.apiCalls)}  cost ${formatUsdCell(row.usd)}`,
-		`  fresh input ${formatTokens(row.input)}  output ${formatTokens(row.output)}  reasoning ${formatTokens(row.reasoningTokens)}`,
-		`  ${formatCacheLine(row.cacheRead, row.cacheWrite, row.apiCalls)}`,
-		`  processed total ${formatTokens(row.tokens)} tokens`,
-	];
+function modelBlock(row: CostRow): string[] {
+	return kvBlock([
+		["turns", formatTokens(row.runs)],
+		["requests", formatTokens(row.apiCalls)],
+		["cost", formatUsdCell(row.usd)],
+		["input", formatTokens(row.input)],
+		["output", formatTokens(row.output)],
+		["reasoning", formatTokens(row.reasoningTokens)],
+		["cache read", cacheReadValue(row.cacheRead, row.apiCalls)],
+		["cache write", formatTokens(row.cacheWrite)],
+		["processed", `${formatTokens(row.tokens)} tokens`],
+	]);
 }
 
 export function formatCostOverlayBodyLines(
@@ -122,17 +147,19 @@ export function formatCostOverlayBodyLines(
 	rows: ReadonlyArray<CostRow>,
 	contentWidth: number,
 ): string[] {
+	const theme = clioTheme();
 	const lines: string[] = [];
-	for (const line of formatSummaryLines(totalUsd, totalTokens, rows)) {
+	for (const line of summaryBlock(totalUsd, totalTokens, rows)) {
 		lines.push(line);
 	}
-	lines.push("─".repeat(contentWidth));
+	lines.push(rule(theme, contentWidth));
 	if (rows.length === 0) {
-		lines.push("no token usage recorded for this session");
+		lines.push(theme.fg("muted", "no token usage recorded for this session"));
 	} else {
 		for (const [index, row] of rows.entries()) {
 			if (index > 0) lines.push("");
-			for (const line of formatRowLines(row)) {
+			lines.push(theme.style("accent", `${row.providerId} · ${row.modelId}`, { bold: true }));
+			for (const line of modelBlock(row)) {
 				lines.push(line);
 			}
 		}

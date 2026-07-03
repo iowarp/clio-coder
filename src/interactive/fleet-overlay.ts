@@ -22,7 +22,7 @@ import {
 	selectTargetSubmenu,
 	textInputSubmenu,
 } from "./overlays/settings.js";
-import { formatCompactMs } from "./theme/index.js";
+import { type ClioToken, clioTheme, formatCompactMs, GLYPH, rule } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1000;
@@ -69,8 +69,50 @@ function formatTokens(value: number): string {
 	return Math.max(0, Math.round(value)).toLocaleString("en-US");
 }
 
+// A timestamp always renders as HH:MM:SS in local time so a row never carries a
+// raw ISO string. An unparseable value falls back to itself rather than an
+// empty cell.
+function formatClock(value: string): string {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return value;
+	const pad = (n: number): string => String(n).padStart(2, "0");
+	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function dim(text: string): string {
+	return clioTheme().fg("dim", text);
+}
+
+function muted(text: string): string {
+	return clioTheme().fg("muted", text);
+}
+
+// Status-ish cells read their token from the value itself: stale is a warning,
+// failed or dead is an error, and everything alive or running is neutral muted.
+function statusToken(value: string): ClioToken {
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "stale") return "warning";
+	if (normalized === "failed" || normalized === "dead") return "error";
+	return "muted";
+}
+
+function statusCell(value: string, width: number): string {
+	return clioTheme().fg(statusToken(value), fitLeft(value, width));
+}
+
+// The list-group header from the design system: `── running (1)` in dim. The
+// leading double dash is a structural rule literal, not a status glyph.
+function listGroupHeader(label: string): string {
+	return dim(`── ${label}`);
+}
+
+// A key-value row with a dim padded key and a muted value.
+function kvRow(key: string, value: string, keyWidth: number): string {
+	return `${dim(key.padEnd(keyWidth))} ${muted(value)}`;
+}
+
 function divider(width: number): string {
-	return "─".repeat(width);
+	return rule(clioTheme(), width);
 }
 
 function fitContentLine(text: string, width: number): string {
@@ -78,63 +120,74 @@ function fitContentLine(text: string, width: number): string {
 }
 
 function runningHeader(width: number): string {
-	return fitContentLine(
-		[
-			fitLeft("run", 10),
-			fitLeft("agent", 12),
-			fitLeft("rt", 5),
-			fitLeft("hb", 6),
-			fitLeft("phase", 11),
-			fitRight("try", 3),
-			fitRight("dep", 3),
-			fitRight("age", 7),
-			fitRight("tokens", 8),
-			fitRight("cost", 9),
-		].join(" "),
-		width,
+	return dim(
+		fitContentLine(
+			[
+				fitLeft("run", 10),
+				fitLeft("agent", 12),
+				fitLeft("rt", 5),
+				fitLeft("hb", 6),
+				fitLeft("phase", 11),
+				fitRight("try", 3),
+				fitRight("dep", 3),
+				fitRight("age", 7),
+				fitRight("tokens", 8),
+				fitRight("cost", 9),
+			].join(" "),
+			width,
+		),
 	);
 }
 
 function retryHeader(width: number): string {
-	return fitContentLine(
-		[fitLeft("source", 10), fitLeft("agent", 12), fitRight("try", 3), fitLeft("due", 20), fitLeft("reason", 32)].join(
-			" ",
+	return dim(
+		fitContentLine(
+			[fitLeft("source", 10), fitLeft("agent", 12), fitRight("try", 3), fitLeft("due", 20), fitLeft("reason", 32)].join(
+				" ",
+			),
+			width,
 		),
-		width,
 	);
 }
 
 function runningRow(row: DispatchSnapshot["running"][number], width: number): string {
 	const line = [
-		fitLeft(shortId(row.runId), 10),
-		fitLeft(row.agentId, 12),
-		fitLeft(row.runtimeKind, 5),
-		fitLeft(row.heartbeat, 6),
-		fitLeft(row.outcomePhase, 11),
-		fitRight(String(row.lineage.attempt), 3),
-		fitRight(String(row.lineage.depth), 3),
-		fitRight(formatCompactMs(row.elapsedMs), 7),
-		fitRight(formatTokens(row.tokens.total), 8),
-		fitRight(formatUsd(row.costUsd), 9),
+		muted(fitLeft(shortId(row.runId), 10)),
+		muted(fitLeft(row.agentId, 12)),
+		muted(fitLeft(row.runtimeKind, 5)),
+		statusCell(row.heartbeat, 6),
+		statusCell(row.outcomePhase, 11),
+		muted(fitRight(String(row.lineage.attempt), 3)),
+		muted(fitRight(String(row.lineage.depth), 3)),
+		muted(fitRight(formatCompactMs(row.elapsedMs), 7)),
+		muted(fitRight(formatTokens(row.tokens.total), 8)),
+		muted(fitRight(formatUsd(row.costUsd), 9)),
 	].join(" ");
 	return truncateToWidth(line, width, "", true);
 }
 
 function retryRow(row: DispatchSnapshot["retrying"][number], width: number): string {
+	// A retrying row is a warning-level state, so the reason cell that explains
+	// the retry carries the warning token; its timestamp renders as a clock.
 	const line = [
-		fitLeft(shortId(row.runId), 10),
-		fitLeft(row.agentId, 12),
-		fitRight(String(row.attempt), 3),
-		fitLeft(row.dueAt, 20),
-		fitLeft(row.reason, 32),
+		muted(fitLeft(shortId(row.runId), 10)),
+		muted(fitLeft(row.agentId, 12)),
+		muted(fitRight(String(row.attempt), 3)),
+		muted(fitLeft(formatClock(row.dueAt), 20)),
+		clioTheme().fg("warning", fitLeft(row.reason, 32)),
 	].join(" ");
 	return truncateToWidth(line, width, "", true);
 }
 
-function totalsLine(totals: DispatchSnapshot["totals"]): string {
-	return `input=${formatTokens(totals.inputTokens)} output=${formatTokens(totals.outputTokens)} total=${formatTokens(
-		totals.totalTokens,
-	)} cost=${formatUsd(totals.costUsd)} runtime=${formatCompactMs(totals.runtimeSeconds * 1000)}`;
+function totalsRows(totals: DispatchSnapshot["totals"]): string[] {
+	const keyWidth = "runtime".length;
+	return [
+		kvRow("input", formatTokens(totals.inputTokens), keyWidth),
+		kvRow("output", formatTokens(totals.outputTokens), keyWidth),
+		kvRow("total", formatTokens(totals.totalTokens), keyWidth),
+		kvRow("cost", formatUsd(totals.costUsd), keyWidth),
+		kvRow("runtime", formatCompactMs(totals.runtimeSeconds * 1000), keyWidth),
+	];
 }
 
 export function formatFleetOverlayBodyLines(
@@ -143,35 +196,32 @@ export function formatFleetOverlayBodyLines(
 ): string[] {
 	const width = Math.max(1, Math.floor(contentWidth));
 	const lines: string[] = [];
-	const push = (line: string): void => {
-		lines.push(fitContentLine(line, width));
-	};
-	push(`generated ${snapshot.generatedAt}`);
+	lines.push(dim(`generated ${formatClock(snapshot.generatedAt)}`));
 	lines.push(divider(width));
-	push(`running (${snapshot.running.length})`);
+	lines.push(listGroupHeader(`running (${snapshot.running.length})`));
 	if (snapshot.running.length === 0) {
-		push("  none in this TUI process");
+		lines.push(dim("  none in this TUI process"));
 	} else {
 		lines.push(runningHeader(width));
 		for (const row of snapshot.running) lines.push(runningRow(row, width));
 	}
 	lines.push("");
-	push(`retrying (${snapshot.retrying.length})`);
+	lines.push(listGroupHeader(`retrying (${snapshot.retrying.length})`));
 	if (snapshot.retrying.length === 0) {
-		push("  none in this TUI process");
+		lines.push(dim("  none in this TUI process"));
 	} else {
 		lines.push(retryHeader(width));
 		for (const row of snapshot.retrying) lines.push(retryRow(row, width));
 	}
 	lines.push("");
-	push("totals");
-	push(`  ${totalsLine(snapshot.totals)}`);
+	lines.push(listGroupHeader("totals"));
+	for (const totalRow of totalsRows(snapshot.totals)) lines.push(totalRow);
 	if (snapshot.running.length === 0 && snapshot.retrying.length === 0) {
 		lines.push("");
-		push("No in-process dispatches are active.");
-		push("Cross-process live retry state is not attached to the TUI.");
-		push("Use `clio fleet status` for durable ledger-backed running rows.");
-		push("Rows from other Clio processes are not shown here.");
+		lines.push(dim("No in-process dispatches are active."));
+		lines.push(dim("Cross-process live retry state is not attached to the TUI."));
+		lines.push(dim("Use `clio fleet status` for durable ledger-backed running rows."));
+		lines.push(dim("Rows from other Clio processes are not shown here."));
 	}
 	return lines;
 }
@@ -181,7 +231,7 @@ function renderSnapshot(dispatch: DispatchContract, width = DEFAULT_CONTENT_WIDT
 		return formatFleetOverlayBodyLines(dispatch.snapshot(), width);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		return [`fleet snapshot unavailable`, "", fitContentLine(message, width)];
+		return [clioTheme().fg("error", "fleet snapshot unavailable"), "", muted(fitContentLine(message, width))];
 	}
 }
 
@@ -215,47 +265,60 @@ function normalizeSettingValue(value: string | null | undefined): string {
 	return value && value.length > 0 ? value : "(unset)";
 }
 
+function selectionMarker(selected: boolean): string {
+	return selected ? clioTheme().fg("accent", `${GLYPH.cursor} `) : "  ";
+}
+
+// A row warning takes the inline warning mark in the warning token.
+function rowWarning(warning: string | null): string {
+	return warning ? clioTheme().fg("warning", `${GLYPH.warnInline} ${warning}`) : "";
+}
+
 function profileHeader(width: number): string {
-	return fitContentLine(
-		[fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), fitLeft("thinking", 8), "warning"].join(" "),
-		width,
+	return dim(
+		fitContentLine(
+			[fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), fitLeft("thinking", 8), "warning"].join(" "),
+			width,
+		),
 	);
 }
 
 function profileLine(row: ProfileRow, selected: boolean, width: number): string {
-	const marker = selected ? "▸ " : "  ";
-	const warning = row.warning ? `! ${row.warning}` : "";
-	return fitContentLine(
-		`${marker}${[
-			fitLeft(row.name, 20),
-			fitLeft(row.target, 18),
-			fitLeft(row.model, 26),
-			fitLeft(row.profile.thinkingLevel, 8),
-			warning,
+	return truncateToWidth(
+		`${selectionMarker(selected)}${[
+			muted(fitLeft(row.name, 20)),
+			muted(fitLeft(row.target, 18)),
+			muted(fitLeft(row.model, 26)),
+			muted(fitLeft(row.profile.thinkingLevel, 8)),
+			rowWarning(row.warning),
 		].join(" ")}`,
-		width,
+		Math.max(1, width),
+		"",
+		true,
 	);
 }
 
 function bindingHeader(width: number): string {
-	return fitContentLine(
-		[fitLeft("agent", 20), fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), "warning"].join(" "),
-		width,
+	return dim(
+		fitContentLine(
+			[fitLeft("agent", 20), fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), "warning"].join(" "),
+			width,
+		),
 	);
 }
 
 function bindingLine(row: BindingRow, selected: boolean, width: number): string {
-	const marker = selected ? "▸ " : "  ";
-	const warning = row.warning ? `! ${row.warning}` : "";
-	return fitContentLine(
-		`${marker}${[
-			fitLeft(row.agentId, 20),
-			fitLeft(row.profileName, 20),
-			fitLeft(row.target, 18),
-			fitLeft(row.model, 26),
-			warning,
+	return truncateToWidth(
+		`${selectionMarker(selected)}${[
+			muted(fitLeft(row.agentId, 20)),
+			muted(fitLeft(row.profileName, 20)),
+			muted(fitLeft(row.target, 18)),
+			muted(fitLeft(row.model, 26)),
+			rowWarning(row.warning),
 		].join(" ")}`,
-		width,
+		Math.max(1, width),
+		"",
+		true,
 	);
 }
 
@@ -297,7 +360,7 @@ class FleetOverlayBody implements Component {
 		const contentWidth = Math.max(1, Math.floor(width));
 		if (this.submenuComponent) return this.submenuComponent.render(contentWidth);
 		if (this.mode === "status") return renderSnapshot(this.dispatch, contentWidth);
-		if (!this.canEditSettings()) return ["settings writer unavailable"];
+		if (!this.canEditSettings()) return [muted("settings writer unavailable")];
 		return this.mode === "profiles" ? this.renderProfiles(contentWidth) : this.renderBindings(contentWidth);
 	}
 
@@ -451,9 +514,9 @@ class FleetOverlayBody implements Component {
 
 	private renderProfiles(width: number): string[] {
 		const rows = this.profileRows();
-		const lines = [fitContentLine("profiles", width), divider(width), profileHeader(width)];
+		const lines = [listGroupHeader(`profiles (${rows.length})`), divider(width), profileHeader(width)];
 		if (rows.length === 0) {
-			lines.push(fitContentLine("no fleet profiles configured. press n to create one", width));
+			lines.push(muted("no fleet profiles configured. press n to create one"));
 		} else {
 			const selected = Math.min(this.selectedByMode.profiles, rows.length - 1);
 			rows.forEach((row, index) => {
@@ -472,16 +535,16 @@ class FleetOverlayBody implements Component {
 					? `Delete profile ${this.confirmDeleteProfileName} and ${bindingCount} binding(s)? press y to confirm, any other key cancels`
 					: `Delete profile ${this.confirmDeleteProfileName}? press y to confirm, any other key cancels`;
 			lines.push("");
-			lines.push(fitContentLine(prompt, width));
+			lines.push(clioTheme().fg("warning", fitContentLine(prompt, width)));
 		}
 		return lines;
 	}
 
 	private renderBindings(width: number): string[] {
 		const rows = this.bindingRows();
-		const lines = [fitContentLine("agent bindings", width), divider(width), bindingHeader(width)];
+		const lines = [listGroupHeader(`agent bindings (${rows.length})`), divider(width), bindingHeader(width)];
 		if (rows.length === 0) {
-			lines.push(fitContentLine("no agent bindings configured. press b to bind one", width));
+			lines.push(muted("no agent bindings configured. press b to bind one"));
 		} else {
 			const selected = Math.min(this.selectedByMode.bindings, rows.length - 1);
 			rows.forEach((row, index) => {
