@@ -2,6 +2,9 @@ import { ok } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
+
+const theme = clioTheme();
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
 const strip = (s: string): string => s.replace(ANSI, "");
@@ -71,5 +74,45 @@ describe("contracts/resume replay ledger fidelity", () => {
 		// The expanded body and its UI middle-elision must not appear in replay.
 		ok(!rendered.includes("many.txt:1:"), "replay must not render the expanded grep body");
 		ok(!rendered.includes("lines hidden"), "replay must not carry the expanded body's middle-elision");
+	});
+});
+
+describe("contracts/resume replay transcript notices", () => {
+	const ts = "2026-07-02T12:00:00.000Z";
+
+	it("styles a replayed [model] tag dim with a muted body", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "modelChange",
+				turnId: "m1",
+				parentTurnId: null,
+				timestamp: ts,
+				provider: "anthropic",
+				modelId: "claude-opus-4-8",
+			},
+		]);
+		const rendered = panel.render(80).join("\n");
+		ok(strip(rendered).includes("[model] anthropic/claude-opus-4-8"), "the model line replays its content");
+		ok(rendered.includes(theme.fg("dim", "[model]")), "the [model] tag renders dim");
+		ok(rendered.includes(theme.fg("muted", " anthropic/claude-opus-4-8")), "the [model] body renders muted");
+	});
+
+	it("styles a replayed [retry] tag in warning with a muted body", () => {
+		const panel = createChatPanel();
+		rehydrateChatPanelFromTurns(panel, [
+			{
+				kind: "custom",
+				customType: "retryStatus",
+				turnId: "c1",
+				parentTurnId: null,
+				timestamp: ts,
+				data: { phase: "waiting", attempt: 2, maxAttempts: 5, seconds: 3 },
+			},
+		]);
+		const rendered = panel.render(80).join("\n");
+		ok(strip(rendered).includes("[retry] attempt 2/5 in 3s"), "the retry line replays its content");
+		ok(rendered.includes(theme.fg("warning", "[retry]")), "the [retry] tag renders warning, not dim");
+		ok(rendered.includes(theme.fg("muted", " attempt 2/5 in 3s")), "the retry body renders muted");
 	});
 });

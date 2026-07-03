@@ -84,7 +84,18 @@ type ToolSegment = {
 	 */
 	partialOutput?: string | undefined;
 };
-type AssistantSegment = TextSegment | ToolSegment;
+/**
+ * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
+ * `[stopped: length] ...`) carried as its own segment so it renders in the
+ * error token instead of being piped through Markdown as plain prose. Kept
+ * distinct from streamed text: the error text is not model output, it is Clio
+ * reporting why the turn ended.
+ */
+type ErrorSegment = {
+	kind: "error";
+	text: string;
+};
+type AssistantSegment = TextSegment | ToolSegment | ErrorSegment;
 type ReplayBlockRenderer = (width: number) => string[];
 type AssistantStatusLine = { phase: StatusPhase; verb: string; toneHint: VerbRender["toneHint"] };
 
@@ -202,6 +213,7 @@ function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>
 	for (const seg of entry.segments) {
 		if (seg.kind === "tool") return true;
 		if (seg.kind === "text" && seg.text.trim().length > 0) return true;
+		if (seg.kind === "error" && seg.text.trim().length > 0) return true;
 	}
 	return false;
 }
@@ -228,6 +240,22 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	// redraw on terminals that cannot clear scrollback. Trim only that render
 	// padding so finalized prose remains byte-stable with the streamed shape.
 	return seg.md.render(width).map((line) => line.replace(/ +$/, ""));
+}
+
+/**
+ * Render a terminal-error segment in the error token. Terminal markers such as
+ * `[error] ...`, `[aborted] ...`, and `[stopped: length] ...` render as red
+ * message text rather than plain markdown, so a failed turn is visibly a
+ * failure. Each source line wraps to width and carries the error color.
+ */
+function renderErrorSegmentLines(seg: ErrorSegment, width: number): string[] {
+	const out: string[] = [];
+	for (const line of seg.text.split("\n")) {
+		for (const wrapped of wrapTextWithAnsi(line, width)) {
+			out.push(`${RED_CRIT}${wrapped}${RESET}`);
+		}
+	}
+	return out;
 }
 
 const CLIO_PREFIX = `${TEAL}${AGENT_GLYPH}${RESET} `;
@@ -397,19 +425,21 @@ function renderEntryLines(
 	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	let labeled = false;
 	for (const seg of entry.segments) {
-		if (seg.kind === "text") {
-			if (seg.text.length === 0) continue;
-			const rendered = renderTextSegmentLines(seg, width);
-			if (rendered.length === 0) continue;
-			if (!labeled) {
-				lines.push(...prefixClioLabel(rendered, width, clioPrefix));
-				labeled = true;
-			} else {
-				lines.push(...rendered);
-			}
+		if (seg.kind === "tool") {
+			lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId, nowMs, unboundedToolBodies));
 			continue;
 		}
-		lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId, nowMs, unboundedToolBodies));
+		// Text and error segments share the reply-prefix bookkeeping: the first
+		// non-empty one carries the agent glyph and every later one hangs plain.
+		if (seg.kind === "text" && seg.text.length === 0) continue;
+		const rendered = seg.kind === "text" ? renderTextSegmentLines(seg, width) : renderErrorSegmentLines(seg, width);
+		if (rendered.length === 0) continue;
+		if (!labeled) {
+			lines.push(...prefixClioLabel(rendered, width, clioPrefix));
+			labeled = true;
+		} else {
+			lines.push(...rendered);
+		}
 	}
 	const shouldRenderStatus =
 		entry.pending &&
@@ -512,6 +542,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return;
 		}
 		entry.segments.push({ kind: "text", text, finalized: true });
+	};
+
+	/**
+	 * Append the turn's terminal-error marker as its own error segment so the
+	 * render path styles it in the error token rather than piping it through
+	 * Markdown as prose. Guards against a duplicate when the same marker arrives
+	 * twice for one settled turn.
+	 */
+	const appendErrorSegment = (entry: Extract<TranscriptEntry, { role: "assistant" }>, text: string): void => {
+		const tail = entry.segments[entry.segments.length - 1];
+		if (tail?.kind === "error" && tail.text === text) return;
+		entry.segments.push({ kind: "error", text });
 	};
 
 	const latestCollapsedFinishedToolId = (): string | null => {
@@ -745,7 +787,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					assistant.expandedThinking = thinkingExpanded;
 				}
 				if (text.length > 0) canonicalizeMessageText(assistant, text);
-				if (terminalError.length > 0) canonicalizeMessageText(assistant, terminalError);
+				if (terminalError.length > 0) appendErrorSegment(assistant, terminalError);
 				markDirty();
 				return;
 			}

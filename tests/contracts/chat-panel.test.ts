@@ -2,6 +2,10 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
+
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
+const strip = (s: string): string => s.replace(ANSI, "");
 
 describe("chat-panel live thinking streaming", () => {
 	it("folded render shows token count when pending, shows static label when settled", () => {
@@ -155,5 +159,103 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		const rendered = panel.render(100).join("\n");
 		const errorGlyphs = (rendered.match(/✗/g) ?? []).length;
 		strictEqual(errorGlyphs, 1, "exactly the reused-id orphan settled to an error line");
+	});
+});
+
+describe("chat-panel agent voice", () => {
+	it("prefixes an agent reply with ✦ in accent", () => {
+		strictEqual(GLYPH.agent, "✦", "the agent glyph is the four-pointed star");
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "text", text: "Hello there" }], stopReason: "stop" },
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const rendered = panel.render(80).join("\n");
+		ok(rendered.includes(`${fgSequence("accent")}${GLYPH.agent}`), "the reply glyph renders in accent");
+		ok(
+			strip(rendered).includes("✦ Hello there"),
+			`stripped reply reads glyph + text: ${JSON.stringify(strip(rendered))}`,
+		);
+	});
+
+	it("turns the reply glyph and the terminal error text red on a failed turn", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [] as unknown[], stopReason: "error", errorMessage: "boom happened" },
+		} as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const rendered = panel.render(80).join("\n");
+		ok(rendered.includes(`${fgSequence("error")}${GLYPH.agent}`), "the glyph turns error red on a failed turn");
+		ok(
+			rendered.includes(`${fgSequence("error")}[error] boom happened`),
+			"the terminal error marker renders as its own error-token segment, not plain markdown",
+		);
+		ok(strip(rendered).includes("✦ [error] boom happened"), "the stripped failed reply reads glyph + error marker");
+	});
+});
+
+describe("chat-panel tool ledger subline", () => {
+	function feedCollapsedRead(panel: ReturnType<typeof createChatPanel>): void {
+		// A streaming turn keeps its tool collapsed to the ledger subline.
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "r1",
+			toolName: "read",
+			args: { path: "src/interactive/chat-panel.ts", offset: 100 },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "r1",
+			toolName: "read",
+			result: {
+				content: [{ type: "text", text: "x" }],
+				details: { observation: { unit: "lines", shownCount: 120, totalCount: 787, shownBytes: 23962 } },
+			},
+			isError: false,
+			durationMs: 230,
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+	}
+
+	it("wraps the collapsed subline to two lines without splitting the status tail", () => {
+		const panel = createChatPanel({ getToolExpandKey: () => "ctrl+o" });
+		feedCollapsedRead(panel);
+		const lines = panel
+			.render(80)
+			.map(strip)
+			.filter((line) => line.length > 0);
+		ok(lines.length <= 2, `subline renders on at most two lines, got ${lines.length}: ${JSON.stringify(lines)}`);
+		ok(lines[0]?.includes("reading src/interactive/chat-panel.ts"), "the verb and object lead the first line");
+		const tail = lines.find((line) => line.includes("✓"));
+		ok(tail !== undefined, "a line carries the success glyph");
+		ok(tail?.includes("230ms"), `the status glyph and duration share a line: ${JSON.stringify(tail)}`);
+		ok(tail?.includes("(ctrl+o)"), `the expand hint stays with the status tail: ${JSON.stringify(tail)}`);
+	});
+});
+
+describe("chat-panel edit diff block", () => {
+	it("suppresses the \\ No newline at end of file marker rows", () => {
+		const panel = createChatPanel();
+		// A fresh (non-streaming) turn expands the edit tool to its diff block.
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "e1",
+			toolName: "edit",
+			args: { path: "a.txt", old_string: "line one\nline two", new_string: "line one\nline TWO" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "e1",
+			toolName: "edit",
+			result: "ok",
+			isError: false,
+		} as ChatLoopEvent);
+		const rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("line TWO"), "the diff still renders the actual change");
+		ok(rendered.includes("@@"), "the diff still renders its hunk header");
+		ok(!rendered.includes("No newline at end of file"), "the no-newline sentinel rows are filtered out");
 	});
 });

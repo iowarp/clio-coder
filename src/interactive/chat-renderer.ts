@@ -31,6 +31,7 @@ import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
+import { styleTaggedNotice } from "./renderers/notice.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import { renderToolResultOnly } from "./renderers/tool-execution.js";
 
@@ -435,7 +436,10 @@ function extractToolResult(entry: MessageEntry): ReplayToolResult {
 }
 
 function renderReplayLine(text: string, width: number): string[] {
-	return wrapTextWithAnsi(text, width);
+	// Style a leading bracketed tag (`[skill]`, `[checkpoint]`, ...) dim with a
+	// muted body; free-form lines such as `system:` prefixes pass through
+	// unchanged so only bracketed notices pick up the treatment.
+	return wrapTextWithAnsi(styleTaggedNotice(text), width);
 }
 
 function appendReplayLine(chatPanel: ChatPanel, text: string): void {
@@ -470,7 +474,7 @@ export function renderBashExecutionEntry(entry: BashExecutionEntry, width: numbe
 
 function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
 	const data = payloadObject(entry.data);
-	if (!data) return wrapTextWithAnsi("[retry] status", width);
+	if (!data) return wrapTextWithAnsi(styleTaggedNotice("[retry] status"), width);
 	const rawPhase = data.phase;
 	if (
 		rawPhase !== "scheduled" &&
@@ -480,11 +484,11 @@ function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
 		rawPhase !== "exhausted" &&
 		rawPhase !== "recovered"
 	) {
-		return wrapTextWithAnsi("[retry] status", width);
+		return wrapTextWithAnsi(styleTaggedNotice("[retry] status"), width);
 	}
 	const attempt = typeof data.attempt === "number" ? data.attempt : null;
 	const maxAttempts = typeof data.maxAttempts === "number" ? data.maxAttempts : null;
-	if (attempt === null || maxAttempts === null) return wrapTextWithAnsi("[retry] status", width);
+	if (attempt === null || maxAttempts === null) return wrapTextWithAnsi(styleTaggedNotice("[retry] status"), width);
 	const status: RetryStatusPayload = {
 		phase: rawPhase,
 		attempt,
@@ -516,16 +520,16 @@ function renderReminderMessageEntry(entry: CustomEntry, width: number): string[]
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
 	const target = entry.target ? `${entry.target}/` : "";
-	return wrapTextWithAnsi(`[model] ${target}${entry.provider}/${entry.modelId}`, width);
+	return wrapTextWithAnsi(styleTaggedNotice(`[model] ${target}${entry.provider}/${entry.modelId}`), width);
 }
 
 function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: number): string[] {
-	return wrapTextWithAnsi(`[thinking] ${entry.thinkingLevel}`, width);
+	return wrapTextWithAnsi(styleTaggedNotice(`[thinking] ${entry.thinkingLevel}`), width);
 }
 
 function renderFileEntry(entry: FileEntryEntry, width: number): string[] {
 	const bytes = typeof entry.bytes === "number" ? `, ${entry.bytes} bytes` : "";
-	return wrapTextWithAnsi(`[file ${entry.operation}] ${entry.path}${bytes}`, width);
+	return wrapTextWithAnsi(styleTaggedNotice(`[file ${entry.operation}] ${entry.path}${bytes}`), width);
 }
 
 function renderProtectedArtifactEntry(entry: ProtectedArtifactEntry, width: number): string[] {
@@ -533,12 +537,17 @@ function renderProtectedArtifactEntry(entry: ProtectedArtifactEntry, width: numb
 		entry.artifact.validationCommand === undefined
 			? ""
 			: ` after ${entry.artifact.validationCommand}${entry.artifact.validationExitCode === undefined ? "" : ` exit ${entry.artifact.validationExitCode}`}`;
-	return wrapTextWithAnsi(`[protected] ${entry.artifact.path}${validation}: ${entry.artifact.reason}`, width);
+	return wrapTextWithAnsi(
+		styleTaggedNotice(`[protected] ${entry.artifact.path}${validation}: ${entry.artifact.reason}`),
+		width,
+	);
 }
 
 function renderSessionInfoEntry(entry: SessionInfoEntry, width: number): string[] {
-	if (entry.name) return wrapTextWithAnsi(`[session] ${entry.name}`, width);
-	if (entry.label && entry.targetTurnId) return wrapTextWithAnsi(`[label] ${entry.targetTurnId}: ${entry.label}`, width);
+	if (entry.name) return wrapTextWithAnsi(styleTaggedNotice(`[session] ${entry.name}`), width);
+	if (entry.label && entry.targetTurnId) {
+		return wrapTextWithAnsi(styleTaggedNotice(`[label] ${entry.targetTurnId}: ${entry.label}`), width);
+	}
 	return [];
 }
 

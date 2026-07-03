@@ -1,8 +1,10 @@
 export const GLYPH = {
-	// Clio wordmark, shown in the welcome and dashboard headers. `agent` still
-	// aliases it as the chat reply prefix until slice 4 flips the reply glyph.
+	// Clio wordmark, shown in the welcome and dashboard headers only.
 	brand: ">C_",
-	agent: ">C_",
+	// Agent voice glyph for the chat reply prefix. It renders in accent on a
+	// normal turn and error red on a failed one. The `>C_` wordmark is no longer
+	// the reply prefix; it survives only in the two headers above.
+	agent: "✦",
 	user: "›",
 	// Selection focus marker for list overlays. Its value flips to "❯" in slice
 	// 9; until then it stays "▸" so the refactor renders byte-identically.

@@ -1,11 +1,12 @@
 import type { RetryStatusPayload } from "../chat-loop.js";
+import { styleTaggedNotice } from "./notice.js";
 
 function shorten(value: string, limit: number): string {
 	if (value.length <= limit) return value;
 	return `${value.slice(0, Math.max(0, limit - 3))}...`;
 }
 
-export function formatRetryStatus(status: RetryStatusPayload): string {
+function rawRetryStatus(status: RetryStatusPayload): string {
 	const suffix = status.errorMessage ? `: ${shorten(status.errorMessage, 120)}` : "";
 	if (status.phase === "waiting") {
 		return `[retry] attempt ${status.attempt}/${status.maxAttempts} in ${status.seconds ?? 0}s${suffix}`;
@@ -18,4 +19,13 @@ export function formatRetryStatus(status: RetryStatusPayload): string {
 	if (status.phase === "cancelled") return `[retry] cancelled attempt ${status.attempt}/${status.maxAttempts}${suffix}`;
 	if (status.phase === "exhausted") return `[retry] exhausted after ${status.attempt} attempt(s)${suffix}`;
 	return `[retry] recovered after ${status.attempt} attempt(s)`;
+}
+
+/**
+ * Format a retry-status payload as a transcript notice. The `[retry]` tag
+ * renders in warning and the body in muted via the shared notice styler, so the
+ * live retry line and the replayed one read identically.
+ */
+export function formatRetryStatus(status: RetryStatusPayload): string {
+	return styleTaggedNotice(rawRetryStatus(status));
 }
