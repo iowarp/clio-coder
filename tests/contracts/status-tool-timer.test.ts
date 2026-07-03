@@ -1,0 +1,76 @@
+import { ok, strictEqual } from "node:assert/strict";
+import { describe, it } from "node:test";
+import { type ReduceContext, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/state-machine.js";
+import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
+import { resolveFooterVerb, resolveInlineVerb } from "../../src/interactive/status/verbs.js";
+
+function ctx(now: number): ReduceContext {
+	return { now, localRuntime: true, modelId: "m", targetId: "t", runId: "r" };
+}
+
+function drive(events: Array<[StatusInputEvent, number]>) {
+	let status = { ...INITIAL_STATUS };
+	for (const [event, now] of events) status = reduceStatus(status, event, ctx(now));
+	return status;
+}
+
+describe("status running-tool timer keys on the call's own start", () => {
+	it("counts elapsed from tool_execution_start, not from turn start", () => {
+		// Turn starts at 0; the tool starts at 10s; we render at 12s. The footer
+		// must show 2s (this call's runtime), never 12s (turn elapsed) — the exact
+		// phantom the incident showed as `running tool: grep · 19s`.
+		const status = drive([
+			[{ type: "agent_start", messages: [] } as unknown as StatusInputEvent, 0],
+			[
+				{ type: "tool_execution_start", toolCallId: "c1", toolName: "grep", args: { pattern: "x" } } as StatusInputEvent,
+				10_000,
+			],
+		]);
+		strictEqual(status.phase, "tool_running");
+		strictEqual(status.toolStartedAt, 10_000, "the call's own start is stamped");
+		const footer = resolveFooterVerb(status, 12_000, 120);
+		ok(footer?.text.includes("running tool: grep"), "names the running tool");
+		ok(footer?.text.includes("· 2s"), `footer shows the call's own 2s elapsed, got: ${footer?.text}`);
+		ok(!footer?.text.includes("12s"), "never shows turn-elapsed as tool-elapsed");
+		const inline = resolveInlineVerb(status, 12_000, 120);
+		ok(inline?.text.includes("· 2s"), `inline verb also shows the call's own elapsed, got: ${inline?.text}`);
+	});
+
+	it("stops showing a tool as running once the model resumes generating", () => {
+		// A tool_execution_start whose end never lands (admission block, id reuse)
+		// must not leave the spinner claiming a tool is running: the first token of
+		// model output clears the running-tool display.
+		const status = drive([
+			[{ type: "agent_start", messages: [] } as unknown as StatusInputEvent, 0],
+			[{ type: "tool_execution_start", toolCallId: "c1", toolName: "grep", args: {} } as StatusInputEvent, 5_000],
+			[{ type: "text_delta", contentIndex: 0, delta: "here", partialText: "here" } as unknown as StatusInputEvent, 6_000],
+		]);
+		strictEqual(status.phase, "writing", "the model is writing, not running a tool");
+		strictEqual(status.tool, undefined, "the running-tool overlay is cleared");
+		strictEqual(status.toolStartedAt, undefined, "the tool timer is cleared");
+		const footer = resolveFooterVerb(status, 6_500, 120);
+		ok(!footer?.text.includes("running tool"), `no phantom running tool, got: ${footer?.text}`);
+	});
+
+	it("clears the tool timer on tool_execution_end so a later phase never reuses it", () => {
+		const status = drive([
+			[{ type: "agent_start", messages: [] } as unknown as StatusInputEvent, 0],
+			[
+				{ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "a" } } as StatusInputEvent,
+				3_000,
+			],
+			[
+				{
+					type: "tool_execution_end",
+					toolCallId: "c1",
+					toolName: "read",
+					result: "ok",
+					isError: false,
+				} as StatusInputEvent,
+				3_100,
+			],
+		]);
+		strictEqual(status.phase, "preparing");
+		strictEqual(status.toolStartedAt, undefined, "the timer is dropped when the call ends");
+	});
+});

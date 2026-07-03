@@ -318,17 +318,20 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return refreshMeaningful(prev, ctx);
 		case "tool_execution_end": {
 			const next = refreshMeaningful(prev, ctx);
-			if (prev.phase === "tool_running") return { ...next, phase: "preparing", tool: undefined };
+			if (prev.phase === "tool_running") return { ...next, phase: "preparing", tool: undefined, toolStartedAt: undefined };
 			if (prev.phase === "stuck" && prev.resumePhase === "tool_running") {
-				return { ...next, phase: "preparing", resumePhase: undefined, tool: undefined };
+				return { ...next, phase: "preparing", resumePhase: undefined, tool: undefined, toolStartedAt: undefined };
 			}
 			return next;
 		}
 		case "thinking_delta": {
 			const base = activePhaseAfterStuck(prev);
 			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
-			if (base === "preparing" || base === "waiting_model" || base === "writing") {
-				return { ...next, phase: "thinking", resumePhase: undefined };
+			// Model reasoning arriving while a tool still shows as running means the
+			// tool is done (its end never landed or was an admission block): the
+			// model is generating, nothing is executing, so drop the tool display.
+			if (base === "preparing" || base === "waiting_model" || base === "writing" || base === "tool_running") {
+				return { ...next, phase: "thinking", resumePhase: undefined, tool: undefined, toolStartedAt: undefined };
 			}
 			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
 			return next;
@@ -336,8 +339,10 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		case "text_delta": {
 			const base = activePhaseAfterStuck(prev);
 			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
-			if (base === "preparing" || base === "waiting_model" || base === "thinking") {
-				return { ...next, phase: "writing", resumePhase: undefined };
+			// Streamed answer text while a tool still shows as running: same as
+			// above, the model is writing, so the running-tool spinner must clear.
+			if (base === "preparing" || base === "waiting_model" || base === "thinking" || base === "tool_running") {
+				return { ...next, phase: "writing", resumePhase: undefined, tool: undefined, toolStartedAt: undefined };
 			}
 			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
 			return next;
@@ -347,7 +352,9 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 				toolName: event.toolName,
 				toolPreview: compactPreview(event.args),
 			};
-			return { ...refreshMeaningful(prev, ctx), phase: "tool_running", tool };
+			// Stamp this call's own start so the footer's running-tool timer counts
+			// from here, not from turn start.
+			return { ...refreshMeaningful(prev, ctx), phase: "tool_running", tool, toolStartedAt: ctx.now };
 		}
 		case "retry_status": {
 			const phase = event.status.phase;

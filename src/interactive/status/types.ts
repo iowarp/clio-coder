@@ -68,6 +68,13 @@ export interface AgentStatus {
 	activePhases?: ReadonlySet<OverlayPhase> | undefined;
 	overlayStack?: OverlayFrame[] | undefined;
 	tool?: ToolOverlay | undefined;
+	/**
+	 * Wall-clock start of the tool call the `tool_running` phase is showing, so
+	 * the footer's `running tool · Ns` reads the call's OWN elapsed rather than
+	 * time-since-turn-start. Set on `tool_execution_start`, cleared when the
+	 * phase leaves `tool_running`.
+	 */
+	toolStartedAt?: number | undefined;
 	retry?: RetryOverlay | undefined;
 	dispatch?: DispatchOverlay | undefined;
 	summary?: TurnSummary | undefined;

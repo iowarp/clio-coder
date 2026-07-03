@@ -110,3 +110,50 @@ describe("chat-panel tool-body export rendering", () => {
 		ok(rendered.includes("many.txt:300:"), "export must keep the tail of the body");
 	});
 });
+
+describe("chat-panel settles blocked and orphaned tool calls", () => {
+	it("settles a tool call whose end never arrives to an error line with its own duration", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "c1",
+			toolName: "grep",
+			args: { pattern: "x" },
+		} as ChatLoopEvent);
+		clock = 1500;
+		// While running: no outcome glyph yet, just a live counting elapsed.
+		let rendered = panel.render(100).join("\n");
+		ok(!rendered.includes("✗"), "a running call carries no error glyph yet");
+		// The run ends with NO tool_execution_end for c1 (admission block / abort).
+		clock = 2200;
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		rendered = panel.render(100).join("\n");
+		ok(rendered.includes("✗"), "the orphaned call settles to an error line, not a counting running line");
+		ok(/\b\d+ms\b|\b\d+(?:\.\d+)?s\b/.test(rendered), `the settled line shows its own duration, got: ${rendered}`);
+	});
+
+	it("settles a prior same-id segment when the model reuses a tool-call id", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "dup",
+			toolName: "grep",
+			args: { pattern: "a" },
+		} as ChatLoopEvent);
+		clock = 1400;
+		// Same id reused for a fresh call: the earlier segment must settle instead
+		// of lingering as a second running line.
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "dup",
+			toolName: "grep",
+			args: { pattern: "b" },
+		} as ChatLoopEvent);
+		clock = 1600;
+		const rendered = panel.render(100).join("\n");
+		const errorGlyphs = (rendered.match(/✗/g) ?? []).length;
+		strictEqual(errorGlyphs, 1, "exactly the reused-id orphan settled to an error line");
+	});
+});
