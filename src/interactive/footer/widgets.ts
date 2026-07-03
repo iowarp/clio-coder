@@ -4,13 +4,14 @@ import type { ContextUsageBreakdown } from "../../domains/session/context-accoun
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
-import { agentDisplayLabel, type DispatchBoardRow, type DispatchBoardStatus } from "../dispatch-board.js";
+import { agentDisplayLabel, type DispatchBoardRow, dispatchStatusPresentation } from "../dispatch-board.js";
 import { buildSegmentedContextBar, CONTEXT_BAR_LABEL_WIDTH, formatFooterTokens } from "../footer-panel.js";
 import { type AgentStatus, spinnerFrame, type TurnSummary } from "../status/index.js";
 import {
 	type ClioTheme,
 	type ClioToken,
 	clioTheme,
+	formatCompactMs,
 	GLYPH,
 	joinChips,
 	joinSections,
@@ -556,29 +557,6 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 	]);
 }
 
-function statusGlyph(status: DispatchBoardStatus): string {
-	if (status === "running" || status === "stale" || status === "enqueued") return GLYPH.running;
-	if (status === "completed") return GLYPH.ok;
-	if (status === "aborted") return GLYPH.cancelled;
-	return GLYPH.error;
-}
-
-function statusToken(status: DispatchBoardStatus): ClioToken {
-	if (status === "completed") return "success";
-	if (status === "running" || status === "enqueued") return "accent";
-	if (status === "stale") return "warning";
-	return "error";
-}
-
-function formatElapsed(value: number): string {
-	const ms = Math.max(0, Math.round(value));
-	if (ms < 1000) return `${ms}ms`;
-	const seconds = ms / 1000;
-	return seconds < 60
-		? `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
-		: `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
-}
-
 function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; token: ClioToken } {
 	if (reason === "error") return { glyph: GLYPH.error, token: "error" };
 	if (reason === "aborted" || reason === "cancelled") return { glyph: GLYPH.cancelled, token: "dim" };
@@ -595,7 +573,7 @@ function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; to
 export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 	const stop = stopReasonStyle(summary.stopReason);
 	const parts: string[] = [
-		theme.fg(stop.token, `${stop.glyph} ${formatElapsed(summary.elapsedMs)}`),
+		theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(summary.elapsedMs)}`),
 		theme.fg("muted", `${GLYPH.up}${summary.inputTokens} ${GLYPH.down}${summary.outputTokens}`),
 	];
 	if (typeof summary.reasoningTokens === "number" && summary.reasoningTokens > 0) {
@@ -612,8 +590,9 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 }
 
 export function workerLine(theme: ClioTheme, row: DispatchBoardRow): string {
-	const glyph = theme.fg(statusToken(row.status), statusGlyph(row.status));
-	return `${glyph} ${theme.fg("muted", agentDisplayLabel(row))} ${theme.fg("dim", `${row.status} ${formatElapsed(row.elapsedMs)}`)}`;
+	const presentation = dispatchStatusPresentation(row.status, { compact: true });
+	const glyph = theme.fg(presentation.token, presentation.glyph);
+	return `${glyph} ${theme.fg("muted", agentDisplayLabel(row))} ${theme.fg("dim", `${presentation.label} ${formatCompactMs(row.elapsedMs)}`)}`;
 }
 
 interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
@@ -643,9 +622,9 @@ function formattedThroughput(theme: ClioTheme, throughput: TokenThroughputSnapsh
 	const tps = finiteNonNegative(throughput?.tokensPerSecond);
 	if (tps <= 0) return null;
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
-	const parts = [theme.fg("success", `⚡${rounded}/s`)];
+	const parts = [theme.fg("success", `${GLYPH.speed}${rounded}/s`)];
 	const ttft = finiteNonNegative(throughput?.ttftMs);
-	if (ttft > 0) parts.push(theme.fg("muted", `ttft ${formatElapsed(ttft)}`));
+	if (ttft > 0) parts.push(theme.fg("muted", `ttft ${formatCompactMs(ttft)}`));
 	return joinChips(theme, parts);
 }
 
@@ -673,7 +652,7 @@ function liveTokenValue(
 
 function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const stop = stopReasonStyle(lastTurn.stopReason);
-	return theme.fg(stop.token, `${stop.glyph} ${formatElapsed(lastTurn.elapsedMs)}`);
+	return theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(lastTurn.elapsedMs)}`);
 }
 
 function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
@@ -758,7 +737,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 			: statusRow(null),
 	);
 	rows.push(
-		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "warning" : "dim"),
+		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "highlight" : "dim"),
 	);
 	for (const row of facts.dispatchRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row)));
 	rows.push(kv("tools", facts.toolTally));
@@ -792,13 +771,6 @@ export function zipColumnBlocks(blocks: ReadonlyArray<string[]>, widths: Readonl
 		lines.push(cells.join(sep));
 	}
 	return lines;
-}
-
-function formatDurationMs(ms: number): string {
-	const safe = Math.max(0, Math.round(ms));
-	if (safe < 1000) return `${safe}ms`;
-	const seconds = safe / 1000;
-	return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
 }
 
 type HarnessPhasePresentation = {
@@ -846,7 +818,7 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 		case "compacting":
 			return { glyph: "♻", label: "compacting", token: "reason", live: true };
 		case "dispatching":
-			return { glyph: "⇲", label: "dispatch", token: "accent", live: true };
+			return { glyph: "⇲", label: "dispatch", token: "highlight", live: true };
 		case "stuck": {
 			const seconds = Math.max(0, Math.floor((now - status.since) / 1000));
 			return { glyph: "⚠", label: ultraNarrow ? "stuck" : `stuck ${seconds}s`, token: "error", live: true };
@@ -868,9 +840,10 @@ function harnessBadge(
 ): string {
 	const workers = activeWorkerCount(dispatchRows);
 	const activeTools = finiteNonNegative(toolCounts.active);
+	// Active fleet work is a Clio-signature state; it gets the highlight color.
+	if (workers > 0) return ` ${theme.fg("dim", "·")} ${theme.fg("highlight", `fleet ${workers}`)}`;
 	let badgeText: string | null = null;
-	if (workers > 0) badgeText = `fleet ${workers}`;
-	else if (activeTools > 0) badgeText = `tools ${activeTools}`;
+	if (activeTools > 0) badgeText = `tools ${activeTools}`;
 	else if (status.phase === "idle") badgeText = "tools none";
 	return badgeText ? ` ${theme.fg("dim", "·")} ${theme.fg("muted", badgeText)}` : "";
 }
@@ -913,13 +886,13 @@ export function buildMetricStrip(
 	if (isStreaming) {
 		const tps = finiteNonNegative(throughput?.tokensPerSecond);
 		const rounded = tps > 0 ? (tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10) : null;
-		candidates.push(rounded !== null ? theme.fg("success", `⚡${rounded}/s`) : null);
+		candidates.push(rounded !== null ? theme.fg("success", `${GLYPH.speed}${rounded}/s`) : null);
 
 		const liveOutput = finiteNonNegative(throughput?.outputTokens);
 		candidates.push(liveOutput > 0 ? theme.fg("success", `${GLYPH.down}${formatFooterTokens(liveOutput)}`) : null);
 
 		const ttftMs = finiteNonNegative(throughput?.ttftMs);
-		candidates.push(ttftMs > 0 ? theme.fg("muted", `ttft ${formatDurationMs(ttftMs)}`) : null);
+		candidates.push(ttftMs > 0 ? theme.fg("muted", `ttft ${formatCompactMs(ttftMs)}`) : null);
 
 		const inputTokens =
 			finiteNonNegative(liveInputTokens) ||
@@ -929,7 +902,7 @@ export function buildMetricStrip(
 		candidates.push(inputTokens > 0 ? theme.fg("muted", `${GLYPH.up}${formatFooterTokens(inputTokens)}`) : null);
 	} else if (lastTurn) {
 		const stop = stopReasonStyle(lastTurn.stopReason);
-		candidates.push(theme.fg(stop.token, `${stop.glyph} ${formatElapsed(lastTurn.elapsedMs)}`));
+		candidates.push(theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(lastTurn.elapsedMs)}`));
 		candidates.push(
 			theme.fg(
 				"muted",

@@ -1,6 +1,7 @@
 export type ClioToken =
 	| "accent"
 	| "accentDeep"
+	| "highlight"
 	| "success"
 	| "warning"
 	| "error"
@@ -23,6 +24,10 @@ interface TokenColor {
 const TOKENS: Record<ClioToken, TokenColor> = {
 	accent: { rgb: [70, 229, 208], xterm: 80 },
 	accentDeep: { rgb: [31, 183, 166], xterm: 44 },
+	// Second brand color: neon orange. Reserved for Clio's signature actions
+	// (dispatching, queued fleet work, steering) so it reads as "Clio is acting",
+	// never as decoration. warning stays the soft amber for actual warnings.
+	highlight: { rgb: [255, 126, 41], xterm: 208 },
 	success: { rgb: [87, 227, 137], xterm: 114 },
 	warning: { rgb: [255, 180, 84], xterm: 221 },
 	error: { rgb: [255, 92, 102], xterm: 203 },

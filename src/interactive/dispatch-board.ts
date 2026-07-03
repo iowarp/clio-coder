@@ -10,7 +10,7 @@ import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
-import { type ClioTheme, clioTheme, GLYPH, spinnerFrame } from "./theme/index.js";
+import { type ClioTheme, type ClioToken, clioTheme, formatCompactMs, GLYPH, spinnerFrame } from "./theme/index.js";
 
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
@@ -82,48 +82,62 @@ function padAnsi(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
-/** Compact duration, matching the footer's turn-summary style. */
-function formatElapsedMs(value: number): string {
-	const ms = Math.max(0, Math.round(value));
-	if (ms < 1000) return `${ms}ms`;
-	const seconds = ms / 1000;
-	return seconds < 60
-		? `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
-		: `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
-}
-
-function _formatTokenCount(value: number): string {
-	return String(Math.max(0, Math.round(value)));
-}
-
 export function agentDisplayLabel(row: Pick<DispatchBoardRow, "agentId" | "agentAudience">): string {
 	if (row.agentAudience === "shadow") return `sh:${row.agentId}`;
 	if (row.agentAudience === "internal") return `in:${row.agentId}`;
 	return row.agentId;
 }
 
+export interface DispatchStatusPresentation {
+	glyph: string;
+	label: string;
+	token: ClioToken;
+}
+
+/**
+ * One presentation per run status, shared by the dispatch cards, the task
+ * island, and the footer worker lines so a status never changes glyph or color
+ * between surfaces. `compact` shortens labels for narrow rows; a `tick`
+ * animates the running glyph.
+ */
+export function dispatchStatusPresentation(
+	status: DispatchBoardStatus,
+	options: { compact?: boolean; tick?: number } = {},
+): DispatchStatusPresentation {
+	const compact = options.compact === true;
+	switch (status) {
+		case "running":
+			return {
+				glyph: options.tick !== undefined ? spinnerFrame(options.tick) : GLYPH.running,
+				label: "running",
+				token: "accent",
+			};
+		case "completed":
+			return { glyph: GLYPH.ok, label: compact ? "done" : "completed", token: "success" };
+		case "failed":
+			return { glyph: GLYPH.error, label: compact ? "fail" : "failed", token: "error" };
+		case "dead":
+			return { glyph: GLYPH.error, label: "dead", token: "error" };
+		case "aborted":
+			return { glyph: GLYPH.cancelled, label: compact ? "abort" : "aborted", token: "dim" };
+		case "stale":
+			return { glyph: GLYPH.noticeWarn, label: "stale", token: "warning" };
+		case "enqueued":
+			return { glyph: GLYPH.queued, label: "queued", token: "highlight" };
+	}
+}
+
 export function renderDispatchCard(row: DispatchBoardRow, width: number): string[] {
 	const theme = clioTheme();
 	const agentLabel = agentDisplayLabel(row);
-	const elapsed = formatElapsedMs(row.elapsedMs);
+	const elapsed = formatCompactMs(row.elapsedMs);
 	const cost = formatUsd(row.costUsd);
 	const detail = terminalDetail(row);
 
-	let statusStr = "";
-	if (row.status === "running") {
-		const spinner = spinnerFrame(Math.floor(Date.now() / 100));
-		statusStr = theme.style("accent", `${spinner} running`);
-	} else if (row.status === "completed") {
-		statusStr = theme.fg("success", `${GLYPH.ok} completed`);
-	} else if (row.status === "failed") {
-		statusStr = theme.fg("error", `${GLYPH.error} failed`);
-	} else if (row.status === "aborted") {
-		statusStr = theme.fg("dim", `${GLYPH.cancelled} aborted`);
-	} else if (row.status === "stale") {
-		statusStr = theme.fg("warning", `! stale`);
-	} else {
-		statusStr = theme.fg("dim", `+ ${row.status}`);
-	}
+	const presentation = dispatchStatusPresentation(row.status, {
+		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+	});
+	const statusStr = theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`);
 
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? "waiting..." : "n/a";
 	const target = `${row.runtimeKind}:${row.targetId} ${theme.fg("dim", "▸")} ${row.wireModelId}`;
@@ -163,30 +177,21 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	const theme = clioTheme();
 	const agentLabel = agentDisplayLabel(row);
-	const elapsed = formatElapsedMs(row.elapsedMs);
+	const elapsed = formatCompactMs(row.elapsedMs);
 	const cost = formatUsd(row.costUsd);
 
-	let statusStr = "";
-	if (row.status === "running") {
-		const spinner = spinnerFrame(Math.floor(Date.now() / 100));
-		statusStr = theme.style("accent", `${spinner} running`);
-	} else if (row.status === "completed") {
-		statusStr = theme.fg("success", `${GLYPH.ok} done`);
-	} else if (row.status === "failed") {
-		statusStr = theme.fg("error", `${GLYPH.error} fail`);
-	} else if (row.status === "aborted") {
-		statusStr = theme.fg("dim", `${GLYPH.cancelled} abort`);
-	} else if (row.status === "stale") {
-		statusStr = theme.fg("warning", `! stale`);
-	} else {
-		statusStr = theme.fg("dim", `+ ${row.status}`);
-	}
+	const presentation = dispatchStatusPresentation(row.status, {
+		compact: true,
+		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
+	});
+	const glyph = theme.fg(presentation.token, presentation.glyph);
+	const statusStr = theme.fg(presentation.token, presentation.label);
 
-	const line1 = `${theme.style("accent", agentLabel, { bold: true })} ${theme.fg("dim", "•")} ${statusStr} ${theme.fg("dim", "•")} ${theme.fg("info", elapsed)}`;
+	const line1 = `${glyph} ${theme.style("accent", agentLabel, { bold: true })} ${theme.fg("dim", "•")} ${statusStr} ${theme.fg("dim", "•")} ${theme.fg("muted", elapsed)}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
-	const telemetry = `${theme.fg("dim", `${GLYPH.up} ${row.inputTokens}`)} ${theme.fg("dim", "•")} ${theme.fg("success", `${GLYPH.down} ${row.outputTokens}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""} ${theme.fg("dim", "•")} ${theme.fg("warning", cost)}`;
+	const telemetry = `  ${theme.fg("dim", `${GLYPH.up} ${row.inputTokens}`)} ${theme.fg("dim", "•")} ${theme.fg("success", `${GLYPH.down} ${row.outputTokens}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""} ${theme.fg("dim", "•")} ${theme.fg("muted", cost)}`;
 
 	return [padAnsi(line1, width), padAnsi(telemetry, width)];
 }
@@ -194,15 +199,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>, width = 76): string[] {
 	if (rows.length === 0) {
 		const theme = clioTheme();
-		const lines = [
-			"",
-			"                    No active dispatches                     ",
-			"         Ready to orchestrate your agent workloads.          ",
-			"",
-			"       Run tasks in parallel, trace telemetry in real time,  ",
-			"        or manage tool calls with safety-net admission.      ",
-			"",
-		];
+		const lines = ["", "No active dispatches", "Delegated runs appear here with live status and telemetry.", ""];
 		return lines.map((line) => {
 			const padding = Math.max(0, Math.floor((width - 4 - visibleWidth(line)) / 2));
 			return theme.fg("dim", " ".repeat(padding) + line);
