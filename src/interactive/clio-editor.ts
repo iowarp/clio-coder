@@ -27,6 +27,10 @@ function normalizeThinkingHint(value: string): string {
 		.toLowerCase();
 }
 
+// The thinking-level hint reads on a two-step color scale that survives
+// squinting: `off` is dim, the low band (`minimal`/`low`) is muted, and
+// everything from `medium` up carries the reason token, going bold for the
+// top band (`xhigh`/`max`, and the generic `on`).
 function styledThinkingHint(theme: ClioTheme, value: string): string {
 	const hint = normalizeThinkingHint(value);
 	switch (hint) {
@@ -34,17 +38,13 @@ function styledThinkingHint(theme: ClioTheme, value: string): string {
 			return theme.fg("dim", hint);
 		case "minimal":
 		case "low":
-			return theme.style("accentDeep", hint, { dim: true });
-		case "medium":
-			return theme.fg("effortMedium", hint);
-		case "high":
-			return theme.fg("effortHigh", hint);
+			return theme.fg("muted", hint);
 		case "xhigh":
 		case "max":
 		case "on":
-			return theme.fg("frameStrong", hint);
+			return theme.style("reason", hint, { bold: true });
 		default:
-			return theme.fg("dim", hint);
+			return theme.fg("reason", hint);
 	}
 }
 

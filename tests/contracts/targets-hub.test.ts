@@ -175,7 +175,7 @@ describe("contracts/targets hub", () => {
 
 		const active = lines.find((line) => line.includes("dynamo"));
 		ok(active, "active target row exists");
-		ok(active.includes("▸ dynamo"), active);
+		ok(active.includes("❯ dynamo"), active);
 		ok(active.includes("active"), active);
 		ok(active.includes("LM Studio"), active);
 		ok(active.includes("● ok 57ms"), active);

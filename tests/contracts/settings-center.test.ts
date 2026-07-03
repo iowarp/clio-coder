@@ -367,7 +367,7 @@ describe("contracts/settings center", () => {
 		handle.refreshRows();
 
 		const rendered = stripAnsi(overlay.render(120).join("\n"));
-		ok(rendered.includes("▸ Max retries"), rendered);
+		ok(rendered.includes("❯ Max retries"), rendered);
 		ok(rendered.includes("retry.maxRetries"));
 		ok(rendered.includes("8"));
 		ok(fake.renders() > 0);
