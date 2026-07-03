@@ -21,7 +21,7 @@ import {
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
 import { stringEnum } from "../string-enum.js";
 import { truncateHead } from "../truncate.js";
-import { searchDocs } from "./docs-engine.js";
+import { listDocsCorpus, searchDocs } from "./docs-engine.js";
 
 /**
  * The context tool: one OBSERVE entry point for material about the working
@@ -240,7 +240,23 @@ function runDocsScope(
 	options: ToolInvokeOptions | undefined,
 ): ToolResult {
 	const query = typeof args.query === "string" ? args.query.trim() : "";
-	if (query.length === 0) return { kind: "error", message: "context: scope=docs requires query" };
+	if (query.length === 0) {
+		// No query: return the corpus listing (files + counts) the model needs to
+		// pick a search term, instead of an error that wastes a round.
+		const corpus = listDocsCorpus();
+		if (!corpus.ok) return { kind: "error", message: `context: ${corpus.message}` };
+		return finalizeObservation({
+			tool: ToolNames.Context,
+			unit: "entries",
+			format: "json",
+			output: JSON.stringify(corpus.payload, null, 2),
+			shownCount: corpus.fileCount,
+			totalCount: corpus.fileCount,
+			truncated: false,
+			reservation,
+			...(options ? { options } : {}),
+		});
+	}
 	const outcome = searchDocs(query, args.limit);
 	if (!outcome.ok) return { kind: "error", message: `context: ${outcome.message}` };
 	return finalizeObservation({
@@ -353,10 +369,10 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.Context,
 		description:
-			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (query required), scope=skills lists available skills or loads one by name.",
+			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (omit query to list the corpus), scope=skills lists available skills or loads one by name.",
 		parameters: Type.Object({
 			scope: stringEnum(["workspace", "docs", "skills"], "Context source."),
-			query: Type.Optional(Type.String({ description: "scope=docs: question or terms." })),
+			query: Type.Optional(Type.String({ description: "scope=docs: question or terms; omit to list the corpus." })),
 			name: Type.Optional(Type.String({ description: "scope=skills: skill name to load; omit to list." })),
 			limit: Type.Optional(Type.Number({ description: "scope=docs: max sections (default 5, max 12)." })),
 			include_tree: Type.Optional(Type.Boolean({ description: "scope=skills: list files under the skill base_dir." })),

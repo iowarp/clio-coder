@@ -138,6 +138,28 @@ describe("contracts/context docs scope", () => {
 		}
 	});
 
+	it("lists the corpus instead of erroring when no query is given", async () => {
+		const result = await contextTool.run({ scope: "docs" });
+		strictEqual(result.kind, "ok", "an omitted query lists the corpus rather than returning an error");
+		if (result.kind !== "ok") return;
+		const payload = JSON.parse(result.output) as {
+			version: number;
+			corpus: { docs: number; sections: number; files: string[]; excludes: string[] };
+			followUp?: string;
+			results?: unknown;
+		};
+		strictEqual(payload.version, 2);
+		ok(payload.corpus.docs >= 2, "corpus lists the searched doc count");
+		ok(payload.corpus.sections > 0, "corpus lists the section count");
+		ok(Array.isArray(payload.corpus.files) && payload.corpus.files.length > 0, "corpus lists the files");
+		ok(payload.corpus.excludes.includes("docs/html/**"), "corpus reports the html exclusion");
+		strictEqual(payload.results, undefined, "the listing carries no ranked results");
+		ok(
+			typeof payload.followUp === "string" && payload.followUp.includes("query="),
+			"the listing tells the model to query",
+		);
+	});
+
 	it("ranks a multi-term query by heading and body matches", async () => {
 		const result = await contextTool.run({ scope: "docs", query: "fleet dispatch" });
 		strictEqual(result.kind, "ok");
@@ -189,8 +211,8 @@ describe("contracts/context docs scope", () => {
 		ok(typeof payload.next === "string" && payload.next.startsWith("query="), "empty results carry an exact next call");
 	});
 
-	it("rejects an empty query", async () => {
-		const result = await contextTool.run({ scope: "docs" });
-		strictEqual(result.kind, "error");
+	it("treats a whitespace-only query as no query and lists the corpus", async () => {
+		const result = await contextTool.run({ scope: "docs", query: "   " });
+		strictEqual(result.kind, "ok", "a blank query lists the corpus rather than erroring");
 	});
 });
