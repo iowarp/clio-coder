@@ -1,7 +1,7 @@
 ---
 name: design-council
-description: Use when a design decision has real tradeoffs and needs several expert perspectives that challenge each other before code is written, such as architecture choices, API shapes, storage formats, parallelization strategies, or dependency decisions. Runs a bounded debate through dispatched read-only workers, where each perspective states a position, then responds to the other positions, then the orchestrator synthesizes agreements, remaining disagreements, and a recommendation, with the transcript preserved through dispatch receipts and evidence. Quick mode runs a single round for a fast perspective check. Triggers on "council", "debate this", "multiple perspectives", "weigh the options", "what would experts say". Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation work across workers; use dispatch directly.
-version: 0.1.0
+description: Use when a design decision has real tradeoffs and needs several expert perspectives that challenge each other before code is written, such as architecture choices, API shapes, storage formats, parallelization strategies, or dependency decisions. Quick mode runs a single round for a fast perspective check. Triggers on "council", "debate this", "multiple perspectives", "weigh the options", "what would experts say". Not for a one-question-at-a-time interrogation of a plan; use grill-me. Not for splitting implementation work across workers; use dispatch directly.
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - dispatch

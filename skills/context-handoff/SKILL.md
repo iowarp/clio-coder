@@ -1,7 +1,7 @@
 ---
 name: context-handoff
 description: Use when a session is winding down and work will continue in a new session or another agent, when context is about to be compacted or lost, or when the user asks for a handoff, brief, summary, or "notes for the next session." Produces a durable, redacted, reference-not-copy handoff document the next session can pick up from.
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -60,10 +60,10 @@ Distinct from two things it is often confused with:
    genuinely part of the project. Replace with `[REDACTED]` and note what was
    removed.
 
-7. **Suggest skills** from the in-context `# Skills` catalog (do not scan the
-   filesystem): name two to five the next session should invoke, one line each, tied to
-   the next focus or the work in progress. Always include `context-prime` as the
-   first step.
+7. **Suggest skills** from the `context(scope="skills")` listing (do not scan
+   the filesystem): name two to five the next session should invoke, one line
+   each, tied to the next focus or the work in progress. Always include
+   `context-prime` as the first step.
 
 8. **Write** to `.clio/handoffs/handoff-YYYY-MM-DD[-slug].md`. `.clio/` is
    intentionally ignored by default unless the user force-adds something. Use

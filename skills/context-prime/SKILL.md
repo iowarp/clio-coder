@@ -1,7 +1,7 @@
 ---
 name: context-prime
 description: Use when a coding session begins, when resuming work after a break, or when you land in an unfamiliar or in-progress repository and need to orient before acting. Loads the last handoff, git state, the project constitution, and active-work signals so a fresh agent reconstructs intent instead of guessing. Triggers on "prime", "catch me up", "where were we", "get up to speed", or the first substantive request in a new session.
-version: 0.2.0
+version: 0.2.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -58,8 +58,9 @@ Work top to bottom; stop early once you have enough to state where things stand.
    A v1 or missing `.clio/codewiki.json` may rebuild on demand through
    codewiki tools, but source files remain authoritative.
 
-5. **Skills.** The `# Skills` catalog is already in context. Note any the
-   handoff suggested for the next step; do not scan the filesystem for them.
+5. **Skills.** List installed skills with `context(scope="skills")` and note
+   any the handoff suggested for the next step; do not scan the filesystem
+   for them.
 
 6. **Orient.** Produce a short orientation (template below) and **confirm the
    focus with the user before non-trivial action** — via `ask_user` with the

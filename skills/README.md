@@ -44,7 +44,8 @@ auto-loads. That gap is deliberate.
 | [`experiment-protocol`](experiment-protocol/) | workflow | A benchmark, optimization, or numerical comparison needs success criteria locked before results exist. Pre-registers thresholds into the repo validation contract. |
 | [`design-council`](design-council/) | workflow | A design decision has real tradeoffs and needs several composed expert perspectives that debate through read-only dispatched workers before code is written. |
 | [`credentials`](credentials/) | discipline | A task needs an API key, token, or facility credential. Verifies presence without exposing values, collects new secrets via hidden terminal input, and contains leaks. |
-| [`workflow-distiller`](workflow-distiller/) | workflow | A workflow that just ran should become a reusable skill. Reconstructs it from the session record, interviews, checks overlap, gates on approval, then creates it. |
+| [`workflow-distiller`](workflow-distiller/) | workflow | A workflow that just ran should become a reusable skill. Reconstructs it from the session record, interviews, checks overlap, gates on approval, then writes it following `skill-craft`. |
+| [`skill-craft`](skill-craft/) | reference | Writing, reviewing, or pruning any SKILL.md: invocation cost, trigger-only descriptions, completion criteria, progressive disclosure, and the pruning pass. |
 
 Each SKILL.md may declare `allowed-tools` / `disallowed-tools`. After a skill
 loads, Clio enforces that declaration at tool admission until the turn (or
@@ -87,9 +88,9 @@ skills dir, both of which are gitignored / outside the repo.
 
 A skill is "approved for the marketplace" when a maintainer:
 
-1. Reviews `SKILL.md` against `superpowers:writing-skills` and Anthropic's skill
-   authoring guidance (concise, trigger-rich description, progressive
-   disclosure, one excellent example, evals present).
+1. Reviews `SKILL.md` against [`skill-craft`](skill-craft/) (trigger-only
+   description, checkable completion criteria, progressive disclosure, pruning
+   pass, evals present).
 2. Confirms it carries the provenance frontmatter below and sets `audit: pass`.
 3. Sets / bumps `version`.
 
@@ -108,8 +109,9 @@ audit: pass
 ```
 
 Each skill ships an `evals.md` recording the baseline scenarios it was tested
-against (RED-GREEN per `superpowers:writing-skills`). `clio skills eval <name>`
-executes those scenarios instead of trusting the prose.
+against (RED-GREEN per [`skill-craft`](skill-craft/)). `clio skills eval <name>`
+executes those scenarios instead of trusting the prose; the eval lane is the
+curation gate for this catalog, not an end-user feature.
 
 `npm run skills:pin` enforces this contract structurally: it refuses to pin a
 catalog where any skill is missing the required frontmatter, `audit: pass`, or

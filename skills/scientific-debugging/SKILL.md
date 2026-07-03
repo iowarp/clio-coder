@@ -1,7 +1,7 @@
 ---
 name: scientific-debugging
-description: Use when debugging has stalled after the first obvious fix, when a failure spans multiple systems, when someone is about to try random changes, or when a scientific or HPC code produces wrong numbers, NaNs, nondeterministic results, or an unexplained performance regression. Forces a one-sentence goal, at least three falsifiable hypotheses drawn from distinct fault classes, cheapest-test-first ordering, and an evidence-cited verdict per hypothesis. Two tiers, quick diagnosis for problems under fifteen minutes and structured investigation with baseline measurements and pre-committed verdict conditions for longer work. Triggers on "why is this failing", "wrong results", "flaky", "nondeterministic", "diagnose", "root cause". Not for designing benchmarks or pre-registered experiments; use experiment-protocol.
-version: 0.1.0
+description: Use when debugging has stalled after the first obvious fix, when a failure spans multiple systems, when someone is about to try random changes, or when a scientific or HPC code produces wrong numbers, NaNs, nondeterministic results, or an unexplained performance regression. Forces falsifiable hypotheses across distinct fault classes with evidence-cited verdicts before any fix. Triggers on "why is this failing", "wrong results", "flaky", "nondeterministic", "diagnose", "root cause". Not for designing benchmarks or pre-registered experiments; use experiment-protocol.
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - read

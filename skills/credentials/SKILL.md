@@ -1,7 +1,7 @@
 ---
 name: credentials
-description: Use before running any tool or script that needs an API key, token, or credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Verifies presence without exposing values, has the user add missing credentials through a hidden-input terminal command instead of pasting them into chat, and defines the containment steps if a secret does leak into the transcript. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc for data transfer. Triggers on "API key", "credential", "token", "auth error", "permission denied", "add a secret", "leaked". Not for provider target configuration; use clio auth and target settings.
-version: 0.1.0
+description: Use before running any tool or script that needs an API key, token, or other credential, when a command fails with an auth error, when the user must supply a new secret, or when a secret may have leaked into output. Covers facility surfaces such as kerberos tickets, globus and scheduler tokens, ssh agents, and netrc. Triggers on "API key", "credential", "token", "auth error", "permission denied", "add a secret", "leaked". Not for provider target configuration; use clio auth and target settings.
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - read

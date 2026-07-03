@@ -18,8 +18,8 @@ Expected:
 - Lists installed skills via `context(scope="skills")` with no name before
   designing.
 - Presents a compact design summary and waits for explicit approval.
-- Calls `artifact(kind="skill")` only after approval, with session-specific
-  values replaced by placeholders.
+- Writes the SKILL.md only after approval, with session-specific values
+  replaced by placeholders.
 - Records a RED-GREEN validation scenario.
 
 ## S2 - overlap with an installed skill
@@ -32,9 +32,8 @@ Expected:
 - The overlap check finds the installed skill.
 - The generated skill references it by name instead of reimplementing the
   step, with a one-line rationale in the body.
-- The `artifact(kind="skill")` call passes `requires: ["skill:<name>"]` so the
-  generated frontmatter arms the loader's unmet-dependency warning when the
-  referenced skill is absent.
+- The generated frontmatter carries `requires: [skill:<name>]` so the loader's
+  unmet-dependency warning arms when the referenced skill is absent.
 
 ## S3 - no recurrence
 
@@ -52,8 +51,8 @@ Setup: user asks for a new skill for something never done in any session.
 
 Expected:
 
-- Skips the distiller ceremony and gives direct `artifact(kind="skill")`
-  guidance.
+- Skips the distiller ceremony and points at writing the SKILL.md directly,
+  following skill-craft.
 
 ## Baseline failure modes to watch for (RED)
 
@@ -93,5 +92,6 @@ prompt; the phases still had to run in order.
   the line to add; `requires: [skill:arxiv-literature]` on the generated
   skill was verified to produce the loader's "requires skill ... which is not
   available" warning when the dependency is absent. 2026-07-02: skill
-  creation (today's `artifact(kind="skill")`) gained a validated `requires`
-  parameter and the skill now passes the entries directly in Phase 5.
+  creation moved to writing SKILL.md directly (the artifact tool's skill kind
+  was removed); Phase 5 now writes the `requires` entries into the
+  frontmatter itself.

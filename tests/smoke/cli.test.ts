@@ -522,7 +522,7 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(settings, /^ {2}target: null$/m);
 	});
 
-	it("skills list, inspect, validate, and create work in a scratch project", async () => {
+	it("skills list, inspect, and validate work in a scratch project", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
 		const project = join(scratch.dir, "project");
 		const skillFile = writeSkill(join(project, ".clio", "skills"), "smoke-skill", "Smoke test skill.");
@@ -542,9 +542,12 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		const validated = JSON.parse(validate.stdout) as { ok: boolean };
 		strictEqual(validated.ok, true);
 
+		// `skills create` was removed with the artifact/skill split: a skill is a
+		// SKILL.md folder written with the ordinary write tool and validated by
+		// the loader, so an unknown subcommand must fail closed.
 		const created = await runCli(["skills", "create", "cli-made"], { env: scratch.env, cwd: project });
-		strictEqual(created.code, 0, `stderr=${created.stderr}`);
-		ok(existsSync(join(project, ".clio", "skills", "cli-made", "SKILL.md")));
+		strictEqual(created.code, 2, `stderr=${created.stderr}`);
+		match(created.stderr, /unknown skills command/);
 	});
 
 	it("runs non-interactively against a mock provider", async () => {

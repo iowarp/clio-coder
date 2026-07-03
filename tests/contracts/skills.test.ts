@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -774,99 +774,13 @@ describe("contracts/skills tools", () => {
 		strictEqual(result.kind, "error");
 	});
 
-	it("artifact kind=skill writes a SKILL.md folder", async () => {
+	it("artifact rejects kind=skill; skills are written as SKILL.md files directly", async () => {
 		const cwd = join(scratch, "project");
 		mkdirSync(cwd, { recursive: true });
 		const tool = createArtifactTool({ getCwd: () => cwd });
-		const result = await tool.run({
-			kind: "skill",
-			title: "made-skill",
-			description: "A created skill.",
-			content: "# Steps\n\nDo work.",
-		});
-		strictEqual(result.kind, "ok");
-		const file = join(cwd, ".clio", "skills", "made-skill", "SKILL.md");
-		ok(existsSync(file));
-		const content = readFileSync(file, "utf8");
-		ok(content.includes("name: made-skill"));
-		ok(content.includes("description: A created skill."));
-		ok(content.includes("Do work."));
-	});
-
-	it("artifact kind=skill refuses to overwrite without the overwrite flag", async () => {
-		const cwd = join(scratch, "project");
-		mkdirSync(cwd, { recursive: true });
-		const tool = createArtifactTool({ getCwd: () => cwd });
-		const first = await tool.run({ kind: "skill", title: "dup-skill", description: "First.", content: "One." });
-		strictEqual(first.kind, "ok");
-		const second = await tool.run({ kind: "skill", title: "dup-skill", description: "Second.", content: "Two." });
-		strictEqual(second.kind, "error");
-		const third = await tool.run({
-			kind: "skill",
-			title: "dup-skill",
-			description: "Third.",
-			content: "Three.",
-			overwrite: true,
-		});
-		strictEqual(third.kind, "ok");
-		const file = join(cwd, ".clio", "skills", "dup-skill", "SKILL.md");
-		strictEqual(readFileSync(file, "utf8").includes("Three."), true);
-		strictEqual(readFileSync(`${file}.bak`, "utf8").includes("One."), true);
-	});
-
-	it("artifact kind=skill renders allowed-tools frontmatter that round-trips through the loader", async () => {
-		const cwd = join(scratch, "project");
-		mkdirSync(cwd, { recursive: true });
-		const tool = createArtifactTool({ getCwd: () => cwd });
-		const result = await tool.run({
-			kind: "skill",
-			title: "rich-skill",
-			description: "Rich frontmatter skill.",
-			content: "Body.",
-			allowed_tools: ["Read", "Edit"],
-		});
-		strictEqual(result.kind, "ok");
-		const list = loadSkills({ roots: [projectRoot(join(cwd, ".clio", "skills"))] });
-		const skill = list.items.find((s) => s.name === "rich-skill");
-		ok(skill);
-		deepStrictEqual(skill.allowedTools, ["Read", "Edit"]);
-	});
-
-	it("artifact kind=skill renders validated requires frontmatter the loader diagnoses", async () => {
-		const cwd = join(scratch, "project");
-		mkdirSync(cwd, { recursive: true });
-		const tool = createArtifactTool({ getCwd: () => cwd });
-		const invalid = await tool.run({
-			kind: "skill",
-			title: "needy-skill",
-			description: "Skill with dependencies.",
-			content: "Body.",
-			requires: ["skill:UPPER CASE"],
-		});
-		strictEqual(invalid.kind, "error");
-		if (invalid.kind === "error") ok(invalid.message.includes("invalid requires entry"));
-
-		const result = await tool.run({
-			kind: "skill",
-			title: "needy-skill",
-			description: "Skill with dependencies.",
-			content: "Body.",
-			// A bare name normalizes to skill:<name>; duplicates collapse.
-			requires: ["skill:arxiv-literature", "context-prime", "skill:arxiv-literature"],
-		});
-		strictEqual(result.kind, "ok");
-		const content = readFileSync(join(cwd, ".clio", "skills", "needy-skill", "SKILL.md"), "utf8");
-		ok(content.includes("requires:"));
-		ok(content.includes("skill:arxiv-literature"));
-		ok(content.includes("skill:context-prime"));
-
-		// The loader treats requires as metadata and warns for each missing dep.
-		const list = loadSkills({ roots: [projectRoot(join(cwd, ".clio", "skills"))] });
-		const skill = list.items.find((s) => s.name === "needy-skill");
-		ok(skill);
-		deepStrictEqual(skill.metadata.requires, ["skill:arxiv-literature", "skill:context-prime"]);
-		const warnings = list.diagnostics.filter((d) => d.message.includes("requires skill"));
-		strictEqual(warnings.length, 2);
+		const result = await tool.run({ kind: "skill", title: "made-skill", content: "Body." });
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") ok(result.message.includes("kind must be plan, review, or report"));
 	});
 
 	it("context skill loads with a recipe-bound policy admit exactly the declared skills", async () => {

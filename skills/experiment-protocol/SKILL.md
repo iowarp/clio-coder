@@ -1,7 +1,7 @@
 ---
 name: experiment-protocol
-description: Use when running a performance study, numerical comparison, parameter sweep, kernel or solver benchmark, or any change justified by "faster" or "more accurate", and success criteria should be locked before results exist. Pre-registers the goal, thresholds, tolerances with explicit absolute or relative semantics, pinned environment and inputs, and CONFIRMED/REFUTED/INCONCLUSIVE conditions into the repository validation contract so completion gates can demand matching evidence. Covers baseline capture, one-variable-at-a-time experiments, measurement with environment context, honest analysis against the pre-registered thresholds, and iteration with a dead-ends ledger. Triggers on "benchmark", "compare implementations", "optimize", "tolerance", "reproduce results", "parameter sweep". Not for diagnosing a stalled bug; use scientific-debugging.
-version: 0.1.0
+description: Use when running a performance study, numerical comparison, parameter sweep, kernel or solver benchmark, or any change justified by "faster" or "more accurate", and success criteria should be locked before results exist. Pre-registers thresholds, tolerances, environment pins, and verdict conditions into the repository validation contract before any measurement. Triggers on "benchmark", "compare implementations", "optimize", "tolerance", "reproduce results", "parameter sweep". Not for diagnosing a stalled bug; use scientific-debugging.
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - read

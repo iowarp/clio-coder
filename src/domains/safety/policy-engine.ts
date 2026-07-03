@@ -413,8 +413,6 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 			return target === null ? [] : [{ operation: "write", path: target }];
 		}
 		case ToolNames.Artifact: {
-			// kind=skill writes into the managed skill store, not a caller path.
-			if (args?.kind === "skill") return [];
 			const fallback = args?.kind === "review" ? "REVIEW.md" : args?.kind === "report" ? "REPORT.md" : "PLAN.md";
 			return [{ operation: "write", path: pathArg(args) ?? fallback }];
 		}
