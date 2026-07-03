@@ -151,6 +151,10 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Dispatch pipeline halt evidence.** When a `mode=pipeline` dispatch stops
+  after a failed step, the error result now keeps the completed and failed run
+  summaries plus their receipt paths in `details.runs`, so the orchestrator
+  still receives receipt-backed evidence for the partial chain.
 - **One compaction threshold.** The context ledger overlay and the persisted
   context snapshots now fall back to the shared auto-compact default (0.8)
   instead of a local 0.85, so `/context` reserve/free math and the

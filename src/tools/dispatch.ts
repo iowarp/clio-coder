@@ -317,6 +317,16 @@ interface CompletedRun {
 	summary: EventSummary;
 }
 
+class PipelineHaltError extends Error {
+	constructor(
+		message: string,
+		readonly runs: ReadonlyArray<CompletedRun>,
+	) {
+		super(message);
+		this.name = "PipelineHaltError";
+	}
+}
+
 function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, maxOutputBytes: number): string {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	const perRunOutputBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, runs.length)));
@@ -452,6 +462,15 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 				if (failed.length > 0) return { kind: "error", message: output, details };
 				return { kind: "ok", output, details };
 			} catch (err) {
+				if (err instanceof PipelineHaltError) {
+					const haltMessage = `dispatch: ${err.message}`;
+					const output = formatDispatchOutput("pipeline", err.runs, maxOutputBytes);
+					return {
+						kind: "error",
+						message: `${haltMessage}\n\n${output}`,
+						details: dispatchDetails("pipeline", err.runs),
+					};
+				}
 				return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
 			}
 		},
@@ -584,8 +603,9 @@ async function runPipeline(
 			});
 			if (isPipelineStepFailure(receipt)) {
 				const skipped = requests.length - (index + 1);
-				throw new Error(
+				throw new PipelineHaltError(
 					`pipeline dispatch halted at step ${index + 1}/${requests.length} (run ${receipt.runId}, ${pipelineFailureReason(receipt)}); skipped ${skipped} later step(s)`,
+					[...runs],
 				);
 			}
 			previous = { runId: receipt.runId, text: summary.lastAssistantText };
