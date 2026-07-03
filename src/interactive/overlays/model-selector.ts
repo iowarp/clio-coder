@@ -31,13 +31,11 @@ import {
 import {
 	buildHint,
 	clioError,
-	clioFrame,
-	clioTitle,
 	formatRuntimeResolutionDiagnostic,
 	runtimeResolutionDiagnosticLine,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
-import { GLYPH } from "../theme/index.js";
+import { type ClioToken, clioTheme, GLYPH } from "../theme/index.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
@@ -86,13 +84,30 @@ export interface OpenModelOverlayDeps {
 function healthGlyph(status: TargetStatus): string {
 	switch (status.health.status) {
 		case "healthy":
-			return "●";
+			return GLYPH.running;
 		case "degraded":
 			return "◐";
 		case "down":
 			return "○";
 		default:
 			return "·";
+	}
+}
+
+/**
+ * Map a row's health glyph back to its semantic token so the status cell states
+ * the fact in color: healthy green, degraded amber, down red, unknown dim.
+ */
+function healthToken(row: ModelRow): ClioToken {
+	switch (row.healthGlyph) {
+		case GLYPH.running:
+			return "success";
+		case "◐":
+			return "warning";
+		case "○":
+			return "error";
+		default:
+			return "dim";
 	}
 }
 
@@ -553,13 +568,17 @@ function fitLine(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
+// The state mark to the left of a model id. The active model carries the accent
+// active mark; a scoped model the muted scoped mark; favorite, recent, and
+// default are quiet dim metadata; everything else is a dim placeholder dot.
 function activeMark(row: ModelRow): string {
-	if (row.active) return clioTitle(GLYPH.active);
-	if (row.favorite) return clioFrame("★");
-	if (row.recent) return clioFrame("↺");
-	if (row.scoped) return clioFrame(GLYPH.scoped);
-	if (row.defaultModel) return clioFrame("d");
-	return "·";
+	const theme = clioTheme();
+	if (row.active) return theme.fg("accent", GLYPH.active);
+	if (row.favorite) return theme.fg("dim", "★");
+	if (row.recent) return theme.fg("dim", "↺");
+	if (row.scoped) return theme.fg("muted", GLYPH.scoped);
+	if (row.defaultModel) return theme.fg("dim", "d");
+	return theme.fg("dim", "·");
 }
 
 function formatModelHeader(width: number): string {
@@ -571,23 +590,31 @@ function formatModelHeader(width: number): string {
 		`${fitCell("caps", CAPS_COL_WIDTH)}`;
 	if (columns.showTarget) line += ` ${fitCell("target", columns.targetWidth)}`;
 	if (columns.showRuntime) line += ` ${fitCell("runtime", columns.runtimeWidth)}`;
-	return clioFrame(fitLine(line, width));
+	// Table headers render dim per the design-system table recipe (section 4.6).
+	return clioTheme().fg("dim", fitLine(line, width));
 }
 
 function formatModelRow(row: ModelRow, width: number, selected: boolean): string {
+	const theme = clioTheme();
 	const columns = modelColumns(width);
-	const pointer = selected ? "→" : " ";
-	const prefix = `${pointer} ${row.healthGlyph} ${activeMark(row)} `;
+	// Selection points with the accent cursor and bolds the model id; the health
+	// glyph states the fact in its status token; the remaining cells stay muted.
+	// The whole line is never recolored, so a cell's own reset can never clip the
+	// selection highlight.
+	const pointer = selected ? theme.fg("accent", GLYPH.cursor) : " ";
+	const health = theme.fg(healthToken(row), row.healthGlyph);
+	const prefix = `${pointer} ${health} ${activeMark(row)} `;
 	const modelLabel = row.model.length > 0 ? row.model : "(no model ids)";
+	const modelCell = fitCell(truncateMiddle(modelLabel, columns.modelWidth), columns.modelWidth);
+	const model = selected ? theme.style("accent", modelCell, { bold: true }) : theme.fg("muted", modelCell);
 	let line =
 		prefix +
-		`${fitCell(truncateMiddle(modelLabel, columns.modelWidth), columns.modelWidth)}` +
-		`${fitCell(row.context, CONTEXT_COL_WIDTH, "right")} ` +
-		`${fitCell(row.badges, CAPS_COL_WIDTH)}`;
-	if (columns.showTarget) line += ` ${fitCell(row.target, columns.targetWidth)}`;
-	if (columns.showRuntime) line += ` ${fitCell(row.runtimeShortName, columns.runtimeWidth)}`;
-	line = fitLine(line, width);
-	return selected ? clioTitle(line) : line;
+		model +
+		`${theme.fg("muted", fitCell(row.context, CONTEXT_COL_WIDTH, "right"))} ` +
+		theme.fg("muted", fitCell(row.badges, CAPS_COL_WIDTH));
+	if (columns.showTarget) line += ` ${theme.fg("muted", fitCell(row.target, columns.targetWidth))}`;
+	if (columns.showRuntime) line += ` ${theme.fg("dim", fitCell(row.runtimeShortName, columns.runtimeWidth))}`;
+	return fitLine(line, width);
 }
 
 function capabilityNames(caps: CapabilityFlags): string {
@@ -629,11 +656,17 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 	const loadState = row.loadState
 		? ` · state ${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`
 		: "";
+	const theme = clioTheme();
+	// The detail block is quiet scaffolding beneath the selected row; only the
+	// diagnostics carry a semantic token, so the two fact lines render dim.
 	return [
-		fitLine(`${state} ${ref} · ${availability} · auth ${row.authText}`, width),
-		fitLine(
-			`source ${sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
-			width,
+		theme.fg("dim", fitLine(`${state} ${ref} · ${availability} · auth ${row.authText}`, width)),
+		theme.fg(
+			"dim",
+			fitLine(
+				`source ${sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
+				width,
+			),
 		),
 		...(row.diagnostics ?? [])
 			.filter((entry) => entry.severity !== "info")
@@ -711,22 +744,34 @@ function renderModelOverlayLines(input: {
 	const selected = filtered[selectedIndex] ?? null;
 	const active = input.summary.activeRef || "not configured";
 	const modeLabel = searching ? `search "${query}"` : input.showAll ? "all" : "focus";
+	const theme = clioTheme();
+	// The mode/count summary and the focus legend are quiet scaffolding, so they
+	// render dim; only the table rows and status rails carry brighter tokens.
 	const lines = [
-		fitLine(
-			`${modeLabel} · ${selectableFiltered}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
-			width,
+		theme.fg(
+			"dim",
+			fitLine(
+				`${modeLabel} · ${selectableFiltered}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
+				width,
+			),
 		),
-		fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width),
+		theme.fg("dim", fitLine(`current ${active} · focus shows current, favorites, recent, and target defaults`, width)),
 	];
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
-	if (refreshLine) lines.push((input.refreshError ? clioError : clioFrame)(fitLine(refreshLine, width)));
+	if (refreshLine)
+		lines.push(
+			input.refreshError ? clioError(fitLine(refreshLine, width)) : theme.fg("dim", fitLine(refreshLine, width)),
+		);
 	if (input.selectionError) lines.push(clioError(fitLine(input.selectionError, width)));
 	lines.push(formatModelHeader(width));
 	if (filtered.length === 0) {
 		lines.push(
-			fitLine(
-				searching ? "  no models match the current filter" : "  no focused models; type to search or press Tab for all",
-				width,
+			theme.fg(
+				"muted",
+				fitLine(
+					searching ? "  no models match the current filter" : "  no focused models; type to search or press Tab for all",
+					width,
+				),
 			),
 		);
 	} else {
@@ -737,12 +782,12 @@ function renderModelOverlayLines(input: {
 			lines.push(formatModelRow(row, width, start + i === selectedIndex));
 		}
 		if (filtered.length > VISIBLE_ROWS) {
-			lines.push(clioFrame(fitLine(`  (${selectedIndex + 1}/${filtered.length})`, width)));
+			lines.push(theme.fg("dim", fitLine(`  (${selectedIndex + 1}/${filtered.length})`, width)));
 		}
 	}
 	lines.push("");
 	if (selected) lines.push(...formatModelDetail(selected, width));
-	else lines.push(fitLine("no selected model", width), "");
+	else lines.push(theme.fg("muted", fitLine("no selected model", width)), "");
 	return lines.map((line) => fitLine(line, width));
 }
 
