@@ -6,9 +6,9 @@ export const GLYPH = {
 	// the reply prefix; it survives only in the two headers above.
 	agent: "✦",
 	user: "›",
-	// Selection focus marker for list overlays. Its value flips to "❯" in slice
-	// 9; until then it stays "▸" so the refactor renders byte-identically.
-	cursor: "▸",
+	// Selection focus marker for list overlays. It is deliberately distinct from
+	// the tool ledger's toolHeader so a focused row never reads as a tool line.
+	cursor: "❯",
 	toolHeader: "▸",
 	running: "●",
 	queued: "◌",

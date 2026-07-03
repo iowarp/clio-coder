@@ -33,12 +33,11 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 		const lines: string[] = [];
 		for (const message of messages) {
 			const preview = truncateToWidth(message.text.replace(/\s+/g, " "), Math.max(12, bodyWidth - 9), "...", false);
-			// Steering redirects the live turn: that is a Clio-signature action,
-			// so the steer marker carries the action color.
+			// A steer is the user's voice redirecting the live turn, so it carries
+			// the user glyph painted in the action color. The tool ledger keeps
+			// exclusive ownership of the toolHeader glyph.
 			const marker =
-				message.kind === "steer"
-					? theme.fg("action", `${GLYPH.toolHeader} steer`)
-					: theme.fg("muted", `${GLYPH.queued} queued`);
+				message.kind === "steer" ? theme.fg("action", `${GLYPH.user} steer`) : theme.fg("muted", `${GLYPH.queued} queued`);
 			lines.push(`${marker} ${theme.fg("muted", preview)}`);
 		}
 		const restoreKey = key && key.length > 0 ? key : "alt+up";

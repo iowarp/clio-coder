@@ -1,4 +1,5 @@
 import type { EditorTheme, MarkdownTheme, SelectListTheme, SettingsListTheme } from "../../engine/tui.js";
+import { GLYPH } from "./glyphs.js";
 import type { ClioTheme } from "./tokens.js";
 
 const identity = (text: string): string => text;
@@ -38,7 +39,7 @@ export function settingsListTheme(theme: ClioTheme): SettingsListTheme {
 		label: (text, selected) => (selected ? theme.style("accent", text, { bold: true }) : text),
 		value: (text, selected) => (selected ? theme.fg("success", text) : theme.fg("muted", text)),
 		description: (text) => theme.fg("muted", text),
-		cursor: "▸",
+		cursor: GLYPH.cursor,
 		hint: (text) => theme.fg("dim", text),
 	};
 }
