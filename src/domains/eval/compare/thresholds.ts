@@ -44,8 +44,19 @@ export function metricValue(
 		if (metric === "result.pass") return artifact.summary.failed === 0;
 		if (metric === "latency.wallMs") return artifact.summary.wallTimeMs;
 		if (metric === "tokens.total") return artifact.summary.tokens.total;
+		if (metric.startsWith("summary.")) return summaryValue(artifact, metric.slice("summary.".length));
 	}
 	return null;
+}
+
+/** Resolve a dotted path under artifact.summary to a scalar, else null. */
+function summaryValue(artifact: EvalArtifactV2, path: string): number | string | boolean | null {
+	let current: unknown = artifact.summary;
+	for (const segment of path.split(".")) {
+		if (!isRecord(current) || !(segment in current)) return null;
+		current = current[segment];
+	}
+	return typeof current === "number" || typeof current === "string" || typeof current === "boolean" ? current : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
