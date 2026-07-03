@@ -108,6 +108,22 @@ export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 	});
 }
 
+/**
+ * Alias spellings that parse like their canonical command, e.g. /ctx for
+ * /context. The /skill: family stays out: it is routed by the dedicated skill
+ * branch and never reaches argument completion.
+ */
+function commandAliasMap(): Map<string, string> {
+	const map = new Map<string, string>();
+	for (const ref of commandReference()) {
+		for (const alias of ref.aliases) {
+			if (alias.includes(":")) continue;
+			map.set(alias, ref.name);
+		}
+	}
+	return map;
+}
+
 function isSlashCommandPrefix(lines: string[], cursorLine: number, cursorCol: number): string | null {
 	if (cursorLine !== 0) return null;
 	const currentLine = lines[cursorLine] ?? "";
@@ -125,15 +141,46 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 
 	private readonly provider: CombinedAutocompleteProvider;
 	private readonly listSkills: (() => { installed: Skill[]; marketplace: MarketplaceSkill[] }) | undefined;
+	private readonly aliases: Map<string, string>;
 
 	constructor(
 		commands: SlashAutocompleteCommand[],
 		basePath: string,
 		fdPath: string | null,
 		listSkills?: () => { installed: Skill[]; marketplace: MarketplaceSkill[] },
+		aliases: Map<string, string> = commandAliasMap(),
 	) {
 		this.provider = new CombinedAutocompleteProvider(commands, basePath, fdPath);
 		this.listSkills = listSkills;
+		this.aliases = aliases;
+	}
+
+	/**
+	 * An alias invocation parses exactly like its canonical command, so it must
+	 * complete like it too. The combined provider looks argument completions up
+	 * by exact command name, so the line it sees swaps the alias token for the
+	 * canonical name with the cursor shifted by the length delta. Completion
+	 * application still runs against the user's original spelling because
+	 * argument prefixes never include the command token.
+	 */
+	private canonicalizeAlias(
+		lines: string[],
+		cursorLine: number,
+		cursorCol: number,
+	): { lines: string[]; cursorCol: number } {
+		const line = lines[cursorLine] ?? "";
+		const match = line.match(/^(\s*)\/(\S+)\s/);
+		const lead = match?.[1];
+		const typed = match?.[2];
+		if (lead === undefined || typed === undefined) return { lines, cursorCol };
+		const canonical = this.aliases.get(typed);
+		if (!canonical) return { lines, cursorCol };
+		const nameStart = lead.length + 1;
+		const nameEnd = nameStart + typed.length;
+		if (cursorCol <= nameEnd) return { lines, cursorCol };
+		const next = [...lines];
+		next[cursorLine] = `${line.slice(0, nameStart)}${canonical}${line.slice(nameEnd)}`;
+		return { lines: next, cursorCol: cursorCol + (canonical.length - typed.length) };
 	}
 
 	async getSuggestions(
@@ -187,7 +234,8 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			if (items.length > 0) return { items, prefix: typedPrefix };
 		}
 
-		const suggestions = await this.provider.getSuggestions(lines, cursorLine, cursorCol, options);
+		const canonical = this.canonicalizeAlias(lines, cursorLine, cursorCol);
+		const suggestions = await this.provider.getSuggestions(canonical.lines, cursorLine, canonical.cursorCol, options);
 		const commandPrefix = isSlashCommandPrefix(lines, cursorLine, cursorCol);
 		if (!suggestions || commandPrefix === null) return suggestions;
 		const items = suggestions.items.filter((item) => item.value.startsWith(commandPrefix));
