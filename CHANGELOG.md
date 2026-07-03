@@ -192,6 +192,14 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Clio source-tree awareness no longer leaks into nested repositories.**
+  `detectClioCoderRepo` walked every ancestor directory, so a session whose
+  cwd was any project nested under a clio-coder checkout matched the
+  clio-coder root above it and received the "# Clio Source Tree … own source
+  tree" prompt section, confusing models about which codebase they were in.
+  The upward walk now stops at the first directory containing `.git` that is
+  not the clio-coder root: only a cwd whose own repository is clio-coder gets
+  the awareness fragment.
 - **Loop guard: the post-budget retry spiral is dead.** Crossing the soft
   per-turn tool-call budget used to short-circuit the guard before the
   identical-call detector, so a weak local model that retried its blocked
