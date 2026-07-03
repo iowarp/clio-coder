@@ -165,12 +165,18 @@ function renderPendingSkillTask(name: string, options: ToolInvokeOptions | undef
 function renderSkillsList(skills: ReadonlyArray<Skill>): string {
 	if (skills.length === 0) return "No skills are installed.";
 	const lines = [
-		"Available skills. Skill bodies load only after an explicit operator request; when one fits the task, suggest the operator run /skill:<name>.",
+		"Available skills. Match the current task against the descriptions below: when one fits, suggest the operator run /skill:<name>; when several compose, suggest the sequence in order. Skill bodies load only after an explicit operator request; never load one without it.",
 		"",
 	];
 	for (const skill of skills) {
 		lines.push(`- ${skill.name} (${skill.scope}): ${skill.description}`);
 	}
+	// Recency anchor with an exact reply shape: literal models act on an output
+	// template where they skip conditional prose in the header.
+	lines.push(
+		"",
+		"If one skill above matches the current task, begin your reply with the line `Suggested skill: /skill:<name>` (a comma-separated sequence, in order, when several compose) and wait for the operator to run it. If none match, do not mention skills.",
+	);
 	return lines.join("\n");
 }
 
@@ -188,17 +194,36 @@ function runWorkspaceScope(
 		snap = workspace.probeWorkspace();
 		workspace.saveSnapshot(snap);
 	}
+	// Orientation is where the model actually looks before multi-step work, so
+	// the snapshot carries a one-line pointer at the skill catalog. Pointer
+	// only: no catalog entries here, and loading stays operator-gated.
+	const payload = withSkillsPointer(deps, snap);
 	return finalizeObservation({
 		tool: ToolNames.Context,
 		unit: "results",
 		format: "json",
-		output: JSON.stringify(snap, null, 2),
+		output: JSON.stringify(payload, null, 2),
 		shownCount: 1,
 		totalCount: 1,
 		truncated: false,
 		reservation,
 		...(options ? { options } : {}),
 	});
+}
+
+function withSkillsPointer(deps: ContextToolDeps, snap: WorkspaceSnapshot): Record<string, unknown> {
+	let count = 0;
+	try {
+		const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
+		count = modelVisibleSkills(list.items).length;
+	} catch {
+		return { ...snap };
+	}
+	if (count === 0) return { ...snap };
+	return {
+		...snap,
+		skills: `Installed skills: ${count}. If one matches this task, list them with context(scope="skills") and suggest /skill:<name> to the operator; load only on operator request.`,
+	};
 }
 
 function runDocsScope(

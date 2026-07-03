@@ -258,11 +258,11 @@ Arguments:
 - `name` (scope=skills). Skill to load; omit to list.
 - `include_tree` (scope=skills, boolean). List up to 50 files under the skill's base_dir.
 
-`scope="workspace"` returns the session's git/project snapshot as JSON, probing and caching it on first call. It requires a bound session; worker registries without one get a clean error. 50KB cap.
+`scope="workspace"` returns the session's git/project snapshot as JSON, probing and caching it on first call. When model-visible skills are installed, the payload carries a one-line `skills` pointer (count plus the suggest protocol) so orientation surfaces the catalog; the pointer never includes catalog entries and never changes the load gate. It requires a bound session; worker registries without one get a clean error. 50KB cap.
 
 `scope="docs"` runs deterministic, offline retrieval over Clio's bundled docs (every `docs/*.md` plus README.md, CHANGELOG.md, and CLIO.md), indexed as heading-delimited sections with light stemming, Clio vocabulary aliases, phrase boosts, and BM25-style body scoring. The JSON payload carries `corpus`, the expanded `terms`, and ranked `results` with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an `omitted` count. Follow the `followUp` guidance: read the cited file and line range when you need the full section. Empty results are still valid JSON with `next` populated (the closest vocabulary expansion, or `query=overview`). 16KB cap; an oversize payload is replaced by the parseable JSON stub. The old `docs_search` `file` filter was dropped in the consolidation.
 
-`scope="skills"` with no `name` lists installed skills with descriptions. Loading a body is policy-gated: a skill loads only after an explicit operator request (`/skill:<name>` task, `/skill <name>` task, or a selector choice), and recipe-bound workers may load only their declared skills. A pending request's task text is surfaced with the body. Marketplace-installed skills are drift-checked against their pinned hash; a mismatch annotates the result with a `skill_drift` warning but never blocks. 50KB cap; a truncated body offloads in full.
+`scope="skills"` with no `name` lists installed skills with descriptions; the listing asks the model to match the current task against the catalog and, on a fit, to open its reply with `Suggested skill: /skill:<name>` (a comma-separated sequence when skills compose) and wait for the operator. Loading a body is policy-gated: a skill loads only after an explicit operator request (`/skill:<name>` task, `/skill <name>` task, or a selector choice), and recipe-bound workers may load only their declared skills. A pending request's task text is surfaced with the body. Marketplace-installed skills are drift-checked against their pinned hash; a mismatch annotates the result with a `skill_drift` warning but never blocks. 50KB cap; a truncated body offloads in full.
 
 ```text
 context(scope="workspace")
@@ -346,29 +346,23 @@ steer(run_id="run-01H...", action="guide", message="Skip the docs sweep; limit t
 steer(run_id="run-01H...", action="cancel")
 ```
 
-## artifact: plans, reviews, reports, and skills
+## artifact: plans, reviews, and reports
 
-Named document writers and the skill store behind one surface. Source: `src/tools/artifact.ts`.
+Terminal document writers behind one surface. Source: `src/tools/artifact.ts`.
 
 Arguments:
 
-- `kind` (required). `plan`, `review`, `report`, or `skill`.
-- `content` (required). Full Markdown body (the SKILL.md body for kind=skill).
-- `title` (optional). Document title, or the skill name for kind=skill.
-- `path` (plan/review/report). Override the default artifact path.
-- `description` (kind=skill, required). One sentence describing when to use the skill; max 1024 characters.
-- `scope` (kind=skill). `project` (default) or `user`.
-- `overwrite` (kind=skill, boolean). Replace an existing skill.
-- `allowed_tools` (kind=skill). Becomes `allowed-tools` frontmatter.
-- `requires` (kind=skill). Dependencies, normalized to `skill:<name>` entries; bare names are accepted and prefixed.
+- `kind` (required). `plan`, `review`, or `report`.
+- `content` (required). Full Markdown body.
+- `title` (optional). Document title.
+- `path` (optional). Override the default artifact path.
 
 `kind=plan|review|report` writes a Markdown document to PLAN.md, REVIEW.md, or REPORT.md at the project root by default; `path` may override the destination but must stay inside the workspace. When `content` does not already start with `#`, a non-empty `title` is prepended as an H1. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in `content`; there is no closing message after the write.
 
-`kind=skill` creates `<store>/<name>/SKILL.md` with validated frontmatter and is not terminal. `title` is the skill name and must be lowercase letters, numbers, and single hyphens, at most 64 characters. The project store is `.clio/skills/`; the user store lives under the Clio config directory. An existing skill errors unless `overwrite=true`, which backs up the old file before replacing it. The result warns when the destination is gitignored and would not be tracked. `allowed_tools` and `requires` sent as JSON strings are tolerated and parsed.
+Skills are not artifacts. A skill is a `SKILL.md` folder written with the ordinary write tool into `.clio/skills/<name>/` (or the user skill store) and validated by the skills loader; the `skill-craft` shipped skill documents the format and craft rules.
 
 ```text
 artifact(kind="plan", content="# Migration plan\n\n## Step 1 ...")
 artifact(kind="report", title="Benchmark results", path="docs/reports/bench.md", content="...")
 artifact(kind="review", content="# Review: toolkit-v2\n\n## Findings ...")
-artifact(kind="skill", title="release-checklist", description="Walk the release checklist before tagging a version.", content="# Release checklist\n\n...", scope="project")
 ```

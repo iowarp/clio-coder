@@ -123,6 +123,22 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
+- **Skill awareness across the prompt and tool surfaces.** Four wording-level
+  nudges now incline the main agent to surface installed skills: the
+  operating contract carries a static Skills passage (skill-shaped tasks,
+  suggest `/skill:<name>` or the sequence when skills compose), the Tool
+  Contract adds a base line to list skills once for a multi-step task, the
+  `context` tool hint says to suggest a matching skill and never load one
+  uninvited, and the `context(scope="workspace")` snapshot carries a one-line
+  pointer at the skill catalog when skills are installed. The
+  `context(scope="skills")` listing header now invites matching against the
+  current task and sequencing composable skills. Dispatch side: the fleet
+  catalog tells the orchestrator to prefer a recipe whose bound skill
+  (`skills=...`) matches the task, and the architect recipe description names
+  its cut-it sprint-slicing domain. The operator gate is unchanged
+  everywhere: suggestions only, loading still requires an explicit operator
+  request. Compiled prompt text changes; local prompt-prefix caches
+  invalidate once on upgrade.
 - **Battletest harness moved out of the repository.** The battletest release
   suites and legacy oracle now live in gitignored `.superpowers/battletest/`
   local dev scratch.

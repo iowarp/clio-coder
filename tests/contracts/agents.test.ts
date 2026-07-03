@@ -102,6 +102,9 @@ describe("contracts/agents", () => {
 		match(catalog, /verifier \(base, quality, verification, fast, builtin, tags=tests\)/);
 		match(catalog, /Shadow agents for internal orchestration:/);
 		match(catalog, /scout \(shadow, explore, read-only, fast, builtin\)/);
+		// Recipe selection weighs skill fit: the catalog says to prefer a recipe
+		// whose bound skill matches the task.
+		match(catalog, /prefer the recipe that binds it/);
 	});
 
 	it("includes config-synthesized delegation specs in the spec-based roster", () => {

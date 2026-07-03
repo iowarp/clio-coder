@@ -48,7 +48,7 @@ const TOOL_HINTS = {
 	context: {
 		tool: "context",
 		hint:
-			'Call context with scope="skills" to list available skills. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
+			'Call context with scope="skills" to list available skills; when one matches the task, suggest the operator run /skill:<name> and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 	},
 	dispatch: {
 		tool: "dispatch",
@@ -224,6 +224,31 @@ describe("contracts/prompts compiler logic", () => {
 		}
 	});
 
+	it("operating contract carries skill awareness with the operator gate intact", () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: { provider: "p", model: "m" },
+		});
+		// The fragment is hard-wrapped; compare against whitespace-normalized text.
+		const flat = result.systemPrompt.replace(/\s+/g, " ");
+		// The passage tells the agent to check the catalog on skill-shaped tasks
+		// and to suggest matches (or a sequence) to the operator.
+		ok(flat.includes('context (scope="skills")'));
+		ok(flat.includes("/skill:<name>"));
+		ok(flat.includes("when skills compose"));
+		// The gate: only the operator activates skills; no self-loading.
+		ok(flat.includes("Only an explicit operator request activates a skill"));
+		ok(flat.includes("never load one on your own"));
+		// Routine tasks stay suggestion-free (false-positive guard).
+		ok(flat.includes("proceed normally and suggest nothing"));
+		// Guidance stays generic: no skill catalog is compiled into the prompt.
+		strictEqual(flat.includes("grill-me"), false);
+		strictEqual(flat.includes("experiment-protocol"), false);
+	});
+
 	it("renders no per-turn state: tool-free phrasing is an instruction, not a prompt change", () => {
 		const table = loadFragments();
 		const result = compile(table, {
@@ -301,6 +326,7 @@ describe("contracts/prompts compiler logic", () => {
 			"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 			'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
+			'For a multi-step task, list installed skills once with context (scope="skills"); if one matches the task, suggest the operator run /skill:<name> before proceeding, and never load a skill the operator did not request.',
 			TOOL_HINTS.ask_user.hint,
 			TOOL_HINTS.code_nav.hint,
 			TOOL_HINTS.context.hint,
@@ -335,7 +361,11 @@ describe("contracts/prompts compiler logic", () => {
 			},
 		});
 
-		strictEqual(result.systemPrompt.includes('scope="skills"'), false);
+		// The registry-owned hint lines are absent with their tools. The operating
+		// contract's static skill-awareness passage and the Tool Contract's static
+		// base lines still render; only the per-tool "Call context with ..." /
+		// "Call dispatch with ..." hints are surface-dependent.
+		strictEqual(result.systemPrompt.includes('Call context with scope="skills" to list available skills'), false);
 		strictEqual(result.systemPrompt.includes("list:true"), false);
 	});
 
