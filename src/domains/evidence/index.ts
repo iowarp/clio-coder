@@ -3,6 +3,16 @@ export { buildEvidence } from "./build.js";
 export type { BuildEvalEvidenceOptions } from "./eval.js";
 export { buildEvalEvidence, evalEvidenceId } from "./eval.js";
 export { FINISH_CONTRACT_EVIDENCE_TAGS, finishContractEvidenceTags } from "./finish-contract-map.js";
+export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
+export {
+	extractRunProvenance,
+	formatPersonaHashPrefix,
+	hasRunProvenance,
+	PERSONA_HASH_PREFIX_CHARS,
+	provenanceCompactSuffix,
+	provenanceTranscriptLines,
+} from "./provenance.js";
+export type { EvidenceRunProvenance } from "./store.js";
 export {
 	EVIDENCE_FILES,
 	evidenceDirectory,
@@ -10,6 +20,7 @@ export {
 	inspectEvidence,
 	listEvidenceOverviews,
 	loadEvidenceOverview,
+	loadEvidenceRunProvenance,
 } from "./store.js";
 export type {
 	EvidenceAuditLinkedRow,

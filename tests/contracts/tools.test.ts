@@ -1090,6 +1090,77 @@ describe("contracts/tools dispatch run paths", () => {
 		}
 	});
 
+	it("surfaces pipeline, persona, and escalation provenance in output lines and details, absent on plain steps", async () => {
+		const capturedRequests: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch(
+				[
+					{ runId: "run-1", assistantText: "first worker answer" },
+					{
+						runId: "run-2",
+						assistantText: "second worker answer",
+						receipt: {
+							pipeline: { fromRunId: "run-1", position: 2, inputBytes: 32, inputTruncated: true },
+							personaOverride: { promptHash: "1b3fc16b2c4d5e6f7a8b9c0d1e2f3a4b" },
+							safety: {
+								decisions: {
+									allowed: 3,
+									blocked: 0,
+									permissionRequested: 2,
+									escalationRequested: 2,
+									escalationApproved: 0,
+									escalationDenied: 1,
+									escalationTimedOut: 1,
+								},
+								blockedAttempts: [],
+								requestedActions: [],
+								runtimeLimitations: [],
+							},
+						},
+					},
+				],
+				capturedRequests,
+			),
+		});
+
+		const result = await tool.run({
+			mode: "pipeline",
+			tasks: [
+				{ task: "step 1", agent_id: "coder" },
+				{ task: "step 2", agent_id: "coder" },
+			],
+		});
+
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("pipeline=step2 from=run-1 in=32b truncated"), result.output);
+			ok(result.output.includes("persona=1b3fc16b2c4d..."), result.output);
+			ok(result.output.includes("escalations=2req/0appr/1deny/1timeout"), result.output);
+			const details = result.details as {
+				runs?: Array<{
+					runId?: unknown;
+					pipeline?: unknown;
+					personaOverride?: unknown;
+					escalation?: unknown;
+				}>;
+			};
+			// Plain first step carries no provenance keys.
+			strictEqual(details.runs?.[0]?.runId, "run-1");
+			ok(!("pipeline" in (details.runs?.[0] ?? {})), "plain step must omit pipeline");
+			ok(!("personaOverride" in (details.runs?.[0] ?? {})), "plain step must omit personaOverride");
+			ok(!("escalation" in (details.runs?.[0] ?? {})), "plain step must omit escalation");
+			// Provenance-bearing second step carries the additive keys.
+			deepStrictEqual(details.runs?.[1]?.pipeline, {
+				fromRunId: "run-1",
+				position: 2,
+				inputBytes: 32,
+				inputTruncated: true,
+			});
+			deepStrictEqual(details.runs?.[1]?.personaOverride, { promptHash: "1b3fc16b2c4d5e6f7a8b9c0d1e2f3a4b" });
+			deepStrictEqual(details.runs?.[1]?.escalation, { requested: 2, approved: 0, denied: 1, timedOut: 1 });
+		}
+	});
+
 	it("invalid dispatch mode error names all supported modes", async () => {
 		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
 		const result = await tool.run({ mode: "serial", tasks: [{ task: "do work", agent_id: "coder" }] });

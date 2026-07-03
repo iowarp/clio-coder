@@ -5,6 +5,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
+import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
@@ -340,12 +341,15 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 			const failure = receipt.failureMessage ? ` failure=${receipt.failureMessage}` : "";
 			// Pipeline runs are an ordered chain, so each line names its step.
 			const stepLabel = mode === "pipeline" ? `step ${index + 1}/${runs.length} ` : "";
+			// Provenance suffix is empty for a legacy receipt, so the line format is
+			// unchanged when a run carries no pipeline/persona/escalation fields.
+			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
 			const output =
 				summary.lastAssistantText.length > 0
 					? truncateUtf8(summary.lastAssistantText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${noteSuffix}${failure}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${noteSuffix}${failure}${provenance}`,
 				"  agent output:",
 				...output.split("\n").map((line) => `  ${line}`),
 			];
@@ -361,13 +365,21 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 		runIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
-		runs: runs.map(({ receipt, receiptPath, summary }) => ({
-			runId: receipt.runId,
-			agentId: receipt.agentId,
-			exitCode: receipt.exitCode,
-			receiptPath,
-			eventCount: summary.count,
-		})),
+		runs: runs.map(({ receipt, receiptPath, summary }) => {
+			// Additive provenance keys only; folded in when the receipt carries the
+			// field so a legacy run entry keeps its exact shape.
+			const provenance = extractRunProvenance(receipt);
+			return {
+				runId: receipt.runId,
+				agentId: receipt.agentId,
+				exitCode: receipt.exitCode,
+				receiptPath,
+				eventCount: summary.count,
+				...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
+				...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
+				...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
+			};
+		}),
 	};
 }
 

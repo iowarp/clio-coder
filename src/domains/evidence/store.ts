@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
+import { hasRunProvenance, type RunProvenanceView, runProvenanceFromUnknown } from "./provenance.js";
 import type { EvidenceFinding, EvidenceFindingsFile, EvidenceInspectable, EvidenceOverview } from "./types.js";
 
 export const EVIDENCE_FILES = [
@@ -37,6 +38,38 @@ export async function inspectEvidence(dataDir: string, evidenceId: string): Prom
 	const findingsParsed = parseJson(findingsRaw, `${evidenceId}/findings.json`);
 	const findings = parseFindingsFile(findingsParsed, `${evidenceId}/findings.json`);
 	return { overview, findings };
+}
+
+/** A bundle run whose receipt carries at least one provenance field set. */
+export interface EvidenceRunProvenance {
+	runId: string;
+	view: RunProvenanceView;
+}
+
+/**
+ * Read the per-run provenance views from a bundle's `receipt.json`. Only runs
+ * whose receipt carries at least one provenance field set are returned, so a
+ * legacy bundle yields an empty array and CLI surfaces render nothing new.
+ * A missing receipt file is treated as no provenance.
+ */
+export async function loadEvidenceRunProvenance(dataDir: string, evidenceId: string): Promise<EvidenceRunProvenance[]> {
+	let raw: string;
+	try {
+		raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "receipt.json"), "utf8");
+	} catch (error) {
+		const err = error as NodeJS.ErrnoException;
+		if (err.code === "ENOENT") return [];
+		throw error;
+	}
+	const parsed = parseJson(raw, `${evidenceId}/receipt.json`);
+	if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) return [];
+	const out: EvidenceRunProvenance[] = [];
+	for (const entry of parsed.receipts) {
+		if (!isRecord(entry) || typeof entry.runId !== "string") continue;
+		const view = runProvenanceFromUnknown(entry);
+		if (hasRunProvenance(view)) out.push({ runId: entry.runId, view });
+	}
+	return out;
 }
 
 export async function listEvidenceOverviews(dataDir: string): Promise<EvidenceOverview[]> {
