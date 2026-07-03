@@ -11,7 +11,7 @@ import {
 	renderDispatchCard,
 	TASK_ISLAND_WIDTH,
 } from "../../src/interactive/dispatch-board.js";
-import { GLYPH } from "../../src/interactive/theme/index.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
 
@@ -94,6 +94,31 @@ describe("dispatch board task island", () => {
 			ok(!hasTruncatedAnsi(line), `line carries a truncated escape sequence: ${JSON.stringify(line)}`);
 		}
 	});
+
+	it("renders the agent label as plain bold, dropping the accent color", () => {
+		const theme = clioTheme();
+		const island = formatTaskIslandLines([makeRow({ agentId: "reviewer" })]).join("\n");
+		ok(island.includes(theme.paint("reviewer", { bold: true })), "the agent label should be plain bold");
+		ok(!island.includes(theme.style("accent", "reviewer", { bold: true })), "the agent label must drop its accent color");
+	});
+
+	it("reads a queued island row as a status pill with no throughput", () => {
+		const rows = [makeRow({ status: "enqueued", agentId: "reviewer", elapsedMs: 3000, inputTokens: 0, outputTokens: 0 })];
+		const stripped = formatTaskIslandLines(rows).map(stripSgr);
+		const rowLine = stripped.find((line) => line.includes("reviewer"));
+		ok(rowLine, "expected the reviewer row");
+		ok(
+			rowLine.includes(`${GLYPH.queued} reviewer · queued · 3.0s`),
+			`queued row should read as a status pill, got: "${rowLine}"`,
+		);
+		ok(!stripped.join("\n").includes("/s)"), "a queued island row shows no (N/s) throughput");
+	});
+
+	it("separates island content with the dim middot and never the retired bullet", () => {
+		const island = formatTaskIslandLines([makeRow()]).join("\n");
+		ok(!island.includes("•"), "island must not render the retired • bullet");
+		ok(stripSgr(island).includes("·"), "island should separate chips with the · middot");
+	});
 });
 
 describe("dispatch board card", () => {
@@ -112,18 +137,53 @@ describe("dispatch board card", () => {
 			.replace(sgr, "");
 		ok(stripped.includes(`${GLYPH.up} 12k`), `input should read compact, got: ${stripped}`);
 		ok(stripped.includes(`${GLYPH.down} 3k`), `output should read compact, got: ${stripped}`);
-		ok(stripped.includes("Total: 15k"), `total should read compact, got: ${stripped}`);
+		ok(stripped.includes("total 15k"), `total should read compact, got: ${stripped}`);
 	});
 
 	it("renders a compact terminal detail line for failed, dead, and aborted cards", () => {
 		for (const status of ["failed", "dead", "aborted"] as const) {
 			const lines = renderDispatchCard(makeRow({ status, outcomeDetail: "fatal\nworker crash" }), 76);
-			ok(lines.join("\n").includes("Detail:"));
-			ok(lines.join("\n").includes("fatal worker crash"));
+			const joined = lines.map(stripSgr).join("\n");
+			ok(/\bdetail\b/.test(joined), `expected a dim detail key row, got: ${joined}`);
+			ok(joined.includes("fatal worker crash"), `expected the detail text, got: ${joined}`);
 			for (const line of lines) {
 				strictEqual(visibleWidth(line), 76, `line "${line}" should span 76 columns`);
 			}
 		}
+	});
+
+	it("separates card content with the dim middot and never the retired bullet", () => {
+		const card = renderDispatchCard(makeRow(), 76).join("\n");
+		ok(!card.includes("•"), "card must not render the retired • bullet");
+		ok(stripSgr(card).includes("·"), "card should separate chips with the · middot");
+	});
+
+	it("paints exactly one red element on a failed card and keeps telemetry neutral", () => {
+		const theme = clioTheme();
+		const rendered = renderDispatchCard(makeRow({ status: "failed", outcomeDetail: "boom" }), 76).join("\n");
+		const errorSeq = theme.fgSequence("error");
+		const successSeq = theme.fgSequence("success");
+		strictEqual(rendered.split(errorSeq).length - 1, 1, "a failed card carries exactly one red element");
+		strictEqual(rendered.split(successSeq).length - 1, 0, "telemetry output tokens must not render green");
+		ok(stripSgr(rendered).includes(`${GLYPH.error} failed`), "the single red element is the status value");
+	});
+
+	it("renders cost and TTFT muted, never amber warning or the accentDeep structure color", () => {
+		const theme = clioTheme();
+		const rendered = renderDispatchCard(makeRow({ ttftMs: 180, costUsd: 0.5 }), 76).join("\n");
+		strictEqual(rendered.split(theme.fgSequence("warning")).length - 1, 0, "cost must not be amber warning");
+		strictEqual(rendered.split(theme.fgSequence("accentDeep")).length - 1, 0, "TTFT and rate must not be accentDeep");
+		const stripped = stripSgr(rendered);
+		ok(stripped.includes("ttft 180ms"), `expected a muted ttft value, got: ${stripped}`);
+		ok(stripped.includes("cost $0.50"), `expected a muted cost value, got: ${stripped}`);
+	});
+
+	it("suppresses throughput on a queued card", () => {
+		const rendered = renderDispatchCard(
+			makeRow({ status: "enqueued", inputTokens: 0, outputTokens: 0, tokenCount: 0, elapsedMs: 3000 }),
+			76,
+		).join("\n");
+		ok(!rendered.includes("/s)"), "a queued card shows no (N/s) throughput");
 	});
 });
 

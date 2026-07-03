@@ -127,7 +127,7 @@ export function formatContextActivityIslandLines(
 	const title =
 		activity.kind === "context-init" ? "Context Init" : activity.kind === "compaction" ? "Context Compact" : "Context";
 	const elapsedMs = Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs);
-	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "•")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "•")} ${theme.fg("info", formatCompactMs(elapsedMs))}`;
+	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "·")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "·")} ${theme.fg("info", formatCompactMs(elapsedMs))}`;
 	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));
 	const percent = `${Math.round(activityProgress(activity) * 100)}%`.padStart(4);
 	const progressLine = `${progressBar(theme, activity, barWidth)} ${theme.fg("dim", percent)}`;

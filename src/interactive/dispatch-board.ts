@@ -11,7 +11,17 @@ import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispa
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
 import { formatFooterTokens } from "./footer-panel.js";
-import { type ClioToken, clioTheme, formatCompactMs, frame, GLYPH, innerDivider, spinnerFrame } from "./theme/index.js";
+import {
+	type ClioTheme,
+	type ClioToken,
+	clioTheme,
+	dotSep,
+	formatCompactMs,
+	frame,
+	GLYPH,
+	innerDivider,
+	spinnerFrame,
+} from "./theme/index.js";
 
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
@@ -130,20 +140,33 @@ export function dispatchStatusPresentation(
 	}
 }
 
+// Dispatch card rows follow the footer dashboard key-value grammar: a dim key
+// padded to a shared column, then one trailing space before the value. The
+// widest key ("telemetry") sets the column so every value starts aligned.
+const CARD_KV_KEY_WIDTH = "telemetry".length;
+
+function cardKvKey(theme: ClioTheme, key: string): string {
+	return theme.fg("dim", `${key.padEnd(CARD_KV_KEY_WIDTH)} `);
+}
+
 export function renderDispatchCard(row: DispatchBoardRow, width: number): string[] {
 	const theme = clioTheme();
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
 	const cost = formatUsd(row.costUsd);
 	const detail = terminalDetail(row);
+	const dot = dotSep(theme);
 
 	const presentation = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
 	});
+	// The status value (glyph plus word) is the single status-colored element on
+	// the card. Cost and TTFT are neutral telemetry, so they render muted rather
+	// than amber or the accentDeep structure color.
 	const statusStr = theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`);
 
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? "waiting..." : "n/a";
-	const target = `${row.runtimeKind}:${row.targetId} ${theme.fg("dim", "▸")} ${row.wireModelId}`;
+	const target = `${theme.fg("muted", `${row.runtimeKind}:${row.targetId}`)} ${theme.fg("dim", "▸")} ${theme.fg("muted", row.wireModelId)}`;
 
 	// The agent label is the frame title and can be arbitrarily long (agent ids
 	// are user data); clamp it so the title plus the elapsed meta never pushes
@@ -151,17 +174,23 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10);
 	const clampedLabel = truncateToWidth(agentLabel, labelBudget, "...", false);
 
-	const bodyLines = [`Target: ${target}`];
-	bodyLines.push(
-		`Status: ${statusStr}  ${theme.fg("dim", "•")}  TTFT: ${theme.fg("accentDeep", ttft)}  ${theme.fg("dim", "•")}  Cost: ${theme.fg("warning", cost)}`,
-	);
-	if (detail !== null) bodyLines.push(`Detail: ${theme.fg("dim", detail)}`);
-
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
-	bodyLines.push(
-		`Telemetry: ${theme.fg("dim", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`)}  ${theme.fg("dim", "•")}  ${theme.fg("success", `${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""}  ${theme.fg("dim", "•")}  Total: ${theme.fg("info", formatFooterTokens(row.tokenCount))}`,
+	// A queued run has produced nothing yet, so it never carries a throughput.
+	const showRate = row.status !== "enqueued" && tokensPerSec > 0;
+	const up = theme.fg("muted", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
+	const down = theme.fg(
+		"muted",
+		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${tokensPerSec}/s)` : ""}`,
 	);
+	const total = theme.fg("muted", `total ${formatFooterTokens(row.tokenCount)}`);
+
+	const bodyLines = [
+		`${cardKvKey(theme, "target")}${target}`,
+		`${cardKvKey(theme, "status")}${statusStr}${dot}${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}${dot}${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
+		`${cardKvKey(theme, "telemetry")}${up}${dot}${down}${dot}${total}`,
+	];
+	if (detail !== null) bodyLines.push(`${cardKvKey(theme, "detail")}${theme.fg("dim", detail)}`);
 
 	return frame(theme, clampedLabel, bodyLines, width, { rightMeta: elapsed });
 }
@@ -172,6 +201,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	const elapsed = formatCompactMs(row.elapsedMs);
 	const cost = formatUsd(row.costUsd);
 
+	const dot = dotSep(theme);
 	const presentation = dispatchStatusPresentation(row.status, {
 		compact: true,
 		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
@@ -179,11 +209,20 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	const glyph = theme.fg(presentation.token, presentation.glyph);
 	const statusStr = theme.fg(presentation.token, presentation.label);
 
-	const line1 = `${glyph} ${theme.style("accent", agentLabel, { bold: true })} ${theme.fg("dim", "•")} ${statusStr} ${theme.fg("dim", "•")} ${theme.fg("muted", elapsed)}`;
+	// The agent label drops its accent color for plain bold; the status word is
+	// the only status-colored element on the row, with dim middot separators.
+	const line1 = `${glyph} ${theme.paint(agentLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
-	const telemetry = `  ${theme.fg("dim", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`)} ${theme.fg("dim", "•")} ${theme.fg("success", `${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""} ${theme.fg("dim", "•")} ${theme.fg("muted", cost)}`;
+	// A queued run has produced nothing yet, so it never carries a throughput.
+	const showRate = row.status !== "enqueued" && tokensPerSec > 0;
+	const up = theme.fg("muted", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`);
+	const down = theme.fg(
+		"muted",
+		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${tokensPerSec}/s)` : ""}`,
+	);
+	const telemetry = `  ${up}${dot}${down}${dot}${theme.fg("muted", cost)}`;
 
 	return [padAnsi(line1, width), padAnsi(telemetry, width)];
 }
