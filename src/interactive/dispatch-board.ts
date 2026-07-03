@@ -10,6 +10,7 @@ import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
+import { formatFooterTokens } from "./footer-panel.js";
 import { type ClioTheme, type ClioToken, clioTheme, formatCompactMs, GLYPH, spinnerFrame } from "./theme/index.js";
 
 export type DispatchBoardStatus =
@@ -164,7 +165,7 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
-	const telemetryContent = `Telemetry: ${theme.fg("dim", `${GLYPH.up} ${row.inputTokens}`)}  ${theme.fg("dim", "•")}  ${theme.fg("success", `${GLYPH.down} ${row.outputTokens}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""}  ${theme.fg("dim", "•")}  Total: ${theme.fg("info", String(row.tokenCount))}`;
+	const telemetryContent = `Telemetry: ${theme.fg("dim", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`)}  ${theme.fg("dim", "•")}  ${theme.fg("success", `${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""}  ${theme.fg("dim", "•")}  Total: ${theme.fg("info", formatFooterTokens(row.tokenCount))}`;
 	const telemetryLine = `${theme.fg("frame", "│")} ${padAnsi(telemetryContent, width - 4)} ${theme.fg("frame", "│")}`;
 
 	const bottomBorder = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(width - 2))}${theme.fg("frame", "┘")}`;
@@ -191,7 +192,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
-	const telemetry = `  ${theme.fg("dim", `${GLYPH.up} ${row.inputTokens}`)} ${theme.fg("dim", "•")} ${theme.fg("success", `${GLYPH.down} ${row.outputTokens}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""} ${theme.fg("dim", "•")} ${theme.fg("muted", cost)}`;
+	const telemetry = `  ${theme.fg("dim", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`)} ${theme.fg("dim", "•")} ${theme.fg("success", `${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""} ${theme.fg("dim", "•")} ${theme.fg("muted", cost)}`;
 
 	return [padAnsi(line1, width), padAnsi(telemetry, width)];
 }

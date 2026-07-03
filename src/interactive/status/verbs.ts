@@ -1,5 +1,5 @@
 import { ToolNames } from "../../core/tool-names.js";
-import { GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
+import { formatCompactMs, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 import type { AgentStatus } from "./types.js";
 
 export interface VerbRender {
@@ -11,12 +11,15 @@ export function spinnerFrame(frameIndex: number): string {
 	return themeSpinnerFrame(frameIndex);
 }
 
+/**
+ * Elapsed time in the footer and inline status verbs. Kept as a named export
+ * because several call sites reference it, but the body is now a thin delegate
+ * to formatCompactMs so status durations share the one duration formatter:
+ * `4.2s` under ten seconds, `42s`, then `1m5s` with no space and no zero pad
+ * (the previous body emitted `1m 5s`).
+ */
 export function formatStatusElapsed(elapsedMs: number): string {
-	const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	const rest = seconds % 60;
-	return `${minutes}m ${rest}s`;
+	return formatCompactMs(elapsedMs);
 }
 
 function elapsedSince(status: AgentStatus, now: number): string {

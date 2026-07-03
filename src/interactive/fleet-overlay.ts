@@ -13,6 +13,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
+import { formatUsd } from "./footer/widgets.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "./overlay-frame.js";
 import {
 	type SettingSubmenuBuilder,
@@ -21,6 +22,7 @@ import {
 	selectTargetSubmenu,
 	textInputSubmenu,
 } from "./overlays/settings.js";
+import { formatCompactMs } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1000;
@@ -61,24 +63,10 @@ function shortId(runId: string): string {
 	return runId.length <= 10 ? runId : runId.slice(0, 10);
 }
 
-function formatSeconds(ms: number): string {
-	const seconds = Math.max(0, Math.round(ms / 1000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	const rest = seconds % 60;
-	return `${minutes}m${rest.toString().padStart(2, "0")}s`;
-}
-
-function formatRuntimeSeconds(seconds: number): string {
-	return formatSeconds(seconds * 1000);
-}
-
+// Token columns in this overlay are a detail table, so they keep full
+// grouped integers via toLocaleString rather than the compact footer form.
 function formatTokens(value: number): string {
 	return Math.max(0, Math.round(value)).toLocaleString("en-US");
-}
-
-function formatUsd(value: number): string {
-	return `$${Math.max(0, value).toFixed(4)}`;
 }
 
 function divider(width: number): string {
@@ -125,7 +113,7 @@ function runningRow(row: DispatchSnapshot["running"][number], width: number): st
 		fitLeft(row.outcomePhase, 11),
 		fitRight(String(row.lineage.attempt), 3),
 		fitRight(String(row.lineage.depth), 3),
-		fitRight(formatSeconds(row.elapsedMs), 7),
+		fitRight(formatCompactMs(row.elapsedMs), 7),
 		fitRight(formatTokens(row.tokens.total), 8),
 		fitRight(formatUsd(row.costUsd), 9),
 	].join(" ");
@@ -146,7 +134,7 @@ function retryRow(row: DispatchSnapshot["retrying"][number], width: number): str
 function totalsLine(totals: DispatchSnapshot["totals"]): string {
 	return `input=${formatTokens(totals.inputTokens)} output=${formatTokens(totals.outputTokens)} total=${formatTokens(
 		totals.totalTokens,
-	)} cost=${formatUsd(totals.costUsd)} runtime=${formatRuntimeSeconds(totals.runtimeSeconds)}`;
+	)} cost=${formatUsd(totals.costUsd)} runtime=${formatCompactMs(totals.runtimeSeconds * 1000)}`;
 }
 
 export function formatFleetOverlayBodyLines(
