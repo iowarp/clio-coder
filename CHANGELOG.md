@@ -223,6 +223,21 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Silent double-resident local models are dead.** The residency reconciler
+  used to back off to observe-only whenever a resident model was not
+  attributed to Clio in-process, so batteries and multi-process runs loaded
+  a second large model on top of the operator's resident one and the box
+  silently crawled. Policy now: when the requested model is not resident,
+  Clio swaps, unloading the resident model with a warning-level recorded
+  transition notice (LM Studio and Ollama); when the requested model is
+  already resident, extra residents are left alone but reported as
+  degraded-inference warnings. `CLIO_RESIDENCY=observe` remains the
+  multi-tenant opt-out. llama.cpp router targets get a fire-and-forget
+  observer that records the router's own server-side swaps (and double
+  residency) through the same notice channel. Headless runs now mirror all
+  runtime notices to stderr (they previously had no subscriber, which was
+  the silent path). `clio targets --probe` notes gain a `resident:` summary
+  from the per-model load states local runtimes already report.
 - **Reasoning-off models can no longer be made to think by the dial.** The
   Qwopus Coder-MTP families are thinking-off by design (creator's card) and
   mini's llama.cpp router serves them with `enable_thinking: false`, yet

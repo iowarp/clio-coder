@@ -821,6 +821,22 @@ function capabilityBadges(caps: CapabilityFlags): string {
 	].join("");
 }
 
+/**
+ * One-word residency summary for the probe notes column, from the per-model
+ * load states local runtimes already report. Null when the runtime exposed
+ * no states (cloud targets); "resident: none" when states are known and
+ * nothing is loaded, so a cold box is distinguishable from an unknown one.
+ */
+export function residentModelsSummary(states: TargetStatus["discoveredModelStates"]): string | null {
+	if (!states) return null;
+	const entries = Object.entries(states);
+	if (entries.length === 0) return null;
+	const resident = entries
+		.filter(([, status]) => status.state === "loaded" || status.state === "loading")
+		.map(([id, status]) => (status.state === "loading" ? `${id} (loading)` : id));
+	return resident.length > 0 ? `resident: ${resident.join(", ")}` : "resident: none";
+}
+
 function formatNotes(status: TargetStatus): string {
 	const parts: string[] = [];
 	if (status.target.gateway) parts.push("gateway");
@@ -828,6 +844,8 @@ function formatNotes(status: TargetStatus): string {
 	if (status.runtime?.auth === "claude-cli") parts.push("claude-cli");
 	if (status.capabilities.contextWindow > 0) parts.push(`ctx ${status.capabilities.contextWindow}`);
 	if (!status.available && status.reason) parts.push(status.reason);
+	const residency = residentModelsSummary(status.discoveredModelStates);
+	if (residency) parts.push(residency);
 	if (status.probeNotes && status.probeNotes.length > 0) parts.push(`note: ${status.probeNotes.join("; ")}`);
 	return parts.join(" ");
 }

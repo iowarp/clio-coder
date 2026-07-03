@@ -36,19 +36,44 @@ describe("contracts/model residency decision", () => {
 		resetResidencyState();
 	});
 
-	it("backs off when another resident model was not loaded by Clio", () => {
+	it("swaps out a foreign resident model instead of silently stacking on top", () => {
 		const plan = decideResidency({
 			targetId: "local",
-			runtimeId: "ollama-native",
+			runtimeId: "lmstudio-native",
 			keepModelId: "new-model",
 			managed: true,
-			resident: [{ modelId: "foreign-model", loadedByClio: false }],
+			resident: [{ modelId: "foreign-model", loadedByClio: false, sizeVramBytes: 8 * GIB }],
+		});
+
+		// The requested model is not resident: never load on top of another
+		// large model. The swap is a recorded, warning-level transition.
+		strictEqual(plan.decision, "reconcile");
+		deepStrictEqual(
+			plan.evict.map((entry) => entry.modelId),
+			["foreign-model"],
+		);
+		strictEqual(plan.notices[0]?.kind, "swap");
+		strictEqual(plan.notices[0]?.level, "warning");
+		deepStrictEqual(plan.notices[0]?.detail, { freedVramBytes: 8 * GIB, swappedOut: "foreign-model" });
+	});
+
+	it("leaves foreign residents alone when the requested model is already served, but reports them", () => {
+		const plan = decideResidency({
+			targetId: "local",
+			runtimeId: "lmstudio-native",
+			keepModelId: "new-model",
+			managed: true,
+			resident: [
+				{ modelId: "new-model", loadedByClio: false },
+				{ modelId: "operator-model", loadedByClio: false },
+			],
 		});
 
 		strictEqual(plan.decision, "observe");
+		strictEqual(plan.keepResident, true);
 		deepStrictEqual(plan.evict, []);
 		strictEqual(plan.notices[0]?.kind, "foreign-backoff");
-		strictEqual(plan.notices[0]?.level, "info");
+		strictEqual(plan.notices[0]?.level, "warning");
 	});
 
 	it("evicts only Clio-loaded residents and counts their VRAM as reclaimable", () => {
