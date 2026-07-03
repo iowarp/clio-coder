@@ -64,6 +64,7 @@ async function main(): Promise<number> {
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),
 		...(spec.onPermission !== undefined ? { onPermission: spec.onPermission } : {}),
 		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
+		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;

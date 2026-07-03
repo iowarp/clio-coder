@@ -151,6 +151,17 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Tool profiles enforced on external CLI worker runtimes.** A worker
+  dispatched with a narrowing `tool_profile` (e.g. `minimal-local`) on the
+  `claude-sdk` runtime could still run out-of-profile tools such as `bash`,
+  because the SDK runtime ran its own builtin preset and never consumed the
+  admitted `allowedTools` surface (only the native worker registry did). The
+  SDK runtime now enforces the admitted surface authoritatively at the Clio
+  mediation layer (out-of-profile calls are denied before the safety net, with
+  a `tool-profile` reasonCode) and also translates the surface into the SDK's
+  `disallowedTools` option as defense in depth. The black-box `claude-code` and
+  `antigravity-code` runtimes, which cannot mediate per-tool calls, now refuse a
+  narrowing `tool_profile` instead of silently running their full surface.
 - **Dispatch pipeline halt evidence.** When a `mode=pipeline` dispatch stops
   after a failed step, the error result now keeps the completed and failed run
   summaries plus their receipt paths in `details.runs`, so the orchestrator

@@ -1,18 +1,21 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
+import { buildAgyArgs } from "../../src/engine/antigravity/subprocess-runtime.js";
 import { claudeSdkPermissionModeForAutonomy, claudeSdkToolsForAutonomy } from "../../src/engine/claude/sdk-runtime.js";
 import {
 	buildClaudeCodeArgs,
 	claudeSubprocessPermissionConfigForAutonomy,
 } from "../../src/engine/claude/subprocess-runtime.js";
 import {
+	claudeToolsOutsideProfile,
 	type EvaluateClaudeToolPermissionInput,
 	emitClaudeToolPermissionDecision,
 	evaluateClaudeToolPermission,
 } from "../../src/engine/claude/tool-safety.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
+import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 
 describe("contracts/claude runtimes safety bridge", () => {
@@ -115,6 +118,120 @@ describe("contracts/claude runtimes safety bridge", () => {
 		strictEqual(claudeSdkPermissionModeForAutonomy("full-auto"), "default");
 		deepStrictEqual(claudeSdkToolsForAutonomy("read-only"), { type: "preset", preset: "claude_code" });
 		deepStrictEqual(claudeSdkToolsForAutonomy("auto-edit"), { type: "preset", preset: "claude_code" });
+	});
+});
+
+describe("contracts/external CLI worker tool-profile enforcement", () => {
+	// Regression for BUG-1 (battletest-pipeline-adhoc): a coder worker dispatched
+	// with tool_profile minimal-local on the claude-sdk target ran bash. The
+	// admitted surface must be enforced at the Clio mediation layer, not left to
+	// the external CLI to honor.
+	const minimalLocal = new Set<string>(["read", "grep", "find", "ls", "git", "context", "code_nav"]);
+
+	function decideWithProfile(
+		toolName: string,
+		input: Record<string, unknown>,
+		allowedTools: ReadonlySet<string>,
+		autonomy: EvaluateClaudeToolPermissionInput["autonomy"] = "full-auto",
+	) {
+		const request: EvaluateClaudeToolPermissionInput = {
+			toolName,
+			input,
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			allowedTools,
+		};
+		if (autonomy !== undefined) request.autonomy = autonomy;
+		return evaluateClaudeToolPermission(request);
+	}
+
+	it("denies an out-of-profile Bash call before the safety net (minimal-local excludes bash)", () => {
+		// Under full-auto a recognized `pwd` would otherwise be allowed; the
+		// profile gate must deny it because bash is outside minimal-local.
+		const decision = decideWithProfile("Bash", { command: "pwd" }, minimalLocal);
+		strictEqual(decision.kind, "deny");
+		strictEqual(decision.permissionRequired, false);
+		strictEqual(decision.decision.kind, "block");
+		strictEqual(decision.reasonCode, "tool-profile");
+	});
+
+	it("still allows in-profile tools under the same profile", () => {
+		const decision = decideWithProfile("Read", { file_path: "README.md" }, minimalLocal, "read-only");
+		strictEqual(decision.kind, "allow");
+		strictEqual(decision.decision.classification.actionClass, "read");
+	});
+
+	it("emits a blocked clio_tool_finish with the tool-profile reasonCode for out-of-profile calls", () => {
+		const events: ClioWorkerEvent[] = [];
+		const decision = emitClaudeToolPermissionDecision({
+			toolName: "Bash",
+			input: { command: "pwd" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "full-auto",
+			allowedTools: minimalLocal,
+			emit: (event) => events.push(event),
+		});
+		strictEqual(decision.kind, "deny");
+		const finish = events.find((event) => event.type === "clio_tool_finish");
+		ok(finish && finish.type === "clio_tool_finish");
+		strictEqual(finish.payload.tool, "bash");
+		strictEqual(finish.payload.outcome, "blocked");
+		strictEqual(finish.payload.decision, "blocked");
+		strictEqual(finish.payload.reasonCode, "tool-profile");
+	});
+
+	it("computes the SDK disallowedTools list from the admitted surface", () => {
+		const disallowed = claudeToolsOutsideProfile(minimalLocal);
+		// bash/write/edit/task/todo are outside minimal-local and must be disallowed.
+		ok(disallowed.includes("Bash"));
+		ok(disallowed.includes("Write"));
+		ok(disallowed.includes("Edit"));
+		ok(disallowed.includes("MultiEdit"));
+		ok(disallowed.includes("WebFetch"));
+		ok(disallowed.includes("Task"));
+		ok(disallowed.includes("TodoWrite"));
+		// read/grep/find/ls stay available.
+		ok(!disallowed.includes("Read"));
+		ok(!disallowed.includes("Grep"));
+		ok(!disallowed.includes("Glob"));
+		ok(!disallowed.includes("LS"));
+	});
+
+	it("without an allowedTools surface, behavior is unchanged (no profile gate)", () => {
+		const request: EvaluateClaudeToolPermissionInput = {
+			toolName: "Bash",
+			input: { command: "pwd" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "full-auto",
+		};
+		const decision = evaluateClaudeToolPermission(request);
+		strictEqual(decision.kind, "allow");
+	});
+
+	it("black-box CLI runtimes refuse a narrowing profile they cannot mediate", () => {
+		const base: WorkerRunInput = {
+			systemPrompt: "",
+			agentId: "coder",
+			task: "run pwd",
+			target: { id: "contract", runtime: "claude-code" } as WorkerRunInput["target"],
+			runtime: claudeCodeRuntime,
+			wireModelId: "sonnet",
+			allowedTools: ["read", "grep", "find", "ls", "git", "context", "code_nav"],
+		};
+
+		throws(
+			() => buildClaudeCodeArgs({ ...base, toolProfile: "minimal-local" }),
+			/cannot enforce tool_profile 'minimal-local'/,
+		);
+		throws(() => buildClaudeCodeArgs({ ...base, toolProfile: "science-local" }), /cannot enforce tool_profile/);
+		throws(() => buildAgyArgs({ ...base, toolProfile: "minimal-local" }), /cannot enforce tool_profile/);
+
+		// full-agent and no profile impose no narrowing, so they build normally.
+		ok(Array.isArray(buildClaudeCodeArgs({ ...base, toolProfile: "full-agent" })));
+		ok(Array.isArray(buildClaudeCodeArgs(base)));
+		ok(Array.isArray(buildAgyArgs({ ...base, toolProfile: "full-agent" })));
 	});
 });
 
