@@ -1005,6 +1005,8 @@ export interface CommandReferenceEntry {
 	aliases: ReadonlyArray<string>;
 	usage: string;
 	description: string;
+	/** The command's args grammar, carried through for argument autocomplete. */
+	args?: CommandArgsSpec;
 }
 
 export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
@@ -1017,6 +1019,7 @@ export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
 			aliases: entry.aliases ?? [],
 			usage,
 			description: entry.description,
+			...(entry.args ? { args: entry.args } : {}),
 		};
 	});
 }

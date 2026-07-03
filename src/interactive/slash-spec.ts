@@ -53,7 +53,7 @@ function getFlagValuePlaceholder(flag: CommandFlagSpec): string {
 	return flag.name.replace(/^--/, "");
 }
 
-function renderArgsSpec(spec: CommandArgsSpec): string {
+export function renderArgsSpec(spec: CommandArgsSpec): string {
 	const parts: string[] = [];
 
 	if (spec.flags) {
@@ -285,6 +285,134 @@ export function parseArgs(spec: CommandArgsSpec, argsLine: string): ParsedArgs {
 		...(subcommand !== undefined ? { subcommand } : {}),
 		...(rest !== undefined ? { rest } : {}),
 	};
+}
+
+export interface ArgCompletion {
+	/** Replacement for the trailing (possibly empty) token under the cursor. */
+	token: string;
+	/** Grammar hint rendered beside the suggestion, e.g. a flag's value placeholder. */
+	hint?: string;
+}
+
+export interface ArgCompletionResult {
+	completions: ArgCompletion[];
+	/** Index in the argument text where the token under the cursor begins. */
+	tokenStart: number;
+}
+
+/**
+ * State reached after replaying the completed tokens of an argument line
+ * against a spec, mirroring parseArgs: which non-repeatable flags are spent,
+ * whether the cursor sits in a flag's value slot, how many positionals are
+ * filled, and whether free rest text has begun (after which nothing completes).
+ */
+interface CompletionWalk {
+	usedFlags: Set<string>;
+	awaitingValue: CommandFlagSpec | null;
+	positionalIndex: number;
+	restBegun: boolean;
+}
+
+function walkCompletedTokens(spec: CommandArgsSpec, tokens: ReadonlyArray<string>): CompletionWalk {
+	const flagSpecs = spec.flags ?? [];
+	const positionalSpecs = spec.positionals ?? [];
+	const walk: CompletionWalk = { usedFlags: new Set(), awaitingValue: null, positionalIndex: 0, restBegun: false };
+	for (const token of tokens) {
+		if (walk.awaitingValue) {
+			walk.awaitingValue = null;
+			continue;
+		}
+		const atRest = positionalSpecs[walk.positionalIndex]?.rest === true;
+		const flagsParseable = !atRest || spec.parseFlagsBeforeRest === true;
+		const matched =
+			flagsParseable && token.startsWith("--")
+				? flagSpecs.find((flag) => flag.name === token || flag.aliases?.includes(token))
+				: undefined;
+		if (matched) {
+			walk.usedFlags.add(matched.name);
+			if (matched.takesValue) walk.awaitingValue = matched;
+			continue;
+		}
+		if (atRest) {
+			walk.restBegun = true;
+			break;
+		}
+		walk.positionalIndex += 1;
+	}
+	return walk;
+}
+
+function flagCompletions(spec: CommandArgsSpec, walk: CompletionWalk, current: string): ArgCompletion[] {
+	const available = (spec.flags ?? []).filter((flag) => flag.repeatable === true || !walk.usedFlags.has(flag.name));
+	let rows = available.filter((flag) => flag.name.startsWith(current)).map((flag) => ({ flag, name: flag.name }));
+	// When the typed token matches no primary name, fall back to aliases so a
+	// legal spelling like --rewrite still completes instead of going silent.
+	if (rows.length === 0) {
+		rows = available.flatMap((flag) =>
+			(flag.aliases ?? []).filter((alias) => alias.startsWith(current)).map((alias) => ({ flag, name: alias })),
+		);
+	}
+	return rows.map(({ flag, name }) => ({
+		token: name,
+		...(flag.takesValue ? { hint: `<${getFlagValuePlaceholder(flag)}>` } : {}),
+	}));
+}
+
+/**
+ * Complete the trailing token of a slash command's argument text against its
+ * args spec: subcommand names in first position, declared flags wherever the
+ * grammar still parses flags, and closed value sets in a flag's value slot.
+ * Free text (positionals, open flag values, rest) never completes; returning
+ * null closes the suggestion list. The walk mirrors parseArgs so a completion
+ * is always a token the parser would accept.
+ */
+export function completeArgs(spec: CommandArgsSpec, argumentText: string): ArgCompletionResult | null {
+	const trailing = argumentText.match(/\S*$/)?.[0] ?? "";
+	const tokenStart = argumentText.length - trailing.length;
+	const current = trailing;
+	const completed = argumentText
+		.slice(0, tokenStart)
+		.split(/\s+/)
+		.filter((token) => token.length > 0);
+
+	const completions: ArgCompletion[] = [];
+	let active = spec;
+	let walkTokens = completed;
+
+	if (spec.subcommands) {
+		const first = completed[0];
+		if (first === undefined) {
+			for (const [name, subSpec] of Object.entries(spec.subcommands)) {
+				if (!name.startsWith(current)) continue;
+				const hint = renderArgsSpec(subSpec);
+				completions.push({ token: name, ...(hint.length > 0 ? { hint } : {}) });
+			}
+		} else if (spec.subcommands[first]) {
+			active = spec.subcommands[first];
+			walkTokens = completed.slice(1);
+		}
+	}
+
+	const walk = walkCompletedTokens(active, walkTokens);
+
+	if (walk.restBegun) {
+		return completions.length > 0 ? { completions, tokenStart } : null;
+	}
+
+	if (walk.awaitingValue) {
+		for (const value of walk.awaitingValue.values ?? []) {
+			if (value.startsWith(current)) completions.push({ token: value });
+		}
+		return completions.length > 0 ? { completions, tokenStart } : null;
+	}
+
+	const atRest = (active.positionals ?? [])[walk.positionalIndex]?.rest === true;
+	const flagsParseable = !atRest || active.parseFlagsBeforeRest === true;
+	if (flagsParseable && (current.length === 0 || current.startsWith("-"))) {
+		completions.push(...flagCompletions(active, walk, current));
+	}
+
+	return completions.length > 0 ? { completions, tokenStart } : null;
 }
 
 export function matchFromSpec(

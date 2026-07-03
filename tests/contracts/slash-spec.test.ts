@@ -451,7 +451,7 @@ describe("contracts/slash-spec", () => {
 		]);
 	});
 
-	it("builds slash autocomplete commands from commandReference usage", () => {
+	it("builds slash autocomplete commands with hints that fit the suggestion row", () => {
 		const commands = buildSlashAutocompleteCommands();
 		const byName = new Map(commands.map((command) => [command.name, command]));
 
@@ -459,16 +459,89 @@ describe("contracts/slash-spec", () => {
 		for (const hiddenName of ["compact", "context-init", "context-clear", "context-view"]) {
 			ok(!byName.has(hiddenName), `deprecated /${hiddenName} is not suggested`);
 		}
-		strictEqual(
-			byName.get("context")?.argumentHint,
-			"compact [instructions] | init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic] | refresh | reset [--all] [--confirm] [--confirm-all]",
-		);
+		strictEqual(byName.get("context")?.argumentHint, "compact | init | refresh | reset");
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
 		strictEqual(byName.get("help")?.argumentHint, "[query]");
-		strictEqual(byName.get("share")?.argumentHint, "export <path> | import [--dry-run] [--force] <path>");
-		strictEqual(
-			byName.get("run")?.argumentHint,
-			"[--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local|science-local|full-agent>] [--require <cap>] <agent> <task>",
+		strictEqual(byName.get("share")?.argumentHint, "export | import");
+		strictEqual(byName.get("run")?.argumentHint, "[--agent-profile <profile>] … <agent> <task>");
+		for (const command of commands) {
+			if (!command.argumentHint) continue;
+			ok(
+				command.argumentHint.length <= 44,
+				`/${command.name} hint should fit the row budget, got ${command.argumentHint.length} chars: "${command.argumentHint}"`,
+			);
+		}
+	});
+
+	it("completes subcommands after the command name, with the subcommand grammar as the hint", async () => {
+		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
+		const context = byName.get("context");
+
+		const all = await context?.getArgumentCompletions?.("");
+		deepStrictEqual(
+			all?.map((item) => item.label),
+			["compact", "init", "refresh", "reset"],
+		);
+		const init = all?.find((item) => item.label === "init");
+		strictEqual(init?.value, "init");
+		strictEqual(init?.description, "[--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]");
+
+		const filtered = await context?.getArgumentCompletions?.("in");
+		deepStrictEqual(
+			filtered?.map((item) => item.value),
+			["init"],
+		);
+	});
+
+	it("completes a subcommand's flags, excluding flags already spent", async () => {
+		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
+		const context = byName.get("context");
+
+		const flags = await context?.getArgumentCompletions?.("init --");
+		deepStrictEqual(
+			flags?.map((item) => item.label),
+			["--preview", "--adopt", "--apply", "--propose", "--global", "--heuristic"],
+		);
+		strictEqual(flags?.[0]?.value, "init --preview", "the value replays the typed stem with the token completed");
+
+		const remaining = await context?.getArgumentCompletions?.("init --preview --");
+		ok(remaining, "flag completion continues after a spent flag");
+		ok(!remaining?.some((item) => item.label === "--preview"), "a spent non-repeatable flag is not offered again");
+	});
+
+	it("falls back to alias completion when no primary flag name matches the typed token", async () => {
+		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
+		const items = await byName.get("context")?.getArgumentCompletions?.("init --rew");
+		deepStrictEqual(
+			items?.map((item) => item.value),
+			["init --rewrite"],
+		);
+	});
+
+	it("completes closed value sets in a flag's value slot and stays silent for open values", async () => {
+		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
+		const run = byName.get("run");
+
+		const profiles = await run?.getArgumentCompletions?.("--tool-profile ");
+		deepStrictEqual(
+			profiles?.map((item) => item.label),
+			["minimal-local", "science-local", "full-agent"],
+		);
+		const filtered = await run?.getArgumentCompletions?.("--tool-profile sci");
+		deepStrictEqual(
+			filtered?.map((item) => item.value),
+			["--tool-profile science-local"],
+		);
+		strictEqual(await run?.getArgumentCompletions?.("--target "), null, "an open flag value never completes");
+	});
+
+	it("never completes inside free rest text", async () => {
+		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
+		strictEqual(await byName.get("context")?.getArgumentCompletions?.("compact tidy up --"), null);
+		strictEqual(await byName.get("run")?.getArgumentCompletions?.("architect slice the work --"), null);
+		ok(
+			await byName.get("run")?.getArgumentCompletions?.("architect --tar"),
+			"flags before rest still complete when the grammar parses flags there",
 		);
 	});
 
