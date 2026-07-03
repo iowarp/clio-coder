@@ -21,6 +21,18 @@ const loopBlocked = (interrupted: boolean): LoopBlockedPayload => ({
 	blocksThisTurn: interrupted ? 2 : 1,
 	budget: 2,
 	interrupted,
+	disposition: interrupted ? "stop" : "block",
+	at: 1,
+	turnId: "t1",
+});
+
+const loopLockout = (): LoopBlockedPayload => ({
+	tool: "context",
+	repeatCount: 3,
+	blocksThisTurn: 2,
+	budget: 2,
+	interrupted: false,
+	disposition: "lockout",
 	at: 1,
 	turnId: "t1",
 });
@@ -66,6 +78,14 @@ describe("contracts/loop-guard-interrupt operatorless stop", () => {
 		bus.emit(BusChannels.LoopBlocked, loopBlocked(false));
 		bus.emit(BusChannels.ToolBudgetExceeded, budgetExceeded(false));
 		strictEqual(chat.calls.length, 0, "warn-level blocks do not stop the run");
+	});
+
+	it("does not cancel on a synthesis lockout so the model can answer from what it gathered", () => {
+		const bus = createSafeEventBus();
+		const chat = captureChat();
+		subscribeLoopGuardStop(bus, chat);
+		bus.emit(BusChannels.LoopBlocked, loopLockout());
+		strictEqual(chat.calls.length, 0, "a lockout leaves the turn running; only the backstop stop cancels");
 	});
 
 	it("stops firing after unsubscribe", () => {

@@ -230,6 +230,23 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **The loop guard forces a final answer instead of killing a turn that already
+  holds it.** A live session asked how CLIO.md bootstrapping works; the model
+  ran nine successful retrievals (the exact answer landed four times) and then
+  fixated on one identical grep. At the second loop block the guard hard-
+  cancelled the turn, so a turn holding the answer ended with a message telling
+  the operator to re-prompt. Reaching the per-turn block budget no longer
+  cancels: it locks tool use for the rest of the turn and denies every further
+  call with a synthesize-now directive, so the model produces a final answer
+  from what it gathered. Only a bounded backstop (two post-lockout tool calls)
+  falls back to the existing hard stop with its closing message, so a model
+  that keeps calling tools instead of answering is still bounded. The behavior
+  is identical across the interactive TUI, headless `clio run`, and ACP: the
+  guard drives it over the bus with a new `lockout` disposition, and only the
+  `stop` disposition cancels. Detection thresholds (three identical calls in
+  30s, two blocks per turn) are unchanged; the per-turn tool-call ceiling
+  already had this shape (soft budget locks, hard ceiling stops) and is
+  untouched.
 - **Bash can no longer create files outside the session workspace unnoticed.**
   A full-auto battery run recorded the escape: with the session cwd in a
   fixture copy, `mkdir -p /abs/path && cd /abs/path` built a whole project at
