@@ -26,7 +26,7 @@ import { buildModelItems, ModelOverlayView, openModelOverlay } from "../../src/i
 import { commitScopedModelSelection } from "../../src/interactive/overlays/scoped-models.js";
 import { createSessionOverlayBox } from "../../src/interactive/overlays/session-selector.js";
 import type { AgentStatus } from "../../src/interactive/status/types.js";
-import { clioTheme } from "../../src/interactive/theme/index.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { createWelcomeDashboard, deriveWelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
 
 const ESC = "\x1b";
@@ -261,6 +261,38 @@ describe("milestone 08 overlay polish regressions", () => {
 		strictEqual(renders, 1);
 		const after = stripAnsi(view.render(78).join("\n"));
 		ok(after.includes("target empty has no selectable model id"), after);
+	});
+
+	it("/model points with the chevron cursor and tokens the health and header cells", () => {
+		const result = buildModelItems({
+			settings: settings("mock", "model-a"),
+			providers: providersFor([targetStatus("mock", ["model-a"])]),
+		});
+		const view = new ModelOverlayView(
+			result.rows,
+			result.summary,
+			() => {},
+			undefined,
+			() => {},
+			{},
+		);
+		const lines = view.render(80);
+		const joined = lines.join("\n");
+		const theme = clioTheme();
+
+		// Selection points with the chevron, never the retired arrow pointer.
+		ok(joined.includes(GLYPH.cursor), joined);
+		ok(!stripAnsi(joined).includes("→"), stripAnsi(joined));
+
+		// The table header renders dim per the design-system table recipe.
+		const header = lines.find((line) => stripAnsi(line).includes("model") && stripAnsi(line).includes("ctx"));
+		ok(header?.startsWith(theme.fgSequence("dim")), header);
+
+		// The selected healthy row states its health fact in green and highlights
+		// the model id in accent rather than recoloring the whole row.
+		const row = lines.find((line) => stripAnsi(line).includes("model-a") && stripAnsi(line).includes(GLYPH.running));
+		ok(row?.includes(theme.fgSequence("success")), row);
+		ok(row?.includes(theme.fgSequence("accent")), row);
 	});
 
 	it("/model suppresses post-refresh UI writes after hide", async () => {
