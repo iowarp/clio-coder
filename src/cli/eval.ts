@@ -1,44 +1,62 @@
 import { InvalidIdError } from "../core/safe-id.js";
-import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import type { EvalRunArtifact } from "../domains/eval/index.js";
+import { clioDataDir } from "../core/xdg.js";
+import { loadEvalArtifactAny, writeEvalArtifactV2 } from "../domains/eval/artifacts/store.js";
+import { compareEvalArtifactsV2, renderEvalComparisonV2 } from "../domains/eval/compare/compare.js";
+import { evaluateGate } from "../domains/eval/compare/gates.js";
+import { loadThresholds } from "../domains/eval/compare/thresholds.js";
 import {
 	compareEvalArtifacts,
-	createEvalId,
-	EvalTaskFileError,
 	evalArtifactPath,
-	linkEvalArtifactRuntimePaths,
-	loadEvalArtifact,
-	loadEvalTaskFile,
 	renderEvalComparison,
 	renderEvalReport,
 	renderSweJsonl,
-	runEvalTasks,
-	writeEvalArtifact,
 } from "../domains/eval/index.js";
-import { buildEvalEvidence, evalEvidenceId } from "../domains/evidence/index.js";
+import { renderEvalJsonReportV2 } from "../domains/eval/reports/json.js";
+import { renderEvalJunitReportV2 } from "../domains/eval/reports/junit.js";
+import { renderEvalMarkdownReportV2 } from "../domains/eval/reports/markdown.js";
+import { renderEvalSweJsonlReportV2 } from "../domains/eval/reports/swe-jsonl.js";
+import { renderEvalTextReportV2 } from "../domains/eval/reports/text.js";
+import type { EvalArtifactV2 } from "../domains/eval/schema/artifact-v2.js";
+import { EvalSuiteFileError, loadEvalSuiteFile, loadV1TaskFileAsSuite } from "../domains/eval/suites/load.js";
+import { resolveSuiteForRun } from "../domains/eval/suites/resolve.js";
+import { runEvalSuiteV2 } from "../domains/eval/suites/run.js";
+import { EvalTaskFileError } from "../domains/eval/task-file.js";
+import type { EvalRunArtifact } from "../domains/eval/types.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio eval run --task-file <tasks.yaml> [--repeat <n>]
-clio eval report <evalId> [--format swe-jsonl]
-clio eval compare <baselineEvalId> <candidateEvalId>
+const HELP = `clio eval <command>
 
-Run repo-local YAML eval tasks, reports, or baseline/candidate comparisons.
+Commands:
+  clio eval validate --suite <suite.yaml>
+  clio eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
+  clio eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
+  clio eval report <evalId> --format text|json|md|swe-jsonl|junit
+  clio eval compare <baselineEvalId> <candidateEvalId>
+  clio eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 `;
 
-type EvalCommand = "run" | "report" | "compare";
+type EvalCommand = "validate" | "run" | "report" | "compare" | "gate";
+type EvalReportFormat = "text" | "json" | "md" | "swe-jsonl" | "junit";
 
 interface ParsedEvalArgs {
 	command?: EvalCommand;
+	suite?: string;
 	taskFile?: string;
 	repeat: number;
+	target?: string;
+	model?: string;
+	out?: string;
+	clioEntry?: string;
 	evalId?: string;
-	format?: "swe-jsonl";
+	format: EvalReportFormat;
 	compareIds: string[];
+	baseline?: string;
+	thresholds?: string;
 	help: boolean;
 }
 
 function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
-	const parsed: ParsedEvalArgs = { repeat: 1, compareIds: [], help: false };
+	const parsed: ParsedEvalArgs = { repeat: 1, compareIds: [], format: "text", help: false };
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === undefined) continue;
@@ -47,28 +65,53 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 			continue;
 		}
 		if (parsed.command === undefined) {
-			if (arg === "run" || arg === "report" || arg === "compare") {
+			if (arg === "validate" || arg === "run" || arg === "report" || arg === "compare" || arg === "gate") {
 				parsed.command = arg;
 				continue;
 			}
 			throw new Error(`unknown eval command: ${arg}`);
 		}
+		if (parsed.command === "validate") {
+			if (arg === "--suite") {
+				parsed.suite = requiredValue(args, index, "--suite");
+				index += 1;
+				continue;
+			}
+			throw new Error(`unknown eval validate argument: ${arg}`);
+		}
 		if (parsed.command === "run") {
+			if (arg === "--suite") {
+				parsed.suite = requiredValue(args, index, "--suite");
+				index += 1;
+				continue;
+			}
 			if (arg === "--task-file") {
-				const value = args[index + 1];
-				if (value === undefined || value.startsWith("-")) throw new Error("--task-file requires a path");
-				parsed.taskFile = value;
+				parsed.taskFile = requiredValue(args, index, "--task-file");
+				index += 1;
+				continue;
+			}
+			if (arg === "--target") {
+				parsed.target = requiredValue(args, index, "--target");
+				index += 1;
+				continue;
+			}
+			if (arg === "--model") {
+				parsed.model = requiredValue(args, index, "--model");
+				index += 1;
+				continue;
+			}
+			if (arg === "--out") {
+				parsed.out = requiredValue(args, index, "--out");
+				index += 1;
+				continue;
+			}
+			if (arg === "--clio-entry") {
+				parsed.clioEntry = requiredValue(args, index, "--clio-entry");
 				index += 1;
 				continue;
 			}
 			if (arg === "--repeat") {
-				const value = args[index + 1];
-				if (value === undefined || value.startsWith("-")) throw new Error("--repeat requires a positive integer");
-				const repeat = Number.parseInt(value, 10);
-				if (!Number.isInteger(repeat) || repeat <= 0 || String(repeat) !== value) {
-					throw new Error("--repeat requires a positive integer");
-				}
-				parsed.repeat = repeat;
+				parsed.repeat = positiveInteger(requiredValue(args, index, "--repeat"), "--repeat");
 				index += 1;
 				continue;
 			}
@@ -76,9 +119,7 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 		}
 		if (parsed.command === "report") {
 			if (arg === "--format") {
-				const value = args[index + 1];
-				if (value !== "swe-jsonl") throw new Error("--format must be 'swe-jsonl'");
-				parsed.format = value;
+				parsed.format = reportFormat(requiredValue(args, index, "--format"));
 				index += 1;
 				continue;
 			}
@@ -95,13 +136,36 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 			}
 			throw new Error(`unexpected eval compare argument: ${arg}`);
 		}
+		if (parsed.command === "gate") {
+			if (arg === "--baseline") {
+				parsed.baseline = requiredValue(args, index, "--baseline");
+				index += 1;
+				continue;
+			}
+			if (arg === "--thresholds") {
+				parsed.thresholds = requiredValue(args, index, "--thresholds");
+				index += 1;
+				continue;
+			}
+			if (parsed.evalId === undefined && !arg.startsWith("-")) {
+				parsed.evalId = arg;
+				continue;
+			}
+			throw new Error(`unexpected eval gate argument: ${arg}`);
+		}
 	}
 	if (parsed.help) return parsed;
-	if (parsed.command === undefined) throw new Error("eval requires run, report, or compare");
-	if (parsed.command === "run" && parsed.taskFile === undefined) throw new Error("run requires --task-file <path>");
+	if (parsed.command === undefined) throw new Error("eval requires a command");
+	if (parsed.command === "validate" && parsed.suite === undefined) throw new Error("validate requires --suite <path>");
+	if (parsed.command === "run" && (parsed.suite === undefined) === (parsed.taskFile === undefined)) {
+		throw new Error("run requires exactly one of --suite or --task-file");
+	}
 	if (parsed.command === "report" && parsed.evalId === undefined) throw new Error("report requires an eval id");
 	if (parsed.command === "compare" && parsed.compareIds.length !== 2) {
 		throw new Error("compare requires <baselineEvalId> <candidateEvalId>");
+	}
+	if (parsed.command === "gate" && (parsed.evalId === undefined || parsed.baseline === undefined)) {
+		throw new Error("gate requires <candidateEvalId> --baseline <baselineEvalId>");
 	}
 	return parsed;
 }
@@ -112,79 +176,57 @@ export async function runEvalCommand(args: ReadonlyArray<string>): Promise<numbe
 		parsed = parseEvalArgs(args);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (parsed.help) {
 		process.stdout.write(HELP);
 		return 0;
 	}
+	if (parsed.command === "validate") return runEvalValidate(parsed);
 	if (parsed.command === "run") return runEvalRun(parsed);
 	if (parsed.command === "report") return runEvalReportCommand(parsed);
 	if (parsed.command === "compare") return runEvalCompareCommand(parsed);
-	printError("eval requires run, report, or compare");
+	if (parsed.command === "gate") return runEvalGateCommand(parsed);
+	printError("eval requires a command");
 	return 2;
 }
 
-async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
-	const taskFile = parsed.taskFile;
-	if (taskFile === undefined) {
-		printError("run requires --task-file <path>");
-		return 2;
-	}
+async function runEvalValidate(parsed: ParsedEvalArgs): Promise<number> {
 	try {
-		const loadedTaskFile = await loadEvalTaskFile(taskFile);
-		const startedAt = new Date();
-		const evalId = createEvalId(startedAt, loadedTaskFile.contentHash);
-		const artifact = await runEvalTasks({
-			loadedTaskFile,
-			repeat: parsed.repeat,
-			evalId,
-			now: () => new Date(),
-		});
-		const dataDir = clioDataDir();
-		const stateDir = clioStateDir();
-		const evidenceId = evalEvidenceId(artifact.evalId);
-		const artifactWithEvidenceId = withEvidenceId(artifact, evidenceId);
-		const artifactWithRuntimePaths = await linkEvalArtifactRuntimePaths(artifactWithEvidenceId, stateDir);
-		const evidence = await buildEvalEvidence({ dataDir, stateDir, artifact: artifactWithRuntimePaths });
-		const linkedArtifact = await linkEvalArtifactRuntimePaths(artifactWithRuntimePaths, stateDir, evidence.directory);
-		const artifactPath = await writeEvalArtifact(dataDir, linkedArtifact);
-		const storedArtifact = await loadEvalArtifact(dataDir, linkedArtifact.evalId);
-		process.stdout.write(renderEvalReport(storedArtifact, artifactPath));
-		return storedArtifact.summary.failed === 0 ? 0 : 1;
+		const loaded = await loadEvalSuiteFile(parsed.suite ?? "");
+		process.stdout.write(`valid suite: ${loaded.suite.suite.id}\n`);
+		return 0;
 	} catch (error) {
-		if (error instanceof EvalTaskFileError) {
-			printError(error.message);
-			for (const issue of error.issues) process.stderr.write(`  ${issue.path}: ${issue.message}\n`);
-			return 2;
-		}
-		printError(error instanceof Error ? error.message : String(error));
-		return 1;
+		return handleEvalLoadError(error);
 	}
 }
 
-function withEvidenceId(artifact: EvalRunArtifact, evidenceId: string): EvalRunArtifact {
-	return {
-		...artifact,
-		results: artifact.results.map((result) => ({ ...result, evidenceId })),
-	};
+async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
+	try {
+		const loaded =
+			parsed.suite !== undefined
+				? await loadEvalSuiteFile(parsed.suite)
+				: await loadV1TaskFileAsSuite(parsed.taskFile ?? "", parsed.repeat);
+		const resolveOptions: { target?: string; model?: string } = {};
+		if (parsed.target !== undefined) resolveOptions.target = parsed.target;
+		if (parsed.model !== undefined) resolveOptions.model = parsed.model;
+		const suite = resolveSuiteForRun(loaded.suite, resolveOptions);
+		const clioEntry = parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js";
+		const artifact = await runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
+		const artifactPath = await writeEvalArtifactV2(clioDataDir(), artifact, parsed.out);
+		process.stdout.write(`${renderEvalTextReportV2(artifact)}artifact: ${artifactPath}\n`);
+		return artifact.summary.failed === 0 ? 0 : 1;
+	} catch (error) {
+		return handleEvalLoadError(error, 1);
+	}
 }
 
 async function runEvalReportCommand(parsed: ParsedEvalArgs): Promise<number> {
-	const evalId = parsed.evalId;
-	if (evalId === undefined) {
-		printError("report requires an eval id");
-		return 2;
-	}
 	try {
 		const dataDir = clioDataDir();
-		const artifact = await loadEvalArtifact(dataDir, evalId);
-		if (parsed.format === "swe-jsonl") {
-			process.stdout.write(renderSweJsonl(artifact));
-		} else {
-			process.stdout.write(renderEvalReport(artifact, evalArtifactPath(dataDir, evalId)));
-		}
+		const artifact = await loadEvalArtifactAny(dataDir, parsed.evalId ?? "");
+		process.stdout.write(renderArtifactReport(artifact, parsed.format, dataDir));
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
@@ -193,20 +235,95 @@ async function runEvalReportCommand(parsed: ParsedEvalArgs): Promise<number> {
 }
 
 async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
-	const baselineEvalId = parsed.compareIds[0];
-	const candidateEvalId = parsed.compareIds[1];
-	if (baselineEvalId === undefined || candidateEvalId === undefined) {
-		printError("compare requires <baselineEvalId> <candidateEvalId>");
-		return 2;
-	}
+	const baselineEvalId = parsed.compareIds[0] ?? "";
+	const candidateEvalId = parsed.compareIds[1] ?? "";
 	try {
 		const dataDir = clioDataDir();
-		const baseline = await loadEvalArtifact(dataDir, baselineEvalId);
-		const candidate = await loadEvalArtifact(dataDir, candidateEvalId);
-		process.stdout.write(renderEvalComparison(compareEvalArtifacts(baseline, candidate)));
+		const baseline = await loadEvalArtifactAny(dataDir, baselineEvalId);
+		const candidate = await loadEvalArtifactAny(dataDir, candidateEvalId);
+		if (isV2Artifact(baseline) && isV2Artifact(candidate)) {
+			process.stdout.write(renderEvalComparisonV2(compareEvalArtifactsV2(baseline, candidate)));
+		} else {
+			process.stdout.write(
+				renderEvalComparison(compareEvalArtifacts(baseline as EvalRunArtifact, candidate as EvalRunArtifact)),
+			);
+		}
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return error instanceof InvalidIdError ? 2 : 1;
 	}
+}
+
+async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
+	try {
+		const dataDir = clioDataDir();
+		const candidate = await loadEvalArtifactAny(dataDir, parsed.evalId ?? "");
+		await loadEvalArtifactAny(dataDir, parsed.baseline ?? "");
+		if (!isV2Artifact(candidate)) {
+			const pass = candidate.summary.failed === 0;
+			process.stdout.write(pass ? "gate: pass\n" : "gate: fail\n");
+			return pass ? 0 : 1;
+		}
+		const thresholds =
+			parsed.thresholds === undefined
+				? { fail: [{ metric: "result.pass", op: "eq" as const, value: false }] }
+				: loadThresholds(parsed.thresholds);
+		const gate = evaluateGate(candidate, thresholds);
+		process.stdout.write(gate.pass ? "gate: pass\n" : `gate: fail (${gate.failures.length} threshold failure)\n`);
+		return gate.pass ? 0 : 1;
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return error instanceof InvalidIdError ? 2 : 1;
+	}
+}
+
+function renderArtifactReport(
+	artifact: EvalArtifactV2 | EvalRunArtifact,
+	format: EvalReportFormat,
+	dataDir: string,
+): string {
+	if (isV2Artifact(artifact)) {
+		if (format === "json") return renderEvalJsonReportV2(artifact);
+		if (format === "md") return renderEvalMarkdownReportV2(artifact);
+		if (format === "swe-jsonl") return renderEvalSweJsonlReportV2(artifact);
+		if (format === "junit") return renderEvalJunitReportV2(artifact);
+		return renderEvalTextReportV2(artifact);
+	}
+	if (format === "json") return `${JSON.stringify(artifact, null, 2)}\n`;
+	if (format === "swe-jsonl") return renderSweJsonl(artifact);
+	return renderEvalReport(artifact, evalArtifactPath(dataDir, artifact.evalId));
+}
+
+function handleEvalLoadError(error: unknown, fallback = 2): number {
+	if (error instanceof EvalSuiteFileError || error instanceof EvalTaskFileError) {
+		printError(error.message);
+		for (const issue of error.issues) process.stderr.write(`  ${issue.path}: ${issue.message}\n`);
+		return 2;
+	}
+	printError(error instanceof Error ? error.message : String(error));
+	return fallback;
+}
+
+function requiredValue(args: ReadonlyArray<string>, index: number, flag: string): string {
+	const value = args[index + 1];
+	if (value === undefined || value.startsWith("-")) throw new Error(`${flag} requires a value`);
+	return value;
+}
+
+function positiveInteger(value: string, flag: string): number {
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== value) {
+		throw new Error(`${flag} requires a positive integer`);
+	}
+	return parsed;
+}
+
+function reportFormat(value: string): EvalReportFormat {
+	if (value === "text" || value === "json" || value === "md" || value === "swe-jsonl" || value === "junit") return value;
+	throw new Error("--format must be text, json, md, swe-jsonl, or junit");
+}
+
+function isV2Artifact(value: EvalArtifactV2 | EvalRunArtifact): value is EvalArtifactV2 {
+	return value.version === 2;
 }
