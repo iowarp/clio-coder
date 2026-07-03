@@ -1,6 +1,5 @@
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
-import { AGENT_GLYPH, AMBER, BLUE_REASON, DIM, GREEN_OK, RED_CRIT, RESET, TEAL, USER_GLYPH } from "./palette.js";
 import { highlightCode } from "./renderers/highlight.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
@@ -13,9 +12,22 @@ import {
 	unwrapResultEnvelope,
 } from "./renderers/tool-execution.js";
 import type { StatusPhase, VerbRender } from "./status/index.js";
-import { clioTheme, markdownTheme } from "./theme/index.js";
+import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
 
 const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), highlightCode);
+
+// Prefix and rail SGR constants, previously re-exported by the deleted
+// palette.ts. Composing them from fgSequence/GLYPH here yields byte-identical
+// sequences to what palette.js produced, so the transcript renders unchanged.
+const RESET = SGR_RESET;
+const DIM = SGR_DIM;
+const TEAL = fgSequence("accent");
+const BLUE_REASON = fgSequence("reason");
+const GREEN_OK = fgSequence("success");
+const AMBER = fgSequence("warning");
+const RED_CRIT = fgSequence("error");
+const AGENT_GLYPH = GLYPH.agent;
+const USER_GLYPH = GLYPH.user;
 
 /**
  * An assistant turn is a sequence of text and tool segments interleaved in

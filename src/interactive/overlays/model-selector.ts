@@ -37,6 +37,7 @@ import {
 	runtimeResolutionDiagnosticLine,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
+import { GLYPH } from "../theme/index.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
@@ -493,7 +494,7 @@ export function buildModelItems(deps: {
 			};
 			items.push({
 				value: rowRef,
-				label: `${row.healthGlyph}${favorite ? "★" : scopeHit ? "◇" : active ? "◆" : " "} ${wireModel}`,
+				label: `${row.healthGlyph}${favorite ? "★" : scopeHit ? GLYPH.scoped : active ? GLYPH.active : " "} ${wireModel}`,
 				description: `${row.context}  ${badges}  ${runtimeShortName}  target=${target.id}`,
 			});
 			refs.push({ target: target.id, model: wireModel });
@@ -553,10 +554,10 @@ function fitLine(text: string, width: number): string {
 }
 
 function activeMark(row: ModelRow): string {
-	if (row.active) return clioTitle("◆");
+	if (row.active) return clioTitle(GLYPH.active);
 	if (row.favorite) return clioFrame("★");
 	if (row.recent) return clioFrame("↺");
-	if (row.scoped) return clioFrame("◇");
+	if (row.scoped) return clioFrame(GLYPH.scoped);
 	if (row.defaultModel) return clioFrame("d");
 	return "·";
 }

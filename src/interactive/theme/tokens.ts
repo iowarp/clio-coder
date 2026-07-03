@@ -1,13 +1,12 @@
 export type ClioToken =
 	| "accent"
 	| "accentDeep"
-	| "highlight"
+	| "action"
 	| "success"
 	| "warning"
 	| "error"
 	| "info"
 	| "reason"
-	| "loop"
 	| "dim"
 	| "muted"
 	| "title"
@@ -24,21 +23,25 @@ interface TokenColor {
 const TOKENS: Record<ClioToken, TokenColor> = {
 	accent: { rgb: [70, 229, 208], xterm: 80 },
 	accentDeep: { rgb: [31, 183, 166], xterm: 44 },
-	// Second brand color: neon orange. Reserved for Clio's signature actions
-	// (dispatching, queued fleet work, steering) so it reads as "Clio is acting",
-	// never as decoration. warning stays the soft amber for actual warnings.
-	highlight: { rgb: [255, 126, 41], xterm: 208 },
+	// Second brand color: neon orange. The token name teaches the rule: orange
+	// means Clio is acting. It fires only for Clio's signature actions
+	// (dispatching, queued and running fleet work, steering), never as
+	// decoration, and never a metric, at most one orange element per region of
+	// the screen. warning stays the soft amber for actual warnings.
+	action: { rgb: [255, 126, 41], xterm: 208 },
 	success: { rgb: [87, 227, 137], xterm: 114 },
 	warning: { rgb: [255, 180, 84], xterm: 221 },
 	error: { rgb: [255, 92, 102], xterm: 203 },
 	info: { rgb: [91, 168, 255], xterm: 75 },
 	reason: { rgb: [157, 140, 255], xterm: 141 },
-	loop: { rgb: [255, 122, 198], xterm: 207 },
 	dim: { rgb: [106, 122, 133], xterm: 59 },
 	muted: { rgb: [138, 153, 164], xterm: 102 },
 	title: { rgb: [70, 229, 208], xterm: 80 },
 	frame: { rgb: [47, 93, 90], xterm: 23 },
 	frameStrong: { rgb: [42, 171, 158], xterm: 37 },
+	// effortMedium and effortHigh are retired in slice 9. clio-editor.ts still
+	// paints them for the thinking-level hint, so the tokens stay for now to
+	// keep rendering byte-identical until that slice replaces the ramp.
 	effortMedium: { rgb: [36, 132, 124], xterm: 23 },
 	effortHigh: { rgb: [39, 154, 143], xterm: 30 },
 };

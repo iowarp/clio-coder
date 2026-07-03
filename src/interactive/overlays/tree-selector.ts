@@ -9,6 +9,7 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import { buildHint, clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { GLYPH } from "../theme/index.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 16;
@@ -96,7 +97,7 @@ const ROW_PREVIEW_BUDGET = 55;
 /** @internal */
 export function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number }): string {
 	const indent = "  ".repeat(row.depth);
-	const glyph = isLeaf(row.node) ? "●" : "○";
+	const glyph = isLeaf(row.node) ? GLYPH.running : "○";
 	const turnId = shortTurnId(row.node.id);
 	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
 	const labelSuffix = row.node.label ? ` · label:"${row.node.label}"` : "";
@@ -175,7 +176,7 @@ export class TreeOverlayView implements Component {
 			for (let i = this.scrollTop; i < end; i++) {
 				const row = this.rows[i];
 				if (!row) continue;
-				const prefix = i === this.highlight ? "▸ " : "  ";
+				const prefix = i === this.highlight ? `${GLYPH.cursor} ` : "  ";
 				const body = formatTreeRow(row, {
 					showTimestamps: this.showTimestamps,
 					width: Math.max(1, contentWidth - visibleWidth(prefix)),

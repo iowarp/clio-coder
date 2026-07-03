@@ -888,7 +888,7 @@ function formatSettingRow(
 ): string {
 	const theme = clioTheme();
 	const indent = " ".repeat(Math.max(0, indentWidth));
-	const prefix = selected ? theme.fg("accent", "▸ ") : "  ";
+	const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 	const labelText = padAnsi(item.label, columns.label);
 	const label = selected ? theme.style("accent", labelText, { bold: true }) : labelText;
 	const modified = !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue;
@@ -1200,7 +1200,7 @@ export class SettingsCenter implements Component {
 			theme.fg("dim", "Sections"),
 			...sections.map((section, index) => {
 				const selected = index === this.selectedSectionIndex;
-				const cursor = selected && this.focusedLane === "sections" ? theme.fg("accent", "▸ ") : "  ";
+				const cursor = selected && this.focusedLane === "sections" ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 				const modifiedCount = section.items.filter(
 					(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
 				).length;
@@ -1248,7 +1248,7 @@ export class SettingsCenter implements Component {
 			const sectionSelected = sectionIndex === this.selectedSectionIndex;
 			const sectionFocused = sectionSelected && this.focusedLane === "sections";
 			if (sectionFocused) selectedLine = rows.length;
-			const cursor = sectionFocused ? theme.fg("accent", "▸ ") : "  ";
+			const cursor = sectionFocused ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
 			const label = sectionSelected
 				? theme.style("accent", section.label, { bold: true })
 				: theme.fg("dim", section.label);

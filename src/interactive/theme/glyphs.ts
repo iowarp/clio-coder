@@ -1,6 +1,12 @@
 export const GLYPH = {
+	// Clio wordmark, shown in the welcome and dashboard headers. `agent` still
+	// aliases it as the chat reply prefix until slice 4 flips the reply glyph.
+	brand: ">C_",
 	agent: ">C_",
 	user: "›",
+	// Selection focus marker for list overlays. Its value flips to "❯" in slice
+	// 9; until then it stays "▸" so the refactor renders byte-identically.
+	cursor: "▸",
 	toolHeader: "▸",
 	running: "●",
 	queued: "◌",
@@ -8,21 +14,27 @@ export const GLYPH = {
 	ok: "✓",
 	error: "✗",
 	cancelled: "⊘",
-	thinkOn: "◆",
-	thinkOff: "◇",
+	active: "◆",
+	scoped: "◇",
 	up: "↑",
 	down: "↓",
 	rail: "│",
+	innerDivider: "╌",
 	barFull: "█",
 	barEmpty: "░",
 	contextFull: "▰",
 	contextFree: "▱",
 	info: "ℹ",
 	warn: "⚠",
-	noticeInfo: "·",
-	noticeSuccess: "✓",
-	noticeWarn: "!",
-	noticeError: "✗",
+	warnInline: "!",
+	phaseWaiting: "◔",
+	phaseThinking: "◐",
+	phaseWriting: "◑",
+	phaseTool: "⚙",
+	phaseBlocked: "⏸",
+	phaseRetry: "↻",
+	phaseCompact: "♻",
+	phaseDispatch: "⇲",
 } as const;
 
 export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;

@@ -9,22 +9,22 @@ describe("contracts/notice", () => {
 		const testCases = [
 			{
 				level: "info" as const,
-				glyph: GLYPH.noticeInfo,
+				glyph: "·",
 				token: "dim" as const,
 			},
 			{
 				level: "success" as const,
-				glyph: GLYPH.noticeSuccess,
+				glyph: GLYPH.ok,
 				token: "success" as const,
 			},
 			{
 				level: "warn" as const,
-				glyph: GLYPH.noticeWarn,
+				glyph: GLYPH.warnInline,
 				token: "warning" as const,
 			},
 			{
 				level: "error" as const,
-				glyph: GLYPH.noticeError,
+				glyph: GLYPH.error,
 				token: "error" as const,
 			},
 		];
@@ -70,7 +70,7 @@ describe("contracts/notice", () => {
 		strictEqual(lines.length > 1, true);
 
 		// The first line should start with the success glyph
-		const expectedPrefix = `${theme.fg("success", GLYPH.noticeSuccess)} `;
+		const expectedPrefix = `${theme.fg("success", GLYPH.ok)} `;
 		const firstLine = lines[0];
 		ok(firstLine);
 		strictEqual(firstLine.startsWith(expectedPrefix), true);

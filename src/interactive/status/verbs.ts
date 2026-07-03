@@ -1,5 +1,5 @@
 import { ToolNames } from "../../core/tool-names.js";
-import { spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
+import { GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 import type { AgentStatus } from "./types.js";
 
 export interface VerbRender {
@@ -72,9 +72,10 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 		case "ended": {
 			const stop = status.summary?.stopReason ?? "stop";
 			const elapsed = status.summary ? ` · ${formatStatusElapsed(status.summary.elapsedMs)}` : "";
-			if (stop === "cancelled" || stop === "aborted") return { text: `⊘ cancelled${elapsed}`, toneHint: "muted" };
-			if (stop === "error") return { text: `✗ failed${elapsed}`, toneHint: "error" };
-			return { text: `✓ done${elapsed}`, toneHint: "ok" };
+			if (stop === "cancelled" || stop === "aborted")
+				return { text: `${GLYPH.cancelled} cancelled${elapsed}`, toneHint: "muted" };
+			if (stop === "error") return { text: `${GLYPH.error} failed${elapsed}`, toneHint: "error" };
+			return { text: `${GLYPH.ok} done${elapsed}`, toneHint: "ok" };
 		}
 		default:
 			return null;

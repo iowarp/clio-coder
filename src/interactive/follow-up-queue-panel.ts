@@ -41,10 +41,10 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 		for (const message of messages) {
 			const preview = truncateToWidth(message.text.replace(/\s+/g, " "), Math.max(12, bodyWidth - 9), "...", false);
 			// Steering redirects the live turn: that is a Clio-signature action,
-			// so the steer marker carries the highlight color.
+			// so the steer marker carries the action color.
 			const marker =
 				message.kind === "steer"
-					? theme.fg("highlight", `${GLYPH.toolHeader} steer`)
+					? theme.fg("action", `${GLYPH.toolHeader} steer`)
 					: theme.fg("muted", `${GLYPH.queued} queued`);
 			lines.push(`${marker} ${theme.fg("muted", preview)}`);
 		}

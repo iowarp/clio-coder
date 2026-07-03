@@ -8,6 +8,7 @@ import {
 } from "../../domains/providers/index.js";
 import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { GLYPH } from "../theme/index.js";
 
 export const THINKING_OVERLAY_WIDTH = 44;
 
@@ -37,7 +38,7 @@ function buildThinkingItems(
 		const label = labelFor(lvl);
 		return {
 			value: lvl,
-			label: `${lvl === current ? "●" : " "} ${label}`,
+			label: `${lvl === current ? GLYPH.running : " "} ${label}`,
 			description: label === "on" ? "thinking enabled" : (DESCRIPTIONS[lvl] ?? ""),
 		};
 	});
