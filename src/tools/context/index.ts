@@ -1,6 +1,7 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
+import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	checkSkillDrift,
@@ -113,14 +114,21 @@ function policyIsRecipeBound(policy: { requests: ReadonlyArray<{ source: string 
 	return policy.requests.length > 0 && policy.requests.every((request) => request.source === "recipe");
 }
 
+// The denial must name the model's compliant next move, not just the gate:
+// a model whose operator asked for a skill in plain language has no way to
+// load it (only the operator activates), so its move is suggest-and-wait.
+const NO_PENDING_SKILL_DENIAL =
+	"context: no pending skill request is active this turn; only the operator can activate a skill, so do not retry this load. " +
+	`If a listed skill matches the task, open your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` and wait for the operator to run it; otherwise continue without skills.`;
+
 function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | undefined): string | null {
 	const policy = options?.pendingSkillPolicy;
 	if (!policy) {
-		return "context: no pending skill request is active this turn. Skills can only be loaded after an explicit /skill:<name> task, /skill <name> task, or selector choice.";
+		return NO_PENDING_SKILL_DENIAL;
 	}
 	const allowed = [...new Set(policy.allowedSkillNames.map((entry) => entry.trim()).filter(Boolean))];
 	if (allowed.length === 0) {
-		return "context: no pending skill request is active this turn. Skills can only be loaded after an explicit /skill:<name> task, /skill <name> task, or selector choice.";
+		return NO_PENDING_SKILL_DENIAL;
 	}
 	const recipeBound = policyIsRecipeBound(policy);
 	if (!allowed.includes(name)) {
@@ -175,7 +183,7 @@ function renderSkillsList(skills: ReadonlyArray<Skill>): string {
 	// template where they skip conditional prose in the header.
 	lines.push(
 		"",
-		"If one skill above matches the current task, begin your reply with the line `Suggested skill: /skill:<name>` (a comma-separated sequence, in order, when several compose) and wait for the operator to run it. If none match, do not mention skills.",
+		`If one skill above matches the current task, begin your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose) and wait for the operator to run it. If none match, do not mention skills.`,
 	);
 	return lines.join("\n");
 }

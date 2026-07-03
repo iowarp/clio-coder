@@ -74,6 +74,13 @@ export {
 	runMiddlewareRegistrations,
 	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
+export {
+	createSkillsReminderRegistration,
+	SKILL_SUGGESTION_ANCHOR,
+	SKILLS_REMINDER_REGISTRATION_ID,
+	type SkillsReminderDeps,
+	skillsReminderMessage,
+} from "./skills-reminder.js";
 export { createMiddlewareContractFromSnapshot, createMiddlewareSnapshot } from "./snapshot.js";
 export type {
 	MiddlewareAnnotationSeverity,

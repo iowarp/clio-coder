@@ -1,6 +1,14 @@
 export type SkillActivationTrigger = "slash-command" | "tool";
 export type PendingSkillRequestSource = "slash-command" | "selector" | "marketplace" | "recipe";
 
+/**
+ * The one reply shape every surface teaches for skill suggestions: the
+ * context(scope="skills") listing footer, the first-turn middleware
+ * reminder, and the operator-gate denial all cite this exact line so the
+ * model learns a single protocol.
+ */
+export const SKILL_SUGGESTION_ANCHOR = "Suggested skill: /skill:<name>";
+
 export interface PendingSkillRequest {
 	name: string;
 	args: string;
