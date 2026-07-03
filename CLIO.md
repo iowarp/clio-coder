@@ -25,10 +25,6 @@ src/cli owns command parsing and headless runs; src/interactive owns the TUI; sr
 
 The codewiki indexes the repository; refresh it after structural edits. For navigational tasks, prefer the indexed tools (entry_points, where_is, find_symbol) before broad reads. Useful starting points: src/cli/index.ts, src/domains/context/bootstrap.ts, src/domains/dispatch/index.ts, src/engine/index.ts, and src/tools/registry.ts.
 
-## Verification expectations
-
-Run `npm run typecheck` and `npm run lint` before any handoff. Use targeted lanes for narrow risk: `npm run test:contracts`, `npm run test:smoke`, `npm run check:boundaries`. Run `npm run test` when behavior crosses domains, tool contracts, smoke flows, or boundaries, and `npm run build` after CLI, worker, packaging, or generated-dist changes. `npm run ci` is the full local gate before committing shared behavior changes; `npm run ci:release` adds the check-release dist and packaging audit and gates every tag.
-
 ## Build, packaging, and release
 
 `npm run build` (tsup) bundles two ESM entries, src/cli/index.ts and src/worker/entry.ts, into dist/ with code splitting on. The splitting is deliberate: src/cli/index.ts imports every subcommand dynamically, so each command loads only its own chunk and `clio --version` never parses the interactive graph; keep new subcommands behind dynamic imports. The shebang comes from the hashbang line in each entry source; never add a tsup `banner`, which would stamp it onto every chunk. The npm tarball is an allowlist (package.json `files`): dist without source maps, the runtime resource trees under src (prompt fragments, builtin agents, model catalogs), docs, and the 128px logo. A new resource read from the installed package root must be added both to `files` and to the required list in scripts/check-release.mjs, which enforces entry-only shebangs, forbidden and required package contents, and size budgets. Releases are tag-driven: tag vX.Y.Z matching package.json's version and push; .github/workflows/release.yml runs the gate once through prepublishOnly, publishes to npm with provenance, and creates the GitHub release. The step-by-step process lives in CONTRIBUTING.md under Releasing.
@@ -37,10 +33,14 @@ Run `npm run typecheck` and `npm run lint` before any handoff. Use targeted lane
 
 The installed `clio` symlink executes dist/cli/index.js, so TypeScript edits are invisible until `npm run build` runs again. Lifecycle migration ids must be of the form `YYYY-MM-DD-<slug>` and registered in src/domains/lifecycle/migrations. Compiled prompt text and provider tool schemas are byte-stable per session by design; edits to prompt fragments or tool schemas invalidate local prompt-prefix caches and shift cache telemetry, so treat diffs in compiled prompt text as behavior changes. The shared settings file is written through field-level patches under an advisory lock; do not hand-edit it while sessions are live.
 
-## Generated and local artifact policy
-
-CLIO.md is the versioned, human-owned project handbook; review intentional changes like source. `.clio/*` (codewiki.json, state.json, proposals, handoffs) is ignored local context-engine state and is never committed unless explicitly force-added. dist/ is generated build output. docs/.superpowers/ is ignored dev scratch. `clio context-init` regenerates or updates CLIO.md through the bootstrap agent: `--propose` writes ignored drafts, `--apply` updates from the existing handbook, `--rewrite` generates a fresh handbook from repository structure.
-
 ## Self-development boundary
 
 When Clio runs inside this repository, edits to her own TUI, skills, agents, tools, prompts, context engine, and harness are ordinary local source work when the user asks for them. Publishing, pushing, tagging, releasing, opening PRs, and registry contributions always require explicit user intent. The clio-dev skill under skills/ documents this boundary in full.
+
+## Verification expectations
+
+Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and style checks. Run `npm run build` after CLI, worker, packaging, or generated-dist changes. Use targeted checks for narrower risk: `npm run test:contracts`, `npm run test:smoke`, `npm run check:boundaries`. Run `npm run test` when behavior crosses domains, tool contracts, smoke flows, or boundaries. Use `npm run ci` for the full local gate before committing broad or shared behavior changes. `npm run ci:release` adds the check-release dist and packaging audit and gates every tag.
+
+## Context artifacts
+
+`CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `dist/` is generated build output. `context-init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
