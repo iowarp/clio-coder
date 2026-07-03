@@ -180,6 +180,27 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Loop guard: the post-budget retry spiral is dead.** Crossing the soft
+  per-turn tool-call budget used to short-circuit the guard before the
+  identical-call detector, so a weak local model that retried its blocked
+  call verbatim could only die 15 calls later at the hard ceiling, and the
+  directive it received ("narrow to a single concrete next step … before
+  calling more tools") was unfollowable because every further call in the
+  turn was also blocked. Detection now runs before the budget check, so
+  verbatim retries trip the detector and interrupt after two blocks, and the
+  soft-budget directive states plainly that all further calls this turn are
+  blocked and to reply with a text summary. The per-turn soft budget default
+  rose from 25 to 60 (hard ceiling 75): it is a backstop against
+  distinct-call spray, not a ceiling on legitimate deep work such as a
+  repo-wide audit.
+- **Loop-guard interrupts leave a clean transcript.** The closing "loop guard
+  stopped this turn" message is shown live at cancel but persisted only after
+  the aborted run's in-flight tool results settle, so the session ledger
+  always replays as tool calls, then results, then the closing text; strict
+  chat templates reject the old interleaving. The empty aborted assistant
+  messages the abort leaves behind are suppressed in both the ledger and the
+  live transcript instead of rendering as duplicate "[aborted] Request was
+  aborted." noise.
 - **Tool profiles enforced on external CLI worker runtimes.** A worker
   dispatched with a narrowing `tool_profile` (e.g. `minimal-local`) on the
   `claude-sdk` runtime could still run out-of-profile tools such as `bash`,
@@ -202,6 +223,20 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Removed / BREAKING (unreleased, no compat shims)
 
+- Guardrail env vars were renamed and repointed at settings. The new
+  `guardrails:` settings.yaml section (`turnToolCallBudget`,
+  `workerToolCallCap`, `maxDispatchRuns`, `readMaxBytes`,
+  `observationTurnBudgetBytes`) is the durable home for the loop-guard
+  budgets, tool byte caps, and dispatch ledger cap, resolved env > settings >
+  default in `core/guardrails.ts`. `CLIO_MAX_TOOL_CALLS` is now
+  `CLIO_WORKER_TOOL_CALL_CAP` and `CLIO_ORCH_MAX_TOOL_CALLS` is now
+  `CLIO_TURN_TOOL_CALL_BUDGET`; the old names are ignored. The run-scoped CLI
+  overrides (`--max-context-tokens`, `--kv-cache-mode`, sampling flags) now
+  travel in one typed JSON env var, `CLIO_RUN_OVERRIDES`
+  (`core/run-overrides.ts`), and the per-option vars
+  `CLIO_MAX_CONTEXT_TOKENS`, `CLIO_KV_CACHE_MODE`, and
+  `CLIO_SAMPLING_OVERRIDES` are gone. Every env var the runtime reads is now
+  documented in `docs/environment-variables.md`.
 - Tool names `glob`, `workspace_context`, `docs_search`, `read_skill`,
   `run_task`, `validate_frontend`, `write_plan`, `write_review`,
   `create_skill`, and `dispatch_batch` are gone; see the consolidations above

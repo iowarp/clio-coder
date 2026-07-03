@@ -1,6 +1,7 @@
 import { readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
+import { withRunOverrides } from "../core/run-overrides.js";
 import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -140,99 +141,95 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
-	const previousMaxContextTokens = process.env.CLIO_MAX_CONTEXT_TOKENS;
-	const previousKvCacheMode = process.env.CLIO_KV_CACHE_MODE;
-	try {
-		if (parsed.maxContextTokens !== undefined) {
-			process.env.CLIO_MAX_CONTEXT_TOKENS = String(parsed.maxContextTokens);
-		}
-		if (parsed.kvCacheMode !== undefined) {
-			process.env.CLIO_KV_CACHE_MODE = parsed.kvCacheMode;
-		}
-		if (parsed.help) {
-			process.stdout.write(HELP);
-			return 0;
-		}
-		for (const diagnostic of parsed.diagnostics) {
-			process.stderr.write(`clio run: ${diagnostic.message}\n`);
-		}
-		if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
-			process.stderr.write(USAGE);
-			return 2;
-		}
-		if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
-			process.stderr.write("clio run: fleet dispatch flags require --agent <recipe-id>\n");
-			process.stderr.write(USAGE);
-			return 2;
-		}
-
-		const noSkills = options.noSkills === true || parsed.noSkills === true;
-		const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
-		// An explicit --skill path is a contract: a path that is missing or loads
-		// no valid skill fails the run before any model invocation instead of
-		// silently degrading to whatever skills discovery finds.
-		const skillPathErrors = explicitSkillPathErrors(skillPaths);
-		if (skillPathErrors.length > 0) {
-			for (const message of skillPathErrors) {
-				process.stderr.write(`clio run: --skill ${message}\n`);
+	// One-run overrides ride the scoped run-overrides transport (restored on
+	// exit) so dispatched worker subprocesses inherit them; see
+	// core/run-overrides.ts.
+	return withRunOverrides(
+		{
+			...(parsed.maxContextTokens !== undefined ? { maxContextTokens: parsed.maxContextTokens } : {}),
+			...(parsed.kvCacheMode !== undefined ? { kvCacheMode: parsed.kvCacheMode } : {}),
+		},
+		async () => {
+			if (parsed.help) {
+				process.stdout.write(HELP);
+				return 0;
 			}
-			return 2;
-		}
-
-		const assembled = await assemblePrompt(parsed);
-		if (!assembled) return 2;
-
-		if (parsed.agentId === undefined) {
-			// An explicit --target override is a one-run target; a missing id is an
-			// operator config error, not an assistant response. Reject it before the
-			// headless turn so the resolver diagnostic never streams to stdout as a
-			// message_end/agent_end assistant turn.
-			if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
-				process.stderr.write(`clio run: target '${parsed.target}' not found in settings.targets\n`);
+			for (const diagnostic of parsed.diagnostics) {
+				process.stderr.write(`clio run: ${diagnostic.message}\n`);
+			}
+			if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
+				process.stderr.write(USAGE);
 				return 2;
 			}
-			takeOverStdout();
-			try {
-				const code = await runClioCommand({
-					...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
-					...(options.noContextFiles ? { noContextFiles: true } : {}),
-					...(noSkills ? { noSkills: true } : {}),
-					...(skillPaths.length > 0 ? { skillPaths } : {}),
-					headless: {
-						prompt: assembled.prompt,
-						mode: parsed.json ? "json" : "text",
-						jsonEvents: parsed.jsonEvents,
+			if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
+				process.stderr.write("clio run: fleet dispatch flags require --agent <recipe-id>\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
+
+			const noSkills = options.noSkills === true || parsed.noSkills === true;
+			const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
+			// An explicit --skill path is a contract: a path that is missing or loads
+			// no valid skill fails the run before any model invocation instead of
+			// silently degrading to whatever skills discovery finds.
+			const skillPathErrors = explicitSkillPathErrors(skillPaths);
+			if (skillPathErrors.length > 0) {
+				for (const message of skillPathErrors) {
+					process.stderr.write(`clio run: --skill ${message}\n`);
+				}
+				return 2;
+			}
+
+			const assembled = await assemblePrompt(parsed);
+			if (!assembled) return 2;
+
+			if (parsed.agentId === undefined) {
+				// An explicit --target override is a one-run target; a missing id is an
+				// operator config error, not an assistant response. Reject it before the
+				// headless turn so the resolver diagnostic never streams to stdout as a
+				// message_end/agent_end assistant turn.
+				if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
+					process.stderr.write(`clio run: target '${parsed.target}' not found in settings.targets\n`);
+					return 2;
+				}
+				takeOverStdout();
+				try {
+					const code = await runClioCommand({
+						...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
+						...(options.noContextFiles ? { noContextFiles: true } : {}),
 						...(noSkills ? { noSkills: true } : {}),
 						...(skillPaths.length > 0 ? { skillPaths } : {}),
-						...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
-						...(assembled.workingContextPaths && assembled.workingContextPaths.length > 0
-							? { workingContextPaths: assembled.workingContextPaths }
-							: {}),
-						...(parsed.target !== undefined ? { target: parsed.target } : {}),
-						...(parsed.model !== undefined ? { model: parsed.model } : {}),
-						...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
-						...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
-						...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
-					},
-				});
-				await flushRawStdout();
-				return code;
-			} finally {
-				restoreStdout();
+						headless: {
+							prompt: assembled.prompt,
+							mode: parsed.json ? "json" : "text",
+							jsonEvents: parsed.jsonEvents,
+							...(noSkills ? { noSkills: true } : {}),
+							...(skillPaths.length > 0 ? { skillPaths } : {}),
+							...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
+							...(assembled.workingContextPaths && assembled.workingContextPaths.length > 0
+								? { workingContextPaths: assembled.workingContextPaths }
+								: {}),
+							...(parsed.target !== undefined ? { target: parsed.target } : {}),
+							...(parsed.model !== undefined ? { model: parsed.model } : {}),
+							...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
+							...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
+							...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
+						},
+					});
+					await flushRawStdout();
+					return code;
+				} finally {
+					restoreStdout();
+				}
 			}
-		}
 
-		return await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
-			...options,
-			noSkills,
-			skillPaths,
-		});
-	} finally {
-		if (previousMaxContextTokens === undefined) delete process.env.CLIO_MAX_CONTEXT_TOKENS;
-		else process.env.CLIO_MAX_CONTEXT_TOKENS = previousMaxContextTokens;
-		if (previousKvCacheMode === undefined) delete process.env.CLIO_KV_CACHE_MODE;
-		else process.env.CLIO_KV_CACHE_MODE = previousKvCacheMode;
-	}
+			return await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
+				...options,
+				noSkills,
+				skillPaths,
+			});
+		},
+	);
 }
 
 async function runDispatch(

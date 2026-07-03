@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { Type } from "typebox";
+import { GUARDRAIL_DEFAULTS, GUARDRAIL_ENV_VARS, resolveGuardrail } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
 import { finalizeObservation, observationBudgetExhausted, reserveObservation } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
@@ -17,18 +18,14 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 // Per-call read cap. Raised from the 16KB per-observation source cap toward
 // pi's 50KB so large source/generated files finish in fewer calls (a 144KB file
 // took ~9 sequential 16KB reads before). The per-turn observation budget
-// (src/tools/observation.ts) still bounds the aggregate. Override with
-// CLIO_READ_MAX_BYTES.
-export const DEFAULT_READ_MAX_BYTES = 50 * 1024;
-export const READ_MAX_BYTES_ENV = "CLIO_READ_MAX_BYTES";
+// (src/tools/observation.ts) still bounds the aggregate. Value, settings key,
+// and env override (CLIO_READ_MAX_BYTES) live in core/guardrails.ts.
+export const DEFAULT_READ_MAX_BYTES = GUARDRAIL_DEFAULTS.readMaxBytes;
+export const READ_MAX_BYTES_ENV = GUARDRAIL_ENV_VARS.readMaxBytes;
 const MIN_READ_CAP_BYTES = 1024;
 
 export function readMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
-	const raw = env[READ_MAX_BYTES_ENV];
-	if (raw === undefined || raw.trim().length === 0) return DEFAULT_READ_MAX_BYTES;
-	const parsed = Number(raw.trim());
-	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_READ_MAX_BYTES;
-	return Math.max(MIN_READ_CAP_BYTES, Math.floor(parsed));
+	return Math.max(MIN_READ_CAP_BYTES, resolveGuardrail("readMaxBytes", env));
 }
 
 export const readTool: ToolSpec = {

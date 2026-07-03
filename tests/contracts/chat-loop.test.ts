@@ -387,6 +387,81 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		strictEqual(looped?.reason, "loop: context repeated 3x");
 	});
 
+	it("persists the closing turn after straggler tool results and keeps aborted noise out of the live transcript", async () => {
+		// Regression for the v0.2.8 demo failure: the hard-ceiling cancel used to
+		// persist the closing turn immediately, so the still-in-flight blocked
+		// tool results landed after it and the ledger replayed assistant text
+		// between a tool-call message and its results. The aborted follow-up
+		// calls also rendered as "[aborted] Request was aborted." noise.
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const REASON = "[Clio Coder] loop guard stopped this turn: 40 tool calls reached the per-turn ceiling (40).";
+		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
+		const seen: ChatLoopEvent[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				agent.state.messages.push(...inputMessages(input));
+				await agent.emit({
+					type: "tool_execution_start",
+					toolCallId: "c1",
+					toolName: "ls",
+					args: { path: "src/domains/prompts" },
+				} as never);
+				// The ceiling fires while the blocked call is still in flight.
+				holder.loop?.cancel({ reason: REASON, source: "loop_guard", auditReason: "tool-call ceiling: 40 calls" });
+				// The straggler result lands after the cancel...
+				await agent.emit({
+					type: "tool_execution_end",
+					toolCallId: "c1",
+					toolName: "ls",
+					result: { content: [{ type: "text", text: "tool-call budget exhausted" }] },
+					isError: true,
+				} as never);
+				// ...followed by the empty aborted assistant message the abort leaves.
+				const aborted = {
+					role: "assistant",
+					content: [],
+					stopReason: "aborted",
+					errorMessage: "Request was aborted.",
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(aborted);
+				await agent.emit({ type: "message_end", message: aborted });
+				await agent.emit({ type: "agent_end", messages: [aborted] });
+			}),
+		} as never);
+		holder.loop = loop;
+		loop.onEvent((event: ChatLoopEvent) => seen.push(event));
+
+		await loop.submit("audit the docs");
+
+		const roles = entries.filter((entry) => entry.kind === "message").map((entry) => entry.role);
+		const resultIndex = roles.lastIndexOf("tool_result");
+		const closingIndex = roles.lastIndexOf("assistant");
+		ok(resultIndex !== -1 && closingIndex !== -1, "both the tool result and the closing turn are persisted");
+		ok(resultIndex < closingIndex, "the closing turn lands after the straggler tool result");
+		const assistantEntries = entries.filter(isAssistantMessageEntry);
+		strictEqual(assistantEntries.length, 1, "exactly one assistant turn: the durable closing message");
+		strictEqual((assistantEntries[0]?.payload as { text?: string }).text, REASON);
+		const abortedEnds = seen.filter(
+			(event) =>
+				event.type === "message_end" && (event as { message?: { stopReason?: string } }).message?.stopReason === "aborted",
+		);
+		strictEqual(abortedEnds.length, 0, "the empty aborted message never reaches the live transcript");
+		const closingEnds = seen.filter(
+			(event) =>
+				event.type === "message_end" &&
+				JSON.stringify((event as { message?: unknown }).message ?? {}).includes("loop guard stopped"),
+		);
+		strictEqual(closingEnds.length, 1, "the closing message is shown live exactly once");
+	});
+
 	it("keeps a bare operator cancel as an empty aborted turn", async () => {
 		const entries: SessionEntry[] = [];
 		const bus = createSafeEventBus();

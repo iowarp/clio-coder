@@ -93,7 +93,7 @@ def run_clio(checkout: Path, task: str, events_path: Path, timeout_s: int, targe
     if model:
         cmd += ["--model", model]
     cmd += [task]
-    env = {**os.environ, "CLIO_NO_UPDATE_NOTIFIER": "1"}
+    env = {**os.environ}
     t0 = time.time()
     timed_out = False
     with open(events_path, "w") as ef:

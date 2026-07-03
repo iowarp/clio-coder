@@ -32,6 +32,7 @@ import {
 	type LLMTool,
 	LMStudioClient,
 } from "@lmstudio/sdk";
+import { runOverrides } from "../../core/run-overrides.js";
 import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
 import { lmStudioQuietLogger } from "../../domains/providers/runtimes/common/lmstudio-logger.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
@@ -425,28 +426,30 @@ export function loadModelConfig(model: Model<"lmstudio-native">): LLMLoadModelCo
 		if (kvCache.vQuant !== undefined && kvCache.vQuant !== false) config.llamaVCacheQuantizationType = kvCache.vQuant;
 		if (kvCache.useFp16 !== undefined) config.useFp16ForKVCache = kvCache.useFp16;
 	}
-	const envKvCacheMode = process.env.CLIO_KV_CACHE_MODE;
-	if (envKvCacheMode) {
-		if (envKvCacheMode === "f16") {
+	// One-run CLI override (clio run --kv-cache-mode), delivered over the
+	// run-overrides transport; see core/run-overrides.ts.
+	const kvCacheModeOverride = runOverrides().kvCacheMode;
+	if (kvCacheModeOverride) {
+		if (kvCacheModeOverride === "f16") {
 			config.llamaKCacheQuantizationType = "f16";
 			config.llamaVCacheQuantizationType = "f16";
 			config.useFp16ForKVCache = true;
-		} else if (envKvCacheMode === "f32") {
+		} else if (kvCacheModeOverride === "f32") {
 			config.llamaKCacheQuantizationType = "f32";
 			config.llamaVCacheQuantizationType = "f32";
 			config.useFp16ForKVCache = false;
-		} else if (envKvCacheMode === "none" || envKvCacheMode === "false") {
+		} else if (kvCacheModeOverride === "none" || kvCacheModeOverride === "false") {
 			delete config.llamaKCacheQuantizationType;
 			delete config.llamaVCacheQuantizationType;
 			delete config.useFp16ForKVCache;
 		} else {
-			const quant = asKvCacheQuant(envKvCacheMode);
+			const quant = asKvCacheQuant(kvCacheModeOverride);
 			if (quant !== undefined && quant !== false && VALID_ENV_KV_CACHE_QUANTS.has(quant)) {
 				config.llamaKCacheQuantizationType = quant;
 				config.llamaVCacheQuantizationType = quant;
 				config.useFp16ForKVCache = false;
 			} else {
-				process.stderr.write(`clio: ignoring invalid CLIO_KV_CACHE_MODE '${envKvCacheMode}'\n`);
+				process.stderr.write(`clio: ignoring invalid kv-cache-mode override '${kvCacheModeOverride}'\n`);
 			}
 		}
 	}

@@ -10,6 +10,7 @@
  */
 
 import { validateSettingsFile } from "../core/config.js";
+import { configureGuardrails } from "../core/guardrails.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
@@ -43,7 +44,7 @@ import { startAntigravityWorkerRun } from "./antigravity/subprocess-runtime.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
 import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
 import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
-import { createLoopGuardRegistration, readToolCallCap } from "./loop-guard.js";
+import { createLoopGuardRegistration, readWorkerToolCallCap } from "./loop-guard.js";
 import { patchProviderThinkingPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
@@ -217,7 +218,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// budget so dispatched runs honor settings.defaults.maxTokens too. Use the
 	// non-throwing read: a worker must not abort over a settings issue the parent
 	// already surfaced.
-	setGlobalDefaultMaxOutputTokens(validateSettingsFile().settings.defaults.maxTokens);
+	const workerSettings = validateSettingsFile().settings;
+	setGlobalDefaultMaxOutputTokens(workerSettings.defaults.maxTokens);
+	// Same mirroring for guardrail policy: the worker's loop-guard cap and tool
+	// byte caps resolve settings-first, so the fresh process needs the section
+	// installed before any registry or tool construction reads it.
+	configureGuardrails(workerSettings.guardrails);
 	const fauxModel = registerFauxFromEnv();
 	// Workers are bounded runs against an admission-verified recipe surface.
 	// They have no operator to widen a missing tool, so the active surface is
@@ -254,7 +260,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// starts empty (workers receive no orchestrator protection state) and
 		// has no persistence sink; it exists so protect_path effects from
 		// snapshot rules behave identically in workers.
-		[createLoopGuardRegistration({ safety, toolCallCap: readToolCallCap() }), createProtectedArtifactsRegistration()],
+		[
+			createLoopGuardRegistration({ safety, toolCallCap: readWorkerToolCallCap() }),
+			createProtectedArtifactsRegistration(),
+		],
 		input.autonomy,
 	);
 	const telemetry: ToolTelemetry = {

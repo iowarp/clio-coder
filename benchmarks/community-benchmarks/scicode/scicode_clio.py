@@ -307,7 +307,7 @@ def run_clio_step(prompt: str, cwd: Path, events_path: Path, timeout: int, targe
     if model:
         cmd.extend(["--model", model])
     cmd.append(prompt)
-    env = {**os.environ, "CLIO_NO_UPDATE_NOTIFIER": "1"}
+    env = {**os.environ}
     started = time.time()
     timed_out = False
     stderr = ""

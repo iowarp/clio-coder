@@ -401,9 +401,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let toolProseAbortReason: string | null = null;
 	let lastRunSnapshot: ChatLoopRunSnapshot | null = null;
 	// Set by a loop-guard interrupt (cancel with a reason). While set, the empty
-	// aborted assistant message the abort produces is suppressed at persistence
-	// time because a durable closing turn carrying the reason was already
-	// written. Cleared at the start of each submit.
+	// aborted assistant messages the abort produces are suppressed in both the
+	// ledger and the live transcript; the durable closing turn carrying the
+	// reason is persisted when the run settles (submit's finally), after the
+	// in-flight tool results have landed. Cleared there, and defensively at the
+	// start of each submit.
 	let activeInterruptReason: string | null = null;
 	// UI mirror of both engine queues, in enqueue order. Entries leave when
 	// the engine injects them into the transcript (message_end →
@@ -894,6 +896,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const ensureFailureVisibleAndPersisted = (failure: TerminalAssistantFailure): void => {
 		const message = failure.message;
 		if (!message || typeof message !== "object" || persistedAssistantMessages.has(message as object)) return;
+		// After a loop-guard interrupt the closing turn already says why the run
+		// stopped; the empty aborted failure message the abort leaves behind
+		// would only add "[aborted] Request was aborted." noise on top of it.
+		if (activeInterruptReason !== null && isEmptyAbortedAssistantMessage(message)) return;
 		appendAssistantTurn(message);
 		emit({ type: "message_end", message });
 	};
@@ -1273,6 +1279,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						recordedAt: eventAt,
 					});
 				}
+			}
+			// While a loop-guard interrupt is active its closing message has
+			// already been shown; the aborted follow-up calls the abort leaves
+			// behind carry no content and would render as "[aborted] Request was
+			// aborted." noise, so drop them from the live transcript the same way
+			// persistence does.
+			if (
+				activeInterruptReason !== null &&
+				publicEvent?.type === "message_end" &&
+				isEmptyAbortedAssistantMessage(publicEvent.message)
+			) {
+				return;
 			}
 			if (publicEvent) emit(publicEvent);
 			if (publicEvent?.type === "message_update") {
@@ -2154,6 +2172,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					await finalizeAskUserInterview(askUserPolicy, "turn_finished", currentToolInvokeOptions());
 				}
 				streaming = false;
+				if (activeInterruptReason !== null) {
+					// The loop-guard cancel showed its closing message live; persist
+					// the durable closing turn only now, after the aborted run's
+					// in-flight tool results have all landed, so the ledger replays
+					// as tool_calls → tool_results → closing text.
+					appendAssistantTurn(noticeMessage(activeInterruptReason));
+					activeInterruptReason = null;
+				}
 				currentPendingSkillPolicy = priorPendingSkillPolicy;
 				currentAskUserPolicy = priorAskUserPolicy;
 				activeUserTurnId = null;
@@ -2174,14 +2200,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			clearQueuedMirror();
 			const interruptReason = options?.reason?.trim();
 			if (wasStreaming && interruptReason) {
-				// System-initiated interrupt (loop guard): replace the empty aborted
-				// turn with a durable, visible assistant message stating why the turn
-				// stopped. `activeInterruptReason` then suppresses the empty aborted
-				// message the abort below leaves behind.
+				// System-initiated interrupt (loop guard): show the stop reason
+				// immediately, but persist the durable closing turn only when the
+				// run settles (submit's finally). The abort below still lets the
+				// in-flight tool results land; persisting here would interleave an
+				// assistant turn between a tool-call message and its results, which
+				// strict chat templates reject on replay. `activeInterruptReason`
+				// meanwhile suppresses the empty aborted messages the abort leaves
+				// behind, in both the ledger and the live transcript.
 				activeInterruptReason = interruptReason;
-				const message = noticeMessage(interruptReason);
-				appendAssistantTurn(message);
-				emit({ type: "message_end", message });
+				emit({ type: "message_end", message: noticeMessage(interruptReason) });
 			}
 			runtime?.agent.abort();
 			if (wasStreaming && !interruptReason) {

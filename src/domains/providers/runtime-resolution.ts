@@ -1,3 +1,4 @@
+import { runOverrides } from "../../core/run-overrides.js";
 import { targetRequiresAuth } from "./auth/index.js";
 import { getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
@@ -571,13 +572,12 @@ export function resolveContextWindowDetails(
 		source = "descriptor-default";
 	}
 
-	const envMaxTokensVal = process.env.CLIO_MAX_CONTEXT_TOKENS;
-	if (envMaxTokensVal) {
-		const envMaxTokens = Number(envMaxTokensVal);
-		if (Number.isInteger(envMaxTokens) && envMaxTokens > 0) {
-			effective = envMaxTokens;
-			source = "target-override";
-		}
+	// One-run CLI override (clio run --max-context-tokens), delivered over the
+	// run-overrides transport; see core/run-overrides.ts.
+	const overrideMaxContextTokens = runOverrides().maxContextTokens;
+	if (overrideMaxContextTokens !== undefined) {
+		effective = overrideMaxContextTokens;
+		source = "target-override";
 	}
 
 	let warning: string | null = null;

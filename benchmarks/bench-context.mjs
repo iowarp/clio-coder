@@ -206,7 +206,7 @@ function runCli(cli, args, cwd) {
 	return new Promise((resolve) => {
 		const child = spawn(command, finalArgs, {
 			cwd,
-			env: { ...process.env, CLIO_NO_UPDATE_NOTIFIER: "1" },
+			env: { ...process.env },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let stdout = "";

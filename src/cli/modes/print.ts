@@ -1,4 +1,5 @@
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import { withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
 	type SkillActivation,
@@ -7,7 +8,6 @@ import {
 import { ToolNames } from "../../core/tool-names.js";
 import { openLedger } from "../../domains/dispatch/state.js";
 import type { RunKind, RunOutcome, RunReceiptDraft, ToolCallStat } from "../../domains/dispatch/types.js";
-import { CLIO_SAMPLING_OVERRIDES_ENV } from "../../engine/apis/sampling-overrides.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { type RunUsageSummary, sumRunUsage } from "../../interactive/chat-loop-messages.js";
@@ -303,10 +303,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		result = resultFromEvent(event, result);
 	});
 
-	const previousSamplingOverride = process.env[CLIO_SAMPLING_OVERRIDES_ENV];
-	if (options.sampling && Object.keys(options.sampling).length > 0) {
-		process.env[CLIO_SAMPLING_OVERRIDES_ENV] = JSON.stringify(options.sampling);
-	}
 	let cleanupSteer: (() => void) | undefined;
 	if (options.steerChannel) {
 		cleanupSteer = setupSteerChannel(options.steerChannel, (line) => {
@@ -324,13 +320,18 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				? { pendingSkillRequests: options.pendingSkillRequests }
 				: {}),
 		};
-		await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
+		// Sampling flags ride the scoped run-overrides transport for the turn;
+		// see core/run-overrides.ts.
+		await withRunOverrides(
+			options.sampling && Object.keys(options.sampling).length > 0 ? { sampling: { ...options.sampling } } : {},
+			async () => {
+				await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
+			},
+		);
 	} finally {
 		if (cleanupSteer) {
 			cleanupSteer();
 		}
-		if (previousSamplingOverride === undefined) delete process.env[CLIO_SAMPLING_OVERRIDES_ENV];
-		else process.env[CLIO_SAMPLING_OVERRIDES_ENV] = previousSamplingOverride;
 		unsubscribe();
 	}
 

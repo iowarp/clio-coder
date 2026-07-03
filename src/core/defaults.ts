@@ -6,6 +6,7 @@
 
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { GUARDRAIL_DEFAULTS, type GuardrailValues } from "./guardrails.js";
 
 export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 export type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -215,6 +216,10 @@ export const DEFAULT_SETTINGS = {
 		baseDelayMs: 2000,
 		maxDelayMs: 60000,
 	} as RetrySettings,
+	// Numeric backstops that bound runaway agent behavior. Settings are the
+	// primary home; each value also has a per-process env override for CI and
+	// one-off experiments (core/guardrails.ts documents both).
+	guardrails: { ...GUARDRAIL_DEFAULTS } as GuardrailValues,
 };
 
 export type DefaultSettings = typeof DEFAULT_SETTINGS;
@@ -416,4 +421,21 @@ retry:
   maxRetries: 3
   baseDelayMs: 2000
   maxDelayMs: 60000
+
+# Guardrails: numeric backstops that bound runaway agent behavior.
+#   turnToolCallBudget          orchestrator per-turn soft tool-call budget;
+#                               the hard interrupt ceiling sits 15 above it.
+#   workerToolCallCap           lifetime tool-call cap per dispatched worker run.
+#   maxDispatchRuns             dispatch run-ledger retention cap.
+#   readMaxBytes                per-call byte cap for the read tool.
+#   observationTurnBudgetBytes  shared per-turn byte pool for observation tools.
+# Each value also has a per-process env override (CLIO_TURN_TOOL_CALL_BUDGET,
+# CLIO_WORKER_TOOL_CALL_CAP, CLIO_MAX_RUNS, CLIO_READ_MAX_BYTES,
+# CLIO_OBSERVATION_TURN_BUDGET_BYTES) meant for CI and one-off experiments.
+guardrails:
+  turnToolCallBudget: 60
+  workerToolCallCap: 50
+  maxDispatchRuns: 1000
+  readMaxBytes: 51200
+  observationTurnBudgetBytes: 196608
 `;

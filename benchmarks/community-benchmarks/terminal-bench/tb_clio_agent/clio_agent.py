@@ -81,7 +81,6 @@ class ClioAgent(AbstractInstalledAgent):
     def _env(self) -> dict[str, str]:
         # Written into the container; install-clio.sh renders settings.yaml from these.
         return {
-            "CLIO_NO_UPDATE_NOTIFIER": "1",
             "CLIO_AUTONOMY": os.environ.get("CLIO_AUTONOMY", "full-auto"),
             "CLIO_MAIN_URL": os.environ.get("CLIO_MAIN_URL", "http://192.168.86.141:8080"),
             "CLIO_MAIN_MODEL": self._main_model,
