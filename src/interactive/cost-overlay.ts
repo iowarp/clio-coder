@@ -92,23 +92,29 @@ function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "mo
 	);
 }
 
-function cacheReadValue(cacheRead: number, apiCalls: number): string {
+// Cache read splits into a primary value and an optional per-request average
+// annotation, so the number joins the aligned column while the aside hangs
+// after it.
+function cacheReadValue(cacheRead: number, apiCalls: number): readonly [value: string, annotation?: string] {
 	if (apiCalls > 1 && cacheRead > 0) {
-		return `${formatTokens(cacheRead)} (avg/request ${formatTokens(Math.round(cacheRead / apiCalls))})`;
+		return [formatTokens(cacheRead), `(avg/request ${formatTokens(Math.round(cacheRead / apiCalls))})`];
 	}
-	return formatTokens(cacheRead);
+	return [formatTokens(cacheRead)];
 }
 
 // A block of key-value rows in the design-system grammar: a dim padded key and
-// a muted value. Values are right-aligned inside the block so the numbers line
-// up under one another.
-function kvBlock(entries: ReadonlyArray<readonly [string, string]>): string[] {
+// a muted value. Primary values are right-aligned inside the block so the
+// numbers line up under one another; an optional annotation renders dim after
+// its value and stays outside the alignment math, so a long aside never drags
+// the whole column right.
+function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): string[] {
 	const theme = clioTheme();
 	const keyWidth = entries.reduce((max, [key]) => Math.max(max, key.length), 0);
 	const valueWidth = entries.reduce((max, [, value]) => Math.max(max, value.length), 0);
-	return entries.map(
-		([key, value]) => `${theme.fg("dim", key.padEnd(keyWidth))}  ${theme.fg("muted", value.padStart(valueWidth))}`,
-	);
+	return entries.map(([key, value, annotation]) => {
+		const row = `${theme.fg("dim", key.padEnd(keyWidth))}  ${theme.fg("muted", value.padStart(valueWidth))}`;
+		return annotation ? `${row} ${theme.fg("dim", annotation)}` : row;
+	});
 }
 
 function summaryBlock(totalUsd: number, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
@@ -121,7 +127,7 @@ function summaryBlock(totalUsd: number, totalTokens: number, rows: ReadonlyArray
 		["input", formatTokens(totals.input)],
 		["output", formatTokens(totals.output)],
 		["reasoning", formatTokens(totals.reasoningTokens)],
-		["cache read", cacheReadValue(totals.cacheRead, totals.apiCalls)],
+		["cache read", ...cacheReadValue(totals.cacheRead, totals.apiCalls)],
 		["cache write", formatTokens(totals.cacheWrite)],
 		["processed", `${formatTokens(resolvedTotal)} tokens`],
 	]);
@@ -135,7 +141,7 @@ function modelBlock(row: CostRow): string[] {
 		["input", formatTokens(row.input)],
 		["output", formatTokens(row.output)],
 		["reasoning", formatTokens(row.reasoningTokens)],
-		["cache read", cacheReadValue(row.cacheRead, row.apiCalls)],
+		["cache read", ...cacheReadValue(row.cacheRead, row.apiCalls)],
 		["cache write", formatTokens(row.cacheWrite)],
 		["processed", `${formatTokens(row.tokens)} tokens`],
 	]);
