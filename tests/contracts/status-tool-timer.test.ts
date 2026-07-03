@@ -17,8 +17,9 @@ function drive(events: Array<[StatusInputEvent, number]>) {
 describe("status running-tool timer keys on the call's own start", () => {
 	it("counts elapsed from tool_execution_start, not from turn start", () => {
 		// Turn starts at 0; the tool starts at 10s; we render at 12s. The footer
-		// must show 2s (this call's runtime), never 12s (turn elapsed) — the exact
-		// phantom the incident showed as `running tool: grep · 19s`.
+		// must show 2.0s (this call's runtime under ten seconds now carries one
+		// decimal from formatCompactMs), never 12s (turn elapsed), which is the
+		// exact phantom the incident showed as `running tool: grep · 19s`.
 		const status = drive([
 			[{ type: "agent_start", messages: [] } as unknown as StatusInputEvent, 0],
 			[
@@ -30,10 +31,10 @@ describe("status running-tool timer keys on the call's own start", () => {
 		strictEqual(status.toolStartedAt, 10_000, "the call's own start is stamped");
 		const footer = resolveFooterVerb(status, 12_000, 120);
 		ok(footer?.text.includes("running tool: grep"), "names the running tool");
-		ok(footer?.text.includes("· 2s"), `footer shows the call's own 2s elapsed, got: ${footer?.text}`);
+		ok(footer?.text.includes("· 2.0s"), `footer shows the call's own 2.0s elapsed, got: ${footer?.text}`);
 		ok(!footer?.text.includes("12s"), "never shows turn-elapsed as tool-elapsed");
 		const inline = resolveInlineVerb(status, 12_000, 120);
-		ok(inline?.text.includes("· 2s"), `inline verb also shows the call's own elapsed, got: ${inline?.text}`);
+		ok(inline?.text.includes("· 2.0s"), `inline verb also shows the call's own elapsed, got: ${inline?.text}`);
 	});
 
 	it("stops showing a tool as running once the model resumes generating", () => {

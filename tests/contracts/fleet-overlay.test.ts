@@ -54,6 +54,16 @@ describe("fleet overlay", () => {
 		ok(body.includes("cost=$0.0012"));
 	});
 
+	it("renders costs at or above a cent with two decimals via the shared formatter", () => {
+		const body = formatFleetOverlayBodyLines(
+			snapshot({
+				totals: { inputTokens: 100, outputTokens: 42, totalTokens: 142, costUsd: 0.42, runtimeSeconds: 12 },
+			}),
+		).join("\n");
+		ok(body.includes("cost=$0.42"), `cost should read cents, got: ${body}`);
+		ok(!body.includes("$0.4200"), "the shared formatter drops the four-decimal fleet form");
+	});
+
 	it("states the cross-process limitation when no in-process rows exist", () => {
 		const body = formatFleetOverlayBodyLines(snapshot()).join("\n");
 		ok(body.includes("running (0)"));

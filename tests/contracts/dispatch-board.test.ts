@@ -10,6 +10,7 @@ import {
 	renderDispatchCard,
 	TASK_ISLAND_WIDTH,
 } from "../../src/interactive/dispatch-board.js";
+import { GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
 
@@ -78,6 +79,16 @@ describe("dispatch board card", () => {
 				strictEqual(visibleWidth(line), width, `width ${width}: line "${line}" should span ${width} columns`);
 			}
 		}
+	});
+
+	it("renders telemetry token counts through the compact footer formatter", () => {
+		const sgr = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
+		const stripped = renderDispatchCard(makeRow({ inputTokens: 12_000, outputTokens: 3_000, tokenCount: 15_000 }), 76)
+			.join("\n")
+			.replace(sgr, "");
+		ok(stripped.includes(`${GLYPH.up} 12k`), `input should read compact, got: ${stripped}`);
+		ok(stripped.includes(`${GLYPH.down} 3k`), `output should read compact, got: ${stripped}`);
+		ok(stripped.includes("Total: 15k"), `total should read compact, got: ${stripped}`);
 	});
 
 	it("renders a compact terminal detail line for failed, dead, and aborted cards", () => {

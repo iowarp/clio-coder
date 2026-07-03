@@ -13,7 +13,7 @@
  */
 
 import { wrapTextWithAnsi } from "../../engine/tui.js";
-import { clioTheme, GLYPH } from "../theme/index.js";
+import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
 import { tryRenderJson, tryRenderXml } from "./structured.js";
 
@@ -138,15 +138,17 @@ function displayArg(toolName: string, value: string): string {
 	return toolName === "bash" ? stripShellWrapperForDisplay(value) : value;
 }
 
-function formatDurationMs(durationMs: number | undefined): string | null {
+/**
+ * Optional-duration guard around the single duration formatter. formatCompactMs
+ * is the one formatter for elapsed time, but these call sites carry a
+ * `number | undefined` that may be missing, non-finite, or negative and must
+ * then omit the ` · <dur>` segment entirely. Returns null in those cases and
+ * delegates every real value to formatCompactMs, so durations render as
+ * `860ms`, `4.2s`, `42s`, and `1m36s` with no zero padding on the seconds.
+ */
+function optionalCompactMs(durationMs: number | undefined): string | null {
 	if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) return null;
-	if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
-	const seconds = durationMs / 1000;
-	if (seconds < 10) return `${seconds.toFixed(1)}s`;
-	if (seconds < 60) return `${Math.round(seconds)}s`;
-	const minutes = Math.floor(seconds / 60);
-	const rest = Math.round(seconds % 60);
-	return `${minutes}m${rest.toString().padStart(2, "0")}s`;
+	return formatCompactMs(durationMs);
 }
 
 function bashExitCodeFromResult(result: unknown): string | null {
@@ -363,7 +365,7 @@ interface StatusMeta {
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
-	const duration = formatDurationMs(meta.durationMs);
+	const duration = optionalCompactMs(meta.durationMs);
 	const durationSuffix = duration ? dim(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
 	const exitSuffix = meta.exitCode ? dim(` (exit ${meta.exitCode})`) : "";
@@ -468,7 +470,7 @@ function sublineLine(call: ToolExecutionStart | ToolExecutionFinished, status: H
 		const tail = ledgerTail(finished);
 		return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${tail.facts}${statusGlyph(status, meta)}${tail.offload}`;
 	}
-	const elapsed = formatDurationMs("elapsedMs" in call ? call.elapsedMs : undefined);
+	const elapsed = optionalCompactMs("elapsedMs" in call ? call.elapsedMs : undefined);
 	const running = elapsed !== null ? dim(` · ${elapsed}`) : "";
 	return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${running}`;
 }
@@ -856,7 +858,7 @@ export function renderToolStreamingExecution(call: ToolExecutionStart, width: nu
 	} else {
 		out.push(...renderOutputRows(partialOutput, width, false, STREAMING_RESULT_ROW_LIMIT));
 	}
-	const elapsed = formatDurationMs(call.elapsedMs);
+	const elapsed = optionalCompactMs(call.elapsedMs);
 	out.push(...indentAndWrap(dim(elapsed !== null ? `(running... ${elapsed})` : "(running...)"), width, false));
 	return out;
 }

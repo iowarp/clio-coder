@@ -5,6 +5,7 @@ import type { ObservabilityContract } from "../../src/domains/observability/inde
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
+import { abbreviateModelId } from "../../src/interactive/theme/index.js";
 import { buildWelcomeDashboardLines, deriveWelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
 
 const mockSettings: ClioSettings = {
@@ -105,6 +106,15 @@ describe("welcome-dashboard and footer integration tests", () => {
 		strictEqual(stats.toolProfile, "clio-policy");
 	});
 
+	it("abbreviates model ids by keeping whole dash-separated parts under 18 chars", () => {
+		// The version suffix must survive: keep parts while the joined result stays
+		// within 18 characters, then stop; a single oversized part is hard-clipped.
+		strictEqual(abbreviateModelId("claude-sonnet-5"), "claude-sonnet-5");
+		strictEqual(abbreviateModelId("claude-opus-4-8"), "claude-opus-4-8");
+		strictEqual(abbreviateModelId("qwen3-coder-30b-a3b-instruct"), "qwen3-coder-30b");
+		strictEqual(abbreviateModelId("verylongsinglemodelidentifierwithoutdashes").length, 18);
+	});
+
 	it("formats welcome dashboard lines with correct components in wide mode", () => {
 		const stats = deriveWelcomeDashboardStats({
 			providers: mockProviders,
@@ -119,6 +129,9 @@ describe("welcome-dashboard and footer integration tests", () => {
 		ok(joined.includes("Context:"));
 		ok(joined.includes("Config:"));
 		ok(joined.includes("Hint:"));
+		// abbreviateModelId now keeps whole dash-separated parts under 18 chars,
+		// so the version suffix survives instead of being clipped to "gemini-3.5".
+		ok(joined.includes("gemini-3.5-flash"), `model label should keep its version suffix, got: ${joined}`);
 	});
 
 	it("renders every framed line at exactly the requested width (border alignment)", () => {

@@ -1,3 +1,10 @@
+/**
+ * Abbreviate a wire model id for chips and dashboards without amputating a
+ * version suffix. Whole dash-separated parts are kept while the joined result
+ * stays within 18 characters, so `claude-sonnet-5` and `claude-opus-4-8`
+ * survive intact and `qwen3-coder-30b-a3b-instruct` collapses to
+ * `qwen3-coder-30b`. A single part longer than 18 characters is hard-clipped.
+ */
 export function abbreviateModelId(modelId: string | null | undefined): string {
 	const base = (modelId ?? "").trim().split("/").filter(Boolean).pop() ?? "";
 	if (base.length === 0) return "model";
@@ -6,10 +13,11 @@ export function abbreviateModelId(modelId: string | null | undefined): string {
 	const kept: string[] = [];
 	for (const part of parts) {
 		const next = [...kept, part].join("-");
-		if (kept.length >= 2 && next.length > 14) break;
+		if (kept.length > 0 && next.length > 18) break;
 		kept.push(part);
 	}
-	return kept.length > 0 ? kept.join("-") : base;
+	const joined = kept.join("-");
+	return joined.length > 18 ? joined.slice(0, 18) : joined;
 }
 
 /**

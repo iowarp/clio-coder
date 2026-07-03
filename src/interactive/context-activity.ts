@@ -7,7 +7,7 @@ import {
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
-import { type ClioTheme, clioTheme, GLYPH, spinnerFrame } from "./theme/index.js";
+import { type ClioTheme, clioTheme, formatCompactMs, GLYPH, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
 	kind: ContextActivityKind;
@@ -64,12 +64,6 @@ function isContextActivityPayload(value: unknown): value is ContextActivityPaylo
 function padAnsi(text: string, width: number): string {
 	const clipped = truncateToWidth(text, width, "", true);
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-}
-
-function formatElapsed(startedAtMs: number, now: number): string {
-	const elapsed = Math.max(0, now - startedAtMs);
-	if (elapsed < 1000) return `${Math.round(elapsed)}ms`;
-	return `${(elapsed / 1000).toFixed(elapsed < 10_000 ? 1 : 0)}s`;
 }
 
 function phaseIndex(phase: ContextActivityPhase): number {
@@ -132,7 +126,8 @@ export function formatContextActivityIslandLines(
 	const bodyWidth = Math.max(1, width - 4);
 	const title =
 		activity.kind === "context-init" ? "Context Init" : activity.kind === "compaction" ? "Context Compact" : "Context";
-	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "•")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "•")} ${theme.fg("info", formatElapsed(activity.startedAtMs, activity.completedAtMs ?? now))}`;
+	const elapsedMs = Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs);
+	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "•")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "•")} ${theme.fg("info", formatCompactMs(elapsedMs))}`;
 	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));
 	const percent = `${Math.round(activityProgress(activity) * 100)}%`.padStart(4);
 	const progressLine = `${progressBar(theme, activity, barWidth)} ${theme.fg("dim", percent)}`;
