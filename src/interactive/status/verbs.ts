@@ -20,7 +20,11 @@ export function formatStatusElapsed(elapsedMs: number): string {
 }
 
 function elapsedSince(status: AgentStatus, now: number): string {
-	return formatStatusElapsed(Math.max(0, now - status.since));
+	// A running tool times from its own start, not from turn start, so the
+	// footer never shows turn-elapsed as tool-elapsed.
+	const from =
+		status.phase === "tool_running" && status.toolStartedAt !== undefined ? status.toolStartedAt : status.since;
+	return formatStatusElapsed(Math.max(0, now - from));
 }
 
 function noProgressSince(status: AgentStatus, now: number): string {

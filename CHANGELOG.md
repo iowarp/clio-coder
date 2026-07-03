@@ -257,6 +257,19 @@ and grep/find answer tree visibility from a single ignore policy.
   canonical call fingerprint through an after-tool touchpoint (no threading of
   result bodies through the middleware contract); a call that only ever errored
   gets no false "already succeeded" claim.
+- **TUI ledger: blocked tool calls settle, and the running-tool timer owns its
+  start.** In the loop-guard incident the TUI showed a blocked grep as a live
+  `· 8.3s` line that never settled while the status spinner read
+  `Running tool: grep · 19s` — both timers counting time that was not this
+  call's runtime, and one call left orphaned while an identical one settled
+  normally. A tool call whose `tool_execution_end` never arrives (admission
+  block, mid-batch abort, or a model that reuses a tool-call id) now settles to
+  the same error line grammar as any failure (`✗ · <its own ms>`): the ledger
+  settles the orphan when the run ends or when the id is reused, never leaving a
+  counting line. The status footer's `running tool · Ns` timer now counts from
+  the call's own `tool_execution_start` rather than from turn start, and the
+  running-tool spinner clears the moment the model resumes generating, so it
+  never claims a tool is running while nothing executes.
 - **Bash can no longer create files outside the session workspace unnoticed.**
   A full-auto battery run recorded the escape: with the session cwd in a
   fixture copy, `mkdir -p /abs/path && cd /abs/path` built a whole project at

@@ -437,6 +437,25 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	const now = (): number => options.now?.() ?? Date.now();
 
+	/**
+	 * Force an in-flight tool segment to a settled error line. A call blocked at
+	 * admission (loop guard, safety) or one whose `tool_execution_end` never
+	 * arrives (aborted mid-batch, a model that reuses a tool-call id) would
+	 * otherwise stay a counting `· N.Ns` running line forever. Settling it with
+	 * its OWN elapsed gives it the same visual grammar as any other error
+	 * (`✗ · <ms>`), so a blocked call reads like the failure it is.
+	 */
+	const settleUnfinishedToolSegment = (seg: ToolSegment): void => {
+		if (seg.finished) return;
+		seg.finished = true;
+		seg.isError = true;
+		if (seg.durationMs === undefined && seg.startedAtMs !== undefined) {
+			seg.durationMs = Math.max(1, now() - seg.startedAtMs);
+		}
+		if (seg.result === undefined) seg.result = "(no result: the call did not complete)";
+		seg.partialOutput = undefined;
+	};
+
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
 		const last = transcript[transcript.length - 1];
 		if (last && last.role === "assistant") return last;
@@ -620,6 +639,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			if (event.type === "tool_execution_start") {
 				const assistant = ensureAssistant();
+				// A model that reuses a tool-call id across calls would leave the
+				// prior same-id segment unsettled (its end matches the first segment
+				// on lookup). Settle any such orphan now so it does not linger as a
+				// counting running line while this call runs.
+				for (const seg of assistant.segments) {
+					if (seg.kind === "tool" && seg.id === event.toolCallId && !seg.finished) settleUnfinishedToolSegment(seg);
+				}
 				// Compact resource reads (SKILL.md, CLIO.md, AGENTS.md, docs/) stay
 				// collapsed to one labeled line until explicitly expanded.
 				const expanded = assistant.pending === false && classifyResourceRead(event.toolName, event.args) === null;
@@ -723,9 +749,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			if (event.type === "agent_end") {
 				const assistant = transcript[transcript.length - 1];
-				if (assistant && assistant.role === "assistant" && assistant.pending) {
-					assistant.pending = false;
-					assistant.statusLine = null;
+				if (assistant && assistant.role === "assistant") {
+					// The run is over: no tool can still be executing. Settle any tool
+					// segment whose `tool_execution_end` never arrived (blocked at
+					// admission, or cut off by an abort) so the ledger never leaves a
+					// running line counting past the turn's end.
+					for (const seg of assistant.segments) {
+						if (seg.kind === "tool" && !seg.finished) settleUnfinishedToolSegment(seg);
+					}
+					if (assistant.pending) {
+						assistant.pending = false;
+						assistant.statusLine = null;
+					}
 					markDirty();
 				}
 			}
