@@ -4,7 +4,10 @@ import { describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
-import { buildSlashAutocompleteCommands } from "../../src/interactive/slash-autocomplete.js";
+import {
+	buildSlashAutocompleteCommands,
+	createSlashCommandAutocompleteProvider,
+} from "../../src/interactive/slash-autocomplete.js";
 import {
 	BUILTIN_SLASH_COMMANDS,
 	commandReference,
@@ -533,6 +536,23 @@ describe("contracts/slash-spec", () => {
 			["--tool-profile science-local"],
 		);
 		strictEqual(await run?.getArgumentCompletions?.("--target "), null, "an open flag value never completes");
+	});
+
+	it("completes arguments for alias spellings and preserves the typed alias on accept", async () => {
+		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
+		const line = "/ctx init --rew";
+		const suggestions = await provider.getSuggestions([line], 0, line.length, {
+			signal: new AbortController().signal,
+		});
+		deepStrictEqual(
+			suggestions?.items.map((item) => item.value),
+			["init --rewrite"],
+			"/ctx completes exactly like /context",
+		);
+		const first = suggestions?.items[0];
+		ok(first, "the alias invocation yields a completion to accept");
+		const applied = provider.applyCompletion([line], 0, line.length, first, suggestions?.prefix ?? "");
+		strictEqual(applied.lines[0], "/ctx init --rewrite", "accepting keeps the user's alias spelling");
 	});
 
 	it("never completes inside free rest text", async () => {
