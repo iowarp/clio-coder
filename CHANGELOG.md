@@ -123,9 +123,9 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
-- **Battletest harness moved to local dev scratch.** The battletest release
-  suites and legacy oracle moved out of the repository to gitignored
-  `.superpowers/battletest/` local dev scratch.
+- **Battletest harness moved out of the repository.** The battletest release
+  suites and legacy oracle now live in gitignored `.superpowers/battletest/`
+  local dev scratch.
 - **Registry-owned tool prompt hints.** The per-tool guidance sentences in the
   session Tool Contract (code_nav, context, dispatch, ask_user) moved verbatim
   from a compiler if-chain onto the tool registry metadata

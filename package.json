@@ -88,7 +88,6 @@
 		"bench:swe": "python3 benchmarks/community-benchmarks/swe-bench-lite/swebench_clio.py",
 		"bench:scicode": "python3 benchmarks/community-benchmarks/scicode/scicode_clio.py",
 		"bench:tb": "python3 benchmarks/community-benchmarks/clio_fleet.py",
-		"bench:battletest": "python3 benchmarks/battletest/battletest_clio.py",
 		"install:local": "bash scripts/install-local.sh",
 		"uninstall:local": "bash scripts/uninstall-local.sh",
 		"hooks:install": "bash scripts/install-hooks.sh",
