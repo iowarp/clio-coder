@@ -5,7 +5,7 @@ import type { ObservabilityContract } from "../../src/domains/observability/inde
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
-import { abbreviateModelId } from "../../src/interactive/theme/index.js";
+import { abbreviateModelId, clioTheme } from "../../src/interactive/theme/index.js";
 import { buildWelcomeDashboardLines, deriveWelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
 
 const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
@@ -170,6 +170,23 @@ describe("welcome-dashboard and footer integration tests", () => {
 			const top = stripAnsi(buildWelcomeDashboardLines(stats, width)[0] ?? "");
 			match(top, /^┌─ >C_ Clio Coder v[^ ]+ ─+┐$/, `width ${width}: top border "${top}"`);
 		}
+	});
+
+	it("paints the title wordmark as a logotype: dim scaffolding around a bold accent C", () => {
+		const stats = deriveWelcomeDashboardStats({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+		});
+
+		const theme = clioTheme();
+		const logotype = `${theme.fg("dim", ">")}${theme.style("accent", "C", { bold: true })}${theme.fg("dim", "_")}`;
+		const top = buildWelcomeDashboardLines(stats, 80)[0] ?? "";
+		ok(top.includes(logotype), `the title should open with the composed logotype, got "${top}"`);
+		ok(
+			top.includes(theme.style("title", "Clio Coder", { bold: true })),
+			"the product name next to the logotype stays bold title",
+		);
 	});
 
 	it("truncates the width-80 hint row with a trailing ellipsis instead of a mid-word cut", () => {

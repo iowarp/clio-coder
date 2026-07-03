@@ -588,6 +588,28 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		strictEqual(headerRow.split("│").length, 4, `wide header should have four columns, got "${headerRow}"`);
 	});
 
+	it("paints the dashboard header wordmark as a logotype: dim scaffolding around a bold accent C", () => {
+		const lines = renderFooterStatusLines(
+			expandedRenderState({
+				workspace,
+				session,
+				context,
+				agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+				status: { ...status, phase: "idle" },
+			}),
+			120,
+		);
+		const header = lines.find((line) => strip(line).includes("CLIO DASHBOARD")) ?? "";
+		const theme = clioTheme();
+		const logotype = `${theme.fg("dim", ">")}${theme.style("accent", "C", { bold: true })}${theme.fg("dim", "_")}`;
+		ok(header.includes(logotype), `the dashboard header should open with the composed logotype, got "${header}"`);
+		ok(
+			header.includes(theme.style("title", "CLIO DASHBOARD", { bold: true })),
+			"the header label next to the logotype stays bold title",
+		);
+		ok(strip(header).includes(">C_ CLIO DASHBOARD"), "the stripped header keeps the plain wordmark for width math");
+	});
+
 	it("keeps expanded context segmented and removes old awkward labels", () => {
 		const joined = strip(
 			renderFooterStatusLines(

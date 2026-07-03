@@ -14,7 +14,7 @@ import {
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
-import { abbreviateModelId, type ClioTheme, clioTheme, frame, GLYPH } from "./theme/index.js";
+import { abbreviateModelId, brandMark, type ClioTheme, clioTheme, frame } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	providers: ProvidersContract;
@@ -235,9 +235,9 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	const safeWidth = Math.max(1, width);
 	const contentWidth = safeWidth - 4;
 
-	// The whole styled title (brand glyph, bold name, dim version) is handed to
+	// The whole styled title (logotype, bold name, dim version) is handed to
 	// the canonical island frame, which places it with one space on each side.
-	const title = `${theme.fg("frame", GLYPH.brand)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
+	const title = `${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${readClioVersion()}`)}`;
 
 	const targetVal = `${theme.fg("accent", stats.targetLabel)}/${abbreviateModelId(stats.modelLabel)}`;
 	const thinkVal = `think ${theme.fg("reason", stats.thinkingLevel)}`;
