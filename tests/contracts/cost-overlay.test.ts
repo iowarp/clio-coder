@@ -1,4 +1,4 @@
-import { ok } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { type CostRow, formatCostOverlayBodyLines } from "../../src/interactive/cost-overlay.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
@@ -73,6 +73,26 @@ describe("cost overlay", () => {
 	it("marks a zero-cost model block as local", () => {
 		const body = strip(formatCostOverlayBodyLines(0, 5_000, [row({ usd: 0 })], 80).join("\n"));
 		ok(body.includes("$0.00 local"), `a zero-cost row reads as local, got: ${body}`);
+	});
+
+	it("aligns primary values in a tight column and hangs the cache-read annotation dim after the number", () => {
+		const lines = formatCostOverlayBodyLines(1.5, 8_000, [row({ cacheRead: 20_000, apiCalls: 7 })], 80);
+		const body = lines.map(strip);
+		const endOf = (label: string, value: string): number => {
+			const line = body.find((candidate) => candidate.startsWith(label)) ?? "";
+			ok(line.includes(value), `the "${label}" row should carry "${value}", got: ${line}`);
+			return line.indexOf(value) + value.length;
+		};
+		const cacheReadEnd = endOf("cache read", "20,000");
+		strictEqual(endOf("cost", "$1.50"), cacheReadEnd, "the aligned column is computed over primary values only");
+		strictEqual(endOf("turns", "3"), cacheReadEnd, "every primary value shares the tight column");
+		const costLine = body.find((candidate) => candidate.startsWith("cost")) ?? "";
+		strictEqual(costLine.length, cacheReadEnd, "no row is dragged right to make room for the annotation");
+		const cacheReadLine = lines.find((line) => strip(line).includes("avg/request")) ?? "";
+		ok(
+			cacheReadLine.includes(theme.fg("dim", "(avg/request 2,857)")),
+			`the annotation reads dim after the number, got: ${cacheReadLine}`,
+		);
 	});
 
 	it("styles the empty state instead of leaving it bare", () => {
