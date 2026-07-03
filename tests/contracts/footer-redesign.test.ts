@@ -636,6 +636,56 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		ok(activityText.includes("turn"), `ACTIVITY should include turn metrics, got "${activityText}"`);
 		ok(activityText.includes("cost"), `ACTIVITY should include cost, got "${activityText}"`);
 	});
+
+	it("paints all four quadrant tags with the identical bold accentDeep sequence", () => {
+		const lines = renderFooterStatusLines(
+			expandedRenderState({
+				workspace,
+				session,
+				context,
+				agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+				status: { ...status, phase: "idle" },
+			}),
+			134,
+		);
+		const header = lines.find((line) => strip(line).includes("WORKSPACE")) ?? "";
+		// The bold accentDeep opener the tag paints; slice it off a marker render so
+		// the expectation carries no hand-written escape bytes.
+		const boldAccentDeep = theme.style("accentDeep", " ", { bold: true }).split(" ")[0] ?? "";
+		const tagSequence = (label: string): string => header.match(new RegExp(`(${ESC}\\[[0-9;]*m)${label}`))?.[1] ?? "";
+		for (const label of ["WORKSPACE", "SESSION", "CONTEXT", "ACTIVITY"]) {
+			strictEqual(tagSequence(label), boldAccentDeep, `${label} tag should render in bold accentDeep`);
+		}
+	});
+
+	it("keeps the idle dashboard free of action orange", () => {
+		const joined = renderFooterStatusLines(
+			expandedRenderState({
+				workspace,
+				session,
+				context,
+				agent: { ...agent, statusText: null, dispatchSummary: null, dispatchRows: [], toolTally: "none · 0✗" },
+				status: { ...status, phase: "idle" },
+			}),
+			134,
+		).join("\n");
+		ok(
+			!joined.includes(theme.fgSequence("action")),
+			`idle dashboard must contain no action orange, got "${strip(joined)}"`,
+		);
+	});
+
+	it("never paints a dashboard value in the accentDeep structure color", () => {
+		// accentDeep only ever appears as the bold section tag, so its fg-only
+		// (value) sequence must not survive anywhere in the rendered dashboard.
+		const joined = renderFooterStatusLines(expandedRenderState({ workspace, session, context, agent, status }), 134).join(
+			"\n",
+		);
+		ok(
+			!joined.includes(theme.fgSequence("accentDeep")),
+			`accentDeep is a structure color and must not paint any value, got "${strip(joined)}"`,
+		);
+	});
 });
 
 function expandedRenderState(parts: {

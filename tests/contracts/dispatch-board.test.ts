@@ -6,6 +6,7 @@ import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	createDispatchBoardStore,
 	type DispatchBoardRow,
+	dispatchStatusPresentation,
 	formatTaskIslandLines,
 	renderDispatchCard,
 	TASK_ISLAND_WIDTH,
@@ -123,6 +124,32 @@ describe("dispatch board card", () => {
 				strictEqual(visibleWidth(line), 76, `line "${line}" should span 76 columns`);
 			}
 		}
+	});
+});
+
+describe("dispatch status presentation", () => {
+	it("joins running and queued fleet work under the action token", () => {
+		// Running fleet work is Clio acting, so it shares the action orange with
+		// queued work rather than the old teal-running/orange-queued split.
+		strictEqual(dispatchStatusPresentation("running").token, "action");
+		strictEqual(dispatchStatusPresentation("enqueued").token, "action");
+	});
+
+	it("keeps every terminal and attention outcome in its own status token", () => {
+		strictEqual(dispatchStatusPresentation("completed").token, "success");
+		strictEqual(dispatchStatusPresentation("failed").token, "error");
+		strictEqual(dispatchStatusPresentation("dead").token, "error");
+		strictEqual(dispatchStatusPresentation("aborted").token, "dim");
+		strictEqual(dispatchStatusPresentation("stale").token, "warning");
+	});
+
+	it("carries the section 5 glyph vocabulary for each status", () => {
+		strictEqual(dispatchStatusPresentation("running").glyph, GLYPH.running);
+		strictEqual(dispatchStatusPresentation("enqueued").glyph, GLYPH.queued);
+		strictEqual(dispatchStatusPresentation("completed").glyph, GLYPH.ok);
+		strictEqual(dispatchStatusPresentation("failed").glyph, GLYPH.error);
+		strictEqual(dispatchStatusPresentation("aborted").glyph, GLYPH.cancelled);
+		strictEqual(dispatchStatusPresentation("stale").glyph, GLYPH.warnInline);
 	});
 });
 
