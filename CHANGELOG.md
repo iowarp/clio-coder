@@ -212,6 +212,13 @@ and grep/find answer tree visibility from a single ignore policy.
   visible.
 - **Spawn hygiene.** rg and fd run with an allowlisted environment, pinned
   cwd, a 30s wall-clock timeout, and SIGTERM-then-SIGKILL teardown.
+- **Bash spawn cost.** Every bash call used to source the login profile chain
+  (`/bin/bash -lc`): ~10ms per call on a lean profile and hundreds of
+  milliseconds with nvm/conda in it. The login environment is now captured
+  once per process and reused, so each call spawns a plain `bash -c` with the
+  profile-shaped PATH; the shell itself stays fresh per call (no state
+  bleed, unchanged kill and timeout semantics), and capture failure falls
+  back to the old per-call `-lc`.
 - **TUI ledger.** Finished tool calls collapse to one line carrying the call
   signature, outcome counts, bytes, duration, and the offload path when
   truncated; resource reads (SKILL.md, CLIO.md, AGENTS.md, docs/) stay
@@ -223,6 +230,21 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Bash can no longer create files outside the session workspace unnoticed.**
+  A full-auto battery run recorded the escape: with the session cwd in a
+  fixture copy, `mkdir -p /abs/path && cd /abs/path` built a whole project at
+  the clio-coder repo root, because write-target extraction knew redirects,
+  `tee`, `cp`/`mv`, and `sed -i` but not directory creation, and nothing
+  tracked `cd`. Extraction now covers `mkdir`/`touch` operands and `ln`
+  destinations, and any `cd`/`pushd` whose directory resolves outside the
+  workspace escalates the command through the same `system_modify` confirm
+  gate as an out-of-workspace write target (a `cd` outside re-bases every
+  relative path that follows it). The bash tool also pins its `cwd` argument
+  inside the session workspace in the tool itself, mirroring the admission
+  check, so a directly invoked tool cannot spawn outside either.
+  Inside-workspace commands are classified exactly as before. The
+  finish-contract inherits the same extraction, so directory creation now
+  counts as a turn mutation.
 - **Silent double-resident local models are dead.** The residency reconciler
   used to back off to observe-only whenever a resident model was not
   attributed to Clio in-process, so batteries and multi-process runs loaded

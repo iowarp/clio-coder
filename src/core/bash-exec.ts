@@ -45,12 +45,87 @@ export function buildToolEnv(): NodeJS.ProcessEnv {
 	return env;
 }
 
+// Login-profile sourcing is the dominant per-call spawn overhead: `-l`
+// re-reads /etc/profile and the user's profile chain on EVERY call (~10ms on
+// a lean profile, hundreds of ms with nvm/conda in it). The profile exists to
+// shape the environment, so capture that environment once per process and
+// spawn every subsequent command as a plain `bash -c` with the snapshot. Each
+// call still gets a fresh shell — only the env composition is cached, so
+// there is no state bleed and cancellation semantics are untouched. When the
+// capture fails (profile error, timeout, no PATH), every call falls back to
+// the historical per-call `-lc`.
+const LOGIN_ENV_CAPTURE_TIMEOUT_MS = 10_000;
+
+let loginEnvCapture: Promise<NodeJS.ProcessEnv | null> | null = null;
+
+export function resetCachedLoginEnvForTests(): void {
+	loginEnvCapture = null;
+}
+
+/** NUL-delimited `env -0` output to an env map; null when unusable (no PATH). */
+export function parseNullDelimitedEnv(raw: string): NodeJS.ProcessEnv | null {
+	const env: NodeJS.ProcessEnv = {};
+	for (const entry of raw.split("\0")) {
+		if (entry.length === 0) continue;
+		const eq = entry.indexOf("=");
+		if (eq <= 0) continue;
+		env[entry.slice(0, eq)] = entry.slice(eq + 1);
+	}
+	return typeof env.PATH === "string" && env.PATH.length > 0 ? env : null;
+}
+
+function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
+	return new Promise((resolve) => {
+		let stdout = "";
+		let settled = false;
+		const finish = (value: NodeJS.ProcessEnv | null): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(value);
+		};
+		const child = spawn("/bin/bash", ["-lc", "env -0"], {
+			env: buildToolEnv(),
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+			finish(null);
+		}, LOGIN_ENV_CAPTURE_TIMEOUT_MS);
+		child.stdout?.on("data", (chunk: Buffer) => {
+			stdout += chunk.toString("utf8");
+		});
+		child.on("error", () => finish(null));
+		child.on("close", (code) => finish(code === 0 ? parseNullDelimitedEnv(stdout) : null));
+	});
+}
+
+interface BashSpawnPlan {
+	mode: "-c" | "-lc";
+	env: NodeJS.ProcessEnv;
+}
+
+async function bashSpawnPlan(): Promise<BashSpawnPlan> {
+	loginEnvCapture ??= captureLoginEnv();
+	const captured = await loginEnvCapture;
+	if (captured === null) return { mode: "-lc", env: buildToolEnv() };
+	// Captured (login-transformed) values win; keys added to process.env after
+	// the capture still flow through; the CLIO control keys are re-stripped
+	// last so they never reach the child from either source.
+	const env: NodeJS.ProcessEnv = { ...process.env, ...captured };
+	for (const key of CLIO_CONTROL_ENV_KEYS) {
+		Reflect.deleteProperty(env, key);
+	}
+	return { mode: "-c", env };
+}
+
 export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "stderr">): string {
 	const { stdout, stderr } = result;
 	return stderr.length > 0 ? `${stdout}${stdout.endsWith("\n") || stdout.length === 0 ? "" : "\n"}${stderr}` : stdout;
 }
 
-export function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
+export async function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
+	const plan = await bashSpawnPlan();
 	return new Promise((resolve) => {
 		const timeout = clampTimeoutMs(options.timeoutMs ?? 300_000);
 		let aborted = false;
@@ -64,9 +139,9 @@ export function runBashCommand(command: string, options: RunBashCommandOptions =
 		let outputBytes = 0;
 		let outputCapped = false;
 
-		const child = spawn("/bin/bash", ["-lc", command], {
+		const child = spawn("/bin/bash", [plan.mode, command], {
 			...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-			env: buildToolEnv(),
+			env: plan.env,
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		});

@@ -90,13 +90,15 @@ write(path=".clio/notes/session.md", content="# Session notes\n\n...")
 
 ## bash: run a shell command
 
-Executes a command via `/bin/bash -lc` and returns combined stdout and stderr. Sources: `src/tools/bash.ts`, `src/core/bash-exec.ts`.
+Executes a command in a fresh `/bin/bash` per call and returns combined stdout and stderr. The login environment is captured once per process (one `bash -lc 'env -0'`) and reused, so every call gets the profile-shaped PATH without re-sourcing the profile chain; when the capture fails the tool falls back to per-call `-lc`. Sources: `src/tools/bash.ts`, `src/core/bash-exec.ts`.
 
 Arguments:
 
 - `command` (required).
-- `cwd` (optional). Working directory.
+- `cwd` (optional). Working directory; resolved against the session workspace and rejected when it escapes it. The safety net blocks an escaping cwd at admission, and the tool enforces the same rule itself.
 - `timeout_ms` (optional). Default 300000 (5 minutes).
+
+Workspace containment: commands whose filesystem targets resolve outside the session workspace escalate to `system_modify` and ask for one-shot confirmation at every autonomy level (headless runs deny asks). Recognized targets are shell redirects, `tee`/`mkdir`/`touch` path operands, `cp`/`mv`/`ln` destinations, in-place `sed -i` operands, and any `cd`/`pushd` whose directory leaves the workspace, since a `cd` outside re-bases every relative path that follows it. Inside-workspace equivalents stay plain `execute` with no new prompts.
 
 Output shaping is tail-biased: the display keeps the LAST 16KB / 2000 lines, because the failing assertion, compiler error, and exit summary live at the end. Before truncating, the full output is spilled to the per-session scratch file and the appended note names the path; read it with offset/limit. A command producing more than 16MB of output is stopped with an error. A timeout or nonzero exit returns the shaped output plus a status line (`bash: command timed out after <ms>ms`, `bash: command failed (exit N)`).
 

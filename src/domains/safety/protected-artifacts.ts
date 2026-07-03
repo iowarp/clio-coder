@@ -183,10 +183,11 @@ export function detectValidationCommand(command: string): ValidationCommandDetec
 
 /**
  * Returns every path the command would write to: shell redirect targets
- * (`>`, `>>`), all path arguments to `tee`, the destination argument of `cp`
- * and `mv`, and the file operands of an in-place `sed -i` edit. Standard
- * descriptors like `/dev/null` and fd references like `&1` are filtered out so
- * callers only see real filesystem targets.
+ * (`>`, `>>`), all path arguments to `tee`, `mkdir`, and `touch`, the
+ * destination argument of `cp`, `mv`, and `ln`, and the file operands of an
+ * in-place `sed -i` edit. Standard descriptors like `/dev/null` and fd
+ * references like `&1` are filtered out so callers only see real filesystem
+ * targets.
  *
  * Used by the action classifier to escalate bash calls that write to a
  * system root or out-of-cwd path through the same confirmation gate as the
@@ -205,6 +206,29 @@ export function extractCommandWriteTargets(command: string): string[] {
 		collectInPlaceEditTargets(segment, targets);
 	}
 	return targets.filter(isInterestingWriteTarget);
+}
+
+/**
+ * Returns the directory each `cd`/`pushd` in the command targets. A bare
+ * `cd` (and `cd -`, whose OLDPWD is unset in a fresh shell) is reported as
+ * `~`: it goes to the user's home directory. The action classifier resolves
+ * these against the workspace root, because a `cd` outside the workspace
+ * re-bases every relative path that follows it — the laundering pattern the
+ * recorded escape used (`cd /abs/outside && python3 <<EOF ...` writing
+ * relative files outside the session workspace).
+ */
+export function extractCommandCdTargets(command: string): string[] {
+	const tokens = tokenizeShellLike(command);
+	const targets: string[] = [];
+	for (const segment of splitSegments(tokens)) {
+		const commandIndex = commandTokenIndex(segment);
+		if (commandIndex === null) continue;
+		const executable = basenameToken(segment[commandIndex]);
+		if (executable !== "cd" && executable !== "pushd") continue;
+		const target = pathArgs(segment, commandIndex).at(0);
+		targets.push(target ?? "~");
+	}
+	return targets;
 }
 
 /**
@@ -252,6 +276,20 @@ function collectInvokedWriteTargets(segment: ReadonlyArray<string>, out: string[
 	const executable = basenameToken(segment[cmdIndex]);
 	if (executable === "tee") {
 		for (const arg of pathArgs(segment, cmdIndex)) out.push(arg);
+		return;
+	}
+	// mkdir and touch create filesystem entries at every path operand. The
+	// recorded workspace escape (`mkdir -p /abs/outside && cd ...` in the
+	// skill-mastery app-idea battery) rode exactly this blind spot: redirects
+	// and tee were classified, directory creation was not.
+	if (executable === "mkdir" || executable === "touch") {
+		for (const arg of pathArgs(segment, cmdIndex)) out.push(arg);
+		return;
+	}
+	if (executable === "ln") {
+		const args = pathArgs(segment, cmdIndex);
+		const destination = args.at(-1);
+		if (args.length >= 2 && destination !== undefined) out.push(destination);
 		return;
 	}
 	if (executable === "cp" || executable === "mv") {

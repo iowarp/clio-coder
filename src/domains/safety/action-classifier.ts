@@ -1,6 +1,6 @@
 import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
-import { extractCommandWriteTargets } from "./protected-artifacts.js";
+import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -175,6 +175,21 @@ export function classify(call: ClassifierCall): Classification {
 				const decision = writePathClass(target, argCwd);
 				if (decision.cls === "system_modify") {
 					targetReasons.push(decision.reason ?? `bash-write-target: ${target}`);
+				}
+			}
+			// A `cd` outside the workspace re-bases every relative path after it,
+			// so static write-target extraction stops describing what the command
+			// touches. Escalate through the same system_modify confirm gate as an
+			// out-of-workspace write target; inside-workspace `cd` stays plain
+			// execute.
+			for (const target of extractCommandCdTargets(command)) {
+				if (target.startsWith("~")) {
+					targetReasons.push(`bash-cd-home-escape: ${target}`);
+					continue;
+				}
+				const abs = resolveCandidate(target, argCwd);
+				if (!isInsideCwd(abs)) {
+					targetReasons.push(`bash-cd-outside-workspace: ${abs}`);
 				}
 			}
 			if (targetReasons.length > 0) {

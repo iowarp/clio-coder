@@ -56,6 +56,41 @@ describe("contracts/safety", () => {
 		strictEqual(classify({ tool: "bash", args: { command: "sed -i 's/a/b/' src/x.ts" } }).actionClass, "execute");
 	});
 
+	it("escalates bash filesystem creation and cd outside the workspace (W5 containment)", () => {
+		// The recorded escape shape: mkdir with an absolute out-of-workspace path,
+		// then cd there so every relative write that follows lands outside the
+		// session workspace (skill-mastery app-idea battery, lab-notebook-cli).
+		const escapeShape = classify({
+			tool: "bash",
+			args: { command: "mkdir -p /srv/outside/proj && cd /srv/outside/proj" },
+		});
+		strictEqual(escapeShape.actionClass, "system_modify");
+		ok(
+			escapeShape.reasons.some((reason) => reason.includes("/srv/outside/proj")),
+			escapeShape.reasons.join("; "),
+		);
+
+		// Each convicted primitive alone.
+		strictEqual(classify({ tool: "bash", args: { command: "mkdir -p /srv/outside" } }).actionClass, "system_modify");
+		strictEqual(classify({ tool: "bash", args: { command: "touch /srv/outside/f" } }).actionClass, "system_modify");
+		const cdOut = classify({ tool: "bash", args: { command: "cd /srv/outside && python3 gen.py" } });
+		strictEqual(cdOut.actionClass, "system_modify");
+		ok(
+			cdOut.reasons.some((reason) => reason.startsWith("bash-cd-outside-workspace:")),
+			cdOut.reasons.join("; "),
+		);
+		// Relative laundering: cd .. leaves the workspace root.
+		strictEqual(classify({ tool: "bash", args: { command: "cd .. && mkdir proj" } }).actionClass, "system_modify");
+		// Bare cd goes to $HOME, outside the workspace.
+		strictEqual(classify({ tool: "bash", args: { command: "cd && ls" } }).actionClass, "system_modify");
+
+		// Inside-workspace equivalents stay plain execute: no new prompts for
+		// ordinary project work.
+		strictEqual(classify({ tool: "bash", args: { command: "mkdir -p src/generated" } }).actionClass, "execute");
+		strictEqual(classify({ tool: "bash", args: { command: "touch src/generated/.keep" } }).actionClass, "execute");
+		strictEqual(classify({ tool: "bash", args: { command: "cd tests && npm test" } }).actionClass, "execute");
+	});
+
 	it("engages when the turn mutated a file without validation evidence or a limitation", () => {
 		// Action-scoped: the edit receipt is the trigger, not the wording of the
 		// prompt or the assistant's "done".

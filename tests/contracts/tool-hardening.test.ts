@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { clampTimeoutMs } from "../../src/core/bash-exec.js";
+import { clampTimeoutMs, parseNullDelimitedEnv, runBashCommand } from "../../src/core/bash-exec.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
@@ -104,6 +104,115 @@ describe("contracts/tool-hardening bash tail-biased non-destructive output", () 
 		if (result.kind !== "ok") return;
 		strictEqual(result.output.trim(), "hello\nworld");
 		strictEqual((result.details as { resultSize?: unknown } | undefined)?.resultSize, undefined);
+	});
+});
+
+describe("contracts/tool-hardening bash cwd pinning (W5)", () => {
+	it("rejects an absolute cwd outside the workspace in the tool itself", async () => {
+		// Defense in depth: the safety net blocks this at admission, but a direct
+		// tool invocation must not reach spawn with an escaping cwd either.
+		const result = await bashTool.run({ command: "pwd", cwd: "/etc" }, undefined);
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.includes("escapes workspace root"), result.message);
+	});
+
+	it("rejects a relative cwd that resolves outside the workspace", async () => {
+		const result = await bashTool.run({ command: "pwd", cwd: ".." }, undefined);
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		ok(result.message.includes("escapes workspace root"), result.message);
+	});
+
+	it("resolves a relative in-workspace cwd and defaults to the workspace root", async () => {
+		const relative = await bashTool.run({ command: "pwd", cwd: "tests" }, undefined);
+		strictEqual(relative.kind, "ok");
+		if (relative.kind === "ok") strictEqual(relative.output.trim(), join(process.cwd(), "tests"));
+
+		const defaulted = await bashTool.run({ command: "pwd" }, undefined);
+		strictEqual(defaulted.kind, "ok");
+		if (defaulted.kind === "ok") strictEqual(defaulted.output.trim(), process.cwd());
+	});
+});
+
+describe("contracts/tool-hardening bash spawn env and shell freshness (W5)", () => {
+	afterEach(() => {
+		Reflect.deleteProperty(process.env, "CLIO_INTERACTIVE");
+		Reflect.deleteProperty(process.env, "CLIO_TEST_BLEED");
+	});
+
+	it("strips the CLIO control keys from the child environment", async () => {
+		process.env.CLIO_INTERACTIVE = "1";
+		const result = await runBashCommand("printenv CLIO_INTERACTIVE || printf unset");
+		strictEqual(result.exitCode, 0);
+		strictEqual(result.stdout, "unset");
+	});
+
+	it("gives every call a fresh shell: no state bleed between commands", async () => {
+		const first = await runBashCommand("export CLIO_TEST_BLEED=leaked; cd /tmp; umask 077");
+		strictEqual(first.exitCode, 0);
+		const second = await runBashCommand('printenv CLIO_TEST_BLEED || printf clean; printf ":"; pwd');
+		strictEqual(second.exitCode, 0);
+		ok(second.stdout.startsWith("clean:"), `shell state must not bleed: ${second.stdout}`);
+		ok(!second.stdout.includes("/tmp"), `cwd must reset per call: ${second.stdout}`);
+	});
+
+	it("runs commands without a TTY on stdout", async () => {
+		const result = await runBashCommand("if [ -t 1 ]; then echo tty; else echo notty; fi");
+		strictEqual(result.stdout.trim(), "notty");
+	});
+
+	it("parseNullDelimitedEnv parses NUL-separated entries and rejects captures without PATH", () => {
+		const parsed = parseNullDelimitedEnv("PATH=/usr/bin:/bin\0HOME=/home/u\0MULTI=line one\nline two\0");
+		ok(parsed !== null);
+		strictEqual(parsed?.PATH, "/usr/bin:/bin");
+		strictEqual(parsed?.MULTI, "line one\nline two");
+		strictEqual(parseNullDelimitedEnv("HOME=/home/u\0"), null);
+		strictEqual(parseNullDelimitedEnv(""), null);
+	});
+});
+
+describe("contracts/tool-hardening bash kill and cap semantics (W5)", () => {
+	it("timeout kills the whole process group, including a backgrounded grandchild", async () => {
+		const startedAt = Date.now();
+		const result = await runBashCommand("sleep 30 & echo child:$!; wait", { timeoutMs: 400 });
+		const elapsed = Date.now() - startedAt;
+		ok(result.timedOut, "must report the timeout");
+		ok(elapsed < 10_000, `must not wait for the 30s grandchild (took ${elapsed}ms)`);
+		const pidMatch = /child:(\d+)/.exec(result.stdout);
+		ok(pidMatch?.[1], `stdout must carry the grandchild pid: ${result.stdout}`);
+		const pid = Number(pidMatch?.[1]);
+		// SIGTERM delivery is asynchronous; give the group kill a moment.
+		let dead = false;
+		for (let attempt = 0; attempt < 30; attempt += 1) {
+			try {
+				process.kill(pid, 0);
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			} catch {
+				dead = true;
+				break;
+			}
+		}
+		ok(dead, `grandchild ${pid} must be dead after the group kill`);
+	});
+
+	it("abort signal stops the command and reports aborted", async () => {
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 150);
+		const startedAt = Date.now();
+		const result = await runBashCommand("sleep 30", { signal: controller.signal });
+		ok(result.aborted, "must report aborted");
+		ok(Date.now() - startedAt < 10_000, "abort must not wait out the command");
+	});
+
+	it("kills a runaway command at the 16MB hard output cap", async () => {
+		const startedAt = Date.now();
+		const result = await runBashCommand("yes AAAAAAAAAAAAAAAA", { timeoutMs: 60_000 });
+		ok(result.outputCapped, "must report the output cap");
+		ok(!result.timedOut, "the cap, not the timeout, must stop the command");
+		ok(Date.now() - startedAt < 30_000, "the kill must be prompt");
+		const bytes = Buffer.byteLength(result.stdout, "utf8");
+		ok(bytes <= 16 * 1024 * 1024, `captured output must respect the cap (${bytes} bytes)`);
 	});
 });
 

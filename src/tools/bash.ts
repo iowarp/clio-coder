@@ -1,6 +1,8 @@
 import { Type } from "typebox";
 import { BASH_HARD_CAP_BYTES, buildToolEnv, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import { resolveSafeCwd } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
+import { expandPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { writeToolOffload } from "./result-shaping.js";
 import { DEFAULT_MAX_LINES, formatSize, truncateTail } from "./truncate.js";
@@ -64,10 +66,11 @@ function withDetails(base: ToolResult, details: ToolResultDetails | undefined): 
 
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
-	description: "Execute a bash command via /bin/bash -lc and return stdout and stderr. Default timeout 300000 ms.",
+	description:
+		"Execute a bash command and return stdout and stderr. Runs inside the session workspace. Default timeout 300000 ms.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
-		cwd: Type.Optional(Type.String({ description: "Working directory." })),
+		cwd: Type.Optional(Type.String({ description: "Working directory; must stay inside the session workspace." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),
 	}),
 	baseActionClass: "execute",
@@ -76,11 +79,25 @@ export const bashTool: ToolSpec = {
 		if (typeof args.command !== "string" || args.command.length === 0) {
 			return { kind: "error", message: "bash: missing command argument" };
 		}
-		const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
+		const cwdArg = typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
+		// Pin the child's cwd inside the session workspace in the tool itself.
+		// The safety net blocks escaping cwd arguments at admission; this is the
+		// defense-in-depth mirror for paths that reach the tool directly, and it
+		// resolves `~` before checking so a home-relative cwd cannot slip past
+		// as an unexpanded literal.
+		let cwd: string;
+		try {
+			cwd = resolveSafeCwd(cwdArg === undefined ? undefined : expandPath(cwdArg), process.cwd());
+		} catch {
+			return {
+				kind: "error",
+				message: `bash: cwd '${cwdArg}' escapes workspace root '${process.cwd()}'; use a typed tool or a project policy entry with explicit cwd`,
+			};
+		}
 		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
 		try {
 			const result = await runBashCommand(args.command, {
-				...(cwd === undefined ? {} : { cwd }),
+				cwd,
 				timeoutMs: timeout,
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
 			});
