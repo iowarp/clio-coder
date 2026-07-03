@@ -294,7 +294,7 @@ function expandedPairWidths(width: number, sepWidth: number, priority: "session"
 
 function headerLine(session: SessionFacts, width: number): string {
 	const theme = clioTheme();
-	const left = theme.style("title", `${GLYPH.agent} CLIO DASHBOARD`, { bold: true });
+	const left = theme.style("title", `${GLYPH.brand} CLIO DASHBOARD`, { bold: true });
 	const right = theme.fg("dim", `v${session.version}`);
 	const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
 	return fitDashboardLine(`${left}${" ".repeat(gap)}${right}`, width);

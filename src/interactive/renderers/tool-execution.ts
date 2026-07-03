@@ -12,7 +12,7 @@
  * two surfaces stay byte-identical.
  */
 
-import { wrapTextWithAnsi } from "../../engine/tui.js";
+import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
 import { tryRenderJson, tryRenderXml } from "./structured.js";
@@ -461,18 +461,61 @@ function buildSublineBody(toolName: string, args: unknown, status: HeaderStatus,
 	return buildUnknownToolBody(toolName, args);
 }
 
-function sublineLine(call: ToolExecutionStart | ToolExecutionFinished, status: HeaderStatus, meta: StatusMeta): string {
+interface SublineParts {
+	/** Verb, object, and ledger facts. Breakable across wraps. */
+	lead: string;
+	/**
+	 * Status glyph, duration, and any offload path, composed as one unit. The
+	 * caller appends the expand hint here so the whole tail stays atomic: a wrap
+	 * may fall before the status glyph but never between the glyph, the
+	 * duration, and the hint. Begins with a joining space so it attaches to the
+	 * lead's last line when they share a row. Empty for in-flight calls, which
+	 * carry no status glyph.
+	 */
+	tail: string;
+}
+
+function sublineParts(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	status: HeaderStatus,
+	meta: StatusMeta,
+): SublineParts {
 	const finished = "result" in call ? call : null;
 	const body = styleSublineBody(buildSublineBody(call.toolName, call.args, status, finished?.result));
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
 	const resource = resourceLabel !== null ? dim(` · ${resourceLabel}`) : "";
 	if (finished !== null) {
-		const tail = ledgerTail(finished);
-		return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${tail.facts}${statusGlyph(status, meta)}${tail.offload}`;
+		const ledger = ledgerTail(finished);
+		return {
+			lead: `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${ledger.facts}`,
+			tail: `${statusGlyph(status, meta)}${ledger.offload}`,
+		};
 	}
 	const elapsed = optionalCompactMs("elapsedMs" in call ? call.elapsedMs : undefined);
 	const running = elapsed !== null ? dim(` · ${elapsed}`) : "";
-	return `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${running}`;
+	return { lead: `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${running}`, tail: "" };
+}
+
+/**
+ * Wrap a collapsed subline while keeping its status tail atomic. The lead wraps
+ * normally; the tail (status glyph, duration, offload, and the optional expand
+ * hint) is placed as a single unit. When the whole line fits it renders on one
+ * row; otherwise the tail joins the lead's last wrapped line if it fits there,
+ * and only falls to its own row when it cannot, so the status glyph and
+ * duration are never separated by a wrap.
+ */
+function wrapSublineWithTail(lead: string, tail: string, width: number): string[] {
+	if (tail.length === 0) return wrap(lead, width);
+	if (visibleWidth(`${lead}${tail}`) <= width) return [`${lead}${tail}`];
+	const leadLines = wrap(lead, width);
+	const last = leadLines[leadLines.length - 1];
+	if (last !== undefined && visibleWidth(`${last}${tail}`) <= width) {
+		leadLines[leadLines.length - 1] = `${last}${tail}`;
+		return leadLines;
+	}
+	// The tail cannot sit beside the lead: give it its own row, dropping the
+	// joining leading space so it starts flush at the left.
+	return [...leadLines, ...wrap(tail.replace(/^ +/u, ""), width)];
 }
 
 function wrap(line: string, width: number): string[] {
@@ -633,12 +676,24 @@ function asEditDiffArgs(args: unknown): EditDiffArgs | null {
 	return out;
 }
 
+// The `diff` library appends a `\ No newline at end of file` sentinel row when a
+// side of the comparison lacks a trailing newline. It is transcript noise, so
+// the edit diff block drops it. The marker text carries no ANSI, so a substring
+// check against the styled row is reliable and keeps this module free of raw
+// escape literals.
+const NO_NEWLINE_MARKER = "\\ No newline at end of file";
+
+function isNoNewlineMarkerRow(row: string): boolean {
+	return row.includes(NO_NEWLINE_MARKER);
+}
+
 function renderEditDiffBlock(args: EditDiffArgs, width: number): string[] {
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
 	const input: DiffRenderInput = { oldText: args.old_string, newText: args.new_string };
 	if (args.path !== undefined) input.filename = args.path;
 	const out: string[] = [];
 	for (const line of renderUnifiedDiff(input, bodyWidth)) {
+		if (isNoNewlineMarkerRow(line)) continue;
 		out.push(`${RAIL_DIM}${line}`);
 	}
 	return out;
@@ -725,14 +780,15 @@ function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): Header
  * `status` is "" for in-flight, " ✓" green for success, " ✗" red for error.
  * Output is width-wrapped via wrapTextWithAnsi.
  *
- * When `expandKey` is supplied AND the call has finished, appends a dim
- * ` (<key>)` discoverability hint to the first wrapped line so users see how
- * to expand the collapsed block. Continuation lines stay untouched. The hint
- * is suppressed for in-flight calls (still running, no useful body to expand
- * yet) and when `expandKey` is empty/undefined (no key bound, hint would be
- * misleading). The renderer never imports the keybindings manager directly;
- * the caller resolves the key string and passes it in to keep this module
- * pure.
+ * When `expandKey` is supplied AND the call has finished, a dim ` (<key>)`
+ * discoverability hint rides at the very end of the atomic status tail so users
+ * see how to expand the collapsed block. Composing the full line (facts, status
+ * glyph, duration, offload, and hint) before wrapping keeps the status glyph
+ * and duration together on one row. The hint is suppressed for in-flight calls
+ * (still running, no useful body to expand yet) and when `expandKey` is
+ * empty/undefined (no key bound, hint would be misleading). The renderer never
+ * imports the keybindings manager directly; the caller resolves the key string
+ * and passes it in to keep this module pure.
  */
 export function renderToolSubline(
 	call: ToolExecutionStart | ToolExecutionFinished,
@@ -747,14 +803,10 @@ export function renderToolSubline(
 					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
 				}
 			: {};
-	const wrapped = wrap(sublineLine(call, status, meta), width);
-	if (status === undefined) return wrapped;
-	if (expandKey === undefined || expandKey.length === 0) return wrapped;
-	if (wrapped.length === 0) return wrapped;
-	const first = wrapped[0] ?? "";
-	const hint = dim(` (${expandKey})`);
-	const rewrapped = wrap(`${first}${hint}`, width);
-	return [...rewrapped, ...wrapped.slice(1)];
+	const parts = sublineParts(call, status, meta);
+	const showHint = status !== undefined && expandKey !== undefined && expandKey.length > 0;
+	const tail = showHint ? `${parts.tail}${dim(` (${expandKey})`)}` : parts.tail;
+	return wrapSublineWithTail(parts.lead, tail, width);
 }
 
 /**
