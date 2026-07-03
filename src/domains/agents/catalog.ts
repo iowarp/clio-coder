@@ -32,6 +32,7 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 		`Default dispatch agent: ${DEFAULT_DISPATCH_AGENT_ID}.`,
 		"User-facing agents are base/custom. Shadow agents are internal helpers for context, research, and provenance; do not recommend them as normal `/run` choices.",
 		"Prefer fast read-only agents for orientation, verification agents for gates, and workspace-edit agents only for bounded coding tasks.",
+		"When a task matches a skill named on an agent line (skills=...), prefer the recipe that binds it; its worker is told to load bound skills for the run.",
 		"After a dispatch succeeds, use that receipt/output as evidence and synthesize the answer instead of repeating the same dispatch.",
 	];
 

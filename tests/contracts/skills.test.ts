@@ -337,6 +337,51 @@ describe("contracts/skills on-demand listing", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("- visible (project): Catalog entry."));
 			ok(result.output.includes("/skill:<name>"));
+			// The listing invites matching and composition but keeps the operator gate.
+			ok(result.output.includes("Match the current task"));
+			ok(result.output.includes("suggest the sequence in order"));
+			ok(result.output.includes("never load one without it"));
+			// Footer anchor: exact reply shape after the entries, with a
+			// no-match guard so routine tasks stay suggestion-free.
+			ok(result.output.includes("Suggested skill: /skill:<name>"));
+			ok(result.output.includes("wait for the operator to run it"));
+			ok(result.output.includes("If none match, do not mention skills."));
+		}
+	});
+
+	it("context scope=workspace carries a skills pointer only when skills are installed", async () => {
+		const snapshot = { cwd: "/tmp/x", isGit: false } as never;
+		const workspaceDeps = {
+			hasSession: () => true,
+			getSnapshot: () => snapshot,
+			probeWorkspace: () => snapshot,
+			saveSnapshot: () => {},
+		};
+
+		const withSkills = scratchDir("clio-proj-");
+		writeSkillDir(join(withSkills, ".clio", "skills"), "pointer", ['name: "pointer"', 'description: "Pointer."']);
+		const tool = createContextTool({ getCwd: () => withSkills, workspace: workspaceDeps });
+		const result = await tool.run({ scope: "workspace" }, undefined);
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			// Pointer only: an at-a-glance count and the suggest protocol, no catalog.
+			ok(result.output.includes('"skills"'));
+			ok(result.output.includes("suggest /skill:<name> to the operator"));
+			strictEqual(result.output.includes("Pointer."), false);
+		}
+
+		const bare = scratchDir("clio-proj-");
+		const bareTool = createContextTool({
+			getCwd: () => bare,
+			// Suppress discovery so the zero-skill branch is exercised regardless
+			// of skills installed on the host running the tests.
+			getSkillLoaderOptions: () => ({ disableDiscovery: true }),
+			workspace: workspaceDeps,
+		});
+		const bareResult = await bareTool.run({ scope: "workspace" }, undefined);
+		strictEqual(bareResult.kind, "ok");
+		if (bareResult.kind === "ok") {
+			strictEqual(bareResult.output.includes('"skills"'), false);
 		}
 	});
 

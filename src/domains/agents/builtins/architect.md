@@ -1,6 +1,6 @@
 ---
 name: Architect
-description: Designs coding changes across boundaries, contracts, migrations, and validation gates.
+description: Designs coding changes across boundaries, contracts, migrations, and validation gates; slices an existing plan into an executable dependency-ordered sprint via its bound cut-it skill.
 tools: [read, grep, find, ls, code_nav, git, artifact, context]
 audience: base
 category: plan
