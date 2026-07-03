@@ -22,6 +22,7 @@ import type { ThinkingLevel } from "../../domains/providers/types/capability-fla
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
+import { observeLlamaCppResidency } from "./llamacpp-residency.js";
 import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./output-budget.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 
@@ -532,9 +533,28 @@ function resolvedCapabilitiesForModel(
 	return resolveModelRuntimeCapabilitiesForModel(model, level);
 }
 
+/**
+ * Fire-and-forget residency observation for llama.cpp router targets: record
+ * a server-side model swap (or double residency) as a runtime notice instead
+ * of letting it happen silently. TTL-cached inside the observer; never blocks
+ * or fails the stream.
+ */
+function observeResidencyForModel(model: Model<"openai-completions">): void {
+	const metadata = runtimeMetadata(model);
+	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return;
+	if (typeof model.baseUrl !== "string" || model.baseUrl.length === 0) return;
+	void observeLlamaCppResidency({
+		baseUrl: model.baseUrl,
+		targetId: metadata.targetId ?? model.provider,
+		runtimeId: metadata.runtimeId,
+		keepModelId: model.id,
+	});
+}
+
 export const openAICompletionsApiProvider: ApiProvider<"openai-completions", OpenAICompletionsOptions> = {
 	api: "openai-completions",
 	stream: (model, context, options) => {
+		observeResidencyForModel(model);
 		// Bare `stream` callers don't communicate thinking state; fall back to
 		// the model's reasoning capability so the catalog still applies.
 		const resolved = resolvedCapabilitiesForModel(model, model.reasoning === true ? "medium" : "off");
@@ -551,6 +571,7 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		);
 	},
 	streamSimple: (model, context, options?: SimpleStreamOptions) => {
+		observeResidencyForModel(model);
 		const resolved = resolvedCapabilitiesForModel(model, thinkingLevelFromSimple(options));
 		const withSamplers = withSamplingOverrides(model, options, resolved);
 		return guardMalformedToolCalls(

@@ -7,11 +7,17 @@
  *
  * The reconciler is best-effort and non-blocking. A slow or unreachable server,
  * or a malformed resident listing, degrades to observe-only and never crashes a
- * turn. It evicts only models Clio itself loaded; a foreign-loaded model makes
- * the target look shared, so the reconciler backs off to observe-only and never
- * evicts another tenant's model. Every collision or stress case emits a notice
- * over the event bus instead of a thrown error; a genuine VRAM miss surfaces
- * that same notice content rather than a bare SDK failure.
+ * turn. Silent stacking is forbidden: when the requested model is not resident
+ * and another model is, the reconciler swaps, recording every unload as a
+ * visible transition notice, whether Clio loaded the resident model or the
+ * operator did (batteries and multi-process runs made in-process attribution
+ * blind, and two resident large models silently degraded a box). When the
+ * requested model IS already resident, extra resident models are left alone
+ * (they may be the operator's for another purpose) but reported. The
+ * `CLIO_RESIDENCY=observe` opt-out remains the multi-tenant escape hatch.
+ * Every collision or stress case emits a notice over the event bus instead of
+ * a thrown error; a genuine VRAM miss surfaces that same notice content
+ * rather than a bare SDK failure.
  */
 
 import { BusChannels, type RuntimeNoticeKind, type RuntimeNoticePayload } from "../../core/bus-events.js";
@@ -201,35 +207,55 @@ export function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 		return { decision: "observe", evict: [], keepResident, notices };
 	}
 
-	// Foreign-managed server: a resident model Clio did not load. Back off to
-	// observe-only so Clio never evicts another tenant's model.
+	// Foreign-resident models (loaded by the operator or an earlier Clio
+	// process; in-process attribution cannot tell them apart). When the
+	// requested model is already resident, leave them alone but report the
+	// double residency: inference may be degraded, and silence is the failure
+	// mode this policy exists to kill. When the requested model is NOT
+	// resident, never load on top: swap, recording each unload visibly.
 	const foreign = others.filter((entry) => !entry.loadedByClio);
-	if (foreign.length > 0) {
+	if (foreign.length > 0 && keepResident) {
 		const names = foreign.map((entry) => entry.modelId).join(", ");
 		notices.push(
 			makeNotice(
 				facts,
 				"foreign-backoff",
-				"info",
-				`'${facts.targetId}' already has a model Clio did not load (${names}); backing off to observe-only and leaving residency to you.`,
+				"warning",
+				`'${facts.targetId}' also holds ${names} alongside '${facts.keepModelId}'; inference may be degraded. Clio leaves models it did not load resident when the requested model is already served; unload manually to reclaim VRAM.`,
 				{ foreignCount: foreign.length },
 			),
 		);
 		return { decision: "observe", evict: [], keepResident, notices };
 	}
 
-	// Every remaining resident model is one Clio loaded, so it is safe to evict.
+	// Everything else resident gets released before the load: Clio-loaded
+	// models as routine evictions, foreign ones as recorded swaps.
 	const evict = others;
 	for (const entry of evict) {
-		notices.push(
-			makeNotice(
-				facts,
-				"about-to-evict",
-				"info",
-				`evicting Clio-loaded model '${entry.modelId}' from '${facts.targetId}' to free VRAM for '${facts.keepModelId}'.`,
-				entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : undefined,
-			),
-		);
+		if (entry.loadedByClio) {
+			notices.push(
+				makeNotice(
+					facts,
+					"about-to-evict",
+					"info",
+					`evicting Clio-loaded model '${entry.modelId}' from '${facts.targetId}' to free VRAM for '${facts.keepModelId}'.`,
+					entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : undefined,
+				),
+			);
+		} else {
+			notices.push(
+				makeNotice(
+					facts,
+					"swap",
+					"warning",
+					`swapping resident '${entry.modelId}' for requested '${facts.keepModelId}' on '${facts.targetId}' (Clio did not load it; recorded transition instead of a silent double-resident stack; set CLIO_RESIDENCY=observe to forbid swaps).`,
+					{
+						...(entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : {}),
+						swappedOut: entry.modelId,
+					},
+				),
+			);
+		}
 	}
 
 	// VRAM fit, when the runtime exposed the numbers. Available VRAM is what is
