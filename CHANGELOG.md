@@ -166,6 +166,43 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
+- **TUI design system.** Every interactive surface moved onto one presentation
+  system, recorded in `docs/tui-design.md`: one token vocabulary, one glyph per
+  meaning, one formatter per quantity, one island frame, one status color per
+  region. Per surface:
+  - Theme: `highlight` renamed to `action` (orange means Clio is acting), the
+    unused `loop`/`effortMedium`/`effortHigh` tokens deleted, every glyph
+    centralized in `theme/glyphs.ts`, and a contract test bans raw SGR and hex
+    color outside `theme/`.
+  - Formats: `formatCompactMs` for every duration, `formatFooterTokens` for
+    every token chip, the shared `formatUsd` for money, and
+    `abbreviateModelId` keeps whole dash-separated parts so `claude-sonnet-5`
+    survives intact.
+  - Frames: welcome dashboard, task island, steering queue, and dispatch cards
+    share the one `frame()` island recipe with a spaced bold title and an
+    optional dim right meta.
+  - Transcript: the agent speaks behind a `✦` star, failed turns paint the
+    glyph and terminal error text red, the tool subline tail
+    (`✓ · 230ms (ctrl+o)`) never splits across wrapped lines, and
+    replay/system notices carry dim tags with muted text.
+  - Footer pill: live phases show the spinner or a static glyph, never both,
+    and the tool label is no longer padded into the badge.
+  - Dashboard: all four quadrant tags share one structure color, and running
+    fleet work joins queued work under action orange.
+  - Dispatch cards: key-value grammar with dim keys, `·` separators, muted
+    telemetry, and exactly one status color per card.
+  - Overlays: fleet and cost overlays adopt list-group headers, dim table
+    headers, tokened status cells, and key-value totals.
+  - Selection: list overlays point with a dedicated `❯` chevron, and the
+    editor rail's thinking hint reads a two-step dim/muted/reason ramp.
+  - Code ink: fenced blocks get quiet syntax highlighting from exactly four
+    existing tokens (comments dim, strings success, keywords reason, numbers
+    info) for ts/js, json, bash, and python, plus semantic diff coloring;
+    unknown fences stay plain.
+  - Logotype: the `>C_` wordmark in the two headers composes as dim
+    scaffolding around a bold accent `C`.
+  - Cost overlay: values align on primary numbers, and the cache-read average
+    annotation hangs dim after its value instead of dragging the column.
 - **`context(scope="docs")` with no query lists the corpus instead of erroring.**
   Omitting the query used to return `context: scope=docs requires query`,
   costing the model a wasted round before it could search. It now returns the

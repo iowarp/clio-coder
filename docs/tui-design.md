@@ -56,9 +56,9 @@ One symbol per meaning, one meaning per symbol. All glyphs live in
 
 | Glyph | Name | Meaning | Used by |
 |-------|------|---------|---------|
-| `>C_` | `brand` | Clio wordmark | Welcome header and dashboard header only. |
+| `>C_` | `brand` | Clio wordmark | Welcome header and dashboard header only. Painted as the logotype via `brandMark()`: dim `>` and `_` around a bold accent `C`; the plain string survives for width math. |
 | `✦`   | `agent` | Agent voice | Chat reply prefix (accent; error red on failed turns). |
-| `›`   | `user`  | User voice | Chat user prefix (accent). |
+| `›`   | `user`  | User voice | Chat user prefix (accent); steering queue steer marker (action). |
 | `❯`   | `cursor` | Selection focus | Settings, list overlays, view overlay, tree selector, providers overlay, fleet profile and binding rows. |
 | `▸`   | `toolHeader` | Tool ledger line | Tool sublines and expanded tool headers only. |
 | `✓`   | `ok` | Success | Everywhere. |
@@ -269,6 +269,32 @@ Replay and system lines (`[retry]`, `[model]`, `[thinking]`, `[file ...]`,
 the message in `muted`; retry lines take `warning` on the tag. Today they are
 completely unstyled.
 
+### 6.6 Code ink
+
+Code inside a fence is quoted material, not UI state, so it gets its own
+quiet ink built entirely from existing tokens. The mapping is exactly four
+tokens and closed to extension:
+
+- comments: `dim`
+- string literals: `success`
+- language keywords: `reason`
+- numeric literals: `info`
+
+Everything else, including identifiers, types, function names, and
+punctuation, stays plain. When the lexer is unsure it leaves text plain:
+under-highlighting is correct behavior, mis-highlighting is a defect.
+
+`renderers/code-ink.ts` owns the mapping: a dependency-free, line-oriented
+tokenizer with a small carry state (block comment, template literal,
+triple-quoted string) threaded between the lines of one fence. It covers
+ts/tsx/js/jsx, json, bash/sh, and python; any other fence tag, and untagged
+fences, render plain. Diff fences map semantically instead of lexically:
+added lines `success`, removed lines `error`, hunk headers `dim`. Bash dims
+a leading `$ ` prompt. The ink flows through the `MarkdownTheme`
+`highlightCode` hook in the chat panel, so the fence lines, indentation, and
+width behavior stay pi-tui's, and no module outside `code-ink.ts` composes
+code color.
+
 ## 7. Build plan
 
 Nine slices. Each is independently shippable, keeps `npm run ci` green, and
@@ -287,8 +313,9 @@ Byte-identical rendering; this is the foundation refactor.
 - `theme/tokens.ts`: rename `highlight` to `action` (same values, keep the
   scarcity comment, updated to name the rule "orange means Clio is acting");
   delete `loop`, `effortMedium`, `effortHigh`.
-- `theme/glyphs.ts`: add `brand: ">C_"`, `cursor: "▸"` (value flips in slice
-  9), `warnInline: "!"`, `innerDivider: "╌"`, `active: "◆"`, `scoped: "◇"`,
+- `theme/glyphs.ts`: add `brand: ">C_"`, `cursor: "▸"` (the value is `❯`
+  since slice 9), `warnInline: "!"`, `innerDivider: "╌"`, `active: "◆"`,
+  `scoped: "◇"`,
   and the phase set `phaseWaiting: "◔"`, `phaseThinking: "◐"`,
   `phaseWriting: "◑"`, `phaseTool: "⚙"`, `phaseBlocked: "⏸"`,
   `phaseRetry: "↻"`, `phaseCompact: "♻"`, `phaseDispatch: "⇲"`. Delete
@@ -452,7 +479,5 @@ Byte-identical rendering; this is the foundation refactor.
 
 - No layout re-architecture: banner/transcript/editor/footer stacking stays.
 - No new information: this pass restyles what already renders.
-- Markdown code blocks keep the fence-line presentation from pi-tui; a
-  syntax-highlight upgrade is a future pass.
-- The `>C_` wordmark survives in headers; a real glyph logo is a branding
-  decision outside this document.
+- The wordmark decision is made: `>C_` is the logotype, composed from tokens
+  by `brandMark()` in the two headers (section 2). No image logo is planned.
