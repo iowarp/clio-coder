@@ -21,7 +21,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH } from "../theme/index.js";
+import { barSep, clioTheme, GLYPH, rule } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
@@ -1181,7 +1181,7 @@ export class SettingsCenter implements Component {
 		const footer = this.renderFooter(width, bodyHeight);
 		const contentHeight = Math.max(1, bodyHeight - footer.length);
 		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
-		const separator = clioTheme().fg("frame", " │ ");
+		const separator = barSep(clioTheme());
 		const separatorWidth = visibleWidth(" │ ");
 		const rightWidth = Math.max(1, width - leftWidth - separatorWidth);
 		const left = this.renderSectionLane(leftWidth, contentHeight);
@@ -1279,7 +1279,7 @@ export class SettingsCenter implements Component {
 		const maxFooterLines = Math.min(bodyHeight, bodyHeight >= 12 ? 6 : bodyHeight >= 8 ? 5 : bodyHeight >= 6 ? 4 : 3);
 		if (maxFooterLines <= 0) return [];
 		const safeWidth = Math.max(1, width);
-		const separator = theme.fg("frame", "─".repeat(safeWidth));
+		const separator = rule(theme, safeWidth);
 		const sections = this.sections();
 		const section = this.currentSection();
 		const item = this.selectedItem();
