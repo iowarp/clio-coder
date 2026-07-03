@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Single source of truth for the model fleets the benchmark + battletest
-harnesses drive.
+"""Single source of truth for the model fleets the benchmark adapters drive.
 
-`load_fleet()` reads fleet.json (next to this file), selects a named profile
-(`local-single`, `local-split`, `cloud-claude`, `cloud-openai`), and applies the
-per-node CLIO_* environment overrides, so a run can retarget without editing the
-file. It returns a flat dict with `orchestrator` and `workers` nodes plus
-`profile`, `autonomy`, and `predictionModelName`, which is the shape every
-adapter (swebench_clio.py, tb_clio_agent/clio_agent.py, the battletest) consumes.
+`load_fleet()` reads a private fleet JSON file, selects a named profile, and
+applies the per-node CLIO_* environment overrides. By default it looks for an
+untracked fleet.json next to this file. Set CLIO_FLEET to load a file from a
+different location.
 
 Profile selection order: the `profile` argument, then $CLIO_FLEET_PROFILE, then
-the `default` in fleet.json. Running this module prints the resolved fleet and is
-what `npm run bench:tb` uses as a preflight.
+the `default` in the fleet file. Running this module prints the resolved fleet.
 """
 from __future__ import annotations
 
@@ -38,8 +34,18 @@ def _apply_env(node: dict[str, Any], env_map: dict[str, str]) -> dict[str, Any]:
     return resolved
 
 
+def _fleet_path(path: str | os.PathLike[str] | None = None) -> Path:
+    return Path(path or os.environ.get("CLIO_FLEET") or FLEET_JSON)
+
+
 def _read(path: str | os.PathLike[str] | None) -> dict[str, Any]:
-    return json.loads(Path(path or FLEET_JSON).read_text(encoding="utf-8"))
+    resolved = _fleet_path(path)
+    try:
+        return json.loads(resolved.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"fleet config not found: {resolved}. Set CLIO_FLEET or create an untracked fleet.json."
+        ) from exc
 
 
 def list_profiles(path: str | os.PathLike[str] | None = None) -> list[str]:

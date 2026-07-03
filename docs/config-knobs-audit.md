@@ -89,7 +89,7 @@ All default off; all enabled with `1`.
 | Env var(s) | Used by |
 |---|---|
 | `CLIO_LIVE_SMOKE`, `CLIO_LIVE_TARGET`, `CLIO_LIVE_RUNTIME`, `CLIO_LIVE_BASE_URL`, `CLIO_LIVE_MODEL`, `CLIO_LIVE_API_KEY`, `CLIO_LIVE_KEEP` | `scripts/live-smoke.mjs` |
-| `CLIO_MAIN_TARGET/_MODEL/_URL/_THINKING`, `CLIO_WORKER_TARGET/_MODEL/_URL/_THINKING`, `CLIO_FLEET_PROFILE`, `CLIO_PRED_MODEL`, `CLIO_LLAMACPP_KEY`, `CLIO_LMSTUDIO_KEY` | benchmark fleet config (`benchmarks/community-benchmarks/`) |
+| `CLIO_MAIN_TARGET/_MODEL/_URL/_THINKING`, `CLIO_WORKER_TARGET/_MODEL/_URL/_THINKING`, `CLIO_FLEET`, `CLIO_FLEET_PROFILE`, `CLIO_PRED_MODEL`, `CLIO_LLAMACPP_KEY`, `CLIO_LMSTUDIO_KEY` | benchmark fleet config (`benchmarks/community/`) |
 | `CLIO_AUTONOMY`, `CLIO_TASK_TIMEOUT` | terminal-bench agent wrapper (writes settings.yaml / its own timeout; not a Clio knob) |
 | `CLIO_BIN`, `CLIO_ENTRY`, `CLIO_TARBALL_URL` | install/dev scripts |
 | `CLIO_NO_UPDATE_NOTIFIER` | **Dead.** Set by four benchmark harnesses, read by nothing in `src/`. Either an update notifier was removed and the setters were left behind, or the feature was never built. |

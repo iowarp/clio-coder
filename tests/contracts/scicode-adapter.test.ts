@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
-const SCRIPT = join(REPO_ROOT, "benchmarks", "community-benchmarks", "scicode", "scicode_clio.py");
+const SCRIPT = join(REPO_ROOT, "benchmarks", "community", "scicode", "scicode_clio.py");
 const PYTHON = process.env.PYTHON ?? "python3";
 
 function runPython(args: string[], cwd = REPO_ROOT): string {

@@ -28,7 +28,7 @@ from pathlib import Path
 DATASET = "princeton-nlp/SWE-bench_Lite"
 CLIO = os.environ.get("CLIO_BIN", "clio")
 
-# Shared fleet config (benchmarks/community-benchmarks/clio_fleet.py) is the one
+# Shared fleet config (benchmarks/community/clio_fleet.py) is the one
 # source of truth for fleet endpoints/model names. The import is guarded so the
 # adapter still runs if the config is missing; env vars override either way.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

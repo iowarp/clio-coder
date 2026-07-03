@@ -32,8 +32,12 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DATA = REPO_ROOT / "benchmarks" / "data" / "science-problems" / "problems_all.jsonl"
-DEFAULT_TEMPLATE = REPO_ROOT / "benchmarks" / "data" / "science-problems" / "background_comment_template.txt"
+DEFAULT_DATA = Path(
+    os.environ.get("SCICODE_DATA", REPO_ROOT / "benchmarks" / "community" / "scicode" / "problems_all.jsonl")
+)
+DEFAULT_TEMPLATE = Path(
+    os.environ.get("SCICODE_TEMPLATE", REPO_ROOT / "benchmarks" / "community" / "scicode" / "background_comment_template.txt")
+)
 CLIO = os.environ.get("CLIO_BIN", "clio")
 
 SPECIAL_STEP_SNIPPETS = {

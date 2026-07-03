@@ -3,3 +3,9 @@
 .corpus-cache/
 .clio-benchmark/
 .clio-scicode/
+data/
+community/fleet.json
+community/**/runs/
+results/**/runs/
+results/**/*.jsonl
+results/**/*.log

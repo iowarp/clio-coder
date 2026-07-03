@@ -33,6 +33,9 @@ command -v clio >/dev/null 2>&1 || { log "clio not on PATH after install"; exit 
 log "clio $(clio --version 2>/dev/null || echo unknown)"
 
 # 3. Fleet config pointing at the operator's nodes.
+if [ -z "${CLIO_MAIN_URL:-}" ] || [ -z "${CLIO_WORKER_URL:-}" ]; then
+  log "CLIO_MAIN_URL and CLIO_WORKER_URL must be set for Terminal-Bench runs"; exit 1
+fi
 mkdir -p "$HOME/.config/clio"
 cat > "$HOME/.config/clio/settings.yaml" <<YAML
 version: 1
