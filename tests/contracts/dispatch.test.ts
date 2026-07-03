@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, notStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +60,19 @@ function deferred<T>(): Deferred<T> {
 function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
+
+type WorkerPermissionDecision = "approve" | "deny";
+
+type WorkerPermissionDispatchContract = {
+	resolveWorkerPermission(runId: string, requestId: string, decision: WorkerPermissionDecision): void;
+};
+
+type EscalationSafetyCounters = {
+	escalationRequested?: number;
+	escalationApproved?: number;
+	escalationDenied?: number;
+	escalationTimedOut?: number;
+};
 
 function sha256(input: string): string {
 	return createHash("sha256").update(input).digest("hex");
@@ -2262,6 +2275,244 @@ rl.once("line", () => {
 				["recovered000", live.id],
 			);
 		});
+	});
+
+	it("re-publishes worker permission escalations with the run id as requestedBy", async () => {
+		const context = stubContext();
+		const requests: unknown[] = [];
+		const unsubscribe = context.bus.on(BusChannels.PermissionRequested, (payload) => {
+			requests.push(payload);
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 7601,
+				promise: exit.promise,
+				heartbeatAt: { current: Date.now() },
+				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				events: (async function* () {
+					yield {
+						type: "clio_permission_escalated",
+						payload: {
+							requestId: "perm-run-1",
+							tool: "bash",
+							summary: "bash: printf worker-ok",
+							decision: {
+								kind: "ask",
+								classification: { actionClass: "execute", reasons: ["test"] },
+								rejection: { short: "approval required", detail: "approval required", hints: [] },
+								policy: { policySource: "builtin-command-allowlist", reasonCode: "bash-unrecognized" },
+							},
+							timeoutMs: 120_000,
+						},
+					};
+				})(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "need operator permission" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 0, signal: null });
+			await handle.finalPromise;
+
+			const request = requests[0] as
+				| {
+						requestedBy?: string;
+						requestId?: string;
+						tool?: string;
+						actionClass?: string;
+						summary?: string;
+						timeoutMs?: number;
+				  }
+				| undefined;
+			strictEqual(request?.requestedBy, handle.runId);
+			strictEqual(request?.requestId, "perm-run-1");
+			strictEqual(request?.tool, "bash");
+			strictEqual(request?.actionClass, "execute");
+			strictEqual(request?.summary, "bash: printf worker-ok");
+			strictEqual(request?.timeoutMs, 120_000);
+		} finally {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("resolveWorkerPermission writes the worker stdin decision line and validates active native runs", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const sent: unknown[] = [];
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 7602,
+				promise: exit.promise,
+				events: emptyEvents(),
+				heartbeatAt: { current: Date.now() },
+				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				send: (value: unknown) => {
+					sent.push(value);
+					return true;
+				},
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const permissionContract = bundle.contract as typeof bundle.contract & WorkerPermissionDispatchContract;
+			throws(() => permissionContract.resolveWorkerPermission("no-such-run", "perm-1", "approve"), /not active/);
+
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "approve me" });
+			permissionContract.resolveWorkerPermission(handle.runId, "perm-1", "approve");
+			deepStrictEqual(sent, [{ type: "permission_decision", requestId: "perm-1", decision: "approve" }]);
+
+			exit.resolve({ exitCode: 0, signal: null });
+			await handle.finalPromise;
+			throws(() => permissionContract.resolveWorkerPermission(handle.runId, "perm-2", "deny"), /not active/);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("resolveWorkerPermission rejects ACP delegation runs because they have no worker stdin channel", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) {
+			configContract.get().delegation.agents = [
+				{
+					id: "opencode",
+					command: "opencode",
+					args: ["acp"],
+					connectTimeoutMs: 5,
+					turnTimeoutMs: 10,
+					permissionTimeoutMs: 15,
+					toolGovernance: "clio-policy",
+				},
+			];
+		}
+		const acpExit = deferred<Awaited<AcpDelegationRunHandle["promise"]>>();
+		const acpResult: Awaited<AcpDelegationRunHandle["promise"]> = {
+			messages: [],
+			exitCode: 0,
+			stopReason: "end_turn",
+			usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+			delegation: {
+				acpSessionId: "sess-perm",
+				initialize: null,
+				toolCallsRequested: 0,
+				toolCallsApproved: 0,
+				toolCallsDenied: 0,
+			},
+		};
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => ({
+				pid: 4244,
+				heartbeatAt: { current: Date.now() },
+				abort: () => {},
+				kill: () => {},
+				toolCallLog: () => [],
+				events: emptyEvents() as AcpDelegationRunHandle["events"],
+				promise: acpExit.promise,
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const permissionContract = bundle.contract as typeof bundle.contract & WorkerPermissionDispatchContract;
+			const handle = await bundle.contract.dispatch({
+				agentId: "opencode",
+				delegationAgentId: "opencode",
+				task: "delegate this",
+			});
+			throws(
+				() => permissionContract.resolveWorkerPermission(handle.runId, "perm-acp", "approve"),
+				/ACP|stdin|input channel|native/i,
+			);
+			acpExit.resolve(acpResult);
+			await handle.finalPromise;
+		} finally {
+			acpExit.resolve(acpResult);
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("increments receipt counters for requested, approved, denied, and timed-out escalations", async () => {
+		const context = stubContext();
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 7603,
+				promise: exit.promise,
+				heartbeatAt: { current: Date.now() },
+				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
+				events: (async function* () {
+					for (const requestId of ["perm-approved", "perm-denied", "perm-timeout"]) {
+						yield {
+							type: "clio_permission_escalated",
+							payload: {
+								requestId,
+								tool: "bash",
+								summary: `bash permission ${requestId}`,
+								decision: {
+									kind: "ask",
+									classification: { actionClass: "execute", reasons: ["test"] },
+									rejection: { short: "approval required", detail: "approval required", hints: [] },
+								},
+								timeoutMs: 120_000,
+							},
+						};
+					}
+					yield {
+						type: "clio_permission_resolved",
+						payload: {
+							requestId: "perm-approved",
+							source: "operator",
+							decision: "approved",
+							tool: "bash",
+							actionClass: "execute",
+						},
+					};
+					yield {
+						type: "clio_permission_resolved",
+						payload: {
+							requestId: "perm-denied",
+							source: "operator",
+							decision: "denied",
+							tool: "bash",
+							actionClass: "execute",
+						},
+					};
+					yield {
+						type: "clio_permission_resolved",
+						payload: {
+							requestId: "perm-timeout",
+							source: "timeout",
+							decision: "denied",
+							tool: "bash",
+							actionClass: "execute",
+						},
+					};
+					yield {
+						type: "clio_tool_finish",
+						payload: { tool: "bash", durationMs: 2, outcome: "ok", decision: "allowed" },
+					};
+				})(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "count escalations" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			const counters = receipt.safety?.decisions as
+				| ({ allowed: number; blocked: number; permissionRequested: number } & EscalationSafetyCounters)
+				| undefined;
+
+			strictEqual(counters?.escalationRequested, 3);
+			strictEqual(counters?.escalationApproved, 1);
+			strictEqual(counters?.escalationDenied, 1);
+			strictEqual(counters?.escalationTimedOut, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("native workers resolve permission requests without stalling and audit the denial", async () => {

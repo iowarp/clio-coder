@@ -1089,6 +1089,43 @@ describe("contracts/tools dispatch run paths", () => {
 		strictEqual(capturedRequests.length, 1);
 		strictEqual((capturedRequests[0] as DispatchRequest & { pipelineInput?: unknown }).pipelineInput, undefined);
 	});
+
+	it("does not expose worker permission resolution as a model-facing registry tool", () => {
+		const registry = testRegistryWithTools([]);
+		registerAllTools(registry, {
+			askUser: async () => ({ answers: [] }),
+			dispatch: {
+				dispatch: async () => {
+					throw new Error("dispatch not used");
+				},
+				dispatchBatch: async () => {
+					throw new Error("dispatchBatch not used");
+				},
+				listRuns: () => [],
+				getRun: () => null,
+				abort: () => {},
+				steer: () => {},
+				resolveWorkerPermission: () => {
+					throw new Error("model-facing tools must not call resolveWorkerPermission");
+				},
+				snapshot: () => ({
+					generatedAt: new Date().toISOString(),
+					running: [],
+					retrying: [],
+					totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+				}),
+				drain: async () => {},
+			} as DispatchContract & { resolveWorkerPermission(runId: string, requestId: string, decision: string): void },
+		});
+
+		const surface = registry
+			.listVisible()
+			.map((spec) => `${spec.name}\n${spec.description}\n${JSON.stringify(spec.parameters)}`)
+			.join("\n---\n");
+
+		strictEqual(registry.get("resolveWorkerPermission" as ToolName), undefined);
+		strictEqual(/resolveWorkerPermission|permission_decision|worker permission/i.test(surface), false, surface);
+	});
 });
 
 describe("contracts/tools prompt hints", () => {

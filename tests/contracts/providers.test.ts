@@ -63,6 +63,27 @@ function fakeLiveStatus(discoveredModels: ReadonlyArray<string>, overrides: Part
 	};
 }
 
+function minimalWorkerSpec(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		specVersion: WORKER_SPEC_VERSION,
+		systemPrompt: "",
+		agentId: "coder",
+		task: "t",
+		target: { id: "target", runtime: "http-worker" },
+		runtime: {
+			version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+			id: "http-worker",
+			kind: "http",
+			apiFamily: "openai-responses",
+			auth: "none",
+		},
+		runtimeId: "http-worker",
+		wireModelId: "model",
+		allowedTools: [],
+		...overrides,
+	};
+}
+
 describe("contracts/providers", () => {
 	it("registers, retrieves, and lists runtime descriptors", () => {
 		const registry = createRuntimeRegistry();
@@ -551,6 +572,30 @@ describe("contracts/providers/runtime-cleanup", () => {
 			strictEqual(parsed.runtime.kind, runtime.kind);
 			strictEqual(parsed.runtime.apiFamily, runtime.apiFamily);
 			strictEqual(parsed.runtime.auth, "claude-cli");
+		}
+	});
+
+	it("accepts worker permission escalation posture and escalation options in the spec contract", () => {
+		const parsed = parseWorkerSpec(
+			minimalWorkerSpec({
+				onPermission: "escalate",
+				escalation: { timeoutMs: 90_000, fallback: "fail" },
+			}),
+		) as unknown as { onPermission?: string; escalation?: { timeoutMs: number; fallback: string } };
+
+		strictEqual(parsed.onPermission, "escalate");
+		deepStrictEqual(parsed.escalation, { timeoutMs: 90_000, fallback: "fail" });
+	});
+
+	it("rejects invalid worker permission escalation spec shapes", () => {
+		for (const bad of [
+			{ onPermission: "prompt" },
+			{ onPermission: "escalate", escalation: "soon" },
+			{ onPermission: "escalate", escalation: { timeoutMs: "90000", fallback: "deny" } },
+			{ onPermission: "escalate", escalation: { timeoutMs: -1, fallback: "deny" } },
+			{ onPermission: "escalate", escalation: { timeoutMs: 90_000, fallback: "ask" } },
+		]) {
+			throws(() => parseWorkerSpec(minimalWorkerSpec(bad)), /onPermission|escalation|timeoutMs|fallback/);
 		}
 	});
 

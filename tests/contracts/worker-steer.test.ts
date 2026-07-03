@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
@@ -17,6 +18,8 @@ import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "../../src/engine/ai.js";
+import { startWorkerRun, type WorkerRunHandle, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -38,6 +41,25 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
+async function waitFor<T>(read: () => T | undefined, message: string, timeoutMs = 1000): Promise<T> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() <= deadline) {
+		const value = read();
+		if (value !== undefined) return value;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw new Error(message);
+}
+
+async function expectPending<T>(promise: Promise<T>, label: string, delayMs = 25): Promise<void> {
+	const marker = Symbol(label);
+	const result = await Promise.race([
+		promise,
+		new Promise<typeof marker>((resolve) => setTimeout(() => resolve(marker), delayMs)),
+	]);
+	strictEqual(result, marker, `${label} resolved before permission decision`);
+}
+
 const MINIMAL_SPEC_LINE = `${JSON.stringify({
 	specVersion: WORKER_SPEC_VERSION,
 	runtime: {
@@ -55,6 +77,86 @@ const MINIMAL_SPEC_LINE = `${JSON.stringify({
 	wireModelId: "m",
 	allowedTools: ["bash"],
 })}\n`;
+
+type PermissionDecision = "approve" | "deny";
+
+type PermissionCapableDemux = ReturnType<typeof createWorkerStdinDemux> & {
+	onPermissionDecision(handler: (decision: { requestId: string; decision: PermissionDecision }) => void): void;
+};
+
+type PermissionCapableRunHandle = WorkerRunHandle & {
+	resolvePermission(requestId: string, decision: PermissionDecision): void;
+};
+
+function permissionHandle(handle: WorkerRunHandle): PermissionCapableRunHandle {
+	return handle as PermissionCapableRunHandle;
+}
+
+function permissionEvent(
+	events: ReadonlyArray<unknown>,
+	type: "clio_permission_escalated" | "clio_permission_resolved",
+): { type: string; payload?: Record<string, unknown> } | undefined {
+	return events.find(
+		(event): event is { type: string; payload?: Record<string, unknown> } =>
+			typeof event === "object" &&
+			event !== null &&
+			(event as { type?: unknown }).type === type &&
+			typeof (event as { payload?: unknown }).payload === "object" &&
+			(event as { payload?: unknown }).payload !== null,
+	);
+}
+
+function toolFinish(events: ReadonlyArray<unknown>): Record<string, unknown> | undefined {
+	return events.find(
+		(event): event is { type: string; payload: Record<string, unknown> } =>
+			typeof event === "object" &&
+			event !== null &&
+			(event as { type?: unknown }).type === "clio_tool_finish" &&
+			typeof (event as { payload?: unknown }).payload === "object" &&
+			(event as { payload?: unknown }).payload !== null,
+	)?.payload;
+}
+
+function fauxRuntimeInput(
+	responses: Parameters<ReturnType<typeof registerFauxProvider>["setResponses"]>[0],
+	overrides: Record<string, unknown> = {},
+): { input: WorkerRunInput; unregister(): void } {
+	const provider = `faux-worker-permission-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	const faux = registerFauxProvider({
+		provider,
+		models: [{ id: "faux-worker-permission" }],
+		tokensPerSecond: 0,
+	});
+	faux.setResponses(responses);
+	const runtime: RuntimeDescriptor = {
+		id: provider,
+		displayName: "Faux Worker Permission",
+		kind: "http",
+		apiFamily: "openai-responses",
+		auth: "none",
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+		synthesizeModel: () => faux.getModel("faux-worker-permission") as never,
+	};
+	const target: TargetDescriptor = {
+		id: "faux-worker-permission",
+		runtime: runtime.id,
+		defaultModel: "faux-worker-permission",
+	};
+	return {
+		input: {
+			systemPrompt: "",
+			agentId: "coder",
+			task: "run the requested bash command",
+			target,
+			runtime,
+			wireModelId: "faux-worker-permission",
+			allowedTools: [ToolNames.Bash],
+			autonomy: "suggest",
+			...overrides,
+		} as unknown as WorkerRunInput,
+		unregister: () => faux.unregister(),
+	};
+}
 
 function stubContext(): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -240,6 +342,224 @@ describe("contracts/worker-steer", () => {
 			demux.feed(combined.slice(MINIMAL_SPEC_LINE.length + 5));
 			await demux.readSpec();
 			deepStrictEqual(received, ["split delivery"]);
+		});
+
+		it("dispatches permission_decision lines without treating them as steers", async () => {
+			const demux = createWorkerStdinDemux() as PermissionCapableDemux;
+			const steers: string[] = [];
+			const decisions: Array<{ requestId: string; decision: PermissionDecision }> = [];
+			demux.onSteer((text) => steers.push(text));
+			demux.onPermissionDecision((decision) => decisions.push(decision));
+
+			demux.feed(MINIMAL_SPEC_LINE);
+			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "perm-1", decision: "approve" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "keep going" })}\n`);
+			const spec = await demux.readSpec();
+
+			strictEqual(spec.agentId, "coder");
+			deepStrictEqual(decisions, [{ requestId: "perm-1", decision: "approve" }]);
+			deepStrictEqual(steers, ["keep going"]);
+			strictEqual(demux.droppedLineCount(), 0);
+		});
+
+		it("drops malformed permission_decision lines without losing later valid control lines", () => {
+			const demux = createWorkerStdinDemux() as PermissionCapableDemux;
+			const decisions: Array<{ requestId: string; decision: PermissionDecision }> = [];
+			const steers: string[] = [];
+			demux.onPermissionDecision((decision) => decisions.push(decision));
+			demux.onSteer((text) => steers.push(text));
+
+			demux.feed(MINIMAL_SPEC_LINE);
+			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "", decision: "approve" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "perm-2", decision: "maybe" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "permission_decision", requestId: "perm-3", decision: "deny" })}\n`);
+			demux.feed(`${JSON.stringify({ type: "steer", text: "still alive" })}\n`);
+
+			deepStrictEqual(decisions, [{ requestId: "perm-3", decision: "deny" }]);
+			deepStrictEqual(steers, ["still alive"]);
+			strictEqual(demux.droppedLineCount(), 2);
+		});
+	});
+
+	describe("worker runtime permission escalation", () => {
+		it("escalate posture parks the call and emits clio_permission_escalated with requestId", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-escalate" })], {
+						stopReason: "toolUse",
+					}),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = startWorkerRun(input, (event) => events.push(event));
+				const escalated = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				await expectPending(handle.promise, "worker run");
+
+				strictEqual(typeof escalated.payload?.requestId, "string");
+				ok((escalated.payload?.requestId as string).length > 0);
+				strictEqual(escalated.payload?.tool, "bash");
+				strictEqual(typeof escalated.payload?.summary, "string");
+				ok((escalated.payload?.summary as string).includes("bash"));
+				strictEqual(typeof escalated.payload?.decision, "object");
+				strictEqual(escalated.payload?.timeoutMs, 5_000);
+
+				handle.abort();
+				await handle.promise;
+			} finally {
+				unregister();
+			}
+		});
+
+		it("approve decision releases the parked call and the worker run continues", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-approve" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage("approved and continued"),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = permissionHandle(startWorkerRun(input, (event) => events.push(event)));
+				const escalated = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				const requestId = escalated.payload?.requestId;
+				strictEqual(typeof requestId, "string");
+
+				handle.resolvePermission(requestId as string, "approve");
+				const result = await handle.promise;
+				const resolved = permissionEvent(events, "clio_permission_resolved");
+
+				strictEqual(result.exitCode, 0);
+				strictEqual(resolved?.payload?.requestId, requestId);
+				strictEqual(resolved?.payload?.source, "operator");
+				strictEqual(resolved?.payload?.decision, "approved");
+				strictEqual(toolFinish(events)?.outcome, "ok");
+			} finally {
+				unregister();
+			}
+		});
+
+		it("deny decision resolves with the same structured denial shape as posture deny", async () => {
+			const baselineEvents: unknown[] = [];
+			const baseline = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-deny-baseline" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage("baseline continued"),
+				],
+				{ onPermission: "deny" },
+			);
+			try {
+				await startWorkerRun(baseline.input, (event) => baselineEvents.push(event)).promise;
+			} finally {
+				baseline.unregister();
+			}
+
+			const escalatedEvents: unknown[] = [];
+			const escalated = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-deny" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage("denied and continued"),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = permissionHandle(startWorkerRun(escalated.input, (event) => escalatedEvents.push(event)));
+				const request = await waitFor(
+					() => permissionEvent(escalatedEvents, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				const requestId = request.payload?.requestId;
+				strictEqual(typeof requestId, "string");
+				handle.resolvePermission(requestId as string, "deny");
+				const result = await handle.promise;
+
+				const baselineFinish = toolFinish(baselineEvents);
+				const escalatedFinish = toolFinish(escalatedEvents);
+				strictEqual(result.exitCode, 0);
+				strictEqual(escalatedFinish?.outcome, "blocked");
+				strictEqual(escalatedFinish?.decision, baselineFinish?.decision);
+				strictEqual(escalatedFinish?.actionClass, baselineFinish?.actionClass);
+				ok(String(escalatedFinish?.reason ?? "").includes("permission denied"));
+				const resolved = permissionEvent(escalatedEvents, "clio_permission_resolved");
+				strictEqual(resolved?.payload?.requestId, requestId);
+				strictEqual(resolved?.payload?.source, "operator");
+			} finally {
+				escalated.unregister();
+			}
+		});
+
+		it("timeout applies the configured fail fallback and reports source timeout", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-timeout" })], {
+						stopReason: "toolUse",
+					}),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 25, fallback: "fail" } },
+			);
+			try {
+				const handle = startWorkerRun(input, (event) => events.push(event));
+				const escalated = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				const result = await handle.promise;
+				const resolved = permissionEvent(events, "clio_permission_resolved");
+
+				strictEqual(result.exitCode, 3);
+				strictEqual(resolved?.payload?.requestId, escalated.payload?.requestId);
+				strictEqual(resolved?.payload?.source, "timeout");
+				strictEqual(resolved?.payload?.mode, "fail");
+			} finally {
+				unregister();
+			}
+		});
+
+		it("drops unknown and duplicate permission decisions without crashing the worker", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-duplicates" })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage("duplicate decisions ignored"),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = permissionHandle(startWorkerRun(input, (event) => events.push(event)));
+				const escalated = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				const requestId = escalated.payload?.requestId;
+				strictEqual(typeof requestId, "string");
+
+				handle.resolvePermission("unknown-request", "approve");
+				handle.resolvePermission(requestId as string, "approve");
+				handle.resolvePermission(requestId as string, "deny");
+				const result = await handle.promise;
+
+				strictEqual(result.exitCode, 0);
+				strictEqual(events.filter((event) => (event as { type?: unknown }).type === "clio_permission_resolved").length, 1);
+			} finally {
+				unregister();
+			}
 		});
 	});
 
