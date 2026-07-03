@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { configureGuardrails, GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../src/core/guardrails.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/index.js";
@@ -17,6 +18,7 @@ import {
 	LOOP_GUARD_REGISTRATION_ID,
 	ORCH_TURN_TOOL_CALL_HARD_MARGIN,
 	readOrchTurnToolCallBudget,
+	readWorkerToolCallCap,
 } from "../../src/engine/loop-guard.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -297,15 +299,59 @@ describe("orchestrator per-turn tool-call budget", () => {
 		const nudged = await registry.invoke({ tool: ToolNames.Read, args: { path: "file-3.md" } }, { turnId: "t1" });
 		strictEqual(nudged.kind, "blocked", "the soft-budget call is blocked with a re-plan directive");
 		ok(nudged.kind === "blocked" && nudged.reason.includes("tool-call budget"), "reason names the budget");
+		ok(nudged.kind === "blocked" && nudged.reason.includes("Summarize"), "reason tells the model to summarize and wait");
 		ok(
-			nudged.kind === "blocked" && nudged.reason.includes("Summarize"),
-			"reason tells the model to summarize/narrow/ask",
+			nudged.kind === "blocked" && nudged.reason.includes("Every further tool call this turn will be blocked"),
+			"the directive is honest that no further call this turn can run",
 		);
 		strictEqual(events.length, 1, "exactly one warn event at the first soft crossing");
 		strictEqual(events[0]?.interrupted, false);
 		strictEqual(events[0]?.callsThisTurn, 3);
 		strictEqual(events[0]?.softBudget, 3);
 		strictEqual(events[0]?.turnId, "t1");
+	});
+
+	it("feeds budget-blocked retries to the identical-call detector so the retry spiral interrupts early", async () => {
+		// Regression for the v0.2.8 demo failure: a weak model that retries its
+		// budget-blocked call verbatim must be stopped by the identical-call
+		// detector within a few repeats, not spin all the way to the hard
+		// ceiling. The budget check used to run first and starve the detector.
+		const safety = testSafety();
+		const bus = createSafeEventBus();
+		const loopEvents: LoopBlockedPayload[] = [];
+		bus.on(BusChannels.LoopBlocked, (payload) => {
+			loopEvents.push(payload);
+		});
+		const bundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety, bus, turnToolCallBudget: { soft: 3, hard: 40 } })],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		for (let i = 1; i <= 2; i++) {
+			const okVerdict = await registry.invoke({ tool: ToolNames.Read, args: { path: `f-${i}.md` } }, { turnId: "t1" });
+			strictEqual(okVerdict.kind, "ok");
+		}
+		const call = { tool: ToolNames.Read, args: { path: "f-3.md" } };
+		const crossed = await registry.invoke(call, { turnId: "t1" });
+		strictEqual(crossed.kind, "blocked");
+		ok(crossed.kind === "blocked" && crossed.reason.includes("tool-call budget"), "the crossing gets the budget reason");
+		// Verbatim retries: the first is repeat two (below the detector
+		// threshold, budget reason again); the next ones trip the detector and
+		// exhaust its per-turn block budget, which interrupts the turn.
+		const retryReasons: string[] = [];
+		for (let retry = 1; retry <= 1 + INTERACTIVE_LOOP_BLOCK_BUDGET; retry++) {
+			const verdict = await registry.invoke(call, { turnId: "t1" });
+			strictEqual(verdict.kind, "blocked");
+			if (verdict.kind === "blocked") retryReasons.push(verdict.reason);
+		}
+		ok(retryReasons[0]?.includes("tool-call budget"), "repeat two still carries the budget reason");
+		ok(retryReasons[1]?.includes("loop detected"), "the detector reason takes over at its threshold");
+		strictEqual(loopEvents.length, INTERACTIVE_LOOP_BLOCK_BUDGET, "one LoopBlocked event per detector block");
+		strictEqual(
+			loopEvents[INTERACTIVE_LOOP_BLOCK_BUDGET - 1]?.interrupted,
+			true,
+			"the spiral interrupts at the detector's block budget, far below the hard ceiling",
+		);
+		ok(retryReasons[retryReasons.length - 1]?.includes("stopped"), "the final block states the agent is being stopped");
 	});
 
 	it("interrupts the turn at the hard ceiling like the block budget does", async () => {
@@ -347,19 +393,38 @@ describe("orchestrator per-turn tool-call budget", () => {
 		}
 	});
 
-	it("derives the budget from the environment with a hard margin above the soft value", () => {
+	it("derives the budget from guardrail layers with a hard margin above the soft value", () => {
 		strictEqual(readOrchTurnToolCallBudget({}).soft, DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET);
 		strictEqual(
 			readOrchTurnToolCallBudget({}).hard,
 			DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET + ORCH_TURN_TOOL_CALL_HARD_MARGIN,
 		);
-		const override = readOrchTurnToolCallBudget({ CLIO_ORCH_MAX_TOOL_CALLS: "8" });
+		const override = readOrchTurnToolCallBudget({ CLIO_TURN_TOOL_CALL_BUDGET: "8" });
 		strictEqual(override.soft, 8);
 		strictEqual(override.hard, 8 + ORCH_TURN_TOOL_CALL_HARD_MARGIN);
 		// Invalid values fall back to the default rather than throwing.
 		strictEqual(
-			readOrchTurnToolCallBudget({ CLIO_ORCH_MAX_TOOL_CALLS: "nope" }).soft,
+			readOrchTurnToolCallBudget({ CLIO_TURN_TOOL_CALL_BUDGET: "nope" }).soft,
 			DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET,
 		);
+	});
+
+	it("resolves guardrails settings-first with env as the emergency override", () => {
+		// env > settings.yaml guardrails > built-in default, for every key.
+		try {
+			strictEqual(resolveGuardrail("turnToolCallBudget", {}), GUARDRAIL_DEFAULTS.turnToolCallBudget);
+			configureGuardrails({ turnToolCallBudget: 30, workerToolCallCap: 20 });
+			strictEqual(resolveGuardrail("turnToolCallBudget", {}), 30, "settings beat the built-in default");
+			strictEqual(readOrchTurnToolCallBudget({}).soft, 30, "the loop guard reads the settings layer");
+			strictEqual(readWorkerToolCallCap({}), 20);
+			strictEqual(resolveGuardrail("turnToolCallBudget", { CLIO_TURN_TOOL_CALL_BUDGET: "7" }), 7, "env beats settings");
+			strictEqual(
+				resolveGuardrail("readMaxBytes", {}),
+				GUARDRAIL_DEFAULTS.readMaxBytes,
+				"unconfigured keys keep their defaults",
+			);
+		} finally {
+			configureGuardrails(undefined);
+		}
 	});
 });

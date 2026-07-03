@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { RUN_OVERRIDES_ENV } from "../../src/core/run-overrides.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { assistantMessage, loadModelConfig } from "../../src/engine/apis/lmstudio-native.js";
 
@@ -40,13 +41,13 @@ function model(quirks?: LocalModelQuirks): Model<"lmstudio-native"> {
 }
 
 function withKvCacheMode<T>(value: string, fn: () => T): T {
-	const previous = process.env.CLIO_KV_CACHE_MODE;
-	process.env.CLIO_KV_CACHE_MODE = value;
+	const previous = process.env[RUN_OVERRIDES_ENV];
+	process.env[RUN_OVERRIDES_ENV] = JSON.stringify({ kvCacheMode: value });
 	try {
 		return fn();
 	} finally {
-		if (previous === undefined) delete process.env.CLIO_KV_CACHE_MODE;
-		else process.env.CLIO_KV_CACHE_MODE = previous;
+		if (previous === undefined) delete process.env[RUN_OVERRIDES_ENV];
+		else process.env[RUN_OVERRIDES_ENV] = previous;
 	}
 }
 
@@ -125,6 +126,6 @@ describe("contracts/lmstudio-native KV-cache env override", () => {
 		strictEqual(result.llamaKCacheQuantizationType, "q4_0");
 		strictEqual(result.llamaVCacheQuantizationType, "q5_0");
 		strictEqual(result.useFp16ForKVCache, true);
-		strictEqual(stderr, "clio: ignoring invalid CLIO_KV_CACHE_MODE 'bogus'\n");
+		strictEqual(stderr, "clio: ignoring invalid kv-cache-mode override 'bogus'\n");
 	});
 });

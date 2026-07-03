@@ -122,6 +122,20 @@ describe("contracts/config", () => {
 		strictEqual(result.settings.budget.concurrency, "auto");
 	});
 
+	it("validates the guardrails section and rejects bad values and unknown subkeys", () => {
+		const ok = validateSettings({ guardrails: { turnToolCallBudget: 30, readMaxBytes: 4096 } });
+		deepStrictEqual(ok.issues, []);
+		strictEqual(ok.settings.guardrails.turnToolCallBudget, 30);
+		strictEqual(ok.settings.guardrails.readMaxBytes, 4096);
+		// Unset keys keep the shipped defaults.
+		strictEqual(ok.settings.guardrails.workerToolCallCap, DEFAULT_SETTINGS.guardrails.workerToolCallCap);
+
+		const bad = validateSettings({ guardrails: { turnToolCallBudget: 0, maxRuns: 5 } });
+		const paths = bad.issues.map((issue) => issue.path).sort();
+		deepStrictEqual(paths, ["guardrails.maxRuns", "guardrails.turnToolCallBudget"]);
+		strictEqual(bad.settings.guardrails.turnToolCallBudget, DEFAULT_SETTINGS.guardrails.turnToolCallBudget);
+	});
+
 	it("validates defaults.maxTokens and rejects bad values and unknown subkeys", () => {
 		const ok = validateSettings({ defaults: { maxTokens: 16384 } });
 		deepStrictEqual(ok.issues, []);

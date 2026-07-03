@@ -584,6 +584,7 @@ const TOP_LEVEL_KEYS = [
 	"keybindings",
 	"compaction",
 	"retry",
+	"guardrails",
 ] as const;
 
 export interface SettingsValidationResult {
@@ -894,6 +895,27 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (key in raw.retry) {
 					const v = expectInteger(issues, `retry.${key}`, raw.retry[key], { min: 0 });
 					if (v !== undefined) settings.retry[key] = v;
+				}
+			}
+		}
+	}
+
+	if ("guardrails" in raw) {
+		if (!isPlainObject(raw.guardrails)) {
+			issues.add("guardrails", `expected a map, got ${describe(raw.guardrails)}`);
+		} else {
+			const keys = [
+				"turnToolCallBudget",
+				"workerToolCallCap",
+				"maxDispatchRuns",
+				"readMaxBytes",
+				"observationTurnBudgetBytes",
+			] as const;
+			issues.unknownKeys("guardrails", raw.guardrails, keys);
+			for (const key of keys) {
+				if (key in raw.guardrails) {
+					const v = expectInteger(issues, `guardrails.${key}`, raw.guardrails[key], { min: 1 });
+					if (v !== undefined) settings.guardrails[key] = v;
 				}
 			}
 		}

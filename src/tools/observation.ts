@@ -1,3 +1,4 @@
+import { GUARDRAIL_DEFAULTS, GUARDRAIL_ENV_VARS, resolveGuardrail } from "../core/guardrails.js";
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
 import { writeToolOffload } from "./result-shaping.js";
 import { formatSize } from "./truncate.js";
@@ -62,8 +63,9 @@ export const OBSERVE_SELF_CAPS = {
 
 // Per-turn observation budget pool. One pool per sessionId:turnId shared by
 // every OBSERVE tool; LRU-pruned so abandoned turns cannot grow the map.
-export const DEFAULT_OBSERVATION_TURN_BUDGET_BYTES = 192 * 1024;
-export const OBSERVATION_TURN_BUDGET_ENV = "CLIO_OBSERVATION_TURN_BUDGET_BYTES";
+// Value, settings key, and env override live in core/guardrails.ts.
+export const DEFAULT_OBSERVATION_TURN_BUDGET_BYTES = GUARDRAIL_DEFAULTS.observationTurnBudgetBytes;
+export const OBSERVATION_TURN_BUDGET_ENV = GUARDRAIL_ENV_VARS.observationTurnBudgetBytes;
 const MIN_BUDGET_SLICE_BYTES = 1024;
 const BUDGET_TRACK_LIMIT = 256;
 
@@ -112,11 +114,7 @@ function boundContinuation(next: string | undefined): string | undefined {
 }
 
 export function observationTurnBudgetLimit(env: NodeJS.ProcessEnv = process.env): number {
-	const raw = env[OBSERVATION_TURN_BUDGET_ENV];
-	if (raw === undefined || raw.trim().length === 0) return DEFAULT_OBSERVATION_TURN_BUDGET_BYTES;
-	const parsed = Number(raw.trim());
-	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_OBSERVATION_TURN_BUDGET_BYTES;
-	return Math.max(MIN_BUDGET_SLICE_BYTES, Math.floor(parsed));
+	return Math.max(MIN_BUDGET_SLICE_BYTES, resolveGuardrail("observationTurnBudgetBytes", env));
 }
 
 function budgetKey(options: ToolInvokeOptions | undefined): string | null {

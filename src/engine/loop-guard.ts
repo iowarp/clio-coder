@@ -16,6 +16,7 @@
 
 import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
@@ -31,27 +32,34 @@ export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
  */
 export const INTERACTIVE_LOOP_BLOCK_BUDGET = 2;
 
-/** Default per-run tool-call cap when the env var is unset or invalid. */
-export const DEFAULT_MAX_TOOL_CALLS = 50;
-/** Environment variable that overrides the per-run tool-call cap. */
-export const MAX_TOOL_CALLS_ENV = "CLIO_MAX_TOOL_CALLS";
+/**
+ * Default lifetime tool-call cap for a worker run. Value and env override live
+ * in core/guardrails.ts (`CLIO_WORKER_TOOL_CALL_CAP`); re-exported here for
+ * tests and callers that reason about the guard's tuning in one place.
+ */
+export const DEFAULT_WORKER_TOOL_CALL_CAP = GUARDRAIL_DEFAULTS.workerToolCallCap;
 
 /**
  * Default soft per-turn tool-call budget for the interactive orchestrator.
- * Crossing it injects a re-plan directive; the orchestrator is otherwise
- * uncapped on the premise that an operator can intervene, which fails for weak
- * local models that spray distinct commands the identical-call detector never
- * sees.
+ * Crossing it blocks every further call this turn with a stop-and-summarize
+ * directive; the orchestrator is otherwise uncapped on the premise that an
+ * operator can intervene, which fails for weak local models that spray
+ * distinct commands the identical-call detector never sees.
+ *
+ * Sized as a backstop, not a routine ceiling: verbatim retry spirals are the
+ * identical-call detector's job, so this only has to catch a model spraying
+ * DISTINCT unproductive calls. Legitimate deep work (a repo-wide audit runs
+ * 25+ productive calls in one turn) must not be decapitated by it; mainstream
+ * harnesses run 100+ calls per turn with no ceiling at all. Value and env
+ * override (`CLIO_TURN_TOOL_CALL_BUDGET`) live in core/guardrails.ts.
  */
-export const DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET = 25;
+export const DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET = GUARDRAIL_DEFAULTS.turnToolCallBudget;
 /**
  * Hard ceiling sits this many calls above the soft budget. Reaching it
  * interrupts the turn outright instead of merely nudging, bounding a model
  * that ignores the directive to a small number of blocked retries.
  */
 export const ORCH_TURN_TOOL_CALL_HARD_MARGIN = 15;
-/** Environment variable that overrides the soft per-turn tool-call budget. */
-export const ORCH_MAX_TOOL_CALLS_ENV = "CLIO_ORCH_MAX_TOOL_CALLS";
 
 /** Bounded turn-id memory, matching the registry's dispatch-guard policy. */
 const LOOP_GUARD_TURN_LIMIT = 32;
@@ -61,18 +69,9 @@ const NO_TURN_BUCKET = "no-turn";
 
 const LOOP_WINDOW_MS = createLoopState().windowMs;
 
-function readPositiveIntEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
-	const raw = env[name];
-	if (raw === undefined || raw === "") return fallback;
-	const normalized = raw.trim();
-	if (!/^[1-9]\d*$/.test(normalized)) return fallback;
-	const parsed = Number(normalized);
-	if (!Number.isSafeInteger(parsed)) return fallback;
-	return parsed;
-}
-
-export function readToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
-	return readPositiveIntEnv(env, MAX_TOOL_CALLS_ENV, DEFAULT_MAX_TOOL_CALLS);
+/** Worker lifetime tool-call cap: env > settings guardrails > default. */
+export function readWorkerToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
+	return resolveGuardrail("workerToolCallCap", env);
 }
 
 /** Soft/hard per-turn tool-call budget for the interactive orchestrator. */
@@ -84,7 +83,7 @@ export interface OrchTurnToolCallBudget {
 }
 
 export function readOrchTurnToolCallBudget(env: NodeJS.ProcessEnv = process.env): OrchTurnToolCallBudget {
-	const soft = readPositiveIntEnv(env, ORCH_MAX_TOOL_CALLS_ENV, DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET);
+	const soft = resolveGuardrail("turnToolCallBudget", env);
 	return { soft, hard: soft + ORCH_TURN_TOOL_CALL_HARD_MARGIN };
 }
 
@@ -101,10 +100,11 @@ export interface CreateLoopGuardRegistrationOptions {
 	 */
 	toolCallCap?: number;
 	/**
-	 * Orchestrator only: soft/hard per-turn tool-call budget. The soft budget
-	 * injects a re-plan directive (block this attempt with house-style guidance);
-	 * the hard ceiling additionally interrupts the turn over the bus. Absent for
-	 * workers, which rely on the lifetime {@link toolCallCap} instead.
+	 * Orchestrator only: soft/hard per-turn tool-call budget. Crossing the soft
+	 * budget blocks this and every further call in the turn with a
+	 * stop-and-summarize directive; the hard ceiling additionally interrupts
+	 * the turn over the bus. Absent for workers, which rely on the lifetime
+	 * {@link toolCallCap} instead.
 	 */
 	turnToolCallBudget?: OrchTurnToolCallBudget;
 	now?: () => number;
@@ -177,8 +177,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			];
 		}
 		if (callsThisTurn >= turnBudget.soft) {
-			// Soft budget: block this attempt and hand the model a re-plan
-			// directive. The operator sees one warn notice per turn (the first
+			// Soft budget: block this attempt and every further one this turn.
+			// The directive must say so plainly — an earlier wording implied a
+			// narrower call could still succeed, which sent even compliant
+			// models into a retry spiral because no call after the crossing can
+			// ever run. The operator sees one warn notice per turn (the first
 			// crossing); the model keeps getting the directive on every further
 			// over-budget attempt so it cannot quietly resume spraying calls.
 			if (callsThisTurn === turnBudget.soft) emitBudgetEvent(input, callsThisTurn, false, now);
@@ -187,8 +190,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					kind: "block_tool",
 					reason:
 						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}). ` +
-						`Stop exploring. Summarize what you have found so far, narrow to a single concrete next step, or ask the ` +
-						`operator a clarifying question before calling more tools.`,
+						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
+						`another one. Summarize what you have found so far in plain text, state the single next step you ` +
+						`propose, and wait for the operator.`,
 					severity: "hard-block",
 				},
 			];
@@ -207,12 +211,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (cap !== undefined && count > cap) {
 				return [{ kind: "block_tool", reason: `tool-call cap reached (${cap}); abort turn`, severity: "hard-block" }];
 			}
-			const budgetEffects = evaluateTurnBudget(input, now);
-			if (budgetEffects !== null) return budgetEffects;
+			// Identical-repeat detection runs BEFORE the volume budget so verbatim
+			// retries of budget-blocked calls still reach the detector. Its tighter
+			// interrupt (a couple of blocks per turn) is what ends the retry spiral
+			// a weak model falls into once the budget starts rejecting calls;
+			// checking the budget first starved the detector and let that spiral
+			// churn all the way to the hard ceiling.
 			const fingerprint = input.metadata?.callFingerprint;
-			if (typeof fingerprint !== "string" || fingerprint.length === 0) return [];
+			if (typeof fingerprint !== "string" || fingerprint.length === 0) {
+				return evaluateTurnBudget(input, now) ?? [];
+			}
 			const verdict = options.safety.observeLoop(fingerprint, now);
-			if (!verdict.looping) return [];
+			if (!verdict.looping) return evaluateTurnBudget(input, now) ?? [];
 			const tool = input.toolName ?? "unknown";
 			const blocksThisTurn = bumpTurnBlocks(input.turnId ?? NO_TURN_BUCKET);
 			const interrupted = blocksThisTurn >= budget;

@@ -7,6 +7,7 @@ import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { configureGuardrails } from "../core/guardrails.js";
 import { rememberRecentModel } from "../core/recent-models.js";
 import {
 	applyOverrides,
@@ -591,6 +592,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		});
 		if (!interactive) writeMiddlewareDiagnosticToStderr(diagnostic);
 	});
+
+	// Guardrail policy (tool-call budgets, tool byte caps, dispatch ledger cap)
+	// resolves settings-first with env as emergency override; install the
+	// settings section before any guard registration or tool reads it.
+	configureGuardrails((config?.get() ?? readSettings()).guardrails);
 
 	// Guard registrations on the middleware contract, in order: loop guard,
 	// protected artifacts (last among guards so it absorbs protect_path effects

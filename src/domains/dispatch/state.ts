@@ -21,14 +21,13 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveGuardrail } from "../../core/guardrails.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
-
-const MAX_RUNS_DEFAULT = 1000;
 
 export interface LedgerOptions {
 	maxRuns?: number;
@@ -87,12 +86,8 @@ function readRuns(): RunEnvelope[] {
 
 export function resolveMaxRuns(opt?: number | undefined): number {
 	if (opt !== undefined && opt > 0) return Math.floor(opt);
-	const envRaw = process.env.CLIO_MAX_RUNS;
-	if (envRaw && envRaw.trim().length > 0) {
-		const parsed = Number.parseInt(envRaw, 10);
-		if (Number.isFinite(parsed) && parsed > 0) return parsed;
-	}
-	return MAX_RUNS_DEFAULT;
+	// env (CLIO_MAX_RUNS) > settings guardrails > default; see core/guardrails.ts.
+	return resolveGuardrail("maxDispatchRuns");
 }
 
 function applyPatch(rec: RunEnvelope, patch: Partial<RunEnvelope>): RunEnvelope {

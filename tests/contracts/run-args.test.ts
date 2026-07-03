@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseRunCliArgs } from "../../src/cli/args.js";
 import { runClioRun } from "../../src/cli/run.js";
+import { RUN_OVERRIDES_ENV, runOverrides } from "../../src/core/run-overrides.js";
 
 function captureStdout<T>(fn: () => T | Promise<T>): Promise<{ result: T; stdout: string }> {
 	const original = process.stdout.write.bind(process.stdout);
@@ -69,11 +70,11 @@ describe("contracts/run CLI args", () => {
 		}
 	});
 
-	it("documents resource and steer flags in run help and restores env overrides", async () => {
-		const previousMax = process.env.CLIO_MAX_CONTEXT_TOKENS;
-		const previousKv = process.env.CLIO_KV_CACHE_MODE;
-		process.env.CLIO_MAX_CONTEXT_TOKENS = "111";
-		process.env.CLIO_KV_CACHE_MODE = "q4_0";
+	it("documents resource and steer flags in run help and restores run overrides", async () => {
+		// Pre-existing run overrides in scope (e.g. a caller already inside
+		// withRunOverrides) must survive a nested clio run invocation untouched.
+		const previous = process.env[RUN_OVERRIDES_ENV];
+		process.env[RUN_OVERRIDES_ENV] = JSON.stringify({ maxContextTokens: 111, kvCacheMode: "q4_0" });
 		try {
 			const { result, stdout } = await captureStdout(() =>
 				runClioRun(["--max-context-tokens", "222", "--kv-cache-mode", "q8_0", "--help"]),
@@ -83,13 +84,10 @@ describe("contracts/run CLI args", () => {
 			ok(stdout.includes("--kv-cache-mode <mode>"));
 			ok(stdout.includes("--steer-channel <path>"));
 			ok(stdout.includes("--json-events <mode>"));
-			strictEqual(process.env.CLIO_MAX_CONTEXT_TOKENS, "111");
-			strictEqual(process.env.CLIO_KV_CACHE_MODE, "q4_0");
+			deepStrictEqual(runOverrides(), { maxContextTokens: 111, kvCacheMode: "q4_0" });
 		} finally {
-			if (previousMax === undefined) delete process.env.CLIO_MAX_CONTEXT_TOKENS;
-			else process.env.CLIO_MAX_CONTEXT_TOKENS = previousMax;
-			if (previousKv === undefined) delete process.env.CLIO_KV_CACHE_MODE;
-			else process.env.CLIO_KV_CACHE_MODE = previousKv;
+			if (previous === undefined) delete process.env[RUN_OVERRIDES_ENV];
+			else process.env[RUN_OVERRIDES_ENV] = previous;
 		}
 	});
 });

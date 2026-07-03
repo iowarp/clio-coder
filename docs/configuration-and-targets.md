@@ -189,6 +189,12 @@ retry:
   maxRetries: 3
   baseDelayMs: 2000
   maxDelayMs: 60000
+guardrails:
+  turnToolCallBudget: 60
+  workerToolCallCap: 50
+  maxDispatchRuns: 1000
+  readMaxBytes: 51200
+  observationTurnBudgetBytes: 196608
 ```
 
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
@@ -196,6 +202,8 @@ Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reas
 `defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
 
 The setting `workers.maxRetries` controls the maximum number of automated retries for retryable failures during fleet dispatch. Setting this value to `0` disables retries entirely. The setting `workers.onPermission` decides how noninteractive workers handle a tool call that asks for permission: `deny` returns a structured denial and lets the run continue, while `fail` finalizes the run as failed with permission required. The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
+
+The `guardrails` section holds the numeric backstops that bound runaway agent behavior. `turnToolCallBudget` (default `60`) is the orchestrator's per-turn soft tool-call budget: crossing it blocks every further call in the turn with a stop-and-summarize directive, and a hard ceiling 15 calls above it interrupts the turn outright. `workerToolCallCap` (default `50`) is the lifetime tool-call cap for one dispatched worker run. `maxDispatchRuns` (default `1000`) caps dispatch run-ledger retention. `readMaxBytes` (default `51200`) caps one read-tool call, and `observationTurnBudgetBytes` (default `196608`) is the shared per-turn byte pool across all observation-producing tools. Each value also has a per-process env override intended for CI and one-off experiments (see [environment-variables.md](environment-variables.md)); the settings file is the durable home.
 
 
 ---
