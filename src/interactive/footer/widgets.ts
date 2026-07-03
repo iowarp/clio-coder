@@ -357,17 +357,15 @@ function renderDashboardRow(theme: ClioTheme, row: DashboardRow, keyWidth: numbe
 	return `${key}${value}`;
 }
 
-function dashboardBlock(
-	theme: ClioTheme,
-	token: ClioToken,
-	label: string,
-	rows: ReadonlyArray<DashboardRow>,
-): string[] {
+function dashboardBlock(theme: ClioTheme, label: string, rows: ReadonlyArray<DashboardRow>): string[] {
 	const keyWidth = rows.reduce((max, row) => (row.kind === "kv" ? Math.max(max, row.key.length) : max), 0);
 	const body = rows
 		.map((row) => renderDashboardRow(theme, row, keyWidth))
 		.filter((row): row is string => typeof row === "string" && row.length > 0);
-	return [sectionTag(theme, token, label.toUpperCase(), 0), ...body];
+	// Every quadrant tag shares one structure color. The tag names the quadrant;
+	// the color is not a per-quadrant signal, so all four render bold accentDeep
+	// rather than the old info/accent/reason/success carnival.
+	return [sectionTag(theme, "accentDeep", label.toUpperCase(), 0), ...body];
 }
 
 function kv(key: string, value: string | null | undefined, valueToken: ClioToken = "muted"): DashboardRow {
@@ -389,7 +387,7 @@ function legendRow(value: string | null | undefined): DashboardRow {
 export function workspaceQuadrant(facts: WorkspaceFacts, _options: ExpandedQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
 	const remote = collapseRemote(facts.remote);
-	return dashboardBlock(theme, "info", "Workspace", [
+	return dashboardBlock(theme, "Workspace", [
 		kv("cwd", facts.cwd),
 		styledKv("git", gitValue(theme, facts.branch, facts.dirty)),
 		kv("type", facts.projectType),
@@ -414,12 +412,14 @@ function capabilitiesValue(theme: ClioTheme, capabilities: string[] | null): str
 export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
 	const identity = sessionIdentity(facts);
-	return dashboardBlock(theme, "accent", "Session", [
+	return dashboardBlock(theme, "Session", [
 		kv(identity.key, identity.value, "accent"),
 		kv("target", facts.target, "accent"),
 		kv("think", facts.thinking, "reason"),
 		styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
-		kv("autonomy", facts.safety, "accentDeep"),
+		// accentDeep is a structure color reserved for the section tag; the autonomy
+		// value is a plain fact and reads muted like the other neutral values.
+		kv("autonomy", facts.safety),
 		kv("profile", facts.toolProfile),
 	]);
 }
@@ -543,7 +543,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 
 	const usedTokens = hasLedger && ledger ? ledger.usedTokens : facts.used;
 	const windowTokens = hasLedger && ledger ? ledger.contextWindow : facts.contextWindow;
-	return dashboardBlock(theme, "reason", "Context", [
+	return dashboardBlock(theme, "Context", [
 		statusRow(bar),
 		kv("used", formatUsedWindow(usedTokens, windowTokens)),
 		fill ? styledKv("fill", fill) : kv("fill", "none"),
@@ -741,7 +741,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	);
 	for (const row of facts.dispatchRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row)));
 	rows.push(kv("tools", facts.toolTally));
-	return dashboardBlock(theme, "success", "Activity", rows);
+	return dashboardBlock(theme, "Activity", rows);
 }
 
 /**

@@ -108,10 +108,12 @@ export function dispatchStatusPresentation(
 	const compact = options.compact === true;
 	switch (status) {
 		case "running":
+			// Running fleet work is Clio acting, so it joins queued work under the
+			// action token rather than the old teal-running/orange-queued split.
 			return {
 				glyph: options.tick !== undefined ? spinnerFrame(options.tick) : GLYPH.running,
 				label: "running",
-				token: "accent",
+				token: "action",
 			};
 		case "completed":
 			return { glyph: GLYPH.ok, label: compact ? "done" : "completed", token: "success" };
