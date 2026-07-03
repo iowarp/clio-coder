@@ -268,6 +268,12 @@ clio skills install context-handoff   # copy into .clio/skills (project scope)
 clio skills list                      # confirm Clio sees it
 ```
 
+The catalog includes [`find-skills`](skills/find-skills/), which routes skill
+discovery and installation through `clio skills search` and
+`clio skills install`. Install it with `clio skills install find-skills --user`
+so it outranks the community skill of the same name that external installers
+drop into compat roots like `~/.agents/skills`.
+
 ## Documentation
 
 The README is the entry point; the full documentation set lives under
