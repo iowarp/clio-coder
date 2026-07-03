@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { evalHarnessMetricsFromCommands, sumEvalHarnessMetrics } from "./metrics.js";
+import { type EvalProvenanceOptions, evalClioProvenance, evalEnvironmentProvenance } from "./provenance.js";
 import type {
 	EvalCommandPhase,
 	EvalCommandResult,
@@ -20,6 +21,11 @@ export interface RunEvalOptions {
 	repeat: number;
 	evalId: string;
 	now?: () => Date;
+	provenance?: EvalProvenanceOptions & {
+		target?: string | null;
+		model?: string | null;
+		thinking?: string | null;
+	};
 }
 
 export async function runEvalTasks(options: RunEvalOptions): Promise<EvalRunArtifact> {
@@ -37,6 +43,16 @@ export async function runEvalTasks(options: RunEvalOptions): Promise<EvalRunArti
 		evalId: options.evalId,
 		taskFile: options.loadedTaskFile.path,
 		taskFileHash: options.loadedTaskFile.contentHash,
+		clio: evalClioProvenance(options.provenance),
+		environment: evalEnvironmentProvenance(),
+		target: options.provenance?.target ?? null,
+		model: options.provenance?.model ?? null,
+		thinking: options.provenance?.thinking ?? null,
+		paths: {
+			taskFile: options.loadedTaskFile.path,
+			receipts: [],
+			sessionLedgers: [],
+		},
 		repeat: options.repeat,
 		startedAt,
 		endedAt,

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import type { EvalRunArtifact, EvalSummary } from "./types.js";
 
@@ -10,9 +11,15 @@ export function renderEvalReport(artifact: EvalRunArtifact, artifactPath?: strin
 		...renderSummaryLines(artifact.summary),
 	];
 	if (artifactPath !== undefined) lines.splice(2, 0, `artifact: ${artifactPath}`);
+	lines.splice(
+		2,
+		0,
+		`clio: ${artifact.clio.version} commit=${artifact.clio.commit ?? "unknown"} entry=${artifact.clio.entry}`,
+	);
+	lines.splice(3, 0, `environment: ${artifact.environment.platform} node=${artifact.environment.node}`);
 	const evidenceIds = uniqueEvidenceIds(artifact);
 	if (evidenceIds.length > 0) {
-		const insertAt = artifactPath === undefined ? 2 : 3;
+		const insertAt = artifactPath === undefined ? 4 : 5;
 		lines.splice(insertAt, 0, `evidence: ${evidenceIds.join(", ")}`);
 	}
 	return `${lines.join("\n")}\n`;
@@ -152,7 +159,8 @@ function evidenceDirectories(artifact: EvalRunArtifact, run: EvalResultLike): st
 
 function patchFromLinkedFiles(value: unknown, baseDir: string): string | undefined {
 	for (const patchPath of patchPathsFromUnknown(value)) {
-		const target = isAbsolute(patchPath) ? patchPath : resolve(baseDir, patchPath);
+		const expanded = expandRedactedHomePath(patchPath);
+		const target = isAbsolute(expanded) ? expanded : resolve(baseDir, expanded);
 		const text = readNonEmptyText(target);
 		if (text !== undefined) return text;
 	}
@@ -188,7 +196,7 @@ function patchPathsFromUnknown(value: unknown): string[] {
 }
 
 function readJsonIfExists(path: string): unknown {
-	const text = readNonEmptyText(path);
+	const text = readNonEmptyText(expandRedactedHomePath(path));
 	if (text === undefined) return undefined;
 	try {
 		return JSON.parse(text) as unknown;
@@ -199,8 +207,9 @@ function readJsonIfExists(path: string): unknown {
 
 function readNonEmptyText(path: string): string | undefined {
 	try {
-		if (!existsSync(path)) return undefined;
-		const text = readFileSync(path, "utf8");
+		const expanded = expandRedactedHomePath(path);
+		if (!existsSync(expanded)) return undefined;
+		const text = readFileSync(expanded, "utf8");
 		return text.trim().length > 0 ? text : undefined;
 	} catch {
 		return undefined;
@@ -216,4 +225,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function stringField(record: Record<string, unknown>, field: string): string | undefined {
 	const value = record[field];
 	return typeof value === "string" ? value : undefined;
+}
+
+function expandRedactedHomePath(path: string): string {
+	if (path === "$HOME") return homedir();
+	if (path.startsWith("$HOME/")) return join(homedir(), path.slice("$HOME/".length));
+	return path;
 }

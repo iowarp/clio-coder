@@ -1,11 +1,12 @@
 import { InvalidIdError } from "../core/safe-id.js";
-import { clioDataDir } from "../core/xdg.js";
+import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { EvalRunArtifact } from "../domains/eval/index.js";
 import {
 	compareEvalArtifacts,
 	createEvalId,
 	EvalTaskFileError,
 	evalArtifactPath,
+	linkEvalArtifactRuntimePaths,
 	loadEvalArtifact,
 	loadEvalTaskFile,
 	renderEvalComparison,
@@ -142,11 +143,16 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 			now: () => new Date(),
 		});
 		const dataDir = clioDataDir();
-		const linkedArtifact = withEvidenceId(artifact, evalEvidenceId(artifact.evalId));
-		await buildEvalEvidence({ dataDir, artifact: linkedArtifact });
+		const stateDir = clioStateDir();
+		const evidenceId = evalEvidenceId(artifact.evalId);
+		const artifactWithEvidenceId = withEvidenceId(artifact, evidenceId);
+		const artifactWithRuntimePaths = await linkEvalArtifactRuntimePaths(artifactWithEvidenceId, stateDir);
+		const evidence = await buildEvalEvidence({ dataDir, stateDir, artifact: artifactWithRuntimePaths });
+		const linkedArtifact = await linkEvalArtifactRuntimePaths(artifactWithRuntimePaths, stateDir, evidence.directory);
 		const artifactPath = await writeEvalArtifact(dataDir, linkedArtifact);
-		process.stdout.write(renderEvalReport(linkedArtifact, artifactPath));
-		return linkedArtifact.summary.failed === 0 ? 0 : 1;
+		const storedArtifact = await loadEvalArtifact(dataDir, linkedArtifact.evalId);
+		process.stdout.write(renderEvalReport(storedArtifact, artifactPath));
+		return storedArtifact.summary.failed === 0 ? 0 : 1;
 	} catch (error) {
 		if (error instanceof EvalTaskFileError) {
 			printError(error.message);

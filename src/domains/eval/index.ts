@@ -14,8 +14,10 @@ export {
 	sumEvalHarnessMetrics,
 	ZERO_EVAL_HARNESS_METRICS,
 } from "./metrics.js";
+export { evalClioProvenance, evalEnvironmentProvenance } from "./provenance.js";
 export { renderEvalReport, renderSummaryLines, renderSweJsonl } from "./report.js";
 export { runEvalTasks, summarizeEvalResults } from "./runner.js";
+export { linkEvalArtifactRuntimePaths } from "./runtime-paths.js";
 export {
 	createEvalId,
 	evalArtifactPath,

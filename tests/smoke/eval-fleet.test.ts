@@ -1,5 +1,5 @@
-import { match, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { match, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -43,6 +43,12 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 					evalId: "eval-smoke",
 					taskFile: "/tmp/tasks.yaml",
 					taskFileHash: "abc123",
+					clio: { version: "0.2.8", commit: "fixture-commit", entry: "dist/cli/index.js" },
+					environment: { platform: "linux-x64", node: "v24.0.0" },
+					target: null,
+					model: null,
+					thinking: null,
+					paths: { taskFile: "/tmp/tasks.yaml", receipts: [], sessionLedgers: [] },
 					repeat: 1,
 					startedAt: "2026-06-24T00:00:00.000Z",
 					endedAt: "2026-06-24T00:00:01.000Z",
@@ -93,6 +99,69 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 		strictEqual(parsed.instance_id, "task-a");
 		strictEqual(parsed.status, "pass");
 		match(parsed.model_patch, /diff --git/);
+	});
+
+	it("eval run --task-file stores provenance and redacted command output", async () => {
+		const dataDir = scratch.env.CLIO_DATA_DIR;
+		if (dataDir === undefined) throw new Error("scratch CLIO_DATA_DIR missing");
+		const taskFile = join(scratch.dir, "provenance.yaml");
+		const command = `${process.execPath} -e ${JSON.stringify(
+			"console.log(process.env.HOME + '/artifact-path'); console.error('Authorization: Bearer secretsecretsecret')",
+		)}`;
+		writeFileSync(
+			taskFile,
+			[
+				"version: 1",
+				"tasks:",
+				"  - id: provenance",
+				"    prompt: local provenance smoke",
+				"    cwd: .",
+				"    setup: []",
+				"    verifier:",
+				`      - ${JSON.stringify(command)}`,
+				"    timeoutMs: 5000",
+				"    tags:",
+				"      - provenance",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const result = await runCli(["eval", "run", "--task-file", taskFile], {
+			env: { ...scratch.env, HOME: scratch.dir },
+			cwd: scratch.dir,
+			timeoutMs: 15_000,
+		});
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		const evalId = /eval: (eval-[^\s]+)/.exec(result.stdout)?.[1];
+		if (evalId === undefined) throw new Error(`eval id missing from stdout: ${result.stdout}`);
+		const raw = readFileSync(join(dataDir, "evals", `${evalId}.json`), "utf8");
+		ok(!raw.includes(scratch.dir), "stored eval artifact must not contain the raw scratch home");
+		ok(!raw.includes("secretsecretsecret"), "stored eval artifact must redact credential-looking output");
+		const parsed = JSON.parse(raw) as {
+			taskFileHash?: unknown;
+			clio?: { version?: unknown; commit?: unknown; entry?: unknown };
+			environment?: { platform?: unknown; node?: unknown };
+			target?: unknown;
+			model?: unknown;
+			thinking?: unknown;
+			paths?: { taskFile?: unknown; receipts?: unknown; sessionLedgers?: unknown };
+			results?: Array<{ cwd?: unknown; commands?: Array<{ stdout?: unknown; stderr?: unknown }> }>;
+		};
+		strictEqual(typeof parsed.taskFileHash, "string");
+		strictEqual(typeof parsed.clio?.version, "string");
+		strictEqual(typeof parsed.clio?.entry, "string");
+		strictEqual(typeof parsed.environment?.platform, "string");
+		strictEqual(typeof parsed.environment?.node, "string");
+		strictEqual(parsed.target, null);
+		strictEqual(parsed.model, null);
+		strictEqual(parsed.thinking, null);
+		strictEqual(parsed.paths?.taskFile, "$HOME/provenance.yaml");
+		strictEqual(Array.isArray(parsed.paths?.receipts), true);
+		strictEqual(Array.isArray(parsed.paths?.sessionLedgers), true);
+		strictEqual(parsed.results?.[0]?.cwd, "$HOME");
+		strictEqual(parsed.results?.[0]?.commands?.[0]?.stdout, "$HOME/artifact-path\n");
+		strictEqual(parsed.results?.[0]?.commands?.[0]?.stderr, "Authorization: [redacted]\n");
 	});
 
 	it("fleet status --json is provider-free and reports an empty ledger", async () => {
