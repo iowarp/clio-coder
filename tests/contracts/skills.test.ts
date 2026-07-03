@@ -686,6 +686,43 @@ describe("contracts/skills tools", () => {
 		}
 	});
 
+	it("context skill load denial without a pending request names the compliant next move", async () => {
+		const cwd = join(scratch, "project");
+		writeSkillDir(
+			join(cwd, ".clio", "skills"),
+			"grill-me",
+			['name: "grill-me"', 'description: "Interview skill."'],
+			"ASK ONE QUESTION",
+		);
+		const tool = createContextTool({ getCwd: () => cwd });
+
+		// No pending policy at all: the operator has not requested any skill.
+		const denied = await tool.run({ scope: "skills", name: "grill-me" }, undefined);
+		strictEqual(denied.kind, "error");
+		if (denied.kind === "error") {
+			ok(denied.message.includes("no pending skill request is active this turn"));
+			// The gate names the model's move: suggest-and-wait, never retry.
+			ok(denied.message.includes("only the operator can activate a skill"));
+			ok(denied.message.includes("do not retry this load"));
+			ok(denied.message.includes("Suggested skill: /skill:<name>"));
+			ok(denied.message.includes("wait for the operator"));
+			ok(denied.message.includes("otherwise continue without skills"));
+		}
+
+		// An empty pending policy behaves identically to an absent one.
+		const emptyPolicy = {
+			allowedSkillNames: [],
+			requests: [],
+			loadedSkillNames: new Set<string>(),
+			loadedSkillPolicies: new Map(),
+		};
+		const deniedEmpty = await tool.run({ scope: "skills", name: "grill-me" }, { pendingSkillPolicy: emptyPolicy });
+		strictEqual(deniedEmpty.kind, "error");
+		if (deniedEmpty.kind === "error" && denied.kind === "error") {
+			strictEqual(deniedEmpty.message, denied.message);
+		}
+	});
+
 	it("context skill activation reaches the observer registration with turn metadata", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(

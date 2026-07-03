@@ -13,6 +13,27 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Added
 
+- **First-turn skills reminder.** Once per session, on the first substantive
+  task turn, when model-visible skills exist and the operator has not already
+  requested one, middleware injects a single visible line into the user
+  message: the skill count, the instruction to list the catalog with
+  `context(scope="skills")` on process-shaped tasks, and the exact
+  suggest-and-wait reply shape (`Suggested skill: /skill:<name>`). The
+  skill-mastery batteries proved local models ignore every ambient prompt
+  channel but comply with user-message text; this is that channel, once,
+  teaching the same protocol as the listing footer. Loading stays
+  operator-gated; nothing changes in `pendingSkillPolicy`.
+- **Skill-load denials name the model's next move.** A
+  `context(scope="skills", name=...)` call without a pending operator request
+  used to be denied with a message that named the gate but no compliant next
+  step, and a live demo showed a local model burning three identical denied
+  calls in one turn. The plumbing was sound (root cause: plain-language asks
+  mint no pending request by design, and the denial taught nothing); the
+  denial now says only the operator can activate a skill, not to retry, and
+  to open the reply with the `Suggested skill: /skill:<name>` line and wait,
+  or continue without skills. The suggestion anchor is one shared constant
+  across the listing footer, the first-turn reminder, and the denial.
+
 - **Per-session prompt manifest.** Every prompt compile whose text changed
   appends one record to `prompt-manifest.jsonl` next to the session's
   `current.jsonl`: system-prompt hash, previous hash, token estimate, the

@@ -759,13 +759,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
-	const fireTurnStart = (agentRuntime: AgentRuntime, promptText: string): void => {
+	const fireTurnStart = (agentRuntime: AgentRuntime, promptText: string, pendingSkillRequestCount = 0): void => {
 		const sessionId = deps.session?.current()?.id;
 		const input: MiddlewareHookInput = {
 			hook: "turn_start",
 			...(sessionId ? { sessionId } : {}),
 			modelId: agentRuntime.wireModelId,
-			metadata: { promptChars: promptText.length, queued: false },
+			metadata: {
+				promptChars: promptText.length,
+				queued: false,
+				// First-substantive-turn signal for once-per-session reminders:
+				// a fresh session's opening turn has an empty conversation.
+				conversationMessages: agentRuntime.agent.state.messages.length,
+				pendingSkillRequests: pendingSkillRequestCount,
+			},
 		};
 		for (const effect of runMiddlewareTurnHook(input)) {
 			if (effect.kind !== "inject_reminder") continue;
@@ -2012,7 +2019,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Like the skill preamble below, the block is plain visible text in
 			// the user message: persisted in the ledger, no hidden prompt
 			// machinery.
-			fireTurnStart(agentRuntime, text);
+			fireTurnStart(agentRuntime, text, pendingSkillRequests.length);
 			const reminderBlock = flushPendingReminders();
 			// Pending skill requests are plain visible text in the user message
 			// itself: persisted in the ledger, no hidden prompt machinery.

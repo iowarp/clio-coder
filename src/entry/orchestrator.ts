@@ -42,10 +42,12 @@ import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/exte
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
-import type { ExtensionHookRoot, MiddlewareContract } from "../domains/middleware/index.js";
 import {
 	createHookReceiptLog,
+	createSkillsReminderRegistration,
+	type ExtensionHookRoot,
 	installUserHooks,
+	type MiddlewareContract,
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
@@ -65,7 +67,7 @@ import {
 } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
-import { createResourcesDomainModule, type ResourcesContract } from "../domains/resources/index.js";
+import { createResourcesDomainModule, modelVisibleSkills, type ResourcesContract } from "../domains/resources/index.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { SafetyContract } from "../domains/safety/index.js";
@@ -623,6 +625,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(
 		createSkillActivationObserver((activation) => appendSkillActivationRegistryEvent(session, activation)),
 	);
+	// First-turn skills reminder: user-message-visible text is the one channel
+	// the battery-tested local models act on; suggestion protocol only, the
+	// operator load gate is untouched.
+	if (resources) {
+		middleware.registerHook(
+			createSkillsReminderRegistration({
+				countModelVisibleSkills: () => modelVisibleSkills(resources.skills(process.cwd()).items).length,
+			}),
+		);
+	}
 	if (contextDomain) {
 		middleware.registerHook(
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
