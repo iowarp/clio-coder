@@ -11,7 +11,7 @@ skills:
     sha256: 587685747a96168f49c6ebac7f0e425d9bbf48619fda5cd14685788605201ead
   - name: clio-test
     version: 0.1.2
-    sha256: c3f4fbfc15767e579c034a5428f81cdbea9be016589bc1b11fb6ded25f3d97e5
+    sha256: 4c03bf20bb4ce8b476adbb3f82c55075ba3c2be8582c80b2d49f581ee1fffe1d
   - name: context-handoff
     version: 0.2.1
     sha256: 9486da61a872838c8bd3d89160d4b017995fe8e96e6a5c074233faed46f30316

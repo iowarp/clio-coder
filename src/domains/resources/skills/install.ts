@@ -11,6 +11,11 @@ export { normalizedSkillHash, stripProvenanceFrontmatter } from "./content-hash.
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CLONE_TIMEOUT_MS = 60_000;
 
+/** True when the value has the bare skill-name shape (lowercase, hyphenated). */
+export function isSkillName(value: string): boolean {
+	return value.length > 0 && value.length <= 64 && SKILL_NAME_PATTERN.test(value);
+}
+
 export type SkillSourceSpec =
 	| { kind: "local"; path: string; original: string }
 	| { kind: "github"; cloneUrl: string; branch: string; filePath: string; original: string };
@@ -179,7 +184,12 @@ function validateSourceSkill(skillDir: string): { skill: Skill; warnings: string
 	return { skill, warnings: list.diagnostics.map((diag) => diag.message) };
 }
 
-export function installSkill(input: InstallSkillInput): InstallSkillResult {
+/**
+ * Install from a concrete source: an existing local path or a GitHub URL.
+ * Frontends never call this directly; the public entry point is
+ * `installSkill` in marketplace.ts, which adds bare-name resolution on top.
+ */
+export function installSkillFromSource(input: InstallSkillInput): InstallSkillResult {
 	const spec = parseSkillSourceSpec(input.source);
 	if (!spec) throw new Error(`unsupported skill source: ${input.source}`);
 	const cwd = input.cwd ?? process.cwd();
@@ -189,7 +199,7 @@ export function installSkill(input: InstallSkillInput): InstallSkillResult {
 	try {
 		const { skill, warnings } = validateSourceSkill(fetched.skillDir);
 		const name = (input.name ?? skill.name).trim();
-		if (name.length === 0 || name.length > 64 || !SKILL_NAME_PATTERN.test(name)) {
+		if (!isSkillName(name)) {
 			throw new Error(`invalid skill name "${name}": use lowercase letters, numbers, and single hyphens`);
 		}
 

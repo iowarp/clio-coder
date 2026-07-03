@@ -29,7 +29,8 @@ npm run test              # contracts + smoke + boundaries
 npm run build             # tsup -> dist/
 npm run dev               # tsup --watch -> rebuilds dist/ on save
 npm run ci                # typecheck && lint && build && test
-npm run test:live         # scripts/live-smoke.mjs against a real provider
+npm run test:live         # local live provider smoke; requires CLIO_LIVE_SMOKE=1
+npm run test:live -- --delegation  # adds local opencode/copilot ACP checks
 ```
 
 ## Which layer catches what

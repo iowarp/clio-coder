@@ -473,21 +473,21 @@
         badgeClass: "status-info",
         content: `{
   "runId": "run-9a3c9f28",
-  "command": "npm run build && node scripts/compile.js",
+  "command": "npm run build && npm run test:smoke",
   "exitCode": 0,
   "startedAt": "2026-06-12T08:12:00Z",
   "finishedAt": "2026-06-12T08:12:45Z",
   "receiptIntegrity": "sha256-abc874fde3c99a0042188ffabec12530164c676643",
   "filesCreated": [
-    "dist/index.js",
-    "dist/index.d.ts"
+    "dist/cli/index.js",
+    "dist/worker/entry.js"
   ]
 }`,
         verifySuccess: true,
         verifyLog: `[INFO] Read ~/.local/state/clio/receipts/run-9a3c9f28.json
 [INFO] Validating required receipt fields and value ranges:
   - runId: run-9a3c9f28 (VALID)
-  - command: 'npm run build && node scripts/compile.js' (VALID)
+  - command: 'npm run build && npm run test:smoke' (VALID)
   - exitCode: 0 (VALID)
 [INFO] Read ~/.local/state/clio/runs.json
 [INFO] Found matching run envelope in global runs ledger.

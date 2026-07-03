@@ -4,8 +4,8 @@
  * When `CLIO_BUS_TRACE=1` is set in the environment, subscribe once to the
  * shutdown-phase channels, `session.end`, and the domain lifecycle channels
  * (`domain.loaded`/`domain.failed`, suffixed with the domain name), emitting a
- * single prefixed line per event to stderr. Off by default; diag scripts spawn
- * the CLI with the env var to observe bus ordering across a subprocess boundary.
+ * single prefixed line per event to stderr. Off by default; local debugging can
+ * spawn the CLI with the env var to observe bus ordering across a subprocess boundary.
  *
  * The tracer lives in `src/core/` (engine-free zone) because it is
  * orchestrator-wide observability, not a domain concern. Add channels to the
@@ -14,11 +14,9 @@
  * Ordering invariant: the first `[clio:bus] shutdown.requested` line must
  * never reach stderr before the `Clio Coder: received <SIGNAL>, shutting down...`
  * notice written by termination.installSignalHandlers in
- * src/core/termination.ts. The Front 1 diag (scripts/diag-interactive.ts)
- * asserts the SIGINT notice is present on stderr before the bus trace lines,
- * and future edits to termination.ts must preserve that stderr ordering.
- * Concretely: write the signal notice synchronously from the signal handler
- * before calling shutdown(), which is where ShutdownRequested is emitted.
+ * src/core/termination.ts. Future edits to termination.ts must preserve that
+ * stderr ordering: write the signal notice synchronously from the signal
+ * handler before calling shutdown(), which is where ShutdownRequested is emitted.
  */
 
 import { BusChannels } from "./bus-events.js";

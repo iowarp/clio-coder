@@ -36,8 +36,8 @@ The core files are created automatically during the first run. `credentials.yaml
 
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
-| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall; `uninstall-local.sh --keep-settings-auth` preserves it. |
-| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Removed by uninstall; `uninstall-local.sh --keep-settings-auth` preserves it. |
+| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and theme preferences. | `0o644` (rw-r--r--) | Removed by uninstall / `reset --config`. |
+| **Config** | `credentials.yaml` | Private keys and tokens managed via `clio auth`. | `0o600` (rw-------) | Removed by uninstall / `reset --auth`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install), and `upgradedAt` (stamped on upgrade). | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
@@ -157,48 +157,31 @@ Levels are combinable except `--all`. Each level clears exactly the root or file
 *   `--config`: Deletes `settings.yaml` to revert preferences to default.
 *   `--all`: Wipes all four roots (config, data, state, cache) and automatically reinitializes a fresh environment.
 
-### D. Local Source Uninstallation (`npm run uninstall:local`)
-Preview first:
-
-```bash
-npm run uninstall:local -- --dry-run
-```
-
-Full local source uninstall:
-
-```bash
-npm run uninstall:local -- --force
-hash -r
-```
-
-This removes the `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio` symlink only when it
-points into the current checkout, then removes the Clio config, data, state,
-and cache roots, labeling each removal by its root name. To keep
-only the active settings and credentials files, not old backups or other config
-residue, run:
-
-```bash
-npm run uninstall:local -- --force --keep-settings-auth
-```
-
-Use `--keep-state` for binary-only unlinking. Use `--preserve-settings-auth
-<dir>` to copy active `settings.yaml` and `credentials.yaml` to an explicit
-operator-chosen directory before restoring them. Credential contents are never
-printed.
-
-### E. CLI State Uninstallation (`clio uninstall`)
-`clio uninstall` removes all four roots (config, data, state, cache):
+### D. Uninstallation (`clio uninstall`)
+`clio uninstall` is the single uninstall path for every install method. It
+removes all four roots (config, data, state, cache):
 
 ```bash
 clio uninstall [--remove-binary] [--dry-run] [--force]
 ```
 
-`--dry-run` prints the roots and optional launcher action without changing anything. `--remove-binary` also removes the launcher symlink when it resolves into a
-clio dist; anything else (a real file, a foreign symlink) is left in place.
-It prints binary-removal guidance for the active launcher, npm-global installs,
-npm links, and the local source symlink. Prefer `npm run uninstall:local` for
-source checkouts because it handles both the symlink and state in one audited
-path.
+Preview first, then remove:
+
+```bash
+clio uninstall --dry-run
+clio uninstall --remove-binary --force
+hash -r
+```
+
+`--dry-run` prints the roots and optional launcher action without changing
+anything. `--remove-binary` also removes the launcher symlink when it resolves
+into a clio dist, which is exactly the shape `npm run install:local` creates;
+anything else (a real file, a foreign symlink) is left in place. It prints
+binary-removal guidance for the active launcher, npm-global installs, npm
+links, and the local source symlink. To wipe state selectively while keeping
+settings or credentials, use `clio reset` instead of uninstalling. If the
+launcher is already gone but state remains, run the built CLI directly from
+the checkout: `node dist/cli/index.js uninstall --force`.
 
 ---
 
@@ -213,9 +196,7 @@ If you are removing Clio Coder completely from your system, verify that all cate
     *   `~/.cache/clio`
 2.  **Local Source Bin Link**:
     *   `${CLIO_BIN_DIR:-$HOME/.local/bin}/clio`
-3.  **Git Hooks**:
-    *   If you ran `npm run hooks:install` inside a cloned repository, delete the hook at: `<repo-root>/.git/hooks/pre-commit`
-4.  **Global Bin Links**:
+3.  **Global Bin Links**:
     *   `clio` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
 
 ---

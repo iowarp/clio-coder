@@ -5,6 +5,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify } from "yaml";
 
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h")) {
+	console.log(`Usage: node scripts/live-smoke.mjs [--delegation]
+
+Runs an opt-in live provider smoke only when CLIO_LIVE_SMOKE=1.
+Pass --delegation to also validate external ACP delegation agents
+(opencode and copilot), which must be installed locally.`);
+	process.exit(0);
+}
+const unknown = args.find((arg) => arg !== "--delegation");
+if (unknown) {
+	console.error(`Error: unknown argument: ${unknown}`);
+	process.exit(2);
+}
+const includeDelegation = args.includes("--delegation");
+
 if (process.env.CLIO_LIVE_SMOKE !== "1") {
 	console.log("CLIO_LIVE_SMOKE environment variable is not set to '1'. Skipping live LLM smoke validation.");
 	process.exit(0);
@@ -184,6 +200,7 @@ function runCommand(args, timeoutMs = 120_000) {
 
 async function main() {
 	console.log(`Setting up live smoke test with target=${targetId}, runtime=${runtimeId}, model=${model}`);
+	console.log(`Delegation validation: ${includeDelegation ? "enabled" : "disabled"}`);
 	console.log(`Scratch config path: ${settingsPath}`);
 
 	try {
@@ -221,6 +238,12 @@ async function main() {
 
 		if (!cleanStdout.toLowerCase().includes("clio-live-ok")) {
 			throw new Error("Validation prompt response did not contain 'clio-live-ok'");
+		}
+
+		if (!includeDelegation) {
+			console.log("Skipping ACP delegation live validation; pass --delegation to run opencode/copilot checks.");
+			console.log("Live smoke validation: SUCCESS");
+			return;
 		}
 
 		// 4. clio run --agent opencode "Reply with exactly: clio-opencode-ok"

@@ -7,10 +7,8 @@
  * below exists only for a broken or missing dist and must mirror src/core/xdg.ts,
  * including the rule that per-root `CLIO_*_DIR` vars beat `CLIO_HOME`.
  *
- * The bash uninstaller (scripts/uninstall-local.sh) keeps its own shell copy of
- * this logic on purpose: an uninstaller must not depend on the benchmarks tree,
- * and the live-smoke gate (scripts/live-smoke.mjs) creates fresh scratch roots
- * rather than resolving existing ones, so neither imports this module.
+ * The live-smoke gate (scripts/live-smoke.mjs) creates fresh scratch roots
+ * rather than resolving existing ones, so it does not import this module.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";

@@ -48,7 +48,6 @@ export { parseSkillEvals, type SkillEvalParseResult, type SkillEvalScenario } fr
 export {
 	type InstallSkillInput,
 	type InstallSkillResult,
-	installSkill,
 	normalizedSkillHash,
 	parseSkillSourceSpec,
 	type SkillSourceSpec,
@@ -76,7 +75,7 @@ export {
 	type DiscoverMarketplaceOptions,
 	discoverMarketplaceSkills,
 	getMarketplaceSkills,
-	installMarketplaceSkill,
+	installSkill,
 	type MarketplaceDiscoveryResult,
 	type MarketplaceSkill,
 	type MarketplaceSkillOrigin,

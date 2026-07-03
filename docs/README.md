@@ -57,7 +57,8 @@ The release entry point is [../README.md](../README.md); detailed release
 history lives in [../CHANGELOG.md](../CHANGELOG.md). For v0.2.7 the supported
 install path is a source checkout through `npm run install:local`, the
 deterministic release gate is `npm run ci:release`, live model smoke
-validation is manual and opt-in through `npm run test:live`, and the package
+validation is local/manual and opt-in through `npm run test:live` (add
+`-- --delegation` for opencode/copilot checks), and the package
 is not published to npm.
 
 ## Writing Documentation

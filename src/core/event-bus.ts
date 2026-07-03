@@ -52,7 +52,7 @@ export function createSafeEventBus(): SafeEventBus {
 		// Synchronous fan-out. "Safe" means listener errors never reach the
 		// emitter; it does not mean deferred delivery. Deferred delivery would
 		// drop shutdown.* events when process.exit runs before the Promise
-		// microtask chain resolves (observed during diag-interactive).
+		// microtask chain resolves.
 		// Iterating a snapshot so re-entrant emit()/on()/off() inside a listener
 		// is safe; registration changes take effect on the next emit().
 		for (const listener of [...ls]) {

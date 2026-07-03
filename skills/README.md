@@ -56,22 +56,20 @@ allow. Full semantics: docs/safety-model.md, "Skill tool surface narrowing".
 
 ## Install (activate a marketplace skill)
 
-`install.sh` is the bridge from marketplace to runtime. It links a skill into a
-discovery root so Clio can load it.
+`clio skills install` is the bridge from marketplace to runtime. It copies a
+skill into a discovery root and stamps install provenance so Clio can load it.
 
 ```bash
-# Project scope (default): link into <repo>/.clio/skills, live edits apply
-skills/install.sh context-handoff
+# Project scope (default): copy into <repo>/.clio/skills
+clio skills install context-handoff
 
-# User scope: link into the Clio config skills dir, available everywhere
-skills/install.sh clio-dev --user
-
-# Distribute a frozen copy (stamps installed-at) instead of a live symlink
-skills/install.sh clio-test --copy
-
-# Everything at once
-skills/install.sh --all
+# User scope: copy into the Clio config skills dir, available everywhere
+clio skills install clio-dev --user
 ```
+
+Bare names resolve through the local marketplace (this catalog when run from
+the repo, `CLIO_SKILL_CATALOG_DIR`, or the skill-marketplace.json index); an
+existing local path always wins over a same-named marketplace entry.
 
 After install, confirm Clio sees it:
 
@@ -80,9 +78,14 @@ clio skills list            # human view
 clio skills inspect context-handoff # full metadata + provenance
 ```
 
-Uninstall is just removing the link: `rm .clio/skills/<name>` (or the user-scope
-equivalent). `install.sh` never writes outside `.clio/skills` or the user config
-skills dir, both of which are gitignored / outside the repo.
+Installed copies are frozen; refresh them from their `source-url` provenance
+with `clio skills update <name>` or `clio skills sync`. While developing a
+catalog skill, load it directly without installing:
+`clio --skill skills/<name>/SKILL.md`.
+
+Uninstall is just removing the copy: `rm -r .clio/skills/<name>` (or the
+user-scope equivalent). Installs never write outside `.clio/skills` or the
+user config skills dir, both of which are gitignored / outside the repo.
 
 ## Contributing / approval
 
@@ -118,9 +121,8 @@ catalog where any skill is missing the required frontmatter, `audit: pass`, or
 its `evals.md`, and `npm run skills:check` (run in CI) fails on any drift
 between the catalog and `registry.yaml`. Pinned hashes are provenance-stripped
 (install-lifecycle stamps like `installed-at` do not count as drift; content
-and registry-identity edits do), so a copy installed via `install.sh --copy`
-or `clio skills install` still verifies against its audited source at
-activation.
+and registry-identity edits do), so a copy installed via `clio skills install`
+still verifies against its audited source at activation.
 
 A skill may declare typed dependencies with `requires: [skill:<name>, ...]`
 frontmatter; the loader warns at load time when a required skill is not

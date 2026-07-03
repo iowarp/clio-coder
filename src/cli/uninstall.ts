@@ -139,9 +139,7 @@ function printRemovalGuidance(): void {
 	if (npmPrefix) process.stdout.write(`  npm prefix bin:   ${join(npmPrefix, "bin")}\n`);
 	process.stdout.write(`  local source bin: ${localLink}${existsSync(localLink) ? "" : "  (absent)"}\n`);
 	process.stdout.write("\nUse the removal path that matches how you installed Clio Coder:\n");
-	process.stdout.write(
-		"  source symlink:  clio uninstall --remove-binary --force (or npm run uninstall:local -- --force)\n",
-	);
+	process.stdout.write("  source symlink:  clio uninstall --remove-binary --force\n");
 	process.stdout.write("  npm global:      npm uninstall -g @iowarp/clio-coder\n");
 	process.stdout.write("  npm link:        npm unlink -g @iowarp/clio-coder\n");
 	process.stdout.write("\nAfter removing or replacing a clio link, clear shell command caches:\n");

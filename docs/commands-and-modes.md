@@ -242,7 +242,7 @@ to execute through the existing Pi-backed worker path, the sanctioned Claude Cod
 | --- | --- |
 | `npm run ci` | Local and GitHub PR gate: typecheck, Biome check, skills pin check, build, and deterministic tests. |
 | `npm run ci:release` | Maintainer release gate: `npm run ci`, then the `check-release` dist and packaging audit. |
-| `npm run test:live` | Manual live-model smoke. Requires `CLIO_LIVE_SMOKE=1` and a configured real model target. |
+| `npm run test:live` | Local manual live-model smoke. Requires `CLIO_LIVE_SMOKE=1` and a configured real model target. Add `-- --delegation` for `opencode` and `copilot` ACP delegation checks. |
 | `npm run typecheck` | Strict TypeScript pass. |
 | `npm run lint` | Biome checks; warnings are reported in the release gate output. |
 | `npm run test` | Contract, smoke, and boundary tests. |
@@ -250,7 +250,6 @@ to execute through the existing Pi-backed worker path, the sanctioned Claude Cod
 | `npm run build` | Production bundle through `tsup`. |
 | `npm run dev` | `tsup --watch`. |
 | `npm run clean` | Remove `dist/`. |
-| `npm run hooks:install` | Install the optional pre-commit hook. |
 
 Live smoke example:
 
@@ -261,6 +260,13 @@ CLIO_LIVE_RUNTIME=openai-compat \
 CLIO_LIVE_MODEL=your-model \
 CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
 npm run test:live
+```
+
+Delegation validation is a separate opt-in flag because it depends on local
+`opencode` and `copilot` commands:
+
+```bash
+CLIO_LIVE_SMOKE=1 npm run test:live -- --delegation
 ```
 
 Live checks cost tokens or local GPU time and are not deterministic CI. They

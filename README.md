@@ -104,12 +104,13 @@ TypeScript sources.
 To uninstall, preview first and then remove the symlink and local state:
 
 ```bash
-npm run uninstall:local -- --dry-run
-npm run uninstall:local -- --force
+clio uninstall --dry-run
+clio uninstall --remove-binary --force
+hash -r
 ```
 
-Add `--keep-settings-auth` to preserve `settings.yaml` and `credentials.yaml`,
-or `--keep-state` to unlink the binary only. Full lifecycle details are in
+For selective wipes that keep settings or credentials, use `clio reset`
+instead. Full lifecycle details are in
 [docs/installation-and-lifecycle.md](docs/installation-and-lifecycle.md).
 
 ## Quick Start
@@ -263,8 +264,8 @@ installed copies verify against their audited source at activation. Nothing
 in the catalog auto-loads; activate a skill explicitly:
 
 ```bash
-skills/install.sh context-handoff   # link into .clio/skills (project scope)
-clio skills list                    # confirm Clio sees it
+clio skills install context-handoff   # copy into .clio/skills (project scope)
+clio skills list                      # confirm Clio sees it
 ```
 
 ## Documentation
@@ -324,6 +325,13 @@ CLIO_LIVE_RUNTIME=openai-compat \
 CLIO_LIVE_MODEL=your-model \
 CLIO_LIVE_BASE_URL=http://localhost:8080/v1 \
 npm run test:live
+```
+
+Delegation checks need local `opencode` and `copilot` commands, so they are a
+separate opt-in flag on the same lane:
+
+```bash
+CLIO_LIVE_SMOKE=1 npm run test:live -- --delegation
 ```
 
 Treat live checks as operator-run release evidence, not a guarantee that every
