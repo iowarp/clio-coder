@@ -270,6 +270,51 @@ describe("unified loop guard registration", () => {
 	});
 });
 
+describe("block-reason evidence anchor", () => {
+	it("tells the model the looped call already succeeded and where its result is", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		// The two calls below the detector threshold succeed and are recorded via
+		// the after_tool touchpoint; the third trips the loop.
+		for (let i = 1; i < LOOP_THRESHOLD; i++) {
+			strictEqual((await registry.invoke(call, { turnId: "t1" })).kind, "ok");
+		}
+		const blocked = await registry.invoke(call, { turnId: "t1" });
+		ok(
+			blocked.kind === "blocked" && blocked.reason.includes("already succeeded 2 times"),
+			"names the number of prior successes",
+		);
+		ok(
+			blocked.kind === "blocked" && blocked.reason.includes("already in the conversation above"),
+			"points the model at the result it already has",
+		);
+		ok(blocked.kind === "blocked" && blocked.reason.includes("Change strategy"), "still asks for a strategy change");
+	});
+
+	it("omits the success anchor when the looped call never returned a successful result", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = createRegistry({ safety, middleware: bundle.contract });
+		registry.register({
+			name: ToolNames.Grep,
+			description: "always errors",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			run: async () => ({ kind: "error", message: "boom" }),
+		});
+		const call = { tool: ToolNames.Grep, args: {} };
+		for (let i = 1; i < LOOP_THRESHOLD; i++) await registry.invoke(call, { turnId: "t1" });
+		const blocked = await registry.invoke(call, { turnId: "t1" });
+		ok(blocked.kind === "blocked" && blocked.reason.includes("loop detected"), "still reports the loop");
+		ok(
+			blocked.kind === "blocked" && !blocked.reason.includes("already succeeded"),
+			"a call that only ever errored gets no false success anchor",
+		);
+	});
+});
+
 describe("synthesis lockout at the block budget", () => {
 	function lockoutRegistry(): {
 		registry: ReturnType<typeof createRegistry>;
