@@ -13,6 +13,16 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Added
 
+- **Per-session prompt manifest.** Every prompt compile whose text changed
+  appends one record to `prompt-manifest.jsonl` next to the session's
+  `current.jsonl`: system-prompt hash, previous hash, token estimate, the
+  thinking dial active at compile time, per-section token estimates, and
+  per-fragment content hashes. A finished session's stored artifacts alone
+  now state exactly which prompt the model received, and two sessions diff
+  without recompiling anything. The manifest never stores prompt text.
+  Headless receipts already carry `compiledPromptHash` and the
+  requested/effective thinking level via `runtimeResolution`; the session
+  manifest closes the interactive and section/fragment gap.
 - **Eval artifact provenance, suite v2, and public benchmark manifests.**
   `clio eval run --task-file` now stores redacted provenance with Clio version,
   commit, entrypoint, platform, Node version, target, model, thinking level, and

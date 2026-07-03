@@ -1,11 +1,16 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { isSessionEntry, isSessionHeader, type SkillActivationEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import {
+	appendPromptCompileRecord,
+	getPromptManifestFilePath,
+	readPromptCompileRecords,
+} from "../../src/domains/session/prompt-manifest.js";
 import {
 	type ClioTurnRecord,
 	createSession,
@@ -161,6 +166,53 @@ describe("contracts/persistence", () => {
 		const persistedMeta = reader.meta() as { skillActivations?: Array<{ name: string; turnId?: string }> };
 		strictEqual(persistedMeta.skillActivations?.[0]?.name, "review-tests");
 		strictEqual(persistedMeta.skillActivations?.[0]?.turnId, userTurn.id);
+	});
+
+	it("persists prompt-compile manifest records as a session sibling artifact", () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: scratch });
+
+		const record = {
+			at: "2026-07-03T00:00:00.000Z",
+			previousHash: null,
+			systemPromptHash: "b".repeat(64),
+			tokenEstimate: 1234,
+			thinkingLevel: "off",
+			projectPreload: null,
+			sections: [
+				{ id: "identity", tokenEstimate: 200 },
+				{ id: "operating-contract", tokenEstimate: 900 },
+			],
+			fragments: [{ id: "identity.clio", relPath: "identity/clio.md", contentHash: "c".repeat(64), dynamic: false }],
+		};
+		appendPromptCompileRecord(meta, record);
+		appendPromptCompileRecord(meta, {
+			...record,
+			at: "2026-07-03T00:05:00.000Z",
+			previousHash: record.systemPromptHash,
+			systemPromptHash: "d".repeat(64),
+			thinkingLevel: "low",
+		});
+
+		const manifestPath = getPromptManifestFilePath(meta);
+		strictEqual(manifestPath, join(dirname(sessionPaths(meta).current), "prompt-manifest.jsonl"));
+		ok(existsSync(manifestPath));
+
+		const records = readPromptCompileRecords(meta);
+		strictEqual(records.length, 2);
+		strictEqual(records[0]?.systemPromptHash, "b".repeat(64));
+		strictEqual(records[0]?.previousHash, null);
+		strictEqual(records[0]?.thinkingLevel, "off");
+		deepStrictEqual(records[0]?.sections, record.sections);
+		deepStrictEqual(records[0]?.fragments, record.fragments);
+		strictEqual(records[1]?.previousHash, "b".repeat(64));
+		strictEqual(records[1]?.systemPromptHash, "d".repeat(64));
+		strictEqual(records[1]?.thinkingLevel, "low");
+
+		// A torn trailing line must not break provenance reads.
+		writeFileSync(manifestPath, `${readFileSync(manifestPath, "utf8")}{"truncated`, "utf8");
+		strictEqual(readPromptCompileRecords(meta).length, 2);
 	});
 
 	it("fd-appends turns without close and they are immediately readable", () => {

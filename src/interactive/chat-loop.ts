@@ -62,6 +62,7 @@ import {
 import { buildContextLedger, type ContextLedger, type PromptCacheStats } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
+import { appendPromptCompileRecord, type SessionPromptCompileRecord } from "../domains/session/prompt-manifest.js";
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import {
 	computeRetryDelayMs,
@@ -396,7 +397,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let sessionPrompt: CompiledSessionPrompt | null = null;
 	let sessionPromptKey: string | null = null;
 	const sessionWorkingContextPaths = new Set<string>();
-	let pendingPromptLogEntry: { previousHash: string | null; hash: string; tokenEstimate: number } | null = null;
+	let pendingPromptLogEntry: SessionPromptCompileRecord | null = null;
 	let activeUserTurnId: string | null = null;
 	let toolProseAbortReason: string | null = null;
 	let lastRunSnapshot: ChatLoopRunSnapshot | null = null;
@@ -1600,9 +1601,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (changed) {
 				agentRuntime.agent.state.systemPrompt = result.systemPrompt;
 				pendingPromptLogEntry = {
+					at: new Date().toISOString(),
 					previousHash,
-					hash: result.systemPromptHash,
+					systemPromptHash: result.systemPromptHash,
 					tokenEstimate: result.tokenEstimate,
+					thinkingLevel: agentRuntime.agent.state.thinkingLevel ?? null,
+					projectPreload: result.projectPreload ?? null,
+					sections: result.sections.map((s) => ({ id: s.id, tokenEstimate: s.tokenEstimate })),
+					fragments: result.fragmentManifest.map((f) => ({
+						id: f.id,
+						relPath: f.relPath,
+						contentHash: f.contentHash,
+						dynamic: f.dynamic,
+					})),
 				};
 			}
 			lastSystemPromptReused = !changed;
@@ -1618,27 +1629,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
-	 * Write the queued prompt-compile ledger entry. Deferred until after the
-	 * user turn is appended so the session is guaranteed to exist.
+	 * Write the queued prompt-compile ledger entry and its full manifest
+	 * record. Deferred until after the user turn is appended so the session
+	 * is guaranteed to exist. The current.jsonl entry stays hash-only; the
+	 * section/fragment breakdown goes to the prompt-manifest.jsonl sibling.
 	 */
 	const logPromptCompileIfPending = (): void => {
-		if (!pendingPromptLogEntry || !deps.session?.current()) return;
+		const currentMeta = deps.session?.current();
+		if (!pendingPromptLogEntry || !currentMeta) return;
 		const entry = pendingPromptLogEntry;
 		pendingPromptLogEntry = null;
 		try {
-			deps.session.appendEntry({
+			deps.session?.appendEntry({
 				kind: "custom",
 				customType: "promptRecompiled",
 				parentTurnId: lastTurnId,
 				data: {
 					previousHash: entry.previousHash,
-					hash: entry.hash,
+					hash: entry.systemPromptHash,
 					tokenEstimate: entry.tokenEstimate,
 				},
 			});
 		} catch {
 			// Ledger logging is diagnostics, not control flow; never abort a turn.
 		}
+		appendPromptCompileRecord(currentMeta, entry);
 	};
 
 	const liveContextEstimate = (

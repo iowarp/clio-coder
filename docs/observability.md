@@ -68,6 +68,7 @@ Clio resolves directories under platform-specific XDG defaults (on Linux, these 
 | **Dispatch outputs** | Logs and ledger records detailing worker execution. | `<stateDir>/runs.json` and `<stateDir>/receipts/<runId>.json` |
 | **Tool outputs** | Offloaded large outputs or execution logs. | `<stateDir>/scratch/<sessionId>/<toolCallId>.txt` |
 | **Compaction** | Summaries of compacted history sessions. | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
+| **Prompt manifest** | One record per prompt compile: `systemPromptHash`, previous hash, token estimate, thinking dial at compile time, per-section token estimates, and per-fragment content hashes. States exactly what prompt the model received and diffs across sessions without recompiling; the prompt text itself is never stored. | `<stateDir>/sessions/<cwdHash>/<sessionId>/prompt-manifest.jsonl` |
 
 ---
 
