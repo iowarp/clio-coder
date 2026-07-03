@@ -21,13 +21,17 @@ Commands:
   clio skills search <query> [--json]
   clio skills inspect <name> [--json]
   clio skills validate [path] [--json]
-  clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
+  clio skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]
   clio skills update <name> | --all [--force]
   clio skills sync [--force]
   clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]
 
 search covers installed skills plus the local marketplace (a repo skills/
 catalog, CLIO_SKILL_CATALOG_DIR, or the skill-marketplace.json index).
+
+install resolves a bare name through that marketplace; a path or GitHub URL
+installs directly, and an existing local path always wins over a same-named
+marketplace entry.
 
 eval (experimental) executes the skill's evals.md RED-GREEN scenarios: per
 scenario a baseline headless run without the skill, a treatment run with it,
@@ -236,20 +240,27 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				return 2;
 			}
 			const list = loadSkills({ cwd: process.cwd() });
+			const discovery = discoverMarketplaceSkills({ cwd: process.cwd() });
 			const installedNames = new Set(list.items.map((skill) => skill.name));
 			const matchesQuery = (name: string, description: string): boolean =>
 				name.toLowerCase().includes(query) || description.toLowerCase().includes(query);
 			const installed = list.items.filter((skill) => matchesQuery(skill.name, skill.description));
-			const marketplace = discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter(
+			const marketplace = discovery.skills.filter(
 				(skill) => !installedNames.has(skill.name) && matchesQuery(skill.name, skill.description),
 			);
+			// Search must report anything that made the result incomplete: loader
+			// diagnostics (like list) plus marketplace discovery diagnostics, so a
+			// broken index looks different from a skill that does not exist.
+			const exitCode = list.diagnostics.some((diag) => diag.type === "error") ? 1 : 0;
 			if (parsed.json) {
-				process.stdout.write(`${JSON.stringify({ query, installed, marketplace }, null, 2)}\n`);
-				return 0;
-			}
-			if (installed.length === 0 && marketplace.length === 0) {
-				process.stdout.write(`skills: no matches for "${query}"\n`);
-				return 0;
+				process.stdout.write(
+					`${JSON.stringify(
+						{ query, installed, marketplace, diagnostics: list.diagnostics, marketplaceDiagnostics: discovery.diagnostics },
+						null,
+						2,
+					)}\n`,
+				);
+				return exitCode;
 			}
 			if (installed.length > 0) {
 				process.stdout.write("installed:\n");
@@ -258,12 +269,17 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 				}
 			}
 			if (marketplace.length > 0) {
-				process.stdout.write("marketplace (clio skills install <name|source>):\n");
+				process.stdout.write("marketplace (clio skills install <name>):\n");
 				for (const skill of marketplace) {
 					process.stdout.write(`  ${skill.name.padEnd(24)} ${skill.description}  (${formatMarketplaceOrigin(skill)})\n`);
 				}
 			}
-			return 0;
+			if (installed.length === 0 && marketplace.length === 0) {
+				process.stdout.write(`skills: no matches for "${query}"\n`);
+			}
+			printDiagnostics(list.diagnostics);
+			for (const message of discovery.diagnostics) process.stderr.write(`warning: ${message}\n`);
+			return exitCode;
 		}
 		case "inspect": {
 			const name = parsed.positional[0];
@@ -312,7 +328,9 @@ export async function runSkillsCommand(argv: ReadonlyArray<string>): Promise<num
 		case "install": {
 			const source = parsed.positional[0];
 			if (!source || parsed.positional.length !== 1) {
-				process.stderr.write("usage: clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]\n");
+				process.stderr.write(
+					"usage: clio skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]\n",
+				);
 				return 2;
 			}
 			try {

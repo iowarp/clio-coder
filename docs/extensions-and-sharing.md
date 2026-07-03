@@ -133,7 +133,7 @@ clio skills list [--json] [--all]
 clio skills search <query> [--json]
 clio skills inspect <name> [--json]
 clio skills validate [path] [--json]
-clio skills install <path|github-url> [--user|--project] [--name <name>] [--force]
+clio skills install <name|path|github-url> [--user|--project] [--name <name>] [--force]
 clio skills update <name> | --all [--force]
 clio skills sync [--force]
 clio skills eval <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--json]
@@ -155,7 +155,7 @@ Clio is local-first. Skills run from disk and no chat turn depends on network ac
 npx skills add <skill> -a codex   # installs into ~/.codex/skills
 ```
 
-Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio does support local marketplace search plus `clio skills install <path|github-url>` for explicit local paths or GitHub URLs.
+Clio does not call Skills.sh during startup or prompt assembly, and does not emit its own telemetry. If you run `npx skills`, its telemetry follows that CLI and can be disabled with `DISABLE_TELEMETRY=1`. Skills.sh remote search and audit are not enabled in this release. Clio does support local marketplace search plus `clio skills install <name|path|github-url>`: bare names resolve through the local marketplace, and explicit local paths or GitHub URLs install directly.
 
 ### Prompt envelope and safety
 

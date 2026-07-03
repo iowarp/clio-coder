@@ -44,12 +44,6 @@ Live LLM smoke validation (manual/opt-in):
 CLIO_LIVE_SMOKE=1 CLIO_LIVE_TARGET=anthropic ANTHROPIC_API_KEY=your_key npm run test:live
 ```
 
-Optional hook:
-
-```bash
-npm run hooks:install
-```
-
 ## Testing conventions
 
 CLI-facing contract tests drive the built binary through the child-process
@@ -208,7 +202,7 @@ Agents should:
 `skills/` is the curated skills marketplace: maintainer-approved `SKILL.md`
 guides, distinct from the runtime skills any user can drop into a discovery
 root. It is not itself a discovery root, so nothing here auto-loads; skills
-activate only via `skills/install.sh`.
+activate only via `clio skills install <name>`.
 
 To propose a skill:
 
@@ -218,8 +212,8 @@ To propose a skill:
    progressive disclosure (push heavy reference into `references/`).
 2. Include the provenance frontmatter (`registry-id`, `source-url`, `version`,
    `license`) and ship an `evals.md` with the baseline scenarios you tested.
-3. Verify locally: `skills/install.sh <name>`, then
-   `clio skills validate skills/<name>/SKILL.md` and `clio skills list`.
+3. Verify locally: `clio skills validate skills/<name>/SKILL.md`, then
+   `clio skills install <name>` and `clio skills list`.
 4. Open a PR. A maintainer reviews against the rubric, then sets `audit: pass`
    and the `version` to approve it for the catalog.
 

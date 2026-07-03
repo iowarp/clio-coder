@@ -112,8 +112,8 @@ describe("contracts/pin-skills script", () => {
 		const pin = await runPinScript(["--dir", catalog]);
 		strictEqual(pin.code, 0);
 
-		// Stamp lifecycle fields the way `install.sh --copy` and `clio skills
-		// install` do; the pinned hash must not change.
+		// Stamp lifecycle fields the way `clio skills install` does; the
+		// pinned hash must not change.
 		const raw = readFileSync(file, "utf8");
 		writeFileSync(file, raw.replace("audit: pass\n", 'audit: pass\ninstalled-at: "2026-07-02T00:00:00.000Z"\n'), "utf8");
 		const clean = await runPinScript(["--dir", catalog, "--check"]);

@@ -32,7 +32,7 @@ import {
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
-import { getMarketplaceSkills, installMarketplaceSkill } from "../domains/resources/skills/marketplace.js";
+import { getMarketplaceSkills, installSkill } from "../domains/resources/skills/marketplace.js";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
@@ -1644,7 +1644,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 											`Skill install: config dir unavailable (${configErr instanceof Error ? configErr.message : String(configErr)}); continuing without it.\n`,
 										);
 									}
-									await installMarketplaceSkill(uninstalled.name, {
+									installSkill({
+										source: uninstalled.name,
 										cwd: process.cwd(),
 										...(configDir ? { configDir } : {}),
 									});
@@ -2833,7 +2834,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			},
 			notice: (level, text) => slashCtx.notice(level, text),
 			installSkill: async (name) => {
-				const result = await installMarketplaceSkill(name, { scope: "project" });
+				const result = installSkill({ source: name, scope: "project" });
 				return { name: result.name, path: result.path, warnings: result.warnings };
 			},
 			onClose: () => closeOverlay(),

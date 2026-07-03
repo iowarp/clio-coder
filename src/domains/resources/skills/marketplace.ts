@@ -1,7 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { clioConfigDir } from "../../../core/xdg.js";
-import { type InstallSkillResult, installSkill } from "./install.js";
+import {
+	type InstallSkillInput,
+	type InstallSkillResult,
+	installSkillFromSource,
+	isSkillName,
+	parseSkillSourceSpec,
+} from "./install.js";
 import { loadSkills, type Skill } from "./loader.js";
 
 /**
@@ -164,19 +170,29 @@ export function getMarketplaceSkills(options: DiscoverMarketplaceOptions = {}): 
 	return discoverMarketplaceSkills(options).skills;
 }
 
-export async function installMarketplaceSkill(
-	name: string,
-	options: { scope?: "user" | "project"; cwd?: string; configDir?: string } = {},
-): Promise<InstallSkillResult> {
-	const skill = getMarketplaceSkills({ ...(options.cwd ? { cwd: options.cwd } : {}) }).find(
-		(entry) => entry.name === name,
-	);
-	if (!skill) throw new Error(`Skill ${name} is not available in the local marketplace`);
-	return installSkill({
-		source: skill.sourceUrl,
-		scope: options.scope ?? "project",
-		...(options.cwd ? { cwd: options.cwd } : {}),
-		...(options.configDir ? { configDir: options.configDir } : {}),
-		force: true,
-	});
+/**
+ * The single install entry point for every frontend (headless CLI, TUI
+ * pending-skill prompt, skills hub). Source resolution, in precedence order:
+ *
+ *  1. A GitHub URL installs directly.
+ *  2. An existing local path installs directly; paths always beat same-named
+ *     marketplace entries.
+ *  3. A bare skill name resolves through the local marketplace.
+ *
+ * Anything else is an error naming both failed interpretations. Overwriting
+ * an existing install always requires an explicit `force: true`.
+ */
+export function installSkill(input: InstallSkillInput): InstallSkillResult {
+	const source = input.source.trim();
+	const spec = parseSkillSourceSpec(source);
+	if (spec?.kind === "local" && isSkillName(source) && !existsSync(spec.path)) {
+		const skill = getMarketplaceSkills({ ...(input.cwd ? { cwd: input.cwd } : {}) }).find(
+			(entry) => entry.name === source,
+		);
+		if (!skill) {
+			throw new Error(`"${source}" is neither an existing local path nor available in the local marketplace`);
+		}
+		return installSkillFromSource({ ...input, source: skill.sourceUrl });
+	}
+	return installSkillFromSource(input);
 }

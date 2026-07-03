@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 
@@ -49,13 +49,6 @@ function matrixValues(path: string, jobId: string, key: string): unknown[] {
 	return Array.isArray(value) ? value : [];
 }
 
-function workflowDispatchTrigger(path: string): Record<string, unknown> | null {
-	const parsed = workflow(path);
-	const trigger = parsed.on;
-	if (typeof trigger !== "object" || trigger === null || !("workflow_dispatch" in trigger)) return null;
-	return trigger.workflow_dispatch as Record<string, unknown>;
-}
-
 describe("contracts/ci scripts", () => {
 	it("keeps the deterministic local ci script aligned with the release-relevant checks", () => {
 		const scripts = packageScripts();
@@ -63,6 +56,7 @@ describe("contracts/ci scripts", () => {
 		strictEqual(scripts.ci, "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test");
 		strictEqual(scripts["skills:check"], "node --import tsx scripts/pin-skills.ts --check");
 		strictEqual(scripts["ci:release"], "npm run ci && node scripts/check-release.mjs");
+		strictEqual(scripts["test:live"], "node scripts/live-smoke.mjs");
 		strictEqual(scripts["test:repeat"], "node tests/harness/repeat-tests.mjs");
 		ok(scripts["test:coverage"]?.includes("--experimental-test-coverage"));
 		ok(scripts["test:coverage"]?.includes("--test-coverage-include='src/**/*.ts'"));
@@ -111,16 +105,14 @@ describe("contracts/ci scripts", () => {
 		);
 	});
 
-	it("keeps live smoke explicit and outside the deterministic gate", () => {
-		const env = workflowJob(".github/workflows/live-smoke.yml", "live-smoke").steps.find(
-			(step) => step.env?.CLIO_LIVE_SMOKE !== undefined,
-		)?.env;
+	it("keeps live smoke local-only and outside hosted CI/release gates", () => {
+		const scripts = packageScripts();
+		const ciCommands = runCommands(".github/workflows/ci.yml", "ci");
+		const releaseCommands = runCommands(".github/workflows/release.yml", "release");
 
-		ok(workflowDispatchTrigger(".github/workflows/live-smoke.yml"), "live smoke must be workflow_dispatch-only");
-		strictEqual(env?.CLIO_LIVE_SMOKE, "1");
-		deepStrictEqual(
-			runCommands(".github/workflows/live-smoke.yml", "live-smoke").filter((command) => command.includes("test:live")),
-			["npm run test:live"],
-		);
+		strictEqual(scripts["test:live"], "node scripts/live-smoke.mjs");
+		strictEqual(existsSync(".github/workflows/live-smoke.yml"), false, "live smoke must stay local/operator-run");
+		ok(!ciCommands.some((command) => command.includes("test:live")), "ordinary CI must not run live smoke");
+		ok(!releaseCommands.some((command) => command.includes("test:live")), "release CI must not run live smoke");
 	});
 });

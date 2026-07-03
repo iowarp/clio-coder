@@ -1,5 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -52,5 +52,105 @@ describe("contracts/skills-cli validate", () => {
 		const result = await runCli(["skills", "validate", good, "--json"], { env: scratch.env });
 		strictEqual(result.code, 0, `stderr=${result.stderr}`);
 		strictEqual(JSON.parse(result.stdout).ok, true);
+	});
+});
+
+describe("contracts/skills-cli install by marketplace name", () => {
+	const scratch = makeScratchHome("clio-skills-install-");
+	after(() => scratch.cleanup());
+
+	const catalogBody = "---\nname: demo-skill\ndescription: demo skill from the catalog\n---\nCatalog body\n";
+
+	function seedMarketplace(): NodeJS.ProcessEnv {
+		const catalog = seedCatalog(join(scratch.dir, "catalog"), { "demo-skill/SKILL.md": catalogBody });
+		return { ...scratch.env, CLIO_SKILL_CATALOG_DIR: catalog };
+	}
+
+	it("resolves a bare name through the local marketplace into the project scope", async () => {
+		const project = join(scratch.dir, "project-bare");
+		mkdirSync(project, { recursive: true });
+
+		const result = await runCli(["skills", "install", "demo-skill"], { env: seedMarketplace(), cwd: project });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		const installed = readFileSync(join(project, ".clio", "skills", "demo-skill", "SKILL.md"), "utf8");
+		ok(installed.includes("demo skill from the catalog"), "installed copy must come from the catalog entry");
+	});
+
+	it("fails a bare name that is neither a local path nor a marketplace entry", async () => {
+		const project = join(scratch.dir, "project-missing");
+		mkdirSync(project, { recursive: true });
+
+		const result = await runCli(["skills", "install", "no-such-skill"], { env: seedMarketplace(), cwd: project });
+		strictEqual(result.code, 1, `stdout=${result.stdout}`);
+		ok(
+			result.stderr.includes("neither an existing local path nor available in the local marketplace"),
+			`stderr=${result.stderr}`,
+		);
+	});
+
+	it("prefers an existing local path over a same-named marketplace entry", async () => {
+		const project = join(scratch.dir, "project-local");
+		seedCatalog(project, {
+			"demo-skill/SKILL.md": "---\nname: demo-skill\ndescription: demo skill from the local path\n---\nLocal body\n",
+		});
+
+		const result = await runCli(["skills", "install", "demo-skill"], { env: seedMarketplace(), cwd: project });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		const installed = readFileSync(join(project, ".clio", "skills", "demo-skill", "SKILL.md"), "utf8");
+		ok(installed.includes("demo skill from the local path"), "a local path must win over the marketplace entry");
+	});
+
+	it("never overwrites an existing install without --force", async () => {
+		const project = join(scratch.dir, "project-force");
+		mkdirSync(project, { recursive: true });
+		const env = seedMarketplace();
+
+		const first = await runCli(["skills", "install", "demo-skill"], { env, cwd: project });
+		strictEqual(first.code, 0, `stderr=${first.stderr}`);
+		const second = await runCli(["skills", "install", "demo-skill"], { env, cwd: project });
+		strictEqual(second.code, 1, "reinstalling without --force must fail");
+		ok(second.stderr.includes("already installed"), `stderr=${second.stderr}`);
+		const forced = await runCli(["skills", "install", "demo-skill", "--force"], { env, cwd: project });
+		strictEqual(forced.code, 0, `stderr=${forced.stderr}`);
+	});
+});
+
+describe("contracts/skills-cli search diagnostics", () => {
+	const scratch = makeScratchHome("clio-skills-search-");
+	after(() => scratch.cleanup());
+
+	function seedEnv(): { env: NodeJS.ProcessEnv; project: string } {
+		const catalog = seedCatalog(join(scratch.dir, "catalog"), {
+			"demo-skill/SKILL.md": "---\nname: demo-skill\ndescription: demo skill from the catalog\n---\nCatalog body\n",
+		});
+		const brokenIndex = join(scratch.dir, "skill-marketplace.json");
+		writeFileSync(brokenIndex, "{ not json", "utf8");
+		const project = join(scratch.dir, "project");
+		mkdirSync(project, { recursive: true });
+		return {
+			env: { ...scratch.env, CLIO_SKILL_CATALOG_DIR: catalog, CLIO_SKILL_MARKETPLACE_INDEX: brokenIndex },
+			project,
+		};
+	}
+
+	it("surfaces marketplace discovery diagnostics on stderr without hiding matches", async () => {
+		const { env, project } = seedEnv();
+		const result = await runCli(["skills", "search", "demo"], { env, cwd: project });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		ok(result.stdout.includes("demo-skill"), "catalog match must still be listed");
+		ok(result.stderr.includes("skill marketplace index unreadable"), `stderr=${result.stderr}`);
+	});
+
+	it("returns marketplace diagnostics in the --json payload", async () => {
+		const { env, project } = seedEnv();
+		const result = await runCli(["skills", "search", "demo", "--json"], { env, cwd: project });
+		strictEqual(result.code, 0, `stderr=${result.stderr}`);
+		const payload = JSON.parse(result.stdout);
+		strictEqual(payload.marketplace.length, 1);
+		ok(Array.isArray(payload.diagnostics), "loader diagnostics must be part of the payload");
+		ok(
+			payload.marketplaceDiagnostics.some((message: string) => message.includes("index unreadable")),
+			`marketplaceDiagnostics=${JSON.stringify(payload.marketplaceDiagnostics)}`,
+		);
 	});
 });
