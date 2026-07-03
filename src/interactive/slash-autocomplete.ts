@@ -10,8 +10,17 @@ import {
 	type SlashCommand,
 } from "../engine/tui.js";
 import { commandReference } from "./slash-commands.js";
+import { type CommandArgsSpec, completeArgs, renderArgsSpec } from "./slash-spec.js";
 
 export type SlashAutocompleteCommand = SlashCommand;
+
+/**
+ * The suggestion row shares one truncated column with the command description,
+ * so the hint's job is orientation, not the full grammar. Anything longer than
+ * this budget is elided; the full usage lives in the usage notice and in the
+ * per-token argument completions.
+ */
+const ARGUMENT_HINT_BUDGET = 44;
 
 export interface SlashAutocompleteOptions {
 	basePath?: string;
@@ -41,17 +50,60 @@ function findExecutableOnPath(name: string): string | null {
 	return null;
 }
 
+/**
+ * A hint that fits the row. Subcommand commands list their subcommand names;
+ * flag commands keep the positional tail whole and include leading flags only
+ * while the budget holds, eliding the remainder behind an ellipsis.
+ */
+function compactArgumentHint(args: CommandArgsSpec | undefined): string | undefined {
+	if (!args) return undefined;
+	if (args.subcommands) {
+		const rootStr = renderArgsSpec({
+			...(args.flags ? { flags: args.flags } : {}),
+			...(args.positionals ? { positionals: args.positionals } : {}),
+		});
+		const parts = [...(rootStr.length > 0 ? [rootStr] : []), ...Object.keys(args.subcommands)];
+		const joined = parts.join(" | ");
+		return joined.length > 0 ? joined : undefined;
+	}
+	const positionalTail = renderArgsSpec({ ...(args.positionals ? { positionals: args.positionals } : {}) });
+	const tail = positionalTail.length > 0 ? ` ${positionalTail}` : "";
+	const flagParts = (args.flags ?? []).map((flag) => renderArgsSpec({ flags: [flag] }));
+	const kept: string[] = [];
+	for (const part of flagParts) {
+		const candidate = [...kept, part].join(" ");
+		if (`${candidate} …${tail}`.length > ARGUMENT_HINT_BUDGET) break;
+		kept.push(part);
+	}
+	let flagsStr = kept.join(" ");
+	if (kept.length < flagParts.length) flagsStr = flagsStr.length > 0 ? `${flagsStr} …` : "…";
+	const hint = `${flagsStr}${flagsStr.length > 0 ? tail : positionalTail}`.trim();
+	return hint.length > 0 ? hint : undefined;
+}
+
+function argumentCompletionItems(args: CommandArgsSpec, argumentText: string): AutocompleteItem[] | null {
+	const result = completeArgs(args, argumentText);
+	if (!result) return null;
+	// The provider replaces the whole argument text with the item value, so
+	// each value carries the typed stem verbatim with only the trailing token
+	// swapped for the completion.
+	const stem = argumentText.slice(0, result.tokenStart);
+	return result.completions.map((completion) => ({
+		value: `${stem}${completion.token}`,
+		label: completion.token,
+		...(completion.hint ? { description: completion.hint } : {}),
+	}));
+}
+
 export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 	return commandReference().map((ref) => {
-		const prefix = `/${ref.name}`;
-		const argumentHint = ref.usage
-			.split(" | ")
-			.map((part) => (part.startsWith(`${prefix} `) ? part.slice(prefix.length + 1) : part))
-			.join(" | ");
+		const argumentHint = compactArgumentHint(ref.args);
+		const args = ref.args;
 		return {
 			name: ref.name,
 			description: ref.description,
-			...(argumentHint !== ref.usage ? { argumentHint } : {}),
+			...(argumentHint ? { argumentHint } : {}),
+			...(args ? { getArgumentCompletions: (argumentText: string) => argumentCompletionItems(args, argumentText) } : {}),
 		};
 	});
 }
