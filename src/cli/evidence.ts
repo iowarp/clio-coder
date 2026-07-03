@@ -1,7 +1,14 @@
 import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import type { EvidenceOverview } from "../domains/evidence/index.js";
-import { buildEvalEvidence, buildEvidence, inspectEvidence, listEvidenceOverviews } from "../domains/evidence/index.js";
+import type { EvidenceOverview, EvidenceRunProvenance } from "../domains/evidence/index.js";
+import {
+	buildEvalEvidence,
+	buildEvidence,
+	inspectEvidence,
+	listEvidenceOverviews,
+	loadEvidenceRunProvenance,
+	provenanceTranscriptLines,
+} from "../domains/evidence/index.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio evidence build --run <runId>
@@ -142,7 +149,9 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 				printError("inspect requires an evidence id");
 				return 2;
 			}
-			renderEvidence(await inspectEvidence(dataDir, evidenceId));
+			const inspected = await inspectEvidence(dataDir, evidenceId);
+			const provenance = await loadEvidenceRunProvenance(dataDir, evidenceId);
+			renderEvidence(inspected, provenance);
 			return 0;
 		}
 		if (parsed.command === "list") {
@@ -157,7 +166,10 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 	}
 }
 
-function renderEvidence(input: Awaited<ReturnType<typeof inspectEvidence>>): void {
+function renderEvidence(
+	input: Awaited<ReturnType<typeof inspectEvidence>>,
+	provenance: ReadonlyArray<EvidenceRunProvenance> = [],
+): void {
 	const { overview, findings } = input;
 	process.stdout.write(`evidence: ${overview.evidenceId}\n`);
 	process.stdout.write(`source: ${formatSource(overview)}\n`);
@@ -168,6 +180,12 @@ function renderEvidence(input: Awaited<ReturnType<typeof inspectEvidence>>): voi
 	process.stdout.write(`blocked tools: ${overview.totals.blockedToolCalls}\n`);
 	process.stdout.write(`tags: ${formatList(overview.tags)}\n`);
 	process.stdout.write(`findings: ${findings.length}\n`);
+	// Provenance is printed only for runs whose receipts carry it, so a legacy
+	// bundle prints nothing new here.
+	for (const { runId, view } of provenance) {
+		process.stdout.write(`provenance ${runId}:\n`);
+		for (const line of provenanceTranscriptLines(view)) process.stdout.write(`  ${line}\n`);
+	}
 	process.stdout.write(`files: ${formatList(overview.files)}\n`);
 }
 

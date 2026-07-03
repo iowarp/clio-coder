@@ -6,12 +6,17 @@
  * outcome, lineage, and token splits) must keep verifying.
  */
 
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runEvidenceCommand } from "../../src/cli/evidence.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
+import type {
+	RunPersonaOverride,
+	RunPipelineProvenance,
+	RunReceiptSafetySummary,
+} from "../../src/domains/dispatch/types.js";
 import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
@@ -46,12 +51,39 @@ async function captureStderr<T>(fn: () => Promise<T>): Promise<{ result: T; stde
 	}
 }
 
+async function captureStdout<T>(fn: () => Promise<T>): Promise<{ result: T; stdout: string }> {
+	const original = process.stdout.write.bind(process.stdout);
+	let stdout = "";
+	process.stdout.write = ((chunk: string | Uint8Array) => {
+		stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		const result = await fn();
+		return { result, stdout };
+	} finally {
+		process.stdout.write = original;
+	}
+}
+
+/**
+ * Provenance field sets a sealed receipt may carry. Folded into the receipt
+ * draft (and thus the integrity digest) only when supplied, mirroring the
+ * dispatch finalizer's optional-field writes.
+ */
+interface SealProvenance {
+	pipeline?: RunPipelineProvenance;
+	personaOverride?: RunPersonaOverride;
+	safety?: RunReceiptSafetySummary;
+}
+
 /** Seal a finalized run + receipt the way the dispatch finalizer does. */
 async function sealRun(
 	runtime: { runtimeId: string; runtimeKind: "http" | "acp-delegation" } = {
 		runtimeId: "openai-completions",
 		runtimeKind: "http",
 	},
+	provenance: SealProvenance = {},
 ): Promise<{ runId: string; receiptPath: string }> {
 	const ledger = openLedger();
 	const envelope = ledger.create({
@@ -114,6 +146,9 @@ async function sealRun(
 		toolCalls: 0,
 		toolStats: [],
 		toolActivity: { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false },
+		...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
+		...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
+		...(provenance.safety !== undefined ? { safety: provenance.safety } : {}),
 		sessionId: null,
 	});
 	await ledger.persist();
@@ -244,6 +279,100 @@ describe("contracts/evidence-build", () => {
 				false,
 			);
 			strictEqual(result.overview.totals.auditRows, 1);
+		});
+	});
+
+	it("surfaces pipeline, persona, and escalation provenance in transcript, cleaned trace, and findings", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const pipeline: RunPipelineProvenance = {
+				fromRunId: "upstreamrun01",
+				position: 2,
+				inputBytes: 32,
+				inputTruncated: false,
+			};
+			const personaOverride: RunPersonaOverride = { promptHash: "1b3fc16b2c4d5e6f7a8b9c0d1e2f3a4b" };
+			const safety: RunReceiptSafetySummary = {
+				decisions: {
+					allowed: 3,
+					blocked: 0,
+					permissionRequested: 2,
+					escalationRequested: 2,
+					escalationApproved: 0,
+					escalationDenied: 1,
+					escalationTimedOut: 1,
+				},
+				blockedAttempts: [],
+				requestedActions: [],
+				runtimeLimitations: [],
+			};
+			const { runId } = await sealRun(undefined, { pipeline, personaOverride, safety });
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
+
+			const result = await buildEvidence({ dataDir, stateDir, runId });
+
+			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
+			ok(transcript.includes("pipeline: step 2, input 32 bytes from upstreamrun01 (not truncated)"), transcript);
+			ok(transcript.includes("persona override: prompt hash 1b3fc16b2c4d..."), transcript);
+			ok(transcript.includes("escalations: 2 requested, 0 approved, 1 denied, 1 timed out"), transcript);
+
+			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
+			const runRow = cleaned.find((row) => row.kind === "run");
+			ok(runRow, "cleaned trace missing run row");
+			deepStrictEqual(runRow?.pipeline, pipeline);
+			deepStrictEqual(runRow?.personaOverride, personaOverride);
+			deepStrictEqual(runRow?.escalation, { requested: 2, approved: 0, denied: 1, timedOut: 1 });
+
+			const escalationFinding = result.findings.find((finding) => finding.tag === "escalation");
+			ok(escalationFinding, "expected an escalation finding");
+			strictEqual(escalationFinding?.severity, "warn");
+			strictEqual(escalationFinding?.runId, runId);
+			ok(escalationFinding?.message.includes("1 timed out"), escalationFinding?.message);
+			ok(escalationFinding?.message.includes("1 denied"), escalationFinding?.message);
+
+			// The CLI inspect path reads the bundle's receipt.json and prints the
+			// same three field sets.
+			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
+			strictEqual(inspected.result, 0, inspected.stdout);
+			ok(inspected.stdout.includes(`provenance ${runId}:`), inspected.stdout);
+			ok(
+				inspected.stdout.includes("pipeline: step 2, input 32 bytes from upstreamrun01 (not truncated)"),
+				inspected.stdout,
+			);
+			ok(inspected.stdout.includes("persona override: prompt hash 1b3fc16b2c4d..."), inspected.stdout);
+			ok(inspected.stdout.includes("escalations: 2 requested, 0 approved, 1 denied, 1 timed out"), inspected.stdout);
+		});
+	});
+
+	it("renders a legacy receipt without provenance byte-identically (fields absent, not empty)", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const { runId } = await sealRun();
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
+
+			const result = await buildEvidence({ dataDir, stateDir, runId });
+
+			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
+			ok(!transcript.includes("pipeline: step"), transcript);
+			ok(!transcript.includes("persona override:"), transcript);
+			ok(!transcript.includes("escalations:"), transcript);
+
+			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
+			const runRow = cleaned.find((row) => row.kind === "run");
+			ok(runRow, "cleaned trace missing run row");
+			ok(!("pipeline" in (runRow ?? {})), "legacy run row must omit pipeline");
+			ok(!("personaOverride" in (runRow ?? {})), "legacy run row must omit personaOverride");
+			ok(!("escalation" in (runRow ?? {})), "legacy run row must omit escalation");
+
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "escalation"),
+				false,
+			);
+
+			// The CLI inspect path prints no provenance block for a legacy bundle.
+			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
+			strictEqual(inspected.result, 0, inspected.stdout);
+			ok(!inspected.stdout.includes("provenance "), inspected.stdout);
 		});
 	});
 });

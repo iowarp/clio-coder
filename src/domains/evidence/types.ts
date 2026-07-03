@@ -1,6 +1,8 @@
 import type { RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
+import type { RunPersonaOverride, RunPipelineProvenance } from "../dispatch/types.js";
 import type { EvalCommandPhase, EvalFailureClass, EvalRunRecord } from "../eval/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
+import type { RunEscalationCounts } from "./provenance.js";
 
 export const EVIDENCE_VERSION = 1;
 
@@ -17,6 +19,7 @@ export const EVIDENCE_TAGS = [
 	"no-validation",
 	"destructive-cleanup",
 	"blocked-tool",
+	"escalation",
 	"receipt-integrity",
 	"protected-artifact",
 	"tool-loop",
@@ -188,6 +191,12 @@ export interface EvidenceTraceRunRow {
 	wireModelId: string;
 	tokenCount: number;
 	costUsd: number;
+	/** Pipeline threading provenance; present only for pipeline steps after the first. */
+	pipeline?: RunPipelineProvenance;
+	/** Ad-hoc specialist provenance; present only when a persona override composed the prompt. */
+	personaOverride?: RunPersonaOverride;
+	/** Worker permission-escalation counters; present only when the run saw an escalation. */
+	escalation?: RunEscalationCounts;
 }
 
 export interface EvidenceTraceToolRow extends EvidenceToolEvent {

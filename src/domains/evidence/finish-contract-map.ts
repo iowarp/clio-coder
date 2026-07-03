@@ -5,7 +5,7 @@ import type { EvidenceTag } from "./types.js";
  * One evidence spine: the live finish-contract layer is a cheap projection of
  * the forensic evidence taxonomy.
  *
- * The forensic layer (`evidence/build.ts`) speaks the canonical 22-tag
+ * The forensic layer (`evidence/build.ts`) speaks the canonical 23-tag
  * `EVIDENCE_TAGS` vocabulary over durable artifacts. The live layer
  * (`safety/finish-contract.ts`) speaks a 3-kind in-loop vocabulary
  * (`FinishContractEvidenceKind`) over the last ~80 session entries. They are

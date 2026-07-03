@@ -15,6 +15,7 @@ import {
 	readSessionEntriesForId,
 	type SessionEntry,
 } from "../session/index.js";
+import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
 import {
@@ -242,6 +243,21 @@ function buildFindings(
 		if (blocked > 0) {
 			findings.push(
 				finding(findings.length, "warn", "blocked-tool", source.envelope.id, `${blocked} blocked tool call(s)`),
+			);
+		}
+		// An escalation that timed out or was denied is an unresolved permission
+		// ask; surface it the way blocked tool calls are surfaced above. Approved
+		// escalations resolved cleanly and need no finding.
+		const escalation = receipt === null ? undefined : extractRunProvenance(receipt).escalation;
+		if (escalation !== undefined && (escalation.timedOut > 0 || escalation.denied > 0)) {
+			findings.push(
+				finding(
+					findings.length,
+					"warn",
+					"escalation",
+					source.envelope.id,
+					`escalations unresolved: ${escalation.timedOut} timed out, ${escalation.denied} denied`,
+				),
 			);
 		}
 		if (source.envelope.status === "stale" || source.envelope.status === "dead") {
@@ -502,6 +518,9 @@ function cleanedTraceRows(
 	const rows: EvidenceCleanTraceRow[] = [];
 	for (const source of runSources) {
 		const envelope = source.envelope;
+		// Provenance fields are folded in only when the receipt carries them, so a
+		// legacy receipt (or a run with no receipt) emits a byte-identical row.
+		const provenance = source.receipt === null ? {} : extractRunProvenance(source.receipt);
 		rows.push({
 			kind: "run",
 			runId: envelope.id,
@@ -518,6 +537,9 @@ function cleanedTraceRows(
 			wireModelId: envelope.wireModelId,
 			tokenCount: source.receipt?.tokenCount ?? envelope.tokenCount,
 			costUsd: source.receipt?.costUsd ?? envelope.costUsd,
+			...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
+			...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
+			...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
 		});
 		for (const event of toolEventRows.filter((item) => item.runId === source.envelope.id)) {
 			rows.push({ kind: "tool-summary", ...event });
@@ -1047,6 +1069,13 @@ function renderTranscript(
 			`- ${envelope.id} status=${envelope.status} exit=${exitCode ?? "?"} agent=${envelope.agentId} target=${envelope.targetId}`,
 		);
 		lines.push(`  task: ${truncateText(envelope.task, MAX_TASK_CHARS)}`);
+		// Provenance sentences appear only when the receipt carries the fields, so
+		// a legacy receipt renders the run section byte-identical to today.
+		if (source.receipt !== null) {
+			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt))) {
+				lines.push(`  ${line}`);
+			}
+		}
 	}
 	if (sessionLinks.entries.length > 0) {
 		lines.push("", "## Linked Session Transcript");
