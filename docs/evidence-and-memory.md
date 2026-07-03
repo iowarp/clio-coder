@@ -65,11 +65,13 @@ Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact 
 | `protected-artifacts.json` | Protected artifact state/events. |
 | `findings.json` / `findings.md` | Structured and readable findings. |
 
+When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` and `trace.cleaned.jsonl` surface the receipt's provenance field sets, and `clio evidence inspect` prints them as a `provenance <runId>:` block. The field paths, types, and stability labels are documented in the [receipt provenance schema](./observability.md#receipt-fields-for-dispatch-provenance).
+
 ---
 
 ## Evidence Tag Taxonomy and Failure Causes
 
-Clio Coder classifies every run, session, and eval record using a closed set of 22 canonical tags. These tags distinguish general execution characteristics (such as lineage linkages) from actual failure causes.
+Clio Coder classifies every run, session, and eval record using a closed set of 23 canonical tags. These tags distinguish general execution characteristics (such as lineage linkages) from actual failure causes.
 
 ### Complete Taxonomy
 
@@ -87,6 +89,7 @@ Clio Coder classifies every run, session, and eval record using a closed set of 
 | `no-validation` | Validation | Succeeded turn or run did not execute any verification commands. |
 | `destructive-cleanup`| Precaution | Clean-up rules triggered to prevent workspace pollution or damage. |
 | `blocked-tool` | Failure | The safety net blocked a tool call requested by the model. |
+| `escalation` | Precaution | A worker permission escalation timed out or was denied; see the receipt provenance schema below. |
 | `receipt-integrity` | Security | Forensic verification detected receipt modification or checksum mismatch. |
 | `protected-artifact`| Precaution | Mutating a path protected by project or system safety policies. |
 | `tool-loop` | Constraint | The model repeatedly called the same tool with identical arguments. |

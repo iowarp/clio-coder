@@ -87,6 +87,16 @@ and grep/find answer tree visibility from a single ignore policy.
 - **Deep per-tool usage docs.** Rich usage guidance moved out of non-hot tool
   descriptions (now one sentence each) into `docs/tool-usage.md`, retrievable
   section by section through `context(scope="docs")`.
+- **Receipt provenance on evidence and dispatch surfaces.** Evidence bundles
+  now render a receipt's `pipeline`, `personaOverride`, and escalation-counter
+  provenance in `transcript.md` (human sentences), `trace.cleaned.jsonl`
+  (structured run rows), and the `clio evidence inspect` output, and a
+  timed-out or denied escalation raises a new `escalation` finding. The
+  `dispatch` tool appends a compact provenance suffix to each run line and adds
+  matching keys to `details.runs[]`. A receipt without these optional fields
+  renders byte-identical to before. `docs/observability.md` gains a
+  receipt-provenance schema table labeling every new field `experimental`. No
+  receipt shape, tool schema, or prompt text changed.
 
 ### Added (context wiring)
 
@@ -113,6 +123,9 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
+- **Battletest harness moved to local dev scratch.** The battletest release
+  suites and legacy oracle moved out of the repository to gitignored
+  `.superpowers/battletest/` local dev scratch.
 - **Registry-owned tool prompt hints.** The per-tool guidance sentences in the
   session Tool Contract (code_nav, context, dispatch, ask_user) moved verbatim
   from a compiler if-chain onto the tool registry metadata
