@@ -1057,8 +1057,36 @@ describe("contracts/tools dispatch run paths", () => {
 			text: "first worker answer",
 		});
 		if (result.kind === "error") {
+			strictEqual(
+				result.message.split("\n")[0],
+				"dispatch: pipeline dispatch halted at step 2/3 (run run-2, outcome=failed); skipped 1 later step(s)",
+			);
 			match(result.message, /step 2/i);
 			match(result.message, /skip(?:ped)?\s+1|1\s+skip/i);
+			ok(result.message.includes("dispatch (pipeline) total=2 failed=1"));
+			ok(result.message.includes("receipt=/tmp/run-1.json"));
+			ok(result.message.includes("receipt=/tmp/run-2.json"));
+			ok(result.message.includes("first worker answer"));
+			ok(result.message.includes("second worker failed"));
+			const details = result.details as
+				| {
+						mode?: unknown;
+						runIds?: unknown;
+						receiptCount?: unknown;
+						failedCount?: unknown;
+						runs?: Array<{ runId?: unknown; exitCode?: unknown; receiptPath?: unknown }>;
+				  }
+				| undefined;
+			strictEqual(details?.mode, "pipeline");
+			deepStrictEqual(details?.runIds, ["run-1", "run-2"]);
+			strictEqual(details?.receiptCount, 2);
+			strictEqual(details?.failedCount, 1);
+			strictEqual(details?.runs?.[0]?.runId, "run-1");
+			strictEqual(details?.runs?.[0]?.exitCode, 0);
+			strictEqual(details?.runs?.[0]?.receiptPath, "/tmp/run-1.json");
+			strictEqual(details?.runs?.[1]?.runId, "run-2");
+			strictEqual(details?.runs?.[1]?.exitCode, 2);
+			strictEqual(details?.runs?.[1]?.receiptPath, "/tmp/run-2.json");
 		}
 	});
 
