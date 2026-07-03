@@ -223,6 +223,25 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Reasoning-off models can no longer be made to think by the dial.** The
+  Qwopus Coder-MTP families are thinking-off by design (creator's card) and
+  mini's llama.cpp router serves them with `enable_thinking: false`, yet
+  `--thinking low` produced reasoning tokens: the catalog marked them
+  `reasoning: true` with an `on-off` mechanism, so two per-request paths
+  (pi-ai's qwen-chat-template kwargs and Clio's thinking payload) flipped
+  `enable_thinking: true` over the server default. The catalog now gives
+  every blessed local family a reasoning class derived from its thinking
+  mechanism: `never` (Coder-MTP: `reasoning: false`, mechanism `none`; the
+  dial clamps to off at every level and no request field is sent),
+  `switchable` (Qwen3.6 hybrids, per-dial `enable_thinking`), or `always`
+  (Ornith: cannot be silenced). New `qwopus3.6-27b-coder` and
+  `qwopus3.5-9b-coder` families keep the 27B/9B Coder ids from falling
+  through to reasoning-capable families. When the requested dial cannot
+  apply (never-class model at low, always-class at off, on/off coercion),
+  one visible notice line now fires where the dial takes effect, and
+  receipts carry the reasoning class plus the notice in
+  `runtimeResolution.thinking`. Verified live on mini: dial low now yields
+  zero reasoning tokens with the clamp notice, dial off unchanged.
 - **Clio source-tree awareness no longer leaks into nested repositories.**
   `detectClioCoderRepo` walked every ancestor directory, so a session whose
   cwd was any project nested under a clio-coder checkout matched the

@@ -1052,6 +1052,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	/**
+	 * One visible line when the requested thinking dial cannot apply as-is
+	 * (reasoning-class-never model, always-on model, on/off coercion). Emitted
+	 * where the dial takes effect, once per target+model+request change; the
+	 * same facts stay inspectable in receipts via runtimeResolution.thinking.
+	 */
+	let lastThinkingNoticeKey: string | null = null;
+	const emitThinkingClampNotice = (resolution: ChatLoopTarget["runtimeResolution"]): void => {
+		const thinking = resolution.modelRuntime.thinking;
+		const notice = thinking.notice.trim();
+		if (thinking.noticeKind === "applied" || notice.length === 0) return;
+		const key = [
+			resolution.targetId,
+			resolution.wireModelId,
+			resolution.requestedThinkingLevel,
+			resolution.effectiveThinkingLevel,
+			notice,
+		].join("|");
+		if (key === lastThinkingNoticeKey) return;
+		lastThinkingNoticeKey = key;
+		emitNotice(
+			`[Clio Coder] thinking ${resolution.requestedThinkingLevel} -> ${thinking.display}: ${notice} (${resolution.wireModelId})`,
+		);
+	};
+
+	/**
 	 * Append a `modelChange` session entry so /resume and /fork can replay the
 	 * sequence of models a long-running session ran under. Silent no-op when
 	 * the session contract is absent or no session is current. The
@@ -1116,6 +1141,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtime.agent.state.thinkingLevel = desiredLevel;
 			}
 			runtime.runtimeResolution = runtimeResolution;
+			emitThinkingClampNotice(runtimeResolution);
 			return runtime;
 		}
 
@@ -1137,6 +1163,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const effectiveThinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
 			runtime.agent.state.thinkingLevel = effectiveThinkingLevel;
 			runtime.runtimeResolution = target.runtimeResolution;
+			emitThinkingClampNotice(target.runtimeResolution);
 			appendModelChangeEntry(target);
 			ensureReasoningProbe(target);
 			return runtime;
@@ -1189,6 +1216,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			wireModelId: target.wireModelId,
 			runtimeResolution: target.runtimeResolution,
 		};
+		emitThinkingClampNotice(target.runtimeResolution);
 		handle.agent.prepareNextTurn = async (signal?: AbortSignal) => postToolContinuationGuard(localRuntime, signal);
 
 		let streamStartedAt: number | null = null;
