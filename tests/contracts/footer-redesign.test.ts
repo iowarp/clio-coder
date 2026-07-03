@@ -541,6 +541,31 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		ok(line.includes("80.0%"), `percent label should use reported usage, got "${line}"`);
 	});
 
+	it("styles the ledger ctx row as kv: dim key, muted percent, dim ?% before measurement", () => {
+		const ledger = {
+			contextWindow: 10_000,
+			percent: 43.5,
+			meter: [{ category: "messages", label: "conversation", tokens: 4_350, percent: 43.5 }],
+			groups: [],
+		} as unknown as NonNullable<ContextEngineFacts["ledger"]>;
+
+		const measured = compactSecondaryLine({ ...context, ledger }, agent, 80, theme, status, null, null, null);
+		ok(measured.includes(theme.fg("dim", "ctx")), `the ctx key reads dim, got "${measured}"`);
+		ok(measured.includes(theme.fg("muted", "43.5%")), `a measured percent reads muted, got "${measured}"`);
+
+		const unmeasured = compactSecondaryLine(
+			{ ...context, ledger: { ...ledger, percent: null } },
+			agent,
+			80,
+			theme,
+			status,
+			null,
+			null,
+			null,
+		);
+		ok(unmeasured.includes(theme.fg("dim", "?%")), `the unmeasured placeholder reads dim, got "${unmeasured}"`);
+	});
+
 	it("verifies expanded context quadrant contains the color legend", () => {
 		const quad = contextQuadrant(context);
 		const legendLine = quad[quad.length - 1] ?? "";

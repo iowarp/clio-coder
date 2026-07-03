@@ -320,8 +320,12 @@ export function compactSecondaryLine(
 	const barCells = compactContextBarWidth(safeWidth);
 	let left = "";
 	if (context.ledger) {
-		const percent = context.ledger.percent !== null ? `${context.ledger.percent.toFixed(1)}%` : "?%";
-		left = `ctx ${renderContextMeterBar(context.ledger, barCells, theme)} ${percent}`;
+		// The row follows the kv grammar: dim key, muted value. An unmeasured
+		// percent renders the ?% placeholder dim because it is scaffolding for a
+		// number that has not arrived, not a measurement.
+		const percent =
+			context.ledger.percent !== null ? theme.fg("muted", `${context.ledger.percent.toFixed(1)}%`) : theme.fg("dim", "?%");
+		left = `${theme.fg("dim", "ctx")} ${renderContextMeterBar(context.ledger, barCells, theme)} ${percent}`;
 	} else {
 		left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));
 	}
