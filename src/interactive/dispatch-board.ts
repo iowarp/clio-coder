@@ -11,7 +11,7 @@ import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispa
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
 import { formatFooterTokens } from "./footer-panel.js";
-import { type ClioTheme, type ClioToken, clioTheme, formatCompactMs, GLYPH, spinnerFrame } from "./theme/index.js";
+import { type ClioToken, clioTheme, formatCompactMs, frame, GLYPH, innerDivider, spinnerFrame } from "./theme/index.js";
 
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
@@ -143,36 +143,25 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? "waiting..." : "n/a";
 	const target = `${row.runtimeKind}:${row.targetId} ${theme.fg("dim", "▸")} ${row.wireModelId}`;
 
-	const suffix = ` ${elapsed} ──┐`;
-	// The label can be arbitrarily long (agent ids are user data); clamp it so
-	// prefix + suffix never exceed the card width.
-	const labelBudget = Math.max(1, width - visibleWidth(suffix) - visibleWidth("┌──  "));
-	const clampedLabel = truncateToWidth(agentLabel, labelBudget, "...", true);
-	const prefix = `┌── ${clampedLabel} `;
-	const middleWidth = Math.max(0, width - visibleWidth(prefix) - visibleWidth(suffix));
-	const topBorder = `${theme.fg("frame", prefix)}${theme.fg("frame", "─".repeat(middleWidth))}${theme.fg("frame", suffix)}`;
+	// The agent label is the frame title and can be arbitrarily long (agent ids
+	// are user data); clamp it so the title plus the elapsed meta never pushes
+	// the right corner past the card width.
+	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10);
+	const clampedLabel = truncateToWidth(agentLabel, labelBudget, "...", false);
 
-	const targetLineContent = `Target: ${target}`;
-	const targetLine = `${theme.fg("frame", "│")} ${padAnsi(targetLineContent, width - 4)} ${theme.fg("frame", "│")}`;
-
-	const statusLineContent = `Status: ${statusStr}  ${theme.fg("dim", "•")}  TTFT: ${theme.fg("accentDeep", ttft)}  ${theme.fg("dim", "•")}  Cost: ${theme.fg("warning", cost)}`;
-	const statusLine = `${theme.fg("frame", "│")} ${padAnsi(statusLineContent, width - 4)} ${theme.fg("frame", "│")}`;
-
-	const detailLine =
-		detail !== null
-			? `${theme.fg("frame", "│")} ${padAnsi(`Detail: ${theme.fg("dim", detail)}`, width - 4)} ${theme.fg("frame", "│")}`
-			: null;
+	const bodyLines = [`Target: ${target}`];
+	bodyLines.push(
+		`Status: ${statusStr}  ${theme.fg("dim", "•")}  TTFT: ${theme.fg("accentDeep", ttft)}  ${theme.fg("dim", "•")}  Cost: ${theme.fg("warning", cost)}`,
+	);
+	if (detail !== null) bodyLines.push(`Detail: ${theme.fg("dim", detail)}`);
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
-	const telemetryContent = `Telemetry: ${theme.fg("dim", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`)}  ${theme.fg("dim", "•")}  ${theme.fg("success", `${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""}  ${theme.fg("dim", "•")}  Total: ${theme.fg("info", formatFooterTokens(row.tokenCount))}`;
-	const telemetryLine = `${theme.fg("frame", "│")} ${padAnsi(telemetryContent, width - 4)} ${theme.fg("frame", "│")}`;
+	bodyLines.push(
+		`Telemetry: ${theme.fg("dim", `${GLYPH.up} ${formatFooterTokens(row.inputTokens)}`)}  ${theme.fg("dim", "•")}  ${theme.fg("success", `${GLYPH.down} ${formatFooterTokens(row.outputTokens)}`)}${tokensPerSec > 0 ? theme.fg("accentDeep", ` (${tokensPerSec}/s)`) : ""}  ${theme.fg("dim", "•")}  Total: ${theme.fg("info", formatFooterTokens(row.tokenCount))}`,
+	);
 
-	const bottomBorder = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(width - 2))}${theme.fg("frame", "┘")}`;
-
-	return detailLine !== null
-		? [topBorder, targetLine, statusLine, detailLine, telemetryLine, bottomBorder]
-		: [topBorder, targetLine, statusLine, telemetryLine, bottomBorder];
+	return frame(theme, clampedLabel, bodyLines, width, { rightMeta: elapsed });
 }
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
@@ -229,37 +218,21 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 			const row = visibleRows[i];
 			if (!row) continue;
 			if (i > 0) {
-				body.push(clioTheme().fg("frame", "╌".repeat(TASK_ISLAND_WIDTH)));
+				body.push(innerDivider(clioTheme(), TASK_ISLAND_WIDTH));
 			}
 			body.push(...renderTaskIslandRow(row, TASK_ISLAND_WIDTH));
 		}
 		const hidden = rows.length - visibleRows.length;
 		if (hidden > 0) {
-			body.push(clioTheme().fg("frame", "╌".repeat(TASK_ISLAND_WIDTH)));
+			body.push(innerDivider(clioTheme(), TASK_ISLAND_WIDTH));
 			body.push(clioTheme().fg("dim", `+ ${hidden} more`));
 		}
 	}
 
-	// Body lines are already ANSI-padded to TASK_ISLAND_WIDTH by the row
-	// renderer (or are fixed-width separators/empty-state lines). `frame`
-	// re-pads each line ANSI-aware via padAnsi, so passing the styled lines
-	// through directly avoids an escape-corrupting truncation pass.
+	// Body rows are already ANSI-padded to TASK_ISLAND_WIDTH by the row renderer
+	// (or are fixed-width dividers/empty-state lines). The canonical frame re-pads
+	// each row ANSI-aware, so passing the styled lines through is safe.
 	return frame(clioTheme(), "Tasks", body, TASK_ISLAND_WIDTH + 4);
-}
-
-function frame(theme: ClioTheme, title: string, body: string[], width: number): string[] {
-	const bodyWidth = Math.max(1, width - 4);
-	const label = title.length > 0 ? `─ ${title} ` : "─ ";
-	// Total top width must equal the body rows (`│ … │` => bodyWidth + 4) and
-	// the bottom border. `┌─` and `┐` contribute 3 columns, so the fill spans
-	// bodyWidth + 1 - visibleWidth(label) to keep the right corners aligned.
-	const fill = Math.max(0, bodyWidth - visibleWidth(label) + 1);
-	const top = `${theme.fg("frame", "┌─")}${theme.style("title", label, { bold: true })}${theme.fg("frame", "─".repeat(fill))}${theme.fg("frame", "┐")}`;
-	const formattedBody = body.map(
-		(line) => `${theme.fg("frame", "│")} ${padAnsi(line, bodyWidth)} ${theme.fg("frame", "│")}`,
-	);
-	const bottom = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(bodyWidth + 2))}${theme.fg("frame", "┘")}`;
-	return [top, ...formattedBody, bottom];
 }
 
 function parseRunId(value: unknown): string | null {

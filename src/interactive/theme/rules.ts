@@ -1,4 +1,5 @@
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { GLYPH } from "./glyphs.js";
 import type { ClioTheme, ClioToken } from "./tokens.js";
 
 function padAnsi(text: string, width: number): string {
@@ -29,13 +30,72 @@ export function rule(theme: ClioTheme, width: number, options: RuleOptions = {})
 	return `${left}${fill}${right}`;
 }
 
-export function frame(theme: ClioTheme, title: string, lines: readonly string[], width: number): string[] {
+export interface FrameOptions {
+	/**
+	 * Dim right-hand metadata placed just before the closing corner with one
+	 * space on each side. The dispatch cards pass a run's elapsed time here.
+	 */
+	rightMeta?: string;
+}
+
+/**
+ * The one framed-island recipe for every in-flow block: the welcome dashboard,
+ * the task island, the steering queue, and the dispatch cards.
+ *
+ * ```
+ * ┌─ Title ──────────────────── meta ─┐
+ * │ body line                         │
+ * └───────────────────────────────────┘
+ * ```
+ *
+ * Corners and fills carry the `frame` token. A plain `title` is drawn bold in
+ * the `title` token with exactly one space on each side. A title that already
+ * carries its own styling, such as the welcome header's composite of a brand
+ * glyph and a dim version, is placed verbatim so its escape sequences are never
+ * re-wrapped. The optional `rightMeta` renders dim before the closing corner.
+ */
+export function frame(
+	theme: ClioTheme,
+	title: string,
+	lines: readonly string[],
+	width: number,
+	opts: FrameOptions = {},
+): string[] {
 	const safeWidth = Math.max(4, width);
 	const contentWidth = Math.max(0, safeWidth - 4);
-	const label = title.length > 0 ? `─ ${theme.style("title", title, { bold: true })} ` : "─ ";
-	const topFill = Math.max(0, safeWidth - 2 - visibleWidth(label));
-	const top = `${theme.fg("frame", "┌")}${label}${theme.fg("frame", "─".repeat(topFill))}${theme.fg("frame", "┐")}`;
-	const body = lines.map((line) => `${theme.fg("frame", "│")} ${padAnsi(line, contentWidth)} ${theme.fg("frame", "│")}`);
-	const bottom = `${theme.fg("frame", "└")}${theme.fg("frame", "─".repeat(safeWidth - 2))}${theme.fg("frame", "┘")}`;
+	const frameFg = (text: string): string => theme.fg("frame", text);
+
+	const hasTitle = title.length > 0;
+	// A title that already carries escape sequences is a pre-styled composite
+	// (the welcome header's brand glyph and dim version); place it verbatim. A
+	// plain title is styled here as bold in the `title` token.
+	const styledTitle = !hasTitle ? "" : title.includes("\u001b") ? title : theme.style("title", title, { bold: true });
+	const titleWidth = visibleWidth(title);
+
+	const meta = opts.rightMeta ?? "";
+	const hasMeta = meta.length > 0;
+	const metaWidth = hasMeta ? visibleWidth(meta) : 0;
+
+	// `┌─`, plus ` Title ` when titled, on the left; `┐`, or ` meta ─┐` when a
+	// right meta is present, on the right. The fill is whatever keeps the total
+	// width exact.
+	const leftVisible = 2 + (hasTitle ? titleWidth + 2 : 0);
+	const rightVisible = hasMeta ? metaWidth + 4 : 1;
+	const fillWidth = Math.max(0, safeWidth - leftVisible - rightVisible);
+
+	const leftStr = hasTitle ? `${frameFg("┌─")} ${styledTitle} ` : frameFg("┌─");
+	const rightStr = hasMeta ? ` ${theme.fg("dim", meta)} ${frameFg("─┐")}` : frameFg("┐");
+	const top = `${leftStr}${frameFg("─".repeat(fillWidth))}${rightStr}`;
+
+	const body = lines.map((line) => `${frameFg("│")} ${padAnsi(line, contentWidth)} ${frameFg("│")}`);
+	const bottom = `${frameFg("└")}${frameFg("─".repeat(safeWidth - 2))}${frameFg("┘")}`;
 	return [top, ...body, bottom];
+}
+
+/**
+ * A full-width run of the inner-divider glyph in the `frame` token, drawn
+ * between rows inside an island. Callers pass the island's inner content width.
+ */
+export function innerDivider(theme: ClioTheme, width: number): string {
+	return theme.fg("frame", GLYPH.innerDivider.repeat(Math.max(0, width)));
 }

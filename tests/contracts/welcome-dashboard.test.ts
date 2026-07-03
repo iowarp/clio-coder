@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import type { ObservabilityContract } from "../../src/domains/observability/index.js";
@@ -7,6 +7,9 @@ import { visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { abbreviateModelId } from "../../src/interactive/theme/index.js";
 import { buildWelcomeDashboardLines, deriveWelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
+
+const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+const stripAnsi = (text: string): string => text.replace(SGR, "");
 
 const mockSettings: ClioSettings = {
 	autonomy: "auto-edit",
@@ -150,6 +153,38 @@ describe("welcome-dashboard and footer integration tests", () => {
 				strictEqual(visibleWidth(line), width, `width ${width}: line "${line}" should span ${width} columns`);
 			}
 		}
+	});
+
+	it("opens the island with the canonical frame recipe: ┌─ styled title ─ fill ┐", () => {
+		const stats = deriveWelcomeDashboardStats({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+		});
+
+		// The whole styled title (brand glyph, bold name, dim version) sits with
+		// one space on each side; the fill runs frame-colored straight to the
+		// right corner. The old `v0.2.8────` glue must be gone: a space, not a
+		// dash, follows the version.
+		for (const width of [80, 100]) {
+			const top = stripAnsi(buildWelcomeDashboardLines(stats, width)[0] ?? "");
+			match(top, /^┌─ >C_ Clio Coder v[^ ]+ ─+┐$/, `width ${width}: top border "${top}"`);
+		}
+	});
+
+	it("truncates the width-80 hint row with a trailing ellipsis instead of a mid-word cut", () => {
+		const stats = deriveWelcomeDashboardStats({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+		});
+
+		const hintRow = buildWelcomeDashboardLines(stats, 80)
+			.map(stripAnsi)
+			.find((line) => line.includes("Hint:"));
+		ok(hintRow, "expected a Hint row");
+		ok(hintRow.includes("…"), `hint row should end in an ellipsis, got: ${hintRow}`);
+		ok(!hintRow.includes("…dashboard"), "the full hint must not survive the ellipsis at width 80");
 	});
 
 	it("never exceeds the requested width in narrow mode", () => {

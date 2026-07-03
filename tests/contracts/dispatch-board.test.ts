@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -40,6 +40,29 @@ function hasTruncatedAnsi(text: string): boolean {
 	const sgr = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
 	return text.replace(sgr, "").includes(ESC);
 }
+
+const stripSgr = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
+
+describe("dispatch board island frames", () => {
+	it("opens the task island with the canonical ┌─ Tasks ─ fill ┐ recipe", () => {
+		const top = stripSgr(formatTaskIslandLines([makeRow()])[0] ?? "");
+		strictEqual(/^┌─ Tasks ─+┐$/.test(top), true, `task island top border "${top}"`);
+	});
+
+	it("separates island rows with a full-width inner divider", () => {
+		const lines = formatTaskIslandLines([makeRow({ runId: "a" }), makeRow({ runId: "b", agentId: "beta" })]).map(
+			stripSgr,
+		);
+		const divider = lines.find((line) => line.includes(GLYPH.innerDivider));
+		ok(divider, "expected a ╌ inner divider between rows");
+		ok(divider.includes(GLYPH.innerDivider.repeat(TASK_ISLAND_WIDTH)), `divider should span the island: "${divider}"`);
+	});
+
+	it("frames a dispatch card as ┌─ label ─ … ─ elapsed ─┐ with the elapsed meta before the corner", () => {
+		const top = stripSgr(renderDispatchCard(makeRow({ agentId: "researcher", elapsedMs: 42_000 }), 80)[0] ?? "");
+		match(top, /^┌─ researcher ─+ 42s ─┐$/, `dispatch card top border "${top}"`);
+	});
+});
 
 describe("dispatch board task island", () => {
 	it("renders every framed line at exactly TASK_ISLAND_WIDTH + 4 columns (empty state)", () => {
