@@ -1,11 +1,7 @@
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
-import { type ClioTheme, GLYPH } from "./theme/index.js";
-
-const ARROW_UP = "\u2191";
-const ARROW_DOWN = "\u2193";
-const SPEED_ICON = "\u26A1";
+import { type ClioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
 
 /**
  * Render a token count with a single-letter magnitude suffix so the footer
@@ -43,29 +39,22 @@ export function tokensSegment(usage: UsageBreakdown | null | undefined): string 
 	if (input + output + reasoning + total === 0) return null;
 	const reasoningPart = reasoning > 0 ? ` r${formatFooterTokens(reasoning)}` : "";
 	const totalPart = total > 0 ? ` Σ${formatFooterTokens(total)}` : "";
-	return `${ARROW_UP}${formatFooterTokens(input)} ${ARROW_DOWN}${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
+	return `${GLYPH.up}${formatFooterTokens(input)} ${GLYPH.down}${formatFooterTokens(output)}${reasoningPart}${totalPart}`;
 }
 
 export function throughputSegment(metric: TokenThroughputSnapshot | null | undefined): string | null {
 	const tps = metric?.tokensPerSecond;
 	if (typeof tps !== "number" || !Number.isFinite(tps) || tps <= 0) return null;
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
-	return `${SPEED_ICON}${rounded} Tk/s`;
-}
-
-function formatDurationMs(ms: number): string {
-	const safe = Math.max(0, Math.round(ms));
-	if (safe < 1000) return `${safe}ms`;
-	const seconds = safe / 1000;
-	return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
+	return `${GLYPH.speed}${rounded} Tk/s`;
 }
 
 export function throughputDetailSegment(metric: TokenThroughputSnapshot | null | undefined): string | null {
 	if (!throughputSegment(metric) || !metric) return null;
-	const parts = [`gen ${formatDurationMs(metric.durationMs)}`];
+	const parts = [`gen ${formatCompactMs(metric.durationMs)}`];
 	if (typeof metric.ttftMs === "number" && Number.isFinite(metric.ttftMs))
-		parts.push(`ttft ${formatDurationMs(metric.ttftMs)}`);
-	parts.push(`↓${formatFooterTokens(metric.outputTokens)}`);
+		parts.push(`ttft ${formatCompactMs(metric.ttftMs)}`);
+	parts.push(`${GLYPH.down}${formatFooterTokens(metric.outputTokens)}`);
 	return parts.join(" · ");
 }
 

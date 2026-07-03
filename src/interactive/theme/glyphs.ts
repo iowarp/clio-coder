@@ -3,6 +3,8 @@ export const GLYPH = {
 	user: "›",
 	toolHeader: "▸",
 	running: "●",
+	queued: "◌",
+	speed: "⚡",
 	ok: "✓",
 	error: "✗",
 	cancelled: "⊘",
