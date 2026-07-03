@@ -139,29 +139,25 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 		ok(!raw.includes(scratch.dir), "stored eval artifact must not contain the raw scratch home");
 		ok(!raw.includes("secretsecretsecret"), "stored eval artifact must redact credential-looking output");
 		const parsed = JSON.parse(raw) as {
-			taskFileHash?: unknown;
+			version?: unknown;
+			suite?: { id?: unknown; hash?: unknown };
 			clio?: { version?: unknown; commit?: unknown; entry?: unknown };
 			environment?: { platform?: unknown; node?: unknown };
-			target?: unknown;
-			model?: unknown;
-			thinking?: unknown;
-			paths?: { taskFile?: unknown; receipts?: unknown; sessionLedgers?: unknown };
-			results?: Array<{ cwd?: unknown; commands?: Array<{ stdout?: unknown; stderr?: unknown }> }>;
+			matrix?: { target?: unknown; model?: unknown; thinking?: unknown };
+			results?: Array<{ artifacts?: { verifierStdout?: unknown; verifierStderr?: unknown } }>;
 		};
-		strictEqual(typeof parsed.taskFileHash, "string");
+		strictEqual(parsed.version, 2);
+		strictEqual(parsed.suite?.id, "v1-task-file");
+		strictEqual(typeof parsed.suite?.hash, "string");
 		strictEqual(typeof parsed.clio?.version, "string");
 		strictEqual(typeof parsed.clio?.entry, "string");
 		strictEqual(typeof parsed.environment?.platform, "string");
 		strictEqual(typeof parsed.environment?.node, "string");
-		strictEqual(parsed.target, null);
-		strictEqual(parsed.model, null);
-		strictEqual(parsed.thinking, null);
-		strictEqual(parsed.paths?.taskFile, "$HOME/provenance.yaml");
-		strictEqual(Array.isArray(parsed.paths?.receipts), true);
-		strictEqual(Array.isArray(parsed.paths?.sessionLedgers), true);
-		strictEqual(parsed.results?.[0]?.cwd, "$HOME");
-		strictEqual(parsed.results?.[0]?.commands?.[0]?.stdout, "$HOME/artifact-path\n");
-		strictEqual(parsed.results?.[0]?.commands?.[0]?.stderr, "Authorization: [redacted]\n");
+		strictEqual(parsed.matrix?.target, "local");
+		strictEqual(parsed.matrix?.model, null);
+		strictEqual(parsed.matrix?.thinking, null);
+		strictEqual(parsed.results?.[0]?.artifacts?.verifierStdout, "$HOME/artifact-path\n");
+		strictEqual(parsed.results?.[0]?.artifacts?.verifierStderr, "Authorization: [redacted]\n");
 	});
 
 	it("fleet status --json is provider-free and reports an empty ledger", async () => {
