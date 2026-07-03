@@ -765,6 +765,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			hook: "turn_start",
 			...(sessionId ? { sessionId } : {}),
 			modelId: agentRuntime.wireModelId,
+			// The raw user text so the skills reminder can tell a substantive task
+			// turn from a bare greeting; the runtime caps it on clone.
+			text: promptText.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
 			metadata: {
 				promptChars: promptText.length,
 				queued: false,

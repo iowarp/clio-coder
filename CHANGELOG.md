@@ -270,6 +270,19 @@ and grep/find answer tree visibility from a single ignore policy.
   the call's own `tool_execution_start` rather than from turn start, and the
   running-tool spinner clears the moment the model resumes generating, so it
   never claims a tool is running while nothing executes.
+- **The once-per-session skills reminder no longer burns on "hi".** The
+  registration's docstring promised the reminder fires on the first
+  *substantive* task turn, but the implementation marked any first turn spent —
+  so a session that opened with a bare greeting spent its single reminder on
+  the greeting and the real task never saw it. A greeting turn now carries the
+  shot to the first real task turn instead. The substance test is a small pure
+  exported function (`isSubstantiveUserTurn`, table-driven tested) that is
+  conservative toward firing: only a short message whose every token is a bare
+  greeting/acknowledgement is skipped, so any real task word makes the turn
+  substantive. Substantive-first sessions behave exactly as before; the
+  reminder still fires at most once per session, never after a substantive turn
+  has already passed, never when a skill request is already pending, and never
+  on a resumed conversation with history. The reminder text is unchanged.
 - **Bash can no longer create files outside the session workspace unnoticed.**
   A full-auto battery run recorded the escape: with the session cwd in a
   fixture copy, `mkdir -p /abs/path && cd /abs/path` built a whole project at
