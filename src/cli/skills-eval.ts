@@ -10,6 +10,8 @@ import {
 	type EvalHarnessMetrics,
 	type EvalRunArtifact,
 	type EvalRunRecord,
+	evalClioProvenance,
+	evalEnvironmentProvenance,
 	summarizeEvalResults,
 	writeEvalArtifact,
 	ZERO_EVAL_HARNESS_METRICS,
@@ -166,7 +168,7 @@ export async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEv
 	}
 	const endedAt = new Date().toISOString();
 
-	const artifact = synthesizeArtifact(skill.name, evalsPath, evalsRaw, startedAt, endedAt, outcomes);
+	const artifact = synthesizeArtifact(skill.name, evalsPath, evalsRaw, startedAt, endedAt, outcomes, options.target);
 	let evidenceId: string | null = null;
 	let evidenceDirectory: string | null = null;
 	const evidenceErrors: string[] = [];
@@ -738,6 +740,7 @@ function synthesizeArtifact(
 	startedAt: string,
 	endedAt: string,
 	outcomes: ReadonlyArray<ScenarioOutcome>,
+	target: string | undefined,
 ): EvalRunArtifact {
 	const contentHash = createHash("sha256").update(evalsRaw, "utf8").digest("hex");
 	const stamp = startedAt.replace(/[-:.]/g, "");
@@ -771,6 +774,12 @@ function synthesizeArtifact(
 		evalId,
 		taskFile: evalsPath,
 		taskFileHash: contentHash,
+		clio: evalClioProvenance(),
+		environment: evalEnvironmentProvenance(),
+		target: target ?? null,
+		model: null,
+		thinking: null,
+		paths: { taskFile: evalsPath, receipts: [], sessionLedgers: [] },
 		repeat: 1,
 		startedAt,
 		endedAt,

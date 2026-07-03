@@ -48,6 +48,31 @@ export interface EvalCommandResult {
 	stderr: string;
 }
 
+export interface EvalClioProvenance {
+	version: string;
+	commit: string | null;
+	entry: string;
+}
+
+export interface EvalEnvironmentProvenance {
+	platform: string;
+	node: string;
+}
+
+export interface EvalRunPaths {
+	receipt?: string;
+	sessionLedger?: string;
+	evidence?: string;
+}
+
+export interface EvalArtifactPaths {
+	taskFile: string;
+	artifact?: string;
+	evidence?: string;
+	receipts: string[];
+	sessionLedgers: string[];
+}
+
 export interface EvalResult {
 	taskId: string;
 	runId: string;
@@ -60,6 +85,7 @@ export interface EvalResult {
 	failureClass?: EvalFailureClass;
 	receiptPath?: string;
 	evidenceId?: string;
+	paths?: EvalRunPaths;
 }
 
 export interface EvalRunRecord extends EvalResult {
@@ -101,6 +127,12 @@ export interface EvalRunArtifact {
 	evalId: string;
 	taskFile: string;
 	taskFileHash: string;
+	clio: EvalClioProvenance;
+	environment: EvalEnvironmentProvenance;
+	target: string | null;
+	model: string | null;
+	thinking: string | null;
+	paths: EvalArtifactPaths;
 	repeat: number;
 	startedAt: string;
 	endedAt: string;

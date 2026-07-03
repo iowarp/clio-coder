@@ -3,13 +3,18 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { redactArtifactForStorage } from "./artifacts/redact.js";
 import { evalHarnessMetricsFromCommands, ZERO_EVAL_HARNESS_METRICS } from "./metrics.js";
 import type {
+	EvalArtifactPaths,
+	EvalClioProvenance,
 	EvalCommandResult,
+	EvalEnvironmentProvenance,
 	EvalFailureClass,
 	EvalFailureClassCount,
 	EvalHarnessMetrics,
 	EvalRunArtifact,
+	EvalRunPaths,
 	EvalRunRecord,
 	EvalSummary,
 } from "./types.js";
@@ -71,7 +76,11 @@ export async function writeEvalArtifact(dataDir: string, artifact: EvalRunArtifa
 	// closes the real bug: the previous bare writeFile had no tmp+rename or fsync,
 	// so a crash mid-write left a torn ${evalId}.json that loadEvalArtifact rejects.
 	const path = evalArtifactPath(dataDir, artifact.evalId);
-	safeResourceWrite(path, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: "utf8" });
+	const redacted = redactArtifactForStorage({
+		...artifact,
+		paths: { ...artifact.paths, artifact: path },
+	});
+	safeResourceWrite(path, `${JSON.stringify(redacted, null, 2)}\n`, { encoding: "utf8" });
 	return path;
 }
 
@@ -102,6 +111,15 @@ function parseArtifact(value: unknown, source: string): EvalRunArtifact {
 		evalId: readString(value, source, "evalId"),
 		taskFile: readString(value, source, "taskFile"),
 		taskFileHash: readString(value, source, "taskFileHash"),
+		clio: value.clio === undefined ? legacyClioProvenance() : parseClioProvenance(value.clio, `${source}.clio`),
+		environment:
+			value.environment === undefined
+				? legacyEnvironmentProvenance()
+				: parseEnvironmentProvenance(value.environment, `${source}.environment`),
+		target: readOptionalNullableString(value, source, "target"),
+		model: readOptionalNullableString(value, source, "model"),
+		thinking: readOptionalNullableString(value, source, "thinking"),
+		paths: value.paths === undefined ? legacyArtifactPaths(value) : parseArtifactPaths(value.paths, `${source}.paths`),
 		repeat: readNumber(value, source, "repeat"),
 		startedAt: readString(value, source, "startedAt"),
 		endedAt: readString(value, source, "endedAt"),
@@ -159,7 +177,65 @@ function parseRecord(value: unknown, source: string): EvalRunRecord {
 	if (receiptPath !== undefined) record.receiptPath = receiptPath;
 	const evidenceId = readOptionalString(value, source, "evidenceId");
 	if (evidenceId !== undefined) record.evidenceId = evidenceId;
+	const paths = value.paths === undefined ? undefined : parseRunPaths(value.paths, `${source}.paths`);
+	if (paths !== undefined) record.paths = paths;
 	return record;
+}
+
+function parseClioProvenance(value: unknown, source: string): EvalClioProvenance {
+	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	return {
+		version: readString(value, source, "version"),
+		commit: readNullableString(value, source, "commit"),
+		entry: readString(value, source, "entry"),
+	};
+}
+
+function parseEnvironmentProvenance(value: unknown, source: string): EvalEnvironmentProvenance {
+	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	return {
+		platform: readString(value, source, "platform"),
+		node: readString(value, source, "node"),
+	};
+}
+
+function parseArtifactPaths(value: unknown, source: string): EvalArtifactPaths {
+	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	const out: EvalArtifactPaths = {
+		taskFile: readString(value, source, "taskFile"),
+		receipts: readStringArray(value, source, "receipts"),
+		sessionLedgers: readStringArray(value, source, "sessionLedgers"),
+	};
+	const artifact = readOptionalString(value, source, "artifact");
+	if (artifact !== undefined) out.artifact = artifact;
+	const evidence = readOptionalString(value, source, "evidence");
+	if (evidence !== undefined) out.evidence = evidence;
+	return out;
+}
+
+function parseRunPaths(value: unknown, source: string): EvalRunPaths {
+	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	const out: EvalRunPaths = {};
+	const receipt = readOptionalString(value, source, "receipt");
+	if (receipt !== undefined) out.receipt = receipt;
+	const sessionLedger = readOptionalString(value, source, "sessionLedger");
+	if (sessionLedger !== undefined) out.sessionLedger = sessionLedger;
+	const evidence = readOptionalString(value, source, "evidence");
+	if (evidence !== undefined) out.evidence = evidence;
+	return out;
+}
+
+function legacyClioProvenance(): EvalClioProvenance {
+	return { version: "unknown", commit: null, entry: "unknown" };
+}
+
+function legacyEnvironmentProvenance(): EvalEnvironmentProvenance {
+	return { platform: "unknown", node: "unknown" };
+}
+
+function legacyArtifactPaths(value: Record<string, unknown>): EvalArtifactPaths {
+	const taskFile = typeof value.taskFile === "string" && value.taskFile.length > 0 ? value.taskFile : "unknown";
+	return { taskFile, receipts: [], sessionLedgers: [] };
 }
 
 function parseHarnessMetrics(value: unknown, source: string): EvalHarnessMetrics {
@@ -244,6 +320,20 @@ function readOptionalString(record: Record<string, unknown>, source: string, fie
 	const value = record[field];
 	if (value === undefined) return undefined;
 	if (typeof value !== "string" || value.length === 0) throw new Error(`${source}.${field}: expected string`);
+	return value;
+}
+
+function readNullableString(record: Record<string, unknown>, source: string, field: string): string | null {
+	const value = record[field];
+	if (value === null) return null;
+	if (typeof value !== "string" || value.length === 0) throw new Error(`${source}.${field}: expected string or null`);
+	return value;
+}
+
+function readOptionalNullableString(record: Record<string, unknown>, source: string, field: string): string | null {
+	const value = record[field];
+	if (value === undefined || value === null) return null;
+	if (typeof value !== "string" || value.length === 0) throw new Error(`${source}.${field}: expected string or null`);
 	return value;
 }
 

@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
+import { redactArtifactForStorage } from "../eval/artifacts/redact.js";
 import type { EvalCommandResult, EvalRunArtifact, EvalRunRecord } from "../eval/index.js";
 import { loadEvalArtifact } from "../eval/index.js";
 import { evidenceDirectory, findingsFile } from "./store.js";
@@ -208,16 +209,17 @@ async function writeEvalEvidenceFiles(
 		version: EVIDENCE_VERSION,
 		receipts: linkedRuns.runSources.flatMap((source) => (source.receipt === null ? [] : [source.receipt])),
 	};
+	const redactedArtifact = redactArtifactForStorage(artifact);
 	await mkdir(directory, { recursive: true });
 	await writeJson(join(directory, "overview.json"), overview);
-	await writeFile(join(directory, "transcript.md"), renderEvalTranscript(artifact, overview), "utf8");
-	await writeJsonl(join(directory, "trace.raw.jsonl"), rawEvalTraceRows(artifact));
-	await writeJsonl(join(directory, "trace.cleaned.jsonl"), cleanedEvalTraceRows(artifact, findings));
-	await writeJsonl(join(directory, "tool-events.jsonl"), toolEventRows);
+	await writeFile(join(directory, "transcript.md"), renderEvalTranscript(redactedArtifact, overview), "utf8");
+	await writeJsonl(join(directory, "trace.raw.jsonl"), rawEvalTraceRows(redactedArtifact));
+	await writeJsonl(join(directory, "trace.cleaned.jsonl"), cleanedEvalTraceRows(redactedArtifact, findings));
+	await writeJsonl(join(directory, "tool-events.jsonl"), redactArtifactForStorage(toolEventRows));
 	await writeJsonl(join(directory, "audit-linked.jsonl"), linkedRuns.auditRows);
 	await writeJson(join(directory, "receipt.json"), receiptsFile);
 	await writeJson(join(directory, "protected-artifacts.json"), emptyProtected);
-	await writeJson(join(directory, "eval-result.json"), artifact);
+	await writeJson(join(directory, "eval-result.json"), redactedArtifact);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
 	await writeFile(join(directory, "findings.md"), renderFindings(findings), "utf8");
 }
