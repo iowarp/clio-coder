@@ -1,6 +1,6 @@
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
-import { highlightCode } from "./renderers/highlight.js";
+import { codeInk } from "./renderers/code-ink.js";
 import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
 	classifyResourceRead,
@@ -14,7 +14,13 @@ import {
 import type { StatusPhase, VerbRender } from "./status/index.js";
 import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
 
-const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), highlightCode);
+// Fenced code reaches the screen through pi-tui's Markdown component, which
+// exposes the MarkdownTheme.highlightCode hook: it hands over the raw fence
+// text plus its language tag before pi-tui draws the fence borders and indent.
+// Wiring code ink through that hook colors only the ink, so the fence frame,
+// indentation, and width behavior stay pi-tui's and nothing post-processes
+// already-rendered output.
+const CHAT_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) => codeInk(lang, code.split("\n")));
 
 // Prefix and rail SGR constants, previously re-exported by the deleted
 // palette.ts. Composing them from fgSequence/GLYPH here yields byte-identical
