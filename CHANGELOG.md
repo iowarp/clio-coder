@@ -13,6 +13,18 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Added
 
+- **Eval artifact provenance, suite v2, and public benchmark manifests.**
+  `clio eval run --task-file` now stores redacted provenance with Clio version,
+  commit, entrypoint, platform, Node version, target, model, thinking level, and
+  linked receipt or session paths when they are present. The eval domain also
+  supports version 2 suites through `clio eval validate`, `run`, `report`,
+  `compare`, and `gate`, with runner kinds for Clio headless runs, context
+  indexing, context initialization, and external commands. Reports render as
+  text, JSON, Markdown, SWE JSONL, and JUnit XML. Public examples live in
+  `examples/evals/`, while private suite seeds and the external-suite workflow
+  are documented in `docs/evals-internal.md`. Benchmark adapters now emit
+  sanitized `manifest.json` and `summary.json` files per run, and the tracked
+  benchmark tree is limited to public adapters plus sanitized result records.
 - **Toolkit v2: seven planes, 18 tools.** The surface is organized as OBSERVE
   (read, grep, find, ls, code_nav, context, credential_present), MUTATE
   (write, edit), EXECUTE (bash, git, verify), ORCHESTRATE (dispatch, monitor,
