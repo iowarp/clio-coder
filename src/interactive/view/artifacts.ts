@@ -51,6 +51,12 @@ export interface ViewArtifact {
 	sizeBytes?: number | undefined;
 	/** Absolute backing path when one exists. Session-entry artifacts point at current.jsonl. */
 	path?: string | undefined;
+	description?: string;
+	runId?: string;
+	sessionId?: string;
+	correlationId?: string;
+	toolName?: string;
+	searchText?: readonly string[];
 	load(): Promise<ViewArtifactLoadResult>;
 	verify?(): Promise<{ ok: boolean; detail: string }>;
 }
@@ -585,6 +591,21 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 				category: this.category,
 				title: safeTitle(`Evidence · ${evidenceSourceTitle(overview.source)}`, "Evidence bundle"),
 				timestamp: parseTime(overview.generatedAt),
+				searchText: [
+					overview.evidenceId,
+					evidenceSourceTitle(overview.source),
+					...overview.runIds,
+					...(overview.sessionId ? [overview.sessionId] : []),
+					...overview.tasks,
+					...overview.cwds,
+					...overview.agentIds,
+					...overview.targetIds,
+					...overview.runtimeIds,
+					...overview.modelIds,
+					...overview.statuses,
+					...overview.tags,
+					...overview.files,
+				],
 				load: async () => {
 					try {
 						const inspected = await inspectEvidence(dataDir, overview.evidenceId);
@@ -602,6 +623,8 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 				},
 			};
 			if (path !== undefined) artifact.path = path;
+			if (overview.runIds.length === 1 && overview.runIds[0] !== undefined) artifact.runId = overview.runIds[0];
+			if (overview.sessionId !== null) artifact.sessionId = overview.sessionId;
 			return artifact;
 		});
 	}
@@ -631,6 +654,10 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 					timestamp: parseTime(env.endedAt ?? env.startedAt),
 					sizeBytes: maybeSizeBytes(path),
 					path,
+					description: env.task,
+					runId: env.id,
+					...(env.sessionId ? { sessionId: env.sessionId } : {}),
+					searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
 					load: () => loadJsonFileLines(path),
 					verify: async () => {
 						const result = verifyReceiptFile(this.deps.stateDir, env.id);
@@ -721,6 +748,10 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 				timestamp: parseTime(env.endedAt ?? env.startedAt),
 				sizeBytes: maybeSizeBytes(path),
 				path,
+				description: env.task,
+				runId: env.id,
+				...(env.sessionId ? { sessionId: env.sessionId } : {}),
+				searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
 				load: async () => {
 					const text = dispatchResultForRun(entries, env.id);
 					const lines = [
@@ -831,6 +862,19 @@ export class TaskLedgerArtifactProvider implements ArtifactProvider {
 				timestamp: parseTime(entry.timestamp),
 				sizeBytes: Buffer.byteLength(JSON.stringify(entry), "utf8"),
 				...(path ? { path } : {}),
+				searchText: [
+					entry.turnId,
+					...entry.activeRunIds,
+					...entry.goals.flatMap((goal) => [goal.id, goal.title, goal.description ?? "", goal.parentGoalId ?? ""]),
+					...entry.subgoals.flatMap((goal) => [goal.id, goal.title, goal.description ?? "", goal.parentGoalId ?? ""]),
+					...entry.requiredValidationEvidence.flatMap((item) => [
+						item.id,
+						item.description,
+						item.command ?? "",
+						item.artifactPath ?? "",
+						item.notes ?? "",
+					]),
+				].filter(isNonEmptyString),
 				load: async () => ({
 					format: "markdown" as const,
 					lines: renderTaskLedgerMarkdown(entry),
@@ -875,21 +919,30 @@ export class ToolOutputArtifactProvider implements ArtifactProvider {
 			timestamp: parseTime(entry.timestamp),
 			sizeBytes: maybeSizeBytes(path),
 			path,
+			toolName: "bash",
+			searchText: ["bash", entry.turnId, entry.command, path, basename(path)],
 			load: () => loadTextPath(path),
 		};
 	}
 
 	private toolResultArtifact(entry: MessageEntry, path: string): ViewArtifact {
 		const toolName = toolNameFor(entry);
-		return {
+		const artifact: ViewArtifact = {
 			id: `tool:${entry.turnId}`,
 			category: this.category,
 			title: safeTitle(`${toolName} · ${basename(path)}`, `${toolName} output`),
 			timestamp: parseTime(entry.timestamp),
 			sizeBytes: maybeSizeBytes(path),
 			path,
+			toolName,
+			searchText: [toolName, entry.turnId, path, basename(path)],
 			load: () => loadTextPath(path),
 		};
+		const payload = messagePayload(entry);
+		const details = payload ? resultDetails(payload.result) : null;
+		const runId = readStringField(payload ?? {}, "runId") ?? readStringField(details ?? {}, "runId");
+		if (runId !== null) artifact.runId = runId;
+		return artifact;
 	}
 }
 
@@ -934,6 +987,22 @@ export class ProtectedArtifactProvider implements ArtifactProvider {
 					title: protectedArtifactTitle(entry),
 					timestamp: parseTime(entry.timestamp),
 					sizeBytes: path ? maybeSizeBytes(path) : Buffer.byteLength(JSON.stringify(entry), "utf8"),
+					description: entry.artifact.reason,
+					...(entry.runId ? { runId: entry.runId } : {}),
+					...(entry.correlationId ? { correlationId: entry.correlationId } : {}),
+					...(entry.toolName ? { toolName: entry.toolName } : {}),
+					searchText: [
+						entry.turnId,
+						entry.parentTurnId ?? "",
+						entry.artifact.path,
+						entry.artifact.source,
+						entry.artifact.reason,
+						entry.artifact.validationCommand ?? "",
+						entry.toolName ?? "",
+						entry.toolCallId ?? "",
+						entry.runId ?? "",
+						entry.correlationId ?? "",
+					].filter(isNonEmptyString),
 					load: async () => ({
 						format: "markdown" as const,
 						lines: renderProtectedArtifactMarkdown(entry),
@@ -1114,6 +1183,15 @@ export class SafetyAuditArtifactProvider implements ArtifactProvider {
 			.slice(0, SAFETY_AUDIT_ARTIFACT_LIMIT);
 		const artifacts: ViewArtifact[] = selected.map((row) => {
 			const path = join(this.deps.stateDir, "audit", row.file);
+			const runId = readStringField(row.row, "runId");
+			const sessionId = readStringField(row.row, "sessionId");
+			const correlationId = readStringField(row.row, "correlationId") ?? row.correlationId;
+			const tool = readStringField(row.row, "tool");
+			const actionClass = readStringField(row.row, "actionClass");
+			const decision = readStringField(row.row, "decision");
+			const status = readStringField(row.row, "status");
+			const source = readStringField(row.row, "source");
+			const phase = readStringField(row.row, "phase");
 			return {
 				id: `audit:${row.file}:${row.line}`,
 				category: this.category,
@@ -1121,6 +1199,25 @@ export class SafetyAuditArtifactProvider implements ArtifactProvider {
 				timestamp: parseTime(row.ts),
 				sizeBytes: maybeSizeBytes(path),
 				path,
+				...(runId ? { runId } : {}),
+				...(sessionId ? { sessionId } : {}),
+				...(correlationId ? { correlationId } : {}),
+				...(tool ? { toolName: tool } : {}),
+				searchText: [
+					row.file,
+					String(row.line),
+					row.auditKind,
+					row.correlationId,
+					runId ?? "",
+					sessionId ?? "",
+					correlationId,
+					tool ?? "",
+					actionClass ?? "",
+					decision ?? "",
+					status ?? "",
+					source ?? "",
+					phase ?? "",
+				].filter(isNonEmptyString),
 				load: async () => ({
 					format: "json" as const,
 					lines: splitLinesCapped(JSON.stringify(auditRowPayload(row), null, 2), path),

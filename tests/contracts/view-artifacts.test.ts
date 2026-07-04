@@ -271,6 +271,8 @@ describe("contracts/view-artifacts", () => {
 		strictEqual(artifacts.length, 1);
 		strictEqual(artifacts[0]?.id, envelope.id);
 		strictEqual(artifacts[0]?.category, "receipt");
+		strictEqual(artifacts[0]?.runId, envelope.id);
+		strictEqual(artifacts[0]?.sessionId, envelope.sessionId);
 		ok(artifacts[0]?.path?.endsWith(`${envelope.id}.json`));
 
 		const verify = await artifacts[0]?.verify?.();
@@ -415,6 +417,8 @@ describe("contracts/view-artifacts", () => {
 		const artifacts = await provider.list();
 		strictEqual(artifacts.length, 1);
 		strictEqual(artifacts[0]?.category, "dispatch");
+		strictEqual(artifacts[0]?.runId, envelope.id);
+		strictEqual(artifacts[0]?.sessionId, envelope.sessionId);
 		const loaded = await artifacts[0]?.load();
 		strictEqual(loaded?.format, "text");
 		ok(loaded?.lines.join("\n").includes("dispatch run output body"));
@@ -476,7 +480,7 @@ describe("contracts/view-artifacts", () => {
 					result: {
 						kind: "ok",
 						output: "preview",
-						details: { outputPath: largePath },
+						details: { outputPath: largePath, runId: "run-view-tool" },
 					},
 				},
 			},
@@ -498,8 +502,13 @@ describe("contracts/view-artifacts", () => {
 		const artifacts = await provider.list();
 		strictEqual(artifacts.length, 3);
 		const first = artifacts.find((artifact) => artifact.path === outputPath);
+		strictEqual(first?.toolName, "bash");
+		ok(first?.searchText?.includes("npm test"));
 		strictEqual((await first?.load())?.lines.join("\n"), "line 1\nline 2");
 
+		const toolResult = artifacts.find((artifact) => artifact.path === largePath);
+		strictEqual(toolResult?.toolName, "bash");
+		strictEqual(toolResult?.runId, "run-view-tool");
 		const capped = await artifacts.find((artifact) => artifact.path === largePath)?.load();
 		strictEqual(capped?.format, "text");
 		strictEqual(capped?.lines.length, VIEW_ARTIFACT_LINE_CAP + 1);
@@ -580,6 +589,8 @@ describe("contracts/view-artifacts", () => {
 		strictEqual(artifacts[0]?.category, "task-ledger");
 		ok(artifacts[0]?.title.includes("Ship proof catalog"));
 		ok(artifacts[0]?.title.includes("1/3 done"));
+		ok(artifacts[0]?.searchText?.includes("run-view-1"));
+		ok(artifacts[0]?.searchText?.includes("G1"));
 		ok(artifacts[0]?.path?.endsWith("current.jsonl"));
 
 		const loaded = await artifacts[0]?.load();
@@ -622,6 +633,9 @@ describe("contracts/view-artifacts", () => {
 		strictEqual(artifacts.length, 1);
 		strictEqual(artifacts[0]?.id, "protected:protected-1");
 		strictEqual(artifacts[0]?.category, "protected-artifact");
+		strictEqual(artifacts[0]?.runId, "run-view-1");
+		strictEqual(artifacts[0]?.correlationId, "corr-1");
+		strictEqual(artifacts[0]?.toolName, "write");
 		ok(artifacts[0]?.title.includes("locked.ts"));
 		strictEqual(artifacts[0]?.path, protectedPath);
 
@@ -672,6 +686,10 @@ describe("contracts/view-artifacts", () => {
 		const row = artifacts.find((artifact) => artifact.id === "audit:2026-06-11.jsonl:3");
 		ok(row, "matching current-session audit row is listed");
 		strictEqual(row.category, "audit");
+		strictEqual(row.runId, "run-view-1");
+		strictEqual(row.sessionId, meta.id);
+		strictEqual(row.correlationId, "audit-corr");
+		strictEqual(row.toolName, "bash");
 		ok(row.title.includes("tool_call"), row.title);
 		ok(row.title.includes("bash"), row.title);
 		ok(row.title.includes("write"), row.title);
@@ -700,6 +718,9 @@ describe("contracts/view-artifacts", () => {
 		strictEqual(artifacts.length, 1);
 		strictEqual(artifacts[0]?.id, evidenceId);
 		strictEqual(artifacts[0]?.category, "evidence");
+		strictEqual(artifacts[0]?.runId, "run-view-1");
+		strictEqual(artifacts[0]?.sessionId, "session-1");
+		ok(artifacts[0]?.searchText?.includes("blocked-tool"));
 		ok(artifacts[0]?.title.includes("Evidence · run run-view-1"));
 		ok(artifacts[0]?.path?.endsWith(join("evidence", evidenceId)));
 
