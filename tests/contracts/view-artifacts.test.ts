@@ -11,13 +11,19 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { SessionMeta } from "../../src/domains/session/index.js";
 import {
 	CompactionArtifactProvider,
+	createDefaultArtifactProviders,
 	DispatchArtifactProvider,
+	EvidenceArtifactProvider,
 	listViewArtifacts,
 	loadJsonFileLines,
+	ProtectedArtifactProvider,
 	ReceiptArtifactProvider,
 	receiptFilePath,
 	runLedgerPath,
+	SafetyAuditArtifactProvider,
+	TaskLedgerArtifactProvider,
 	ToolOutputArtifactProvider,
+	VIEW_ARTIFACT_CATEGORIES,
 	VIEW_ARTIFACT_LINE_CAP,
 	verifyReceiptFile,
 } from "../../src/interactive/view/artifacts.js";
@@ -155,7 +161,107 @@ function sessionMeta(): SessionMeta {
 	};
 }
 
+async function writeEvidenceFixture(dataDir: string): Promise<string> {
+	const evidenceId = "run-run-view-1-20260611T120000Z";
+	const evidenceDir = join(dataDir, "evidence", evidenceId);
+	await mkdir(evidenceDir, { recursive: true });
+	const overview = {
+		version: 1,
+		evidenceId,
+		source: { kind: "run", runId: "run-view-1" },
+		generatedAt: "2026-06-11T12:10:00.000Z",
+		runIds: ["run-view-1"],
+		sessionId: "session-1",
+		statuses: ["completed"],
+		startedAt: "2026-06-11T12:00:00.000Z",
+		endedAt: "2026-06-11T12:00:05.000Z",
+		tasks: ["fix lint errors"],
+		cwds: ["/workspace"],
+		agentIds: ["coder"],
+		targetIds: ["local"],
+		runtimeIds: ["openai"],
+		modelIds: ["model-a"],
+		totals: {
+			runs: 1,
+			receipts: 1,
+			toolCalls: 2,
+			toolErrors: 1,
+			blockedToolCalls: 1,
+			sessionEntries: 3,
+			auditRows: 1,
+			toolEvents: 2,
+			linkedToolEvents: 1,
+			protectedArtifacts: 1,
+			tokens: 1530,
+			costUsd: 0.0123,
+			wallTimeMs: 6500,
+		},
+		tags: ["audit-linked", "blocked-tool"],
+		files: ["overview.json", "findings.json", "receipt.json"],
+	};
+	await writeFile(join(evidenceDir, "overview.json"), JSON.stringify(overview, null, 2));
+	await writeFile(
+		join(evidenceDir, "findings.json"),
+		JSON.stringify(
+			{
+				version: 1,
+				evidenceId,
+				findings: [
+					{
+						id: "finding-1",
+						severity: "warn",
+						tag: "blocked-tool",
+						runId: "run-view-1",
+						message: "1 blocked tool call(s)",
+					},
+				],
+			},
+			null,
+			2,
+		),
+	);
+	return evidenceId;
+}
+
 describe("contracts/view-artifacts", () => {
+	it("includes durable proof categories and tolerates missing provider backing stores", async () => {
+		deepStrictEqual(VIEW_ARTIFACT_CATEGORIES, [
+			"accountability",
+			"evidence",
+			"receipt",
+			"dispatch",
+			"task-ledger",
+			"tool-output",
+			"protected-artifact",
+			"compaction",
+			"audit",
+		]);
+
+		const stateDir = await scratchDir();
+		const dataDir = join(stateDir, "missing-data");
+		const artifacts = await listViewArtifacts(
+			createDefaultArtifactProviders({
+				stateDir,
+				dataDir,
+				readSessionEntries: () => [],
+			}),
+		);
+		ok(artifacts.some((artifact) => artifact.category === "accountability"));
+		ok(!artifacts.some((artifact) => artifact.category === "evidence"), "missing data dir produces no evidence rows");
+		ok(!artifacts.some((artifact) => artifact.category === "audit"), "missing audit dir produces no audit rows");
+
+		const isolated = await listViewArtifacts([
+			{
+				category: "audit",
+				list: async () => {
+					throw new Error("boom");
+				},
+			},
+			new EvidenceArtifactProvider({ stateDir }),
+		]);
+		deepStrictEqual(isolated, []);
+	});
+
 	it("lists receipt artifacts without loading and verifies plus pretty-prints JSON", async () => {
 		const stateDir = await scratchDir();
 		const envelope = await writeReceiptFixture(stateDir);
@@ -432,6 +538,189 @@ describe("contracts/view-artifacts", () => {
 		ok(loaded?.lines.join("\n").includes("Important prior context."));
 		ok(loaded?.lines.join("\n").includes("- tokens before: 1k"));
 		ok(loaded?.lines.join("\n").includes("- tokens after: 300"));
+	});
+
+	it("lists and loads task ledger snapshots as markdown artifacts", async () => {
+		const stateDir = await scratchDir();
+		const meta = sessionMeta();
+		const entries: SessionEntry[] = [
+			{
+				kind: "taskLedger",
+				turnId: "ledger-1",
+				parentTurnId: null,
+				timestamp: "2026-06-11T12:05:00.000Z",
+				goals: [{ id: "G1", title: "Ship proof catalog", status: "active" }],
+				subgoals: [
+					{ id: "T1", title: "Add evidence provider", status: "completed", parentGoalId: "G1" },
+					{ id: "T2", title: "Add audit provider", status: "active", parentGoalId: "G1" },
+				],
+				activeRunIds: ["run-view-1"],
+				requiredValidationEvidence: [
+					{
+						id: "V1",
+						description: "Focused /view contracts pass",
+						status: "pending",
+						command: "npm test -- tests/contracts/view-artifacts.test.ts",
+						artifactPath: "/tmp/view-artifacts.log",
+						observedAt: "2026-06-11T12:06:00.000Z",
+						notes: "waiting for implementation",
+					},
+				],
+			},
+		];
+		const provider = new TaskLedgerArtifactProvider({
+			stateDir,
+			sessionMeta: meta,
+			readSessionEntries: () => entries,
+		});
+
+		const artifacts = await provider.list();
+		strictEqual(artifacts.length, 1);
+		strictEqual(artifacts[0]?.id, "task-ledger:ledger-1");
+		strictEqual(artifacts[0]?.category, "task-ledger");
+		ok(artifacts[0]?.title.includes("Ship proof catalog"));
+		ok(artifacts[0]?.title.includes("1/3 done"));
+		ok(artifacts[0]?.path?.endsWith("current.jsonl"));
+
+		const loaded = await artifacts[0]?.load();
+		const text = loaded?.lines.join("\n") ?? "";
+		strictEqual(loaded?.format, "markdown");
+		ok(text.includes("## Board Goals"), text);
+		ok(text.includes("- [active] G1 Ship proof catalog"), text);
+		ok(text.includes("- run-view-1"), text);
+		ok(text.includes("npm test -- tests/contracts/view-artifacts.test.ts"), text);
+		ok(text.includes("- observed: 2026-06-11T12:06:00.000Z"), text);
+	});
+
+	it("lists and loads protected artifact session records", async () => {
+		const stateDir = await scratchDir();
+		const protectedPath = join(stateDir, "src", "locked.ts");
+		const entries: SessionEntry[] = [
+			{
+				kind: "protectedArtifact",
+				turnId: "protected-1",
+				parentTurnId: "turn-1",
+				timestamp: "2026-06-11T12:07:00.000Z",
+				action: "protect",
+				artifact: {
+					path: protectedPath,
+					protectedAt: "2026-06-11T12:06:30.000Z",
+					reason: "validation passed",
+					validationCommand: "npm test",
+					validationExitCode: 0,
+					source: "validation",
+				},
+				toolName: "write",
+				toolCallId: "tool-call-1",
+				runId: "run-view-1",
+				correlationId: "corr-1",
+			},
+		];
+		const provider = new ProtectedArtifactProvider({ stateDir, readSessionEntries: () => entries });
+
+		const artifacts = await provider.list();
+		strictEqual(artifacts.length, 1);
+		strictEqual(artifacts[0]?.id, "protected:protected-1");
+		strictEqual(artifacts[0]?.category, "protected-artifact");
+		ok(artifacts[0]?.title.includes("locked.ts"));
+		strictEqual(artifacts[0]?.path, protectedPath);
+
+		const loaded = await artifacts[0]?.load();
+		const text = loaded?.lines.join("\n") ?? "";
+		strictEqual(loaded?.format, "markdown");
+		ok(text.includes(`- path: ${protectedPath}`), text);
+		ok(text.includes("- source: validation"), text);
+		ok(text.includes("- validation command: npm test"), text);
+		ok(text.includes("- validation exit code: 0"), text);
+		ok(text.includes("- tool name: write"), text);
+		ok(text.includes("- run id: run-view-1"), text);
+		ok(text.includes("- correlation id: corr-1"), text);
+	});
+
+	it("lists and loads current-session safety audit rows while surfacing malformed lines", async () => {
+		const stateDir = await scratchDir();
+		const meta = sessionMeta();
+		await mkdir(join(stateDir, "audit"), { recursive: true });
+		await writeFile(
+			join(stateDir, "audit", "2026-06-11.jsonl"),
+			[
+				JSON.stringify({
+					kind: "tool_call",
+					ts: "2026-06-11T12:08:00.000Z",
+					correlationId: "other-corr",
+					tool: "read",
+					actionClass: "inspect",
+					decision: "allowed",
+					sessionId: "other-session",
+				}),
+				"{not json",
+				JSON.stringify({
+					kind: "tool_call",
+					ts: "2026-06-11T12:09:00.000Z",
+					correlationId: "audit-corr",
+					tool: "bash",
+					actionClass: "write",
+					decision: "blocked",
+					sessionId: meta.id,
+					runId: "run-view-1",
+				}),
+			].join("\n"),
+		);
+		const provider = new SafetyAuditArtifactProvider({ stateDir, sessionMeta: meta });
+
+		const artifacts = await provider.list();
+		const row = artifacts.find((artifact) => artifact.id === "audit:2026-06-11.jsonl:3");
+		ok(row, "matching current-session audit row is listed");
+		strictEqual(row.category, "audit");
+		ok(row.title.includes("tool_call"), row.title);
+		ok(row.title.includes("bash"), row.title);
+		ok(row.title.includes("write"), row.title);
+		ok(row.title.includes("run run-view-1"), row.title);
+		ok(!artifacts.some((artifact) => artifact.id === "audit:2026-06-11.jsonl:1"), "other session row is skipped");
+		ok(
+			artifacts.some((artifact) => artifact.id === "audit:read-errors"),
+			"malformed line is surfaced separately",
+		);
+
+		const loaded = await row.load();
+		const text = loaded.lines.join("\n");
+		strictEqual(loaded.format, "json");
+		ok(text.includes('"file": "2026-06-11.jsonl"'), text);
+		ok(text.includes('"line": 3'), text);
+		ok(text.includes('"tool": "bash"'), text);
+	});
+
+	it("lists and loads minimal evidence bundles from the data dir", async () => {
+		const stateDir = await scratchDir();
+		const dataDir = await scratchDir();
+		const evidenceId = await writeEvidenceFixture(dataDir);
+		const provider = new EvidenceArtifactProvider({ stateDir, dataDir });
+
+		const artifacts = await provider.list();
+		strictEqual(artifacts.length, 1);
+		strictEqual(artifacts[0]?.id, evidenceId);
+		strictEqual(artifacts[0]?.category, "evidence");
+		ok(artifacts[0]?.title.includes("Evidence · run run-view-1"));
+		ok(artifacts[0]?.path?.endsWith(join("evidence", evidenceId)));
+
+		const loaded = await artifacts[0]?.load();
+		const text = loaded?.lines.join("\n") ?? "";
+		strictEqual(loaded?.format, "markdown");
+		ok(text.includes("- evidence id: run-run-view-1-20260611T120000Z"), text);
+		ok(text.includes("- source: run run-view-1"), text);
+		ok(text.includes("- run ids: run-view-1"), text);
+		ok(text.includes("- statuses: completed"), text);
+		ok(text.includes("- targets: local"), text);
+		ok(text.includes("- models: model-a"), text);
+		ok(text.includes("- tool calls: 2"), text);
+		ok(text.includes("- tool errors: 1"), text);
+		ok(text.includes("- blocked tool calls: 1"), text);
+		ok(text.includes("- tokens: 1.5k"), text);
+		ok(text.includes("- cost: $0.01"), text);
+		ok(text.includes("- protected artifacts: 1"), text);
+		ok(text.includes("- wall time: 6.5s"), text);
+		ok(text.includes("- blocked-tool"), text);
+		ok(text.includes("- warn blocked-tool run run-view-1: 1 blocked tool call(s)"), text);
 	});
 
 	it("falls back invalid JSON artifacts to text rendering", async () => {

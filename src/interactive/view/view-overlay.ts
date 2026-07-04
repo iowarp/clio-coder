@@ -86,14 +86,22 @@ function categoryLabel(category: ViewArtifactCategory): string {
 	switch (category) {
 		case "accountability":
 			return "Accountability";
+		case "evidence":
+			return "Evidence bundles";
 		case "receipt":
 			return "Receipts";
 		case "dispatch":
 			return "Dispatch outputs";
+		case "task-ledger":
+			return "Task ledgers";
 		case "tool-output":
 			return "Tool outputs";
+		case "protected-artifact":
+			return "Protected artifacts";
 		case "compaction":
 			return "Compaction summaries";
+		case "audit":
+			return "Safety audit rows";
 	}
 }
 

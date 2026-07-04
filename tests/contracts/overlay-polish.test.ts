@@ -217,6 +217,8 @@ function observability(entries: CostEntry[]): ObservabilityContract {
 		resetSession: () => {},
 		recordTokens: () => {},
 		recordTokenThroughput: () => {},
+		snapshot: () => ({}) as never,
+		subscribe: () => () => {},
 	} as ObservabilityContract;
 }
 
