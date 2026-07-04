@@ -245,7 +245,11 @@ describe("contracts/approval identity", () => {
 					actionClass: request.actionClass,
 					requestedBy: "tool",
 				});
-				await registry.resumeParkedCalls({ actionClass: "execute", requestedBy: "tool:one_shot" });
+				await registry.resumeParkedCalls({
+					actionClass: "execute",
+					requestId: request.requestId,
+					requestedBy: "tool:one_shot",
+				});
 				strictEqual((await pending).kind, "ok");
 				return {};
 			},
@@ -261,32 +265,54 @@ describe("contracts/approval identity", () => {
 		strictEqual(requestedRow.requestId, requests[0]?.requestId);
 	});
 
-	it("interactive deny joins request and resolution by requestId", async () => {
+	it("interactive deny resolves only the shown request by requestId", async () => {
 		const { requests, resolutions } = await withApprovalHarness("auto-edit", async ({ registry, bus, requests }) => {
-			const pending = registry.invoke(bashCall("echo hello"));
+			const first = registry.invoke(bashCall("echo first"));
+			const second = registry.invoke(bashCall("echo second"));
 			await settle();
-			const request = requests[0];
-			ok(request?.requestId);
+			const firstRequest = requests[0];
+			const secondRequest = requests[1];
+			ok(firstRequest?.requestId);
+			ok(secondRequest?.requestId);
 			bus.emit(BusChannels.PermissionResolved, {
 				status: "denied",
-				requestId: request.requestId,
+				requestId: firstRequest.requestId,
 				origin: "main",
 				decidedBy: "operator",
-				tool: request.tool,
-				actionClass: request.actionClass,
+				tool: firstRequest.tool,
+				actionClass: firstRequest.actionClass,
 				reason: "operator cancelled",
 				requestedBy: "tool",
 			});
-			registry.cancelParkedCalls("operator cancelled");
-			strictEqual((await pending).kind, "blocked");
+			strictEqual(registry.cancelParkedCall(firstRequest.requestId, "operator cancelled"), true);
+			strictEqual((await first).kind, "blocked");
+			strictEqual(requests[2]?.requestId, secondRequest.requestId);
+			bus.emit(BusChannels.PermissionResolved, {
+				status: "granted",
+				requestId: secondRequest.requestId,
+				origin: "main",
+				decidedBy: "operator",
+				tool: secondRequest.tool,
+				actionClass: secondRequest.actionClass,
+				requestedBy: "tool",
+			});
+			await registry.resumeParkedCalls({
+				actionClass: "execute",
+				requestId: secondRequest.requestId,
+				requestedBy: "tool:one_shot",
+			});
+			strictEqual((await second).kind, "ok");
 			return {};
 		});
 
-		strictEqual(requests.length, 1);
-		strictEqual(resolutions.length, 1);
+		strictEqual(requests.length, 3);
+		strictEqual(resolutions.length, 2);
 		strictEqual(resolutions[0]?.status, "denied");
 		strictEqual(resolutions[0]?.decidedBy, "operator");
 		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
+		strictEqual(resolutions[1]?.status, "granted");
+		strictEqual(resolutions[1]?.decidedBy, "operator");
+		strictEqual(resolutions[1]?.requestId, requests[1]?.requestId);
 	});
 
 	it("headless fast-deny emits adjacent request and policy resolution with one id", async () => {

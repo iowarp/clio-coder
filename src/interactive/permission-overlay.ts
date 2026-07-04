@@ -57,13 +57,11 @@ export function createPermissionOverlayBody(view: ApprovalRequestView): Componen
 		`Asked by: ${truncate(askedBy(view), 68)}`,
 		truncate(oneLine(view.reason), 76),
 		"",
-		view.origin.kind === "worker"
-			? "Allowing resumes the parked call inside the worker."
-			: "Allowing resumes only this parked tool call.",
+		"Allow or deny applies to this call only.",
 		"Hard-blocked actions remain blocked.",
 	];
 	if (view.queueDepth !== undefined && view.queueDepth > 1) {
-		lines.splice(4, 0, `Queue: 1 of ${view.queueDepth} parked`);
+		lines.splice(4, 0, `1 of ${view.queueDepth} parked`);
 	}
 	return new PermissionOverlayBody(lines);
 }

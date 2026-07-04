@@ -214,6 +214,8 @@ export interface AskUserToolPolicy {
 export interface OneShotGrant {
 	/** Parked action class approved for this single admission pass. */
 	actionClass: ActionClass;
+	/** Parked approval request approved for this single admission pass. */
+	requestId?: string;
 	/** Free-form origin tag carried into audit (`tool`, `keybind:single`, ...). */
 	requestedBy: string;
 }
@@ -237,7 +239,7 @@ export interface ToolRegistry {
 	 * Admission point. Classifies, evaluates safety, and either runs or
 	 * returns a rejection. Never throws on safety rejections. When the
 	 * a safety ask or confirmable action is encountered, the returned promise
-	 * stays pending until `resumeParkedCalls` or `cancelParkedCalls` is called.
+	 * stays pending until a resume or cancel method resolves it.
 	 */
 	invoke(call: ClassifierCall, options?: ToolInvokeOptions): Promise<RegistryVerdict>;
 	/**
@@ -246,13 +248,20 @@ export interface ToolRegistry {
 	 * whenever an unrelated overlay closes with a parked call still pending.
 	 */
 	hasParkedCalls(): boolean;
+	/** Number of calls currently waiting for operator confirmation. */
+	parkedCount(): number;
 	/**
 	 * Re-run admission for every parked call. When `grant` is provided the
-	 * grant covers the oldest parked action class. Calls admitted on retry
+	 * grant covers one parked action class. Calls admitted on retry
 	 * execute and their original promise resolves with the result. Calls still
 	 * waiting for confirmation stay parked.
 	 */
 	resumeParkedCalls(grant?: OneShotGrant): Promise<void>;
+	/**
+	 * Resolve one parked call with a `blocked` verdict carrying `reason`.
+	 * Returns true when the request was found.
+	 */
+	cancelParkedCall(requestId: string, reason: string): boolean;
 	/**
 	 * Resolve every parked call with a `blocked` verdict carrying `reason`.
 	 * Used when the confirmation overlay is cancelled so the agent loop sees a
@@ -481,6 +490,22 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return firstBlockToolEffect(effects)?.reason ?? null;
 	};
 
+	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string): void => {
+		// A denied/cancelled park is still a model attempt: observe it so
+		// identical retries trip the loop detector. When the detector fires, its
+		// reason replaces the generic denial so the model gets recovery guidance.
+		const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
+		entry.resolve({ kind: "blocked", reason: loopReason ?? reason, decision: entry.decision });
+	};
+
+	const reparkEntry = (entry: ParkedCall, index?: number): void => {
+		if (index === undefined || index < 0 || index >= parked.length) {
+			parked.push(entry);
+			return;
+		}
+		parked.splice(index, 0, entry);
+	};
+
 	const nextApprovalRequestId = (): string => `apr-${++approvalRequestCounter}`;
 
 	const notifyPermissionRequired = (
@@ -536,17 +561,37 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			});
 		},
 		hasParkedCalls: () => parked.length > 0,
+		parkedCount: () => parked.length,
 		async resumeParkedCalls(grant?: OneShotGrant) {
 			if (parked.length === 0) return;
-			const pending = grant === undefined ? parked.splice(0, parked.length) : parked.splice(0, 1);
-			for (const entry of pending) {
-				// A one-shot grant covers only the oldest parked call. Calls that
-				// parked while the overlay was already open remain queued and need
-				// their own confirmation, so a late or concurrent privileged call
-				// cannot ride along on a grant the user approved for another call.
+			const pending: Array<{ entry: ParkedCall; reparkIndex?: number }> = [];
+			if (grant === undefined) {
+				pending.push(...parked.splice(0, parked.length).map((entry) => ({ entry })));
+			} else if (grant.requestId !== undefined) {
+				const index = parked.findIndex((entry) => entry.meta.requestId === grant.requestId);
+				if (index === -1) {
+					const next = parked[0];
+					if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
+					return;
+				}
+				const [entry] = parked.splice(index, 1);
+				if (entry) pending.push({ entry, reparkIndex: index });
+			} else {
+				const [entry] = parked.splice(0, 1);
+				if (entry) pending.push({ entry });
+			}
+			for (const { entry, reparkIndex } of pending) {
+				// A one-shot grant covers only the parked call it selected. Calls
+				// that parked while the overlay was already open remain queued and
+				// need their own confirmation, so a concurrent privileged call
+				// cannot ride along on a grant approved for another call.
+				if (grant !== undefined && entry.decision.classification.actionClass !== grant.actionClass) {
+					reparkEntry(entry, reparkIndex);
+					continue;
+				}
 				const outcome = admit(entry.call, grant, entry.options);
 				if (outcome.kind === "park") {
-					parked.push(entry);
+					reparkEntry(entry, reparkIndex);
 					continue;
 				}
 				if (outcome.kind === "terminal") {
@@ -559,16 +604,21 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const next = parked[0];
 			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 		},
+		cancelParkedCall(requestId, reason) {
+			const index = parked.findIndex((entry) => entry.meta.requestId === requestId);
+			if (index === -1) return false;
+			const [entry] = parked.splice(index, 1);
+			if (!entry) return false;
+			resolveParkedAsBlocked(entry, reason);
+			const next = parked[0];
+			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
+			return true;
+		},
 		cancelParkedCalls(reason) {
 			if (parked.length === 0) return;
 			const pending = parked.splice(0, parked.length);
 			for (const entry of pending) {
-				// A denied/cancelled park is still a model attempt: observe it so
-				// identical retries trip the loop detector. When the detector
-				// fires, its reason replaces the generic denial so the model gets
-				// recovery guidance rather than the same static message forever.
-				const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
-				entry.resolve({ kind: "blocked", reason: loopReason ?? reason, decision: entry.decision });
+				resolveParkedAsBlocked(entry, reason);
 			}
 		},
 		onPermissionRequired(listener) {
