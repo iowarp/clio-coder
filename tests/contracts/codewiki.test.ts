@@ -3,18 +3,21 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { runContextIndexCommand } from "../../src/cli/context-index.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	buildCodewiki,
-	buildCodewikiWithTreeSitter,
 	readCodewiki,
 	renderCodewikiDigest,
+	runContextRefresh,
 	structuralCodewikiHash,
 	updateCodewikiPaths,
 	writeCodewiki,
 } from "../../src/domains/context/index.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
 
-type BuiltCodewiki = ReturnType<typeof buildCodewiki>;
+type BuiltCodewiki = Awaited<ReturnType<typeof buildCodewiki>>;
 
 function hasSymbol(codewiki: BuiltCodewiki, path: string, name: string, kind?: string): boolean {
 	const file = codewiki.files.find((item) => item.path === path);
@@ -22,6 +25,31 @@ function hasSymbol(codewiki: BuiltCodewiki, path: string, name: string, kind?: s
 	return codewiki.symbols.some(
 		(symbol) => symbol.fileId === file.id && symbol.name === name && (!kind || symbol.kind === kind),
 	);
+}
+
+function hasInternalEdge(codewiki: BuiltCodewiki, fromPath: string, toPath: string): boolean {
+	const from = codewiki.files.find((item) => item.path === fromPath);
+	const to = codewiki.files.find((item) => item.path === toPath);
+	if (!from || !to) return false;
+	return codewiki.edges.some((edge) => edge.fileId === from.id && "toFileId" in edge && edge.toFileId === to.id);
+}
+
+function hasExternalEdge(codewiki: BuiltCodewiki, fromPath: string, externalModule: string): boolean {
+	const from = codewiki.files.find((item) => item.path === fromPath);
+	if (!from) return false;
+	return codewiki.edges.some(
+		(edge) => edge.fileId === from.id && "externalModule" in edge && edge.externalModule === externalModule,
+	);
+}
+
+async function captureStdout<T>(fn: () => Promise<T>): Promise<T> {
+	const originalWrite = process.stdout.write;
+	process.stdout.write = (() => true) as typeof process.stdout.write;
+	try {
+		return await fn();
+	} finally {
+		process.stdout.write = originalWrite;
+	}
 }
 
 describe("contracts/codewiki", () => {
@@ -35,7 +63,7 @@ describe("contracts/codewiki", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
-	it("writes v3 normalized files, symbols, and edges", () => {
+	it("writes v3 normalized files, symbols, and edges", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "index.ts"),
@@ -52,7 +80,11 @@ describe("contracts/codewiki", () => {
 		writeFileSync(join(scratch, "src", "math.test.ts"), "export const testValue = 1;\n", "utf8");
 		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = true;\n", "utf8");
 
-		const codewiki = buildCodewiki({ cwd: scratch, language: "typescript", generatedAt: "2026-05-01T00:00:00.000Z" });
+		const codewiki = await buildCodewiki({
+			cwd: scratch,
+			language: "typescript",
+			generatedAt: "2026-05-01T00:00:00.000Z",
+		});
 		writeCodewiki(scratch, codewiki);
 		const serialized = readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8");
 		strictEqual(serialized.includes("\n  "), false);
@@ -100,7 +132,7 @@ describe("contracts/codewiki", () => {
 			"utf8",
 		);
 
-		const codewiki = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "python" });
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "python" });
 		ok(codewiki.files.some((file) => file.path === "app.py"));
 		ok(codewiki.files.some((file) => file.path === "fixtures/sample.rb"));
 		ok(codewiki.symbols.some((symbol) => symbol.name === "ApiClient"));
@@ -145,14 +177,14 @@ describe("contracts/codewiki", () => {
 		ok(read.symbols.some((symbol) => symbol.name === "main"));
 	});
 
-	it("indexes non-empty source files across languages, including single-file repositories", () => {
+	it("indexes non-empty source files across languages, including single-file repositories", async () => {
 		writeFileSync(join(scratch, "rendergit.py"), "import sys\n\ndef render(path):\n    return path\n", "utf8");
 		mkdirSync(join(scratch, "cmd"), { recursive: true });
 		writeFileSync(join(scratch, "cmd", "serve.go"), "package main\n\nfunc main() {}\n", "utf8");
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "lib.rs"), "pub fn run() {}\n", "utf8");
 
-		const codewiki = buildCodewiki({ cwd: scratch, language: "polyglot" });
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "polyglot" });
 
 		deepStrictEqual(
 			codewiki.files
@@ -166,21 +198,16 @@ describe("contracts/codewiki", () => {
 		ok(codewiki.symbols.some((symbol) => symbol.name === "run" && symbol.kind === "func"));
 	});
 
-	it("uses web-tree-sitter WASM extraction before regex fallback", async () => {
+	it("uses web-tree-sitter extraction in the unified builder", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "stream.ts"), "export function* stream() {\n  yield 1;\n}\n", "utf8");
 
-		const fallback = buildCodewiki({ cwd: scratch, language: "typescript" });
-		const wasm = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "typescript" });
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
 
-		strictEqual(
-			fallback.symbols.some((symbol) => symbol.name === "stream"),
-			false,
-		);
-		ok(wasm.symbols.some((symbol) => symbol.name === "stream" && symbol.kind === "func"));
+		ok(codewiki.symbols.some((symbol) => symbol.name === "stream" && symbol.kind === "func"));
 	});
 
-	it("indexes TS declarations but skips local variables and control-flow junk in both extraction tiers", async () => {
+	it("indexes TS declarations but skips local variables and control-flow junk", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "declarations.ts"),
@@ -212,24 +239,21 @@ describe("contracts/codewiki", () => {
 			"utf8",
 		);
 
-		const regex = buildCodewiki({ cwd: scratch, language: "typescript" });
-		const wasm = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "typescript" });
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
 
-		for (const codewiki of [regex, wasm]) {
-			ok(hasSymbol(codewiki, "src/declarations.ts", "exportedValue", "const"));
-			ok(hasSymbol(codewiki, "src/declarations.ts", "topLevelValue", "const"));
-			ok(hasSymbol(codewiki, "src/declarations.ts", "topLevelCount", "var"));
-			ok(hasSymbol(codewiki, "src/declarations.ts", "compute", "func"));
-			ok(hasSymbol(codewiki, "src/declarations.ts", "Widget", "class"));
-			ok(hasSymbol(codewiki, "src/declarations.ts", "render", "method"));
-			ok(hasSymbol(codewiki, "src/declarations.ts", "build", "method"));
-			strictEqual(hasSymbol(codewiki, "src/declarations.ts", "localConst"), false);
-			strictEqual(hasSymbol(codewiki, "src/declarations.ts", "localLet"), false);
-			strictEqual(hasSymbol(codewiki, "src/declarations.ts", "if", "method"), false);
-		}
+		ok(hasSymbol(codewiki, "src/declarations.ts", "exportedValue", "const"));
+		ok(hasSymbol(codewiki, "src/declarations.ts", "topLevelValue", "const"));
+		ok(hasSymbol(codewiki, "src/declarations.ts", "topLevelCount", "var"));
+		ok(hasSymbol(codewiki, "src/declarations.ts", "compute", "func"));
+		ok(hasSymbol(codewiki, "src/declarations.ts", "Widget", "class"));
+		ok(hasSymbol(codewiki, "src/declarations.ts", "render", "method"));
+		ok(hasSymbol(codewiki, "src/declarations.ts", "build", "method"));
+		strictEqual(hasSymbol(codewiki, "src/declarations.ts", "localConst"), false);
+		strictEqual(hasSymbol(codewiki, "src/declarations.ts", "localLet"), false);
+		strictEqual(hasSymbol(codewiki, "src/declarations.ts", "if", "method"), false);
 	});
 
-	it("indexes Python module assignments and tree-sitter class attributes but skips function-local assignments", async () => {
+	it("indexes Python module and class assignments but skips function-local assignments", async () => {
 		writeFileSync(
 			join(scratch, "settings.py"),
 			[
@@ -251,25 +275,19 @@ describe("contracts/codewiki", () => {
 			"utf8",
 		);
 
-		const regex = buildCodewiki({ cwd: scratch, language: "python" });
-		ok(hasSymbol(regex, "settings.py", "MODULE_LIMIT", "const"));
-		ok(hasSymbol(regex, "settings.py", "module_value", "var"));
-		strictEqual(hasSymbol(regex, "settings.py", "local_value"), false);
-		strictEqual(hasSymbol(regex, "settings.py", "local_attr"), false);
-
-		const wasm = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "python" });
-		ok(hasSymbol(wasm, "settings.py", "MODULE_LIMIT", "const"));
-		ok(hasSymbol(wasm, "settings.py", "module_value", "var"));
-		ok(hasSymbol(wasm, "settings.py", "class_attr", "var"));
-		strictEqual(hasSymbol(wasm, "settings.py", "local_value"), false);
-		strictEqual(hasSymbol(wasm, "settings.py", "local_attr"), false);
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "python" });
+		ok(hasSymbol(codewiki, "settings.py", "MODULE_LIMIT", "const"));
+		ok(hasSymbol(codewiki, "settings.py", "module_value", "var"));
+		ok(hasSymbol(codewiki, "settings.py", "class_attr", "var"));
+		strictEqual(hasSymbol(codewiki, "settings.py", "local_value"), false);
+		strictEqual(hasSymbol(codewiki, "settings.py", "local_attr"), false);
 	});
 
-	it("records empty source package markers as files with zero symbols", () => {
+	it("records empty source package markers as files with zero symbols", async () => {
 		mkdirSync(join(scratch, "pkg"), { recursive: true });
 		writeFileSync(join(scratch, "pkg", "__init__.py"), "", "utf8");
 
-		const codewiki = buildCodewiki({ cwd: scratch, language: "python" });
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "python" });
 		const marker = codewiki.files.find((file) => file.path === "pkg/__init__.py");
 
 		ok(marker);
@@ -280,45 +298,45 @@ describe("contracts/codewiki", () => {
 		);
 	});
 
-	it("updates changed source paths incrementally", () => {
+	it("updates changed source paths incrementally", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "alpha.ts"), "export const alpha = 1;\n", "utf8");
-		const original = buildCodewiki({
+		const original = await buildCodewiki({
 			cwd: scratch,
 			language: "typescript",
 			generatedAt: "2026-05-01T00:00:00.000Z",
 		});
 		writeFileSync(join(scratch, "src", "beta.py"), "def beta():\n    return True\n", "utf8");
 
-		const added = updateCodewikiPaths(scratch, original, ["src/beta.py"]);
+		const added = await updateCodewikiPaths(scratch, original, ["src/beta.py"]);
 		ok(added !== original);
 		const betaFile = added.files.find((file) => file.path === "src/beta.py");
 		ok(betaFile);
 		ok(added.symbols.some((symbol) => symbol.fileId === betaFile.id && symbol.name === "beta"));
 
 		rmSync(join(scratch, "src", "alpha.ts"));
-		const removed = updateCodewikiPaths(scratch, added, ["src/alpha.ts"]);
+		const removed = await updateCodewikiPaths(scratch, added, ["src/alpha.ts"]);
 		strictEqual(
 			removed.files.some((file) => file.path === "src/alpha.ts"),
 			false,
 		);
 
-		const untouched = updateCodewikiPaths(scratch, removed, ["README.md"]);
+		const untouched = await updateCodewikiPaths(scratch, removed, ["README.md"]);
 		strictEqual(untouched, removed);
 	});
 
-	it("hashes structural output deterministically across runs", () => {
+	it("hashes structural output deterministically across runs", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "index.ts"), "export const value = 1;\n", "utf8");
 
-		const first = buildCodewiki({ cwd: scratch, language: "typescript", generatedAt: "2026-05-01T00:00:00.000Z" });
-		const second = buildCodewiki({ cwd: scratch, language: "typescript", generatedAt: "2027-01-01T00:00:00.000Z" });
+		const first = await buildCodewiki({ cwd: scratch, language: "typescript", generatedAt: "2026-05-01T00:00:00.000Z" });
+		const second = await buildCodewiki({ cwd: scratch, language: "typescript", generatedAt: "2027-01-01T00:00:00.000Z" });
 
 		strictEqual(structuralCodewikiHash(first), structuralCodewikiHash(second));
 		deepStrictEqual(first, second);
 	});
 
-	it("renders a compact deterministic digest with entries, symbols, areas, and deps", () => {
+	it("renders a compact deterministic digest with entries, symbols, areas, and deps", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "index.ts"),
@@ -331,7 +349,7 @@ describe("contracts/codewiki", () => {
 			"utf8",
 		);
 
-		const codewiki = buildCodewiki({ cwd: scratch, language: "typescript" });
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
 		const digest = renderCodewikiDigest(codewiki, 200);
 
 		ok(digest.includes("codewiki v3 language=typescript"));
@@ -342,7 +360,7 @@ describe("contracts/codewiki", () => {
 		strictEqual(digest, renderCodewikiDigest(codewiki, 200));
 	});
 
-	it("rebuilds missing or stale codewiki on tool demand", () => {
+	it("rebuilds missing or stale codewiki on tool demand", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		mkdirSync(join(scratch, ".clio"), { recursive: true });
 		writeFileSync(join(scratch, "src", "index.ts"), "export const rebuilt = true;\n", "utf8");
@@ -357,11 +375,183 @@ describe("contracts/codewiki", () => {
 			"utf8",
 		);
 
-		const loaded = loadCodewikiForTool(scratch);
+		const loaded = await loadCodewikiForTool(scratch);
 		if (!loaded.ok) throw new Error(loaded.message);
 		strictEqual(loaded.codewiki.version, 3);
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "rebuilt"));
 		ok(existsSync(join(scratch, ".clio", "codewiki.json")));
 		ok(existsSync(join(scratch, ".clio", "state.json")));
+	});
+
+	it("builds identical artifacts through refresh and context-index paths", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		mkdirSync(join(scratch, "pkg"), { recursive: true });
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "codewiki-path-equality" }), "utf8");
+		writeFileSync(
+			join(scratch, "src", "index.ts"),
+			"import { value } from './value.js';\nexport const main = value;\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "src", "value.ts"), "export const value = 1;\n", "utf8");
+		writeFileSync(
+			join(scratch, "pkg", "tool.py"),
+			"from .helper import helper\n\ndef run():\n    return helper()\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "pkg", "helper.py"), "def helper():\n    return 1\n", "utf8");
+		writeFileSync(join(scratch, "main.go"), 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println(1) }\n', "utf8");
+
+		await runContextRefresh({ cwd: scratch });
+		const refreshed = readCodewiki(scratch);
+		ok(refreshed);
+
+		const originalCwd = process.cwd();
+		process.chdir(scratch);
+		try {
+			const exitCode = await captureStdout(() => runContextIndexCommand(["--json"]));
+			strictEqual(exitCode, 0);
+		} finally {
+			process.chdir(originalCwd);
+		}
+		const indexed = readCodewiki(scratch);
+		ok(indexed);
+		deepStrictEqual(indexed, refreshed);
+	});
+
+	it("extracts imports across supported grammars", async () => {
+		mkdirSync(join(scratch, "ts"), { recursive: true });
+		writeFileSync(join(scratch, "ts", "main.ts"), "import { dep } from './dep.js';\nexport const main = dep;\n", "utf8");
+		writeFileSync(join(scratch, "ts", "dep.ts"), "export const dep = 1;\n", "utf8");
+
+		mkdirSync(join(scratch, "py"), { recursive: true });
+		writeFileSync(
+			join(scratch, "py", "main.py"),
+			"from .helper import helper\n\ndef run():\n    return helper()\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "py", "helper.py"), "def helper():\n    return 1\n", "utf8");
+
+		mkdirSync(join(scratch, "go"), { recursive: true });
+		writeFileSync(
+			join(scratch, "go", "main.go"),
+			'package main\n\nimport "./local"\n\nfunc main() { local.Run() }\n',
+			"utf8",
+		);
+		writeFileSync(join(scratch, "go", "local.go"), "package local\n\nfunc Run() {}\n", "utf8");
+
+		mkdirSync(join(scratch, "rust"), { recursive: true });
+		writeFileSync(
+			join(scratch, "rust", "lib.rs"),
+			"use crate::foo::{bar, baz};\nextern crate serde;\npub fn run() {}\n",
+			"utf8",
+		);
+
+		mkdirSync(join(scratch, "c"), { recursive: true });
+		writeFileSync(join(scratch, "c", "main.c"), "#include <stdio.h>\nint main() { return 0; }\n", "utf8");
+
+		mkdirSync(join(scratch, "java"), { recursive: true });
+		writeFileSync(join(scratch, "java", "App.java"), "import java.util.List;\nclass App { void run() {} }\n", "utf8");
+
+		mkdirSync(join(scratch, "rb"), { recursive: true });
+		writeFileSync(join(scratch, "rb", "app.rb"), "require_relative 'helper'\nclass App\nend\n", "utf8");
+		writeFileSync(join(scratch, "rb", "helper.rb"), "class Helper\nend\n", "utf8");
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "polyglot" });
+
+		ok(hasInternalEdge(codewiki, "ts/main.ts", "ts/dep.ts"));
+		ok(hasInternalEdge(codewiki, "py/main.py", "py/helper.py"));
+		ok(hasInternalEdge(codewiki, "go/main.go", "go/local.go"));
+		ok(hasExternalEdge(codewiki, "rust/lib.rs", "crate::foo::{bar, baz}"));
+		ok(hasExternalEdge(codewiki, "rust/lib.rs", "serde"));
+		ok(hasExternalEdge(codewiki, "c/main.c", "stdio.h"));
+		ok(hasExternalEdge(codewiki, "java/App.java", "java.util.List"));
+		ok(hasInternalEdge(codewiki, "rb/app.rb", "rb/helper.rb"));
+	});
+
+	it("indexes C# declarations and using directives without method locals", async () => {
+		writeFileSync(
+			join(scratch, "Widget.cs"),
+			[
+				"using System.Text;",
+				"",
+				"public interface IService {",
+				"    void Run();",
+				"}",
+				"",
+				"public class Widget {",
+				"    public string Name { get; set; }",
+				"    public static readonly int Max = 3;",
+				"",
+				"    public Widget() {}",
+				"",
+				"    public void Run() {",
+				"        var localValue = 1;",
+				"    }",
+				"}",
+				"",
+				"public record Thing(int Id);",
+				"public struct Bag {}",
+				"public enum Color { Red }",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "polyglot" });
+
+		ok(hasSymbol(codewiki, "Widget.cs", "IService", "iface"));
+		ok(hasSymbol(codewiki, "Widget.cs", "Widget", "class"));
+		ok(hasSymbol(codewiki, "Widget.cs", "Name", "var"));
+		ok(hasSymbol(codewiki, "Widget.cs", "Max", "const"));
+		ok(hasSymbol(codewiki, "Widget.cs", "Run", "method"));
+		ok(hasSymbol(codewiki, "Widget.cs", "Thing", "type"));
+		ok(hasSymbol(codewiki, "Widget.cs", "Bag", "type"));
+		ok(hasSymbol(codewiki, "Widget.cs", "Color", "type"));
+		ok(hasExternalEdge(codewiki, "Widget.cs", "System.Text"));
+		strictEqual(hasSymbol(codewiki, "Widget.cs", "localValue"), false);
+	});
+
+	it("skips Go function-local var and const specs while keeping package declarations", async () => {
+		writeFileSync(
+			join(scratch, "main.go"),
+			[
+				"package main",
+				"",
+				"const PackageConst = 1",
+				"var PackageVar = 2",
+				"",
+				"func main() {",
+				"    const localConst = 3",
+				"    var localVar = 4",
+				"}",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "go" });
+
+		ok(hasSymbol(codewiki, "main.go", "PackageConst", "const"));
+		ok(hasSymbol(codewiki, "main.go", "PackageVar", "var"));
+		strictEqual(hasSymbol(codewiki, "main.go", "localConst"), false);
+		strictEqual(hasSymbol(codewiki, "main.go", "localVar"), false);
+	});
+
+	it("awaits the final codewiki write during context extension stop", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const stopWritten = true;\n", "utf8");
+		const originalCwd = process.cwd();
+		process.chdir(scratch);
+		try {
+			const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+			await bundle.extension.start();
+			await bundle.extension.stop?.();
+		} finally {
+			process.chdir(originalCwd);
+		}
+
+		const codewiki = readCodewiki(scratch);
+		ok(codewiki);
+		ok(hasSymbol(codewiki, "src/index.ts", "stopWritten", "const"));
 	});
 });

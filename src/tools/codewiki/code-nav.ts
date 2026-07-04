@@ -349,7 +349,7 @@ export const codeNavTool: ToolSpec = {
 	executionMode: "parallel",
 	async run(args, options): Promise<ToolResult> {
 		const mode = typeof args.mode === "string" ? args.mode : "";
-		const loaded = loadCodewikiForTool();
+		const loaded = await loadCodewikiForTool();
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const index = buildNavIndex(loaded.codewiki);
 		const query = typeof args.query === "string" ? args.query.trim() : "";

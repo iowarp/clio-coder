@@ -30,7 +30,7 @@ describe("contracts/code_nav", () => {
 	let scratch: string;
 	let originalCwd: string;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		originalCwd = process.cwd();
 		scratch = mkdtempSync(join(tmpdir(), "clio-code-nav-"));
 		mkdirSync(join(scratch, "src"), { recursive: true });
@@ -42,7 +42,7 @@ describe("contracts/code_nav", () => {
 		);
 		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = 1;\n", "utf8");
 		writeFileSync(join(scratch, "pkg", "util.py"), "import os\n\ndef helper():\n    return os.getcwd()\n", "utf8");
-		writeCodewiki(scratch, buildCodewiki({ cwd: scratch, language: "polyglot" }));
+		writeCodewiki(scratch, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
 		process.chdir(scratch);
 	});
 

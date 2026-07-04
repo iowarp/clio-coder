@@ -77,6 +77,13 @@ export interface LanguageExtractor {
 	extract(path: string, text: string): LanguageExtraction;
 }
 
+let treeSitterExtractorPromise: Promise<LanguageExtractor> | null = null;
+
+function loadTreeSitterExtractor(): Promise<LanguageExtractor> {
+	treeSitterExtractorPromise ??= createTreeSitterExtractor();
+	return treeSitterExtractorPromise;
+}
+
 const EXCLUDED_DIRS = new Set([
 	".git",
 	".clio",
@@ -536,7 +543,39 @@ interface BuiltFile {
 	exports: string[];
 }
 
-function buildFile(cwd: string, relPath: string, extractors: ReadonlyArray<LanguageExtractor>): BuiltFile | null {
+function mergeTreeSitterWithRegexImports(
+	language: CodewikiLanguage,
+	relPath: string,
+	text: string,
+	extracted: LanguageExtraction,
+): LanguageExtraction {
+	const regex = extractWithExtractors(fallbackExtractors, language, relPath, text);
+	return {
+		symbols: extracted.symbols.sort(compareSymbols),
+		imports: uniqueSorted([...extracted.imports, ...regex.imports]),
+		exports: uniqueSorted(extracted.exports),
+	};
+}
+
+function fallbackExtraction(language: CodewikiLanguage, relPath: string, text: string): LanguageExtraction {
+	return extractWithExtractors(fallbackExtractors, language, relPath, text);
+}
+
+function extractSourceFile(
+	language: CodewikiLanguage,
+	relPath: string,
+	text: string,
+	treeSitterExtractor: LanguageExtractor,
+): LanguageExtraction {
+	if (!treeSitterExtractor.langs.includes(language)) return fallbackExtraction(language, relPath, text);
+	try {
+		return mergeTreeSitterWithRegexImports(language, relPath, text, treeSitterExtractor.extract(relPath, text));
+	} catch {
+		return fallbackExtraction(language, relPath, text);
+	}
+}
+
+function buildFile(cwd: string, relPath: string, treeSitterExtractor: LanguageExtractor): BuiltFile | null {
 	const language = languageForPath(relPath);
 	if (!language) return null;
 	let text: string;
@@ -554,7 +593,7 @@ function buildFile(cwd: string, relPath: string, extractors: ReadonlyArray<Langu
 	};
 	const isSource = language !== "config";
 	if (!isSource || text.trim().length === 0) return { file, symbols: [], imports: [], exports: [] };
-	const extracted = extractWithExtractors(extractors, language, relPath, text);
+	const extracted = extractSourceFile(language, relPath, text, treeSitterExtractor);
 	const symbols = extracted.symbols.map((symbol) => ({
 		name: symbol.name,
 		kind: symbol.kind,
@@ -658,15 +697,11 @@ function promoteSingleSourceEntry(files: CodewikiFile[]): CodewikiFile[] {
 	return files.map((file) => (file.id === only.id ? { ...file, role: "entry" } : file));
 }
 
-function buildFromPaths(
-	cwd: string,
-	language: ProjectType,
-	relPaths: ReadonlyArray<string>,
-	extractors: ReadonlyArray<LanguageExtractor>,
-): Codewiki {
+async function buildFromPaths(cwd: string, language: ProjectType, relPaths: ReadonlyArray<string>): Promise<Codewiki> {
+	const treeSitterExtractor = await loadTreeSitterExtractor();
 	const builtFiles: BuiltFile[] = [];
 	for (const relPath of [...relPaths].sort(compareStrings)) {
-		const built = buildFile(cwd, relPath, extractors);
+		const built = buildFile(cwd, relPath, treeSitterExtractor);
 		if (built) builtFiles.push(built);
 	}
 	const files = promoteSingleSourceEntry(builtFiles.map((item) => item.file).sort(compareFiles));
@@ -684,17 +719,10 @@ function buildFromPaths(
 	};
 }
 
-export function buildCodewiki(input: BuildCodewikiInput): Codewiki {
+export async function buildCodewiki(input: BuildCodewikiInput): Promise<Codewiki> {
 	const files: string[] = [];
 	walkFiles(input.cwd, input.cwd, files);
-	return buildFromPaths(input.cwd, input.language, files, fallbackExtractors);
-}
-
-export async function buildCodewikiWithTreeSitter(input: BuildCodewikiInput): Promise<Codewiki> {
-	const files: string[] = [];
-	walkFiles(input.cwd, input.cwd, files);
-	const treeSitterExtractor = await createTreeSitterExtractor();
-	return buildFromPaths(input.cwd, input.language, files, [treeSitterExtractor, ...fallbackExtractors]);
+	return buildFromPaths(input.cwd, input.language, files);
 }
 
 /**
@@ -702,7 +730,11 @@ export async function buildCodewikiWithTreeSitter(input: BuildCodewikiInput): Pr
  * records and symbols are replaced in-place, and edges are rebuilt from the
  * current source tree so imports stay normalized after adds/removes.
  */
-export function updateCodewikiPaths(cwd: string, codewiki: Codewiki, paths: ReadonlyArray<string>): Codewiki {
+export async function updateCodewikiPaths(
+	cwd: string,
+	codewiki: Codewiki,
+	paths: ReadonlyArray<string>,
+): Promise<Codewiki> {
 	const normalizedPaths = paths.map(normalizeInputPath).filter((path) => path.length > 0 && !path.startsWith(".."));
 	if (normalizedPaths.length === 0) return codewiki;
 	const existingPaths = new Set(codewiki.files.map((file) => file.path));
@@ -724,7 +756,7 @@ export function updateCodewikiPaths(cwd: string, codewiki: Codewiki, paths: Read
 			// deleted file: already removed from the set
 		}
 	}
-	return buildFromPaths(cwd, codewiki.language, [...allPaths], fallbackExtractors);
+	return buildFromPaths(cwd, codewiki.language, [...allPaths]);
 }
 
 export function codewikiPath(cwd: string): string {

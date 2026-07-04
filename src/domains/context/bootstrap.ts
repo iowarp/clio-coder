@@ -11,7 +11,7 @@ import {
 	scanAgentConfigs,
 } from "./adoption.js";
 import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
-import { buildCodewikiWithTreeSitter, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
+import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
@@ -840,7 +840,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	// Index the repository before generation so the generator can ground CLIO.md
 	// in the real structure (entry points, key modules), not just sibling prose.
 	progress(input, { phase: "codewiki", status: "started", message: "building codewiki index" });
-	const codewiki = await buildCodewikiWithTreeSitter({ cwd, language: projectType, generatedAt: indexedAt });
+	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
 	const codewikiEntryCount = indexedSourceFileCount(codewiki);
 	progress(input, {
 		phase: "codewiki",

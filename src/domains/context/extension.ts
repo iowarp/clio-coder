@@ -45,7 +45,7 @@ function persistState(
  * pulls, and out-of-session edits) and again at stop. Skips projects that were
  * never indexed so we never index an arbitrary directory unprompted.
  */
-function ensureCodewikiFresh(cwd: string): void {
+async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	// The bootstrap model-generation child runs a headless session purely to draft
 	// CLIO.md; it must not re-index while the parent context-init owns the rebuild.
 	if (process.env.CLIO_BOOTSTRAP_GENERATE_CHILD === "1") return;
@@ -57,7 +57,7 @@ function ensureCodewikiFresh(cwd: string): void {
 	if (!stale) return;
 	const indexedAt = new Date().toISOString();
 	const projectType = state?.projectType ?? detectProjectType(cwd);
-	writeCodewiki(cwd, buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
+	writeCodewiki(cwd, await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
 	persistState(cwd, fingerprint, indexedAt, state);
 }
 
@@ -135,32 +135,30 @@ export function createContextBundle(
 	const contextState = createContextStateReader();
 	const onStart = (): void => {
 		lastCwd = process.cwd();
-		try {
-			ensureCodewikiFresh(lastCwd);
-		} catch {
+		void ensureCodewikiFresh(lastCwd).catch(() => {
 			// Indexing is best-effort; a failed refresh must not block session start.
-		}
+		});
 		startupHints = collectStartupHints(lastCwd, options);
 		if (process.env.CLIO_INTERACTIVE === "1") return;
 		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
 	};
 
 	const noteFileChanges = (paths: ReadonlyArray<string>, cwd: string = lastCwd): void => {
-		try {
+		void (async () => {
 			if (paths.length === 0) return;
 			const codewiki = readCodewiki(cwd);
 			if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
 			const rel = paths
 				.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
 				.filter((p) => p.length > 0 && !p.startsWith(".."));
-			const updated = updateCodewikiPaths(cwd, codewiki, rel);
+			const updated = await updateCodewikiPaths(cwd, codewiki, rel);
 			if (updated === codewiki) return; // No indexable file actually changed.
 			writeCodewiki(cwd, updated);
 			persistState(cwd, computeFingerprint(cwd), new Date().toISOString(), readClioState(cwd));
 			contextState.invalidate(cwd);
-		} catch {
+		})().catch(() => {
 			// Best-effort: never let incremental indexing surface as a tool error.
-		}
+		});
 	};
 
 	let unsubscribeSessionStart: (() => void) | null = null;
@@ -168,7 +166,7 @@ export function createContextBundle(
 		start() {
 			unsubscribeSessionStart = _context.bus.on(BusChannels.SessionStart, onStart);
 		},
-		stop() {
+		async stop() {
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
 			const projectType = detectProjectType(lastCwd);
@@ -177,7 +175,7 @@ export function createContextBundle(
 			let lastIndexedAt = state?.lastIndexedAt;
 			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !readCodewiki(lastCwd)) {
 				lastIndexedAt = new Date().toISOString();
-				writeCodewiki(lastCwd, buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }));
+				writeCodewiki(lastCwd, await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }));
 			}
 			writeClioState(lastCwd, {
 				version: 1,
