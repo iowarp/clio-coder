@@ -2,6 +2,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
+import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/task-board.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
 import { agentDisplayLabel, type DispatchBoardRow, dispatchStatusPresentation } from "../dispatch-board.js";
@@ -80,6 +81,8 @@ export interface AgentWorkFacts {
 	} | null;
 	/** Metrics for the most recent completed turn, surfaced when the agent is idle. */
 	lastTurn: TurnSummary | null;
+	/** Session task board declared through the tasks tool; null before any plan. */
+	taskBoard?: TaskBoardSnapshot | null;
 }
 
 /** Responsive bands for the expanded footer. */
@@ -689,6 +692,21 @@ function fleetValue(dispatchSummary: string | null, dispatchRows: ReadonlyArray<
 	return dispatchRows.length > 0 ? `${dispatchRows.length} runs` : "none";
 }
 
+/** Task-board progress chips: `2/5 done`, with a warning chip when tasks are blocked. */
+function taskBoardValue(theme: ClioTheme, board: TaskBoardSnapshot): string {
+	const counts = taskBoardCounts(board);
+	const progress = theme.fg(counts.open > 0 ? "muted" : "success", `${counts.completed}/${counts.total} done`);
+	const blocked = counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null;
+	return joinChips(theme, [progress, blocked]);
+}
+
+/** The board's current focus: the single active task, glyph-led like a worker row. */
+function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): string | null {
+	const active = board.tasks.find((task) => task.status === "active");
+	if (!active) return null;
+	return `${theme.fg("accent", GLYPH.running)} ${theme.fg("dim", active.id)} ${theme.fg("muted", active.title)}`;
+}
+
 export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
 	const maxWorkers = Math.max(0, options.maxWorkers ?? 3);
@@ -744,6 +762,10 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 		kv("fleet", fleetValue(facts.dispatchSummary, facts.dispatchRows), facts.dispatchSummary ? "action" : "dim"),
 	);
 	for (const row of facts.dispatchRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row)));
+	if (facts.taskBoard && facts.taskBoard.tasks.length > 0) {
+		rows.push(styledKv("tasks", taskBoardValue(theme, facts.taskBoard)));
+		rows.push(statusRow(activeTaskLine(theme, facts.taskBoard)));
+	}
 	rows.push(kv("tools", facts.toolTally));
 	return dashboardBlock(theme, "Activity", rows);
 }

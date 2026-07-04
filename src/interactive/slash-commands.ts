@@ -51,6 +51,7 @@ type SlashCommandVariant =
 	| { kind: "cost" }
 	| { kind: "context-view" }
 	| { kind: "fleet" }
+	| { kind: "tasks" }
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
 	| { kind: "view-usage" }
@@ -242,6 +243,8 @@ export interface SlashCommandContext {
 	openContextView: () => void;
 	/** Open the read-only `/fleet` overlay: running, retrying, and totals. */
 	openFleet: () => void;
+	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
+	openTasks: () => void;
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
 	openThinking: () => void;
@@ -716,6 +719,16 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUnknown({ kind: "fleet" }),
 		handle(_command, ctx) {
 			ctx.openFleet();
+		},
+	},
+	{
+		name: "tasks",
+		description: "Show the session task board the agent tracks with the tasks tool",
+		kinds: ["tasks"],
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "tasks" }),
+		handle(_command, ctx) {
+			ctx.openTasks();
 		},
 	},
 	{

@@ -184,6 +184,7 @@ const PRIMARY_ARG_FIELD: Record<string, string> = {
 	artifact: "kind",
 	monitor: "run_id",
 	steer: "run_id",
+	tasks: "action",
 };
 
 /**
@@ -310,6 +311,17 @@ function outcomeSummary(finished: ToolExecutionFinished): string | null {
 		if (receipts !== null) return `${receipts} task${receipts === 1 ? "" : "s"} -> ${receipts - failed} ok`;
 		return null;
 	}
+	if (finished.toolName === "tasks") {
+		const rawCounts = details?.counts;
+		const counts = isPlainObject(rawCounts) ? rawCounts : null;
+		const completed = numberField(counts, "completed");
+		const total = numberField(counts, "total");
+		if (completed !== null && total !== null) {
+			const blocked = numberField(counts, "blocked") ?? 0;
+			return `${completed}/${total} done${blocked > 0 ? ` · ${blocked} blocked` : ""}`;
+		}
+		return null;
+	}
 	return null;
 }
 
@@ -420,6 +432,16 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	artifact: (args) => buildFieldSublineBody(args, "kind", "writing "),
 	monitor: (args) => buildFieldSublineBody(args, "run_id", "monitoring "),
 	steer: (args) => buildFieldSublineBody(args, "run_id", "steering "),
+	tasks: (args) => {
+		const action = readStringField(args, "action");
+		if (action === null) return null;
+		if (action === "plan") {
+			const title = readStringField(args, "title");
+			return title === null ? "tasks plan" : `tasks plan ${truncate(`"${title}"`, ARG_PREVIEW_LIMIT)}`;
+		}
+		const id = readStringField(args, "id");
+		return id === null ? `tasks ${action}` : `tasks ${action} ${id}`;
+	},
 	dispatch: (args) => {
 		if (!isPlainObject(args) || !Array.isArray(args.tasks)) return null;
 		const count = args.tasks.length;

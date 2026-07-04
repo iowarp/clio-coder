@@ -812,7 +812,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stalledTurnNudgeSpent = true;
 		pendingRequestContinuation = true;
 		bufferReminder(message, "info");
-		emitFooterNotice("info", "model announced work without calling tools; nudge sent", "nudge.stalled-turn.sent");
+		// Producer-neutral wording: stalled-turn, the high-rigor finish contract,
+		// and the open-tasks nudge all arrive here, and the buffered reminder
+		// already carries each producer's specific message into the transcript.
+		emitFooterNotice("info", "turn ended with open work; nudge sent", "nudge.stalled-turn.sent");
 	};
 
 	const lastAssistantMessage = (messages: ReadonlyArray<AgentMessage>): AgentMessage | null => {

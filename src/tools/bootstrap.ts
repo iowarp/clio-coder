@@ -3,6 +3,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
+import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
@@ -22,6 +23,7 @@ import { readMaxBytes, readTool } from "./read.js";
 import type { ToolMetadata, ToolRegistry, ToolSourceInfo, ToolSpec } from "./registry.js";
 import { gitTool } from "./safe-exec.js";
 import { createSteerTool } from "./steer.js";
+import { createTasksTool } from "./tasks.js";
 import { verifyTool } from "./verify/index.js";
 import { webFetchTool } from "./web-fetch.js";
 import { writeTool } from "./write.js";
@@ -31,6 +33,12 @@ export interface ToolBootstrapDeps {
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
 	askUser?: AskUserHandler;
+	/**
+	 * Shared task-board store so the tool, the turn-end nudge, and the TUI all
+	 * read one board. Absent (workers, headless without a session) the tool
+	 * gets a private in-memory board without ledger persistence.
+	 */
+	taskBoard?: TaskBoardStore;
 	/** Agent fleet catalog renderer for the dispatch tool's list action. */
 	getAgentCatalog?: () => string;
 	getSkillLoaderOptions?: () => Pick<
@@ -182,6 +190,23 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_slow",
 	},
 	// ORCHESTRATE: agent-class, receipts as evidence.
+	[ToolNames.Tasks]: {
+		objective: "Declare and track the session task board with evidence-carrying completions.",
+		uiLabel: "Tasks",
+		// A repeated plan/start/done lands on the same board state; a repeated
+		// add duplicates a task, so the surface as a whole is not retry safe.
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 8_192,
+			followUpHint: 'Call tasks with action="list" to re-read the board.',
+		},
+		costLatency: "local_fast",
+		promptHint:
+			'Before multi-step work, declare a task board: tasks action="plan" with a title and the task list. ' +
+			'Mark one task active with "start" before working it, close it with "done" plus an evidence note ' +
+			'(what proves it works), and use "block" with a reason instead of silently stalling.',
+	},
 	[ToolNames.Dispatch]: {
 		objective: "Dispatch bounded tasks to configured Clio workers.",
 		uiLabel: "Dispatch",
@@ -333,6 +358,12 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	});
 	registry.register({
 		...builtin(createArtifactTool({ getCwd: skillToolDeps.getCwd }), { path: "src/tools/artifact.ts", scope: "core" }),
+	});
+	registry.register({
+		...builtin(createTasksTool({ board: deps.taskBoard ?? createTaskBoardStore() }), {
+			path: "src/tools/tasks.ts",
+			scope: "core",
+		}),
 	});
 	if (deps.dispatch) {
 		const dispatchToolDeps = {

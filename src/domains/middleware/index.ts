@@ -82,6 +82,12 @@ export {
 	skillsReminderMessage,
 } from "./skills-reminder.js";
 export { createMiddlewareContractFromSnapshot, createMiddlewareSnapshot } from "./snapshot.js";
+export {
+	buildOpenTasksMessage,
+	type CreateTaskNudgeRegistrationOptions,
+	createTaskNudgeRegistration,
+	TASK_NUDGE_REGISTRATION_ID,
+} from "./task-nudge.js";
 export type {
 	MiddlewareAnnotationSeverity,
 	MiddlewareEffect,
