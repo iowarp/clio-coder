@@ -8,6 +8,7 @@ import {
 } from "../../domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /**
@@ -49,10 +50,11 @@ function diagnosticTouchesSkill(diagnosticPath: string | undefined, skill: Skill
 /** @internal exported for contract tests */
 export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[] {
 	return list.items.map((skill) => {
+		const theme = clioTheme();
 		const flagged = list.diagnostics.some((diag) => diagnosticTouchesSkill(diag.path, skill));
 		const metaParts = [`${skill.scope}/${skill.source}`];
 		if (!skill.trusted) metaParts.push("untrusted");
-		if (flagged) metaParts.push("!");
+		if (flagged) metaParts.push(theme.fg("warning", GLYPH.warnInline));
 		return {
 			id: skill.name,
 			label: skill.name,
@@ -81,18 +83,22 @@ export function buildInstalledItems(list: ResourceList<Skill>): ListOverlayItem[
 
 /** @internal exported for contract tests */
 export function buildDiagnosticItems(list: ResourceList<Skill>): ListOverlayItem[] {
-	return list.diagnostics.map((diag, index) => ({
-		id: `diagnostic-${index}`,
-		label: `${diag.type}: ${diag.message}`,
-		...(diag.path ? { meta: diag.path } : {}),
-		group: GROUP_DIAGNOSTICS,
-		detail: () => [
-			"# Skill diagnostic",
-			`**Severity:** ${diag.type}`,
-			`**Message:** ${diag.message}`,
-			`**File:** ${diag.path ?? "(unknown)"}`,
-		],
-	}));
+	const theme = clioTheme();
+	return list.diagnostics.map((diag, index) => {
+		const marker = diag.type === "error" ? theme.fg("error", GLYPH.error) : theme.fg("warning", GLYPH.warnInline);
+		return {
+			id: `diagnostic-${index}`,
+			label: `${marker} ${diag.message}`,
+			...(diag.path ? { meta: diag.path } : {}),
+			group: GROUP_DIAGNOSTICS,
+			detail: () => [
+				"# Skill diagnostic",
+				`**Severity:** ${diag.type}`,
+				`**Message:** ${diag.message}`,
+				`**File:** ${diag.path ?? "(unknown)"}`,
+			],
+		};
+	});
 }
 
 export function openSkillsHub(tui: TUI, deps: SkillsHubDeps): OverlayHandle {

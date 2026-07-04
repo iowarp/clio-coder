@@ -2,6 +2,10 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ResourceList, Skill } from "../../src/domains/resources/index.js";
 import { buildDiagnosticItems, buildInstalledItems } from "../../src/interactive/overlays/skills-hub.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+
+const ESC = String.fromCharCode(27);
+const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 
 function makeSkill(overrides: Partial<Skill> & { name: string }): Skill {
 	const base = {
@@ -47,7 +51,8 @@ describe("contracts/skills-hub", () => {
 		const items = buildInstalledItems(
 			makeList([skill], [{ type: "warning", message: "bad frontmatter", path: skill.filePath }]),
 		);
-		strictEqual(items[0]?.meta, "project/clio · untrusted · !");
+		strictEqual(stripAnsi(items[0]?.meta ?? ""), `project/clio · untrusted · ${GLYPH.warnInline}`);
+		ok(items[0]?.meta?.includes(clioTheme().fgSequence("warning")), "diagnostic mark uses the warning token");
 	});
 
 	it("detail pane includes invocation, source path, diagnostics, and body", () => {
@@ -70,6 +75,8 @@ describe("contracts/skills-hub", () => {
 		strictEqual(items.length, 1);
 		strictEqual(items[0]?.group, "Diagnostics");
 		strictEqual(items[0]?.meta, "/repo/broken/SKILL.md");
+		strictEqual(stripAnsi(items[0]?.label ?? ""), `${GLYPH.error} unreadable SKILL.md`);
+		ok(items[0]?.label.includes(clioTheme().fgSequence("error")), "error diagnostics use the error token");
 		ok((items[0]?.detail?.() ?? []).join("\n").includes("unreadable SKILL.md"));
 	});
 });
