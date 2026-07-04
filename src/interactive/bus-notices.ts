@@ -5,7 +5,12 @@
  * Returning null means "ignore the event".
  */
 
-import type { BudgetAlertPayload, MiddlewareHookFailedPayload, SafetyBlockedPayload } from "../core/bus-events.js";
+import type {
+	BudgetAlertPayload,
+	MiddlewareHookFailedPayload,
+	PermissionRequestedPayload,
+	SafetyBlockedPayload,
+} from "../core/bus-events.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { askAxis } from "./permission-overlay.js";
 
@@ -78,6 +83,46 @@ function isMiddlewareHookFailedPayload(value: unknown): value is MiddlewareHookF
 	if (p.overCount !== undefined && typeof p.overCount !== "number") return false;
 	if (p.windowSamples !== undefined && typeof p.windowSamples !== "number") return false;
 	return true;
+}
+
+function isWorkerEscalationPayload(value: unknown): value is PermissionRequestedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (typeof p.requestId !== "string" || p.requestId.length === 0) return false;
+	if (typeof p.tool !== "string" || p.tool.length === 0) return false;
+	if (typeof p.actionClass !== "string" || p.actionClass.length === 0) return false;
+	if (p.origin !== undefined) {
+		if (typeof p.origin !== "string" || !p.origin.startsWith("worker:")) return false;
+	} else if (typeof p.requestedBy !== "string" || p.requestedBy.length === 0) {
+		return false;
+	}
+	if (p.agentId !== undefined && typeof p.agentId !== "string") return false;
+	if (p.axis !== undefined && typeof p.axis !== "string") return false;
+	if (p.ruleId !== undefined && typeof p.ruleId !== "string") return false;
+	if (p.reasonCode !== undefined && typeof p.reasonCode !== "string") return false;
+	return true;
+}
+
+function workerRunId(payload: PermissionRequestedPayload): string {
+	if (payload.origin?.startsWith("worker:")) return payload.origin.slice("worker:".length);
+	return payload.requestedBy ?? "worker";
+}
+
+function workerEscalationAxis(
+	payload: PermissionRequestedPayload,
+): { kind: "net"; ruleId: string } | { kind: "autonomy"; level: string } | null {
+	if (payload.axis?.startsWith("net:")) {
+		const ruleId = payload.axis.slice("net:".length);
+		return ruleId.length > 0 ? { kind: "net", ruleId } : null;
+	}
+	if (payload.axis?.startsWith("autonomy:")) {
+		const level = payload.axis.slice("autonomy:".length);
+		return level.length > 0 ? { kind: "autonomy", level } : null;
+	}
+	if (payload.ruleId !== undefined && payload.ruleId.length > 0) {
+		return { kind: "net", ruleId: payload.ruleId };
+	}
+	return null;
 }
 
 export function middlewareBudgetWarningKey(payload: unknown): string | null {
@@ -165,6 +210,24 @@ export function approvalParkedNotice(tool: string, decision: SafetyDecision, aut
 	return {
 		level: "warn",
 		text: `[approval] ${tool} parked (${actionClass}): asks at autonomy ${autonomy}.${widen}`,
+	};
+}
+
+export function workerEscalationNotice(payload: unknown): BusNotice | null {
+	if (!isWorkerEscalationPayload(payload)) return null;
+	const axis = workerEscalationAxis(payload);
+	if (axis === null) return null;
+	const agentId = payload.agentId ?? "worker";
+	const runId = workerRunId(payload);
+	if (axis.kind === "net") {
+		return {
+			level: "warn",
+			text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to cancel.`,
+		};
+	}
+	return {
+		level: "warn",
+		text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): asks at autonomy ${axis.level}. Approve once, or Esc to cancel.`,
 	};
 }
 

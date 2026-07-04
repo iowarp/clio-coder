@@ -2446,11 +2446,13 @@ rl.once("line", () => {
 							requestId: "perm-run-1",
 							tool: "bash",
 							summary: "bash: printf worker-ok",
+							axis: "net:bash-command-substitution",
 							decision: {
-								kind: "ask",
-								classification: { actionClass: "execute", reasons: ["test"] },
-								rejection: { short: "approval required", detail: "approval required", hints: [] },
-								policy: { policySource: "builtin-command-allowlist", reasonCode: "bash-unrecognized" },
+								actionClass: "execute",
+								reasons: ["command substitution requires confirmation"],
+								ruleId: "bash-command-substitution",
+								reasonCode: "bash-command-substitution",
+								policySource: "builtin-command-allowlist",
 							},
 							timeoutMs: 120_000,
 						},
@@ -2472,7 +2474,12 @@ rl.once("line", () => {
 						origin?: string;
 						tool?: string;
 						actionClass?: string;
+						axis?: string;
 						summary?: string;
+						reasons?: ReadonlyArray<string>;
+						ruleId?: string;
+						reasonCode?: string;
+						policySource?: string;
 						timeoutMs?: number;
 				  }
 				| undefined;
@@ -2481,7 +2488,12 @@ rl.once("line", () => {
 			strictEqual(request?.origin, `worker:${handle.runId}`);
 			strictEqual(request?.tool, "bash");
 			strictEqual(request?.actionClass, "execute");
+			strictEqual(request?.axis, "net:bash-command-substitution");
 			strictEqual(request?.summary, "bash: printf worker-ok");
+			deepStrictEqual(request?.reasons, ["command substitution requires confirmation"]);
+			strictEqual(request?.ruleId, "bash-command-substitution");
+			strictEqual(request?.reasonCode, "bash-command-substitution");
+			strictEqual(request?.policySource, "builtin-command-allowlist");
 			strictEqual(request?.timeoutMs, 120_000);
 		} finally {
 			unsubscribe();

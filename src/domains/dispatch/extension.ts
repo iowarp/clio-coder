@@ -256,6 +256,12 @@ function readStringOrNull(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function readStringArrayOrNull(value: unknown): ReadonlyArray<string> | null {
+	if (!Array.isArray(value)) return null;
+	const strings = value.filter((entry): entry is string => typeof entry === "string");
+	return strings.length === value.length ? strings : null;
+}
+
 function messageText(value: unknown): string {
 	const record = isRecord(value) ? value : null;
 	if (record === null) return "";
@@ -2502,7 +2508,7 @@ export function createDispatchBundle(
 							posture?: string;
 							durationMs?: number;
 							outcome?: "ok" | "error" | "blocked";
-							decision?: "allowed" | "blocked" | "permission_requested" | "approved" | "denied";
+							decision?: unknown;
 							actionClass?: string;
 							ruleId?: string;
 							reasonCode?: string;
@@ -2513,6 +2519,7 @@ export function createDispatchBundle(
 							// clio_permission_resolved escalate path).
 							requestId?: string;
 							summary?: string;
+							axis?: string;
 							timeoutMs?: number;
 							source?: "operator" | "timeout" | "policy";
 						};
@@ -2526,23 +2533,35 @@ export function createDispatchBundle(
 					}
 					if (event.type === "clio_permission_escalated" && event.payload && typeof event.payload.requestId === "string") {
 						escalationCounts.requested += 1;
-						const ctx = event.payload.decision as unknown as
-							| { classification?: { actionClass?: unknown }; actionClass?: unknown }
-							| undefined;
+						const ctx = isRecord(event.payload.decision) ? event.payload.decision : null;
+						const classification = ctx !== null && isRecord(ctx.classification) ? ctx.classification : null;
+						const policy = ctx !== null && isRecord(ctx.policy) ? ctx.policy : null;
 						const actionClass =
-							typeof ctx?.classification?.actionClass === "string"
-								? ctx.classification.actionClass
-								: typeof ctx?.actionClass === "string"
-									? ctx.actionClass
-									: "unknown";
+							readStringOrNull(classification?.actionClass) ??
+							readStringOrNull(ctx?.actionClass) ??
+							readStringOrNull(event.payload.actionClass) ??
+							"unknown";
+						const reasons = readStringArrayOrNull(ctx?.reasons) ?? readStringArrayOrNull(classification?.reasons);
+						const reasonCode = readStringOrNull(ctx?.reasonCode) ?? readStringOrNull(policy?.reasonCode);
+						const ruleId = readStringOrNull(ctx?.ruleId) ?? readStringOrNull(policy?.ruleId);
+						const policySource = readStringOrNull(ctx?.policySource) ?? readStringOrNull(policy?.policySource);
+						const policyKind = readStringOrNull(policy?.kind);
+						const axis =
+							readStringOrNull(event.payload.axis) ??
+							(ruleId !== null ? `net:${ruleId}` : policyKind === "ask" && reasonCode !== null ? `net:${reasonCode}` : null);
 						context.bus.emit(BusChannels.PermissionRequested, {
 							tool: typeof event.payload.tool === "string" ? event.payload.tool : "unknown",
 							actionClass,
 							requestedBy: runIdForPermissionAudit ?? undefined,
 							requestId: event.payload.requestId,
 							...(runIdForPermissionAudit !== null ? { origin: `worker:${runIdForPermissionAudit}` } : {}),
+							...(axis !== null ? { axis } : {}),
 							agentId: req.agentId,
 							...(typeof event.payload.summary === "string" ? { summary: event.payload.summary } : {}),
+							...(reasons !== null ? { reasons } : {}),
+							...(reasonCode !== null ? { reasonCode } : {}),
+							...(ruleId !== null ? { ruleId } : {}),
+							...(policySource !== null ? { policySource } : {}),
 							...(typeof event.payload.timeoutMs === "number" ? { timeoutMs: event.payload.timeoutMs } : {}),
 						});
 					}

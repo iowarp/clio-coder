@@ -1,11 +1,18 @@
-import type { ClassifierCall } from "../domains/safety/action-classifier.js";
-import { askAxis } from "../domains/safety/approval-axis.js";
-import type { SafetyDecision } from "../domains/safety/contract.js";
 import type { Component } from "../engine/tui.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 
-const PERMISSION_OVERLAY_CONTENT_WIDTH = 56;
+export interface ApprovalRequestView {
+	requestId: string;
+	tool: string;
+	actionClass: string;
+	axis: { kind: "net"; ruleId: string } | { kind: "autonomy"; level: string };
+	origin: { kind: "main" } | { kind: "worker"; agentId: string; runId: string };
+	reason: string;
+	queueDepth?: number;
+}
+
+const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
 
 export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
 
@@ -23,31 +30,40 @@ function truncate(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
+function oneLine(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
+}
+
+function axisLabel(axis: ApprovalRequestView["axis"], style: ApprovalRequestView["origin"]["kind"]): string {
+	if (axis.kind === "net") return `safety-net rail ${axis.ruleId}`;
+	return style === "worker" ? `autonomy level ${axis.level}` : `autonomy level (${axis.level})`;
+}
+
+function askedBy(view: ApprovalRequestView): string {
+	if (view.origin.kind === "worker") {
+		return `worker ${view.origin.agentId} (run ${view.origin.runId}), ${axisLabel(view.axis, "worker")}`;
+	}
+	return axisLabel(view.axis, "main");
+}
+
 export function permissionOverlayTitle(): string {
 	return "Allow this action once?";
 }
 
-export function createPermissionOverlayBody(
-	call: ClassifierCall,
-	decision: SafetyDecision,
-	autonomy?: string,
-	worker?: { agentId: string; runId: string },
-): Component {
-	const action = decision.classification.actionClass;
-	const reason = decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${action}`;
-	const axis = askAxis(decision);
-	const askedBy = worker
-		? `worker ${worker.agentId} (run ${worker.runId})`
-		: axis.kind === "net"
-			? `safety-net rail ${axis.ruleId}`
-			: `autonomy level (${autonomy ?? "auto-edit"})`;
-	return new PermissionOverlayBody([
-		`Tool: ${truncate(call.tool, 46)}`,
-		`Action: ${truncate(action, 44)}`,
-		`Asked by: ${truncate(askedBy, 44)}`,
-		truncate(reason, 54),
+export function createPermissionOverlayBody(view: ApprovalRequestView): Component {
+	const lines = [
+		`Tool: ${truncate(view.tool, 72)}`,
+		`Action: ${truncate(view.actionClass, 70)}`,
+		`Asked by: ${truncate(askedBy(view), 68)}`,
+		truncate(oneLine(view.reason), 76),
 		"",
-		worker ? "Allowing resumes the parked call inside the worker." : "Allowing resumes only this parked tool call.",
+		view.origin.kind === "worker"
+			? "Allowing resumes the parked call inside the worker."
+			: "Allowing resumes only this parked tool call.",
 		"Hard-blocked actions remain blocked.",
-	]);
+	];
+	if (view.queueDepth !== undefined && view.queueDepth > 1) {
+		lines.splice(4, 0, `Queue: 1 of ${view.queueDepth} parked`);
+	}
+	return new PermissionOverlayBody(lines);
 }

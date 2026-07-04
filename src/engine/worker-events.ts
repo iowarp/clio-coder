@@ -49,6 +49,7 @@ export interface ClioPermissionEscalatedEvent {
 		requestId: string;
 		tool: string;
 		summary: string;
+		axis?: string;
 		decision: {
 			actionClass: string;
 			reasons: ReadonlyArray<string>;

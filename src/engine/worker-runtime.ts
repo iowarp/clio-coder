@@ -425,6 +425,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					requestId,
 					tool: call.tool,
 					summary: `${call.tool} requires ${actionClass} confirmation`,
+					axis: meta.axis,
 					decision: {
 						actionClass,
 						reasons: decision.classification.reasons,
