@@ -442,6 +442,7 @@ function validateDelegationAgent(
 		"permissionTimeoutMs",
 		"stallTimeoutMs",
 		"toolGovernance",
+		"projectContext",
 		"labels",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
@@ -480,6 +481,10 @@ function validateDelegationAgent(
 	if ("toolGovernance" in value) {
 		const v = expectEnum(issues, `${path}.toolGovernance`, value.toolGovernance, TOOL_GOVERNANCE);
 		if (v !== undefined) agent.toolGovernance = v;
+	}
+	if ("projectContext" in value) {
+		const v = expectEnum(issues, `${path}.projectContext`, value.projectContext, ["none", "bounded"] as const);
+		if (v !== undefined) agent.projectContext = v;
 	}
 	if ("cwd" in value) {
 		const v = expectString(issues, `${path}.cwd`, value.cwd);

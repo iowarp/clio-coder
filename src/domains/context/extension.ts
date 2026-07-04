@@ -263,10 +263,19 @@ export function createContextBundle(
 		projectStructuredContext(cwd = process.cwd()) {
 			const clio = tryReadClioMd(cwd);
 			if (!clio?.ok) return null;
+			// Exact-title allowlist: "Verification expectations" is the only
+			// custom section ever projected to workers (verification class only,
+			// enforced dispatch-side). Same case-insensitive comparison as
+			// clio-md's sectionBody().
+			const verification = clio.value.sections.find(
+				(section) => section.title.toLowerCase() === "verification expectations",
+			);
+			const verificationBody = verification?.body.trim() ?? "";
 			return {
 				projectName: clio.value.projectName,
 				conventions: [...clio.value.conventions],
 				invariants: [...clio.value.invariants],
+				...(verificationBody.length > 0 ? { verificationExpectations: verificationBody } : {}),
 			};
 		},
 		contextState: contextState.read,

@@ -32,6 +32,7 @@ import type { AgentRecipe } from "../agents/recipe.js";
 import {
 	type AgentAudience,
 	type AgentCapabilityClass,
+	type AgentProjectContextTier,
 	assertAgentSpecPolicy,
 	isUserVisibleAgent,
 	normalizeAgentSpec,
@@ -93,6 +94,7 @@ import {
 	type RunOutcome,
 	type RunPersonaOverride,
 	type RunPipelineProvenance,
+	type RunProjectContextProvenance,
 	type RunReceipt,
 	type RunReceiptDraft,
 	type RunReceiptUpstreamResponse,
@@ -469,19 +471,16 @@ function renderAgentSkillPrompt(recipe: AgentRecipe): string {
 	].join("\n");
 }
 
-/**
- * Capability classes whose workers act on the workspace and therefore
- * receive the bounded project-context message. Read-only, shadow, and
- * orchestration recipes deliberately get none.
- */
-const PROJECT_CONTEXT_CAPABILITY_CLASSES: ReadonlySet<AgentCapabilityClass> = new Set([
-	"workspace-edit",
-	"verification",
-	"artifact-write",
-]);
-
 /** Total budget for the worker project-context message body. */
 const WORKER_PROJECT_CONTEXT_MAX_CHARS = 1500;
+
+/**
+ * Cap on the projected "Verification expectations" section body, applied
+ * before the overall WORKER_PROJECT_CONTEXT_MAX_CHARS trim. Truncation order
+ * stays deterministic: conventions, then invariants, then this section, then
+ * the final hard slice.
+ */
+const WORKER_VERIFICATION_SECTION_MAX_CHARS = 600;
 
 /** Cap on threaded pipeline input, applied at render time via truncateUtf8. */
 export const PIPELINE_INPUT_MAX_CHARS = 12_000;
@@ -528,6 +527,29 @@ function pipelineProvenanceFor(req: DispatchRequest): RunPipelineProvenance | nu
 	return renderPipelineInput(req.pipelineInput).provenance;
 }
 
+/**
+ * Receipt provenance for the effective project-context decision, computed
+ * from the rendered dynamic messages so the recorded chars/contentHash can
+ * never disagree with what the worker actually received. `tier: "none"` is
+ * recorded explicitly to distinguish policy from pre-provenance receipts;
+ * bounded policy with no rendered message (no parseable CLIO.md) records
+ * `chars: 0`.
+ */
+function projectContextProvenanceFor(
+	tier: AgentProjectContextTier,
+	messages: ReadonlyArray<WorkerPromptMessage>,
+): RunProjectContextProvenance {
+	if (tier !== "bounded") return { tier: "none" };
+	const message = messages.find((entry) => entry.id === "dispatch-project-context");
+	if (!message) return { tier: "bounded", chars: 0 };
+	return {
+		tier: "bounded",
+		chars: message.body.length,
+		contentHash: message.contentHash,
+		...(workerProjectContextIncludesVerification(message.body) ? { sections: ["verification-expectations"] } : {}),
+	};
+}
+
 function hasPersonaOverride(req: DispatchRequest): boolean {
 	return typeof req.systemPrompt === "string" && req.systemPrompt.trim().length > 0;
 }
@@ -543,7 +565,10 @@ function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string 
  * `staticCompositionHash` stays byte-identical run over run.
  */
 export interface WorkerDynamicContext {
+	/** Used only for the verification-section inclusion rule, never for tier policy. */
 	capabilityClass?: AgentCapabilityClass | null;
+	/** Effective project-context tier; the project message renders only when "bounded". */
+	projectContextTier?: AgentProjectContextTier | null;
 	/** Effective autonomy the worker spec will carry; renders the safety-posture line. */
 	autonomy?: string | null;
 	/** Structured CLIO.md fields; null when CLIO.md is absent or malformed. */
@@ -553,28 +578,51 @@ export interface WorkerDynamicContext {
 /**
  * Render the bounded project message: name, conventions, invariants, capped
  * at WORKER_PROJECT_CONTEXT_MAX_CHARS. Conventions are truncated first, then
- * invariants; a final hard slice guards against a pathological project name.
+ * invariants, then the optional verification section; a final hard slice
+ * guards against a pathological project name. `includeVerification` appends
+ * the projected "Verification expectations" body (verification-class runs
+ * only); when off, output is byte-identical to the historical renderer.
  */
-function renderWorkerProjectContext(project: ProjectStructuredContext): string {
-	const render = (conventions: ReadonlyArray<string>, invariants: ReadonlyArray<string>): string => {
+export function renderWorkerProjectContext(
+	project: ProjectStructuredContext,
+	options: { includeVerification?: boolean } = {},
+): string {
+	const verificationBody = options.includeVerification === true ? (project.verificationExpectations?.trim() ?? "") : "";
+	const render = (
+		conventions: ReadonlyArray<string>,
+		invariants: ReadonlyArray<string>,
+		verification: string,
+	): string => {
 		const lines = ["# Project Context", `Project: ${project.projectName}`];
 		if (conventions.length > 0) lines.push("Conventions:", ...conventions.map((item) => `- ${item}`));
 		if (invariants.length > 0)
 			lines.push("Hard invariants:", ...invariants.map((item, index) => `${index + 1}. ${item}`));
+		if (verification.length > 0) lines.push("Verification expectations:", verification);
 		return lines.join("\n");
 	};
 	const conventions = [...project.conventions];
 	const invariants = [...project.invariants];
-	let body = render(conventions, invariants);
+	let verification = verificationBody.slice(0, WORKER_VERIFICATION_SECTION_MAX_CHARS);
+	let body = render(conventions, invariants, verification);
 	while (body.length > WORKER_PROJECT_CONTEXT_MAX_CHARS && conventions.length > 0) {
 		conventions.pop();
-		body = render(conventions, invariants);
+		body = render(conventions, invariants, verification);
 	}
 	while (body.length > WORKER_PROJECT_CONTEXT_MAX_CHARS && invariants.length > 0) {
 		invariants.pop();
-		body = render(conventions, invariants);
+		body = render(conventions, invariants, verification);
+	}
+	if (body.length > WORKER_PROJECT_CONTEXT_MAX_CHARS && verification.length > 0) {
+		const overflow = body.length - WORKER_PROJECT_CONTEXT_MAX_CHARS;
+		verification = verification.slice(0, Math.max(0, verification.length - overflow)).trimEnd();
+		body = render(conventions, invariants, verification);
 	}
 	return body.length > WORKER_PROJECT_CONTEXT_MAX_CHARS ? body.slice(0, WORKER_PROJECT_CONTEXT_MAX_CHARS) : body;
+}
+
+/** True when the rendered project message body includes the verification block. */
+export function workerProjectContextIncludesVerification(body: string): boolean {
+	return body.includes("\nVerification expectations:\n");
 }
 
 export function buildDynamicPromptMessages(
@@ -582,9 +630,10 @@ export function buildDynamicPromptMessages(
 	dynamicContext: WorkerDynamicContext = {},
 ): WorkerPromptMessage[] {
 	const messages: WorkerPromptMessage[] = [];
-	const capabilityClass = dynamicContext.capabilityClass;
-	if (dynamicContext.project && capabilityClass && PROJECT_CONTEXT_CAPABILITY_CLASSES.has(capabilityClass)) {
-		const body = renderWorkerProjectContext(dynamicContext.project);
+	if (dynamicContext.project && dynamicContext.projectContextTier === "bounded") {
+		const body = renderWorkerProjectContext(dynamicContext.project, {
+			includeVerification: dynamicContext.capabilityClass === "verification",
+		});
 		if (body.length > 0) {
 			messages.push({ id: "dispatch-project-context", body, contentHash: sha256(body) });
 		}
@@ -700,6 +749,7 @@ interface DispatchLifecycleStage {
 	runtimeLimitations: string[];
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
+	projectContext: RunProjectContextProvenance;
 }
 
 interface AcpDelegationLifecycleStage {
@@ -718,6 +768,7 @@ interface AcpDelegationLifecycleStage {
 	requestOrigin: DispatchRequestOrigin;
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
+	projectContext: RunProjectContextProvenance;
 }
 
 function capabilityInfoForTarget(providers: ProvidersContract, targetId: string): CapabilityFlags | null {
@@ -1639,17 +1690,18 @@ export function createDispatchBundle(
 
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, recipe);
-		// Fetch structured project context only for capability classes that
-		// receive it, so read-only scouts never pay the CLIO.md read.
-		const project =
-			projectContext && PROJECT_CONTEXT_CAPABILITY_CLASSES.has(spec.capabilityClass)
-				? projectContext.projectStructuredContext(cwd)
-				: null;
+		// Fetch structured project context only for tiers that receive it, so
+		// read-only scouts never pay the CLIO.md read. The tier is spec policy
+		// (capability-class default, recipe frontmatter override).
+		const tier = spec.projectContextTier;
+		const project = projectContext && tier === "bounded" ? projectContext.projectStructuredContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			capabilityClass: spec.capabilityClass,
+			projectContextTier: tier,
 			autonomy: config?.get().autonomy ?? "auto-edit",
 			project,
 		});
+		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
 		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
 		const staticCompositionHash = promptHash(systemPrompt);
@@ -1688,6 +1740,7 @@ export function createDispatchBundle(
 			runtimeLimitations: limitations,
 			pipeline: pipelineProvenanceFor(req),
 			personaOverride,
+			projectContext: projectContextProvenance,
 		};
 	}
 
@@ -1712,11 +1765,19 @@ export function createDispatchBundle(
 		const admission = resolveDelegationAdmissionStage(req, safety);
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, null);
-		// ACP delegation has no recipe, so no project message; the safety
-		// posture line still rides along for every worker run.
+		// ACP delegation defaults to no project context: repo conventions and
+		// invariants never leave the machine unless this agent's config opts in
+		// with projectContext: "bounded". No recipe means no capability class,
+		// so the verification section can never ride along. The safety posture
+		// line still rides along for every worker run.
+		const tier: AgentProjectContextTier = configured.projectContext ?? "none";
+		const project = projectContext && tier === "bounded" ? projectContext.projectStructuredContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
+			projectContextTier: tier,
 			autonomy: config?.get().autonomy ?? "auto-edit",
+			project,
 		});
+		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
 		const compiledPromptHash = promptCompositionHash([systemPrompt, dynamicText]);
 		const staticCompositionHash = promptHash(systemPrompt);
@@ -1740,6 +1801,7 @@ export function createDispatchBundle(
 			runtimeLimitations: acpRuntimeLimitations(),
 			pipeline: pipelineProvenanceFor(req),
 			personaOverride,
+			projectContext: projectContextProvenance,
 		};
 	}
 
@@ -2041,6 +2103,7 @@ export function createDispatchBundle(
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
+				projectContext: lifecycle.projectContext,
 				startedAt,
 				endedAt,
 				exitCode:
@@ -2127,6 +2190,9 @@ export function createDispatchBundle(
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
+				...(receipt.skillActivations && receipt.skillActivations.length > 0
+					? { skillActivations: [...receipt.skillActivations] }
+					: {}),
 			};
 			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);
@@ -2662,6 +2728,7 @@ export function createDispatchBundle(
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
+				projectContext: lifecycle.projectContext,
 				startedAt,
 				endedAt,
 				exitCode: receiptExitCode,
@@ -2743,6 +2810,9 @@ export function createDispatchBundle(
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
+				...(receipt.skillActivations && receipt.skillActivations.length > 0
+					? { skillActivations: [...receipt.skillActivations] }
+					: {}),
 			};
 			if (outcome === "succeeded") {
 				context.bus.emit(BusChannels.DispatchCompleted, payload);

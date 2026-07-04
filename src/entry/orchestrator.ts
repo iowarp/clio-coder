@@ -26,6 +26,7 @@ import {
 	setAtPath,
 } from "../core/session-routing.js";
 import { getSharedBus } from "../core/shared-bus.js";
+import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioCacheDir, clioDataDir, clioStateDir } from "../core/xdg.js";
@@ -720,7 +721,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (typeof payload?.runId === "string") taskBoard.attachRun(payload.runId);
 	});
 	bus.on(BusChannels.DispatchCompleted, (payload) => {
-		if (typeof payload?.runId === "string") taskBoard.detachRun(payload.runId);
+		if (typeof payload?.runId !== "string") return;
+		taskBoard.detachRun(payload.runId);
+		// Fold worker skill activations from the completed run's receipt into
+		// the session ledger, tagged with the runId, so worker skill provenance
+		// sits next to main-agent activations. The orchestrator never observes
+		// worker tool calls directly (separate subprocess registry), so this is
+		// the only recording path and cannot double-record.
+		for (const activation of payload.skillActivations ?? []) {
+			if (!isSkillActivation(activation)) continue;
+			appendSkillActivationRegistryEvent(session, { ...activation, runId: payload.runId });
+		}
 	});
 	bus.on(BusChannels.DispatchFailed, (payload) => {
 		if (typeof payload?.runId === "string") taskBoard.detachRun(payload.runId);

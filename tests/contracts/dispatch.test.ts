@@ -11,9 +11,13 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
-import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import { defaultProjectContextTier, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
-import { buildDynamicPromptMessages, buildStableSystemPrompt } from "../../src/domains/dispatch/extension.js";
+import {
+	buildDynamicPromptMessages,
+	buildStableSystemPrompt,
+	renderWorkerProjectContext,
+} from "../../src/domains/dispatch/extension.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
@@ -744,7 +748,7 @@ describe("contracts/dispatch", () => {
 		strictEqual(noSkillsPrompt.includes("# Agent-Bound Skills"), false);
 	});
 
-	it("injects bounded project context only for workspace-class workers", () => {
+	it("injects bounded project context only for workspace-class default tiers", () => {
 		const project = {
 			projectName: "Fixture Project",
 			conventions: ["Tabs, line width 120."],
@@ -753,7 +757,19 @@ describe("contracts/dispatch", () => {
 		const req = { agentId: "coder", task: "do work" };
 
 		for (const capabilityClass of ["workspace-edit", "verification", "artifact-write"] as const) {
-			const messages = buildDynamicPromptMessages(req, { capabilityClass, autonomy: "auto-edit", project });
+			strictEqual(defaultProjectContextTier(capabilityClass), "bounded");
+		}
+		for (const capabilityClass of ["read-only", "orchestration", "internal"] as const) {
+			strictEqual(defaultProjectContextTier(capabilityClass), "none");
+		}
+
+		for (const capabilityClass of ["workspace-edit", "artifact-write"] as const) {
+			const messages = buildDynamicPromptMessages(req, {
+				capabilityClass,
+				projectContextTier: defaultProjectContextTier(capabilityClass),
+				autonomy: "auto-edit",
+				project,
+			});
 			deepStrictEqual(
 				messages.map((message) => message.id),
 				["dispatch-project-context", "dispatch-safety-posture"],
@@ -766,7 +782,12 @@ describe("contracts/dispatch", () => {
 		}
 
 		for (const capabilityClass of ["read-only", "orchestration"] as const) {
-			const messages = buildDynamicPromptMessages(req, { capabilityClass, autonomy: "auto-edit", project });
+			const messages = buildDynamicPromptMessages(req, {
+				capabilityClass,
+				projectContextTier: defaultProjectContextTier(capabilityClass),
+				autonomy: "auto-edit",
+				project,
+			});
 			deepStrictEqual(
 				messages.map((message) => message.id),
 				["dispatch-safety-posture"],
@@ -777,6 +798,7 @@ describe("contracts/dispatch", () => {
 		// Missing CLIO.md (null project): no project message either.
 		const withoutProject = buildDynamicPromptMessages(req, {
 			capabilityClass: "workspace-edit",
+			projectContextTier: "bounded",
 			autonomy: "auto-edit",
 			project: null,
 		});
@@ -784,6 +806,126 @@ describe("contracts/dispatch", () => {
 			withoutProject.map((message) => message.id),
 			["dispatch-safety-posture"],
 		);
+	});
+
+	it("lets an explicit tier override the capability-class default in both directions", () => {
+		const project = {
+			projectName: "Fixture Project",
+			conventions: ["Tabs."],
+			invariants: [],
+		};
+		const req = { agentId: "coder", task: "do work" };
+
+		// Recipe frontmatter override flows through normalizeAgentSpec.
+		const optedInReviewer = normalizeAgentSpec({
+			id: "reviewer",
+			name: "Reviewer",
+			description: "Read-only reviewer that opts into project context.",
+			tools: ["read"],
+			capabilityClass: "read-only",
+			projectContextTier: "bounded",
+			source: "project",
+			filepath: "/tmp/reviewer.md",
+			body: "# Reviewer",
+		});
+		strictEqual(optedInReviewer.projectContextTier, "bounded");
+
+		const boundedReadOnly = buildDynamicPromptMessages(req, {
+			capabilityClass: "read-only",
+			projectContextTier: "bounded",
+			autonomy: "auto-edit",
+			project,
+		});
+		strictEqual(boundedReadOnly[0]?.id, "dispatch-project-context");
+
+		const mutedCoder = buildDynamicPromptMessages(req, {
+			capabilityClass: "workspace-edit",
+			projectContextTier: "none",
+			autonomy: "auto-edit",
+			project,
+		});
+		deepStrictEqual(
+			mutedCoder.map((message) => message.id),
+			["dispatch-safety-posture"],
+		);
+	});
+
+	it("projects the verification section only for verification-class workers", () => {
+		const project = {
+			projectName: "Fixture Project",
+			conventions: ["Tabs, line width 120."],
+			invariants: ["Only src/engine imports the pi SDK."],
+			verificationExpectations: "Before handoff, run `npm run typecheck` and `npm run lint`.",
+		};
+		const { verificationExpectations: _omitted, ...projectWithoutSection } = project;
+		const req = { agentId: "verifier", task: "verify work" };
+
+		const verifier = buildDynamicPromptMessages(req, {
+			capabilityClass: "verification",
+			projectContextTier: "bounded",
+			autonomy: "auto-edit",
+			project,
+		});
+		const verifierBody = verifier[0]?.body ?? "";
+		strictEqual(verifier[0]?.id, "dispatch-project-context");
+		ok(verifierBody.includes("Verification expectations:"));
+		ok(verifierBody.includes("Before handoff, run `npm run typecheck` and `npm run lint`."));
+
+		// Byte-stability gate: non-verification classes render identical bytes
+		// whether or not the handbook carries the section.
+		for (const capabilityClass of ["workspace-edit", "artifact-write"] as const) {
+			const withSection = buildDynamicPromptMessages(req, {
+				capabilityClass,
+				projectContextTier: "bounded",
+				autonomy: "auto-edit",
+				project,
+			});
+			const withoutSection = buildDynamicPromptMessages(req, {
+				capabilityClass,
+				projectContextTier: "bounded",
+				autonomy: "auto-edit",
+				project: projectWithoutSection,
+			});
+			strictEqual(withSection[0]?.body, withoutSection[0]?.body, `bytes must match for ${capabilityClass}`);
+			strictEqual(withSection[0]?.contentHash, withoutSection[0]?.contentHash);
+			ok(!(withSection[0]?.body ?? "").includes("Verification expectations:"));
+		}
+
+		// A verification worker on a repo without the section also renders the
+		// legacy bytes exactly.
+		const verifierNoSection = buildDynamicPromptMessages(req, {
+			capabilityClass: "verification",
+			projectContextTier: "bounded",
+			autonomy: "auto-edit",
+			project: projectWithoutSection,
+		});
+		const coderNoSection = buildDynamicPromptMessages(req, {
+			capabilityClass: "workspace-edit",
+			projectContextTier: "bounded",
+			autonomy: "auto-edit",
+			project: projectWithoutSection,
+		});
+		strictEqual(verifierNoSection[0]?.body, coderNoSection[0]?.body);
+	});
+
+	it("caps the verification section at 600 chars inside the 1500-char overall budget", () => {
+		const longSection = "v".repeat(2000);
+		const body = renderWorkerProjectContext(
+			{
+				projectName: "Fixture",
+				conventions: ["Tabs."],
+				invariants: ["One invariant."],
+				verificationExpectations: longSection,
+			},
+			{ includeVerification: true },
+		);
+		ok(body.length <= 1500, `body length ${body.length} exceeds the 1500-char cap`);
+		ok(body.includes("Verification expectations:"));
+		const section = body.split("Verification expectations:\n")[1] ?? "";
+		ok(section.length <= 600, `verification section ${section.length} exceeds the 600-char cap`);
+		// Conventions and invariants survive: the section is trimmed last-in.
+		ok(body.includes("- Tabs."));
+		ok(body.includes("1. One invariant."));
 	});
 
 	it("caps the worker project message at 1500 chars, truncating conventions before invariants", () => {
@@ -794,7 +936,7 @@ describe("contracts/dispatch", () => {
 		};
 		const messages = buildDynamicPromptMessages(
 			{ agentId: "coder", task: "t" },
-			{ capabilityClass: "workspace-edit", autonomy: "auto-edit", project },
+			{ capabilityClass: "workspace-edit", projectContextTier: "bounded", autonomy: "auto-edit", project },
 		);
 		const body = messages[0]?.body ?? "";
 		strictEqual(messages[0]?.id, "dispatch-project-context");
@@ -827,6 +969,7 @@ describe("contracts/dispatch", () => {
 
 		const messages = buildDynamicPromptMessages(req, {
 			capabilityClass: "workspace-edit",
+			projectContextTier: "bounded",
 			autonomy: "auto-edit",
 			project,
 		});
@@ -901,6 +1044,11 @@ describe("contracts/dispatch", () => {
 					inputTruncated: true,
 				},
 			);
+			// Effective project-context provenance is recorded on every receipt,
+			// explicitly even for tier "none" (the harness coder recipe has no
+			// tools, so it normalizes to read-only → none), so evidence can
+			// distinguish policy from pre-provenance receipts.
+			deepStrictEqual((receipt as { projectContext?: { tier: string } }).projectContext, { tier: "none" });
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -992,6 +1140,7 @@ describe("contracts/dispatch", () => {
 
 		const messages = buildDynamicPromptMessages(reqWithPipelineInput, {
 			capabilityClass: "workspace-edit",
+			projectContextTier: "bounded",
 			autonomy: "auto-edit",
 			project,
 		});
