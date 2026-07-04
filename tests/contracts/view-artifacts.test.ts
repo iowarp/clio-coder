@@ -314,6 +314,31 @@ describe("contracts/view-artifacts", () => {
 		ok(loaded?.lines.join("\n").includes("dispatch run output body"));
 	});
 
+	it("loads dispatch metadata with shared formatters instead of raw receipt fields", async () => {
+		const stateDir = await scratchDir();
+		const envelope = fixtureEnvelope(stateDir, "run-format");
+		envelope.tokenCount = 1530;
+		envelope.costUsd = 0.005;
+		envelope.wireModelId = "very-long-single-model-identifier-with-extra-parts";
+		await mkdir(stateDir, { recursive: true });
+		await writeFile(runLedgerPath(stateDir), JSON.stringify([envelope], null, 2));
+
+		const provider = new DispatchArtifactProvider({ stateDir, readSessionEntries: () => [] });
+		const artifacts = await provider.list();
+		strictEqual(artifacts.length, 1);
+		const loaded = await artifacts[0]?.load();
+		const text = loaded?.lines.join("\n") ?? "";
+
+		ok(/\bstarted: \d{2}:\d{2}:\d{2}\b/.test(text), text);
+		ok(/\bended: \d{2}:\d{2}:\d{2}\b/.test(text), text);
+		ok(!text.includes(envelope.startedAt), "dispatch load should not expose raw startedAt ISO text");
+		ok(!text.includes(envelope.endedAt ?? ""), "dispatch load should not expose raw endedAt ISO text");
+		ok(text.includes("tokens: 1.5k"), text);
+		ok(text.includes("cost: $0.0050"), text);
+		ok(!text.includes("costUsd: 0.005"), "dispatch load should not expose the raw costUsd field");
+		ok(text.includes("model: very-long-single"), text);
+	});
+
 	it("loads file-backed tool outputs and caps large output files", async () => {
 		const stateDir = await scratchDir();
 		const outputPath = join(stateDir, "tool-output.txt");
@@ -405,6 +430,8 @@ describe("contracts/view-artifacts", () => {
 		const loaded = await artifacts[0]?.load();
 		strictEqual(loaded?.format, "markdown");
 		ok(loaded?.lines.join("\n").includes("Important prior context."));
+		ok(loaded?.lines.join("\n").includes("- tokens before: 1k"));
+		ok(loaded?.lines.join("\n").includes("- tokens after: 300"));
 	});
 
 	it("falls back invalid JSON artifacts to text rendering", async () => {
