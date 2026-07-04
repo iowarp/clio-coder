@@ -10,7 +10,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import { clioTheme, selectListTheme, settingsListTheme } from "./theme/index.js";
+import { type ClioToken, clioTheme, selectListTheme, settingsListTheme } from "./theme/index.js";
 
 export const IDENTITY = (text: string): string => text;
 
@@ -159,8 +159,17 @@ export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionD
 	return `${diagnostic.severity}: ${diagnostic.code}: ${diagnostic.message}`;
 }
 
+/**
+ * Map a diagnostic's severity to its semantic token so a warning renders amber
+ * and only a true error renders red. Shared by the model overlay's detail rows
+ * and the targets hub's error rail so both surfaces color severity identically.
+ */
+export function diagnosticSeverityToken(severity: RuntimeResolutionDiagnostic["severity"]): ClioToken {
+	return severity === "error" ? "error" : severity === "warning" ? "warning" : "muted";
+}
+
 export function runtimeResolutionDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
-	return clioError(fitDiagnosticLine(diagnostic, width));
+	return clioTheme().fg(diagnosticSeverityToken(diagnostic.severity), fitDiagnosticLine(diagnostic, width));
 }
 
 function fitDiagnosticLine(diagnostic: RuntimeResolutionDiagnostic, width: number): string {
