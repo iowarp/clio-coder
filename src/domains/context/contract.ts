@@ -18,6 +18,13 @@ export interface ProjectStructuredContext {
 	projectName: string;
 	conventions: ReadonlyArray<string>;
 	invariants: ReadonlyArray<string>;
+	/**
+	 * Body of the CLIO.md H2 section titled exactly "Verification expectations"
+	 * (case-insensitive). The only custom section ever projected to workers;
+	 * dispatch includes it for verification-class runs only. Absent when the
+	 * handbook has no such section.
+	 */
+	verificationExpectations?: string;
 }
 
 export interface ContextState {

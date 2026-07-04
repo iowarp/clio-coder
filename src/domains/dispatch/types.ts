@@ -67,6 +67,22 @@ export interface RunPersonaOverride {
 }
 
 /**
+ * Effective project-context decision for a run, recorded on every receipt so
+ * evidence can prove what a worker saw without rehashing. `tier: "none"` is
+ * written explicitly: it distinguishes "policy said none" from a
+ * pre-provenance receipt where the whole block is absent. `chars` and
+ * `contentHash` describe the rendered dynamic message body when bounded;
+ * `sections` lists extra projected sections that actually rendered
+ * (currently only "verification-expectations", never for ACP delegation).
+ */
+export interface RunProjectContextProvenance {
+	tier: "none" | "bounded";
+	chars?: number;
+	contentHash?: string;
+	sections?: string[];
+}
+
+/**
  * Host and HPC-scheduler identity captured at run start. A receipt produced
  * inside a Slurm/PBS/LSF allocation carries the allocation identity so the
  * provenance chain anchors to the scheduler job, not folklore.
@@ -296,6 +312,8 @@ export interface RunReceipt {
 	pipeline?: RunPipelineProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
 	personaOverride?: RunPersonaOverride;
+	/** Effective project-context tier for this run; absent on receipts written before this field landed. */
+	projectContext?: RunProjectContextProvenance;
 	exitCode: number;
 	failureMessage?: string;
 	tokenCount: number;

@@ -128,6 +128,12 @@ export interface DelegationAgentConfig {
 	 */
 	stallTimeoutMs?: number;
 	toolGovernance?: DelegationToolGovernance;
+	/**
+	 * Project context sent to this external agent as a dynamic message.
+	 * Defaults to "none": repo conventions/invariants never leave the machine
+	 * unless the operator opts this agent into the bounded projection.
+	 */
+	projectContext?: "none" | "bounded";
 	labels?: Record<string, string>;
 }
 

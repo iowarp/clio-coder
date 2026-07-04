@@ -1,5 +1,11 @@
 import path from "node:path";
-import type { AgentAudience, AgentCapabilityClass, AgentCategory, AgentLatencyClass } from "./spec.js";
+import type {
+	AgentAudience,
+	AgentCapabilityClass,
+	AgentCategory,
+	AgentLatencyClass,
+	AgentProjectContextTier,
+} from "./spec.js";
 
 export type RecipeThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -17,6 +23,8 @@ export interface AgentRecipe {
 	category?: AgentCategory;
 	capabilityClass?: AgentCapabilityClass;
 	latencyClass?: AgentLatencyClass;
+	/** Overrides the capability-class default for the bounded project-context message. */
+	projectContextTier?: AgentProjectContextTier;
 	audience?: AgentAudience;
 	tags?: ReadonlyArray<string>;
 	output?: string;

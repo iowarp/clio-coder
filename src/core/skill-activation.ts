@@ -108,6 +108,12 @@ export interface SkillActivation {
 	drift?: "match" | "mismatch";
 	triggeredBy: SkillActivationTrigger;
 	turnId?: string;
+	/**
+	 * Dispatch run whose worker performed this activation. Absent on
+	 * main-agent activations; set when a dispatch completion folds a worker
+	 * receipt's activations into the session ledger.
+	 */
+	runId?: string;
 }
 
 export interface SkillActivationSource {
@@ -168,6 +174,7 @@ export function isSkillActivation(value: unknown): value is SkillActivation {
 		typeof record.source === "string" &&
 		(record.sourceOrigin === undefined || typeof record.sourceOrigin === "string") &&
 		(record.triggeredBy === "slash-command" || record.triggeredBy === "tool") &&
-		(record.turnId === undefined || typeof record.turnId === "string")
+		(record.turnId === undefined || typeof record.turnId === "string") &&
+		(record.runId === undefined || typeof record.runId === "string")
 	);
 }

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { isSkillActivation } from "../../src/core/skill-activation.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { isSessionEntry, isSessionHeader, type SkillActivationEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
@@ -166,6 +167,40 @@ describe("contracts/persistence", () => {
 		const persistedMeta = reader.meta() as { skillActivations?: Array<{ name: string; turnId?: string }> };
 		strictEqual(persistedMeta.skillActivations?.[0]?.name, "review-tests");
 		strictEqual(persistedMeta.skillActivations?.[0]?.turnId, userTurn.id);
+	});
+
+	it("persists worker skill activations folded in with a runId tag", () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: scratch });
+
+		// Dispatch-completion fold: the orchestrator appends the worker
+		// receipt's activation with the runId set; entry and meta must both
+		// carry it so /view can attribute worker skill provenance.
+		contract.recordSkillActivation({
+			name: "verify-suite",
+			filePath: join(scratch, ".clio", "skills", "verify-suite", "SKILL.md"),
+			hash: "b".repeat(64),
+			source: "clio",
+			triggeredBy: "tool",
+			runId: "run-worker-1",
+		});
+
+		const reader = openSession(meta.id);
+		const activationEntry = reader
+			.turns()
+			.find((entry): entry is SkillActivationEntry => isSessionEntry(entry) && entry.kind === "skillActivation");
+		ok(activationEntry);
+		strictEqual((activationEntry.activation as { runId?: string }).runId, "run-worker-1");
+		const persistedMeta = reader.meta() as { skillActivations?: Array<{ runId?: string }> };
+		strictEqual(persistedMeta.skillActivations?.[0]?.runId, "run-worker-1");
+
+		// The runtime validator tolerates both shapes: main-agent activations
+		// without runId and folded worker activations with one.
+		strictEqual(isSkillActivation(activationEntry.activation), true);
+		const { runId: _runId, ...withoutRunId } = activationEntry.activation;
+		strictEqual(isSkillActivation(withoutRunId), true);
+		strictEqual(isSkillActivation({ ...activationEntry.activation, runId: 7 }), false);
 	});
 
 	it("persists prompt-compile manifest records as a session sibling artifact", () => {

@@ -7,6 +7,7 @@ import {
 	isAgentCapabilityClass,
 	isAgentCategory,
 	isAgentLatencyClass,
+	isAgentProjectContextTier,
 	isShadowAgent,
 	normalizeAgentSpec,
 } from "./spec.js";
@@ -71,6 +72,9 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 		if (isAgentCategory(frontmatter.category)) recipe.category = frontmatter.category;
 		if (isAgentCapabilityClass(frontmatter.capabilityClass)) recipe.capabilityClass = frontmatter.capabilityClass;
 		if (isAgentLatencyClass(frontmatter.latencyClass)) recipe.latencyClass = frontmatter.latencyClass;
+		if (isAgentProjectContextTier(frontmatter.projectContextTier)) {
+			recipe.projectContextTier = frontmatter.projectContextTier;
+		}
 		if (isAgentAudience(frontmatter.audience)) recipe.audience = frontmatter.audience;
 		const tags = parseStringArray(frontmatter.tags);
 		if (tags) recipe.tags = tags;

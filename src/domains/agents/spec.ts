@@ -23,6 +23,14 @@ export type AgentCapabilityClass =
 
 export type AgentLatencyClass = "fast" | "balanced" | "deep";
 
+/**
+ * How much durable project context a worker run receives as a dynamic prompt
+ * message: "bounded" is the capped name/conventions/invariants projection,
+ * "none" is nothing. Defaults derive from the capability class so read-only
+ * scouts never pay the CLIO.md read; recipe frontmatter may override.
+ */
+export type AgentProjectContextTier = "none" | "bounded";
+
 export type AgentAudience = "base" | "shadow" | "custom" | "internal";
 
 export const AGENT_CATEGORIES: ReadonlyArray<AgentCategory> = [
@@ -50,6 +58,8 @@ export const AGENT_LATENCY_CLASSES: ReadonlyArray<AgentLatencyClass> = ["fast", 
 
 export const AGENT_AUDIENCES: ReadonlyArray<AgentAudience> = ["base", "shadow", "custom", "internal"];
 
+export const AGENT_PROJECT_CONTEXT_TIERS: ReadonlyArray<AgentProjectContextTier> = ["none", "bounded"];
+
 const BUILTIN_SHADOW_AGENT_IDS = new Set(["scout", "researcher", "provenance"]);
 const BUILTIN_INTERNAL_AGENT_IDS = new Set<string>();
 
@@ -63,6 +73,7 @@ export interface AgentSpec {
 	category: AgentCategory;
 	capabilityClass: AgentCapabilityClass;
 	latencyClass: AgentLatencyClass;
+	projectContextTier: AgentProjectContextTier;
 	audience: AgentAudience;
 	tags: ReadonlyArray<string>;
 	skills: ReadonlyArray<string>;
@@ -88,6 +99,21 @@ export function isAgentLatencyClass(value: unknown): value is AgentLatencyClass 
 
 export function isAgentAudience(value: unknown): value is AgentAudience {
 	return includes(AGENT_AUDIENCES, value);
+}
+
+export function isAgentProjectContextTier(value: unknown): value is AgentProjectContextTier {
+	return includes(AGENT_PROJECT_CONTEXT_TIERS, value);
+}
+
+/**
+ * Default tier per capability class. Reproduces the historical dispatch
+ * allowlist byte-for-byte: workers that act on the workspace get the bounded
+ * projection; read-only, orchestration, and internal classes get none.
+ */
+export function defaultProjectContextTier(capability: AgentCapabilityClass): AgentProjectContextTier {
+	return capability === "workspace-edit" || capability === "verification" || capability === "artifact-write"
+		? "bounded"
+		: "none";
 }
 
 function actionClassesForTools(tools: ReadonlyArray<ToolName>): ReadonlySet<ActionClass> {
@@ -156,6 +182,7 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 	const category = recipe.category ?? inferCategory(recipe, tools);
 	const capabilityClass = recipe.capabilityClass ?? inferCapabilityClass(recipe, tools);
 	const latencyClass = recipe.latencyClass ?? inferLatencyClass(category, capabilityClass);
+	const projectContextTier = recipe.projectContextTier ?? defaultProjectContextTier(capabilityClass);
 	return {
 		id: recipe.id,
 		name: recipe.name,
@@ -166,6 +193,7 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		category,
 		capabilityClass,
 		latencyClass,
+		projectContextTier,
 		audience: inferAudience(recipe),
 		tags: recipe.tags ?? [],
 		skills: recipe.skills ?? [],

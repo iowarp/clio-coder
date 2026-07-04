@@ -218,6 +218,27 @@ describe("contracts/config", () => {
 		strictEqual(settings.delegation.agents[0]?.turnTimeoutMs, 11);
 		strictEqual(settings.delegation.agents[0]?.toolGovernance, "clio-policy");
 		deepStrictEqual(settings.delegation.agents[0]?.args, ["acp", "--cwd", "."]);
+		// Project context is explicit opt-in: absent key stays absent (dispatch
+		// treats absent as "none").
+		strictEqual(settings.delegation.agents[0]?.projectContext, undefined);
+
+		const optedIn = validateSettings({
+			delegation: {
+				agents: [{ id: "opencode", command: "opencode", projectContext: "bounded" }],
+			},
+		});
+		deepStrictEqual(optedIn.issues, []);
+		strictEqual(optedIn.settings.delegation.agents[0]?.projectContext, "bounded");
+
+		const badTier = validateSettings({
+			delegation: {
+				agents: [{ id: "opencode", command: "opencode", projectContext: "full" }],
+			},
+		});
+		strictEqual(
+			badTier.issues.some((issue) => issue.path === "delegation.agents[0].projectContext"),
+			true,
+		);
 
 		const prev = structuredClone(DEFAULT_SETTINGS);
 		const next = structuredClone(DEFAULT_SETTINGS);

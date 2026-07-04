@@ -24,6 +24,7 @@ import type {
 import type { MiddlewareHook } from "../domains/middleware/types.js";
 import type { TargetStatus } from "../domains/providers/contract.js";
 import type { ClioSettings } from "./config.js";
+import type { SkillActivation } from "./skill-activation.js";
 import type { TerminationPhase } from "./termination.js";
 
 export const BusChannels = {
@@ -479,6 +480,13 @@ export interface DispatchCompletedPayload extends DispatchRunIdentity, DispatchT
 	requestOrigin: DispatchRequestOrigin;
 	outcome: RunOutcome;
 	outcomeDetail: string | null;
+	/**
+	 * Worker skill activations collected into the run receipt. Present only
+	 * when the run activated at least one skill (native/subprocess runners;
+	 * ACP delegation collects none). The orchestrator folds these into the
+	 * session ledger tagged with the runId.
+	 */
+	skillActivations?: ReadonlyArray<SkillActivation>;
 }
 
 /**

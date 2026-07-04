@@ -127,6 +127,7 @@ describe("contracts/agents", () => {
 				category: "explore",
 				capabilityClass: "orchestration",
 				latencyClass: "deep",
+				projectContextTier: "none",
 				audience: "custom",
 				tags: ["delegation", "acp"],
 				skills: [],
