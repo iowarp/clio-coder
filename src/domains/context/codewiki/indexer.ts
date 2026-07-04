@@ -237,21 +237,6 @@ function roleFor(relPath: string, language: CodewikiLanguage): CodewikiFileRole 
 	return "module";
 }
 
-function firstDocSummary(text: string): string | null {
-	const jsDoc = /\/\*\*([\s\S]*?)\*\//.exec(text)?.[1];
-	const pythonDoc = /^\s*(?:"""([\s\S]*?)"""|'''([\s\S]*?)''')/.exec(text);
-	const raw = jsDoc ?? pythonDoc?.[1] ?? pythonDoc?.[2];
-	if (!raw) return null;
-	const cleaned = raw
-		.split("\n")
-		.map((line) => line.replace(/^\s*\*\s?/, "").trim())
-		.filter((line) => line.length > 0 && !line.startsWith("@"))
-		.join(" ")
-		.replace(/\s+/g, " ")
-		.trim();
-	return cleaned.length > 0 ? cleaned.slice(0, 160) : null;
-}
-
 function sanitizeSymbolName(value: string): string {
 	return value
 		.trim()
@@ -330,10 +315,11 @@ const tsJsExtractor: LanguageExtractor = {
 			{ regex: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)\b/, kind: "iface" },
 			{ regex: /^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\b/, kind: "type" },
 			{ regex: /^\s*(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)\b/, kind: "type" },
-			{ regex: /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\b/, kind: "const" },
-			{ regex: /^\s*(?:export\s+)?(?:let|var)\s+([A-Za-z_$][\w$]*)\b/, kind: "var" },
+			{ regex: /^(?:\s*export\s+)?const\s+([A-Za-z_$][\w$]*)\b/, kind: "const" },
+			{ regex: /^(?:\s*export\s+)?(?:let|var)\s+([A-Za-z_$][\w$]*)\b/, kind: "var" },
 			{
-				regex: /^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{?$/,
+				regex:
+					/^(?: {2,}|\t+)(?:public\s+|private\s+|protected\s+|static\s+|override\s+|abstract\s+|async\s+|get\s+|set\s+)*(?!(?:if|for|while|switch|catch|return|typeof|else|do|new|await|yield)\b)([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{?$/,
 				kind: "method",
 			},
 		]);
@@ -404,8 +390,8 @@ const goExtractor: LanguageExtractor = {
 			{ regex: /^\s*type\s+([A-Za-z_]\w*)\s+interface\b/, kind: "iface" },
 			{ regex: /^\s*type\s+([A-Za-z_]\w*)\s+struct\b/, kind: "type" },
 			{ regex: /^\s*type\s+([A-Za-z_]\w*)\b/, kind: "type" },
-			{ regex: /^\s*const\s+([A-Za-z_]\w*)\b/, kind: "const" },
-			{ regex: /^\s*var\s+([A-Za-z_]\w*)\b/, kind: "var" },
+			{ regex: /^const\s+([A-Za-z_]\w*)\b/, kind: "const" },
+			{ regex: /^var\s+([A-Za-z_]\w*)\b/, kind: "var" },
 		]);
 		const symbols: ExtractedSymbol[] = rawSymbols.map((symbol) => {
 			if (symbol.kind === "func" && /^\s*func\s+\(/.test(symbol.sig ?? "")) return { ...symbol, kind: "method" };
@@ -429,8 +415,8 @@ const rustExtractor: LanguageExtractor = {
 			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z_]\w*)\b/, kind: "type" },
 			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?trait\s+([A-Za-z_]\w*)\b/, kind: "trait" },
 			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?type\s+([A-Za-z_]\w*)\b/, kind: "type" },
-			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z_]\w*)\b/, kind: "const" },
-			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?static\s+([A-Za-z_]\w*)\b/, kind: "var" },
+			{ regex: /^(?:\s*pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z_]\w*)\b/, kind: "const" },
+			{ regex: /^(?:\s*pub(?:\([^)]*\))?\s+)?static\s+([A-Za-z_]\w*)\b/, kind: "var" },
 		]);
 		const imports = uniqueSorted([
 			...extractMatches(text, /^\s*use\s+([^;]+);/gm).map((item) => item.trim()),
@@ -453,7 +439,7 @@ const cFamilyExtractor: LanguageExtractor = {
 				regex: /^\s*(?:template\s*<[^>]+>\s*)?(?:[A-Za-z_][\w:<>,*&\s]+\s+)+([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?\{?$/,
 				kind: "func",
 			},
-			{ regex: /^\s*(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
+			{ regex: /^(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
 		]);
 		const imports = uniqueSorted(extractMatches(text, /^\s*#\s*include\s+[<"]([^>"]+)[>"]/gm));
 		const exports = uniqueSorted(symbols.map((symbol) => symbol.name));
@@ -477,8 +463,7 @@ const javaExtractor: LanguageExtractor = {
 				kind: "method",
 			},
 			{
-				regex:
-					/^\s*(?:public\s+|private\s+|protected\s+|static\s+|final\s+)*[A-Za-z_][\w<>,[\]\s]*\s+([A-Z][A-Z0-9_]*)\s*=/,
+				regex: /^\s*public\s+(?:static\s+|final\s+)*[A-Za-z_][\w<>,[\]\s]*\s+([A-Z][A-Z0-9_]*)\s*=/,
 				kind: "const",
 			},
 		]);
@@ -497,7 +482,7 @@ const rubyExtractor: LanguageExtractor = {
 			{ regex: /^\s*class\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/, kind: "class" },
 			{ regex: /^\s*module\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/, kind: "type" },
 			{ regex: /^\s*def\s+(?:self\.)?([A-Za-z_]\w*[!?=]?)\b/, kind: "func" },
-			{ regex: /^\s*([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
+			{ regex: /^([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
 		]);
 		const imports = uniqueSorted([
 			...extractMatches(text, /^\s*require\s+["']([^"']+)["']/gm),
@@ -549,7 +534,6 @@ interface BuiltFile {
 	symbols: CodewikiSymbol[];
 	imports: string[];
 	exports: string[];
-	summary?: string;
 }
 
 function buildFile(cwd: string, relPath: string, extractors: ReadonlyArray<LanguageExtractor>): BuiltFile | null {
@@ -578,13 +562,11 @@ function buildFile(cwd: string, relPath: string, extractors: ReadonlyArray<Langu
 		line: symbol.line,
 		...(symbol.sig ? { sig: symbol.sig } : {}),
 	}));
-	const summary = firstDocSummary(text);
 	return {
 		file,
 		symbols,
 		imports: extracted.imports,
 		exports: extracted.exports,
-		...(summary ? { summary } : {}),
 	};
 }
 
@@ -750,7 +732,8 @@ export function codewikiPath(cwd: string): string {
 }
 
 export function writeCodewiki(cwd: string, codewiki: Codewiki): void {
-	safeResourceWrite(codewikiPath(cwd), `${JSON.stringify(normalizeCodewiki(codewiki), null, 2)}\n`, {
+	const serialized = JSON.stringify(normalizeCodewiki(codewiki)).replace(/^{"version":3,/, '{"version": 3,');
+	safeResourceWrite(codewikiPath(cwd), `${serialized}\n`, {
 		encoding: "utf8",
 	});
 }
