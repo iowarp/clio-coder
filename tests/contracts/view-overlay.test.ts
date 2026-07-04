@@ -46,7 +46,10 @@ function overlayHandle(): OverlayHandle {
 	};
 }
 
-function fakeTui(rows = 42, columns = 132): {
+function fakeTui(
+	rows = 42,
+	columns = 132,
+): {
 	tui: TUI;
 	component: () => Component;
 	options: () => OverlayOptions | undefined;

@@ -6,8 +6,18 @@ import type {
 	ObservabilityRunSummary,
 	ObservabilitySnapshot,
 } from "../../src/domains/observability/index.js";
-import { type Component, type OverlayHandle, type OverlayOptions, type TUI, visibleWidth } from "../../src/engine/tui.js";
-import { FLEET_OVERLAY_WIDTH, formatFleetOverlayBodyLines, openFleetOverlay } from "../../src/interactive/fleet-overlay.js";
+import {
+	type Component,
+	type OverlayHandle,
+	type OverlayOptions,
+	type TUI,
+	visibleWidth,
+} from "../../src/engine/tui.js";
+import {
+	FLEET_OVERLAY_WIDTH,
+	formatFleetOverlayBodyLines,
+	openFleetOverlay,
+} from "../../src/interactive/fleet-overlay.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
@@ -75,7 +85,10 @@ function overlayHandle(): OverlayHandle {
 	};
 }
 
-function fakeTui(rows = 42, columns = 132): {
+function fakeTui(
+	rows = 42,
+	columns = 132,
+): {
 	tui: TUI;
 	component: () => Component;
 	options: () => OverlayOptions | undefined;
