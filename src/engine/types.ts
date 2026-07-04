@@ -45,8 +45,10 @@ export type {
 	EditorTheme,
 	SelectItem,
 	SelectListLayoutOptions,
-	SelectListTheme,
 	SettingItem,
 	SettingsListTheme,
 } from "@earendil-works/pi-tui";
 export { TUI } from "@earendil-works/pi-tui";
+// SelectListTheme carries the Clio design cursor as an engine augmentation; see
+// ./select-list.ts. Re-export the augmented type so every engine surface agrees.
+export type { SelectListTheme } from "./select-list.js";
