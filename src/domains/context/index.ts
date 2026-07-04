@@ -90,3 +90,4 @@ export {
 	writeWikiMeta,
 } from "./wiki/meta.js";
 export { type BuildWikiPromptInput, buildWikiPrompt } from "./wiki/prompts.js";
+export { type WikiStaleness, wikiStaleness } from "./wiki/staleness.js";

@@ -2,7 +2,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { readClioVersion, resolvePackageRoot } from "../core/package-root.js";
-import { readCodewiki } from "../domains/context/index.js";
+import {
+	listWikiPages,
+	readCodewiki,
+	renderCodewikiDigest,
+	validateWikiLayout,
+	wikiStaleness,
+} from "../domains/context/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	type CapabilityFlags,
@@ -41,7 +47,11 @@ export interface WelcomeDashboardStats {
 	toolProfile: string;
 	compactionThreshold: string;
 	clioMdStatus: string;
+	hasCodewiki: boolean;
 	codewikiCount: number;
+	wikiPageCount: number;
+	wikiStatus: string;
+	wikiDigestExcerpt: string[];
 	handoffCount: number;
 	handoffFreshness: string;
 }
@@ -117,6 +127,18 @@ function formatRelativeTime(mtimeMs: number, now = Date.now()): string {
 	return new Date(mtimeMs).toISOString().slice(0, 10);
 }
 
+function entryPointExcerpt(codewikiDigest: string): string[] {
+	const lines = codewikiDigest.split(/\r?\n/);
+	const start = lines.findIndex((line) => line.trim() === "entry points:");
+	if (start === -1) return [];
+	const out: string[] = [];
+	for (const line of lines.slice(start)) {
+		if (line.trim() === "key symbols:" || line.trim() === "dependencies:") break;
+		out.push(line.trim());
+	}
+	return out.slice(0, 6);
+}
+
 export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
 	const settings = deps.getSettings?.();
 	const statuses = deps.providers.list();
@@ -144,7 +166,11 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		typeof threshold === "number" && Number.isFinite(threshold) ? `${Math.round(threshold * 100)}%` : "80%";
 
 	let clioMdStatus = "none";
+	let hasCodewiki = false;
 	let codewikiCount = 0;
+	let wikiPageCount = 0;
+	let wikiStatus = "no wiki; run clio context wiki";
+	let wikiDigestExcerpt: string[] = [];
 	let handoffCount = 0;
 	let handoffFreshness = "none";
 
@@ -155,7 +181,18 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
+		hasCodewiki = true;
 		codewikiCount = codewiki.files.filter((file) => file.lang !== "config").length;
+		wikiDigestExcerpt = entryPointExcerpt(renderCodewikiDigest(codewiki));
+		const layout = validateWikiLayout(cwd);
+		const staleness = wikiStaleness(cwd);
+		if (layout.ok && staleness.state !== "absent") {
+			wikiPageCount = listWikiPages(cwd).length;
+			wikiStatus =
+				staleness.state === "stale"
+					? `stale, ${staleness.changedFiles} changed file${staleness.changedFiles === 1 ? "" : "s"}`
+					: "fresh";
+		}
 	}
 
 	const handoffsDir = join(cwd, ".clio", "handoffs");
@@ -194,7 +231,11 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		toolProfile,
 		compactionThreshold,
 		clioMdStatus,
+		hasCodewiki,
 		codewikiCount,
+		wikiPageCount,
+		wikiStatus,
+		wikiDigestExcerpt,
 		handoffCount,
 		handoffFreshness,
 	};
@@ -264,6 +305,14 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	const safetyStr = `autonomy ${theme.fg("accentDeep", stats.autonomy)}`;
 	const profileStr = `profile ${theme.fg("dim", stats.toolProfile)}`;
 	const compactStr = `compact @${theme.fg("muted", stats.compactionThreshold)}`;
+	const wikiStateStr =
+		stats.wikiStatus === "no wiki; run clio context wiki"
+			? theme.fg("dim", stats.wikiStatus)
+			: `${theme.fg("info", `${stats.wikiPageCount} page${stats.wikiPageCount === 1 ? "" : "s"}`)} · ${theme.fg(
+					stats.wikiStatus === "fresh" ? "success" : "warning",
+					stats.wikiStatus,
+				)}`;
+	const wikiExcerpt = stats.wikiDigestExcerpt.length > 0 ? stats.wikiDigestExcerpt.join(" · ") : "entry points: none";
 
 	const hintStr = `Type ${theme.fg("accent", "/settings")} to edit · ${theme.fg("accent", "/context init")} to bootstrap · ${theme.fg("accent", "Alt+U")} to toggle dashboard`;
 
@@ -275,22 +324,35 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
 		const targetLine = `  ${theme.fg("muted", "Target:")}   ${targetVal} · ${thinkVal}${healthStr}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
+		const wikiLine = fitHint(`  ${theme.fg("muted", "Wiki:")}     ${wikiStateStr} · ${theme.fg("muted", wikiExcerpt)}`);
 		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${profileStr} · ${compactStr}`;
 		const hintLine = fitHint(`  ${theme.fg("muted", "Hint:")}     ${hintStr}`);
 
-		return frame(theme, title, [targetLine, contextLine, settingsLine, hintLine], safeWidth);
+		return frame(
+			theme,
+			title,
+			[targetLine, contextLine, ...(stats.hasCodewiki ? [wikiLine] : []), settingsLine, hintLine],
+			safeWidth,
+		);
 	} else if (safeWidth >= MID_MIN) {
 		const targetLine = `  ${theme.fg("muted", "Target:")}  ${targetVal} · ${thinkVal}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")} ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
+		const wikiLine = fitHint(`  ${theme.fg("muted", "Wiki:")}    ${wikiStateStr} · ${theme.fg("muted", wikiExcerpt)}`);
 		const configLine = `  ${theme.fg("muted", "Config:")}  ${safetyStr} · ${profileStr}`;
 		const hintLine = fitHint(`  ${theme.fg("muted", "Hint:")}    ${hintStr}`);
 
-		return frame(theme, title, [targetLine, contextLine, configLine, hintLine], safeWidth);
+		return frame(
+			theme,
+			title,
+			[targetLine, contextLine, ...(stats.hasCodewiki ? [wikiLine] : []), configLine, hintLine],
+			safeWidth,
+		);
 	} else {
 		return [
 			title,
 			`  ${targetVal} · ${thinkVal}`,
 			`  ${clioMdStr} · ${codewikiStr}`,
+			...(stats.hasCodewiki ? [`  wiki ${stats.wikiStatus}`] : []),
 			`  ${safetyStr} · ${theme.fg("accent", "Alt+U")} toggle`,
 		].map((line) => truncateToWidth(line, safeWidth, "", true));
 	}

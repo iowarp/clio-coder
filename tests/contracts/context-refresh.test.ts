@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +10,12 @@ import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	computeFingerprint,
+	listWikiPages,
 	renderPromptContext,
 	runContextRefresh,
 	serializeClioMd,
+	wikiDir,
+	writeWikiMeta,
 } from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
 
@@ -48,6 +52,35 @@ function writeFixtureClioMd(cwd: string): string {
 	});
 	writeFileSync(join(cwd, "CLIO.md"), text, "utf8");
 	return text;
+}
+
+function git(cwd: string, args: ReadonlyArray<string>): string {
+	const child = spawnSync("git", [...args], { cwd, encoding: "utf8" });
+	if (child.error) throw child.error;
+	if (child.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${child.stderr}`);
+	return child.stdout.trim();
+}
+
+function initGitRepo(cwd: string): string {
+	git(cwd, ["init"]);
+	git(cwd, ["config", "user.email", "clio-test@example.com"]);
+	git(cwd, ["config", "user.name", "Clio Test"]);
+	git(cwd, ["add", "."]);
+	git(cwd, ["commit", "-m", "initial"]);
+	return git(cwd, ["rev-parse", "--verify", "HEAD"]);
+}
+
+function writeWikiFixture(cwd: string, gitHead: string | null): void {
+	mkdirSync(wikiDir(cwd), { recursive: true });
+	writeFileSync(join(wikiDir(cwd), "quickstart.md"), "# Quickstart\n\nStart with `src/index.ts`.\n", "utf8");
+	writeWikiMeta(cwd, {
+		version: 1,
+		updatedAt: "2026-07-04T00:00:00.000Z",
+		gitHead,
+		model: "test-model",
+		contentHash: "0".repeat(64),
+		pages: listWikiPages(cwd),
+	});
 }
 
 function context(events: ContextActivityPayload[]): DomainContext {
@@ -147,5 +180,67 @@ describe("contracts/context-refresh", () => {
 		strictEqual("clioMdRestamped" in result, false);
 		ok(existsSync(join(cwd, ".clio", "codewiki.json")));
 		strictEqual(existsSync(join(cwd, "CLIO.md")), false);
+	});
+
+	it("updates the wiki after the L1 rebuild only when wiki is explicitly true", async () => {
+		const cwd = scratchProject();
+		writeWikiFixture(cwd, null);
+		let called = 0;
+		let sawRebuiltCodewiki = false;
+
+		const result = await runContextRefresh({
+			cwd,
+			wiki: true,
+			wikiGenerate: (input) => {
+				called += 1;
+				strictEqual(input.mode, "update");
+				sawRebuiltCodewiki = existsSync(join(input.cwd, ".clio", "codewiki.json"));
+			},
+		});
+
+		strictEqual(called, 1);
+		strictEqual(sawRebuiltCodewiki, true);
+		strictEqual(result.wiki?.status, "noop");
+		strictEqual(result.wiki?.pages, 1);
+		strictEqual(result.hint, undefined);
+	});
+
+	it("returns a stale wiki hint on ordinary refresh without calling the wiki generator", async () => {
+		const cwd = scratchProject();
+		const head = initGitRepo(cwd);
+		writeWikiFixture(cwd, head);
+		writeFileSync(join(cwd, "src", "extra.ts"), "export const extra = true;\n", "utf8");
+		git(cwd, ["add", "src/extra.ts"]);
+		git(cwd, ["commit", "-m", "add extra"]);
+		let called = 0;
+
+		const result = await runContextRefresh({
+			cwd,
+			wiki: false,
+			wikiGenerate: () => {
+				called += 1;
+			},
+		});
+
+		strictEqual(called, 0);
+		strictEqual(result.wiki, undefined);
+		strictEqual(result.hint, "wiki is stale; run clio context refresh --wiki or clio context wiki --update");
+	});
+
+	it("does not run or hint wiki refresh when no wiki exists", async () => {
+		const cwd = scratchProject();
+		let called = 0;
+
+		const result = await runContextRefresh({
+			cwd,
+			wiki: true,
+			wikiGenerate: () => {
+				called += 1;
+			},
+		});
+
+		strictEqual(called, 0);
+		strictEqual(result.wiki, undefined);
+		strictEqual(result.hint, undefined);
 	});
 });

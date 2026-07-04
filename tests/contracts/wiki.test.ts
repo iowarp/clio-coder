@@ -16,6 +16,7 @@ import {
 	validateWikiMeta,
 	wikiDir,
 	wikiMetaPath,
+	wikiStaleness,
 	writeWikiMeta,
 } from "../../src/domains/context/index.js";
 
@@ -49,6 +50,24 @@ function writeProjectFile(cwd: string): void {
 function writeWikiPage(cwd: string, name: string, text: string): void {
 	mkdirSync(wikiDir(cwd), { recursive: true });
 	writeFileSync(join(wikiDir(cwd), name), text, "utf8");
+}
+
+function git(cwd: string, args: ReadonlyArray<string>): string {
+	const child = spawnSync("git", [...args], { cwd, encoding: "utf8" });
+	if (child.error) throw child.error;
+	if (child.status !== 0) {
+		throw new Error(`git ${args.join(" ")} failed: ${child.stderr}`);
+	}
+	return child.stdout.trim();
+}
+
+function initGitRepo(cwd: string): string {
+	git(cwd, ["init"]);
+	git(cwd, ["config", "user.email", "clio-test@example.com"]);
+	git(cwd, ["config", "user.name", "Clio Test"]);
+	git(cwd, ["add", "."]);
+	git(cwd, ["commit", "-m", "initial"]);
+	return git(cwd, ["rev-parse", "--verify", "HEAD"]);
 }
 
 function promptCodewiki(): Codewiki {
@@ -129,6 +148,47 @@ describe("contracts/wiki", () => {
 		validation = validateWikiLayout(scratch);
 		strictEqual(validation.ok, false);
 		if (!validation.ok) ok(validation.problems.some((problem) => problem.includes("empty.md is empty")));
+	});
+
+	it("reports absent, fresh, and stale wiki staleness from git metadata", () => {
+		strictEqual(wikiStaleness(scratch).state, "absent");
+
+		writeProjectFile(scratch);
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
+		const head = initGitRepo(scratch);
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: head,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		deepStrictEqual(wikiStaleness(scratch), { state: "fresh" });
+
+		writeFileSync(join(scratch, "src", "extra.ts"), "export const extra = true;\n", "utf8");
+		git(scratch, ["add", "src/extra.ts"]);
+		git(scratch, ["commit", "-m", "add extra"]);
+		const stale = wikiStaleness(scratch);
+		strictEqual(stale.state, "stale");
+		if (stale.state === "stale") ok(stale.changedFiles >= 1);
+	});
+
+	it("degrades git-less wiki staleness checks to fresh with a warning", () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: "abc123",
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		const staleness = wikiStaleness(scratch);
+		strictEqual(staleness.state, "fresh");
+		match(staleness.warning ?? "", /current git HEAD is missing/);
 	});
 
 	it("generates pages with a fake callback and preserves metadata on noop", async () => {
