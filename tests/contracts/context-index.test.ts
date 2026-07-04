@@ -66,6 +66,6 @@ describe("contracts/context-index", () => {
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "python");
 		strictEqual(typeof state?.lastIndexedAt, "string");
-		ok(readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8").includes('"version": 3'));
+		ok(readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8").includes('"version":3'));
 	});
 });
