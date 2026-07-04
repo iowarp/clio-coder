@@ -188,6 +188,8 @@ export interface InteractiveDeps {
 	getTaskBoard?: () => TaskBoardSnapshot | null;
 	/** XDG state dir (clioStateDir()). `/view verify` reads from <stateDir>/receipts/<id>.json. */
 	stateDir: string;
+	/** XDG data dir (clioDataDir()). `/view` reads durable evidence bundles from <dataDir>/evidence/. */
+	dataDir: string;
 	/** XDG cache dir (clioCacheDir()). The Skills Hub marketplace cache lives here. */
 	cacheDir: string;
 	/**
@@ -2504,6 +2506,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openViewOverlay(tui, {
 			providers: createDefaultArtifactProviders({
 				stateDir: deps.stateDir,
+				dataDir: deps.dataDir,
 				dispatch: deps.dispatch,
 				sessionMeta,
 				readSessionEntries: deps.readSessionEntries,

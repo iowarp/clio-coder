@@ -1,17 +1,41 @@
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
+import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../../domains/evidence/store.js";
+import type { EvidenceFinding, EvidenceOverview, EvidenceSource } from "../../domains/evidence/types.js";
 import { type AccountabilitySummary, readAccountabilitySummary } from "../../domains/observability/index.js";
-import type { BashExecutionEntry, MessageEntry, SessionEntry } from "../../domains/session/entries.js";
-import type { SessionMeta } from "../../domains/session/index.js";
+import type {
+	BashExecutionEntry,
+	MessageEntry,
+	ProtectedArtifactEntry,
+	SessionEntry,
+	TaskLedgerEntry,
+	TaskLedgerGoal,
+	TaskLedgerValidationEvidence,
+} from "../../domains/session/entries.js";
+import {
+	type AuditJsonRow,
+	type AuditReadResult,
+	readAuditRows,
+	type SessionMeta,
+} from "../../domains/session/index.js";
 import { formatUsd } from "../footer/widgets.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { abbreviateModelId } from "../theme/index.js";
 
-export type ViewArtifactCategory = "accountability" | "receipt" | "dispatch" | "tool-output" | "compaction";
+export type ViewArtifactCategory =
+	| "accountability"
+	| "evidence"
+	| "receipt"
+	| "dispatch"
+	| "task-ledger"
+	| "tool-output"
+	| "protected-artifact"
+	| "compaction"
+	| "audit";
 export type ViewArtifactFormat = "markdown" | "text" | "json";
 
 export interface ViewArtifactLoadResult {
@@ -38,6 +62,7 @@ export interface ArtifactProvider {
 
 export interface ArtifactProviderDeps {
 	stateDir: string;
+	dataDir?: string | undefined;
 	dispatch?: Pick<DispatchContract, "listRuns" | "getRun"> | undefined;
 	sessionMeta?: SessionMeta | null | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
@@ -45,10 +70,14 @@ export interface ArtifactProviderDeps {
 
 export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"accountability",
+	"evidence",
 	"receipt",
 	"dispatch",
+	"task-ledger",
 	"tool-output",
+	"protected-artifact",
 	"compaction",
+	"audit",
 ] as const;
 
 /** Cap on failure-cause tags rendered in the accountability artifact. */
@@ -130,6 +159,36 @@ function safeTitle(value: string, fallback: string): string {
 	return trimmed.length > 0 ? trimmed : fallback;
 }
 
+function shortValue(value: string, maxLength = 12): string {
+	const trimmed = value.replace(/\s+/g, " ").trim();
+	if (trimmed.length <= maxLength) return trimmed;
+	return trimmed.slice(0, maxLength);
+}
+
+function formatList(values: ReadonlyArray<string>, fallback = "none"): string {
+	const cleaned = values.map((value) => value.trim()).filter((value) => value.length > 0);
+	return cleaned.length > 0 ? cleaned.join(", ") : fallback;
+}
+
+function formatOptionalString(value: string | null | undefined, fallback = "none"): string {
+	return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function formatDurationMs(value: number): string {
+	if (!Number.isFinite(value) || value < 0) return "unknown";
+	if (value < 1000) return `${Math.round(value)}ms`;
+	const seconds = value / 1000;
+	if (seconds < 60) return `${seconds.toFixed(1)}s`;
+	const minutes = Math.floor(seconds / 60);
+	const remainder = Math.round(seconds % 60);
+	return `${minutes}m ${remainder}s`;
+}
+
+function readStringField(record: Record<string, unknown>, key: string): string | null {
+	const value = record[key];
+	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 function maybeSizeBytes(path: string): number | undefined {
 	try {
 		const info = statSync(path);
@@ -142,6 +201,10 @@ function maybeSizeBytes(path: string): number | undefined {
 function sessionCurrentPath(stateDir: string, meta: SessionMeta | null | undefined): string | undefined {
 	if (!meta) return undefined;
 	return join(stateDir, "sessions", meta.cwdHash, meta.id, "current.jsonl");
+}
+
+function protectedArtifactPath(path: string): string | undefined {
+	return isAbsolute(path) ? path : undefined;
 }
 
 export function receiptFilePath(stateDir: string, runId: string): string {
@@ -399,6 +462,151 @@ async function loadTextPath(path: string): Promise<ViewArtifactLoadResult> {
 	}
 }
 
+function evidenceBundlePath(dataDir: string, evidenceId: string): string | undefined {
+	try {
+		return evidenceDirectory(dataDir, evidenceId);
+	} catch {
+		return undefined;
+	}
+}
+
+function evidenceSourceLabel(source: EvidenceSource): string {
+	switch (source.kind) {
+		case "run":
+			return `run ${source.runId}`;
+		case "session":
+			return `session ${source.sessionId}`;
+		case "eval":
+			return `eval ${source.evalId}`;
+	}
+}
+
+function evidenceSourceTitle(source: EvidenceSource): string {
+	switch (source.kind) {
+		case "run":
+			return `run ${shortValue(source.runId)}`;
+		case "session":
+			return `session ${shortValue(source.sessionId)}`;
+		case "eval":
+			return `eval ${shortValue(source.evalId)}`;
+	}
+}
+
+function renderEvidenceMarkdown(
+	overview: EvidenceOverview,
+	findings: ReadonlyArray<EvidenceFinding>,
+	path: string | undefined,
+	loadError?: string,
+): string[] {
+	const lines = [
+		"# Evidence Bundle",
+		"",
+		`- evidence id: ${overview.evidenceId}`,
+		`- source: ${evidenceSourceLabel(overview.source)}`,
+		`- generated: ${overview.generatedAt}`,
+		`- run ids: ${formatList(overview.runIds)}`,
+		`- session id: ${formatOptionalString(overview.sessionId)}`,
+		`- statuses: ${formatList(overview.statuses)}`,
+		"",
+		"## Tasks",
+	];
+	if (overview.tasks.length === 0) {
+		lines.push("- none");
+	} else {
+		for (const task of overview.tasks) lines.push(`- ${task}`);
+	}
+	lines.push(
+		"",
+		"## Targets / Models",
+		"",
+		`- targets: ${formatList(overview.targetIds)}`,
+		`- runtimes: ${formatList(overview.runtimeIds)}`,
+		`- models: ${formatList(overview.modelIds)}`,
+		`- agents: ${formatList(overview.agentIds)}`,
+		"",
+		"## Totals",
+		"",
+		`- runs: ${overview.totals.runs}`,
+		`- receipts: ${overview.totals.receipts}`,
+		`- tool calls: ${overview.totals.toolCalls}`,
+		`- tool errors: ${overview.totals.toolErrors}`,
+		`- blocked tool calls: ${overview.totals.blockedToolCalls}`,
+		`- tokens: ${formatFooterTokens(overview.totals.tokens)}`,
+		`- cost: ${formatUsd(overview.totals.costUsd)}`,
+		`- protected artifacts: ${overview.totals.protectedArtifacts}`,
+		`- wall time: ${formatDurationMs(overview.totals.wallTimeMs)}`,
+		"",
+		"## Tags",
+	);
+	if (overview.tags.length === 0) {
+		lines.push("- none");
+	} else {
+		for (const tag of overview.tags) lines.push(`- ${tag}`);
+	}
+	lines.push("", "## Findings");
+	if (findings.length === 0) {
+		lines.push("- none");
+	} else {
+		for (const finding of findings) {
+			const run = finding.runId ? ` run ${finding.runId}` : "";
+			lines.push(`- ${finding.severity} ${finding.tag}${run}: ${finding.message}`);
+		}
+	}
+	lines.push("", "## Files", "", `- backing path: ${path ?? "unknown"}`);
+	if (overview.files.length === 0) {
+		lines.push("- files: none");
+	} else {
+		for (const file of overview.files) lines.push(`- ${file}`);
+	}
+	if (loadError !== undefined) {
+		lines.push("", "## Load Error", "", loadError);
+	}
+	return lines;
+}
+
+export class EvidenceArtifactProvider implements ArtifactProvider {
+	readonly category = "evidence" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const dataDir = this.deps.dataDir;
+		if (!dataDir) return [];
+		let overviews: EvidenceOverview[];
+		try {
+			overviews = await listEvidenceOverviews(dataDir);
+		} catch {
+			return [];
+		}
+		return overviews.map((overview) => {
+			const path = evidenceBundlePath(dataDir, overview.evidenceId);
+			const artifact: ViewArtifact = {
+				id: overview.evidenceId,
+				category: this.category,
+				title: safeTitle(`Evidence · ${evidenceSourceTitle(overview.source)}`, "Evidence bundle"),
+				timestamp: parseTime(overview.generatedAt),
+				load: async () => {
+					try {
+						const inspected = await inspectEvidence(dataDir, overview.evidenceId);
+						return {
+							format: "markdown" as const,
+							lines: renderEvidenceMarkdown(inspected.overview, inspected.findings, path),
+						};
+					} catch (err) {
+						const message = err instanceof Error ? err.message : String(err);
+						return {
+							format: "markdown" as const,
+							lines: renderEvidenceMarkdown(overview, [], path, `unable to inspect evidence: ${message}`),
+						};
+					}
+				},
+			};
+			if (path !== undefined) artifact.path = path;
+			return artifact;
+		});
+	}
+}
+
 function receiptTitle(env: RunEnvelope): string {
 	return safeTitle(`${env.agentId} · ${env.task}`, env.id);
 }
@@ -541,6 +749,96 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 	}
 }
 
+function taskLedgerStatusSummary(entry: TaskLedgerEntry): string {
+	const items = [...entry.goals, ...entry.subgoals];
+	if (items.length === 0) return "no goals";
+	const completed = items.filter((item) => item.status === "completed").length;
+	const active = items.filter((item) => item.status === "active").length;
+	const blocked = items.filter((item) => item.status === "blocked").length;
+	const parts = [`${completed}/${items.length} done`];
+	if (active > 0) parts.push(`${active} active`);
+	if (blocked > 0) parts.push(`${blocked} blocked`);
+	return parts.join(" · ");
+}
+
+function taskLedgerTitle(entry: TaskLedgerEntry): string {
+	const boardTitle = entry.goals[0]?.title ?? "Task ledger";
+	return safeTitle(`Task ledger · ${boardTitle} · ${taskLedgerStatusSummary(entry)}`, "Task ledger");
+}
+
+function renderTaskLedgerGoals(lines: string[], heading: string, goals: ReadonlyArray<TaskLedgerGoal>): void {
+	lines.push("", heading);
+	if (goals.length === 0) {
+		lines.push("- none");
+		return;
+	}
+	for (const goal of goals) {
+		const parent = goal.parentGoalId ? ` parent ${goal.parentGoalId}` : "";
+		lines.push(`- [${goal.status}] ${goal.id} ${goal.title}${parent}`);
+		if (goal.description) lines.push(`  - description: ${goal.description}`);
+	}
+}
+
+function renderValidationEvidence(lines: string[], evidence: ReadonlyArray<TaskLedgerValidationEvidence>): void {
+	lines.push("", "## Required Validation Evidence");
+	if (evidence.length === 0) {
+		lines.push("- none");
+		return;
+	}
+	for (const item of evidence) {
+		lines.push(`- [${item.status}] ${item.id} ${item.description}`);
+		if (item.command) lines.push(`  - command: ${item.command}`);
+		if (item.artifactPath) lines.push(`  - artifact: ${item.artifactPath}`);
+		if (item.observedAt) lines.push(`  - observed: ${item.observedAt}`);
+		if (item.notes) lines.push(`  - notes: ${item.notes}`);
+	}
+}
+
+function renderTaskLedgerMarkdown(entry: TaskLedgerEntry): string[] {
+	const lines = [
+		"# Task Ledger",
+		"",
+		`- turn id: ${entry.turnId}`,
+		`- timestamp: ${entry.timestamp}`,
+		`- status: ${taskLedgerStatusSummary(entry)}`,
+	];
+	renderTaskLedgerGoals(lines, "## Board Goals", entry.goals);
+	renderTaskLedgerGoals(lines, "## Subgoals", entry.subgoals);
+	lines.push("", "## Active Runs");
+	if (entry.activeRunIds.length === 0) {
+		lines.push("- none");
+	} else {
+		for (const runId of entry.activeRunIds) lines.push(`- ${runId}`);
+	}
+	renderValidationEvidence(lines, entry.requiredValidationEvidence);
+	return lines;
+}
+
+export class TaskLedgerArtifactProvider implements ArtifactProvider {
+	readonly category = "task-ledger" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const entries = sessionEntries(this.deps);
+		const path = sessionCurrentPath(this.deps.stateDir, this.deps.sessionMeta);
+		return entries
+			.filter((entry): entry is TaskLedgerEntry => entry.kind === "taskLedger")
+			.map((entry) => ({
+				id: `task-ledger:${entry.turnId}`,
+				category: this.category,
+				title: taskLedgerTitle(entry),
+				timestamp: parseTime(entry.timestamp),
+				sizeBytes: Buffer.byteLength(JSON.stringify(entry), "utf8"),
+				...(path ? { path } : {}),
+				load: async () => ({
+					format: "markdown" as const,
+					lines: renderTaskLedgerMarkdown(entry),
+				}),
+			}));
+	}
+}
+
 export class ToolOutputArtifactProvider implements ArtifactProvider {
 	readonly category = "tool-output" as const;
 
@@ -592,6 +890,58 @@ export class ToolOutputArtifactProvider implements ArtifactProvider {
 			path,
 			load: () => loadTextPath(path),
 		};
+	}
+}
+
+function protectedArtifactTitle(entry: ProtectedArtifactEntry): string {
+	const name = basename(entry.artifact.path) || entry.artifact.path || entry.turnId;
+	return safeTitle(`Protected · ${name}`, "Protected artifact");
+}
+
+function renderProtectedArtifactMarkdown(entry: ProtectedArtifactEntry): string[] {
+	return [
+		"# Protected Artifact",
+		"",
+		`- turn id: ${entry.turnId}`,
+		`- action: ${entry.action}`,
+		`- path: ${entry.artifact.path}`,
+		`- source: ${entry.artifact.source}`,
+		`- protectedAt: ${entry.artifact.protectedAt}`,
+		`- reason: ${entry.artifact.reason}`,
+		`- validation command: ${entry.artifact.validationCommand ?? "none"}`,
+		`- validation exit code: ${entry.artifact.validationExitCode ?? "none"}`,
+		`- tool name: ${entry.toolName ?? "none"}`,
+		`- tool call id: ${entry.toolCallId ?? "none"}`,
+		`- run id: ${entry.runId ?? "none"}`,
+		`- correlation id: ${entry.correlationId ?? "none"}`,
+	];
+}
+
+export class ProtectedArtifactProvider implements ArtifactProvider {
+	readonly category = "protected-artifact" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		const entries = sessionEntries(this.deps);
+		return entries
+			.filter((entry): entry is ProtectedArtifactEntry => entry.kind === "protectedArtifact")
+			.map((entry) => {
+				const path = protectedArtifactPath(entry.artifact.path);
+				const artifact: ViewArtifact = {
+					id: `protected:${entry.turnId}`,
+					category: this.category,
+					title: protectedArtifactTitle(entry),
+					timestamp: parseTime(entry.timestamp),
+					sizeBytes: path ? maybeSizeBytes(path) : Buffer.byteLength(JSON.stringify(entry), "utf8"),
+					load: async () => ({
+						format: "markdown" as const,
+						lines: renderProtectedArtifactMarkdown(entry),
+					}),
+				};
+				if (path !== undefined) artifact.path = path;
+				return artifact;
+			});
 	}
 }
 
@@ -672,13 +1022,127 @@ export class AccountabilityArtifactProvider implements ArtifactProvider {
 	}
 }
 
+const SAFETY_AUDIT_ARTIFACT_LIMIT = 200;
+
+function compareAuditRowsNewestFirst(left: AuditJsonRow, right: AuditJsonRow): number {
+	const time = parseTime(right.ts) - parseTime(left.ts);
+	if (time !== 0) return time;
+	const file = right.file.localeCompare(left.file);
+	if (file !== 0) return file;
+	return right.line - left.line;
+}
+
+function currentSessionAuditRows(
+	rows: ReadonlyArray<AuditJsonRow>,
+	sessionId: string | null | undefined,
+): ReadonlyArray<AuditJsonRow> {
+	if (!sessionId) return rows;
+	const matching = rows.filter((row) => readStringField(row.row, "sessionId") === sessionId);
+	return matching.length > 0 ? matching : rows;
+}
+
+function auditRowSubject(row: AuditJsonRow): string {
+	const subjectParts: string[] = [];
+	const tool = readStringField(row.row, "tool");
+	if (tool !== null) subjectParts.push(tool);
+	const actionClass = readStringField(row.row, "actionClass");
+	if (actionClass !== null) subjectParts.push(actionClass);
+	const decision =
+		readStringField(row.row, "decision") ??
+		readStringField(row.row, "status") ??
+		readStringField(row.row, "source") ??
+		readStringField(row.row, "phase");
+	if (decision !== null) subjectParts.push(decision);
+	const runId = readStringField(row.row, "runId");
+	const sessionId = readStringField(row.row, "sessionId");
+	const correlationId = readStringField(row.row, "correlationId") ?? row.correlationId;
+	if (runId !== null) {
+		subjectParts.push(`run ${shortValue(runId)}`);
+	} else if (sessionId !== null) {
+		subjectParts.push(`session ${shortValue(sessionId)}`);
+	} else if (correlationId.length > 0) {
+		subjectParts.push(`corr ${shortValue(correlationId)}`);
+	}
+	return subjectParts.join(" · ");
+}
+
+function auditRowTitle(row: AuditJsonRow): string {
+	const subject = auditRowSubject(row);
+	return safeTitle(`Audit · ${row.auditKind}${subject ? ` · ${subject}` : ""}`, "Audit row");
+}
+
+function auditRowPayload(row: AuditJsonRow): Record<string, unknown> {
+	return {
+		file: row.file,
+		line: row.line,
+		auditKind: row.auditKind,
+		correlationId: row.correlationId,
+		row: row.row,
+	};
+}
+
+function auditReadErrorsArtifact(stateDir: string, errors: ReadonlyArray<string>): ViewArtifact | null {
+	if (errors.length === 0) return null;
+	const path = join(stateDir, "audit");
+	return {
+		id: "audit:read-errors",
+		category: "audit",
+		title: `Audit · ${errors.length} read error${errors.length === 1 ? "" : "s"}`,
+		timestamp: Date.now(),
+		path,
+		load: async () => ({
+			format: "markdown" as const,
+			lines: ["# Audit Read Errors", "", ...errors.map((error) => `- ${error}`)],
+		}),
+	};
+}
+
+export class SafetyAuditArtifactProvider implements ArtifactProvider {
+	readonly category = "audit" as const;
+
+	constructor(private readonly deps: ArtifactProviderDeps) {}
+
+	async list(): Promise<ViewArtifact[]> {
+		let read: AuditReadResult;
+		try {
+			read = await readAuditRows(this.deps.stateDir);
+		} catch {
+			return [];
+		}
+		const selected = [...currentSessionAuditRows(read.rows, this.deps.sessionMeta?.id)]
+			.sort(compareAuditRowsNewestFirst)
+			.slice(0, SAFETY_AUDIT_ARTIFACT_LIMIT);
+		const artifacts: ViewArtifact[] = selected.map((row) => {
+			const path = join(this.deps.stateDir, "audit", row.file);
+			return {
+				id: `audit:${row.file}:${row.line}`,
+				category: this.category,
+				title: auditRowTitle(row),
+				timestamp: parseTime(row.ts),
+				sizeBytes: maybeSizeBytes(path),
+				path,
+				load: async () => ({
+					format: "json" as const,
+					lines: splitLinesCapped(JSON.stringify(auditRowPayload(row), null, 2), path),
+				}),
+			};
+		});
+		const errors = auditReadErrorsArtifact(this.deps.stateDir, read.errors);
+		return errors ? [...artifacts, errors] : artifacts;
+	}
+}
+
 export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): ArtifactProvider[] {
 	return [
 		new AccountabilityArtifactProvider(deps),
+		new EvidenceArtifactProvider(deps),
 		new ReceiptArtifactProvider(deps),
 		new DispatchArtifactProvider(deps),
+		new TaskLedgerArtifactProvider(deps),
 		new ToolOutputArtifactProvider(deps),
+		new ProtectedArtifactProvider(deps),
 		new CompactionArtifactProvider(deps),
+		new SafetyAuditArtifactProvider(deps),
 	];
 }
 

@@ -1052,6 +1052,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		getTaskBoard: () => taskBoard.snapshot(),
 		stateDir: clioStateDir(),
+		dataDir: clioDataDir(),
 		cacheDir: clioCacheDir(),
 		registerAskUserHandler: (handler) => {
 			askUserHandler = handler;

@@ -9,11 +9,22 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import { readAccountabilitySummary } from "./accountability.js";
-import type { ObservabilityContract, TokenThroughputSnapshot } from "./contract.js";
+import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { aggregateMetrics } from "./metrics.js";
+import { createObservabilityProjection } from "./projection.js";
 import { createTelemetry } from "./telemetry.js";
+
+/**
+ * Callbacks the auto-build path uses to report evidence readiness back to the
+ * projection without coupling the pure build helper to it. `onReady` fires once
+ * the sidecar index row lands; `onFailed` fires when the build or write throws.
+ */
+interface EvidenceBuildHooks {
+	onReady(runId: string, evidence: ObservabilityRunEvidence): void;
+	onFailed(runId: string, message: string): void;
+}
 
 /**
  * Terminal dispatch payload with every field optional. Partial<> alone does
@@ -53,16 +64,28 @@ function recordDispatchCost(
  * retry). A retry, a non-success outcome, or a bundle that shows no validation
  * evidence all force firstPassSuccess to false. See section 7 of the spec.
  */
-async function buildAndIndexEvidence(runId: string, succeeded: boolean, attempt: number | undefined): Promise<void> {
+async function buildAndIndexEvidence(
+	runId: string,
+	succeeded: boolean,
+	attempt: number | undefined,
+	hooks: EvidenceBuildHooks,
+): Promise<void> {
 	try {
 		const dataDir = clioDataDir();
 		const stateDir = clioStateDir();
 		const result = await buildEvidence({ dataDir, stateDir, runId });
 		const row = evidenceIndexRow(runId, result, succeeded, attempt);
 		await writeEvidenceIndexRowQueued(stateDir, row);
+		hooks.onReady(runId, {
+			evidenceId: row.evidenceId,
+			firstPassSuccess: row.firstPassSuccess,
+			findingCount: row.findingCount,
+			tags: row.tags,
+		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		process.stderr.write(`[clio:evidence] auto-build failed for run ${runId}: ${message}\n`);
+		hooks.onFailed(runId, message);
 	}
 }
 
@@ -99,6 +122,18 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
 
+	// The product-facing projection folds the bus channels plus the session
+	// cost/telemetry trackers into a single bounded snapshot. It reads these
+	// accessors at snapshot-build time, so it always observes the latest state
+	// regardless of bus-handler ordering.
+	const projection = createObservabilityProjection(context.bus, {
+		metrics: () => aggregateMetrics(telemetry.snapshot()),
+		sessionCost: () => cost.sessionTotal(),
+		sessionTokens: () => cost.sessionTokens(),
+		latestThroughput: () => latestThroughput,
+		readAccountability: () => readAccountabilitySummary(clioStateDir()),
+	});
+
 	// In-flight forensic builds. The terminal event is emitted after the receipt
 	// and ledger are persisted (dispatch finalizers persist before emit), so a
 	// build that starts here reads durable state. We keep the bus handler
@@ -109,7 +144,11 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 	// interactive sessions.
 	const pendingBuilds = new Set<Promise<void>>();
 	const trackBuild = (runId: string, succeeded: boolean, attempt: number | undefined): void => {
-		const build = buildAndIndexEvidence(runId, succeeded, attempt);
+		projection.evidenceBuildStarted(runId);
+		const build = buildAndIndexEvidence(runId, succeeded, attempt, {
+			onReady: (id, evidence) => projection.evidenceBuildSucceeded(id, evidence),
+			onFailed: (id, message) => projection.evidenceBuildFailed(id, message),
+		});
 		pendingBuilds.add(build);
 		void build.finally(() => pendingBuilds.delete(build));
 	};
@@ -149,12 +188,16 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 			unsubscribes.push(
 				context.bus.on(BusChannels.SafetyClassified, () => {
 					telemetry.record("counter", "safety.classified", 1);
+					// The projection reads metrics off telemetry; nudge it so the
+					// safety-classification counter reaches the snapshot.
+					projection.refresh();
 				}),
 			);
 		},
 		async stop() {
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
+			projection.stop();
 			// Flush any in-flight forensic builds so a headless run that shuts down
 			// immediately after dispatch still persists its bundle and index row.
 			// Best-effort and bounded by the shutdown hook budget; each build
@@ -176,16 +219,21 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		resetSession() {
 			cost.reset();
 			latestThroughput = null;
+			projection.refresh();
 		},
 		recordTokens(providerId, modelId, tokens, costUsd, breakdown) {
 			telemetry.record("counter", "tokens.total", tokens);
 			cost.accumulate(providerId, modelId, tokens, costUsd, breakdown);
+			projection.refresh();
 		},
 		recordTokenThroughput(snapshot) {
 			latestThroughput = snapshot;
 			telemetry.record("histogram", "tokens.output_per_second", snapshot.tokensPerSecond);
 			telemetry.record("histogram", "tokens.ttft_ms", snapshot.ttftMs ?? 0);
+			projection.refresh();
 		},
+		snapshot: () => projection.snapshot(),
+		subscribe: (listener) => projection.subscribe(listener),
 	};
 
 	return { extension, contract };
