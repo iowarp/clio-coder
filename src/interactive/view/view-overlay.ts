@@ -21,7 +21,7 @@ import {
 
 export const VIEW_OVERLAY_WIDTH = "100%";
 export const VIEW_OVERLAY_MAX_HEIGHT = "100%";
-export const VIEW_OVERLAY_MARGIN = { top: 1, right: 2, bottom: 1, left: 2 } as const;
+export const VIEW_OVERLAY_MARGIN = { top: 0, right: 0, bottom: 0, left: 0 } as const;
 
 const LEFT_PANE_TARGET_WIDTH = 38;
 const LEFT_PANE_MIN_WIDTH = 30;
