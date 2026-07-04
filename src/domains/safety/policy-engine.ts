@@ -27,6 +27,7 @@ export type SafetyPolicySource =
 	| "project-policy"
 	| "project-policy-invalid"
 	| "builtin-command-allowlist"
+	| "builtin-classifier"
 	| "none";
 
 export interface SafetyPolicyDecision {
@@ -248,6 +249,19 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 						return blockDecision(base, blockInput);
 					}
 				}
+			}
+
+			if (classification.actionClass === "system_modify") {
+				const input: Omit<
+					SafetyPolicyDecision,
+					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+				> = {
+					ruleId: "system-modify-confirm",
+					reasonCode: "system-modify-confirm",
+					reasons: [...classification.reasons, "system-level changes require one-shot confirmation at every autonomy level"],
+					policySource: "builtin-classifier",
+				};
+				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
 			if (call.tool === ToolNames.Bash && classification.actionClass === "execute") {

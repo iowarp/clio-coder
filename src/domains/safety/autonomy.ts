@@ -6,7 +6,8 @@ import type { RejectionMessage } from "./rejection-feedback.js";
  * controls exactly one thing: which action classes trigger the approval flow
  * versus run immediately versus auto-deny. It runs AFTER the safety net: a
  * net `block` is final at every level and a net `confirm` always asks; this
- * mapping applies only to calls the net passed.
+ * mapping applies only to level-dependent rows after the net passed.
+ * Level-independent rails such as system_modify belong to the policy engine.
  *
  * The mapping is pure. The registry (orchestrator and worker) and the ACP
  * delegation mediator are the only consumers; each resolves an `ask`
@@ -36,8 +37,9 @@ export interface AutonomyMappingOptions {
 }
 
 /**
- * The §2.3 matrix, verbatim. `git_destructive` never reaches this mapping in
- * practice (the safety net blocks it first); it maps to deny defensively.
+ * The §2.3 level-dependent matrix. `git_destructive` never reaches this
+ * mapping in practice (the safety net blocks it first); it maps to deny
+ * defensively.
  */
 export function mapAutonomy(
 	level: AutonomyLevel,
@@ -57,8 +59,11 @@ export function mapAutonomy(
 			if (options.executeRecognized !== false) return "allow";
 			return level === "full-auto" ? "allow" : "ask";
 		}
-		case "system_modify":
 		case "unknown":
+			// Registered tools that classify as unknown are substituted to their
+			// baseActionClass in the registry after safety.evaluate(). Keeping
+			// unknown here prevents read-class domain tools from becoming a net
+			// confirm rail before that substitution can happen.
 			return "ask";
 		default:
 			return "ask";
