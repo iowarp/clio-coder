@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "../../src/domains/providers/eligibility.js";
@@ -32,7 +32,7 @@ describe("contracts/antigravity runtime registration", () => {
 
 describe("contracts/antigravity subprocess permission gate", () => {
 	it("only opens the dangerous bypass under full-auto plus the explicit environment gate", () => {
-		for (const autonomy of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
+		for (const autonomy of ["read-only", "auto-edit", "full-auto"] as const) {
 			const config = antigravitySubprocessConfigForAutonomy(autonomy, {});
 			strictEqual(config.dangerousBypass, false, `${autonomy} must not bypass by default`);
 			ok(
@@ -42,16 +42,30 @@ describe("contracts/antigravity subprocess permission gate", () => {
 		}
 
 		strictEqual(antigravitySubprocessConfigForAutonomy("read-only", {}).extraArgs.includes("--sandbox"), true);
-		strictEqual(antigravitySubprocessConfigForAutonomy("suggest", {}).extraArgs.includes("--sandbox"), true);
 		strictEqual(antigravitySubprocessConfigForAutonomy("auto-edit", {}).extraArgs.length, 0);
-
-		const suggestWithEnv = antigravitySubprocessConfigForAutonomy("suggest", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" });
-		strictEqual(suggestWithEnv.dangerousBypass, false);
-		ok(!suggestWithEnv.extraArgs.includes("--dangerously-skip-permissions"));
+		throws(() => antigravitySubprocessConfigForAutonomy("suggest", {}), /cannot enforce autonomy 'suggest'/);
+		throws(
+			() => antigravitySubprocessConfigForAutonomy("suggest", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" }),
+			/cannot enforce autonomy 'suggest'/,
+		);
 
 		const fullAutoWithEnv = antigravitySubprocessConfigForAutonomy("full-auto", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" });
 		strictEqual(fullAutoWithEnv.dangerousBypass, true);
 		ok(fullAutoWithEnv.extraArgs.includes("--dangerously-skip-permissions"));
+	});
+
+	it("refuses suggest before building agy args", () => {
+		const base = {
+			systemPrompt: "",
+			agentId: "contract",
+			task: "Summarize the repository.",
+			target: { id: "contract", runtime: "antigravity-code" },
+			runtime: antigravityCodeRuntime,
+			wireModelId: "Gemini 3.5 Flash (High)",
+			allowedTools: [],
+			autonomy: "suggest" as const,
+		};
+		throws(() => buildAgyArgs(base), /antigravity-code runtime cannot enforce autonomy 'suggest'/);
 	});
 
 	it("builds agy --print args with the prompt last and no bypass flag at default autonomy", () => {

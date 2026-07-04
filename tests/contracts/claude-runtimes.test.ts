@@ -268,7 +268,7 @@ describe("contracts/external CLI worker tool-profile enforcement", () => {
 
 describe("contracts/claude subprocess permission gate", () => {
 	it("only opens dangerous bypass under full-auto plus the explicit environment gate", () => {
-		for (const autonomy of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
+		for (const autonomy of ["read-only", "auto-edit", "full-auto"] as const) {
 			const config = claudeSubprocessPermissionConfigForAutonomy(autonomy, {});
 			strictEqual(config.dangerousBypass, false, `${autonomy} must not bypass by default`);
 			strictEqual(config.permissionMode === "bypassPermissions", false, `${autonomy} must not use bypass by default`);
@@ -276,11 +276,11 @@ describe("contracts/claude subprocess permission gate", () => {
 			ok(!config.extraArgs.includes("--dangerously-skip-permissions"));
 		}
 
-		const suggestWithEnv = claudeSubprocessPermissionConfigForAutonomy("suggest", {
-			CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1",
-		});
-		strictEqual(suggestWithEnv.dangerousBypass, false);
-		strictEqual(suggestWithEnv.permissionMode === "bypassPermissions", false);
+		throws(() => claudeSubprocessPermissionConfigForAutonomy("suggest", {}), /cannot enforce autonomy 'suggest'/);
+		throws(
+			() => claudeSubprocessPermissionConfigForAutonomy("suggest", { CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1" }),
+			/cannot enforce autonomy 'suggest'/,
+		);
 
 		const fullAutoWithEnv = claudeSubprocessPermissionConfigForAutonomy("full-auto", {
 			CLIO_ALLOW_EXTERNAL_FULL_ACCESS: "1",
@@ -289,6 +289,20 @@ describe("contracts/claude subprocess permission gate", () => {
 		strictEqual(fullAutoWithEnv.permissionMode, "bypassPermissions");
 		ok(fullAutoWithEnv.extraArgs.includes("--allow-dangerously-skip-permissions"));
 		ok(!fullAutoWithEnv.extraArgs.includes("--dangerously-skip-permissions"));
+	});
+
+	it("refuses suggest before building Claude Code args", () => {
+		const base = {
+			systemPrompt: "",
+			agentId: "contract",
+			task: "hello",
+			target: { id: "contract", runtime: "claude-code" },
+			runtime: claudeCodeRuntime,
+			wireModelId: "sonnet",
+			allowedTools: [],
+			autonomy: "suggest" as const,
+		};
+		throws(() => buildClaudeCodeArgs(base), /claude-code runtime cannot enforce autonomy 'suggest'/);
 	});
 
 	it("does not pass Clio session ids as Claude Code session ids", () => {
