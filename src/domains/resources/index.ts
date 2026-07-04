@@ -17,12 +17,6 @@ export function createResourcesDomainModule(options: ResourceLoaderOptions = {})
 
 export type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
 export { resolveResourceCollisions } from "./collision.js";
-export {
-	DEFAULT_CONTEXT_FILE_NAMES,
-	loadProjectContextFiles,
-	type ProjectContextFile,
-	renderProjectContextFiles,
-} from "./context-files/loader.js";
 export type { ResourceList, ResourcesContract } from "./contract.js";
 export { createResourcesLoader, type ResourceLoaderOptions } from "./loader.js";
 export { ResourcesManifest } from "./manifest.js";

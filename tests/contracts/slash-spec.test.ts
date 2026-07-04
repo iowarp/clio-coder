@@ -137,7 +137,7 @@ describe("contracts/slash-spec", () => {
 			["/context init --preview", { kind: "init", options: { preview: true } }],
 			["/context init --adopt", { kind: "init", options: { adopt: true } }],
 			["/context init --apply", { kind: "init", options: { applyClioMd: true } }],
-			["/context init --rewrite", { kind: "init", options: { applyClioMd: true } }],
+			["/context init --rewrite", { kind: "init", options: { applyClioMd: true, rewriteClioMd: true } }],
 			["/context init --propose", { kind: "init", options: { proposeClioMd: true } }],
 			["/context init --global", { kind: "init", options: { includeGlobalImports: true } }],
 			["/context init --include-global", { kind: "init", options: { includeGlobalImports: true } }],
@@ -499,7 +499,7 @@ describe("contracts/slash-spec", () => {
 		);
 		const init = all?.find((item) => item.label === "init");
 		strictEqual(init?.value, "init");
-		strictEqual(init?.description, "[--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic]");
+		strictEqual(init?.description, "[--preview] [--adopt] [--apply] [--rewrite] [--propose] [--global] [--heuristic]");
 
 		const filtered = await context?.getArgumentCompletions?.("in");
 		deepStrictEqual(
@@ -515,7 +515,7 @@ describe("contracts/slash-spec", () => {
 		const flags = await context?.getArgumentCompletions?.("init --");
 		deepStrictEqual(
 			flags?.map((item) => item.label),
-			["--preview", "--adopt", "--apply", "--propose", "--global", "--heuristic"],
+			["--preview", "--adopt", "--apply", "--rewrite", "--propose", "--global", "--heuristic"],
 		);
 		strictEqual(flags?.[0]?.value, "init --preview", "the value replays the typed stem with the token completed");
 

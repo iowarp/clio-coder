@@ -2,12 +2,6 @@ import { expandConfigPath } from "../../core/resolve-config-value.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import {
-	type LoadProjectContextFilesInput,
-	loadProjectContextFiles,
-	type ProjectContextFile,
-	renderProjectContextFiles,
-} from "./context-files/loader.js";
-import {
 	expandPromptTemplateInput,
 	loadPromptTemplates,
 	type PromptTemplate,
@@ -30,13 +24,10 @@ export interface ResourceList<T> {
 
 export interface ResourceLoaderOptions {
 	cwd?: string;
-	noContextFiles?: boolean;
 	skills?: () => Pick<LoadSkillsInput, "trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths">;
 }
 
 export interface ResourcesLoader {
-	contextFiles(cwd?: string, options?: Omit<LoadProjectContextFilesInput, "cwd">): ProjectContextFile[];
-	renderContextFiles(files: ReadonlyArray<ProjectContextFile>, cwd?: string): string;
 	skills(cwd?: string): ResourceList<Skill>;
 	expandSkillInvocation(text: string, cwd?: string, options?: SkillExpansionOptions): SkillExpansion;
 	parsePendingSkillRequests(
@@ -53,19 +44,11 @@ export interface ResourcesLoader {
 
 export function createResourcesLoader(options: ResourceLoaderOptions = {}): ResourcesLoader {
 	const defaultCwd = options.cwd ?? process.cwd();
-	const noContextFiles = options.noContextFiles === true;
 	const skillOptions = (): Pick<
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
 	> => options.skills?.() ?? {};
 	return {
-		contextFiles(cwd = defaultCwd, contextOptions = {}) {
-			if (noContextFiles) return [];
-			return loadProjectContextFiles({ cwd, ...contextOptions });
-		},
-		renderContextFiles(files, cwd = defaultCwd) {
-			return renderProjectContextFiles(files, cwd);
-		},
 		skills(cwd = defaultCwd) {
 			return loadSkills({ cwd, ...skillOptions() });
 		},

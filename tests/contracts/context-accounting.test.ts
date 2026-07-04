@@ -14,6 +14,10 @@ import {
 } from "../../src/domains/session/context-accounting.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 
+function groupTokens(ledger: ReturnType<typeof buildContextLedger>, category: string): number {
+	return ledger.groups.find((group) => group.category === category)?.tokens ?? 0;
+}
+
 function testRuntime(id: "ollama-native" | "lmstudio-native"): RuntimeDescriptor {
 	return {
 		id,
@@ -111,6 +115,39 @@ describe("contracts/context-accounting", () => {
 			getTokens("streaming");
 
 		strictEqual(ledger.usedTokens, sum);
+	});
+
+	it("buckets dynamic context prompt fragments into their ledger categories", () => {
+		const ledger = buildContextLedger({
+			provider: "test",
+			model: "test-model",
+			contextWindow: 1000,
+			promptSegments: [
+				{ id: "context.project-rules", tokenEstimate: 11 },
+				{ id: "context.operator-profile", tokenEstimate: 13 },
+				{ id: "context.clio-repo-awareness", tokenEstimate: 17 },
+				{ id: "context.unknown-fragment", tokenEstimate: 19 },
+			],
+		});
+
+		strictEqual(groupTokens(ledger, "project"), 11);
+		strictEqual(groupTokens(ledger, "memory"), 13);
+		strictEqual(groupTokens(ledger, "system"), 36);
+	});
+
+	it("counts active project rule fragments as project context instead of system prompt", () => {
+		const ledger = buildContextLedger({
+			provider: "test",
+			model: "test-model",
+			contextWindow: 1000,
+			promptSegments: [
+				{ id: "identity", tokenEstimate: 8 },
+				{ id: "context.project-rules", tokenEstimate: 42 },
+			],
+		});
+
+		strictEqual(groupTokens(ledger, "project"), 42);
+		strictEqual(groupTokens(ledger, "system"), 8);
 	});
 
 	it("normalizes estimated splits deterministically to the exact reconciled prompt total", () => {

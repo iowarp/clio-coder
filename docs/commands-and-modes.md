@@ -111,7 +111,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | - | `/targets` | Show target hub for health, auth, models, and actions |
 | `/cost` | - | `/cost` | Show session token and cost totals |
-| `/context` | `/ctx` | `/context compact [instructions] \| /context init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic] \| /context refresh \| /context reset [--all] [--confirm] [--confirm-all]` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/context` | `/ctx` | `/context compact [instructions] \| /context init [--preview] [--adopt] [--apply] [--rewrite] [--propose] [--global] [--heuristic] \| /context refresh \| /context reset [--all] [--confirm] [--confirm-all]` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |

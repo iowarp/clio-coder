@@ -113,7 +113,7 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 	}
 	const clio = tryReadClioMd(cwd);
 	if (!clio && projectType !== "unknown" && options.noContextFiles !== true) {
-		hints.push("clio: No CLIO.md detected. Run /context-init to explore the repo and bootstrap context.");
+		hints.push("clio: No CLIO.md detected. Run /context init to explore the repo and bootstrap context.");
 	}
 	if (clio && !clio.ok) {
 		hints.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
@@ -121,7 +121,7 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 	const state = readClioState(cwd);
 	if (!state) return hints;
 	if (state.contextSources && state.contextSources.length > 0 && adoptionSourcesChanged(state.contextSources)) {
-		hints.push("clio: Imported agent context changed. Run /context-init --adopt to refresh.");
+		hints.push("clio: Imported agent context changed. Run /context init --adopt to refresh.");
 	}
 	return hints;
 }
@@ -237,11 +237,27 @@ export function createContextBundle(
 			}
 		},
 		async runContextRefresh(input) {
-			const result = await runContextRefresh(input);
-			const cwd = input?.cwd ?? process.cwd();
-			contextState.invalidate(cwd);
-			if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
-			return result;
+			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
+				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-refresh", at: Date.now(), ...event });
+				input?.onProgress?.(event);
+			};
+			try {
+				const result = await runContextRefresh(
+					input ? { ...input, onProgress: emitProgress } : { onProgress: emitProgress },
+				);
+				const cwd = input?.cwd ?? process.cwd();
+				contextState.invalidate(cwd);
+				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
+				return result;
+			} catch (err) {
+				emitProgress({
+					phase: "done",
+					status: "failed",
+					message: "context refresh failed",
+					detail: err instanceof Error ? err.message : String(err),
+				});
+				throw err;
+			}
 		},
 		renderPromptContext,
 		projectStructuredContext(cwd = process.cwd()) {

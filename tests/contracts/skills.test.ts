@@ -513,8 +513,6 @@ describe("contracts/skills slash-command parity", () => {
 		writeSkillDir(root, "expandable", ['name: "expandable"', 'description: "Expand me."'], "FOLLOW STEPS");
 		const list = loadSkills({ roots: [projectRoot(root)] });
 		const resources: ResourcesContract = {
-			contextFiles: () => [],
-			renderContextFiles: () => "",
 			skills: () => list,
 			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
 			parsePendingSkillRequests: (text, _cwd, options) => {
@@ -555,8 +553,6 @@ describe("contracts/skills slash-command parity", () => {
 		);
 		const list = loadSkills({ roots: [projectRoot(root)] });
 		const resources: ResourcesContract = {
-			contextFiles: () => [],
-			renderContextFiles: () => "",
 			skills: () => list,
 			expandSkillInvocation: (text, _cwd, options) => expandSkillInvocationInput(text, list, options),
 			parsePendingSkillRequests: (text, _cwd, options) => {

@@ -39,8 +39,7 @@ const TERMINAL_RETENTION_MS = 4_000;
 const KINDS: ReadonlySet<string> = new Set<ContextActivityKind>([
 	"context-init",
 	"context-clear",
-	"context-prime",
-	"context-handoff",
+	"context-refresh",
 	"compaction",
 ]);
 const PHASE_SET: ReadonlySet<string> = new Set<ContextActivityPhase>(PHASES);
@@ -125,7 +124,13 @@ export function formatContextActivityIslandLines(
 	const theme = clioTheme();
 	const bodyWidth = Math.max(1, width - 4);
 	const title =
-		activity.kind === "context-init" ? "Context Init" : activity.kind === "compaction" ? "Context Compact" : "Context";
+		activity.kind === "context-init"
+			? "Context Init"
+			: activity.kind === "context-refresh"
+				? "Context Refresh"
+				: activity.kind === "compaction"
+					? "Context Compact"
+					: "Context";
 	const elapsedMs = Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs);
 	const topLine = `${theme.style("accent", title, { bold: true })} ${theme.fg("dim", "·")} ${statusLabel(theme, activity, tick)} ${theme.fg("dim", "·")} ${theme.fg("info", formatCompactMs(elapsedMs))}`;
 	const barWidth = Math.max(8, Math.min(24, bodyWidth - 10));

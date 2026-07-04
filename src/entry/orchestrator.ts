@@ -35,6 +35,7 @@ import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { type ContextContract, createContextDomainModule } from "../domains/context/index.js";
+import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
@@ -1077,6 +1078,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							preview?: boolean;
 							adopt?: boolean;
 							applyClioMd?: boolean;
+							rewriteClioMd?: boolean;
 							proposeClioMd?: boolean;
 							includeGlobalImports?: boolean;
 							heuristic?: boolean;
@@ -1088,14 +1090,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						// deterministic heuristic when no target is reachable. --heuristic and
 						// --preview skip model generation.
 						const useModel = options.heuristic !== true && options.preview !== true;
+						const bootstrapOptions = bootstrapInputFromInitOptions(options);
 						await contextDomain.runBootstrap({
 							cwd: process.cwd(),
 							confirmGitignore: () => true,
-							...(options.preview === undefined ? {} : { preview: options.preview }),
 							adopt: options.adopt === true,
-							...(options.applyClioMd === undefined ? {} : { applyClioMd: options.applyClioMd }),
-							...(options.proposeClioMd === undefined ? {} : { proposeClioMd: options.proposeClioMd }),
-							...(options.includeGlobalImports === undefined ? {} : { includeGlobalImports: options.includeGlobalImports }),
+							...bootstrapOptions,
 							...(useModel
 								? {
 										generate: modelBootstrapGenerate({

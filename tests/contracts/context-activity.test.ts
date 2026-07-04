@@ -10,6 +10,9 @@ import {
 	formatContextActivityIslandLines,
 } from "../../src/interactive/context-activity.js";
 
+const ESC = "\u001B";
+const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
+
 function makeActivity(overrides: Partial<ContextActivitySnapshot> = {}): ContextActivitySnapshot {
 	return {
 		kind: "context-init",
@@ -35,6 +38,15 @@ describe("context activity island", () => {
 		}
 	});
 
+	it("titles context-refresh activity as Context Refresh", () => {
+		const rendered = stripAnsi(
+			formatContextActivityIslandLines(makeActivity({ kind: "context-refresh" }), CONTEXT_ISLAND_WIDTH, 2000, 1).join(
+				"\n",
+			),
+		);
+		ok(rendered.includes("Context Refresh"), rendered);
+	});
+
 	it("tracks context progress events and retains terminal state briefly", () => {
 		const bus = createSafeEventBus();
 		const store = createContextActivityStore(bus);
@@ -58,6 +70,28 @@ describe("context activity island", () => {
 		strictEqual(current.phase, "done");
 		strictEqual(current.status, "completed");
 		strictEqual(store.current(7001), null);
+		store.unsubscribe();
+	});
+
+	it("accepts context-refresh payloads and rejects removed context-prime payloads", () => {
+		const bus = createSafeEventBus();
+		const store = createContextActivityStore(bus);
+		bus.emit(BusChannels.ContextActivity, {
+			kind: "context-refresh",
+			phase: "codewiki",
+			status: "started",
+			message: "rebuilding codewiki",
+			at: 1000,
+		});
+		strictEqual(store.current(1001)?.kind, "context-refresh");
+		bus.emit(BusChannels.ContextActivity, {
+			kind: "context-prime",
+			phase: "codewiki",
+			status: "started",
+			message: "removed kind",
+			at: 2000,
+		} as never);
+		strictEqual(store.current(2001)?.kind, "context-refresh");
 		store.unsubscribe();
 	});
 });

@@ -66,7 +66,6 @@ export { renderPromptContext } from "./prompt-context.js";
 export {
 	type RunContextRefreshInput,
 	type RunContextRefreshResult,
-	restampFingerprintFooter,
 	runContextRefresh,
 } from "./refresh.js";
 export { readClioState, writeClioState } from "./state.js";
