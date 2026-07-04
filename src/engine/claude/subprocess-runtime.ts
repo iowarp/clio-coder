@@ -37,11 +37,9 @@ export function claudeSubprocessPermissionConfigForAutonomy(
 		};
 	}
 	if (level === "suggest") {
-		return {
-			permissionMode: "dontAsk",
-			extraArgs: ["--tools", READ_ONLY_CLAUDE_TOOLS.join(",")],
-			dangerousBypass: false,
-		};
+		throw new Error(
+			"claude-code runtime cannot enforce autonomy 'suggest': it cannot park tool calls for approval. Dispatch to a native or claude-sdk worker, or use read-only or auto-edit.",
+		);
 	}
 	if (level === "auto-edit") {
 		return { permissionMode: "acceptEdits", extraArgs: [], dangerousBypass: false };

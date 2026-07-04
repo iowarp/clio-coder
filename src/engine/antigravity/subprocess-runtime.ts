@@ -33,8 +33,8 @@ export interface AntigravitySubprocessConfig {
  *
  *  - `full-auto` + `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1` opens the dangerous
  *    bypass (`--dangerously-skip-permissions`); nothing else does.
- *  - `read-only` and `suggest` run `--sandbox` (terminal restrictions; the
- *    closest headless analog, since `agy --print` cannot pause to ask).
+ *  - `read-only` runs `--sandbox`.
+ *  - `suggest` is refused because `agy --print` cannot pause to ask.
  *  - `auto-edit` and ungated `full-auto` pass no permission flag and defer to
  *    agy's own `settings.json`.
  */
@@ -45,7 +45,12 @@ export function antigravitySubprocessConfigForAutonomy(
 	if (level === "full-auto" && env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS === "1") {
 		return { extraArgs: ["--dangerously-skip-permissions"], dangerousBypass: true };
 	}
-	if (level === "read-only" || level === "suggest") {
+	if (level === "suggest") {
+		throw new Error(
+			"antigravity-code runtime cannot enforce autonomy 'suggest': it cannot park tool calls for approval. Dispatch to a native or claude-sdk worker, or use read-only or auto-edit.",
+		);
+	}
+	if (level === "read-only") {
 		return { extraArgs: ["--sandbox"], dangerousBypass: false };
 	}
 	return { extraArgs: [], dangerousBypass: false };
