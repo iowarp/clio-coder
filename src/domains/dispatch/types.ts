@@ -291,6 +291,15 @@ export interface RunReceiptUpstreamResponse {
 	responseId: string | null;
 }
 
+export type RunAutonomyEnforcementGrade = "mediated" | "approximated" | "bypassed";
+
+export interface RunReceiptAutonomyEnforcement {
+	grade: RunAutonomyEnforcementGrade;
+	autonomy: string;
+	externalMode?: string;
+	dangerousBypass?: boolean;
+}
+
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
@@ -339,6 +348,8 @@ export interface RunReceipt {
 	toolStats: ToolCallStat[];
 	toolActivity?: ToolActivitySummary;
 	skillActivations?: SkillActivation[];
+	/** How this runtime enforced the run's captured autonomy level. */
+	autonomyEnforcement?: RunReceiptAutonomyEnforcement;
 	safety?: RunReceiptSafetySummary;
 	reproducibility?: RunReceiptReproducibility;
 	/** Effective target/runtime/model/thinking/capability decision for this run. */

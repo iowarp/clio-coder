@@ -4,7 +4,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } fr
 /**
  * Integrity versions. v1 predates the outcome/lineage/identity blocks; v2
  * folds them into the digest; v3 additionally folds the durable
- * findingsSummary (tags / firstPassSuccess / findingCount). Verification
+ * findingsSummary and autonomy-enforcement block. Verification
  * branches strictly on the version recorded in the receipt's integrity block,
  * never on field-presence heuristics, so a v2 receipt verifies via the
  * retained v2 branch and a v3 receipt via the v3 branch. Receipts written
@@ -147,6 +147,7 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: Rec
 		if (receipt.identity !== undefined) draft.identity = receipt.identity;
 	}
 	if (version >= 3) {
+		if (receipt.autonomyEnforcement !== undefined) draft.autonomyEnforcement = receipt.autonomyEnforcement;
 		if (receipt.findingsSummary !== undefined) draft.findingsSummary = receipt.findingsSummary;
 	}
 	return draft;
@@ -276,6 +277,9 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 	}
 	if (receipt.integrity.version < 3 && receipt.findingsSummary !== undefined) {
 		return { ok: false, reason: "v3 findings summary on v2 receipt" };
+	}
+	if (receipt.integrity.version < 3 && receipt.autonomyEnforcement !== undefined) {
+		return { ok: false, reason: "v3 autonomy enforcement on v2 receipt" };
 	}
 	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {

@@ -1,4 +1,9 @@
-import type { RunPersonaOverride, RunPipelineProvenance, RunReceipt } from "../dispatch/types.js";
+import type {
+	RunPersonaOverride,
+	RunPipelineProvenance,
+	RunReceipt,
+	RunReceiptAutonomyEnforcement,
+} from "../dispatch/types.js";
 
 /**
  * Worker permission-escalation counters projected off a receipt's
@@ -15,25 +20,25 @@ export interface RunEscalationCounts {
 }
 
 /**
- * The receipt-provenance subset the evidence and dispatch surfaces render:
- * pipeline threading, ad-hoc persona override, and escalation counters. Each
- * field is present only when the receipt carries it, so a legacy receipt maps
- * to an empty view and every renderer stays byte-identical to today.
+ * The receipt-provenance subset the evidence and dispatch surfaces render.
+ * Each field is present only when the receipt carries it, so a legacy receipt
+ * maps to an empty view and every renderer stays byte-identical to today.
  */
 export interface RunProvenanceView {
 	pipeline?: RunPipelineProvenance;
 	personaOverride?: RunPersonaOverride;
 	escalation?: RunEscalationCounts;
+	autonomyEnforcement?: RunReceiptAutonomyEnforcement;
 }
 
 /** The receipt fields the provenance view reads; a narrow slice of RunReceipt. */
-type ProvenanceReceipt = Pick<RunReceipt, "pipeline" | "personaOverride" | "safety">;
+type ProvenanceReceipt = Pick<RunReceipt, "pipeline" | "personaOverride" | "safety" | "autonomyEnforcement">;
 
 /** Number of leading hash characters shown as a persona-override prompt-hash prefix. */
 export const PERSONA_HASH_PREFIX_CHARS = 12;
 
 /**
- * Read the three provenance field sets off a receipt shape. Reads existing
+ * Read the provenance field sets off a receipt shape. Reads existing
  * optional fields only; never mutates the receipt or assumes a field is
  * present. Returns an empty view for a legacy receipt.
  */
@@ -43,12 +48,18 @@ export function extractRunProvenance(receipt: ProvenanceReceipt): RunProvenanceV
 	if (receipt.personaOverride !== undefined) view.personaOverride = receipt.personaOverride;
 	const escalation = escalationCountsFrom(receipt.safety);
 	if (escalation !== null) view.escalation = escalation;
+	if (receipt.autonomyEnforcement !== undefined) view.autonomyEnforcement = receipt.autonomyEnforcement;
 	return view;
 }
 
 /** True when at least one provenance field set is present. */
 export function hasRunProvenance(view: RunProvenanceView): boolean {
-	return view.pipeline !== undefined || view.personaOverride !== undefined || view.escalation !== undefined;
+	return (
+		view.pipeline !== undefined ||
+		view.personaOverride !== undefined ||
+		view.escalation !== undefined ||
+		view.autonomyEnforcement !== undefined
+	);
 }
 
 /**
@@ -66,6 +77,8 @@ export function runProvenanceFromUnknown(value: unknown): RunProvenanceView {
 	if (personaOverride !== null) view.personaOverride = personaOverride;
 	const escalation = escalationFromUnknown(value.safety);
 	if (escalation !== null) view.escalation = escalation;
+	const autonomyEnforcement = autonomyEnforcementFromUnknown(value.autonomyEnforcement);
+	if (autonomyEnforcement !== null) view.autonomyEnforcement = autonomyEnforcement;
 	return view;
 }
 
@@ -89,6 +102,16 @@ function pipelineFromUnknown(value: unknown): RunPipelineProvenance | null {
 function personaOverrideFromUnknown(value: unknown): RunPersonaOverride | null {
 	if (!isRecord(value) || typeof value.promptHash !== "string" || value.promptHash.length === 0) return null;
 	return { promptHash: value.promptHash };
+}
+
+function autonomyEnforcementFromUnknown(value: unknown): RunReceiptAutonomyEnforcement | null {
+	if (!isRecord(value)) return null;
+	if (value.grade !== "mediated" && value.grade !== "approximated" && value.grade !== "bypassed") return null;
+	if (typeof value.autonomy !== "string" || value.autonomy.length === 0) return null;
+	const view: RunReceiptAutonomyEnforcement = { grade: value.grade, autonomy: value.autonomy };
+	if (typeof value.externalMode === "string" && value.externalMode.length > 0) view.externalMode = value.externalMode;
+	if (typeof value.dangerousBypass === "boolean") view.dangerousBypass = value.dangerousBypass;
+	return view;
 }
 
 function escalationFromUnknown(safety: unknown): RunEscalationCounts | null {
@@ -141,6 +164,12 @@ export function provenanceTranscriptLines(view: RunProvenanceView): string[] {
 		const { requested, approved, denied, timedOut } = view.escalation;
 		lines.push(`escalations: ${requested} requested, ${approved} approved, ${denied} denied, ${timedOut} timed out`);
 	}
+	if (view.autonomyEnforcement !== undefined) {
+		const { grade, autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
+		const mode = externalMode !== undefined ? ` mode=${externalMode}` : "";
+		const bypass = dangerousBypass === true ? " dangerousBypass=true" : "";
+		lines.push(`autonomy enforcement: ${grade} autonomy=${autonomy}${mode}${bypass}`);
+	}
 	return lines;
 }
 
@@ -162,6 +191,12 @@ export function provenanceCompactSuffix(view: RunProvenanceView): string {
 	if (view.escalation !== undefined) {
 		const { requested, approved, denied, timedOut } = view.escalation;
 		parts.push(`escalations=${requested}req/${approved}appr/${denied}deny/${timedOut}timeout`);
+	}
+	if (view.autonomyEnforcement !== undefined) {
+		const { grade, autonomy, externalMode, dangerousBypass } = view.autonomyEnforcement;
+		const mode = externalMode !== undefined ? `/${externalMode}` : "";
+		const bypass = dangerousBypass === true ? "/bypass" : "";
+		parts.push(`enforcement=${grade}:${autonomy}${mode}${bypass}`);
 	}
 	return parts.length === 0 ? "" : ` ${parts.join(" ")}`;
 }

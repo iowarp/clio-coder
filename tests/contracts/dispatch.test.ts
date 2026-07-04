@@ -28,7 +28,7 @@ import {
 	summarizeToolActivity,
 	zeroSuccessfulToolNote,
 } from "../../src/domains/dispatch/tool-stats.js";
-import type { RunLineage, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import type { RunLineage, RunReceiptAutonomyEnforcement, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
@@ -294,6 +294,68 @@ function stubContext(
 	return { bus, getContract };
 }
 
+type TestAutonomy = "read-only" | "suggest" | "auto-edit" | "full-auto";
+
+function runtimeDescriptor(input: {
+	id: string;
+	kind: RuntimeDescriptor["kind"];
+	apiFamily: RuntimeDescriptor["apiFamily"];
+	auth?: RuntimeDescriptor["auth"];
+}): RuntimeDescriptor {
+	return {
+		id: input.id,
+		displayName: input.id,
+		kind: input.kind,
+		apiFamily: input.apiFamily,
+		auth: input.auth ?? "none",
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+		synthesizeModel: () => ({ id: "test-model", provider: input.id }) as never,
+	};
+}
+
+async function receiptForRuntime(input: {
+	runtime: RuntimeDescriptor;
+	autonomy: TestAutonomy;
+	allowExternalFullAccess?: boolean;
+	exitCode?: number;
+}): Promise<{ autonomyEnforcement: RunReceiptAutonomyEnforcement | undefined; spec: WorkerSpec | null }> {
+	const target: TargetDescriptor = {
+		id: `${input.runtime.id}-target`,
+		runtime: input.runtime.id,
+		defaultModel: "test-model",
+	};
+	const context = stubContext({ target, runtime: input.runtime });
+	const configContract = context.getContract<ConfigContract>("config");
+	const settings = configContract?.get() as { autonomy: TestAutonomy } | undefined;
+	if (settings) settings.autonomy = input.autonomy;
+	const originalGate = process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS;
+	if (input.allowExternalFullAccess === true) process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS = "1";
+	else Reflect.deleteProperty(process.env, "CLIO_ALLOW_EXTERNAL_FULL_ACCESS");
+	let capturedSpec: WorkerSpec | null = null;
+	const bundle = makeDispatchBundle(context, {
+		spawnWorker: (spec) => {
+			capturedSpec = spec;
+			return {
+				pid: 7100,
+				promise: Promise.resolve({ exitCode: input.exitCode ?? 0, signal: null }),
+				events: emptyEvents(),
+				heartbeatAt: { current: Date.now() },
+				abort: () => {},
+			};
+		},
+	});
+	await bundle.extension.start();
+	try {
+		const handle = await bundle.contract.dispatch({ agentId: "coder", task: `receipt ${input.runtime.id}` });
+		const receipt = await handle.finalPromise;
+		return { autonomyEnforcement: receipt.autonomyEnforcement, spec: capturedSpec };
+	} finally {
+		await bundle.extension.stop?.();
+		if (originalGate === undefined) Reflect.deleteProperty(process.env, "CLIO_ALLOW_EXTERNAL_FULL_ACCESS");
+		else process.env.CLIO_ALLOW_EXTERNAL_FULL_ACCESS = originalGate;
+	}
+}
+
 describe("contracts/dispatch", () => {
 	beforeEach(isolateDispatchState);
 	afterEach(restoreDispatchState);
@@ -520,6 +582,114 @@ describe("contracts/dispatch", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	});
+
+	it("records autonomy enforcement grade on worker receipts", async () => {
+		const cases: Array<{
+			name: string;
+			runtime: RuntimeDescriptor;
+			autonomy: TestAutonomy;
+			allowExternalFullAccess?: boolean;
+			expected: RunReceiptAutonomyEnforcement;
+		}> = [
+			{
+				name: "native http",
+				runtime: runtimeDescriptor({ id: "openai", kind: "http", apiFamily: "openai-completions", auth: "api-key" }),
+				autonomy: "auto-edit",
+				expected: { grade: "mediated", autonomy: "auto-edit" },
+			},
+			{
+				name: "claude sdk",
+				runtime: runtimeDescriptor({ id: "claude-sdk", kind: "sdk", apiFamily: "claude-agent-sdk", auth: "claude-cli" }),
+				autonomy: "suggest",
+				expected: { grade: "mediated", autonomy: "suggest" },
+			},
+			{
+				name: "claude code auto edit",
+				runtime: runtimeDescriptor({
+					id: "claude-code",
+					kind: "subprocess",
+					apiFamily: "claude-code-subprocess",
+					auth: "claude-cli",
+				}),
+				autonomy: "auto-edit",
+				expected: {
+					grade: "approximated",
+					autonomy: "auto-edit",
+					externalMode: "acceptEdits",
+					dangerousBypass: false,
+				},
+			},
+			{
+				name: "claude code bypass",
+				runtime: runtimeDescriptor({
+					id: "claude-code",
+					kind: "subprocess",
+					apiFamily: "claude-code-subprocess",
+					auth: "claude-cli",
+				}),
+				autonomy: "full-auto",
+				allowExternalFullAccess: true,
+				expected: {
+					grade: "bypassed",
+					autonomy: "full-auto",
+					externalMode: "bypassPermissions",
+					dangerousBypass: true,
+				},
+			},
+			{
+				name: "antigravity sandbox",
+				runtime: runtimeDescriptor({
+					id: "antigravity-code",
+					kind: "subprocess",
+					apiFamily: "google-generative-ai",
+				}),
+				autonomy: "read-only",
+				expected: {
+					grade: "approximated",
+					autonomy: "read-only",
+					externalMode: "sandbox",
+					dangerousBypass: false,
+				},
+			},
+			{
+				name: "antigravity bypass",
+				runtime: runtimeDescriptor({
+					id: "antigravity-code",
+					kind: "subprocess",
+					apiFamily: "google-generative-ai",
+				}),
+				autonomy: "full-auto",
+				allowExternalFullAccess: true,
+				expected: {
+					grade: "bypassed",
+					autonomy: "full-auto",
+					externalMode: "agy-settings-default",
+					dangerousBypass: true,
+				},
+			},
+		];
+
+		for (const item of cases) {
+			const { autonomyEnforcement, spec } = await receiptForRuntime(item);
+			strictEqual(spec?.autonomy, item.autonomy, item.name);
+			deepStrictEqual(autonomyEnforcement, item.expected, item.name);
+		}
+	});
+
+	it("keeps receipt building total when an external suggest mapping throws", async () => {
+		const { autonomyEnforcement } = await receiptForRuntime({
+			runtime: runtimeDescriptor({
+				id: "claude-code",
+				kind: "subprocess",
+				apiFamily: "claude-code-subprocess",
+				auth: "claude-cli",
+			}),
+			autonomy: "suggest",
+			exitCode: 2,
+		});
+
+		deepStrictEqual(autonomyEnforcement, { grade: "approximated", autonomy: "suggest" });
 	});
 
 	it("dispatches a batch of tasks to multiple fake workers concurrently", async () => {
