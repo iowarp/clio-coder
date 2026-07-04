@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project python
 """OpenAI HumanEval adapter for Clio Coder.
 
 This adapter intentionally stays thin: it loads the public HumanEval dataset,
@@ -43,6 +43,7 @@ CLIO = os.environ.get("CLIO_BIN", "clio")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from result_manifest import target_profile, write_result_manifest
+from uv_command import uv_python_cmd, uv_script_cmd
 
 try:
     from clio_fleet import load_fleet
@@ -466,7 +467,7 @@ def run_subprocess_check(problem: dict[str, Any], completion: str, timeout: floa
         path.write_text(program, encoding="utf-8")
         try:
             proc = subprocess.run(
-                [sys.executable, str(path)],
+                [*uv_python_cmd(), str(path)],
                 cwd=tmp,
                 capture_output=True,
                 text=True,
@@ -792,7 +793,7 @@ def maybe_data_args(data: str | None) -> list[str]:
 
 
 def generate_tasks(args: argparse.Namespace) -> int:
-    problems, source, _ = load_problems(args.data)
+    problems, source, source_type = load_problems(args.data)
     chosen = selected_problems(problems, args.task_id, args.limit, args.offset)
     if not chosen:
         print("no HumanEval tasks matched", file=sys.stderr)
@@ -800,6 +801,11 @@ def generate_tasks(args: argparse.Namespace) -> int:
     script = Path(__file__).resolve()
     run_root = Path(args.run_root)
     data_args = maybe_data_args(args.data)
+    uv_packages = (
+        ["human-eval @ git+https://github.com/openai/human-eval.git"]
+        if args.evaluator == "official" or source_type == "human_eval_package"
+        else []
+    )
     lines = ["version: 1", "tasks:"]
     for problem in chosen:
         task_id = problem["task_id"]
@@ -814,8 +820,7 @@ def generate_tasks(args: argparse.Namespace) -> int:
             """
         )
         setup = [
-            sys.executable,
-            str(script),
+            *uv_script_cmd(script, uv_packages),
             "run-task",
             *data_args,
             "--task-id",
@@ -833,8 +838,7 @@ def generate_tasks(args: argparse.Namespace) -> int:
         if args.dry_run:
             setup.append("--dry-run")
         verifier = [
-            sys.executable,
-            str(script),
+            *uv_script_cmd(script, uv_packages),
             "grade-task",
             *data_args,
             "--task-id",

@@ -43,10 +43,20 @@ The adapter scripts also honor per-run overrides such as `CLIO_MAIN_URL`,
 target and thinking variables.
 
 ```sh
-CLIO_FLEET=/path/to/private/fleet.json npm run bench:tb
-npm run bench:swe -- --instances pytest-dev__pytest-6116 --out benchmarks/community/swe-bench-lite/runs/smoke
-npm run bench:scicode -- inspect-data --data /path/to/scicode/problems_all.jsonl
-python3 benchmarks/community/human-eval/humaneval_clio.py run --limit 5 --out benchmarks/community/human-eval/runs/smoke
+CLIO_FLEET=/path/to/private/fleet.json \
+  uv run --no-project python benchmarks/community/clio_fleet.py
+
+uv run --no-project --with datasets --with swebench \
+  python benchmarks/community/swe-bench-lite/swebench_clio.py \
+  --instances pytest-dev__pytest-6116 \
+  --out benchmarks/community/swe-bench-lite/runs/smoke
+
+uv run --no-project python benchmarks/community/scicode/scicode_clio.py inspect-data \
+  --data /path/to/scicode/problems_all.jsonl
+
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run \
+  --limit 5 \
+  --out benchmarks/community/human-eval/runs/smoke
 ```
 
 ## Result manifests

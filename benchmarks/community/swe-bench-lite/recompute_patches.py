@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project python
 """Recompute clean predictions.jsonl from existing checkouts.
 
 The first generation run captured polluted diffs (git add -A staged .clio/ and artifacts).

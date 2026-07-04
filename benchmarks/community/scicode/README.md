@@ -19,14 +19,14 @@ Do not commit those artifacts here. Pass their locations with `--data`,
 Inspect readiness:
 
 ```sh
-python benchmarks/community/scicode/scicode_clio.py inspect-data \
+uv run --no-project python benchmarks/community/scicode/scicode_clio.py inspect-data \
   --data /path/to/scicode/problems_all.jsonl
 ```
 
 Generate a small Clio eval file once the target artifact is available:
 
 ```sh
-python benchmarks/community/scicode/scicode_clio.py generate-tasks \
+uv run --no-project python benchmarks/community/scicode/scicode_clio.py generate-tasks \
   --data /path/to/scicode/problems_all.jsonl \
   --h5py-file /path/to/scicode/test_data.h5 \
   --out benchmarks/community/scicode/runs/tasks.yaml \
@@ -38,12 +38,13 @@ clio eval run --task-file benchmarks/community/scicode/runs/tasks.yaml
 Run or grade one problem directly:
 
 ```sh
-python benchmarks/community/scicode/scicode_clio.py run-problem \
+uv run --no-project python benchmarks/community/scicode/scicode_clio.py run-problem \
   --data /path/to/scicode/problems_all.jsonl \
   --problem-id 10 \
   --out benchmarks/community/scicode/runs/scicode-10
 
-python benchmarks/community/scicode/scicode_clio.py grade-problem \
+uv run --no-project --with h5py --with numpy --with scipy \
+  python benchmarks/community/scicode/scicode_clio.py grade-problem \
   --data /path/to/scicode/problems_all.jsonl \
   --problem-id 10 \
   --run benchmarks/community/scicode/runs/scicode-10 \

@@ -9,6 +9,7 @@ adapters are wrappers around Clio, not a second eval engine.
 community/
   fleet.example.json
   clio_fleet.py
+  uv_command.py
   swe-bench-lite/
   terminal-bench/
   scicode/
@@ -18,12 +19,19 @@ community/
 `fleet.json` is intentionally gitignored. Keep real endpoints in that file or
 point `CLIO_FLEET` at another private file.
 
+## Python runner
+
+Run Python adapters with `uv run --no-project ...` so benchmark commands do not
+capture a local interpreter path. Generated `clio eval` task files also use uv.
+Set `UV_BIN` to pin a uv executable, or `CLIO_BENCH_UV_WITH` to inject extra
+comma-separated `uv --with` packages into generated verifier commands.
+
 ## Fleet setup
 
 Inspect a private fleet file with:
 
 ```sh
-CLIO_FLEET=/path/to/private/fleet.json python benchmarks/community/clio_fleet.py
+CLIO_FLEET=/path/to/private/fleet.json uv run --no-project python benchmarks/community/clio_fleet.py
 ```
 
 The same file shape is shown in `fleet.example.json`. Per-run environment
@@ -34,7 +42,7 @@ CLIO_MAIN_URL=http://orchestrator.example:8080 \
 CLIO_MAIN_MODEL=example-orchestrator-model \
 CLIO_WORKER_URL=http://worker.example:1234 \
 CLIO_WORKER_MODEL=example-worker-model \
-npm run bench:tb
+uv run --no-project python benchmarks/community/clio_fleet.py
 ```
 
 Do not commit real fleet URLs, private hostnames, credentials, or local machine
@@ -48,7 +56,8 @@ It also writes `manifest.json` and `summary.json` in the run directory.
 Evaluation with the official harness is a separate Docker workflow.
 
 ```sh
-npm run bench:swe -- \
+uv run --no-project --with datasets --with swebench \
+  python benchmarks/community/swe-bench-lite/swebench_clio.py \
   --instances pytest-dev__pytest-6116 \
   --out benchmarks/community/swe-bench-lite/runs/smoke \
   --timeout 1800
@@ -58,7 +67,7 @@ Use `recompute_patches.py` to rebuild clean predictions from existing checkouts
 without another model run:
 
 ```sh
-python benchmarks/community/swe-bench-lite/recompute_patches.py \
+uv run --no-project python benchmarks/community/swe-bench-lite/recompute_patches.py \
   benchmarks/community/swe-bench-lite/runs/smoke \
   clio-coder-example
 ```
@@ -102,10 +111,10 @@ upstream SciCode Python package, both supplied outside this repository.
 the same run directory with scored manifests.
 
 ```sh
-npm run bench:scicode -- inspect-data \
+uv run --no-project python benchmarks/community/scicode/scicode_clio.py inspect-data \
   --data /path/to/scicode/problems_all.jsonl
 
-npm run bench:scicode -- generate-tasks \
+uv run --no-project python benchmarks/community/scicode/scicode_clio.py generate-tasks \
   --data /path/to/scicode/problems_all.jsonl \
   --h5py-file /path/to/scicode/test_data.h5 \
   --out benchmarks/community/scicode/runs/tasks.yaml \
@@ -127,15 +136,15 @@ HumanEval JSONL is not tracked; either pass `--data`, install the upstream
 directory.
 
 ```sh
-python3 benchmarks/community/human-eval/humaneval_clio.py ensure-data
-python3 benchmarks/community/human-eval/humaneval_clio.py inspect-data
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py ensure-data
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py inspect-data
 
-python3 benchmarks/community/human-eval/humaneval_clio.py run \
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/smoke \
   --timeout 300
 
-python3 benchmarks/community/human-eval/humaneval_clio.py generate-tasks \
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py generate-tasks \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/tasks.yaml \
   --run-root benchmarks/community/human-eval/runs/eval-smoke

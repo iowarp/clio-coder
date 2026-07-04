@@ -7,7 +7,8 @@ patch from the checkout.
 ## Generate Predictions
 
 ```sh
-npm run bench:swe -- \
+uv run --no-project --with datasets --with swebench \
+  python benchmarks/community/swe-bench-lite/swebench_clio.py \
   --instances pytest-dev__pytest-6116 \
   --out benchmarks/community/swe-bench-lite/runs/smoke \
   --timeout 1800
@@ -33,7 +34,7 @@ If a run already has checkouts, recompute source-only patches without another
 model call:
 
 ```sh
-python benchmarks/community/swe-bench-lite/recompute_patches.py \
+uv run --no-project python benchmarks/community/swe-bench-lite/recompute_patches.py \
   benchmarks/community/swe-bench-lite/runs/smoke \
   clio-coder-example
 ```

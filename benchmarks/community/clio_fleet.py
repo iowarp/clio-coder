@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project python
 """Single source of truth for the model fleets the benchmark adapters drive.
 
 `load_fleet()` reads a private fleet JSON file, selects a named profile, and

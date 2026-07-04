@@ -1,10 +1,10 @@
 # Python dependencies for the Clio Coder community benchmark adapters.
 #
-# The adapters are run as scripts, not installed as a package. Install into a
-# venv (`uv venv && uv pip install -r requirements.txt`) or run each adapter
-# ad hoc with uv (`uv tool run --from swebench --with datasets python ...`),
-# as documented in README.md. Deps are grouped by adapter; you only need the
-# group for the track you are running.
+# The adapters are run as scripts, not installed as a package. Prefer the
+# README-documented `uv run --no-project [--with ...] python ...` commands so
+# benchmark invocations do not depend on a machine-specific interpreter. This
+# file remains a compatibility list for operators who still want a prebuilt venv.
+# Deps are grouped by adapter; you only need the group for the track you run.
 
 # --- swe-bench-lite (swebench_clio.py, recompute_patches.py) ---
 datasets            # load princeton-nlp/SWE-bench_Lite

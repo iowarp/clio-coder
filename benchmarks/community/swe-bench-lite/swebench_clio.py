@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --with datasets --with swebench python
 """SWE-bench Lite adapter for Clio Coder.
 
 Per instance:
@@ -12,9 +12,9 @@ Generation runs on the host against the local fleet. Evaluation is separate
 (swebench.harness.run_evaluation or sb-cli) and needs Docker.
 
 Usage:
-  python swebench_clio.py --instances pytest-dev__pytest-6116 --out runs/smoke
-  python swebench_clio.py --limit 3 --smallest --out runs/smoke
-  python swebench_clio.py --all --out runs/full      # gated: 300 instances
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --instances pytest-dev__pytest-6116 --out runs/smoke
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --limit 3 --smallest --out runs/smoke
+  uv run --no-project --with datasets --with swebench python swebench_clio.py --all --out runs/full      # gated: 300 instances
 """
 import argparse
 import json

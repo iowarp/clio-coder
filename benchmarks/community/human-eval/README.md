@@ -17,23 +17,24 @@ External data is not tracked. The adapter can load HumanEval from one of:
 ## Setup
 
 ```sh
-# Optional: install the official package/evaluator.
-uv pip install "human-eval @ git+https://github.com/openai/human-eval.git"
+# Download only the public JSONL.GZ into the untracked adapter data dir.
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py ensure-data
 
-# Or download only the public JSONL.GZ into the untracked adapter data dir.
-python3 benchmarks/community/human-eval/humaneval_clio.py ensure-data
+# Optional: run with the official package/evaluator available to uv.
+uv run --no-project --with "human-eval @ git+https://github.com/openai/human-eval.git" \
+  python benchmarks/community/human-eval/humaneval_clio.py inspect-data
 ```
 
 Check readiness:
 
 ```sh
-python3 benchmarks/community/human-eval/humaneval_clio.py inspect-data
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py inspect-data
 ```
 
 ## Direct run
 
 ```sh
-python3 benchmarks/community/human-eval/humaneval_clio.py run \
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py run \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/smoke \
   --timeout 300
@@ -57,7 +58,7 @@ Outputs include `samples.jsonl` (official-compatible completions),
 Generate a normal v1 task file, then run it with Clio eval:
 
 ```sh
-python3 benchmarks/community/human-eval/humaneval_clio.py generate-tasks \
+uv run --no-project python benchmarks/community/human-eval/humaneval_clio.py generate-tasks \
   --limit 5 \
   --out benchmarks/community/human-eval/runs/tasks.yaml \
   --run-root benchmarks/community/human-eval/runs/eval-smoke

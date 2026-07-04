@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project python
 """SciCode adapter for Clio Coder.
 
 The adapter has three jobs:
@@ -42,6 +42,7 @@ CLIO = os.environ.get("CLIO_BIN", "clio")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from result_manifest import target_profile, write_result_manifest
+from uv_command import uv_python_cmd, uv_script_cmd
 
 SPECIAL_STEP_SNIPPETS = {
     "13.6": DEFAULT_DATA.parent / "13.6.txt",
@@ -256,8 +257,7 @@ def generate_tasks(args: argparse.Namespace) -> int:
         )
         out_dir = run_root / task_id
         setup = [
-            sys.executable,
-            str(script),
+            *uv_script_cmd(script),
             "run-problem",
             "--data",
             str(data),
@@ -275,8 +275,7 @@ def generate_tasks(args: argparse.Namespace) -> int:
         if args.with_background:
             setup.append("--with-background")
         verifier = [
-            sys.executable,
-            str(script),
+            *uv_script_cmd(script),
             "grade-problem",
             "--data",
             str(data),
@@ -571,7 +570,7 @@ def run_python_script(script: str, cwd: Path, timeout: int) -> dict[str, Any]:
         started = time.time()
         try:
             proc = subprocess.run(
-                [sys.executable, str(path)],
+                [*uv_python_cmd(["h5py", "numpy", "scipy"]), str(path)],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
