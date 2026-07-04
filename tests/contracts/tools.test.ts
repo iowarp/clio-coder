@@ -714,6 +714,105 @@ describe("contracts/tools permission sequencing", () => {
 		strictEqual((await first).kind, "blocked");
 		strictEqual(registry.parkedCount(), 0);
 	});
+
+	it("renotifyHead re-emits the oldest parked request without mutating queue depth", async () => {
+		const executed: string[] = [];
+		const registry = createConfirmableWriteRegistry(executed);
+		const requested: Array<{ path: string; requestId: string }> = [];
+		registry.onPermissionRequired((call, _decision, meta) => {
+			requested.push({ path: String(call.args?.path), requestId: meta.requestId });
+		});
+
+		const first = registry.invoke({ tool: ToolNames.Write, args: { path: "one" } });
+		const second = registry.invoke({ tool: ToolNames.Write, args: { path: "two" } });
+		const firstRequestId = requested[0]?.requestId;
+		ok(firstRequestId);
+		strictEqual(registry.parkedCount(), 2);
+
+		registry.renotifyHead();
+
+		strictEqual(registry.parkedCount(), 2);
+		deepStrictEqual(
+			requested.map((request) => [request.path, request.requestId]),
+			[
+				["one", firstRequestId],
+				["two", requested[1]?.requestId],
+				["one", firstRequestId],
+			],
+		);
+		registry.cancelParkedCalls("test done");
+		strictEqual((await first).kind, "blocked");
+		strictEqual((await second).kind, "blocked");
+	});
+
+	it("abort signals cancel parked calls and clear queue depth", async () => {
+		const executed: string[] = [];
+		const registry = createConfirmableWriteRegistry(executed);
+		const requested: string[] = [];
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			requested.push(meta.requestId);
+		});
+		const controller = new AbortController();
+
+		const pending = registry.invoke({ tool: ToolNames.Write, args: { path: "one" } }, { signal: controller.signal });
+		strictEqual(registry.parkedCount(), 1);
+		controller.abort();
+		const verdict = await pending;
+
+		strictEqual(verdict.kind, "blocked");
+		if (verdict.kind === "blocked") strictEqual(verdict.reason, "run aborted before the operator decided");
+		strictEqual(registry.parkedCount(), 0);
+		strictEqual(requested.length, 1);
+		strictEqual(executed.length, 0);
+	});
+
+	it("already-aborted signals block permission asks without parking", async () => {
+		const executed: string[] = [];
+		const registry = createConfirmableWriteRegistry(executed);
+		let requested = 0;
+		registry.onPermissionRequired(() => {
+			requested += 1;
+		});
+		const controller = new AbortController();
+		controller.abort();
+
+		const verdict = await registry.invoke(
+			{ tool: ToolNames.Write, args: { path: "one" } },
+			{ signal: controller.signal },
+		);
+
+		strictEqual(verdict.kind, "blocked");
+		if (verdict.kind === "blocked") strictEqual(verdict.reason, "run aborted before the operator decided");
+		strictEqual(registry.parkedCount(), 0);
+		strictEqual(requested, 0);
+		strictEqual(executed.length, 0);
+	});
+
+	it("approval request ids include a registry-unique token", async () => {
+		const first = createConfirmableWriteRegistry([]);
+		const second = createConfirmableWriteRegistry([]);
+		let firstRequestId: string | undefined;
+		let secondRequestId: string | undefined;
+		first.onPermissionRequired((_call, _decision, meta) => {
+			firstRequestId = meta.requestId;
+		});
+		second.onPermissionRequired((_call, _decision, meta) => {
+			secondRequestId = meta.requestId;
+		});
+
+		const firstPending = first.invoke({ tool: ToolNames.Write, args: { path: "one" } });
+		const secondPending = second.invoke({ tool: ToolNames.Write, args: { path: "two" } });
+
+		ok(firstRequestId);
+		ok(secondRequestId);
+		match(firstRequestId, /^apr-[0-9a-f]{8}-1$/);
+		match(secondRequestId, /^apr-[0-9a-f]{8}-1$/);
+		ok(firstRequestId !== secondRequestId);
+		first.cancelParkedCalls("test done");
+		second.cancelParkedCalls("test done");
+		strictEqual((await firstPending).kind, "blocked");
+		strictEqual((await secondPending).kind, "blocked");
+	});
 });
 
 describe("contracts/tools result shaping and truncation", () => {

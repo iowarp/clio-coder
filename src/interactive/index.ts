@@ -7,6 +7,7 @@ import {
 	type ContextPrunedPayload,
 	type ContextWarningPayload,
 	type LoopBlockedPayload,
+	type PermissionRequestedPayload,
 	type RuntimeNoticePayload,
 	type ToolBudgetExceededPayload,
 } from "../core/bus-events.js";
@@ -167,6 +168,30 @@ export {
 	type SlashCommandContext,
 	type SlashCommandKind,
 } from "./slash-commands.js";
+
+export function shouldAnnouncePermissionRequest(
+	seenRequestIds: Set<string>,
+	requestId: string,
+	maxSize = 2048,
+): boolean {
+	if (seenRequestIds.has(requestId)) return false;
+	seenRequestIds.add(requestId);
+	if (seenRequestIds.size > maxSize) {
+		const oldest = seenRequestIds.values().next().value;
+		if (oldest !== undefined) seenRequestIds.delete(oldest);
+	}
+	return true;
+}
+
+export function isLiveWorkerEscalationRequest(payload: PermissionRequestedPayload): boolean {
+	if (typeof payload.requestId !== "string") return false;
+	if (payload.escalation !== true) return false;
+	const origin = typeof payload.origin === "string" ? payload.origin : undefined;
+	const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
+	if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return false;
+	const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
+	return typeof runId === "string" && runId.length > 0;
+}
 
 export interface InteractiveDeps {
 	bus: SafeEventBus;
@@ -1912,6 +1937,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		axis: ApprovalRequestView["axis"];
 		reason: string;
 	}> = [];
+	const announcedPermissionRequestIds = new Set<string>();
 	let permissionConfirmJustFired = false;
 	let pendingAskUserCancel: (() => void) | null = null;
 	let askUserSession: ReturnType<typeof openAskUserOverlay> | null = null;
@@ -2085,11 +2111,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				else deps.toolRegistry?.cancelParkedCalls(cancellationReason);
 			}
 		}
-		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls() && pendingPermission) {
-			openPermissionOverlay(pendingPermission.call, pendingPermission.decision, pendingPermission.meta);
-		}
 		// A worker escalation that arrived while the overlay was busy waits its turn.
 		maybeOpenWorkerEscalation();
+		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls()) {
+			deps.toolRegistry.renotifyHead();
+		}
 		renderContextIsland();
 		renderTaskIsland();
 		tui.requestRender();
@@ -2097,6 +2123,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const cancelActiveRun = (): void => {
 		deps.chat.cancel();
+		deps.toolRegistry?.cancelParkedCalls("run cancelled by operator");
 		footer.refresh();
 		tui.requestRender();
 	};
@@ -2366,13 +2393,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const unsubscribePermissionRequired =
 		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
-			// The parked notice fires for every park, including ones queued while
-			// the overlay is already open, so the transcript names the asking axis
-			// even when the overlay shows a different call.
-			const parkedNotice = approvalParkedNotice(call.tool, decision, currentAutonomy());
-			appendNotice(parkedNotice.level, parkedNotice.text, busNoticeSink);
-			if (overlayState === "permission-confirm") return;
-			pendingPermission = { call, decision, meta };
+			// Re-notifies reopen overlays, but the transcript names each request
+			// once so tail wakeups do not print duplicate approval notices.
+			if (shouldAnnouncePermissionRequest(announcedPermissionRequestIds, meta.requestId)) {
+				const parkedNotice = approvalParkedNotice(call.tool, decision, currentAutonomy());
+				appendNotice(parkedNotice.level, parkedNotice.text, busNoticeSink);
+			}
 			openPermissionOverlay(call, decision, meta);
 		}) ?? (() => {});
 
@@ -2421,7 +2447,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// by the tool registry above and are ignored here. Headless sessions have no
 	// subscriber, so the worker's timeout fallback governs there.
 	const unsubscribeWorkerEscalation = deps.bus.on(BusChannels.PermissionRequested, (payload) => {
-		if (typeof payload.requestId !== "string") return;
+		if (!isLiveWorkerEscalationRequest(payload)) return;
+		const requestId = payload.requestId;
+		if (typeof requestId !== "string") return;
 		const origin = typeof payload.origin === "string" ? payload.origin : undefined;
 		const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
 		if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return;
@@ -2429,7 +2457,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (!runId) return;
 		const entry = {
 			runId,
-			requestId: payload.requestId,
+			requestId,
 			agentId: typeof payload.agentId === "string" ? payload.agentId : "worker",
 			tool: typeof payload.tool === "string" ? payload.tool : "unknown",
 			actionClass: typeof payload.actionClass === "string" ? payload.actionClass : "unknown",

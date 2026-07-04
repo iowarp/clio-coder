@@ -652,6 +652,63 @@ async function runAcpQueuedPermissionBridge(): Promise<{
 	return { requests, resolutions, presentedCommands };
 }
 
+async function runAcpQueuedPermissionBridgeTransportError(): Promise<{
+	requests: PermissionRequestedPayload[];
+	resolutions: PermissionResolvedPayload[];
+	presentedCommands: string[];
+}> {
+	const clientToServer = new PassThrough();
+	const serverToClient = new PassThrough();
+	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+	const registry = createPermissionRegistry();
+	const bus = createSafeEventBus();
+	const requests: PermissionRequestedPayload[] = [];
+	const resolutions: PermissionResolvedPayload[] = [];
+	const presentedCommands: string[] = [];
+	bus.on(BusChannels.PermissionRequested, (payload) => {
+		requests.push(payload);
+	});
+	bus.on(BusChannels.PermissionResolved, (payload) => {
+		resolutions.push(payload);
+	});
+	registry.onPermissionRequired((call, decision, meta) => {
+		bus.emit(BusChannels.PermissionRequested, {
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+			requestId: meta.requestId,
+			origin: "acp-server",
+			axis: meta.axis,
+			...(decision.kind === "ask" ? { rejection: decision.rejection } : {}),
+		});
+	});
+	const server = serveClioAcpAgent({
+		transport,
+		chat: createQueuedPermissionChat(registry),
+		toolRegistry: registry,
+		bus,
+		cwd: process.cwd(),
+		version: "test",
+		permissionTimeoutMs: 1000,
+	});
+	const client = createRpcClient(clientToServer, serverToClient);
+	client.onRequest("session/request_permission", (params) => {
+		if (isRecord(params) && isRecord(params.toolCall) && isRecord(params.toolCall.rawInput)) {
+			presentedCommands.push(String(params.toolCall.rawInput.command));
+		}
+		throw new Error("permission transport unavailable");
+	});
+	await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
+	const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+	await client.request("session/prompt", {
+		sessionId: session.sessionId,
+		prompt: [{ type: "text", text: "need queued permissions" }],
+	});
+	await client.request("session/close", { sessionId: session.sessionId });
+	client.close();
+	await server;
+	return { requests, resolutions, presentedCommands };
+}
+
 describe("contracts/acp", () => {
 	it("maps agent thought chunks from ACP agents that use the OpenCode update name", () => {
 		const mapper = new AcpEventMapper();
@@ -863,6 +920,22 @@ rl.on("line", (line) => {
 		strictEqual(resolutions[1]?.status, "granted");
 		strictEqual(resolutions[1]?.decidedBy, "acp-client");
 		strictEqual(resolutions[1]?.requestId, uniqueRequestIds[1]);
+	});
+
+	it("ACP server transport error resolves every queued request as denied", async () => {
+		const { requests, resolutions, presentedCommands } = await runAcpQueuedPermissionBridgeTransportError();
+		const uniqueRequestIds = Array.from(new Set(requests.map((request) => request.requestId)));
+
+		strictEqual(presentedCommands.join(","), "sudo true one");
+		strictEqual(uniqueRequestIds.length, 2);
+		strictEqual(resolutions.length, 2);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "error");
+		strictEqual(resolutions[0]?.requestId, uniqueRequestIds[0]);
+		strictEqual(resolutions[1]?.status, "denied");
+		strictEqual(resolutions[1]?.decidedBy, "error");
+		strictEqual(resolutions[1]?.requestId, uniqueRequestIds[1]);
+		ok(resolutions.every((resolution) => resolution.reason?.includes("permission transport unavailable")));
 	});
 
 	it("ACP server permission timeout resolves the parked request with timeout identity", async () => {

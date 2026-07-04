@@ -2597,6 +2597,7 @@ export function createDispatchBundle(
 							...(ruleId !== null ? { ruleId } : {}),
 							...(policySource !== null ? { policySource } : {}),
 							...(typeof event.payload.timeoutMs === "number" ? { timeoutMs: event.payload.timeoutMs } : {}),
+							escalation: true,
 						});
 					}
 					if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {

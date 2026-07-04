@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { TSchema } from "typebox";
 import {
 	evaluateSkillToolSurface,
@@ -251,6 +252,11 @@ export interface ToolRegistry {
 	/** Number of calls currently waiting for operator confirmation. */
 	parkedCount(): number;
 	/**
+	 * Re-fire the permission-required signal for the oldest parked call without
+	 * changing queue order or resolving anything.
+	 */
+	renotifyHead(): void;
+	/**
 	 * Re-run admission for every parked call. When `grant` is provided the
 	 * grant covers one parked action class. Calls admitted on retry
 	 * execute and their original promise resolves with the result. Calls still
@@ -294,6 +300,7 @@ interface ParkedCall {
 	meta: PermissionRequiredMeta;
 	resolve: (verdict: RegistryVerdict) => void;
 	options?: ToolInvokeOptions;
+	abortCleanup?: () => void;
 }
 
 export function createRegistry(deps: RegistryDeps): ToolRegistry {
@@ -306,6 +313,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		(call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel) => void
 	>();
 	let approvalRequestCounter = 0;
+	const approvalRequestToken = randomBytes(4).toString("hex");
 
 	const runSpec = async (
 		spec: ToolSpec,
@@ -490,7 +498,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return firstBlockToolEffect(effects)?.reason ?? null;
 	};
 
+	const cleanupParkedEntry = (entry: ParkedCall): void => {
+		entry.abortCleanup?.();
+		delete entry.abortCleanup;
+	};
+
 	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string): void => {
+		cleanupParkedEntry(entry);
 		// A denied/cancelled park is still a model attempt: observe it so
 		// identical retries trip the loop detector. When the detector fires, its
 		// reason replaces the generic denial so the model gets recovery guidance.
@@ -506,7 +520,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		parked.splice(index, 0, entry);
 	};
 
-	const nextApprovalRequestId = (): string => `apr-${++approvalRequestCounter}`;
+	const nextApprovalRequestId = (): string => `apr-${approvalRequestToken}-${++approvalRequestCounter}`;
 
 	const notifyPermissionRequired = (
 		call: ClassifierCall,
@@ -533,6 +547,17 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 	};
 
+	const cancelParkedCallById = (requestId: string, reason: string): boolean => {
+		const index = parked.findIndex((entry) => entry.meta.requestId === requestId);
+		if (index === -1) return false;
+		const [entry] = parked.splice(index, 1);
+		if (!entry) return false;
+		resolveParkedAsBlocked(entry, reason);
+		const next = parked[0];
+		if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
+		return true;
+	};
+
 	return {
 		register(spec) {
 			tools.set(spec.name, spec);
@@ -548,6 +573,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				return outcome.verdict;
 			}
 			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision, options);
+			const abortReason = "run aborted before the operator decided";
+			if (options?.signal?.aborted) {
+				const loopReason = observeRejectedAttempt(call, outcome.decision, options);
+				return { kind: "blocked", reason: loopReason ?? abortReason, decision: outcome.decision };
+			}
 			return new Promise<RegistryVerdict>((resolve) => {
 				const meta: PermissionRequiredMeta = {
 					requestId: nextApprovalRequestId(),
@@ -556,12 +586,25 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				recordRegistryDisposition(call, outcome.decision, "permission_requested", { requestId: meta.requestId });
 				const parkedCall: ParkedCall = { call, decision: outcome.decision, meta, resolve };
 				if (options !== undefined) parkedCall.options = options;
+				if (options?.signal) {
+					const onAbort = (): void => {
+						cancelParkedCallById(meta.requestId, abortReason);
+					};
+					options.signal.addEventListener("abort", onAbort, { once: true });
+					parkedCall.abortCleanup = () => {
+						options.signal?.removeEventListener("abort", onAbort);
+					};
+				}
 				parked.push(parkedCall);
 				notifyPermissionRequired(call, outcome.decision, meta);
 			});
 		},
 		hasParkedCalls: () => parked.length > 0,
 		parkedCount: () => parked.length,
+		renotifyHead() {
+			const next = parked[0];
+			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
+		},
 		async resumeParkedCalls(grant?: OneShotGrant) {
 			if (parked.length === 0) return;
 			const pending: Array<{ entry: ParkedCall; reparkIndex?: number }> = [];
@@ -594,6 +637,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					reparkEntry(entry, reparkIndex);
 					continue;
 				}
+				cleanupParkedEntry(entry);
 				if (outcome.kind === "terminal") {
 					observeBlockedAttempt(entry.call, outcome.verdict, entry.options);
 					entry.resolve(outcome.verdict);
@@ -605,14 +649,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 		},
 		cancelParkedCall(requestId, reason) {
-			const index = parked.findIndex((entry) => entry.meta.requestId === requestId);
-			if (index === -1) return false;
-			const [entry] = parked.splice(index, 1);
-			if (!entry) return false;
-			resolveParkedAsBlocked(entry, reason);
-			const next = parked[0];
-			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
-			return true;
+			return cancelParkedCallById(requestId, reason);
 		},
 		cancelParkedCalls(reason) {
 			if (parked.length === 0) return;

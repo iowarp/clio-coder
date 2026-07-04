@@ -442,6 +442,38 @@ describe("contracts/worker-steer", () => {
 			}
 		});
 
+		it("abort mid-escalation emits a denied resolution for the active request", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "printf worker-ok" }, { id: "call-abort" })], {
+						stopReason: "toolUse",
+					}),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = startWorkerRun(input, (event) => events.push(event));
+				const escalated = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				await expectPending(handle.promise, "worker run");
+
+				handle.abort();
+				await handle.promise;
+				const resolved = permissionEvent(events, "clio_permission_resolved");
+
+				strictEqual(resolved?.payload?.requestId, escalated.payload?.requestId);
+				strictEqual(resolved?.payload?.source, "operator");
+				strictEqual(resolved?.payload?.decision, "denied");
+				strictEqual(resolved?.payload?.mode, "escalate");
+				ok(String(resolved?.payload?.reason ?? "").includes("run aborted"));
+			} finally {
+				unregister();
+			}
+		});
+
 		it("system_modify escalation carries the builtin confirm rail axis", async () => {
 			const events: unknown[] = [];
 			const { input, unregister } = fauxRuntimeInput(

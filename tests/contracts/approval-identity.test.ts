@@ -228,6 +228,36 @@ describe("contracts/approval identity", () => {
 		);
 	});
 
+	it("ACP permission request audit rows are deduped by requestId", async () => {
+		const { permissionRows } = await withApprovalHarness("auto-edit", async ({ bus }) => {
+			const duplicateRequest: PermissionRequestedPayload = {
+				tool: "bash",
+				actionClass: "execute",
+				requestId: "acp-dup",
+				origin: "acp-server",
+				axis: "autonomy:auto-edit",
+				rejection: { short: "ACP ask", detail: "ACP ask", hints: [] },
+			};
+			bus.emit(BusChannels.PermissionRequested, duplicateRequest);
+			bus.emit(BusChannels.PermissionRequested, duplicateRequest);
+			bus.emit(BusChannels.PermissionRequested, {
+				...duplicateRequest,
+				requestId: "acp-distinct",
+				rejection: { short: "second ask", detail: "second ask", hints: [] },
+			});
+			await settle();
+			return {};
+		});
+
+		deepStrictEqual(
+			permissionRows.filter((row) => row.status === "requested").map((row) => [row.requestId, row.reason]),
+			[
+				["acp-dup", "ACP ask"],
+				["acp-distinct", "second ask"],
+			],
+		);
+	});
+
 	it("interactive grant joins request, resolution, and tool-call audit by requestId", async () => {
 		const { requests, resolutions, rows } = await withApprovalHarness(
 			"auto-edit",
