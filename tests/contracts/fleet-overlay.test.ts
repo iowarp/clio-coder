@@ -1,13 +1,13 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
+import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import type {
 	ObservabilityNotice,
 	ObservabilityRunSummary,
 	ObservabilitySnapshot,
 } from "../../src/domains/observability/index.js";
-import { visibleWidth } from "../../src/engine/tui.js";
-import { formatFleetOverlayBodyLines } from "../../src/interactive/fleet-overlay.js";
+import { type Component, type OverlayHandle, type OverlayOptions, type TUI, visibleWidth } from "../../src/engine/tui.js";
+import { FLEET_OVERLAY_WIDTH, formatFleetOverlayBodyLines, openFleetOverlay } from "../../src/interactive/fleet-overlay.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
@@ -62,6 +62,43 @@ function readyRun(runId: string, evidenceId: string): ObservabilityRunSummary {
 		runId,
 		evidence: { evidenceId, firstPassSuccess: true, findingCount: 0, tags: [] },
 	} as unknown as ObservabilityRunSummary;
+}
+
+function overlayHandle(): OverlayHandle {
+	return {
+		hide() {},
+		setHidden() {},
+		isHidden: () => false,
+		focus() {},
+		unfocus() {},
+		isFocused: () => true,
+	};
+}
+
+function fakeTui(rows = 42, columns = 132): {
+	tui: TUI;
+	component: () => Component;
+	options: () => OverlayOptions | undefined;
+} {
+	let mounted: Component | null = null;
+	let overlayOptions: OverlayOptions | undefined;
+	const tui = {
+		terminal: { rows, columns },
+		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
+			mounted = component;
+			overlayOptions = options;
+			return overlayHandle();
+		},
+		requestRender() {},
+	} as unknown as TUI;
+	return {
+		tui,
+		component: () => {
+			if (!mounted) throw new Error("overlay was not mounted");
+			return mounted;
+		},
+		options: () => overlayOptions,
+	};
 }
 
 function evidenceErrorNotice(runId: string, message: string): ObservabilityNotice {
@@ -188,5 +225,17 @@ describe("fleet overlay", () => {
 
 	it("parses /fleet as the fleet overlay command", () => {
 		strictEqual(parseSlashCommand("/fleet").kind, "fleet");
+	});
+
+	it("mounts full-row width so footer text cannot bleed beside the modal", () => {
+		const harness = fakeTui();
+		const dispatch = { snapshot: () => snapshot() } as unknown as DispatchContract;
+		const handle = openFleetOverlay(harness.tui, dispatch);
+
+		strictEqual(FLEET_OVERLAY_WIDTH, "100%");
+		strictEqual(harness.options()?.width, "100%");
+		const lines = harness.component().render(132);
+		for (const line of lines) strictEqual(visibleWidth(line), 132);
+		handle.hide();
 	});
 });

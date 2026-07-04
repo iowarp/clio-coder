@@ -1,5 +1,12 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import {
+	type Component,
+	type OverlayHandle,
+	type OverlayOptions,
+	type TUI,
+	visibleWidth,
+} from "../../src/engine/tui.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { sortViewArtifacts, type ViewArtifact } from "../../src/interactive/view/artifacts.js";
 import {
@@ -8,7 +15,9 @@ import {
 	groupedViewRows,
 	initialViewSelection,
 	nextContentScrollOffset,
+	openViewOverlay,
 	parseViewFilterQuery,
+	VIEW_OVERLAY_MARGIN,
 	ViewOverlayView,
 	viewFooterHint,
 } from "../../src/interactive/view/view-overlay.js";
@@ -23,6 +32,43 @@ function artifact(
 		sizeBytes: 10,
 		load: async () => ({ lines: [input.title], format: "text" }),
 		...input,
+	};
+}
+
+function overlayHandle(): OverlayHandle {
+	return {
+		hide() {},
+		setHidden() {},
+		isHidden: () => false,
+		focus() {},
+		unfocus() {},
+		isFocused: () => true,
+	};
+}
+
+function fakeTui(rows = 42, columns = 132): {
+	tui: TUI;
+	component: () => Component;
+	options: () => OverlayOptions | undefined;
+} {
+	let mounted: Component | null = null;
+	let overlayOptions: OverlayOptions | undefined;
+	const tui = {
+		terminal: { rows, columns },
+		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
+			mounted = component;
+			overlayOptions = options;
+			return overlayHandle();
+		},
+		requestRender() {},
+	} as unknown as TUI;
+	return {
+		tui,
+		component: () => {
+			if (!mounted) throw new Error("overlay was not mounted");
+			return mounted;
+		},
+		options: () => overlayOptions,
 	};
 }
 
@@ -328,5 +374,19 @@ describe("contracts/view-overlay", () => {
 		ok(contentHint.includes("[g/G] top/bottom"));
 		ok(contentHint.includes("[Tab] list"));
 		ok(!contentHint.includes("[v] verify"));
+	});
+
+	it("mounts as a full-screen opaque frame so dashboard rows cannot bleed through", () => {
+		const harness = fakeTui();
+		const handle = openViewOverlay(harness.tui, { providers: [], onClose() {} });
+
+		strictEqual(harness.options()?.width, "100%");
+		strictEqual(harness.options()?.maxHeight, "100%");
+		deepStrictEqual(harness.options()?.margin, VIEW_OVERLAY_MARGIN);
+		deepStrictEqual(VIEW_OVERLAY_MARGIN, { top: 0, right: 0, bottom: 0, left: 0 });
+
+		const lines = harness.component().render(132);
+		for (const line of lines) strictEqual(visibleWidth(line), 132);
+		handle.hide();
 	});
 });

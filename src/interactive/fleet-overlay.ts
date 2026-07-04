@@ -30,7 +30,7 @@ const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1000;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
-export const FLEET_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
+export const FLEET_OVERLAY_WIDTH = "100%";
 
 type FleetMode = "status" | "profiles" | "bindings";
 type FleetNoticeLevel = "info" | "success" | "warning" | "error";
