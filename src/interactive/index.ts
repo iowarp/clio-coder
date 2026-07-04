@@ -1082,7 +1082,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	// The permission overlay is rebuilt per open because its body depends on
 	// the parked tool call.
-	const dispatchBoard = new Text(formatDispatchBoardLines(dispatchBoardStore.rows(), 76).join("\n"), 0, 0);
+	const dispatchBoard = new Text(
+		formatDispatchBoardLines(dispatchBoardStore.rows(), 76, observabilitySnapshot).join("\n"),
+		0,
+		0,
+	);
 	const taskIsland = new Text("", 0, 0);
 	const contextIsland = new Text("", 0, 0);
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
@@ -1928,7 +1932,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	contextIslandHandle.setHidden(true);
 
 	const renderDispatchBoard = (): void => {
-		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows(), 76).join("\n"));
+		// The cached observability snapshot supplies each card's evidence/proof
+		// state; it is kept current by the single subscription above, so rendering
+		// reads it directly instead of opening another subscription.
+		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows(), 76, observabilitySnapshot).join("\n"));
 		dispatchBoard.invalidate();
 	};
 
@@ -2496,6 +2503,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openFleetOverlay(tui, deps.dispatch, {
 			bus: deps.bus,
 			providers: deps.providers,
+			getObservability: () => observabilitySnapshot,
 			...(deps.agents ? { agents: deps.agents } : {}),
 			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 			...(deps.writeSettings

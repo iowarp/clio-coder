@@ -8,6 +8,7 @@ import {
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
+import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
 import { formatFooterTokens } from "./footer-panel.js";
@@ -140,6 +141,98 @@ export function dispatchStatusPresentation(
 	}
 }
 
+/** Evidence-readiness state for a dispatch run, derived from the observability projection. */
+export type EvidenceState = "pending" | "ready" | "failed" | "none";
+
+/**
+ * Compact, presentation-ready evidence readiness for one run. Derived purely
+ * from an ObservabilitySnapshot: no evidence files are read and no /view
+ * artifact bodies are inspected. `viewFilter` is the `/view` deep-link an
+ * operator would type to inspect the run or its bundle.
+ */
+export interface RunEvidencePresentation {
+	state: EvidenceState;
+	/** Bundle id, present only when the evidence is ready. */
+	evidenceId?: string;
+	/** Short failure reason drawn from the latest evidence notice, when failed. */
+	reason?: string;
+	/** The `/view` filter text: evidence:<id|runId>, or dispatch:<runId> when absent. */
+	viewFilter: string;
+}
+
+// A run's evidence failure is signalled by its latest evidence notice carrying
+// the error level and this run's id; a trailing warning/info notice for the same
+// run is not a failure, and a notice without ref.runId is not attributed here.
+function latestEvidenceFailureReason(notices: readonly ObservabilityNotice[], runId: string): string | null {
+	for (let index = notices.length - 1; index >= 0; index -= 1) {
+		const notice = notices[index];
+		if (!notice) continue;
+		if (notice.kind !== "evidence" || notice.ref?.runId !== runId) continue;
+		if (notice.level !== "error") return null;
+		const reason = notice.message.replace(/\s+/g, " ").trim();
+		return reason.length > 0 ? reason : null;
+	}
+	return null;
+}
+
+/**
+ * Fold an ObservabilitySnapshot into the evidence readiness for one run. Cheap
+ * and pure: it scans the bounded run and notice rings the projection already
+ * maintains and reads no evidence files. Pending outranks a stale ready bundle
+ * because an in-flight rebuild is the more current signal; a matching run
+ * summary with an evidence bundle is ready; the latest error-level evidence
+ * notice for the run marks it failed.
+ */
+export function deriveRunEvidenceState(
+	snapshot: ObservabilitySnapshot | undefined,
+	runId: string,
+): RunEvidencePresentation {
+	if (!snapshot || runId.length === 0) return { state: "none", viewFilter: `dispatch:${runId}` };
+	if (snapshot.pendingEvidenceBuildRunIds.includes(runId)) {
+		return { state: "pending", viewFilter: `evidence:${runId}` };
+	}
+	const evidence = snapshot.runs.find((run) => run.runId === runId)?.evidence;
+	if (evidence) {
+		return { state: "ready", evidenceId: evidence.evidenceId, viewFilter: `evidence:${evidence.evidenceId}` };
+	}
+	const reason = latestEvidenceFailureReason(snapshot.notices, runId);
+	if (reason !== null) return { state: "failed", reason, viewFilter: `evidence:${runId}` };
+	return { state: "none", viewFilter: `dispatch:${runId}` };
+}
+
+interface EvidenceGlyphPresentation {
+	glyph: string;
+	word: string;
+	token: ClioToken;
+}
+
+// Proof state shares the section 5 glyph language with run status: the queued
+// glyph for pending build work, the ok check for a ready bundle, and the error
+// cross for a failed build. `none` renders no marker.
+function evidenceStatePresentation(state: EvidenceState): EvidenceGlyphPresentation | null {
+	switch (state) {
+		case "pending":
+			return { glyph: GLYPH.queued, word: "pending", token: "info" };
+		case "ready":
+			return { glyph: GLYPH.ok, word: "ready", token: "success" };
+		case "failed":
+			return { glyph: GLYPH.error, word: "failed", token: "error" };
+		case "none":
+			return null;
+	}
+}
+
+/**
+ * A compact trailing proof marker (`✓ proof`) for tight tables like /fleet where
+ * a full proof line does not fit. Returns null when no evidence state is known.
+ */
+export function evidenceMarker(evidence: RunEvidencePresentation | undefined): string | null {
+	if (!evidence) return null;
+	const presentation = evidenceStatePresentation(evidence.state);
+	if (!presentation) return null;
+	return clioTheme().fg(presentation.token, `${presentation.glyph} proof`);
+}
+
 // Dispatch card rows follow the footer dashboard key-value grammar: a dim key
 // padded to a shared column, then one trailing space before the value. The
 // widest key ("telemetry") sets the column so every value starts aligned.
@@ -149,7 +242,20 @@ function cardKvKey(theme: ClioTheme, key: string): string {
 	return theme.fg("dim", `${key.padEnd(CARD_KV_KEY_WIDTH)} `);
 }
 
-export function renderDispatchCard(row: DispatchBoardRow, width: number): string[] {
+// A `proof` key-value row: the colored state marker, an optional failure reason,
+// then the dim `/view` filter an operator would type. The card frame truncates
+// this ANSI-aware, so an overlong reason or filter is clipped, never overflowed.
+function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation): string | null {
+	const presentation = evidenceStatePresentation(evidence.state);
+	if (!presentation) return null;
+	const dot = dotSep(theme);
+	const parts = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word}`)];
+	if (evidence.state === "failed" && evidence.reason) parts.push(theme.fg("muted", evidence.reason));
+	parts.push(theme.fg("dim", evidence.viewFilter));
+	return `${cardKvKey(theme, "proof")}${parts.join(dot)}`;
+}
+
+export function renderDispatchCard(row: DispatchBoardRow, width: number, evidence?: RunEvidencePresentation): string[] {
 	const theme = clioTheme();
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
@@ -190,6 +296,13 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number): string
 		`${cardKvKey(theme, "status")}${statusStr}${dot}${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}${dot}${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
 		`${cardKvKey(theme, "telemetry")}${up}${dot}${down}${dot}${total}`,
 	];
+	// The proof row is present only when the observability projection knows an
+	// evidence state for this run; an unknown/none state adds no line, so cards
+	// without evidence keep their existing three-line body.
+	if (evidence) {
+		const proofLine = evidenceCardLine(theme, evidence);
+		if (proofLine !== null) bodyLines.push(proofLine);
+	}
 	if (detail !== null) bodyLines.push(`${cardKvKey(theme, "detail")}${theme.fg("dim", detail)}`);
 
 	return frame(theme, clampedLabel, bodyLines, width, { rightMeta: elapsed });
@@ -227,7 +340,11 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	return [padAnsi(line1, width), padAnsi(telemetry, width)];
 }
 
-export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>, width = 76): string[] {
+export function formatDispatchBoardLines(
+	rows: ReadonlyArray<DispatchBoardRow>,
+	width = 76,
+	observability?: ObservabilitySnapshot,
+): string[] {
 	if (rows.length === 0) {
 		const theme = clioTheme();
 		const lines = ["", "No active dispatches", "Delegated runs appear here with live status and telemetry.", ""];
@@ -237,7 +354,7 @@ export function formatDispatchBoardLines(rows: ReadonlyArray<DispatchBoardRow>, 
 		});
 	}
 
-	const cards = rows.map((row) => renderDispatchCard(row, width));
+	const cards = rows.map((row) => renderDispatchCard(row, width, deriveRunEvidenceState(observability, row.runId)));
 	const body: string[] = [];
 	for (const card of cards) {
 		if (body.length > 0) body.push("");

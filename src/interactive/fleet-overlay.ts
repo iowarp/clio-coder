@@ -3,6 +3,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract, DispatchSnapshot } from "../domains/dispatch/contract.js";
+import type { ObservabilitySnapshot } from "../domains/observability/index.js";
 import { isDispatchEligibleRuntime, type ProvidersContract } from "../domains/providers/index.js";
 import {
 	type Component,
@@ -13,6 +14,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
+import { deriveRunEvidenceState, evidenceMarker } from "./dispatch-board.js";
 import { formatUsd } from "./footer/widgets.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "./overlay-frame.js";
 import {
@@ -150,7 +152,7 @@ function retryHeader(width: number): string {
 	);
 }
 
-function runningRow(row: DispatchSnapshot["running"][number], width: number): string {
+function runningRow(row: DispatchSnapshot["running"][number], width: number, proofMarker: string | null): string {
 	const line = [
 		muted(fitLeft(shortId(row.runId), 10)),
 		muted(fitLeft(row.agentId, 12)),
@@ -163,7 +165,10 @@ function runningRow(row: DispatchSnapshot["running"][number], width: number): st
 		muted(fitRight(formatTokens(row.tokens.total), 8)),
 		muted(fitRight(formatUsd(row.costUsd), 9)),
 	].join(" ");
-	return truncateToWidth(line, width, "", true);
+	// The proof marker is a compact trailing evidence chip; truncateToWidth clips
+	// it ANSI-aware on tight widths, so it never overflows the existing columns.
+	const full = proofMarker ? `${line} ${proofMarker}` : line;
+	return truncateToWidth(full, width, "", true);
 }
 
 function retryRow(row: DispatchSnapshot["retrying"][number], width: number): string {
@@ -193,6 +198,7 @@ function totalsRows(totals: DispatchSnapshot["totals"]): string[] {
 export function formatFleetOverlayBodyLines(
 	snapshot: DispatchSnapshot,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
+	observability?: ObservabilitySnapshot,
 ): string[] {
 	const width = Math.max(1, Math.floor(contentWidth));
 	const lines: string[] = [];
@@ -203,7 +209,11 @@ export function formatFleetOverlayBodyLines(
 		lines.push(dim("  none in this TUI process"));
 	} else {
 		lines.push(runningHeader(width));
-		for (const row of snapshot.running) lines.push(runningRow(row, width));
+		// Evidence state is derived purely from the observability snapshot; when it
+		// is absent the marker resolves to null and rows render exactly as before.
+		for (const row of snapshot.running) {
+			lines.push(runningRow(row, width, evidenceMarker(deriveRunEvidenceState(observability, row.runId))));
+		}
 	}
 	lines.push("");
 	lines.push(listGroupHeader(`retrying (${snapshot.retrying.length})`));
@@ -226,9 +236,13 @@ export function formatFleetOverlayBodyLines(
 	return lines;
 }
 
-function renderSnapshot(dispatch: DispatchContract, width = DEFAULT_CONTENT_WIDTH): string[] {
+function renderSnapshot(
+	dispatch: DispatchContract,
+	width = DEFAULT_CONTENT_WIDTH,
+	observability?: ObservabilitySnapshot,
+): string[] {
 	try {
-		return formatFleetOverlayBodyLines(dispatch.snapshot(), width);
+		return formatFleetOverlayBodyLines(dispatch.snapshot(), width, observability);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		return [clioTheme().fg("error", "fleet snapshot unavailable"), "", muted(fitContentLine(message, width))];
@@ -326,6 +340,12 @@ export interface OpenFleetOverlayOptions {
 	bus?: SafeEventBus;
 	providers?: ProvidersContract;
 	agents?: AgentsContract;
+	/**
+	 * Narrow getter for the cached observability projection. When present, running
+	 * rows show a compact proof marker derived from the snapshot; no file reads and
+	 * no extra subscription are performed here.
+	 */
+	getObservability?: () => ObservabilitySnapshot | undefined;
 	getSettings?: () => Readonly<ClioSettings> | undefined;
 	writeSettings?: (next: ClioSettings) => void;
 	notice?: (level: FleetNoticeLevel, text: string, key?: string) => void;
@@ -359,7 +379,7 @@ class FleetOverlayBody implements Component {
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
 		if (this.submenuComponent) return this.submenuComponent.render(contentWidth);
-		if (this.mode === "status") return renderSnapshot(this.dispatch, contentWidth);
+		if (this.mode === "status") return renderSnapshot(this.dispatch, contentWidth, this.options.getObservability?.());
 		if (!this.canEditSettings()) return [muted("settings writer unavailable")];
 		return this.mode === "profiles" ? this.renderProfiles(contentWidth) : this.renderBindings(contentWidth);
 	}
