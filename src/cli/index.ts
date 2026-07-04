@@ -35,6 +35,7 @@ Usage:
   clio context              show project context status (CLIO.md, preload, codewiki)
   clio context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki
   clio context refresh      re-index the codewiki and refresh .clio state
+  clio context wiki [--update] [--status]  generate or inspect the Markdown wiki
   clio context reset [--all]  clear accumulated project context artifacts
   clio context index [--json]  build the codewiki index without model calls
   clio uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher

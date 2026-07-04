@@ -22,6 +22,7 @@ import { computeFingerprint, isStale } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
+import { runWikiGenerate } from "./wiki/generate.js";
 
 /**
  * Persist the current Clio state for `cwd`, preserving imported-context source
@@ -278,6 +279,25 @@ export function createContextBundle(
 					phase: "done",
 					status: "failed",
 					message: "context refresh failed",
+					detail: err instanceof Error ? err.message : String(err),
+				});
+				throw err;
+			}
+		},
+		async runWikiGenerate(input) {
+			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
+				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-wiki", at: Date.now(), ...event });
+				input?.onProgress?.(event);
+			};
+			try {
+				return await runWikiGenerate(
+					input ? { ...input, onProgress: emitProgress } : { model: "configured-clio-target", onProgress: emitProgress },
+				);
+			} catch (err) {
+				emitProgress({
+					phase: "done",
+					status: "failed",
+					message: "context wiki failed",
 					detail: err instanceof Error ? err.message : String(err),
 				});
 				throw err;
