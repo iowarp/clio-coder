@@ -22,7 +22,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import { buildHint, FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildHint, diagnosticSeverityToken, FocusBox, IDENTITY, showClioOverlayFrame } from "./overlay-frame.js";
 import { applySettingChange } from "./overlays/settings.js";
 import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.js";
 
@@ -340,9 +340,9 @@ export function formatTargetsHubBodyLines(
 	const theme = clioTheme();
 	const lines: string[] = [];
 	if (options.error) {
-		const errorToken: ClioToken =
-			options.error.severity === "error" ? "error" : options.error.severity === "warning" ? "warning" : "muted";
-		lines.push(theme.fg(errorToken, formatRuntimeResolutionDiagnostic(options.error)));
+		lines.push(
+			theme.fg(diagnosticSeverityToken(options.error.severity), formatRuntimeResolutionDiagnostic(options.error)),
+		);
 		lines.push("");
 	}
 	if (statuses.length === 0) {
