@@ -243,6 +243,43 @@ and grep/find answer tree visibility from a single ignore policy.
     scaffolding around a bold accent `C`.
   - Cost overlay: values align on primary numbers, and the cache-read average
     annotation hangs dim after its value instead of dragging the column.
+- **TUI design system, the overlay and dialog surfaces.** The hubs, pickers,
+  modals, and dialogs that the first pass left on the old look now speak the
+  grammar recorded in `docs/tui-design.md`: the `❯` selection cursor, key-value
+  rows with dim keys and muted values, `── label` group headers, registry
+  glyphs, one formatter per quantity, and ellipsis truncation. Per surface:
+  - Model picker: a design-system table whose header renders dim, whose cells
+    each keep their own token so selection never clips the model id, and whose
+    health cell states its fact in color across a healthy green, degraded amber,
+    and down red ramp.
+  - Targets hub: the expanded detail block adopts the key-value grammar with dim
+    keys and muted values, the collapsed row quiets its runtime, auth, and model
+    cells to muted, and the probe error takes its token from severity.
+  - Settings center: the footer separator and the lane divider route through the
+    shared `rule()` and `barSep()` helpers, byte for byte.
+  - Thinking and resume pickers: the current thinking level carries the active
+    mark rather than the running dot, an ended session glyphs `✓` while an open
+    one keeps the running dot, and every mark comes from the registry.
+  - Tree navigator: rows read state from color with a dim glyph and kind, a
+    muted turn id and preview, an accent chevron on the focused row, and a
+    timestamp column that measures on visible width so alignment holds.
+  - List overlays: the shared chrome points with the `❯` cursor, dims its group
+    headers, mutes empty states, draws its detail divider from the frame token,
+    and truncates with an ellipsis; the prompts, skills, agents, extensions, and
+    help surfaces inherit it and mark their diagnostics with the shared warning
+    and error glyphs.
+  - Ask-user modal: the question body stays plain while the progress strip,
+    status, summaries, and option rows render through the selection grammar and
+    the `❯` cursor, with the focused row bold accent.
+  - Auth and small dialogs: the auth dialog tokens its status rows, prompts, and
+    manual choices; the auth selector and cwd fallback keep SelectList as the
+    behavior owner behind design-cursor rows with muted previews; and keybinding
+    detail reads as dim labels, muted values, accent key affordances, and the
+    shared warning glyph.
+  - View overlay: artifact headers render local `HH:MM:SS` timestamps, themed
+    metadata, and registry verification glyphs, and dispatch and compaction
+    loads reuse the shared token, cost, and model-id formatters instead of raw
+    receipt fields.
 - **`context(scope="docs")` with no query lists the corpus instead of erroring.**
   Omitting the query used to return `context: scope=docs requires query`,
   costing the model a wasted round before it could search. It now returns the
