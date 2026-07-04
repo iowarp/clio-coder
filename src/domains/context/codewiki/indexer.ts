@@ -732,8 +732,7 @@ export function codewikiPath(cwd: string): string {
 }
 
 export function writeCodewiki(cwd: string, codewiki: Codewiki): void {
-	const serialized = JSON.stringify(normalizeCodewiki(codewiki)).replace(/^{"version":3,/, '{"version": 3,');
-	safeResourceWrite(codewikiPath(cwd), `${serialized}\n`, {
+	safeResourceWrite(codewikiPath(cwd), `${JSON.stringify(normalizeCodewiki(codewiki))}\n`, {
 		encoding: "utf8",
 	});
 }
