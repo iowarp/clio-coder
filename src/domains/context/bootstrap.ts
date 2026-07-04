@@ -744,6 +744,7 @@ function writeProjectState(
 	indexedAt: string,
 	adoption: AdoptionScanResult,
 	recordAdoption: boolean,
+	codewikiVersion: number,
 ): string {
 	const finalFingerprint = computeFingerprint(cwd);
 	const statePath = resolveStatePath(cwd);
@@ -754,6 +755,7 @@ function writeProjectState(
 		version: 1,
 		projectType,
 		fingerprint: finalFingerprint,
+		codewikiVersion,
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
 		lastIndexedAt: indexedAt,
@@ -964,7 +966,15 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	});
 	progress(input, { phase: "state", status: "started", message: "persisting codewiki and project state" });
 	writeCodewiki(cwd, codewiki);
-	const statePath = writeProjectState(cwd, projectType, now, indexedAt, adoption, input.adopt === true);
+	const statePath = writeProjectState(
+		cwd,
+		projectType,
+		now,
+		indexedAt,
+		adoption,
+		input.adopt === true,
+		codewiki.version,
+	);
 	progress(input, {
 		phase: "state",
 		status: "completed",

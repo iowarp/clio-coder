@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { runContextCommand } from "../../src/cli/context.js";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
 import { readCodewiki } from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
@@ -65,7 +66,45 @@ describe("contracts/context-index", () => {
 		);
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "python");
+		strictEqual(state?.codewikiVersion, 4);
 		strictEqual(typeof state?.lastIndexedAt, "string");
 		ok(readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8").includes('"version":4'));
+	});
+
+	it("loads legacy state without codewikiVersion", () => {
+		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		writeFileSync(
+			join(scratch, ".clio", "state.json"),
+			JSON.stringify({
+				version: 1,
+				fingerprint: { treeHash: "0".repeat(64), gitHead: null, loc: 1 },
+			}),
+			"utf8",
+		);
+
+		const state = readClioState(scratch);
+		ok(state);
+		strictEqual(state.codewikiVersion, undefined);
+	});
+
+	it("renders the codewiki digest in context status when codewiki exists", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const statusDigest = true;\n", "utf8");
+
+		const indexed = await captureStdout(() => runContextIndexCommand(["--json"]));
+		strictEqual(indexed.value, 0);
+		const { output, value } = await captureStdout(() => runContextCommand([]));
+
+		strictEqual(value, 0);
+		ok(output.includes("codewiki: fresh"));
+		ok(output.includes("entry points:"));
+	});
+
+	it("omits the codewiki digest in context status when codewiki is absent", async () => {
+		const { output, value } = await captureStdout(() => runContextCommand([]));
+
+		strictEqual(value, 0);
+		ok(output.includes("codewiki: absent"));
+		strictEqual(output.includes("entry points:"), false);
 	});
 });
