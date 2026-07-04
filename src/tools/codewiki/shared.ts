@@ -3,15 +3,15 @@ import { computeFingerprint } from "../../domains/context/fingerprint.js";
 import { readClioState, writeClioState } from "../../domains/context/state.js";
 import { detectProjectType } from "../../domains/session/workspace/project-type.js";
 
-export function loadCodewikiForTool(
+export async function loadCodewikiForTool(
 	cwd: string = process.cwd(),
-): { ok: true; codewiki: Codewiki } | { ok: false; message: string } {
+): Promise<{ ok: true; codewiki: Codewiki } | { ok: false; message: string }> {
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) return { ok: true, codewiki };
 	try {
 		const generatedAt = new Date().toISOString();
 		const projectType = detectProjectType(cwd);
-		const rebuilt = buildCodewiki({ cwd, language: projectType, generatedAt });
+		const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt });
 		writeCodewiki(cwd, rebuilt);
 		const prev = readClioState(cwd);
 		writeClioState(cwd, {

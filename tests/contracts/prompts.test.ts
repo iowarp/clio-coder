@@ -436,7 +436,7 @@ describe("contracts/prompts compiler logic", () => {
 		const freshWiki = scratchProject();
 		writeClioMd(freshWiki);
 		const generatedAt = "2026-05-01T00:00:00.000Z";
-		writeCodewiki(freshWiki, buildCodewiki({ cwd: freshWiki, language: "typescript", generatedAt }));
+		writeCodewiki(freshWiki, await buildCodewiki({ cwd: freshWiki, language: "typescript", generatedAt }));
 		writeClioState(freshWiki, {
 			version: 1,
 			projectType: "typescript",

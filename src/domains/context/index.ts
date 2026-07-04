@@ -40,7 +40,6 @@ export { parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 export { renderCodewikiDigest } from "./codewiki/digest.js";
 export {
 	buildCodewiki,
-	buildCodewikiWithTreeSitter,
 	codewikiEntries,
 	readCodewiki,
 	structuralCodewikiHash,

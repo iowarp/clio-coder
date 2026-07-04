@@ -35,7 +35,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	const indexedAt = now().toISOString();
 
 	input.onProgress?.({ phase: "codewiki", status: "started", message: "rebuilding codewiki" });
-	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
 	writeCodewiki(cwd, codewiki);
 	const fingerprint = computeFingerprint(cwd);
 
