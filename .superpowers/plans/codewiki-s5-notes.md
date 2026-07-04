@@ -1,0 +1,4 @@
+- Implemented Slice 5 wiki plumbing under `.clio/wiki/` with explicit CLI/contract entrypoints only.
+- Mechanical fix outside the requested set: `src/domains/prompts/fragment-loader.ts` skips `fragments/wiki/` because those files are raw wiki-generation prompts, not session prompt fragments with YAML frontmatter.
+- Runtime note: `modelWikiGenerate` dispatches `documenter` so the agent can write Markdown pages; the existing `scout` recipe has `code_nav` but is explicitly read-only.
+- No Slice 6 refresh hooks, session-start hooks, stop hooks, or surgical wiki refresh behavior were added.

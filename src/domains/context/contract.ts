@@ -3,6 +3,7 @@ import type { RunBootstrapInput, RunBootstrapResult } from "./bootstrap.js";
 import type { RunContextClearInput, RunContextClearResult } from "./clear.js";
 import type { ParsedClioMd } from "./clio-md.js";
 import type { RunContextRefreshInput, RunContextRefreshResult } from "./refresh.js";
+import type { RunWikiGenerateInput, RunWikiGenerateResult } from "./wiki/generate.js";
 
 export interface ProjectPromptContext {
 	text: string;
@@ -40,6 +41,7 @@ export interface ContextContract extends DomainContract {
 	 * Backs `/context refresh` and `clio context refresh`.
 	 */
 	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
+	runWikiGenerate(input?: RunWikiGenerateInput): Promise<RunWikiGenerateResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
 	/**
 	 * Parsed CLIO.md structured fields (project name, conventions, invariants)

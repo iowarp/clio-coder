@@ -2,6 +2,7 @@ const HELP = `Usage:
   clio context
   clio context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
   clio context refresh
+  clio context wiki [--update] [--status]
   clio context reset [--all]
   clio context index [--json]
 
@@ -9,6 +10,7 @@ Project context commands:
   clio context              show project context status (CLIO.md, preload, codewiki)
   clio context init         explore the repo and bootstrap CLIO.md and codewiki
   clio context refresh      re-index the codewiki and refresh .clio state
+  clio context wiki         generate or inspect the agent-authored Markdown wiki
   clio context reset        clear accumulated project context artifacts
   clio context index        build the codewiki index without model calls
 `;
@@ -82,6 +84,74 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 	}
 }
 
+async function runWikiStatusCommand(): Promise<number> {
+	const context = await import("../domains/context/index.js");
+	const cwd = process.cwd();
+	const meta = context.readWikiMeta(cwd);
+	if (!meta) {
+		const pageCount = context.listWikiPages(cwd).length;
+		process.stdout.write(`wiki: absent (${pageCount} page${pageCount === 1 ? "" : "s"})\n`);
+		return 0;
+	}
+	const currentHead = context.currentWikiGitHead(cwd);
+	const lines = [
+		`wiki: present (${meta.pages.length} page${meta.pages.length === 1 ? "" : "s"})`,
+		`updatedAt: ${meta.updatedAt}`,
+		`gitHead: ${meta.gitHead ?? "none"}`,
+	];
+	if (currentHead !== meta.gitHead) {
+		lines.push(`staleness: gitHead differs from current HEAD (${currentHead ?? "none"})`);
+	}
+	process.stdout.write(`${lines.join("\n")}\n`);
+	return 0;
+}
+
+async function runWikiCommand(args: string[]): Promise<number> {
+	let forceUpdate = false;
+	let status = false;
+	for (const arg of args) {
+		if (arg === "--help" || arg === "-h") {
+			process.stdout.write(HELP);
+			return 0;
+		}
+		if (arg === "--update") {
+			forceUpdate = true;
+			continue;
+		}
+		if (arg === "--status") {
+			status = true;
+			continue;
+		}
+		process.stderr.write(`clio context wiki: unknown flag ${arg}\n`);
+		process.stdout.write(HELP);
+		return 2;
+	}
+	if (status) return runWikiStatusCommand();
+	try {
+		const context = await import("../domains/context/index.js");
+		const { modelWikiGenerate } = await import("./wiki-generate.js");
+		const result = await context.runWikiGenerate({
+			cwd: process.cwd(),
+			...(forceUpdate ? { mode: "update" as const } : {}),
+			model: "configured-clio-target",
+			generate: modelWikiGenerate(),
+		});
+		if (result.status === "failed") {
+			process.stderr.write(`clio context wiki failed: ${(result.problems ?? ["unknown failure"]).join("; ")}\n`);
+			return 1;
+		}
+		process.stdout.write(
+			result.status === "noop"
+				? `clio context wiki: unchanged (${result.pages} page${result.pages === 1 ? "" : "s"})\n`
+				: `clio context wiki: generated ${result.pages} page${result.pages === 1 ? "" : "s"}\n`,
+		);
+		return 0;
+	} catch (err) {
+		process.stderr.write(`clio context wiki failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		return 1;
+	}
+}
+
 export async function runContextCommand(args: string[]): Promise<number> {
 	const [verb, ...rest] = args;
 	if (verb === undefined) {
@@ -97,6 +167,8 @@ export async function runContextCommand(args: string[]): Promise<number> {
 			return (await import("./init.js")).runInitCommand(rest);
 		case "refresh":
 			return runRefreshCommand(rest);
+		case "wiki":
+			return runWikiCommand(rest);
 		case "reset":
 			return (await import("./context-clear.js")).runContextClearCommand(rest);
 		case "index":

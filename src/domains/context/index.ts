@@ -69,3 +69,24 @@ export {
 	runContextRefresh,
 } from "./refresh.js";
 export { readClioState, writeClioState } from "./state.js";
+export {
+	type RunWikiGenerateInput,
+	type RunWikiGenerateResult,
+	runWikiGenerate,
+	type WikiGenerate,
+	type WikiGenerateInput,
+	type WikiGenerateMode,
+} from "./wiki/generate.js";
+export { listWikiPages, validateWikiLayout, type WikiLayoutValidation, type WikiPage, wikiDir } from "./wiki/layout.js";
+export {
+	computeWikiContentHash,
+	currentWikiGitHead,
+	isWikiMeta,
+	readWikiMeta,
+	validateWikiMeta,
+	type WikiMeta,
+	type WikiMetaValidation,
+	wikiMetaPath,
+	writeWikiMeta,
+} from "./wiki/meta.js";
+export { type BuildWikiPromptInput, buildWikiPrompt } from "./wiki/prompts.js";
