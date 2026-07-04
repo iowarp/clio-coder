@@ -161,7 +161,9 @@ export function createContextActivityStore(bus: SafeEventBus): {
 	const unsubscribe = bus.on(BusChannels.ContextActivity, (raw) => {
 		if (!isContextActivityPayload(raw)) return;
 		const now = raw.at;
-		const startsNewRun = raw.phase === "scan" && raw.status === "started";
+		const startsNewRun =
+			raw.status === "started" &&
+			(raw.phase === "scan" || !current || current.completedAtMs !== null || current.kind !== raw.kind);
 		const startedAtMs = startsNewRun || !current ? now : current.startedAtMs;
 		current = {
 			kind: raw.kind,
