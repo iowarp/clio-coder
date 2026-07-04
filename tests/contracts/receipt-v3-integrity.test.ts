@@ -115,6 +115,15 @@ describe("contracts/receipt-v3-integrity", () => {
 			ok: false,
 			reason: "v3 findings summary on v2 receipt",
 		});
+
+		const v2WithAutonomyEnforcement: RunReceipt = {
+			...v2Receipt,
+			autonomyEnforcement: { grade: "mediated", autonomy: "auto-edit" },
+		};
+		deepStrictEqual(verifyReceiptIntegrity(v2WithAutonomyEnforcement, envelope), {
+			ok: false,
+			reason: "v3 autonomy enforcement on v2 receipt",
+		});
 	});
 
 	it("detects tampering with the findings summary on a sealed v3 receipt", () => {
@@ -130,6 +139,32 @@ describe("contracts/receipt-v3-integrity", () => {
 		const tampered: RunReceipt = {
 			...receipt,
 			findingsSummary: { ...sampleSummary, firstPassSuccess: true },
+		};
+		deepStrictEqual(verifyReceiptIntegrity(tampered, envelope), { ok: false, reason: "integrity mismatch" });
+	});
+
+	it("detects tampering with autonomy enforcement on a sealed v3 receipt", () => {
+		const envelope = fixtureEnvelope("run-v3-autonomy-enforcement");
+		const draft: RunReceiptDraft = {
+			...fixtureReceiptDraft(envelope),
+			autonomyEnforcement: {
+				grade: "bypassed",
+				autonomy: "full-auto",
+				externalMode: "bypassPermissions",
+				dangerousBypass: true,
+			},
+		};
+		const receipt = withReceiptIntegrity(draft, envelope);
+		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+
+		const tampered: RunReceipt = {
+			...receipt,
+			autonomyEnforcement: {
+				grade: "bypassed",
+				autonomy: "full-auto",
+				externalMode: "bypassPermissions",
+				dangerousBypass: false,
+			},
 		};
 		deepStrictEqual(verifyReceiptIntegrity(tampered, envelope), { ok: false, reason: "integrity mismatch" });
 	});

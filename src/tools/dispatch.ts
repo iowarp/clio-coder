@@ -378,6 +378,7 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 				...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 				...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 				...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
+				...(provenance.autonomyEnforcement !== undefined ? { autonomyEnforcement: provenance.autonomyEnforcement } : {}),
 			};
 		}),
 	};

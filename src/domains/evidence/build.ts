@@ -260,6 +260,29 @@ function buildFindings(
 				),
 			);
 		}
+		const autonomyEnforcement = receipt?.autonomyEnforcement;
+		if (autonomyEnforcement?.dangerousBypass === true) {
+			findings.push(
+				finding(
+					findings.length,
+					"warn",
+					"external-bypass",
+					source.envelope.id,
+					"run executed with external permission bypass (CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced",
+				),
+			);
+		} else if (autonomyEnforcement?.grade === "approximated") {
+			const mode = autonomyEnforcement.externalMode ? ` via ${autonomyEnforcement.externalMode}` : "";
+			findings.push(
+				finding(
+					findings.length,
+					"info",
+					"external-approximation",
+					source.envelope.id,
+					`run used approximated external autonomy enforcement${mode}`,
+				),
+			);
+		}
 		if (source.envelope.status === "stale" || source.envelope.status === "dead") {
 			findings.push(
 				finding(findings.length, "warn", "timeout", source.envelope.id, `run status ${source.envelope.status}`),
@@ -540,6 +563,7 @@ function cleanedTraceRows(
 			...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 			...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 			...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
+			...(provenance.autonomyEnforcement !== undefined ? { autonomyEnforcement: provenance.autonomyEnforcement } : {}),
 		});
 		for (const event of toolEventRows.filter((item) => item.runId === source.envelope.id)) {
 			rows.push({ kind: "tool-summary", ...event });

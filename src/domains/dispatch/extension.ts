@@ -20,6 +20,8 @@ import {
 	type AcpDelegationRunInput,
 	startAcpDelegationRun,
 } from "../../engine/acp/adapter.js";
+import { antigravitySubprocessConfigForAutonomy } from "../../engine/antigravity/subprocess-runtime.js";
+import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude/subprocess-runtime.js";
 import { applyToolProfile, type ToolProfileName } from "../../tools/profiles.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import {
@@ -96,6 +98,7 @@ import {
 	type RunPipelineProvenance,
 	type RunProjectContextProvenance,
 	type RunReceipt,
+	type RunReceiptAutonomyEnforcement,
 	type RunReceiptDraft,
 	type RunReceiptUpstreamResponse,
 	type RunStatus,
@@ -994,6 +997,37 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	// does, with asks resolving through onPermission above.
 	spec.autonomy = config?.get().autonomy ?? "auto-edit";
 	return spec;
+}
+
+function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyEnforcement {
+	const autonomy = spec.autonomy ?? "auto-edit";
+	if (spec.runtimeId === "claude-code") {
+		try {
+			const config = claudeSubprocessPermissionConfigForAutonomy(autonomy);
+			return {
+				grade: config.dangerousBypass ? "bypassed" : "approximated",
+				autonomy,
+				externalMode: config.permissionMode,
+				dangerousBypass: config.dangerousBypass,
+			};
+		} catch {
+			return { grade: "approximated", autonomy };
+		}
+	}
+	if (spec.runtimeId === "antigravity-code") {
+		try {
+			const config = antigravitySubprocessConfigForAutonomy(autonomy);
+			return {
+				grade: config.dangerousBypass ? "bypassed" : "approximated",
+				autonomy,
+				externalMode: config.extraArgs.includes("--sandbox") ? "sandbox" : "agy-settings-default",
+				dangerousBypass: config.dangerousBypass,
+			};
+		} catch {
+			return { grade: "approximated", autonomy };
+		}
+	}
+	return { grade: "mediated", autonomy };
 }
 
 function pickCapabilityMatchedWorker(
@@ -2836,6 +2870,7 @@ export function createDispatchBundle(
 				toolStats: snapshotToolStats(toolStats),
 				toolActivity,
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
+				autonomyEnforcement: autonomyEnforcementForWorkerSpec(spec),
 				safety: {
 					// Escalation tallies are folded in only when at least one ask was
 					// escalated, so deny/fail receipts stay byte-identical.

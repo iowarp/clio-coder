@@ -1,5 +1,5 @@
 import type { RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
-import type { RunPersonaOverride, RunPipelineProvenance } from "../dispatch/types.js";
+import type { RunPersonaOverride, RunPipelineProvenance, RunReceiptAutonomyEnforcement } from "../dispatch/types.js";
 import type { EvalCommandPhase, EvalFailureClass, EvalRunRecord } from "../eval/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { RunEscalationCounts } from "./provenance.js";
@@ -20,6 +20,8 @@ export const EVIDENCE_TAGS = [
 	"destructive-cleanup",
 	"blocked-tool",
 	"escalation",
+	"external-bypass",
+	"external-approximation",
 	"receipt-integrity",
 	"protected-artifact",
 	"tool-loop",
@@ -197,6 +199,8 @@ export interface EvidenceTraceRunRow {
 	personaOverride?: RunPersonaOverride;
 	/** Worker permission-escalation counters; present only when the run saw an escalation. */
 	escalation?: RunEscalationCounts;
+	/** Autonomy enforcement grade recorded by the run receipt. */
+	autonomyEnforcement?: RunReceiptAutonomyEnforcement;
 }
 
 export interface EvidenceTraceToolRow extends EvidenceToolEvent {

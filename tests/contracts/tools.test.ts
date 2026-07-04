@@ -1116,6 +1116,12 @@ describe("contracts/tools dispatch run paths", () => {
 								requestedActions: [],
 								runtimeLimitations: [],
 							},
+							autonomyEnforcement: {
+								grade: "approximated",
+								autonomy: "auto-edit",
+								externalMode: "acceptEdits",
+								dangerousBypass: false,
+							},
 						},
 					},
 				],
@@ -1136,12 +1142,14 @@ describe("contracts/tools dispatch run paths", () => {
 			ok(result.output.includes("pipeline=step2 from=run-1 in=32b truncated"), result.output);
 			ok(result.output.includes("persona=1b3fc16b2c4d..."), result.output);
 			ok(result.output.includes("escalations=2req/0appr/1deny/1timeout"), result.output);
+			ok(result.output.includes("enforcement=approximated:auto-edit/acceptEdits"), result.output);
 			const details = result.details as {
 				runs?: Array<{
 					runId?: unknown;
 					pipeline?: unknown;
 					personaOverride?: unknown;
 					escalation?: unknown;
+					autonomyEnforcement?: unknown;
 				}>;
 			};
 			// Plain first step carries no provenance keys.
@@ -1149,6 +1157,7 @@ describe("contracts/tools dispatch run paths", () => {
 			ok(!("pipeline" in (details.runs?.[0] ?? {})), "plain step must omit pipeline");
 			ok(!("personaOverride" in (details.runs?.[0] ?? {})), "plain step must omit personaOverride");
 			ok(!("escalation" in (details.runs?.[0] ?? {})), "plain step must omit escalation");
+			ok(!("autonomyEnforcement" in (details.runs?.[0] ?? {})), "plain step must omit autonomyEnforcement");
 			// Provenance-bearing second step carries the additive keys.
 			deepStrictEqual(details.runs?.[1]?.pipeline, {
 				fromRunId: "run-1",
@@ -1158,6 +1167,12 @@ describe("contracts/tools dispatch run paths", () => {
 			});
 			deepStrictEqual(details.runs?.[1]?.personaOverride, { promptHash: "1b3fc16b2c4d5e6f7a8b9c0d1e2f3a4b" });
 			deepStrictEqual(details.runs?.[1]?.escalation, { requested: 2, approved: 0, denied: 1, timedOut: 1 });
+			deepStrictEqual(details.runs?.[1]?.autonomyEnforcement, {
+				grade: "approximated",
+				autonomy: "auto-edit",
+				externalMode: "acceptEdits",
+				dangerousBypass: false,
+			});
 		}
 	});
 

@@ -13,8 +13,10 @@ import { describe, it } from "node:test";
 import { runEvidenceCommand } from "../../src/cli/evidence.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type {
+	RunKind,
 	RunPersonaOverride,
 	RunPipelineProvenance,
+	RunReceiptAutonomyEnforcement,
 	RunReceiptSafetySummary,
 } from "../../src/domains/dispatch/types.js";
 import { buildEvidence } from "../../src/domains/evidence/index.js";
@@ -75,11 +77,12 @@ interface SealProvenance {
 	pipeline?: RunPipelineProvenance;
 	personaOverride?: RunPersonaOverride;
 	safety?: RunReceiptSafetySummary;
+	autonomyEnforcement?: RunReceiptAutonomyEnforcement;
 }
 
 /** Seal a finalized run + receipt the way the dispatch finalizer does. */
 async function sealRun(
-	runtime: { runtimeId: string; runtimeKind: "http" | "acp-delegation" } = {
+	runtime: { runtimeId: string; runtimeKind: RunKind } = {
 		runtimeId: "openai-completions",
 		runtimeKind: "http",
 	},
@@ -149,6 +152,7 @@ async function sealRun(
 		...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 		...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 		...(provenance.safety !== undefined ? { safety: provenance.safety } : {}),
+		...(provenance.autonomyEnforcement !== undefined ? { autonomyEnforcement: provenance.autonomyEnforcement } : {}),
 		sessionId: null,
 	});
 	await ledger.persist();
@@ -344,6 +348,85 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
+	it("flags external bypass and projects autonomy enforcement", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const autonomyEnforcement: RunReceiptAutonomyEnforcement = {
+				grade: "bypassed",
+				autonomy: "full-auto",
+				externalMode: "bypassPermissions",
+				dangerousBypass: true,
+			};
+			const { runId } = await sealRun({ runtimeId: "claude-code", runtimeKind: "subprocess" }, { autonomyEnforcement });
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
+
+			const result = await buildEvidence({ dataDir, stateDir, runId });
+
+			const transcript = readFileSync(join(result.directory, "transcript.md"), "utf8");
+			ok(
+				transcript.includes(
+					"autonomy enforcement: bypassed autonomy=full-auto mode=bypassPermissions dangerousBypass=true",
+				),
+				transcript,
+			);
+
+			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
+			const runRow = cleaned.find((row) => row.kind === "run");
+			ok(runRow, "cleaned trace missing run row");
+			deepStrictEqual(runRow?.autonomyEnforcement, autonomyEnforcement);
+
+			const bypassFinding = result.findings.find((finding) => finding.tag === "external-bypass");
+			ok(bypassFinding, "expected an external bypass finding");
+			strictEqual(bypassFinding?.severity, "warn");
+			strictEqual(bypassFinding?.runId, runId);
+			strictEqual(
+				bypassFinding?.message,
+				"run executed with external permission bypass (CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1); Clio safety blocks were not enforced",
+			);
+
+			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
+			strictEqual(inspected.result, 0, inspected.stdout);
+			ok(
+				inspected.stdout.includes(
+					"autonomy enforcement: bypassed autonomy=full-auto mode=bypassPermissions dangerousBypass=true",
+				),
+				inspected.stdout,
+			);
+		});
+	});
+
+	it("reports approximated external enforcement without a bypass finding", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const autonomyEnforcement: RunReceiptAutonomyEnforcement = {
+				grade: "approximated",
+				autonomy: "auto-edit",
+				externalMode: "agy-settings-default",
+				dangerousBypass: false,
+			};
+			const { runId } = await sealRun(
+				{ runtimeId: "antigravity-code", runtimeKind: "subprocess" },
+				{ autonomyEnforcement },
+			);
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
+
+			const result = await buildEvidence({ dataDir, stateDir, runId });
+
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "external-bypass"),
+				false,
+			);
+			const approximationFinding = result.findings.find((finding) => finding.tag === "external-approximation");
+			ok(approximationFinding, "expected an external approximation finding");
+			strictEqual(approximationFinding?.severity, "info");
+			strictEqual(approximationFinding?.runId, runId);
+			strictEqual(
+				approximationFinding?.message,
+				"run used approximated external autonomy enforcement via agy-settings-default",
+			);
+		});
+	});
+
 	it("renders a legacy receipt without provenance byte-identically (fields absent, not empty)", async () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const { runId } = await sealRun();
@@ -356,6 +439,7 @@ describe("contracts/evidence-build", () => {
 			ok(!transcript.includes("pipeline: step"), transcript);
 			ok(!transcript.includes("persona override:"), transcript);
 			ok(!transcript.includes("escalations:"), transcript);
+			ok(!transcript.includes("autonomy enforcement:"), transcript);
 
 			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
 			const runRow = cleaned.find((row) => row.kind === "run");
@@ -363,9 +447,18 @@ describe("contracts/evidence-build", () => {
 			ok(!("pipeline" in (runRow ?? {})), "legacy run row must omit pipeline");
 			ok(!("personaOverride" in (runRow ?? {})), "legacy run row must omit personaOverride");
 			ok(!("escalation" in (runRow ?? {})), "legacy run row must omit escalation");
+			ok(!("autonomyEnforcement" in (runRow ?? {})), "legacy run row must omit autonomyEnforcement");
 
 			strictEqual(
 				result.findings.some((finding) => finding.tag === "escalation"),
+				false,
+			);
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "external-bypass"),
+				false,
+			);
+			strictEqual(
+				result.findings.some((finding) => finding.tag === "external-approximation"),
 				false,
 			);
 
