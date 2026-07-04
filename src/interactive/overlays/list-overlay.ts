@@ -10,7 +10,19 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import { buildHint, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, markdownTheme, selectListTheme } from "../theme/index.js";
+import { clioTheme, GLYPH, markdownTheme, rule, selectListTheme } from "../theme/index.js";
+
+const ELLIPSIS = "…";
+const ENGINE_SELECT_CURSOR = String.fromCharCode(0x2192);
+
+/**
+ * pi-tui's SelectList still owns a legacy selected row arrow. Scoped overlays
+ * pass its rendered rows through this adapter until the engine exposes the
+ * cursor as theme data.
+ */
+export function renderSelectListWithDesignCursor(list: { render(width: number): string[] }, width: number): string[] {
+	return list.render(width).map((line) => line.replace(ENGINE_SELECT_CURSOR, GLYPH.cursor));
+}
 
 export interface ListOverlayItem {
 	id: string;
@@ -112,7 +124,7 @@ export class ListOverlayView implements Component {
 
 	private padLine(line: string, targetWidth: number): string {
 		const w = visibleWidth(line);
-		if (w >= targetWidth) return truncateToWidth(line, targetWidth, "...", true);
+		if (w >= targetWidth) return truncateToWidth(line, targetWidth, ELLIPSIS, true);
 		return line + " ".repeat(targetWidth - w);
 	}
 
@@ -166,8 +178,7 @@ export class ListOverlayView implements Component {
 		}
 
 		if (filteredItems.length === 0) {
-			const theme = selectListTheme(clioTheme());
-			const noMatchText = theme.noMatch(`  ${this.options.emptyMessage ?? "No matches found"}`);
+			const noMatchText = clioTheme().fg("muted", `  ${this.options.emptyMessage ?? "No matches found"}`);
 			lines.push(this.padLine(noMatchText, width));
 		} else {
 			const selectedRowIndex = renderedRows.findIndex(
@@ -197,14 +208,14 @@ export class ListOverlayView implements Component {
 					}
 					const isSelected = row.itemIndex === this.selectedIndex;
 
-					const prefix = isSelected ? theme.selectedPrefix("→ ") : "  ";
+					const prefix = isSelected ? theme.selectedPrefix(`${GLYPH.cursor} `) : "  ";
 					const prefixLen = 2;
 					const availableWidth = width - prefixLen;
 					const metaStr = item.meta ?? "";
 					const metaLen = metaStr ? visibleWidth(metaStr) : 0;
 
-					const maxLabelWidth = availableWidth - (metaLen > 0 ? metaLen + 2 : 0);
-					const truncatedLabel = truncateToWidth(item.label, maxLabelWidth, "...", true);
+					const maxLabelWidth = Math.max(1, availableWidth - (metaLen > 0 ? metaLen + 2 : 0));
+					const truncatedLabel = truncateToWidth(item.label, maxLabelWidth, ELLIPSIS, true);
 					const actualLabelWidth = visibleWidth(truncatedLabel);
 
 					const spacing = " ".repeat(Math.max(1, availableWidth - actualLabelWidth - metaLen));
@@ -256,7 +267,7 @@ export class ListOverlayView implements Component {
 		const sliced = mdLines.slice(this.detailScrollOffset, this.detailScrollOffset + height);
 		const padded = sliced.map((line) => {
 			const w = visibleWidth(line);
-			if (w >= width) return truncateToWidth(line, width, "...", true);
+			if (w >= width) return truncateToWidth(line, width, ELLIPSIS, true);
 			return line + " ".repeat(width - w);
 		});
 
@@ -310,7 +321,7 @@ export class ListOverlayView implements Component {
 			lines.push(...listLines);
 
 			if (this.showDetail && hasDetail) {
-				lines.push(clioTheme().fg("frame", "─".repeat(width)));
+				lines.push(rule(clioTheme(), width));
 				const detailLines = this.renderDetail(width, 10, selectedItem);
 				lines.push(...detailLines);
 			}

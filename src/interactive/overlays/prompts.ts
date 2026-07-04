@@ -1,5 +1,6 @@
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { SlashCommandContext } from "../slash-commands.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
@@ -26,9 +27,11 @@ export function openPromptsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 	});
 
 	const diagnosticItems: ListOverlayItem[] = promptsList.diagnostics.map((diag, idx) => {
+		const theme = clioTheme();
+		const marker = diag.type === "error" ? theme.fg("error", GLYPH.error) : theme.fg("warning", GLYPH.warnInline);
 		const item: ListOverlayItem = {
 			id: `diag-${idx}`,
-			label: `Diagnostic: ${diag.type}: ${diag.message}`,
+			label: `${marker} ${diag.message}`,
 			group: "Diagnostics",
 			detail: () => [
 				`# Diagnostic`,

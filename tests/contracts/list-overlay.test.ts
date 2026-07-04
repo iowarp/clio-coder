@@ -1,6 +1,14 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type ListOverlayItem, ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
+import {
+	type ListOverlayItem,
+	ListOverlayView,
+	renderSelectListWithDesignCursor,
+} from "../../src/interactive/overlays/list-overlay.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+
+const ESC = String.fromCharCode(27);
+const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 
 describe("contracts/list-overlay", () => {
 	it("renders grouping headers and items correctly", () => {
@@ -25,13 +33,18 @@ describe("contracts/list-overlay", () => {
 		);
 
 		const lines = view.render(80);
-		// Should contain grouping headers
+		// The rendered list includes both group headers.
 		ok(lines.some((l) => l.includes("── Fruit")));
 		ok(lines.some((l) => l.includes("── Veggie")));
-		// Should contain items
+		const fruitHeader = lines.find((l) => l.includes("── Fruit")) ?? "";
+		ok(fruitHeader.includes(clioTheme().fgSequence("dim")), "group headers render in the dim token");
+		// The rendered list includes each item in its group.
 		ok(lines.some((l) => l.includes("Apple")));
 		ok(lines.some((l) => l.includes("Banana")));
 		ok(lines.some((l) => l.includes("Carrot")));
+		const selected = stripAnsi(lines.find((l) => l.includes("Apple")) ?? "");
+		ok(selected.includes(GLYPH.cursor), `selected row should use ${GLYPH.cursor}, got: ${selected}`);
+		ok(!selected.includes(String.fromCharCode(0x2192)), "the legacy engine arrow must not render");
 	});
 
 	it("filters items fuzzy matching label and group, and clears on Esc", () => {
@@ -55,20 +68,20 @@ describe("contracts/list-overlay", () => {
 			},
 		);
 
-		// Initially all are shown
+		// The initial render shows every item.
 		let lines = view.render(80);
 		ok(lines.some((l) => l.includes("Apple")));
 		ok(lines.some((l) => l.includes("Banana")));
 		ok(lines.some((l) => l.includes("Carrot")));
 
-		// Input 'c' to narrow to Carrot/Veggie
+		// Typing c narrows the list to Carrot and its group.
 		view.handleInput("c");
 		lines = view.render(80);
 		ok(!lines.some((l) => l.includes("Apple")));
 		ok(!lines.some((l) => l.includes("Banana")));
 		ok(lines.some((l) => l.includes("Carrot")));
 
-		// Esc clears the filter first
+		// Esc clears the filter before it closes the overlay.
 		view.handleInput("\u001b");
 		lines = view.render(80);
 		ok(lines.some((l) => l.includes("Apple")));
@@ -104,7 +117,7 @@ describe("contracts/list-overlay", () => {
 		ok(!lines.some((l) => l.includes("Apple")));
 		ok(lines.some((l) => l.includes("Carrot")));
 
-		// First Esc clears the filter instead of closing.
+		// The first Esc clears the filter instead of closing.
 		view.handleInput("\u001b");
 		strictEqual(closeCount, 0);
 		lines = view.render(80);
@@ -112,7 +125,7 @@ describe("contracts/list-overlay", () => {
 		ok(lines.some((l) => l.includes("Banana")));
 		ok(lines.some((l) => l.includes("Carrot")));
 
-		// Second Esc closes.
+		// The second Esc closes the overlay.
 		view.handleInput("\u001b");
 		strictEqual(closeCount, 1);
 	});
@@ -155,24 +168,24 @@ describe("contracts/list-overlay", () => {
 			() => {},
 		);
 
-		// Initial selection at 0
+		// The initial selection starts at the first row.
 		let lines = view.render(80);
-		ok(lines.some((l) => l.includes("→") && l.includes("Apple")));
+		ok(lines.some((l) => l.includes(GLYPH.cursor) && l.includes("Apple")));
 
-		// j moves to 1
+		// Pressing j moves the selection to the second row.
 		view.handleInput("j");
 		lines = view.render(80);
-		ok(lines.some((l) => l.includes("→") && l.includes("Banana")));
+		ok(lines.some((l) => l.includes(GLYPH.cursor) && l.includes("Banana")));
 
-		// j again wraps to 0
+		// Pressing j again wraps the selection to the first row.
 		view.handleInput("j");
 		lines = view.render(80);
-		ok(lines.some((l) => l.includes("→") && l.includes("Apple")));
+		ok(lines.some((l) => l.includes(GLYPH.cursor) && l.includes("Apple")));
 
-		// k wraps to 1
+		// Pressing k wraps the selection to the second row.
 		view.handleInput("k");
 		lines = view.render(80);
-		ok(lines.some((l) => l.includes("→") && l.includes("Banana")));
+		ok(lines.some((l) => l.includes(GLYPH.cursor) && l.includes("Banana")));
 	});
 
 	it("toggles detail pane and updates lines", () => {
@@ -189,16 +202,18 @@ describe("contracts/list-overlay", () => {
 			() => {},
 		);
 
-		// Detail is closed initially
+		// The detail pane is closed initially.
 		let lines = view.render(80);
 		ok(!lines.some((l) => l.includes("delicious")));
 
-		// Press Tab to open detail
+		// Pressing Tab opens the detail pane.
 		view.handleInput("\t");
 		lines = view.render(80);
 		ok(lines.some((l) => l.includes("delicious")));
+		const divider = lines.find((l) => stripAnsi(l).includes("─"));
+		ok(divider?.includes(clioTheme().fgSequence("frame")), "detail divider uses the frame token");
 
-		// Press Tab again to close detail
+		// Pressing Tab again closes the detail pane.
 		view.handleInput("\t");
 		lines = view.render(80);
 		ok(!lines.some((l) => l.includes("delicious")));
@@ -220,5 +235,28 @@ describe("contracts/list-overlay", () => {
 
 		const hint = view.getHint();
 		strictEqual(hint, "[↑↓] select · [type] filter · [Enter/Tab] detail · [PgUp/PgDn] scroll detail · [Esc] close");
+	});
+
+	it("styles an empty filtered list as muted neutral content", () => {
+		const view = new ListOverlayView(
+			{
+				title: "Test",
+				mode: "browse",
+				items: [{ id: "1", label: "Apple" }],
+				filterable: true,
+				onClose: () => {},
+			},
+			() => {},
+		);
+
+		view.handleInput("z");
+		const emptyLine = view.render(80).find((line) => line.includes("No matches found")) ?? "";
+		ok(emptyLine.includes(clioTheme().fgSequence("muted")), "empty filtered state is muted, not a warning");
+	});
+
+	it("adapts pi-tui SelectList rows to the design cursor", () => {
+		const legacyCursor = String.fromCharCode(0x2192);
+		const lines = renderSelectListWithDesignCursor({ render: () => [`${legacyCursor} OAuth`] }, 80);
+		strictEqual(lines[0], `${GLYPH.cursor} OAuth`);
 	});
 });
