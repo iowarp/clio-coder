@@ -97,13 +97,15 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Autonomy & safety net",
-				"**Autonomy level** (`/settings`, persisted as `autonomy`): read-only | suggest | auto-edit | full-auto. " +
-					"It sets how much initiative the system prompt asks of the model. It does not loosen or tighten any hard gate.",
-				"**Approvals**: actions classified `system_modify`, plus rules marked for confirmation, park the tool call and open a one-shot approval overlay. " +
-					"Approving resumes only that call.",
-				"**Safety net** (always on, identical at every autonomy level): damage-control rules, default-deny bash with a built-in safe-command allowlist, " +
-					"path policy for secrets and system paths, protected artifacts, the loop guard, and dispatch scope checks. " +
-					"Tune it in `.clio/safety.yaml`; see docs/safety-model.md.",
+				"**Tool surface**: which tools exist at all through registration, tool profiles, skill narrowing, and dispatch admission. " +
+					"Violations are terminal denials, never approvable.",
+				"**Safety net** (always on, level-independent): damage-control rules, path policy for secrets and system paths, " +
+					"command-substitution confirmation, and `git_destructive` blocks. Blocks are final at every level; confirm rails ask at every level.",
+				"**Autonomy level** (`/settings`, persisted as `autonomy`): the operator's standing grant per action class for actions the net passed, " +
+					"enforced by the harness at tool admission. read-only denies non-read, suggest parks every non-read call, " +
+					"auto-edit parks unrecognized commands, and full-auto runs them.",
+				"**Approvals**: a parked call waits for a one-shot operator decision; approving resumes only that call. " +
+					"Workers resolve asks per `workers.onPermission` (Approvals Routing); headless runs auto-deny.",
 			],
 		},
 	];

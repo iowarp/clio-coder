@@ -148,7 +148,11 @@ describe("contracts/settings center", () => {
 	it("preserves applySettingChange behavior for every editable id", () => {
 		const cases: Array<{ id: EditableSettingId; value: string; assert: (settings: ClioSettings) => void }> = [
 			{ id: "autonomy", value: "full-auto", assert: (s) => strictEqual(s.autonomy, "full-auto") },
-			{ id: "workers.onPermission", value: "fail", assert: (s) => strictEqual(s.workers.onPermission, "fail") },
+			{
+				id: "workers.onPermission",
+				value: "escalate",
+				assert: (s) => strictEqual(s.workers.onPermission, "escalate"),
+			},
 			{
 				id: "delegation.defaults.toolGovernance",
 				value: "deny-all",
@@ -313,6 +317,27 @@ describe("contracts/settings center", () => {
 		ok(previewed.includes("full-auto"), "preview value is shown");
 		center.handleInput(ENTER); // commit pending → applies to session, opens scope confirm
 		deepStrictEqual(commits, [{ id: "autonomy", value: "full-auto", scope: "session" }]);
+	});
+
+	it("cycles worker approvals routing to escalate and persists it", () => {
+		const settings = settingsWithTargets();
+		const workerRouting = buildSettingItems(settings).find((item) => item.id === "workers.onPermission");
+		ok(workerRouting);
+		deepStrictEqual(workerRouting.values, ["deny", "fail", "escalate"]);
+
+		const { center, commits } = spyingSettingsCenter(26);
+		center.setSelection("safety", 1); // workers.onPermission = deny
+		center.handleInput(" "); // preview -> fail
+		center.handleInput(" "); // preview -> escalate
+		const previewed = stripAnsi(center.render(112).join("\n"));
+		ok(previewed.includes("escalate"), "preview reaches escalate");
+		center.handleInput(ENTER);
+		deepStrictEqual(commits, [{ id: "workers.onPermission", value: "escalate", scope: "session" }]);
+
+		applySettingChange(settings, "workers.onPermission", "escalate");
+		strictEqual(settings.workers.onPermission, "escalate");
+		const reloaded = buildSettingItems(settings).find((item) => item.id === "workers.onPermission");
+		strictEqual(reloaded?.currentValue, "escalate");
 	});
 
 	it("a live knob applies to the session immediately, then offers a global save", () => {

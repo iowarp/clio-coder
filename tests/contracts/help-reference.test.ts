@@ -84,7 +84,10 @@ describe("contracts/help-reference", () => {
 		ok(autonomyTopic.label.includes("autonomy & safety net"));
 		ok(autonomyTopic.detail);
 		const detailText = autonomyTopic.detail().join("\n");
-		ok(detailText.includes("does not loosen or tighten any hard gate"));
-		ok(detailText.includes(".clio/safety.yaml"));
+		ok(detailText.includes("**Tool surface**"));
+		ok(detailText.includes("Violations are terminal denials, never approvable."));
+		ok(detailText.includes("**Safety net** (always on, level-independent)"));
+		ok(detailText.includes("auto-edit parks unrecognized commands"));
+		ok(detailText.includes("Workers resolve asks per `workers.onPermission` (Approvals Routing)"));
 	});
 });
