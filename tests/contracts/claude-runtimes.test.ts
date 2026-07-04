@@ -2,6 +2,8 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
+import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
+import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { buildAgyArgs } from "../../src/engine/antigravity/subprocess-runtime.js";
 import { claudeSdkPermissionModeForAutonomy, claudeSdkToolsForAutonomy } from "../../src/engine/claude/sdk-runtime.js";
 import {
@@ -145,6 +147,17 @@ describe("contracts/external CLI worker tool-profile enforcement", () => {
 		return evaluateClaudeToolPermission(request);
 	}
 
+	function auditingSafety(rows: ToolCallAuditInput[]): SafetyContract {
+		const safety = createWorkerSafety({ cwd: process.cwd() });
+		return {
+			...safety,
+			audit: {
+				recordCount: () => rows.length,
+				recordToolCall: (input) => rows.push(input),
+			},
+		};
+	}
+
 	it("denies an out-of-profile Bash call before the safety net (minimal-local excludes bash)", () => {
 		// Under full-auto a recognized `pwd` would otherwise be allowed; the
 		// profile gate must deny it because bash is outside minimal-local.
@@ -153,6 +166,24 @@ describe("contracts/external CLI worker tool-profile enforcement", () => {
 		strictEqual(decision.permissionRequired, false);
 		strictEqual(decision.decision.kind, "block");
 		strictEqual(decision.reasonCode, "tool-profile");
+	});
+
+	it("records an audit row for out-of-profile Claude SDK tool calls when an audit sink is present", () => {
+		const rows: ToolCallAuditInput[] = [];
+		const decision = evaluateClaudeToolPermission({
+			toolName: "Bash",
+			input: { command: "pwd" },
+			safety: auditingSafety(rows),
+			cwd: process.cwd(),
+			autonomy: "full-auto",
+			allowedTools: minimalLocal,
+		});
+
+		strictEqual(decision.kind, "deny");
+		strictEqual(rows.length, 1);
+		strictEqual(rows[0]?.tool, "bash");
+		strictEqual(rows[0]?.decision, "denied");
+		strictEqual(rows[0]?.reasonCode, "tool-profile");
 	});
 
 	it("still allows in-profile tools under the same profile", () => {

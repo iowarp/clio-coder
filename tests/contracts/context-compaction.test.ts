@@ -1,6 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_COMPACTION_THRESHOLD, shouldCompact } from "../../src/domains/session/compaction/auto.js";
+import { textFromAssistant } from "../../src/domains/session/compaction/compact.js";
 import { maskStaleObservations } from "../../src/domains/session/compaction/mask-observations.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
@@ -78,6 +79,10 @@ describe("contracts/context compaction trigger", () => {
 		// Disabled thresholds never fire.
 		strictEqual(shouldCompact(990, 0, 1000).shouldCompact, false);
 		strictEqual(shouldCompact(990, 1.5, 1000).shouldCompact, false);
+	});
+
+	it("accepts plain string assistant summaries from compaction models", () => {
+		strictEqual(textFromAssistant({ content: "## Goal\nKeep the useful summary." }), "## Goal\nKeep the useful summary.");
 	});
 });
 
