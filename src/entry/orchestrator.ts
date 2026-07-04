@@ -73,7 +73,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import { createResourcesDomainModule, modelVisibleSkills, type ResourcesContract } from "../domains/resources/index.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
-import type { SafetyContract } from "../domains/safety/index.js";
+import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
 import { parseRigorOverride, resolveRigor, SafetyDomainModule } from "../domains/safety/index.js";
 import {
 	createProtectedArtifactsRegistration,
@@ -686,12 +686,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 	termination.onDrain(() => hookReceiptLog.flush());
-	// Autonomy is a hot-reload field: read it per admission from the freshest
-	// config snapshot so a /settings change applies to the next tool call.
+	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
+	// server prompts use the snapshot captured at session/new.
+	let activeAcpSessionAutonomy: AutonomyLevel | null = null;
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
-		autonomy: () => (config?.get() ?? readSettings()).autonomy ?? "auto-edit",
+		autonomy: () => activeAcpSessionAutonomy ?? (config?.get() ?? readSettings()).autonomy ?? "auto-edit",
 	});
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {
@@ -993,6 +994,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(session ? { session } : {}),
 				toolRegistry,
 				bus,
+				autonomy: () => getCurrentSettings().autonomy ?? "auto-edit",
+				onActiveSessionAutonomyChange: (level) => {
+					activeAcpSessionAutonomy = level;
+				},
 				cwd: process.cwd(),
 				version: getVersionInfo().clio,
 				permissionTimeoutMs: config?.get().delegation.defaults.permissionTimeoutMs ?? 120_000,

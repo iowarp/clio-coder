@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { BusChannels } from "../../core/bus-events.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
+import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../../domains/safety/autonomy.js";
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { AcpTimeoutError } from "./errors.js";
@@ -35,6 +36,8 @@ export interface ClioAcpServerOptions {
 	session?: SessionContract;
 	toolRegistry?: ToolRegistry;
 	bus?: SafeEventBus;
+	autonomy?: () => AutonomyLevel;
+	onActiveSessionAutonomyChange?: (level: AutonomyLevel | null) => void;
 	cwd?: string;
 	version?: string;
 	permissionTimeoutMs?: number;
@@ -43,6 +46,7 @@ export interface ClioAcpServerOptions {
 interface AcpServerSession {
 	id: string;
 	cwd: string;
+	autonomy: AutonomyLevel;
 	activePrompt: ActivePrompt | null;
 }
 
@@ -510,7 +514,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		const meta = options.session?.create({ cwd: sessionCwd });
 		const id = meta?.id ?? randomUUID();
-		sessions.set(id, { id, cwd: sessionCwd, activePrompt: null });
+		const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+		sessions.set(id, { id, cwd: sessionCwd, autonomy, activePrompt: null });
 		// NewSessionResponse is { sessionId, modes?, models?, _meta? }; cwd is not a
 		// schema field. Clio runs a single-session-per-process server pinned to the
 		// launch cwd, so no extra fields are needed.
@@ -556,13 +561,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 		session.activePrompt = active;
 		activeSessionId = session.id;
+		options.onActiveSessionAutonomyChange?.(session.autonomy);
 		const unsubscribe = options.chat.onEvent((event) => handleChatEvent(event, options.transport, session.id, active));
 		try {
 			await options.chat.submit(text);
 		} finally {
 			unsubscribe();
 			if (session.activePrompt === active) session.activePrompt = null;
-			if (activeSessionId === session.id) activeSessionId = null;
+			if (activeSessionId === session.id) {
+				activeSessionId = null;
+				options.onActiveSessionAutonomyChange?.(null);
+			}
 		}
 		// ACP has no error StopReason: a failed turn is signalled by failing the
 		// session/prompt request itself. Cancellation takes precedence over error.

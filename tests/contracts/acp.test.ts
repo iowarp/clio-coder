@@ -13,6 +13,7 @@ import {
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
+import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
@@ -404,6 +405,19 @@ const askSafety: SafetyContract = {
 	audit: { recordCount: () => 0 },
 };
 
+const allowWriteSafety: SafetyContract = {
+	classify: () => ({ actionClass: "write", reasons: ["test"] }),
+	evaluate: () => ({ kind: "allow", classification: { actionClass: "write", reasons: ["test"] } }),
+	observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+	scopes: {
+		readonly: READONLY_SCOPE,
+		workspace: WORKSPACE_SCOPE,
+		confirmed: CONFIRMED_SCOPE,
+	},
+	isSubset,
+	audit: { recordCount: () => 0 },
+};
+
 function permissionSpec(name: string, baseActionClass: ActionClass): ToolSpec {
 	return {
 		name: name as ToolName,
@@ -433,6 +447,41 @@ function createPermissionChat(registry: ToolRegistry): AcpServerChat {
 			const message = {
 				role: "assistant",
 				content: [{ type: "text", text: verdict.kind === "ok" ? "allowed" : "denied" }],
+				stopReason: "stop",
+				usage: { input: 1, output: 1 },
+			};
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+function createWriteChat(registry: ToolRegistry): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			const verdict = await registry.invoke({
+				tool: ToolNames.Write,
+				args: { file_path: "notes/acp-autonomy.txt", content: "x" },
+			});
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: verdict.kind }],
 				stopReason: "stop",
 				usage: { input: 1, output: 1 },
 			};
@@ -715,6 +764,56 @@ rl.on("line", (line) => {
 		strictEqual(resolutions[0]?.status, "denied");
 		strictEqual(resolutions[0]?.decidedBy, "timeout");
 		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
+	});
+
+	it("ACP server pins autonomy at session/new until the next session", async () => {
+		let liveAutonomy: AutonomyLevel = "suggest";
+		let activeSnapshot: AutonomyLevel | null = null;
+		let permissionRequests = 0;
+		const registry = createRegistry({
+			safety: allowWriteSafety,
+			autonomy: () => activeSnapshot ?? liveAutonomy,
+		});
+		registry.register(permissionSpec(ToolNames.Write, "write"));
+		const clientToServer = new PassThrough();
+		const serverToClient = new PassThrough();
+		const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+		const server = serveClioAcpAgent({
+			transport,
+			chat: createWriteChat(registry),
+			toolRegistry: registry,
+			cwd: process.cwd(),
+			version: "test",
+			autonomy: () => liveAutonomy,
+			onActiveSessionAutonomyChange: (level) => {
+				activeSnapshot = level;
+			},
+		});
+		const client = createRpcClient(clientToServer, serverToClient);
+		client.onRequest("session/request_permission", () => {
+			permissionRequests += 1;
+			return { outcome: { outcome: "selected", optionId: "allow-once" } };
+		});
+
+		await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
+		const first = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+		liveAutonomy = "full-auto";
+		await client.request("session/prompt", {
+			sessionId: first.sessionId,
+			prompt: [{ type: "text", text: "write once" }],
+		});
+		strictEqual(permissionRequests, 1, "first session keeps the suggest snapshot");
+		await client.request("session/close", { sessionId: first.sessionId });
+
+		const second = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+		await client.request("session/prompt", {
+			sessionId: second.sessionId,
+			prompt: [{ type: "text", text: "write again" }],
+		});
+		strictEqual(permissionRequests, 1, "next session uses the updated full-auto level");
+		await client.request("session/close", { sessionId: second.sessionId });
+		client.close();
+		strictEqual(await server, 0);
 	});
 
 	it("only emits ACP v1 session/update variants and conformant tool calls", async () => {
