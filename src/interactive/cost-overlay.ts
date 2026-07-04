@@ -1,6 +1,4 @@
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
-import type { CostEntry, ObservabilityContract } from "../domains/observability/index.js";
+import type { CostEntry, ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -180,24 +178,28 @@ export interface CostSnapshot {
 	rows: CostRow[];
 }
 
-export function buildCostSnapshot(observability: ObservabilityContract, sessionId: string | null): CostSnapshot {
+// Session totals come from the observability projection: when a snapshot is
+// supplied (the subscribe path holds the latest one), the running USD total is
+// read from `snapshot.session.costUsd`. The per-provider/model rows still fold
+// `costEntries()`, which the snapshot schema deliberately does not carry.
+export function buildCostSnapshot(
+	observability: ObservabilityContract,
+	sessionId: string | null,
+	snapshot?: ObservabilitySnapshot,
+): CostSnapshot {
 	const entries = observability.costEntries();
 	const rows = aggregateCostEntries(entries);
 	const totalTokens = rows.reduce((sum, r) => sum + r.tokens, 0);
 	return {
 		sessionId,
-		totalUsd: observability.sessionCost(),
+		totalUsd: snapshot?.session.costUsd ?? observability.sessionCost(),
 		totalTokens,
 		rows,
 	};
 }
 
 export interface OpenCostOverlayOptions {
-	bus?: SafeEventBus;
 	sessionId?: string | null;
-	chat?: {
-		onEvent(handler: (event: { type: string }) => void): () => void;
-	};
 }
 
 class CostOverlayBody implements Component {
@@ -213,10 +215,13 @@ class CostOverlayBody implements Component {
 }
 
 /**
- * Mount a read-only session-cost overlay. Reads observability.sessionCost() for
- * the running USD total and aggregates observability.costEntries() into a
- * per-provider/model row set. When a bus is supplied, DispatchCompleted events
- * re-render the overlay so the totals tick up as workers finish.
+ * Mount a read-only session-cost overlay. The running USD total comes from the
+ * observability projection's `snapshot().session.costUsd`, while the
+ * per-provider/model rows fold `observability.costEntries()`. The overlay is
+ * kept live by `observability.subscribe()`: the projection already folds the
+ * dispatch terminal channels and every `recordTokens()` into one coalesced
+ * update, so a single subscription replaces the former DispatchCompleted /
+ * DispatchFailed / chat-turn refresh wiring. `hide()` unsubscribes.
  */
 export function openCostOverlay(
 	tui: TUI,
@@ -224,7 +229,8 @@ export function openCostOverlay(
 	options?: OpenCostOverlayOptions,
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
-	const body = new CostOverlayBody(() => buildCostSnapshot(observability, sessionId));
+	let latest: ObservabilitySnapshot = observability.snapshot();
+	const body = new CostOverlayBody(() => buildCostSnapshot(observability, sessionId, latest));
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: COST_OVERLAY_WIDTH,
@@ -232,28 +238,18 @@ export function openCostOverlay(
 		footerHint: buildHint("browse", []),
 	});
 
-	const refresh = (): void => {
+	// subscribe() fires immediately with the current snapshot, then on each
+	// coalesced projection change while the overlay is open.
+	const unsubscribe = observability.subscribe((snapshot) => {
+		latest = snapshot;
 		body.invalidate();
 		tui.requestRender();
-	};
-
-	const unsubscribes: Array<() => void> = [];
-	if (options?.bus) {
-		unsubscribes.push(options.bus.on(BusChannels.DispatchCompleted, refresh));
-		unsubscribes.push(options.bus.on(BusChannels.DispatchFailed, refresh));
-	}
-	if (options?.chat) {
-		unsubscribes.push(
-			options.chat.onEvent((event) => {
-				if (event.type === "message_end" || event.type === "agent_end") refresh();
-			}),
-		);
-	}
+	});
 
 	return {
 		...handle,
 		hide(): void {
-			for (const off of unsubscribes) off();
+			unsubscribe();
 			handle.hide();
 		},
 	};
