@@ -1,12 +1,20 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
+import type {
+	ObservabilityNotice,
+	ObservabilityRunSummary,
+	ObservabilitySnapshot,
+} from "../../src/domains/observability/index.js";
+import { visibleWidth } from "../../src/engine/tui.js";
 import { formatFleetOverlayBodyLines } from "../../src/interactive/fleet-overlay.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
-import { clioTheme } from "../../src/interactive/theme/index.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
+const hasTruncatedAnsi = (text: string): boolean =>
+	text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "").includes(ESC);
 const theme = clioTheme();
 
 function snapshot(overrides: Partial<DispatchSnapshot> = {}): DispatchSnapshot {
@@ -17,6 +25,47 @@ function snapshot(overrides: Partial<DispatchSnapshot> = {}): DispatchSnapshot {
 		totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 		...overrides,
 	};
+}
+
+function runningRow(runId: string): DispatchSnapshot["running"][number] {
+	return {
+		runId,
+		agentId: "coder",
+		runtimeKind: "http",
+		outcomePhase: "running",
+		heartbeat: "alive",
+		lineage: { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
+		startedAt: "2026-06-10T00:00:00.000Z",
+		elapsedMs: 1000,
+		tokens: { input: 1, output: 1, total: 2 },
+		costUsd: 0,
+	};
+}
+
+// deriveRunEvidenceState only reads runs, notices, and pendingEvidenceBuildRunIds.
+function observability(
+	overrides: {
+		runs?: ObservabilityRunSummary[];
+		notices?: ObservabilityNotice[];
+		pendingEvidenceBuildRunIds?: string[];
+	} = {},
+): ObservabilitySnapshot {
+	return {
+		runs: overrides.runs ?? [],
+		notices: overrides.notices ?? [],
+		pendingEvidenceBuildRunIds: overrides.pendingEvidenceBuildRunIds ?? [],
+	} as unknown as ObservabilitySnapshot;
+}
+
+function readyRun(runId: string, evidenceId: string): ObservabilityRunSummary {
+	return {
+		runId,
+		evidence: { evidenceId, firstPassSuccess: true, findingCount: 0, tags: [] },
+	} as unknown as ObservabilityRunSummary;
+}
+
+function evidenceErrorNotice(runId: string, message: string): ObservabilityNotice {
+	return { id: `notice-${runId}`, at: 0, kind: "evidence", level: "error", message, ref: { runId } };
 }
 
 describe("fleet overlay", () => {
@@ -110,6 +159,31 @@ describe("fleet overlay", () => {
 		ok(body.includes("── running (0)"));
 		ok(body.includes("── retrying (0)"));
 		ok(body.includes("Cross-process live retry state is not attached to the TUI"));
+	});
+
+	it("marks running rows with pending, ready, and failed proof markers from the observability snapshot", () => {
+		const dispatchSnapshot = snapshot({
+			running: [runningRow("run-ready"), runningRow("run-pending"), runningRow("run-failed")],
+		});
+		const obs = observability({
+			pendingEvidenceBuildRunIds: ["run-pending"],
+			runs: [readyRun("run-ready", "ev-ready")],
+			notices: [evidenceErrorNotice("run-failed", "sandbox denied")],
+		});
+		const lines = formatFleetOverlayBodyLines(dispatchSnapshot, 96, obs);
+		const body = strip(lines.join("\n"));
+		ok(body.includes(`${GLYPH.ok} proof`), `expected a ready proof marker, got: ${body}`);
+		ok(body.includes(`${GLYPH.queued} proof`), `expected a pending proof marker, got: ${body}`);
+		ok(body.includes(`${GLYPH.error} proof`), `expected a failed proof marker, got: ${body}`);
+		for (const line of lines) {
+			ok(visibleWidth(line) <= 96, `line "${line}" should fit within 96 columns`);
+			ok(!hasTruncatedAnsi(line), `line carries a truncated escape: ${JSON.stringify(line)}`);
+		}
+	});
+
+	it("omits proof markers when no observability snapshot is provided", () => {
+		const body = strip(formatFleetOverlayBodyLines(snapshot({ running: [runningRow("run-1")] }), 96).join("\n"));
+		ok(!body.includes("proof"), `running rows must not show a proof marker without a snapshot, got: ${body}`);
 	});
 
 	it("parses /fleet as the fleet overlay command", () => {

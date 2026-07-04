@@ -2,10 +2,16 @@ import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type {
+	ObservabilityNotice,
+	ObservabilityRunSummary,
+	ObservabilitySnapshot,
+} from "../../src/domains/observability/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	createDispatchBoardStore,
 	type DispatchBoardRow,
+	deriveRunEvidenceState,
 	dispatchStatusPresentation,
 	formatTaskIslandLines,
 	renderDispatchCard,
@@ -31,6 +37,47 @@ function makeRow(overrides: Partial<DispatchBoardRow> = {}): DispatchBoardRow {
 		outputTokens: 212,
 		ttftMs: 180,
 		...overrides,
+	};
+}
+
+type RunEvidence = NonNullable<ObservabilityRunSummary["evidence"]>;
+
+// Minimal observability snapshot: deriveRunEvidenceState only reads runs,
+// notices, and pendingEvidenceBuildRunIds, so the rest is elided via cast.
+function makeSnapshot(
+	overrides: {
+		runs?: ObservabilityRunSummary[];
+		notices?: ObservabilityNotice[];
+		pendingEvidenceBuildRunIds?: string[];
+	} = {},
+): ObservabilitySnapshot {
+	return {
+		runs: overrides.runs ?? [],
+		notices: overrides.notices ?? [],
+		pendingEvidenceBuildRunIds: overrides.pendingEvidenceBuildRunIds ?? [],
+	} as unknown as ObservabilitySnapshot;
+}
+
+function runSummary(runId: string, evidence: RunEvidence | null = null): ObservabilityRunSummary {
+	return { runId, evidence } as unknown as ObservabilityRunSummary;
+}
+
+function readyEvidence(evidenceId: string): RunEvidence {
+	return { evidenceId, firstPassSuccess: true, findingCount: 0, tags: [] };
+}
+
+function evidenceNotice(
+	runId: string | undefined,
+	level: ObservabilityNotice["level"],
+	message: string,
+): ObservabilityNotice {
+	return {
+		id: `notice-${message}`,
+		at: 0,
+		kind: "evidence",
+		level,
+		message,
+		...(runId !== undefined ? { ref: { runId } } : {}),
 	};
 }
 
@@ -293,5 +340,97 @@ describe("dispatch board terminal taxonomy", () => {
 		} finally {
 			store.unsubscribe();
 		}
+	});
+});
+
+describe("dispatch board evidence state derivation", () => {
+	it("derives pending from pendingEvidenceBuildRunIds and points at the run filter", () => {
+		const evidence = deriveRunEvidenceState(makeSnapshot({ pendingEvidenceBuildRunIds: ["run-1"] }), "run-1");
+		strictEqual(evidence.state, "pending");
+		strictEqual(evidence.viewFilter, "evidence:run-1");
+	});
+
+	it("derives ready from a run's evidence bundle and folds the id into the filter", () => {
+		const snap = makeSnapshot({ runs: [runSummary("run-1", readyEvidence("ev-9"))] });
+		const evidence = deriveRunEvidenceState(snap, "run-1");
+		strictEqual(evidence.state, "ready");
+		strictEqual(evidence.evidenceId, "ev-9");
+		strictEqual(evidence.viewFilter, "evidence:ev-9");
+	});
+
+	it("derives failed from the latest error-level evidence notice carrying the run id", () => {
+		const snap = makeSnapshot({ notices: [evidenceNotice("run-1", "error", "sandbox denied\nbuild step")] });
+		const evidence = deriveRunEvidenceState(snap, "run-1");
+		strictEqual(evidence.state, "failed");
+		strictEqual(evidence.reason, "sandbox denied build step");
+		strictEqual(evidence.viewFilter, "evidence:run-1");
+	});
+
+	it("does not treat a trailing non-error evidence notice as a failure", () => {
+		const snap = makeSnapshot({
+			notices: [evidenceNotice("run-1", "error", "boom"), evidenceNotice("run-1", "warning", "retrying")],
+		});
+		strictEqual(deriveRunEvidenceState(snap, "run-1").state, "none");
+	});
+
+	it("ignores an error evidence notice that carries no ref.runId", () => {
+		const snap = makeSnapshot({ notices: [evidenceNotice(undefined, "error", "boom")] });
+		strictEqual(deriveRunEvidenceState(snap, "run-1").state, "none");
+	});
+
+	it("prefers an in-flight pending rebuild over a stale ready bundle", () => {
+		const snap = makeSnapshot({
+			pendingEvidenceBuildRunIds: ["run-1"],
+			runs: [runSummary("run-1", readyEvidence("ev-old"))],
+		});
+		strictEqual(deriveRunEvidenceState(snap, "run-1").state, "pending");
+	});
+
+	it("returns a none state with a dispatch filter when nothing is known", () => {
+		strictEqual(deriveRunEvidenceState(makeSnapshot(), "run-1").state, "none");
+		strictEqual(deriveRunEvidenceState(makeSnapshot(), "run-1").viewFilter, "dispatch:run-1");
+		strictEqual(deriveRunEvidenceState(undefined, "run-1").state, "none");
+	});
+});
+
+describe("dispatch board card proof line", () => {
+	it("renders a pending proof line with the run filter and no overflow", () => {
+		const evidence = deriveRunEvidenceState(makeSnapshot({ pendingEvidenceBuildRunIds: ["run-1"] }), "run-1");
+		const lines = renderDispatchCard(makeRow(), 76, evidence);
+		const joined = lines.map(stripSgr).join("\n");
+		ok(/\bproof\b/.test(joined), `expected a dim proof key row, got: ${joined}`);
+		ok(joined.includes(`${GLYPH.queued} pending`), `expected the pending marker, got: ${joined}`);
+		ok(joined.includes("evidence:run-1"), `expected the run view filter, got: ${joined}`);
+		for (const line of lines) {
+			strictEqual(visibleWidth(line), 76, `line "${line}" should span 76 columns`);
+			ok(!hasTruncatedAnsi(line), `line carries a truncated escape: ${JSON.stringify(line)}`);
+		}
+	});
+
+	it("renders a ready proof line carrying the evidence id via its filter", () => {
+		const snap = makeSnapshot({ runs: [runSummary("run-1", readyEvidence("ev-77"))] });
+		const lines = renderDispatchCard(makeRow({ status: "completed" }), 76, deriveRunEvidenceState(snap, "run-1"));
+		const joined = lines.map(stripSgr).join("\n");
+		ok(joined.includes(`${GLYPH.ok} ready`), `expected the ready marker, got: ${joined}`);
+		ok(joined.includes("evidence:ev-77"), `expected the evidence filter, got: ${joined}`);
+		for (const line of lines) strictEqual(visibleWidth(line), 76, `line "${line}" should span 76 columns`);
+	});
+
+	it("renders a failed proof line with a compact reason and no overflow", () => {
+		const snap = makeSnapshot({ notices: [evidenceNotice("run-1", "error", "sandbox denied\nbuild step")] });
+		const lines = renderDispatchCard(makeRow({ status: "completed" }), 76, deriveRunEvidenceState(snap, "run-1"));
+		const joined = lines.map(stripSgr).join("\n");
+		ok(joined.includes(`${GLYPH.error} failed`), `expected the failed marker, got: ${joined}`);
+		ok(joined.includes("sandbox denied build step"), `expected the compact reason, got: ${joined}`);
+		for (const line of lines) {
+			strictEqual(visibleWidth(line), 76, `line "${line}" should span 76 columns`);
+			ok(!hasTruncatedAnsi(line), `line carries a truncated escape: ${JSON.stringify(line)}`);
+		}
+	});
+
+	it("adds no proof line when the evidence state is none", () => {
+		const baseline = renderDispatchCard(makeRow(), 76).length;
+		const withNone = renderDispatchCard(makeRow(), 76, deriveRunEvidenceState(makeSnapshot(), "run-1")).length;
+		strictEqual(withNone, baseline, "an unknown evidence state must not add a card line");
 	});
 });
