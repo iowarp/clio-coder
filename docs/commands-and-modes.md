@@ -57,9 +57,13 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
 | `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
-| `clio context-clear [--all]` | Clear accumulated project context artifacts. |
-| `clio context-init [--preview] [--heuristic] [--yes] [--adopt] [--propose\|--apply\|--rewrite]` | Explore the repo and bootstrap project context: `CLIO.md` and codewiki. |
-| `clio context-index [--json]` | Build the Stage 1 codewiki index without model calls; writes `.clio/codewiki.json` and `.clio/state.json` and prints coverage plus a structural hash. |
+| `clio context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
+| `clio context init [--preview] [--heuristic] [--yes] [--adopt] [--propose\|--apply\|--rewrite]` | Explore the repo and bootstrap or update project context: `CLIO.md`, `.clio/codewiki.json`, and `.clio/state.json`. |
+| `clio context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO.md`; with `--wiki`, update an existing Markdown wiki. |
+| `clio context wiki [--update\|--status]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio/wiki/`. |
+| `clio context reset [--all]` | Clear accumulated project context artifacts. |
+| `clio context index [--json]` | Build the structural codewiki index without model calls; writes `.clio/codewiki.json` and `.clio/state.json` and prints coverage plus a structural hash. |
+| `clio context-clear` / `clio context-init` / `clio context-index` | Legacy spellings for reset, init, and index. |
 
 ## Headless Run Flags
 
@@ -305,9 +309,9 @@ Clio Coder's behavior can be customized or overridden using the following enviro
 ## Project Context
 
 Clio uses the nearest checked-in `CLIO.md` as the canonical project guide. Run
-`/context-init` in the TUI or `clio context-init` from the shell to create or refresh it.
-During adoption, Clio can fold useful content from supported agent instruction
-files into `CLIO.md` with provenance.
+`/context init` in the TUI or `clio context init` from the shell to create or
+refresh it. During adoption, Clio can fold useful content from supported agent
+instruction files into `CLIO.md` with provenance.
 
 To skip project context for one invocation:
 
@@ -318,33 +322,69 @@ clio -nc run --agent scout "..."
 
 ### Codewiki index
 
-`clio context-index` builds the Stage 1 codewiki without any model calls and writes
-`.clio/codewiki.json` plus `.clio/state.json`. Indexing is deterministic: the same tree
-produces the same structural hash on every run, so the index is safe to rebuild in CI and
-compare across machines. Extraction runs through web-tree-sitter WASM grammars and covers
-TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and Ruby, with a fallback
-extractor for trees the grammars do not parse. The v3 schema records files (path, language,
-line count, role), symbols (name, kind, line, signature), and import edges (internal file
-links and external modules). `clio context-init` builds the same index while bootstrapping
-`CLIO.md`, and it no longer seeds a starter handoff file.
+`clio context index` and the legacy `clio context-index` build the structural
+codewiki without any model calls. They write `.clio/codewiki.json` plus
+`.clio/state.json`, record `codewikiVersion`, and print coverage plus a
+structural hash. The same builder is used by `clio context init`, `clio context
+refresh`, session freshness checks, tool-demand backfill, and in-session
+incremental updates.
+
+The current artifact is schema v4. It records files with path, language, line
+count, role, content hash, imports, and optional summary; declaration-only
+symbols with name, kind, file id, line, and optional signature; and import edges
+to internal files or external modules. The writer emits compact JSON.
+Tree-sitter extraction covers TypeScript, JavaScript, Python, Go, Rust, C, C++,
+Java, Ruby, and C#, with per-file regex fallback where a regex extractor exists.
+
+### Markdown wiki commands
+
+`clio context wiki` generates the optional agent-authored wiki under
+`.clio/wiki/` by dispatching the `documenter` agent through the configured model
+target. `quickstart.md` is required as the hub, the layout is capped at eight
+Markdown pages, and `.clio/wiki/meta.json` records the page list, model label,
+content hash, and git head after validation succeeds.
+
+`clio context wiki --update` requests update mode explicitly. Update prompts
+include the codewiki digest and git evidence since the recorded wiki `gitHead`.
+`clio context wiki --status` is read-only: it prints whether wiki metadata is
+present, page count, `updatedAt`, recorded `gitHead`, and whether that head
+differs from current `HEAD`. It does not dispatch the documenter and does not
+spend model tokens.
+
+`clio context refresh` rebuilds only the structural codewiki and state. It does
+not run a model and does not touch `CLIO.md` or `.clio/wiki/`. If a wiki exists
+and its recorded git head is stale, the command prints the hint:
+
+```text
+wiki is stale; run clio context refresh --wiki or clio context wiki --update
+```
+
+`clio context refresh --wiki` is the explicit model-spend path for refresh. It
+first rebuilds the structural codewiki, then updates an existing wiki when
+`.clio/wiki/meta.json` exists. If no wiki metadata exists, the flag is accepted
+and no wiki model call is made; use `clio context wiki` to create the first
+wiki.
 
 ### code_nav modes
 
-Agents query the codewiki through the read-only `code_nav` tool instead of grepping the
-tree. Every mode reads the persisted index, so lookups are local and fast.
+Agents query the codewiki through the read-only `code_nav` tool instead of
+grepping the tree. Every mode reads local artifacts, so lookups are fast and
+model-free.
 
 | Mode | Arguments | Returns |
-|------|-----------|---------|
-| `symbol` | `query=<name>` | Declaring files plus each match's path, line, kind, and signature. |
-| `path` | `query=<glob \| /regex/ \| substring>` | Files whose path matches the pattern. |
+| --- | --- | --- |
+| `symbol` | `query=<name>` | Declaration records with path, line, kind, and signature. |
+| `path` | `query=<glob \| /regex/ \| substring>` | Indexed files whose path matches the pattern. |
 | `entries` | `[limit=<n>]` | Likely entry points from file roles and `package.json` main/bin. |
-| `outline` | `query=<path>` | Symbols declared in the file with kinds and line numbers. |
-| `deps` | `query=<path>` | The file's imports: internal file paths and external modules. |
-| `dependents` | `query=<path>` | Files that import the given file. |
+| `outline` | `query=<path>` | Declarations in one indexed file. |
+| `deps` | `query=<path>` | The file's internal and external imports. |
+| `dependents` | `query=<path>` | Indexed files that import the target file. |
+| `wiki` | none | Wiki pages plus absent/fresh/stale state and layout warnings. |
 
-`entries` defaults to 25 results and caps at 200. `path` accepts a `/pattern/flags` regex,
-a glob using `*`, `?`, or `[...]`, or a plain substring. `outline`, `deps`, and
-`dependents` resolve an exact indexed path or a unique suffix match.
+`entries` defaults to 25 results and caps at 200. `path` accepts a
+`/pattern/flags` regex, a glob using `*`, `?`, or `[...]`, or a plain substring.
+`outline`, `deps`, and `dependents` resolve an exact indexed path or a unique
+substring match.
 
 ## Reasoning and Live Thinking Controls
 
