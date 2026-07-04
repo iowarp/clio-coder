@@ -37,7 +37,14 @@ describe("contracts/code_nav", () => {
 		mkdirSync(join(scratch, "pkg"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "index.ts"),
-			"import { worker } from './worker.js';\nexport function main() { return worker; }\n",
+			[
+				"/**",
+				" * Runs the TypeScript entry.",
+				" */",
+				"import { worker } from './worker.js';",
+				"export function main() { return worker; }",
+				"",
+			].join("\n"),
 			"utf8",
 		);
 		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = 1;\n", "utf8");
@@ -79,11 +86,14 @@ describe("contracts/code_nav", () => {
 
 		const entries = await codeNavTool.run({ mode: "entries" });
 		strictEqual(entries.kind, "ok");
-		ok(pathsFromFiles(parseJsonOutput(entries.output).files).includes("src/index.ts"));
+		const entriesPayload = parseJsonOutput(entries.output);
+		ok(pathsFromFiles(entriesPayload.files).includes("src/index.ts"));
 
 		const outline = await codeNavTool.run({ mode: "outline", query: "src/index.ts" });
 		strictEqual(outline.kind, "ok");
 		const outlinePayload = parseJsonOutput(outline.output);
+		const outlineFile = outlinePayload.file as Record<string, unknown>;
+		strictEqual(outlineFile.summary, "Runs the TypeScript entry.");
 		ok(
 			Array.isArray(outlinePayload.symbols) &&
 				outlinePayload.symbols.some((item) => {

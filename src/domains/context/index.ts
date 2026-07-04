@@ -41,6 +41,7 @@ export { renderCodewikiDigest } from "./codewiki/digest.js";
 export {
 	buildCodewiki,
 	codewikiEntries,
+	codewikiNeedsBackfill,
 	readCodewiki,
 	structuralCodewikiHash,
 	updateCodewikiPaths,
