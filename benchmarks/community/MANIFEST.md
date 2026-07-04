@@ -14,6 +14,9 @@ raw run outputs.
    `CLIO_*` environment variables, and runs one headless episode per task.
 3. `scicode/scicode_clio.py` generates v1 `clio eval` task files for SciCode
    and grades generated Python with an externally supplied target artifact.
+4. `human-eval/humaneval_clio.py` runs OpenAI HumanEval completions directly or
+   through generated v1 `clio eval` tasks, then grades generated Python against
+   the public HumanEval checks.
 
 ## Data and fleet policy
 

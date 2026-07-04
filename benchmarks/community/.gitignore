@@ -5,5 +5,6 @@ __pycache__/
 .venv/
 venv/
 
-# Adapter run outputs (predictions, metrics, events, checkouts).
+# Adapter run outputs and downloaded public datasets.
 runs/
+data/

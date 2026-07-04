@@ -19,3 +19,6 @@ terminal-bench      # provides the `tb` CLI and AbstractInstalledAgent base
 h5py                # process_hdf5_to_tuple over the official test_data.h5
 scipy               # SciCode reference numerics
 numpy               # SciCode reference numerics
+
+# --- human-eval (humaneval_clio.py official evaluator path) ---
+human-eval @ git+https://github.com/openai/human-eval.git

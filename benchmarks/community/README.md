@@ -12,6 +12,7 @@ community/
   swe-bench-lite/
   terminal-bench/
   scicode/
+  human-eval/
 ```
 
 `fleet.json` is intentionally gitignored. Keep real endpoints in that file or
@@ -116,3 +117,31 @@ clio eval run --task-file benchmarks/community/scicode/runs/tasks.yaml
 For CI fixtures, the SciCode grader also accepts a small JSON target manifest
 through `--references`. That mode is for adapter validation, not official
 SciCode scoring.
+
+## HumanEval
+
+`human-eval/humaneval_clio.py` runs the OpenAI HumanEval Python completion
+suite. It can drive Clio directly or emit a `clio eval` task file. The public
+HumanEval JSONL is not tracked; either pass `--data`, install the upstream
+`human_eval` package, or download the JSONL.GZ into the adapter's ignored data
+directory.
+
+```sh
+python3 benchmarks/community/human-eval/humaneval_clio.py ensure-data
+python3 benchmarks/community/human-eval/humaneval_clio.py inspect-data
+
+python3 benchmarks/community/human-eval/humaneval_clio.py run \
+  --limit 5 \
+  --out benchmarks/community/human-eval/runs/smoke \
+  --timeout 300
+
+python3 benchmarks/community/human-eval/humaneval_clio.py generate-tasks \
+  --limit 5 \
+  --out benchmarks/community/human-eval/runs/tasks.yaml \
+  --run-root benchmarks/community/human-eval/runs/eval-smoke
+
+clio eval run --task-file benchmarks/community/human-eval/runs/tasks.yaml
+```
+
+HumanEval grading executes generated Python. Use a container or other sandbox
+for untrusted model outputs.

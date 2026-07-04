@@ -27,6 +27,7 @@ untracked.
 1. SWE-bench Lite patch generation through `swe-bench-lite/swebench_clio.py`.
 2. Terminal-Bench container episodes through `terminal-bench/tb_clio_agent/`.
 3. SciCode prompt generation and grading through `scicode/scicode_clio.py`.
+4. OpenAI HumanEval completion generation and grading through `human-eval/humaneval_clio.py`.
 
 Each adapter drives Clio through the installed CLI or `clio eval`; none of these
 files is the eval engine itself.
@@ -45,6 +46,7 @@ target and thinking variables.
 CLIO_FLEET=/path/to/private/fleet.json npm run bench:tb
 npm run bench:swe -- --instances pytest-dev__pytest-6116 --out benchmarks/community/swe-bench-lite/runs/smoke
 npm run bench:scicode -- inspect-data --data /path/to/scicode/problems_all.jsonl
+python3 benchmarks/community/human-eval/humaneval_clio.py run --limit 5 --out benchmarks/community/human-eval/runs/smoke
 ```
 
 ## Result manifests
