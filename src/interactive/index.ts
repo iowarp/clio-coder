@@ -22,7 +22,7 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
-import type { ObservabilityContract } from "../domains/observability/index.js";
+import type { ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
 import {
 	getRuntimeRegistry,
 	type ProvidersContract,
@@ -995,14 +995,19 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			}
 		}
 	};
+	// Live observability projection cache. The footer's session cost/token/
+	// throughput getters read this snapshot instead of the raw contract methods,
+	// so the projection is the single source path; the subscription below keeps
+	// it current and drives render invalidation on each coalesced update.
+	let observabilitySnapshot: ObservabilitySnapshot = deps.observability.snapshot();
 	footer = buildFooterDashboard({
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		getAgentStatus: () => statusController.current(),
 		getTerminalColumns: () => terminal.columns,
-		getSessionTokens: () => deps.observability.sessionTokens(),
-		getTokenThroughput: () => deps.observability.latestTokenThroughput(),
-		getSessionCost: () => deps.observability.sessionCost(),
+		getSessionTokens: () => observabilitySnapshot.session.tokens,
+		getTokenThroughput: () => observabilitySnapshot.session.latestThroughput,
+		getSessionCost: () => observabilitySnapshot.session.costUsd,
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
@@ -1030,6 +1035,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
 		dismissKeyLabel,
+	});
+	// Single observability subscription drives footer session cost/token/
+	// throughput refresh. The projection coalesces the dispatch terminal channels
+	// and every recordTokens/resetSession into one debounced update, so this
+	// replaces the per-event footer refresh patchwork for those facts. subscribe()
+	// fires immediately with the current snapshot; it is unsubscribed at shutdown.
+	const unsubscribeObservability = deps.observability.subscribe((snapshot) => {
+		observabilitySnapshot = snapshot;
+		footer.refresh();
+		tui.requestRender();
 	});
 	const editor = new ClioEditor(tui, {
 		getModelLabel: () => {
@@ -2447,8 +2462,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		overlayState = "cost";
 		overlayHandle = openCostOverlay(tui, deps.observability, {
-			bus: deps.bus,
-			chat: deps.chat,
 			sessionId: deps.getSessionId?.() ?? null,
 		});
 		tui.requestRender();
@@ -2920,6 +2933,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		contextIslandHandle.hide();
 		taskIslandHandle.hide();
 		footer.dispose();
+		unsubscribeObservability();
 		contextActivityStore.unsubscribe();
 		dispatchBoardStore.unsubscribe();
 		unsubscribeChat();

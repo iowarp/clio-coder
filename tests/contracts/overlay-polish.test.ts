@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
-import type { CostEntry, ObservabilityContract } from "../../src/domains/observability/index.js";
+import type { CostEntry, ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -205,8 +205,31 @@ function costEntry(tokens: number, usd: number): CostEntry {
 	};
 }
 
-function observability(entries: CostEntry[]): ObservabilityContract {
-	return {
+// Mock observability whose projection seam is live: snapshot() reflects the
+// current cost entries and subscribe() registers listeners, invokes them
+// immediately (matching the real contract), and exposes emit() so a test can
+// simulate one coalesced projection flush.
+function observability(entries: CostEntry[]): {
+	contract: ObservabilityContract;
+	emit: () => void;
+} {
+	const listeners = new Set<(snapshot: ObservabilitySnapshot) => void>();
+	const snapshot = (): ObservabilitySnapshot => ({
+		revision: 0,
+		generatedAt: 0,
+		session: {
+			costUsd: entries.reduce((sum, entry) => sum + entry.usd, 0),
+			tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 },
+			latestThroughput: null,
+		},
+		metrics: {} as never,
+		accountability: { totalRuns: 0, firstPassRuns: 0, firstPassRate: 0, failureCauses: [] },
+		runs: [],
+		providerHealth: {},
+		notices: [],
+		pendingEvidenceBuildRunIds: [],
+	});
+	const contract = {
 		sessionCost: () => entries.reduce((sum, entry) => sum + entry.usd, 0),
 		costEntries: () => entries,
 		accountability: () => ({ totalRuns: 0, firstPassRuns: 0, firstPassRate: 0, failureCauses: [] }),
@@ -217,9 +240,18 @@ function observability(entries: CostEntry[]): ObservabilityContract {
 		resetSession: () => {},
 		recordTokens: () => {},
 		recordTokenThroughput: () => {},
-		snapshot: () => ({}) as never,
-		subscribe: () => () => {},
+		snapshot,
+		subscribe: (listener: (snapshot: ObservabilitySnapshot) => void) => {
+			listeners.add(listener);
+			listener(snapshot());
+			return () => listeners.delete(listener);
+		},
 	} as ObservabilityContract;
+	const emit = (): void => {
+		const current = snapshot();
+		for (const listener of [...listeners]) listener(current);
+	};
+	return { contract, emit };
 }
 
 function emptyDispatchSnapshot(): DispatchSnapshot {
@@ -369,31 +401,27 @@ describe("milestone 08 overlay polish regressions", () => {
 		deepStrictEqual(next, ["mock/model-a", "old-target/old-model"]);
 	});
 
-	it("/cost refreshes from chat turn events and renders at the clamped frame width", () => {
+	it("/cost refreshes from observability projection updates and renders at the clamped frame width", () => {
 		const entries: CostEntry[] = [];
-		const handlers = new Set<(event: { type: string }) => void>();
+		const obs = observability(entries);
 		const harness = fakeTui(80);
-		const handle = openCostOverlay(harness.tui, observability(entries), {
-			chat: {
-				onEvent(handler) {
-					handlers.add(handler);
-					return () => handlers.delete(handler);
-				},
-			},
-			sessionId: "s1",
-		});
+		const handle = openCostOverlay(harness.tui, obs.contract, { sessionId: "s1" });
 
 		const initialLines = harness.component().render(80);
 		ok(initialLines.some((line) => line.includes("─".repeat(76))));
 		for (const line of initialLines) strictEqual(visibleWidth(line), 80);
 
+		// subscribe() fires once on open; measure refreshes relative to that.
+		const baseline = harness.renderRequests();
 		entries.push(costEntry(42, 0.5));
-		for (const handler of handlers) handler({ type: "agent_end" });
-		strictEqual(harness.renderRequests(), 1);
+		obs.emit();
+		strictEqual(harness.renderRequests(), baseline + 1);
+		const refreshed = stripAnsi(harness.component().render(80).join("\n"));
+		ok(refreshed.includes("$0.50"), refreshed);
 
 		handle.hide();
-		for (const handler of handlers) handler({ type: "agent_end" });
-		strictEqual(harness.renderRequests(), 1);
+		obs.emit();
+		strictEqual(harness.renderRequests(), baseline + 1);
 	});
 
 	it("/fleet renders fixed rows at the clamped frame width", () => {
