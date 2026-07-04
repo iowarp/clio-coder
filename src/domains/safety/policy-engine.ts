@@ -132,10 +132,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		diagnostics: [],
 	};
 
-	function rulesFor(_posture: string | undefined): SourcedRule[] {
-		const base: SourcedRule[] = packs.base.rules.map((rule) => ({ rule, source: "damage-control:base" }));
-		return base;
-	}
+	// Base pack rules apply at every posture, so they are sourced once at
+	// construction. Building the array inside evaluate() re-allocated it on
+	// every admission for no behavioral gain.
+	const sourcedRules: SourcedRule[] = packs.base.rules.map((rule) => ({ rule, source: "damage-control:base" }));
 
 	return {
 		evaluate(call, posture) {
@@ -143,7 +143,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const command = commandArg(call.args);
 			const callCwd = cwdArg(call.args, cwd);
 			const scan = serializeArgs(call.args);
-			const hit = scan ? matchSourcedRule(scan, rulesFor(posture)) : null;
+			const hit = scan ? matchSourcedRule(scan, sourcedRules) : null;
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
 			const base = baseDecision(call, classification, callCwd, posture, command);
@@ -152,7 +152,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// the same command (sd-01 M3). Without this, the unconditional
 			// git_destructive block made every authored git ask rule dead
 			// config. Commands matched only by classifier patterns, and rules
-			// with `block: true`, stay hard blocks.
+			// with `block: true`, stay hard blocks. The ask rail itself runs
+			// only after the fail-closed and path-policy blocks below: hard
+			// blocks always win, and the ask rail decides among survivors.
 			const askRule = hit?.match.ask === true && hit.match.block !== true;
 			if (
 				!askRule &&
@@ -173,6 +175,74 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return blockDecision(base, blockInput);
 			}
 
+			if (!projectPolicy.valid && EXECUTION_TOOLS.has(call.tool)) {
+				const blockInput: Omit<
+					SafetyPolicyDecision,
+					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+				> = {
+					ruleId: "project-policy-invalid",
+					reasonCode: "project-policy-invalid",
+					reasons: [`project safety policy is invalid and execution fails closed: ${projectPolicy.errors.join("; ")}`],
+					policySource: "project-policy-invalid",
+				};
+				if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
+				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
+				return blockDecision(base, blockInput);
+			}
+
+			// The path policy runs regardless of project policy validity. When
+			// `.clio/safety.yaml` is invalid, the loader has already dropped every
+			// project-authored path entry and forced `disableDefaultPathPolicy`
+			// off, so the compiled policy here carries exactly the built-in
+			// defaults. Evaluating it unconditionally keeps default credential
+			// protection (`.env`, `~/.ssh/`, `credentials.yaml`, ...) active on a
+			// broken config, which is the fail-closed intent; project-authored
+			// additions and exemptions stay gated on validity inside the loader.
+			const pathBlock = evaluateProjectPathPolicy(pathPolicy, call, callCwd);
+			if (pathBlock !== null) {
+				const blockInput: Omit<
+					SafetyPolicyDecision,
+					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+				> = {
+					ruleId: pathBlock.reasonCode,
+					reasonCode: pathBlock.reasonCode,
+					reasons: [pathBlock.reason],
+					policySource: "project-policy",
+				};
+				if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
+				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
+				return blockDecision(base, blockInput);
+			}
+			// Bash reads of zero-access paths. pathPolicyTargets extracts only
+			// write/delete targets from bash, so `cat .env` used to run and its
+			// output persisted into the transcript and evidence previews. Any
+			// path-like argument token matching a zero-access entry blocks the
+			// command; the one carve-out is the exit-code-only presence check
+			// (`grep -q`/`grep -sq` with a ^NAME= pattern), which is the safe
+			// protocol the credentials skill teaches.
+			if (call.tool === ToolNames.Bash && command !== null) {
+				const secretRead = evaluateBashZeroAccessRead(zeroAccessPolicy, command, callCwd);
+				if (secretRead !== null) {
+					const blockInput: Omit<
+						SafetyPolicyDecision,
+						"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
+					> = {
+						ruleId: "secret_path_bash",
+						reasonCode: "secret_path_bash",
+						reasons: [
+							`bash read of zero-access path blocked: '${secretRead.token}' matches ${secretRead.entrySource}. Check presence with exit codes only (grep -sq "^NAME=" <file>); have the user supply values through their own terminal (read -s), never through chat or command output.`,
+						],
+						policySource: "project-policy",
+					};
+					if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
+					if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
+					return blockDecision(base, blockInput);
+				}
+			}
+
+			// The authored ask rail (sd-01 M3) decides only among calls that
+			// survived every hard block above. A confirmed posture admits the
+			// matched command; an unconfirmed one parks it for confirmation.
 			if (askRule && hit !== null && posture !== "confirmed") {
 				return askDecision(base, {
 					ruleId: hit.match.ruleId,
@@ -190,65 +260,6 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					policySource: hit.source,
 					match: hit.match,
 				});
-			}
-
-			if (!projectPolicy.valid && EXECUTION_TOOLS.has(call.tool)) {
-				const blockInput: Omit<
-					SafetyPolicyDecision,
-					"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
-				> = {
-					ruleId: "project-policy-invalid",
-					reasonCode: "project-policy-invalid",
-					reasons: [`project safety policy is invalid and execution fails closed: ${projectPolicy.errors.join("; ")}`],
-					policySource: "project-policy-invalid",
-				};
-				if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
-				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
-				return blockDecision(base, blockInput);
-			}
-
-			if (projectPolicy.valid) {
-				const pathBlock = evaluateProjectPathPolicy(pathPolicy, call, callCwd);
-				if (pathBlock !== null) {
-					const blockInput: Omit<
-						SafetyPolicyDecision,
-						"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
-					> = {
-						ruleId: pathBlock.reasonCode,
-						reasonCode: pathBlock.reasonCode,
-						reasons: [pathBlock.reason],
-						policySource: "project-policy",
-					};
-					if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
-					if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
-					return blockDecision(base, blockInput);
-				}
-				// Bash reads of zero-access paths. pathPolicyTargets extracts only
-				// write/delete targets from bash, so `cat .env` used to run and its
-				// output persisted into the transcript and evidence previews. Any
-				// path-like argument token matching a zero-access entry blocks the
-				// command; the one carve-out is the exit-code-only presence check
-				// (`grep -q`/`grep -sq` with a ^NAME= pattern), which is the safe
-				// protocol the credentials skill teaches.
-				if (call.tool === ToolNames.Bash && command !== null) {
-					const secretRead = evaluateBashZeroAccessRead(zeroAccessPolicy, command, callCwd);
-					if (secretRead !== null) {
-						const blockInput: Omit<
-							SafetyPolicyDecision,
-							"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
-						> = {
-							ruleId: "secret_path_bash",
-							reasonCode: "secret_path_bash",
-							reasons: [
-								`bash read of zero-access path blocked: '${secretRead.token}' matches ${secretRead.entrySource}. Check presence with exit codes only (grep -sq "^NAME=" <file>); have the user supply values through their own terminal (read -s), never through chat or command output.`,
-							],
-							policySource: "project-policy",
-						};
-						if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
-						if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
-						return blockDecision(base, blockInput);
-					}
-				}
 			}
 
 			if (classification.actionClass === "system_modify") {
@@ -286,13 +297,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
 			return allowDecision(base, allowInput);
 		},
-		metadata(posture) {
-			const rules = rulesFor(posture);
+		metadata() {
 			return {
 				version: 1,
 				rulePackHash: rulePackHash(packs),
 				rulePackVersion: packs.base.version,
-				activeRuleIds: rules.map((entry) => entry.rule.id),
+				activeRuleIds: sourcedRules.map((entry) => entry.rule.id),
 				projectPolicyPath: projectPolicy.path,
 				projectPolicyHash: projectPolicy.hash,
 				projectPolicyValid: projectPolicy.valid,

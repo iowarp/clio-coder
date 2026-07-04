@@ -5,10 +5,14 @@ import { clioStateDir } from "../../core/xdg.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
 
 /**
- * NDJSON audit writer. One line per recorded event, fsynced after each
- * write, file rotated on local-date rollover. Write errors never throw back to
- * the caller because safety must not kill the hot path; they are logged to
- * stderr with a `[clio:audit]` prefix for post-mortem review.
+ * NDJSON audit writer. One line per recorded event, file rotated on
+ * local-date rollover. Rows are written with writeSync, so in-process readers
+ * see them immediately; durability fsync happens on flush(), on close, on
+ * rotation, and on a low-frequency background interval instead of once per
+ * row, which kept blocking the admission hot path on disk latency. Write
+ * errors never throw back to the caller because safety must not kill the hot
+ * path; they are logged to stderr with a `[clio:audit]` prefix for
+ * post-mortem review.
  *
  * Records are a discriminated union over `kind`:
  *   - `tool_call`: emitted by safety.evaluate() for every classified tool call.
@@ -175,6 +179,8 @@ export type AuditRecord =
 
 export interface AuditWriter {
 	write(record: AuditRecord): void;
+	/** Fsync any rows written since the last flush so the file is durable on disk. */
+	flush(): void;
 	close(): Promise<void>;
 }
 
@@ -384,24 +390,40 @@ function logAuditError(err: unknown, path?: string): void {
 	process.stderr.write(`[clio:audit] ${msg}${where}\n`);
 }
 
+/** Cadence of the background safety flush that bounds how long rows can sit unfsynced. */
+const AUDIT_FLUSH_INTERVAL_MS = 5_000;
+
 export function openAuditWriter(opts?: { dateFn?: () => Date }): AuditWriter {
 	const dateFn = opts?.dateFn ?? (() => new Date());
 	let current: OpenFile | null = null;
 	let closed = false;
+	let dirty = false;
 
-	function closeCurrent(): void {
-		if (current === null) return;
+	function flushCurrent(): void {
+		if (current === null || !dirty) return;
 		try {
 			fsyncSync(current.fd);
+			dirty = false;
 		} catch (err) {
 			logAuditError(err, current.path);
 		}
+	}
+
+	// Safety flush: a long session must not hold unflushed rows indefinitely.
+	// The interval is unref'd so it never keeps the process alive.
+	const flushTimer = setInterval(flushCurrent, AUDIT_FLUSH_INTERVAL_MS);
+	flushTimer.unref();
+
+	function closeCurrent(): void {
+		if (current === null) return;
+		flushCurrent();
 		try {
 			closeSync(current.fd);
 		} catch (err) {
 			logAuditError(err, current.path);
 		}
 		current = null;
+		dirty = false;
 	}
 
 	function ensureFor(date: string): OpenFile | null {
@@ -429,14 +451,18 @@ export function openAuditWriter(opts?: { dateFn?: () => Date }): AuditWriter {
 				if (handle === null) return;
 				const line = `${JSON.stringify(record)}\n`;
 				writeSync(handle.fd, line);
-				fsyncSync(handle.fd);
+				dirty = true;
 			} catch (err) {
 				logAuditError(err, current?.path);
 			}
 		},
+		flush(): void {
+			flushCurrent();
+		},
 		async close(): Promise<void> {
 			if (closed) return;
 			closed = true;
+			clearInterval(flushTimer);
 			closeCurrent();
 		},
 	};
