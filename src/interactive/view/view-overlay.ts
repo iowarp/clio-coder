@@ -54,6 +54,10 @@ export interface RenderedViewRow {
 	itemIndex?: number;
 }
 
+export type ViewFilterQuery =
+	| { kind: "text"; text: string }
+	| { kind: "category"; category: ViewArtifactCategory; value: string };
+
 interface LoadedContent {
 	key: string;
 	status: "loading" | "loaded" | "error";
@@ -105,6 +109,69 @@ function categoryLabel(category: ViewArtifactCategory): string {
 	}
 }
 
+const VIEW_ARTIFACT_CATEGORY_SET = new Set<ViewArtifactCategory>(VIEW_ARTIFACT_CATEGORIES);
+const BARE_CATEGORY_FILTERS = new Set<ViewArtifactCategory>([
+	"task-ledger",
+	"protected-artifact",
+	"compaction",
+	"audit",
+]);
+
+function isViewArtifactCategory(value: string): value is ViewArtifactCategory {
+	return VIEW_ARTIFACT_CATEGORY_SET.has(value as ViewArtifactCategory);
+}
+
+export function parseViewFilterQuery(query: string): ViewFilterQuery {
+	const text = query.trim();
+	if (text.length === 0) return { kind: "text", text };
+	const colon = text.indexOf(":");
+	if (colon >= 0) {
+		const prefix = text.slice(0, colon).trim().toLowerCase();
+		if (isViewArtifactCategory(prefix)) {
+			return { kind: "category", category: prefix, value: text.slice(colon + 1).trim() };
+		}
+		return { kind: "text", text };
+	}
+	const bare = text.toLowerCase();
+	if (isViewArtifactCategory(bare) && BARE_CATEGORY_FILTERS.has(bare)) {
+		return { kind: "category", category: bare, value: "" };
+	}
+	return { kind: "text", text };
+}
+
+function isNonEmptySearchValue(value: string | undefined): value is string {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+function broadFilterText(artifact: ViewArtifact): string {
+	return `${artifact.id} ${artifact.category} ${artifact.title}`;
+}
+
+function artifactSearchValues(artifact: ViewArtifact): string[] {
+	return [
+		artifact.id,
+		`${artifact.category}:${artifact.id}`,
+		artifact.category,
+		artifact.title,
+		artifact.description,
+		artifact.runId,
+		artifact.sessionId,
+		artifact.correlationId,
+		artifact.toolName,
+		artifact.path,
+		...(artifact.searchText ?? []),
+	].filter(isNonEmptySearchValue);
+}
+
+function categoryFilterText(artifact: ViewArtifact): string {
+	return artifactSearchValues(artifact).join(" ");
+}
+
+function matchesExactArtifactValue(artifact: ViewArtifact, value: string): boolean {
+	const exact = value.trim();
+	return exact.length > 0 && artifactSearchValues(artifact).some((candidate) => candidate === exact);
+}
+
 export function formatArtifactSize(sizeBytes: number | undefined): string {
 	if (sizeBytes === undefined) return "";
 	if (sizeBytes < 1024) return `${sizeBytes} B`;
@@ -133,14 +200,26 @@ function formatLocalTime(timestamp: number): string {
 }
 
 export function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, query: string): ViewArtifact[] {
-	const trimmed = query.trim();
-	if (trimmed.length === 0) return [...artifacts];
-	return fuzzyFilter([...artifacts], trimmed, (artifact) => `${artifact.id} ${artifact.category} ${artifact.title}`);
+	const parsed = parseViewFilterQuery(query);
+	if (parsed.kind === "category") {
+		const categoryArtifacts = artifacts.filter((artifact) => artifact.category === parsed.category);
+		if (parsed.value.length === 0) return categoryArtifacts;
+		return fuzzyFilter(categoryArtifacts, parsed.value, categoryFilterText);
+	}
+	if (parsed.text.length === 0) return [...artifacts];
+	return fuzzyFilter([...artifacts], parsed.text, broadFilterText);
 }
 
 export function initialViewSelection(artifacts: ReadonlyArray<ViewArtifact>, initialFilter = ""): number {
 	const filtered = filterViewArtifacts(artifacts, initialFilter);
 	if (filtered.length === 0) return 0;
+	const parsed = parseViewFilterQuery(initialFilter);
+	if (parsed.kind === "category" && parsed.value.length > 0) {
+		const exactIndexes = filtered.flatMap((artifact, index) =>
+			matchesExactArtifactValue(artifact, parsed.value) ? [index] : [],
+		);
+		if (exactIndexes.length === 1) return exactIndexes[0] ?? 0;
+	}
 	const exact = initialFilter.trim();
 	if (exact.length > 0) {
 		const exactIndex = filtered.findIndex(

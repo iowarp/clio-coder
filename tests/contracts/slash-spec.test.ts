@@ -282,6 +282,15 @@ describe("contracts/slash-spec", () => {
 			["/view", { kind: "view" }],
 			["/view myRunId", { kind: "view", filter: "myRunId" }],
 			["/view Bash npm test", { kind: "view", filter: "Bash npm test" }],
+			["/view audit:session-1", { kind: "view", filter: "audit:session-1" }],
+			["/view task-ledger", { kind: "view", filter: "task-ledger" }],
+			[
+				"/view protected-artifact:/workspace/src/locked.ts",
+				{
+					kind: "view",
+					filter: "protected-artifact:/workspace/src/locked.ts",
+				},
+			],
 			["/view verify myRunId", { kind: "view-verify", runId: "myRunId" }],
 			["/view verify", { kind: "view-usage" }],
 			["/view verify myRunId extra", { kind: "view-usage" }],

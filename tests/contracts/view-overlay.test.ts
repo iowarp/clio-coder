@@ -8,6 +8,7 @@ import {
 	groupedViewRows,
 	initialViewSelection,
 	nextContentScrollOffset,
+	parseViewFilterQuery,
 	ViewOverlayView,
 	viewFooterHint,
 } from "../../src/interactive/view/view-overlay.js";
@@ -74,6 +75,187 @@ describe("contracts/view-overlay", () => {
 		strictEqual(initialViewSelection(artifacts, "run-222"), 0);
 		strictEqual(initialViewSelection(artifacts, "dispatch:run-222"), 0);
 		strictEqual(initialViewSelection(artifacts, "missing"), 0);
+	});
+
+	it("parses category-aware view filter query strings", () => {
+		deepStrictEqual(parseViewFilterQuery("audit"), { kind: "category", category: "audit", value: "" });
+		deepStrictEqual(parseViewFilterQuery("audit:session-1"), {
+			kind: "category",
+			category: "audit",
+			value: "session-1",
+		});
+		deepStrictEqual(parseViewFilterQuery(" receipt:run-1 "), {
+			kind: "category",
+			category: "receipt",
+			value: "run-1",
+		});
+		deepStrictEqual(parseViewFilterQuery("receipt:"), { kind: "category", category: "receipt", value: "" });
+		deepStrictEqual(parseViewFilterQuery("unknown:run-1"), { kind: "text", text: "unknown:run-1" });
+		deepStrictEqual(parseViewFilterQuery("receipt"), { kind: "text", text: "receipt" });
+	});
+
+	it("filters category-aware queries against summary metadata", () => {
+		const artifacts = [
+			artifact({
+				id: "run-111",
+				category: "receipt",
+				title: "coder fix lint",
+				timestamp: 8,
+				runId: "run-111",
+				sessionId: "session-1",
+				path: "/state/receipts/run-111.json",
+			}),
+			artifact({
+				id: "evidence-run-111",
+				category: "evidence",
+				title: "Evidence · run run-111",
+				timestamp: 7,
+				runId: "run-111",
+				sessionId: "session-1",
+				searchText: ["blocked-tool"],
+			}),
+			artifact({
+				id: "run-222",
+				category: "dispatch",
+				title: "scout inspect tests",
+				timestamp: 6,
+				runId: "run-222",
+			}),
+			artifact({
+				id: "task-ledger:turn-1",
+				category: "task-ledger",
+				title: "Task ledger · Ship proof catalog",
+				timestamp: 5,
+				searchText: ["G1", "run-333"],
+			}),
+			artifact({
+				id: "tool:turn-1",
+				category: "tool-output",
+				title: "Bash · npm test",
+				timestamp: 4,
+				runId: "run-444",
+				toolName: "bash",
+				searchText: ["npm test"],
+			}),
+			artifact({
+				id: "protected:turn-1",
+				category: "protected-artifact",
+				title: "Protected · locked.ts",
+				timestamp: 3,
+				runId: "run-555",
+				correlationId: "corr-protected",
+				path: "/workspace/src/locked.ts",
+			}),
+			artifact({
+				id: "compaction:turn-1",
+				category: "compaction",
+				title: "Compaction · force",
+				timestamp: 2,
+			}),
+			artifact({
+				id: "audit:2026-06-11.jsonl:3",
+				category: "audit",
+				title: "Audit · tool_call · bash · blocked",
+				timestamp: 1,
+				runId: "run-666",
+				sessionId: "session-2",
+				correlationId: "corr-audit",
+			}),
+		];
+
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "receipt:run-111").map((item) => item.id),
+			["run-111"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "evidence:blocked-tool").map((item) => item.id),
+			["evidence-run-111"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "evidence:run-111").map((item) => item.id),
+			["evidence-run-111"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "dispatch:run-222").map((item) => item.id),
+			["run-222"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "task-ledger").map((item) => item.id),
+			["task-ledger:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "task-ledger:run-333").map((item) => item.id),
+			["task-ledger:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "tool-output:bash").map((item) => item.id),
+			["tool:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "tool-output:run-444").map((item) => item.id),
+			["tool:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "protected-artifact").map((item) => item.id),
+			["protected:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "protected-artifact:/workspace/src/locked.ts").map((item) => item.id),
+			["protected:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "protected-artifact:run-555").map((item) => item.id),
+			["protected:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "compaction").map((item) => item.id),
+			["compaction:turn-1"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "audit:corr-audit").map((item) => item.id),
+			["audit:2026-06-11.jsonl:3"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "audit:session-2").map((item) => item.id),
+			["audit:2026-06-11.jsonl:3"],
+		);
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "audit").map((item) => item.id),
+			["audit:2026-06-11.jsonl:3"],
+		);
+	});
+
+	it("falls unknown category prefixes back to free-text filtering", () => {
+		const artifacts = [
+			artifact({ id: "unknown:needle", category: "receipt", title: "prefixed id", timestamp: 1 }),
+			artifact({ id: "run-222", category: "audit", title: "audit row", timestamp: 2 }),
+		];
+
+		deepStrictEqual(
+			filterViewArtifacts(artifacts, "unknown:needle").map((item) => item.id),
+			["unknown:needle"],
+		);
+	});
+
+	it("auto-selects one exact category-aware metadata match among fuzzy matches", () => {
+		const artifacts = [
+			artifact({
+				id: "tool:preview",
+				category: "tool-output",
+				title: "Bash npm test",
+				timestamp: 2,
+			}),
+			artifact({
+				id: "tool:exact",
+				category: "tool-output",
+				title: "shell output",
+				timestamp: 1,
+				toolName: "bash",
+			}),
+		];
+		const filtered = filterViewArtifacts(artifacts, "tool-output:bash");
+		strictEqual(filtered.length, 2);
+		strictEqual(filtered[initialViewSelection(artifacts, "tool-output:bash")]?.id, "tool:exact");
 	});
 
 	it("clamps scroll windows for top, bottom, pages, and half pages", () => {
