@@ -7,6 +7,9 @@ import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
 import { type AccountabilitySummary, readAccountabilitySummary } from "../../domains/observability/index.js";
 import type { BashExecutionEntry, MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import type { SessionMeta } from "../../domains/session/index.js";
+import { formatUsd } from "../footer/widgets.js";
+import { formatFooterTokens } from "../footer-panel.js";
+import { abbreviateModelId } from "../theme/index.js";
 
 export type ViewArtifactCategory = "accountability" | "receipt" | "dispatch" | "tool-output" | "compaction";
 export type ViewArtifactFormat = "markdown" | "text" | "json";
@@ -111,6 +114,15 @@ function parseTime(value: string | null | undefined): number {
 	if (!value) return 0;
 	const parsed = Date.parse(value);
 	return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatLocalTime(value: string | null | undefined): string {
+	const timestamp = parseTime(value);
+	if (timestamp <= 0) return "unknown time";
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return "unknown time";
+	const part = (unit: number) => unit.toString().padStart(2, "0");
+	return `${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
 }
 
 function safeTitle(value: string, fallback: string): string {
@@ -511,12 +523,12 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`outcome: ${env.outcome ?? "unknown"}`,
 						`exit: ${env.exitCode ?? "?"}`,
 						`target: ${env.targetId}`,
-						`model: ${env.wireModelId}`,
+						`model: ${abbreviateModelId(env.wireModelId)}`,
 						`runtime: ${env.runtimeKind}:${env.runtimeId}`,
-						`started: ${env.startedAt}`,
-						`ended: ${env.endedAt ?? "running"}`,
-						`tokens: ${env.tokenCount}`,
-						`costUsd: ${env.costUsd}`,
+						`started: ${formatLocalTime(env.startedAt)}`,
+						`ended: ${env.endedAt ? formatLocalTime(env.endedAt) : "running"}`,
+						`tokens: ${formatFooterTokens(env.tokenCount)}`,
+						`cost: ${formatUsd(env.costUsd)}`,
 						`receipt: ${env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id)}`,
 						"",
 						"agent output:",
@@ -606,8 +618,8 @@ export class CompactionArtifactProvider implements ArtifactProvider {
 						"# Compaction Summary",
 						"",
 						`- trigger: ${entry.trigger ?? "unknown"}`,
-						`- tokens before: ${entry.tokensBefore}`,
-						...(entry.tokensAfter !== undefined ? [`- tokens after: ${entry.tokensAfter}`] : []),
+						`- tokens before: ${formatFooterTokens(entry.tokensBefore)}`,
+						...(entry.tokensAfter !== undefined ? [`- tokens after: ${formatFooterTokens(entry.tokensAfter)}`] : []),
 						...(entry.messagesSummarized !== undefined ? [`- messages summarized: ${entry.messagesSummarized}`] : []),
 						`- continues at turn: ${entry.firstKeptTurnId}`,
 						"",

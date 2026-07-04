@@ -27,6 +27,7 @@ const LEFT_PANE_TARGET_WIDTH = 38;
 const LEFT_PANE_MIN_WIDTH = 30;
 const LEFT_PANE_MAX_WIDTH = 44;
 const SEPARATOR = " │ ";
+const ELLIPSIS = "…";
 
 export type ViewPaneFocus = "list" | "content";
 export type ViewNoticeLevel = "info" | "success" | "warning" | "error";
@@ -77,7 +78,7 @@ function artifactKey(artifact: ViewArtifact): string {
 }
 
 function padAnsi(text: string, width: number): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), "", true);
+	const clipped = truncateToWidth(text, Math.max(0, width), ELLIPSIS, true);
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
@@ -113,6 +114,14 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
 	if (hours < 24) return `${hours}h`;
 	const days = Math.floor(hours / 24);
 	return `${days}d`;
+}
+
+function formatLocalTime(timestamp: number): string {
+	if (!Number.isFinite(timestamp) || timestamp <= 0) return "unknown time";
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return "unknown time";
+	const part = (value: number) => value.toString().padStart(2, "0");
+	return `${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
 }
 
 export function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, query: string): ViewArtifact[] {
@@ -191,9 +200,9 @@ export function nextContentScrollOffset(
 
 function verificationText(state: ViewVerificationState | undefined): string {
 	if (!state || state.status === "idle") return "";
-	if (state.status === "running") return "verify running";
-	if (state.status === "ok") return `verify ok ${state.detail}`;
-	return `verify fail ${state.detail}`;
+	if (state.status === "running") return `${GLYPH.running} verify running`;
+	if (state.status === "ok") return `${GLYPH.ok} verify ok ${state.detail}`;
+	return `${GLYPH.error} verify fail ${state.detail}`;
 }
 
 export function buildArtifactHeader(
@@ -201,22 +210,18 @@ export function buildArtifactHeader(
 	verification: ViewVerificationState | undefined,
 	width: number,
 ): string {
-	if (!artifact) return padAnsi("No artifact selected", width);
+	if (!artifact) return padAnsi(clioTheme().fg("muted", "No artifact selected"), width);
 	const theme = clioTheme();
-	const timestamp = artifact.timestamp > 0 ? new Date(artifact.timestamp).toISOString() : "unknown time";
+	const timestamp = formatLocalTime(artifact.timestamp);
 	const size = formatArtifactSize(artifact.sizeBytes);
-	const parts = [artifact.category, artifact.id, timestamp];
-	if (size.length > 0) parts.push(size);
+	const parts = [theme.fg("dim", artifact.category), theme.fg("muted", artifact.id), theme.fg("dim", timestamp)];
+	if (size.length > 0) parts.push(theme.fg("dim", size));
 	const verify = verificationText(verification);
-	if (verify.length > 0) parts.push(verify);
-	const raw = parts.join("  ");
-	const styled =
-		verification?.status === "ok"
-			? raw.replace(verify, theme.fg("success", verify))
-			: verification?.status === "fail"
-				? raw.replace(verify, theme.fg("error", verify))
-				: raw;
-	return padAnsi(styled, width);
+	if (verify.length > 0) {
+		const token = verification?.status === "ok" ? "success" : verification?.status === "fail" ? "error" : "info";
+		parts.push(theme.fg(token, verify));
+	}
+	return padAnsi(parts.join("  "), width);
 }
 
 export function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean): string {
@@ -310,7 +315,7 @@ export class ViewOverlayView implements Component {
 		const key = artifactKey(artifact);
 		if (this.content?.key === key) return;
 		const token = ++this.loadToken;
-		this.content = { key, status: "loading", lines: ["loading artifact..."], format: "text" };
+		this.content = { key, status: "loading", lines: [clioTheme().fg("dim", "loading artifact…")], format: "text" };
 		void (async () => {
 			try {
 				const loaded = await artifact.load();
@@ -319,7 +324,13 @@ export class ViewOverlayView implements Component {
 			} catch (err) {
 				if (token !== this.loadToken) return;
 				const message = err instanceof Error ? err.message : String(err);
-				this.content = { key, status: "error", lines: [`load failed: ${message}`], format: "text", error: message };
+				this.content = {
+					key,
+					status: "error",
+					lines: [clioTheme().fg("error", `load failed: ${message}`)],
+					format: "text",
+					error: message,
+				};
 			} finally {
 				if (token === this.loadToken) this.options.requestRender?.();
 			}
@@ -346,7 +357,7 @@ export class ViewOverlayView implements Component {
 		lines.push(padAnsi(`${filterLabel}: ${filterValue}`, width));
 
 		if (this.loadingArtifacts) {
-			lines.push(padAnsi(theme.fg("dim", "loading artifacts..."), width));
+			lines.push(padAnsi(theme.fg("dim", "loading artifacts…"), width));
 			return this.fixedLines(lines, width, height);
 		}
 		if (this.artifactError) {
@@ -383,7 +394,7 @@ export class ViewOverlayView implements Component {
 			const available = Math.max(1, width - visibleWidth(cursor));
 			const metaWidth = visibleWidth(meta);
 			const titleWidth = Math.max(1, available - (metaWidth > 0 ? metaWidth + 1 : 0));
-			const clippedTitle = truncateToWidth(title, titleWidth, "...", true);
+			const clippedTitle = truncateToWidth(title, titleWidth, ELLIPSIS, true);
 			const gap = " ".repeat(Math.max(1, available - visibleWidth(clippedTitle) - metaWidth));
 			lines.push(padAnsi(`${cursor}${clippedTitle}${metaWidth > 0 ? `${gap}${meta}` : ""}`, width));
 		}
