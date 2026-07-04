@@ -26,12 +26,11 @@ export interface ClioPermissionResolvedEvent {
 		mode: "deny" | "fail" | "escalate";
 		reason: string;
 		/**
-		 * Resolution provenance. Absent on the existing policy deny/fail path so
-		 * those events stay byte-identical; set only for escalate resolutions so
-		 * consumers can distinguish operator decisions from timeout fallbacks.
+		 * Resolution provenance. Policy deny/fail uses "policy"; escalation
+		 * resolutions distinguish operator decisions from timeout fallbacks.
 		 */
 		source?: "operator" | "timeout" | "policy";
-		/** Escalation request id this resolution answers; escalate path only. */
+		/** Approval request id this resolution answers. */
 		requestId?: string;
 		/** Resolved outcome for an escalation; escalate path only. */
 		decision?: "approved" | "denied";

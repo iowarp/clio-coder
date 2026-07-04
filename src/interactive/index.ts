@@ -54,7 +54,7 @@ import {
 } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
 import {
 	approvalParkedNotice,
 	autonomyDeniedNotice,
@@ -1890,7 +1890,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		);
 		leaderTimer.unref?.();
 	};
-	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision } | null = null;
+	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
 	// A parked worker escalation currently shown in the permission overlay. When
 	// set, the overlay's confirm/deny routes to resolveWorkerPermission over the
 	// dispatch contract instead of the local tool registry. Additional
@@ -2046,6 +2046,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			} else if (confirmed && permission) {
 				deps.bus.emit(BusChannels.PermissionResolved, {
 					status: "granted",
+					...(permission.meta ? { requestId: permission.meta.requestId } : {}),
+					origin: "main",
+					decidedBy: "operator",
 					tool: permission.call.tool,
 					actionClass: permission.decision.classification.actionClass,
 					requestedBy: "tool",
@@ -2058,6 +2061,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			} else {
 				deps.bus.emit(BusChannels.PermissionResolved, {
 					status: "denied",
+					...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
+					origin: "main",
+					decidedBy: "operator",
 					...(permission ? { tool: permission.call.tool } : {}),
 					...(permission ? { actionClass: permission.decision.classification.actionClass } : {}),
 					reason: "operator cancelled",
@@ -2070,7 +2076,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			}
 		}
 		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls() && pendingPermission) {
-			openPermissionOverlay(pendingPermission.call, pendingPermission.decision);
+			openPermissionOverlay(pendingPermission.call, pendingPermission.decision, pendingPermission.meta);
 		}
 		// A worker escalation that arrived while the overlay was busy waits its turn.
 		maybeOpenWorkerEscalation();
@@ -2288,9 +2294,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const currentAutonomy = (): string => deps.getSettings?.().autonomy ?? "auto-edit";
 
-	const openPermissionOverlay = (call: ClassifierCall, decision: SafetyDecision): void => {
+	const openPermissionOverlay = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		meta?: PermissionRequiredMeta,
+	): void => {
 		if (overlayState !== "closed") return;
-		pendingPermission = { call, decision };
+		pendingPermission = { call, decision, ...(meta ? { meta } : {}) };
 		permissionConfirmJustFired = false;
 		overlayState = "permission-confirm";
 		overlayHandle = showClioOverlayFrame(tui, createPermissionOverlayBody(call, decision, currentAutonomy()), {
@@ -2303,15 +2313,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 
 	const unsubscribePermissionRequired =
-		deps.toolRegistry?.onPermissionRequired((call, decision) => {
+		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
 			// The parked notice fires for every park, including ones queued while
 			// the overlay is already open, so the transcript names the asking axis
 			// even when the overlay shows a different call.
 			const parkedNotice = approvalParkedNotice(call.tool, decision, currentAutonomy());
 			appendNotice(parkedNotice.level, parkedNotice.text, busNoticeSink);
 			if (overlayState === "permission-confirm") return;
-			pendingPermission = { call, decision };
-			openPermissionOverlay(call, decision);
+			pendingPermission = { call, decision, meta };
+			openPermissionOverlay(call, decision, meta);
 		}) ?? (() => {});
 
 	const openWorkerPermissionOverlay = (entry: {
@@ -2359,9 +2369,14 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	// by the tool registry above and are ignored here. Headless sessions have no
 	// subscriber, so the worker's timeout fallback governs there.
 	const unsubscribeWorkerEscalation = deps.bus.on(BusChannels.PermissionRequested, (payload) => {
-		if (typeof payload.requestedBy !== "string" || typeof payload.requestId !== "string") return;
+		if (typeof payload.requestId !== "string") return;
+		const origin = typeof payload.origin === "string" ? payload.origin : undefined;
+		const legacyWorkerEvent = origin === undefined && typeof payload.requestedBy === "string";
+		if (!(origin?.startsWith("worker:") || legacyWorkerEvent)) return;
+		const runId = typeof payload.requestedBy === "string" ? payload.requestedBy : origin?.slice("worker:".length);
+		if (!runId) return;
 		const entry = {
-			runId: payload.requestedBy,
+			runId,
 			requestId: payload.requestId,
 			agentId: typeof payload.agentId === "string" ? payload.agentId : "worker",
 			tool: typeof payload.tool === "string" ? payload.tool : "unknown",

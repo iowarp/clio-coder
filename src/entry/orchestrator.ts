@@ -693,6 +693,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware,
 		autonomy: () => (config?.get() ?? readSettings()).autonomy ?? "auto-edit",
 	});
+	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
+	toolRegistry.onPermissionRequired((call, decision, meta) => {
+		bus.emit(BusChannels.PermissionRequested, {
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+			requestId: meta.requestId,
+			origin: mainPermissionOrigin,
+			axis: meta.axis,
+			...(decision.kind === "ask" ? { rejection: decision.rejection } : {}),
+			...(decision.policy?.ruleId !== undefined ? { ruleId: decision.policy.ruleId } : {}),
+			...(decision.policy?.policySource !== undefined ? { policySource: decision.policy.policySource } : {}),
+			...(decision.policy?.reasonCode !== undefined ? { reasonCode: decision.policy.reasonCode } : {}),
+		});
+	});
 	let askUserHandler: AskUserHandler | null = null;
 	// ask_user is interactive-only by design: it is a human interview tool and
 	// headless/ACP surfaces have no operator to interview, so the tool is not
@@ -978,6 +992,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				chat,
 				...(session ? { session } : {}),
 				toolRegistry,
+				bus,
 				cwd: process.cwd(),
 				version: getVersionInfo().clio,
 				permissionTimeoutMs: config?.get().delegation.defaults.permissionTimeoutMs ?? 120_000,
@@ -1001,9 +1016,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const unsubscribeLoopGuardStop = subscribeLoopGuardStop(bus, chat);
 		const headlessPermissionReason =
 			"clio run cannot confirm permission requests; rerun interactively to approve this action.";
-		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision) => {
+		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision, meta) => {
 			bus.emit(BusChannels.PermissionResolved, {
 				status: "denied",
+				requestId: meta.requestId,
+				origin: "main",
+				decidedBy: "policy:no-operator",
 				tool: call.tool,
 				actionClass: decision.classification.actionClass,
 				reason: headlessPermissionReason,

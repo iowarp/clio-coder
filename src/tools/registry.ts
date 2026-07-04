@@ -8,6 +8,7 @@ import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
+import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import {
 	type AutonomyLevel,
 	autonomyAskRejection,
@@ -217,6 +218,11 @@ export interface OneShotGrant {
 	requestedBy: string;
 }
 
+export interface PermissionRequiredMeta {
+	requestId: string;
+	axis: string;
+}
+
 export interface ToolRegistry {
 	register(spec: ToolSpec): void;
 	/** Tools visible in the single operating posture. Models only see these. */
@@ -257,7 +263,9 @@ export interface ToolRegistry {
 	 * Subscribe to the signal fired when a call is parked awaiting permission
 	 * confirmation. Returns an unsubscribe handle.
 	 */
-	onPermissionRequired(listener: (call: ClassifierCall, decision: SafetyDecision) => void): () => void;
+	onPermissionRequired(
+		listener: (call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void,
+	): () => void;
 	/**
 	 * Subscribe to the signal fired when the autonomy mapping auto-denies a
 	 * call (deny dispositions, today only at read-only). The verdict already
@@ -274,6 +282,7 @@ export type RegistryVerdict =
 interface ParkedCall {
 	call: ClassifierCall;
 	decision: SafetyDecision;
+	meta: PermissionRequiredMeta;
 	resolve: (verdict: RegistryVerdict) => void;
 	options?: ToolInvokeOptions;
 }
@@ -281,10 +290,13 @@ interface ParkedCall {
 export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	const tools = new Map<ToolName, ToolSpec>();
 	const parked: ParkedCall[] = [];
-	const permissionListeners = new Set<(call: ClassifierCall, decision: SafetyDecision) => void>();
+	const permissionListeners = new Set<
+		(call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void
+	>();
 	const autonomyDeniedListeners = new Set<
 		(call: ClassifierCall, decision: SafetyDecision, level: AutonomyLevel) => void
 	>();
+	let approvalRequestCounter = 0;
 
 	const runSpec = async (
 		spec: ToolSpec,
@@ -331,7 +343,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	type AdmitOutcome =
 		| { kind: "terminal"; verdict: RegistryVerdict }
 		| { kind: "execute"; spec: ToolSpec; decision: SafetyDecision }
-		| { kind: "park"; decision: SafetyDecision };
+		| { kind: "park"; decision: SafetyDecision; axis: string };
 
 	const admit = (call: ClassifierCall, grant?: OneShotGrant, options?: ToolInvokeOptions): AdmitOutcome => {
 		const spec = tools.get(call.tool as ToolName);
@@ -370,7 +382,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				return { kind: "terminal", verdict };
 			}
 			if (grant?.actionClass === actionClass) return { kind: "execute", spec, decision };
-			return { kind: "park", decision };
+			return { kind: "park", decision, axis: approvalAxisId(decision, level) };
 		}
 		// One-shot grant: resumeParkedCalls re-admits exactly the parked call
 		// the operator approved, with a confirmed posture. The engine converts
@@ -406,8 +418,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 		if (disposition === "ask") {
 			const askDecision = toAutonomyAskDecision(decision, level, call.tool, actionClass);
-			recordRegistryDisposition(call, askDecision, "permission_requested");
-			return { kind: "park", decision: askDecision };
+			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
 		}
 		recordRegistryDisposition(call, decision, "allowed");
 		return { kind: "execute", spec, decision };
@@ -417,7 +428,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		call: ClassifierCall,
 		decision: SafetyDecision,
 		auditDecision: "allowed" | "blocked" | "permission_requested" | "denied",
-		overrides?: { reasons?: ReadonlyArray<string>; reasonCode?: string },
+		overrides?: { reasons?: ReadonlyArray<string>; reasonCode?: string; requestId?: string },
 	): void => {
 		// Row sequence for net-pass calls: safety.evaluate writes `classified`;
 		// registry admission writes the final autonomy disposition. Confirmed
@@ -431,6 +442,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			classification: decision.classification,
 			decision: auditDecision,
 			args: call.args,
+			...(overrides?.requestId !== undefined ? { requestId: overrides.requestId } : {}),
 			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 			...(overrides?.reasonCode !== undefined ? { reasonCode: overrides.reasonCode } : {}),
 			...(reasons !== undefined ? { reasons } : decision.kind === "allow" ? {} : { reasons: [decision.rejection.detail] }),
@@ -469,10 +481,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return firstBlockToolEffect(effects)?.reason ?? null;
 	};
 
-	const notifyPermissionRequired = (call: ClassifierCall, decision: SafetyDecision): void => {
+	const nextApprovalRequestId = (): string => `apr-${++approvalRequestCounter}`;
+
+	const notifyPermissionRequired = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		meta: PermissionRequiredMeta,
+	): void => {
 		for (const listener of permissionListeners) {
 			try {
-				listener(call, decision);
+				listener(call, decision, meta);
 			} catch {
 				// Listener errors never abort admission; they are surfaced via
 				// whatever observability the caller wires up.
@@ -506,10 +524,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			}
 			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision, options);
 			return new Promise<RegistryVerdict>((resolve) => {
-				const parkedCall: ParkedCall = { call, decision: outcome.decision, resolve };
+				const meta: PermissionRequiredMeta = {
+					requestId: nextApprovalRequestId(),
+					axis: outcome.axis,
+				};
+				recordRegistryDisposition(call, outcome.decision, "permission_requested", { requestId: meta.requestId });
+				const parkedCall: ParkedCall = { call, decision: outcome.decision, meta, resolve };
 				if (options !== undefined) parkedCall.options = options;
 				parked.push(parkedCall);
-				notifyPermissionRequired(call, outcome.decision);
+				notifyPermissionRequired(call, outcome.decision, meta);
 			});
 		},
 		hasParkedCalls: () => parked.length > 0,
@@ -534,7 +557,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision, entry.options));
 			}
 			const next = parked[0];
-			if (next) notifyPermissionRequired(next.call, next.decision);
+			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
 		},
 		cancelParkedCalls(reason) {
 			if (parked.length === 0) return;

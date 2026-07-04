@@ -342,7 +342,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		actionClass: ActionClass;
 		timer: ReturnType<typeof setTimeout>;
 	}
-	let escalationCounter = 0;
 	let activeEscalation: ActiveEscalation | null = null;
 	const clearActiveEscalation = (): void => {
 		if (activeEscalation) {
@@ -412,11 +411,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		return true;
 	};
 
-	const unsubscribePermission = registry.onPermissionRequired((call, decision) => {
+	const unsubscribePermission = registry.onPermissionRequired((call, decision, meta) => {
 		const actionClass = decision.classification.actionClass;
 		if (escalationConfig) {
 			if (activeEscalation !== null) return;
-			const requestId = `esc-${++escalationCounter}`;
+			const requestId = meta.requestId;
 			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
 			timer.unref?.();
 			activeEscalation = { requestId, tool: call.tool, actionClass, timer };
@@ -445,6 +444,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				tool: call.tool,
 				actionClass,
 				mode: onPermission,
+				source: "policy",
+				requestId: meta.requestId,
 				reason,
 			},
 		} as ClioWorkerEvent);

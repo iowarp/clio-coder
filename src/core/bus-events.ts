@@ -346,6 +346,8 @@ export interface SafetyClassifiedPayload {
 export interface PermissionRequestedPayload {
 	tool: string;
 	actionClass: string;
+	origin?: string | undefined;
+	axis?: string | undefined;
 	ruleId?: string | undefined;
 	posture?: string | undefined;
 	rejection?: { short: string; detail: string; hints: ReadonlyArray<string> } | undefined;
@@ -373,6 +375,9 @@ export interface PermissionRequestedPayload {
  */
 export interface PermissionResolvedPayload {
 	status: "granted" | "denied";
+	requestId?: string | undefined;
+	origin?: string | undefined;
+	decidedBy?: string | undefined;
 	tool?: string | undefined;
 	actionClass?: string | undefined;
 	reason?: string | undefined;
