@@ -1,7 +1,18 @@
-import { Input, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
+import {
+	type Component,
+	Input,
+	type OverlayHandle,
+	Text,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+} from "../../engine/tui.js";
 import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
+const ELLIPSIS = "…";
+const KEY_WIDTH = 10;
 
 export interface AuthDialogHandle {
 	handle: OverlayHandle;
@@ -12,6 +23,72 @@ export interface AuthDialogHandle {
 		cancel(): void;
 		dismiss(): void;
 	};
+}
+
+function fitLine(text: string, width: number): string {
+	const safeWidth = Math.max(1, width);
+	if (visibleWidth(text) <= safeWidth) return text;
+	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
+}
+
+function keyCell(label: string): string {
+	const theme = clioTheme();
+	const key = theme.fg("dim", label);
+	const width = visibleWidth(label);
+	return `${key}${" ".repeat(Math.max(0, KEY_WIDTH - width))}`;
+}
+
+function normalizeAuthLine(line: string): string {
+	return line.replace(/\.\.\./g, ELLIPSIS);
+}
+
+function formatAuthChoiceLine(line: string): string | null {
+	const match = /^(?<marker>[* ])\s*(?<index>\d+)\.\s*(?<label>.+)$/.exec(line);
+	if (!match?.groups) return null;
+	const theme = clioTheme();
+	const markerText = match.groups.marker ?? " ";
+	const indexText = match.groups.index ?? "";
+	const labelText = match.groups.label ?? "";
+	const marker = markerText === "*" ? theme.fg("accent", GLYPH.cursor) : " ";
+	const index = theme.fg("dim", `${indexText}.`);
+	const label = markerText === "*" ? theme.style("accent", labelText, { bold: true }) : theme.fg("muted", labelText);
+	return `${marker} ${index} ${label}`;
+}
+
+function formatAuthBodyLine(line: string): string {
+	const theme = clioTheme();
+	const normalized = normalizeAuthLine(line).trimEnd();
+	if (normalized.length === 0) return "";
+
+	const choiceLine = formatAuthChoiceLine(normalized);
+	if (choiceLine) return choiceLine;
+
+	if (/^Target ready\b/.test(normalized)) {
+		return theme.fg("success", `${GLYPH.ok} ${normalized}`);
+	}
+	if (/^(Target check failed|Unknown selection:)/.test(normalized)) {
+		return theme.fg("error", `${GLYPH.error} ${normalized}`);
+	}
+
+	const colonIndex = normalized.indexOf(":");
+	if (colonIndex > 0 && colonIndex <= 18 && normalized.slice(colonIndex, colonIndex + 3) !== "://") {
+		const key = normalized.slice(0, colonIndex);
+		const value = normalized.slice(colonIndex + 1).trimStart();
+		if (/^[A-Za-z][A-Za-z ]*$/.test(key)) {
+			return `${keyCell(key)} ${theme.fg("muted", value)}`;
+		}
+	}
+
+	return theme.fg("muted", normalized);
+}
+
+function renderInputWithDesignCursor(input: Input, width: number): string[] {
+	const theme = clioTheme();
+	return input
+		.render(width)
+		.map((line) =>
+			fitLine(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
+		);
 }
 
 function createAuthDialogController(
@@ -26,13 +103,18 @@ function createAuthDialogController(
 	const bodyView = new Text("");
 	const promptView = new Text("");
 	const input = new Input();
+	const inputView: Component = {
+		render: (width) => renderInputWithDesignCursor(input, width),
+		handleInput: (data) => input.handleInput(data),
+		invalidate: () => input.invalidate(),
+	};
 	let lines: string[] = [];
 	let promptLabel: string | null = null;
 	let resolver: ((value: string) => void) | undefined;
 	let rejecter: ((error: Error) => void) | undefined;
 	let currentHint = buildHint("commit", []);
 
-	titleView.setText(title);
+	titleView.setText(clioTheme().style("title", title, { bold: true }));
 	const box = new FocusBox([], {
 		onInput: (data) => {
 			if (promptLabel) input.handleInput(data);
@@ -70,13 +152,13 @@ function createAuthDialogController(
 	function rebuild(): void {
 		box.clear();
 		box.addChild(titleView);
-		bodyView.setText(lines.join("\n"));
+		bodyView.setText(lines.map(formatAuthBodyLine).join("\n"));
 		box.addChild(bodyView);
 		if (promptLabel) {
-			promptView.setText(promptLabel);
+			promptView.setText(clioTheme().fg("dim", normalizeAuthLine(promptLabel)));
 			currentHint = buildHint("commit", [{ key: "Enter", verb: "submit" }]);
 			box.addChild(promptView);
-			box.addChild(input);
+			box.addChild(inputView);
 		} else {
 			currentHint = buildHint("commit", []);
 		}

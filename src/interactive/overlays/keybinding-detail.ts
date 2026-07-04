@@ -1,4 +1,5 @@
-import { truncateToWidth } from "../../engine/tui.js";
+import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 
 export interface KeybindingDetailEntry {
 	id: string;
@@ -8,15 +9,32 @@ export interface KeybindingDetailEntry {
 	warnings?: ReadonlyArray<string>;
 }
 
+const ELLIPSIS = "…";
+const LABEL_WIDTH = 10;
+
 function fitCell(text: string, width: number): string {
-	if (text.length >= width) return truncateToWidth(text, width, "", true);
-	return text.padEnd(width);
+	const clipped = visibleWidth(text) >= width ? truncateToWidth(text, width, ELLIPSIS, true) : text;
+	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
-function row(label: string, value: string, width: number): string[] {
-	const labelWidth = 10;
-	const prefix = `${fitCell(label, labelWidth)} `;
-	const available = Math.max(8, width - prefix.length);
+function fitLine(text: string, width: number): string {
+	const safeWidth = Math.max(1, width);
+	if (visibleWidth(text) <= safeWidth) return text;
+	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
+}
+
+function row(
+	label: string,
+	value: string,
+	width: number,
+	options: {
+		valueStyle?: (text: string) => string;
+		firstValuePrefix?: string;
+	} = {},
+): string[] {
+	const theme = clioTheme();
+	const prefix = `${fitCell(theme.fg("dim", label), LABEL_WIDTH)} `;
+	const available = Math.max(8, width - visibleWidth(prefix));
 	const lines: string[] = [];
 	const words = value.split(/\s+/g).filter(Boolean);
 	let current = "";
@@ -31,29 +49,39 @@ function row(label: string, value: string, width: number): string[] {
 	}
 	if (current.length > 0) lines.push(`${prefix}${current}`);
 	if (lines.length === 0) lines.push(prefix.trimEnd());
-	return lines.map((line) => truncateToWidth(line, width, "", true));
+	const valueStyle = options.valueStyle ?? ((text: string) => theme.fg("muted", text));
+	return lines.map((line, index) => {
+		const rawValue = line.slice(prefix.length);
+		const styledPrefix = index === 0 ? (options.firstValuePrefix ?? "") : "";
+		return fitLine(`${prefix}${styledPrefix}${valueStyle(rawValue)}`, width);
+	});
 }
 
 export function formatKeybindingDetailBodyLines(entry: KeybindingDetailEntry, contentWidth: number): string[] {
+	const theme = clioTheme();
 	const lines: string[] = [];
-	lines.push(`Action    ${entry.action}`);
-	lines.push(`Id        ${entry.id}`);
-	lines.push(`Keys      ${entry.keys}`);
-	lines.push(`Source    ${entry.source ?? "static"}`);
+	lines.push(...row("Action", entry.action, contentWidth));
+	lines.push(...row("Id", entry.id, contentWidth));
+	lines.push(
+		...row("Keys", entry.keys, contentWidth, { valueStyle: (text) => theme.style("accent", text, { bold: true }) }),
+	);
+	lines.push(...row("Source", entry.source ?? "static", contentWidth));
 	lines.push("");
 	for (const detail of row(
 		"Change",
-		"Edit settings.yaml > keybindings, then restart Clio or reopen the TUI.",
+		"Edit settings.yaml under keybindings, then restart Clio or reopen the TUI.",
 		contentWidth,
 	)) {
 		lines.push(detail);
 	}
 	if (entry.id.startsWith("clio.")) {
 		const example = `${entry.id}: "alt+<key>"`;
-		lines.push(`Example   ${example}`);
+		lines.push(...row("Example", example, contentWidth));
 	}
 	for (const warning of entry.warnings ?? []) {
-		lines.push(`Warning   ${warning}`);
+		lines.push(
+			...row("Warning", warning, contentWidth, { firstValuePrefix: theme.fg("warning", `${GLYPH.warnInline} `) }),
+		);
 	}
 	return lines;
 }
