@@ -1,13 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	buildCodewiki,
+	codewikiNeedsBackfill,
 	readCodewiki,
 	renderCodewikiDigest,
 	runContextRefresh,
@@ -63,7 +64,7 @@ describe("contracts/codewiki", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
-	it("writes v3 normalized files, symbols, and edges", async () => {
+	it("writes v4 normalized files, symbols, imports, hashes, summaries, and edges", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "index.ts"),
@@ -92,7 +93,7 @@ describe("contracts/codewiki", () => {
 		deepStrictEqual(JSON.parse(serialized), codewiki);
 		const read = readCodewiki(scratch);
 		ok(read);
-		strictEqual(read.version, 3);
+		strictEqual(read.version, 4);
 		strictEqual(read.files.find((file) => file.path === "src/index.ts")?.role, "entry");
 		strictEqual(read.files.find((file) => file.path === "src/math.test.ts")?.role, "test");
 		strictEqual(read.files.find((file) => file.path === "src/worker.ts")?.role, "module");
@@ -101,6 +102,10 @@ describe("contracts/codewiki", () => {
 		const worker = read.files.find((file) => file.path === "src/worker.ts");
 		ok(index);
 		ok(worker);
+		ok(/^[a-f0-9]{16}$/.test(index.hash));
+		deepStrictEqual(index.imports, ["./worker.js"]);
+		strictEqual(index.summary, "Starts the application.");
+		strictEqual(codewikiNeedsBackfill(read), false);
 		ok(read.edges.some((edge) => edge.fileId === index.id && "toFileId" in edge && edge.toFileId === worker.id));
 	});
 
@@ -154,7 +159,7 @@ describe("contracts/codewiki", () => {
 		strictEqual(readCodewiki(scratch), null);
 	});
 
-	it("upgrades v2 codewiki files to v3 on read", () => {
+	it("upgrades v2 and v3 codewiki files to degraded v4 on read", async () => {
 		mkdirSync(join(scratch, ".clio"), { recursive: true });
 		writeFileSync(
 			join(scratch, ".clio", "codewiki.json"),
@@ -172,9 +177,40 @@ describe("contracts/codewiki", () => {
 
 		const read = readCodewiki(scratch);
 		ok(read);
-		strictEqual(read.version, 3);
+		strictEqual(read.version, 4);
 		strictEqual(read.files.find((file) => file.path === "src/index.ts")?.role, "entry");
+		deepStrictEqual(read.files.find((file) => file.path === "src/index.ts")?.imports, []);
+		strictEqual(read.files.find((file) => file.path === "src/index.ts")?.hash, "");
 		ok(read.symbols.some((symbol) => symbol.name === "main"));
+		strictEqual(codewikiNeedsBackfill(read), true);
+
+		writeFileSync(
+			join(scratch, ".clio", "codewiki.json"),
+			JSON.stringify({
+				version: 3,
+				language: "typescript",
+				files: [
+					{ id: "f_index", path: "src/index.ts", lang: "typescript", loc: 1, role: "entry" },
+					{ id: "f_worker", path: "src/worker.ts", lang: "typescript", loc: 1, role: "module" },
+				],
+				symbols: [{ name: "main", kind: "const", fileId: "f_index", line: 1 }],
+				edges: [{ fileId: "f_index", toFileId: "f_worker" }],
+			}),
+			"utf8",
+		);
+
+		const upgradedV3 = readCodewiki(scratch);
+		ok(upgradedV3);
+		strictEqual(upgradedV3.version, 4);
+		strictEqual(upgradedV3.files.find((file) => file.path === "src/index.ts")?.hash, "");
+		deepStrictEqual(upgradedV3.files.find((file) => file.path === "src/index.ts")?.imports, []);
+		strictEqual(codewikiNeedsBackfill(upgradedV3), true);
+
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const main = 1;\n", "utf8");
+		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = 1;\n", "utf8");
+		const rebuilt = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		strictEqual(codewikiNeedsBackfill(rebuilt), false);
 	});
 
 	it("indexes non-empty source files across languages, including single-file repositories", async () => {
@@ -298,6 +334,29 @@ describe("contracts/codewiki", () => {
 		);
 	});
 
+	it("persists Python module docstring summaries", async () => {
+		writeFileSync(
+			join(scratch, "app.py"),
+			[
+				'"""Runs the Python entry point.',
+				"",
+				"More detail for the summary.",
+				'"""',
+				"",
+				"def main():",
+				"    return 0",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "python" });
+		strictEqual(
+			codewiki.files.find((file) => file.path === "app.py")?.summary,
+			"Runs the Python entry point. More detail for the summary.",
+		);
+	});
+
 	it("updates changed source paths incrementally", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "alpha.ts"), "export const alpha = 1;\n", "utf8");
@@ -325,6 +384,70 @@ describe("contracts/codewiki", () => {
 		strictEqual(untouched, removed);
 	});
 
+	it("matches full rebuilds after incremental add, import modification, and delete", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		mkdirSync(join(scratch, "pkg"), { recursive: true });
+		writeFileSync(
+			join(scratch, "src", "index.ts"),
+			"import { worker } from './worker.js';\nexport const main = worker;\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = 1;\n", "utf8");
+		writeFileSync(
+			join(scratch, "pkg", "main.py"),
+			"from .helper import helper\n\ndef run():\n    return helper()\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "pkg", "helper.py"), "def helper():\n    return 1\n", "utf8");
+
+		let incremental = await buildCodewiki({ cwd: scratch, language: "polyglot" });
+
+		writeFileSync(
+			join(scratch, "src", "feature.ts"),
+			"import { worker } from './worker.js';\nexport const feature = worker;\n",
+			"utf8",
+		);
+		incremental = await updateCodewikiPaths(scratch, incremental, ["src/feature.ts"]);
+		deepStrictEqual(incremental, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
+
+		writeFileSync(
+			join(scratch, "src", "index.ts"),
+			"import { feature } from './feature.js';\nexport const main = feature;\n",
+			"utf8",
+		);
+		incremental = await updateCodewikiPaths(scratch, incremental, ["src/index.ts"]);
+		deepStrictEqual(incremental, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
+
+		rmSync(join(scratch, "src", "worker.ts"));
+		incremental = await updateCodewikiPaths(scratch, incremental, ["src/worker.ts"]);
+		deepStrictEqual(incremental, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
+		ok(hasExternalEdge(incremental, "src/feature.ts", "./worker.js"));
+	});
+
+	it("reads only changed files during incremental updates", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		for (let index = 0; index < 6; index += 1) {
+			writeFileSync(join(scratch, "src", `file-${index}.ts`), `export const value${index} = ${index};\n`, "utf8");
+		}
+		const original = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		writeFileSync(join(scratch, "src", "file-3.ts"), "export const value3 = 33;\n", "utf8");
+		const reads: string[] = [];
+
+		const updated = await updateCodewikiPaths(scratch, original, ["src/file-3.ts"], {
+			readFile(path) {
+				reads.push(relative(scratch, path).split("\\").join("/"));
+				try {
+					return readFileSync(path, "utf8");
+				} catch {
+					return null;
+				}
+			},
+		});
+
+		deepStrictEqual(reads, ["src/file-3.ts"]);
+		deepStrictEqual(updated, await buildCodewiki({ cwd: scratch, language: "typescript" }));
+	});
+
 	it("hashes structural output deterministically across runs", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "index.ts"), "export const value = 1;\n", "utf8");
@@ -340,7 +463,14 @@ describe("contracts/codewiki", () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "index.ts"),
-			"import { worker } from './worker.js';\nexport function main() { return worker; }\n",
+			[
+				"/**",
+				" * Starts the digest entry.",
+				" */",
+				"import { worker } from './worker.js';",
+				"export function main() { return worker; }",
+				"",
+			].join("\n"),
 			"utf8",
 		);
 		writeFileSync(
@@ -352,9 +482,10 @@ describe("contracts/codewiki", () => {
 		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
 		const digest = renderCodewikiDigest(codewiki, 200);
 
-		ok(digest.includes("codewiki v3 language=typescript"));
+		ok(digest.includes("codewiki v4 language=typescript"));
 		ok(digest.includes("areas: src=2"));
 		ok(digest.includes("- src/index.ts"));
+		ok(digest.includes("Starts the digest entry."));
 		ok(digest.includes("- Worker class src/worker.ts:1"));
 		ok(digest.includes("internal=[src/worker.ts]"));
 		strictEqual(digest, renderCodewikiDigest(codewiki, 200));
@@ -377,10 +508,35 @@ describe("contracts/codewiki", () => {
 
 		const loaded = await loadCodewikiForTool(scratch);
 		if (!loaded.ok) throw new Error(loaded.message);
-		strictEqual(loaded.codewiki.version, 3);
+		strictEqual(loaded.codewiki.version, 4);
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "rebuilt"));
 		ok(existsSync(join(scratch, ".clio", "codewiki.json")));
 		ok(existsSync(join(scratch, ".clio", "state.json")));
+	});
+
+	it("backfills degraded upgraded codewiki artifacts on tool demand", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const backfilled = true;\n", "utf8");
+		writeFileSync(
+			join(scratch, ".clio", "codewiki.json"),
+			JSON.stringify({
+				version: 3,
+				language: "typescript",
+				files: [{ id: "f_index", path: "src/index.ts", lang: "typescript", loc: 1, role: "entry" }],
+				symbols: [{ name: "old", kind: "const", fileId: "f_index", line: 1 }],
+				edges: [],
+			}),
+			"utf8",
+		);
+
+		const degraded = readCodewiki(scratch);
+		ok(degraded);
+		strictEqual(codewikiNeedsBackfill(degraded), true);
+		const loaded = await loadCodewikiForTool(scratch);
+		if (!loaded.ok) throw new Error(loaded.message);
+		strictEqual(codewikiNeedsBackfill(loaded.codewiki), false);
+		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "backfilled"));
 	});
 
 	it("builds identical artifacts through refresh and context-index paths", async () => {

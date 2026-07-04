@@ -9,7 +9,14 @@ import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
 import { tryReadClioMd } from "./clio-md.js";
-import { buildCodewiki, codewikiPath, readCodewiki, updateCodewikiPaths, writeCodewiki } from "./codewiki/indexer.js";
+import {
+	buildCodewiki,
+	codewikiNeedsBackfill,
+	codewikiPath,
+	readCodewiki,
+	updateCodewikiPaths,
+	writeCodewiki,
+} from "./codewiki/indexer.js";
 import type { ContextContract, ContextState } from "./contract.js";
 import { computeFingerprint } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
@@ -52,8 +59,13 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	const state = readClioState(cwd);
 	if (!state && !existsSync(codewikiPath(cwd))) return;
 	const fingerprint = computeFingerprint(cwd);
+	const codewiki = readCodewiki(cwd);
 	const stale =
-		!state || state.fingerprint.treeHash !== fingerprint.treeHash || !existsSync(codewikiPath(cwd)) || !readCodewiki(cwd);
+		!state ||
+		state.fingerprint.treeHash !== fingerprint.treeHash ||
+		!existsSync(codewikiPath(cwd)) ||
+		!codewiki ||
+		codewikiNeedsBackfill(codewiki);
 	if (!stale) return;
 	const indexedAt = new Date().toISOString();
 	const projectType = state?.projectType ?? detectProjectType(cwd);
@@ -179,8 +191,9 @@ export function createContextBundle(
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
 			const fingerprint = computeFingerprint(lastCwd);
+			const codewiki = readCodewiki(lastCwd);
 			let lastIndexedAt = state?.lastIndexedAt;
-			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !readCodewiki(lastCwd)) {
+			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !codewiki || codewikiNeedsBackfill(codewiki)) {
 				lastIndexedAt = new Date().toISOString();
 				writeCodewiki(lastCwd, await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }));
 			}

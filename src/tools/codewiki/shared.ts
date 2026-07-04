@@ -1,4 +1,10 @@
-import { buildCodewiki, type Codewiki, readCodewiki, writeCodewiki } from "../../domains/context/codewiki/indexer.js";
+import {
+	buildCodewiki,
+	type Codewiki,
+	codewikiNeedsBackfill,
+	readCodewiki,
+	writeCodewiki,
+} from "../../domains/context/codewiki/indexer.js";
 import { computeFingerprint } from "../../domains/context/fingerprint.js";
 import { readClioState, writeClioState } from "../../domains/context/state.js";
 import { detectProjectType } from "../../domains/session/workspace/project-type.js";
@@ -7,7 +13,7 @@ export async function loadCodewikiForTool(
 	cwd: string = process.cwd(),
 ): Promise<{ ok: true; codewiki: Codewiki } | { ok: false; message: string }> {
 	const codewiki = readCodewiki(cwd);
-	if (codewiki) return { ok: true, codewiki };
+	if (codewiki && !codewikiNeedsBackfill(codewiki)) return { ok: true, codewiki };
 	try {
 		const generatedAt = new Date().toISOString();
 		const projectType = detectProjectType(cwd);

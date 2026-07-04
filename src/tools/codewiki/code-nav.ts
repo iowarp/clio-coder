@@ -107,6 +107,7 @@ function fileSummary(file: CodewikiFile): Record<string, unknown> {
 		lang: file.lang,
 		loc: file.loc,
 		role: file.role,
+		...(file.summary ? { summary: file.summary } : {}),
 	};
 }
 
