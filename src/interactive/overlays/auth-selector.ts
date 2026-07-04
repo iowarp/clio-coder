@@ -9,7 +9,6 @@ import {
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
-import { renderSelectListWithDesignCursor } from "./list-overlay.js";
 
 export const AUTH_SELECTOR_WIDTH = 84;
 const VISIBLE_ROWS = 10;
@@ -66,11 +65,7 @@ export function openAuthSelectorOverlay(tui: TUI, deps: OpenAuthSelectorDeps): O
 	list.onCancel = (): void => {
 		deps.onClose();
 	};
-	const box = new FocusBox({
-		render: (width) => renderSelectListWithDesignCursor(list, width),
-		handleInput: (data) => list.handleInput(data),
-		invalidate: () => list.invalidate(),
-	});
+	const box = new FocusBox(list);
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: AUTH_SELECTOR_WIDTH,

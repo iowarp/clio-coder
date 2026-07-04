@@ -1,10 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-	type ListOverlayItem,
-	ListOverlayView,
-	renderSelectListWithDesignCursor,
-} from "../../src/interactive/overlays/list-overlay.js";
+import { type ListOverlayItem, ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
@@ -252,11 +248,5 @@ describe("contracts/list-overlay", () => {
 		view.handleInput("z");
 		const emptyLine = view.render(80).find((line) => line.includes("No matches found")) ?? "";
 		ok(emptyLine.includes(clioTheme().fgSequence("muted")), "empty filtered state is muted, not a warning");
-	});
-
-	it("adapts pi-tui SelectList rows to the design cursor", () => {
-		const legacyCursor = String.fromCharCode(0x2192);
-		const lines = renderSelectListWithDesignCursor({ render: () => [`${legacyCursor} OAuth`] }, 80);
-		strictEqual(lines[0], `${GLYPH.cursor} OAuth`);
 	});
 });

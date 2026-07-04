@@ -26,6 +26,8 @@ export function markdownTheme(theme: ClioTheme, highlightCode?: MarkdownTheme["h
 
 export function selectListTheme(theme: ClioTheme): SelectListTheme {
 	return {
+		// The design cursor the engine SelectList swaps in for pi-tui's arrow.
+		cursor: GLYPH.cursor,
 		selectedPrefix: (text) => theme.fg("accent", text),
 		selectedText: (text) => theme.style("accent", text, { bold: true }),
 		description: (text) => theme.fg("muted", text),

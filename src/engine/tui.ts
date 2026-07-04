@@ -26,7 +26,6 @@ export type {
 	OverlayOptions,
 	SelectItem,
 	SelectListLayoutOptions,
-	SelectListTheme,
 	SettingItem,
 	SettingsListTheme,
 	SlashCommand,
@@ -91,7 +90,6 @@ export {
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
-	SelectList,
 	SettingsList,
 	Spacer,
 	setKeybindings,
@@ -103,3 +101,10 @@ export {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+export type { SelectListTheme } from "./select-list.js";
+/**
+ * SelectList ships from the engine as a thin subclass that honors a design
+ * cursor exposed through SelectListTheme, so raw pickers no longer inherit
+ * pi-tui's hardcoded arrow. See ./select-list.ts.
+ */
+export { SelectList } from "./select-list.js";

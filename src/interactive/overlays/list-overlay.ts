@@ -13,16 +13,6 @@ import { buildHint, type HintEntry, showClioOverlayFrame } from "../overlay-fram
 import { clioTheme, GLYPH, markdownTheme, rule, selectListTheme } from "../theme/index.js";
 
 const ELLIPSIS = "…";
-const ENGINE_SELECT_CURSOR = String.fromCharCode(0x2192);
-
-/**
- * pi-tui's SelectList still owns a legacy selected row arrow. Scoped overlays
- * pass its rendered rows through this adapter until the engine exposes the
- * cursor as theme data.
- */
-export function renderSelectListWithDesignCursor(list: { render(width: number): string[] }, width: number): string[] {
-	return list.render(width).map((line) => line.replace(ENGINE_SELECT_CURSOR, GLYPH.cursor));
-}
 
 export interface ListOverlayItem {
 	id: string;

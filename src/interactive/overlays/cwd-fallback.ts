@@ -21,7 +21,6 @@ import {
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme } from "../theme/index.js";
-import { renderSelectListWithDesignCursor } from "./list-overlay.js";
 
 export const CWD_FALLBACK_OVERLAY_WIDTH = 88;
 const ELLIPSIS = "…";
@@ -132,11 +131,7 @@ export function openCwdFallbackOverlay(tui: TUI, deps: OpenCwdFallbackOverlayDep
 		deps.onCancel();
 		deps.onClose();
 	};
-	const box = new FocusBox({
-		render: (width) => renderSelectListWithDesignCursor(list, width),
-		handleInput: (data) => list.handleInput(data),
-		invalidate: () => list.invalidate(),
-	});
+	const box = new FocusBox(list);
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",
 		width: CWD_FALLBACK_OVERLAY_WIDTH,
