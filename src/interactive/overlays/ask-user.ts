@@ -13,6 +13,7 @@ import {
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { ASK_USER_OTHER_LABEL, cancelledAskUserResult } from "../../tools/ask-user.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
+import { clioTheme, dotSep, GLYPH } from "../theme/index.js";
 
 export const ASK_USER_OVERLAY_WIDTH = "94%";
 export const ASK_USER_OVERLAY_MIN_WIDTH = 72;
@@ -24,6 +25,7 @@ const ASK_USER_MAX_INNER_ROWS = 42;
 const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_VISIBLE_OPTIONS = 3;
 const MAX_VISIBLE_OPTIONS = 12;
+const ELLIPSIS = "…";
 
 export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
@@ -133,7 +135,7 @@ function answerText(question: AskUserQuestion, selected: ReadonlySet<number>, cu
 function fitLine(text: string, width: number): string {
 	const safeWidth = Math.max(1, width);
 	if (visibleWidth(text) <= safeWidth) return text;
-	return truncateToWidth(text, safeWidth, "", true);
+	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
 }
 
 function compactTitle(question: AskUserQuestion): string {
@@ -231,14 +233,14 @@ class AskUserOverlayView implements Component {
 		const targetRows = this.targetInnerRows();
 		if (this.phase !== "asking") return this.renderWaiting(safeWidth, targetRows);
 		const question = this.currentQuestion();
-		if (!question) return this.padLines(["No questions."], targetRows);
+		if (!question) return this.padLines([clioTheme().fg("muted", "No questions.")], targetRows);
 
 		const controlLines = this.renderControlLines(safeWidth);
 		const summaryLines = this.renderAnswerSummary(
 			safeWidth,
 			this.states.map((state) => state.answer),
 		);
-		const statusLines = this.status.length > 0 ? ["", fitLine(this.status, safeWidth)] : [];
+		const statusLines = this.status.length > 0 ? ["", fitLine(clioTheme().fg("dim", this.status), safeWidth)] : [];
 		const headerLine = this.renderQuestionHeader(question, safeWidth);
 		const baseRows = 1 + 1 + 1 + statusLines.length + 1 + controlLines.length + summaryLines.length;
 		const questionBudget = Math.max(2, targetRows - baseRows);
@@ -305,19 +307,23 @@ class AskUserOverlayView implements Component {
 	}
 
 	private renderWaiting(width: number, targetRows: number): string[] {
+		const theme = clioTheme();
 		const lines = [
-			"Interview",
+			theme.style("title", "Interview", { bold: true }),
 			"",
-			this.history.length > 0
-				? "Answer sent. Waiting for Clio to prepare the next interview question."
-				: "Waiting for Clio to prepare the interview.",
+			theme.fg(
+				"muted",
+				this.history.length > 0
+					? "Answer sent. Waiting for Clio to prepare the next interview question."
+					: "Waiting for Clio to prepare the interview.",
+			),
 		];
 		if (this.history.length > 0) {
-			lines.push("", "Collected answers");
+			lines.push("", theme.fg("dim", "── Collected answers"));
 			for (let index = 0; index < this.history.length; index += 1) {
 				const answer = this.history[index];
 				if (!answer) continue;
-				lines.push(fitLine(`${index + 1}. ${answer.answer}`, width));
+				lines.push(fitLine(`${theme.fg("dim", `${index + 1}.`)} ${theme.fg("muted", answer.answer)}`, width));
 			}
 		}
 		return this.padLines(
@@ -364,22 +370,28 @@ class AskUserOverlayView implements Component {
 	}
 
 	private renderQuestionHeader(question: AskUserQuestion, width: number): string {
-		const parts = [`Question ${this.index + 1}/${this.questions.length}`];
-		if (question.header) parts.push(question.header);
-		if (this.currentState()?.answer.trim()) parts.push("answered");
-		return fitLine(parts.join(" - "), width);
+		const theme = clioTheme();
+		const parts = [theme.fg("dim", `Question ${this.index + 1}/${this.questions.length}`)];
+		if (question.header) parts.push(theme.style("title", question.header, { bold: true }));
+		if (this.currentState()?.answer.trim()) parts.push(theme.fg("muted", "answered"));
+		return fitLine(parts.join(dotSep(theme)), width);
 	}
 
 	private renderQuestionStrip(width: number): string {
+		const theme = clioTheme();
 		const total = this.questions.length;
-		if (total <= 1) return fitLine("Interview", width);
+		if (total <= 1) return fitLine(theme.style("title", "Interview", { bold: true }), width);
 		const gap = "  ";
 		const slotWidth = Math.max(10, Math.floor((width - visibleWidth(gap) * (total - 1)) / total));
 		const parts = this.questions.map((question, index) => {
 			const state = this.states[index];
-			const marker = index === this.index ? ">" : " ";
-			const answerState = state?.answer.trim() ? "done" : "todo";
-			return fitLine(`${marker} Q${index + 1} ${answerState} ${compactTitle(question)}`, slotWidth);
+			const active = index === this.index;
+			const marker = active ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const answerState = state?.answer.trim() ? theme.fg("muted", "answered") : theme.fg("dim", "pending");
+			const title = active
+				? theme.style("accent", compactTitle(question), { bold: true })
+				: theme.fg("muted", compactTitle(question));
+			return fitLine(`${marker}${theme.fg("dim", `Q${index + 1}`)} ${answerState} ${title}`, slotWidth);
 		});
 		return fitLine(parts.join(gap), width);
 	}
@@ -387,19 +399,86 @@ class AskUserOverlayView implements Component {
 	private renderControlLines(width: number): string[] {
 		this.ensureControl();
 		const state = this.currentState();
-		if (state?.mode === "text") return this.input?.render(width) ?? [""];
-		return this.list?.render(width) ?? [""];
+		if (state?.mode === "text") return this.renderTextInput(width);
+		return this.renderSelectControl(width);
 	}
 
 	private renderAnswerSummary(width: number, answers: ReadonlyArray<string>): string[] {
 		if (this.questions.length <= 1) return [];
-		const lines = ["", fitLine("Answers", width)];
+		const theme = clioTheme();
+		const lines = ["", fitLine(theme.fg("dim", "── Answers"), width)];
 		for (let index = 0; index < this.questions.length; index += 1) {
 			const answer = answers[index]?.trim();
-			const text = answer && answer.length > 0 ? answer : "pending";
-			lines.push(fitLine(`Q${index + 1}: ${text}`, width));
+			const value = answer && answer.length > 0 ? theme.fg("muted", answer) : theme.fg("dim", "pending");
+			lines.push(fitLine(`${theme.fg("dim", `Q${index + 1}`)} ${value}`, width));
 		}
 		return lines;
+	}
+
+	private renderTextInput(width: number): string[] {
+		const theme = clioTheme();
+		return (this.input?.render(width) ?? [""]).map((line) =>
+			fitLine(line.startsWith("> ") ? `${theme.fg("accent", `${GLYPH.cursor} `)}${line.slice(2)}` : line, width),
+		);
+	}
+
+	private renderSelectControl(width: number): string[] {
+		const question = this.currentQuestion();
+		const state = this.currentState();
+		const selectedItem = this.list?.getSelectedItem();
+		if (!question || !state || !selectedItem) return [""];
+		const theme = clioTheme();
+		const items = optionItems(question, state.selected);
+		const selectedIndex = Math.max(
+			0,
+			items.findIndex((item) => item.value === selectedItem.value),
+		);
+		const visibleCount = Math.min(this.maxVisibleOptions(), Math.max(1, items.length));
+		const start = Math.max(0, Math.min(selectedIndex - Math.floor(visibleCount / 2), items.length - visibleCount));
+		const end = Math.min(items.length, start + visibleCount);
+		const primaryColumnWidth = this.primaryColumnWidth(items, width);
+		const lines: string[] = [];
+
+		for (let index = start; index < end; index += 1) {
+			const item = items[index];
+			if (!item) continue;
+			lines.push(this.renderOptionRow(item, index === selectedIndex, width, primaryColumnWidth));
+		}
+
+		if (start > 0 || end < items.length) {
+			lines.push(fitLine(theme.fg("dim", `  (${selectedIndex + 1}/${items.length})`), width));
+		}
+		return lines;
+	}
+
+	private primaryColumnWidth(items: ReadonlyArray<SelectItem>, width: number): number {
+		const widest = items.reduce((max, item) => Math.max(max, visibleWidth(item.label) + 2), 0);
+		const bounded = Math.max(24, Math.min(38, widest));
+		return Math.max(1, Math.min(bounded, Math.max(1, width - 4)));
+	}
+
+	private renderOptionRow(item: SelectItem, selected: boolean, width: number, primaryColumnWidth: number): string {
+		const theme = clioTheme();
+		const prefix = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+		const available = Math.max(1, width - 2);
+		const description = item.description?.replace(/[\r\n]+/g, " ").trim();
+
+		let body: string;
+		if (description && width > 40) {
+			const labelWidth = Math.max(1, Math.min(primaryColumnWidth - 2, available - 4));
+			const label = truncateToWidth(item.label, labelWidth, ELLIPSIS, false);
+			const spacing = " ".repeat(Math.max(1, primaryColumnWidth - visibleWidth(label)));
+			const descriptionWidth = Math.max(1, available - visibleWidth(label) - visibleWidth(spacing));
+			const desc = truncateToWidth(description, descriptionWidth, ELLIPSIS, false);
+			body = selected
+				? theme.style("accent", `${label}${spacing}${desc}`, { bold: true })
+				: `${label}${theme.fg("muted", `${spacing}${desc}`)}`;
+		} else {
+			const label = truncateToWidth(item.label, available, ELLIPSIS, false);
+			body = selected ? theme.style("accent", label, { bold: true }) : label;
+		}
+
+		return fitLine(`${prefix}${body}`, width);
 	}
 
 	private padLines(lines: string[], targetRows: number): string[] {
