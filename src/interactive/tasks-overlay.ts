@@ -35,6 +35,50 @@ function fitContentLine(text: string, width: number): string {
 	return truncateToWidth(text, Math.max(1, width), "", true);
 }
 
+function firstUsefulToken(values: ReadonlyArray<string>): string | null {
+	for (const value of values) {
+		const token = value.trim();
+		if (token.length > 0) return token;
+	}
+	return null;
+}
+
+function taskLedgerProofRef(board: TaskBoardSnapshot): string {
+	const runToken = firstUsefulToken(board.activeRunIds);
+	if (runToken) return `task-ledger:${runToken}`;
+	const activeTask = board.tasks.find((task) => task.status === "active" && task.id.trim().length > 0);
+	if (activeTask) return `task-ledger:${activeTask.id.trim()}`;
+	const taskToken = firstUsefulToken(board.tasks.map((task) => task.id));
+	return taskToken ? `task-ledger:${taskToken}` : "task-ledger";
+}
+
+function taskProofRefs(board: TaskBoardSnapshot): string[] {
+	const refs = [`proof ${taskLedgerProofRef(board)}`];
+	for (const runId of board.activeRunIds) {
+		const token = runId.trim();
+		if (token.length === 0) continue;
+		refs.push(`run ${token} dispatch:${token} evidence:${token}`);
+	}
+	return refs;
+}
+
+function extractRunIdsFromTaskEvidence(text: string): string[] {
+	const seen = new Set<string>();
+	for (const match of text.matchAll(/\brun-[A-Za-z0-9][A-Za-z0-9_-]*\b/g)) {
+		const runId = match[0];
+		if (!seen.has(runId)) seen.add(runId);
+	}
+	return [...seen];
+}
+
+function formatTaskProofLines(board: TaskBoardSnapshot, width: number): string[] {
+	const theme = clioTheme();
+	return taskProofRefs(board).map((line) => {
+		const [label, ...rest] = line.split(" ");
+		return fitContentLine(`${dim(label ?? "")} ${theme.fg("muted", rest.join(" "))}`.trim(), width);
+	});
+}
+
 function taskRow(task: TaskBoardTask, width: number): string {
 	const theme = clioTheme();
 	const presentation = STATUS_PRESENTATION[task.status];
@@ -46,7 +90,9 @@ function taskRow(task: TaskBoardTask, width: number): string {
 function taskReceiptRow(task: TaskBoardTask, width: number): string | null {
 	const theme = clioTheme();
 	if (task.status === "completed" && task.evidence) {
-		return fitContentLine(`       ${dim("evidence")} ${muted(task.evidence)}`, width);
+		const runRef = extractRunIdsFromTaskEvidence(task.evidence)[0];
+		const suffix = runRef ? ` ${dim(`evidence:${runRef}`)}` : "";
+		return fitContentLine(`       ${dim("evidence")} ${muted(task.evidence)}${suffix}`, width);
 	}
 	if (task.status === "blocked" && task.reason) {
 		return fitContentLine(`       ${dim("blocked")} ${theme.fg("warning", task.reason)}`, width);
@@ -81,6 +127,7 @@ export function formatTasksOverlayBodyLines(
 		fitContentLine(theme.fg("accent", board.title), width),
 		fitContentLine(chips.join(dim(" · ")), width),
 		rule(theme, width),
+		...formatTaskProofLines(board, width),
 	];
 	for (const task of board.tasks) {
 		lines.push(taskRow(task, width));
