@@ -59,7 +59,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		const arg = argv[i];
 		const need = (flag: string): string | null => {
 			const value = argv[i + 1];
-			if (value === undefined) {
+			if (value === undefined || (value.startsWith("-") && !isNumericLiteral(value))) {
 				parsed.diagnostics.push({ type: "error", message: `${flag} requires a value` });
 				return null;
 			}
@@ -238,4 +238,8 @@ function setNumberOption(
 
 function kebab(value: string): string {
 	return value.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
+}
+
+function isNumericLiteral(value: string): boolean {
+	return value.startsWith("-") && !value.startsWith("--") && Number.isFinite(Number(value));
 }

@@ -24,6 +24,7 @@ Flags:
 
 const DEFAULT_WINDOW_DAYS = 30;
 const RECEIPT_CAP = 1000;
+const USAGE_WINDOW_FUTURE_SKEW_MS = 5_000;
 
 /** Linkage/bookkeeping tags that are not failure causes. */
 const NON_FAILURE_TAGS = new Set([
@@ -430,9 +431,9 @@ function indent(text: string): string {
 		.join("\n");
 }
 
-function inWindow(iso: string, start: number, end: number): boolean {
+export function inWindow(iso: string, start: number, end: number): boolean {
 	const value = Date.parse(iso);
-	return Number.isFinite(value) && value >= start && value <= end;
+	return Number.isFinite(value) && value >= start && value <= end + USAGE_WINDOW_FUTURE_SKEW_MS;
 }
 
 async function runIdsForCwd(stateDir: string, repoPath: string, diagnostics: Diagnostics): Promise<Set<string>> {

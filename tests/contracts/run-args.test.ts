@@ -70,6 +70,21 @@ describe("contracts/run CLI args", () => {
 		}
 	});
 
+	it("does not consume a following option as a missing run flag value", () => {
+		const parsed = parseRunCliArgs(["--skill", "--target", "local", "do work"]);
+		deepStrictEqual(parsed.skillPaths, []);
+		strictEqual(parsed.target, "local");
+		deepStrictEqual(parsed.messages, ["do work"]);
+		ok(parsed.diagnostics.some((diagnostic) => diagnostic.message === "--skill requires a value"));
+	});
+
+	it("keeps negative numeric flag values available for numeric validation", () => {
+		const parsed = parseRunCliArgs(["--presence-penalty", "-1", "do work"]);
+		strictEqual(parsed.sampling?.presencePenalty, -1);
+		deepStrictEqual(parsed.messages, ["do work"]);
+		deepStrictEqual(parsed.diagnostics, []);
+	});
+
 	it("documents resource and steer flags in run help and restores run overrides", async () => {
 		// Pre-existing run overrides in scope (e.g. a caller already inside
 		// withRunOverrides) must survive a nested clio run invocation untouched.

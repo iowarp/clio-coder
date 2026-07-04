@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 
 export type PathPolicyKind = "zeroAccessPaths" | "readOnlyPaths" | "noDeletePaths";
 export type PathPolicyOperation = "read" | "write" | "delete";
@@ -50,7 +51,8 @@ function expandTilde(rawPath: string): string {
 
 function normalizePolicyEntry(rawPath: string, root: string): string {
 	const expanded = expandTilde(rawPath.trim());
-	return path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(root, expanded);
+	const resolved = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(root, expanded);
+	return canonicalizeExistingPath(resolved);
 }
 
 function blocksOperation(kind: PathPolicyKind, operation: PathPolicyOperation): boolean {
@@ -60,7 +62,7 @@ function blocksOperation(kind: PathPolicyKind, operation: PathPolicyOperation): 
 }
 
 export function compilePathPolicy(input: PathPolicyInput, root = process.cwd()): CompiledPathPolicy {
-	const resolvedRoot = path.resolve(root);
+	const resolvedRoot = canonicalizeExistingPath(path.resolve(root));
 	const entries: PathPolicyEntry[] = [];
 	const diagnostics: string[] = [];
 	for (const kind of ORDERED_KINDS) {
@@ -90,7 +92,8 @@ export function evaluatePathPolicy(
 	cwd = policy.root,
 ): PathPolicyDecision {
 	const expanded = expandTilde(targetPath);
-	const resolvedTarget = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(cwd, expanded);
+	const lexicalTarget = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(cwd, expanded);
+	const resolvedTarget = canonicalizeExistingPath(lexicalTarget);
 	const normalizedResolvedTarget = normalizeSeparators(resolvedTarget);
 	const normalizedRelativeTarget = normalizeSeparators(path.relative(policy.root, resolvedTarget));
 	const normalizedRawTarget = normalizeSeparators(targetPath);
@@ -129,11 +132,22 @@ function compilePathPattern(rawPath: string, root: string): RegExp | null {
 	if (!rawPath.includes("*")) return null;
 	const expanded = expandTilde(rawPath.trim());
 	const source = path.isAbsolute(expanded) ? expanded : path.join(root, expanded);
-	const normalized = normalizeSeparators(source);
+	const normalized = normalizeSeparators(canonicalizePatternSource(source));
 	const relative = normalizeSeparators(path.isAbsolute(expanded) ? expanded : expanded);
 	const absolutePattern = segmentPattern(normalized);
 	const relativePattern = segmentPattern(relative);
 	return new RegExp(`(?:${absolutePattern})|(?:${relativePattern})`);
+}
+
+function canonicalizePatternSource(patternPath: string): string {
+	const wildcardIndex = patternPath.indexOf("*");
+	if (wildcardIndex === -1) return canonicalizeExistingPath(patternPath);
+	const fixedPrefix = patternPath.slice(0, wildcardIndex);
+	const separatorIndex = fixedPrefix.lastIndexOf(path.sep);
+	if (separatorIndex === -1) return patternPath;
+	const prefix = patternPath.slice(0, separatorIndex + 1);
+	const suffix = patternPath.slice(separatorIndex + 1);
+	return path.join(canonicalizeExistingPath(prefix), suffix);
 }
 
 function segmentPattern(rawPath: string): string {

@@ -827,6 +827,18 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 	return [];
 }
 
+type WorkerPermissionMode = NonNullable<WorkerSpec["onPermission"]>;
+
+function assertRuntimeCanHonorWorkerPermissionMode(
+	runtime: RuntimeDescriptor,
+	onPermission: WorkerPermissionMode,
+): void {
+	if (runtime.kind !== "subprocess" || onPermission === "deny") return;
+	throw new Error(
+		`dispatch: runtime '${runtime.id}' cannot enforce workers.onPermission='${onPermission}' because subprocess workers do not expose per-tool permission mediation; set workers.onPermission='deny' or choose a mediated runtime`,
+	);
+}
+
 function acpRuntimeLimitations(): string[] {
 	return ["external ACP agent executes its own tools; Clio mediates permission requests and records decisions"];
 }
@@ -967,6 +979,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		const escalation = config?.get().workers.escalation;
 		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
 	}
+	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
 	// Carry the tool profile so external CLI runtimes that cannot mediate
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
@@ -1687,6 +1700,7 @@ export function createDispatchBundle(
 			providers,
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
+		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, config?.get().workers.onPermission ?? "deny");
 
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, recipe);

@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { bashShape } from "../../src/cli/usage.js";
+import { bashShape, inWindow } from "../../src/cli/usage.js";
 import { type RunEnvelope, type RunReceipt, verifyReceiptIntegrity } from "../../src/domains/dispatch/index.js";
 import {
 	closeServer,
@@ -283,6 +283,15 @@ describe("contracts/usage-report seeded archive facts", () => {
 			strictEqual(row.windowDays, 30);
 			ok(row.kind === "fact" || row.kind === "opportunity", `unexpected kind: ${row.kind}`);
 		}
+	});
+});
+
+describe("contracts/usage-report window tolerance", () => {
+	it("includes receipts that are only slightly ahead of the reporter clock", () => {
+		const end = Date.now();
+		const start = end - DAY;
+		strictEqual(inWindow(new Date(end + 4_000).toISOString(), start, end), true);
+		strictEqual(inWindow(new Date(end + 6_000).toISOString(), start, end), false);
 	});
 });
 

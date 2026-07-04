@@ -1,6 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import { canonicalizeExistingPath } from "../core/path-canonical.js";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const NARROW_NO_BREAK_SPACE = "\u202F";
@@ -43,8 +44,8 @@ export function expandPath(filePath: string): string {
 
 export function resolveToCwd(filePath: string, cwd: string = process.cwd()): string {
 	const expanded = expandPath(filePath);
-	if (isAbsolute(expanded)) return expanded;
-	return resolvePath(cwd, expanded);
+	const resolved = isAbsolute(expanded) ? resolvePath(expanded) : resolvePath(cwd, expanded);
+	return canonicalizeExistingPath(resolved);
 }
 
 export function resolveReadPath(filePath: string, cwd: string = process.cwd()): string {

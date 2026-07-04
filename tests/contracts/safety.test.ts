@@ -506,7 +506,7 @@ describe("contracts/safety credential damage control", () => {
 	it("B2: blocks bash reads of zero-access paths with reason code secret_path_bash", () => {
 		const contract = freshBundle().contract;
 		const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
-		for (const command of ["cat .env", "less ~/.aws/credentials", "base64 ~/.ssh/id_rsa"]) {
+		for (const command of ["cat .env", "less ~/.aws/credentials", "base64 ~/.ssh/id_rsa", 'cat "my_\\"_secret.pem"']) {
 			const decision = contract.evaluate(bash(command));
 			strictEqual(decision.kind, "block", `${command} must block`);
 			strictEqual(decision.policy?.reasonCode, "secret_path_bash", `${command} carries the reason code`);

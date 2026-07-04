@@ -248,6 +248,30 @@ describe("contracts/bootstrap", () => {
 		strictEqual(gitignore.includes(".clio/handoffs/"), false);
 	});
 
+	it("recognizes root-anchored .clio gitignore entries as blanket ignores", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");
+		writeFileSync(join(scratch, ".gitignore"), "node_modules\n/.clio/\n", "utf8");
+
+		await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => false,
+			modelId: "stub-model",
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			generate: () => ({
+				projectName: "Mock Project",
+				identity: "Mock Project is a dynamic test project.",
+				conventions: [],
+				invariants: [],
+			}),
+		});
+
+		const gitignore = readFileSync(join(scratch, ".gitignore"), "utf8");
+		strictEqual(gitignore.includes("/.clio/"), true);
+		strictEqual(gitignore.split(/\r?\n/).filter((line) => line.endsWith(".clio/")).length, 1);
+		strictEqual(gitignore.includes(".clio/codewiki.json"), false);
+	});
+
 	it("migrates a dynamic-only .clio gitignore block back to blanket .clio", async () => {
 		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "mock-project", type: "module" }), "utf8");
 		writeFileSync(join(scratch, "tsconfig.json"), "{}", "utf8");

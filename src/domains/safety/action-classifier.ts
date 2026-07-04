@@ -1,4 +1,5 @@
 import path from "node:path";
+import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
 
@@ -112,13 +113,15 @@ function resolveCandidate(p: string, baseCwd?: string): string {
 	// absolute user-home reference. We keep it as-is so the caller-visible
 	// string drives the escape check, and classify conservatively as modify.
 	if (p.startsWith("~")) return p;
-	if (path.isAbsolute(p)) return path.resolve(p);
-	return path.resolve(baseCwd ?? process.cwd(), p);
+	const base = canonicalizeExistingPath(path.resolve(baseCwd ?? process.cwd()));
+	const resolved = path.isAbsolute(p) ? path.resolve(p) : path.resolve(base, p);
+	return canonicalizeExistingPath(resolved);
 }
 
 function isInsideCwd(abs: string): boolean {
-	const cwd = path.resolve(process.cwd());
-	const rel = path.relative(cwd, abs);
+	const cwd = canonicalizeExistingPath(path.resolve(process.cwd()));
+	const candidate = canonicalizeExistingPath(abs);
+	const rel = path.relative(cwd, candidate);
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 

@@ -1,4 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
@@ -92,6 +95,32 @@ describe("protected-artifacts registration", () => {
 		);
 		const benign = await registry.invoke({ tool: ToolNames.Bash, args: { command: "cat /repo/PLAN.md" } });
 		strictEqual(benign.kind, "ok");
+	});
+
+	it("blocks mutations that reach protected artifacts through symlinks", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-protected-artifact-"));
+		try {
+			const protectedPath = join(root, "PLAN.md");
+			const symlinkPath = join(root, "PLAN-link.md");
+			writeFileSync(protectedPath, "protected\n");
+			symlinkSync(protectedPath, symlinkPath);
+
+			const guard = createProtectedArtifactsRegistration({ initialState: protectedState(protectedPath) });
+			const bundle = createMiddlewareBundle({ registrations: [guard] });
+			const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
+			registry.register(mockSpec(ToolNames.Write));
+			registry.register(mockSpec(ToolNames.Bash));
+
+			const write = await registry.invoke({ tool: ToolNames.Write, args: { path: symlinkPath } });
+			strictEqual(write.kind, "blocked");
+			ok(write.kind === "blocked" && write.reason.includes("would modify protected path"));
+
+			const remove = await registry.invoke({ tool: ToolNames.Bash, args: { command: `rm ${symlinkPath}` } });
+			strictEqual(remove.kind, "blocked");
+			ok(remove.kind === "blocked" && remove.reason.includes("protected artifact blocked: rm would affect"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("absorbs protect_path from an after_tool rule and notifies the persistence sink", async () => {

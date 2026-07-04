@@ -1,4 +1,5 @@
 import path from "node:path";
+import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 
@@ -585,7 +586,7 @@ function pathArgs(segment: ReadonlyArray<string>, commandIndex: number): string[
 	return args;
 }
 
-function tokenizeShellLike(command: string): string[] {
+export function tokenizeShellLike(command: string): string[] {
 	const tokens: string[] = [];
 	let current = "";
 	let quote: "'" | '"' | null = null;
@@ -767,15 +768,18 @@ function cloneArtifact(artifact: ProtectedArtifact): ProtectedArtifact {
 function normalizePathKey(input: string): string | null {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return null;
-	const posixInput = trimmed.replace(/\\/g, "/");
-	if (path.posix.isAbsolute(posixInput)) return path.posix.normalize(posixInput);
-	return path.posix.resolve(posixCwd(), posixInput);
+	if (isWindowsAbsolutePath(trimmed) && path.sep !== "\\") {
+		return toSlashKey(path.win32.normalize(trimmed));
+	}
+	const resolved = path.isAbsolute(trimmed) ? trimmed : path.resolve(trimmed);
+	return toSlashKey(canonicalizeExistingPath(resolved));
 }
 
 function wildcardRootKey(input: string): string | null {
-	const firstWildcard = firstWildcardIndex(input);
+	const normalizedInput = toSlashKey(input.trim());
+	const firstWildcard = firstWildcardIndex(normalizedInput);
 	if (firstWildcard === null) return null;
-	const prefix = input.slice(0, firstWildcard);
+	const prefix = normalizedInput.slice(0, firstWildcard);
 	const slash = prefix.lastIndexOf("/");
 	const root = slash >= 0 ? prefix.slice(0, slash + 1) : ".";
 	return normalizePathKey(root);
@@ -787,8 +791,12 @@ function firstWildcardIndex(input: string): number | null {
 	return Math.min(...indexes);
 }
 
-function posixCwd(): string {
-	return process.cwd().replace(/\\/g, "/");
+function isWindowsAbsolutePath(input: string): boolean {
+	return /^[A-Za-z]:[\\/]/.test(input);
+}
+
+function toSlashKey(input: string): string {
+	return input.replace(/\\/g, "/");
 }
 
 function isSameOrDescendant(candidate: string, parent: string): boolean {

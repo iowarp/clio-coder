@@ -383,9 +383,10 @@ interface TextBlock {
 	text: string;
 }
 
-function textFromAssistant(message: unknown): string {
+export function textFromAssistant(message: unknown): string {
 	if (!message || typeof message !== "object" || !("content" in message)) return "";
 	const content = (message as { content: unknown }).content;
+	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
 		.filter(

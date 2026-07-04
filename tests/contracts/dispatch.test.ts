@@ -2749,6 +2749,45 @@ rl.once("line", () => {
 		}
 	});
 
+	it("rejects permission mediation modes for subprocess workers before spawning", async () => {
+		for (const mode of ["fail", "escalate"] as const) {
+			const target: TargetDescriptor = {
+				id: `subprocess-${mode}`,
+				runtime: "claude-code",
+				defaultModel: "claude-sonnet",
+			};
+			const runtime: RuntimeDescriptor = {
+				id: "claude-code",
+				displayName: "Claude Code",
+				kind: "subprocess",
+				apiFamily: "claude-code-subprocess",
+				auth: "claude-cli",
+				defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+				synthesizeModel: () => ({ id: "claude-sonnet", provider: "claude-code" }) as never,
+			};
+			const context = stubContext({ target, runtime });
+			const configContract = context.getContract<ConfigContract>("config");
+			if (configContract) configContract.get().workers.onPermission = mode;
+			let spawned = false;
+			const bundle = makeDispatchBundle(context, {
+				spawnWorker: () => {
+					spawned = true;
+					throw new Error("must not spawn");
+				},
+			});
+			await bundle.extension.start();
+			try {
+				await rejects(
+					bundle.contract.dispatch({ agentId: "coder", task: `subprocess ${mode} permission` }),
+					new RegExp(`workers\\.onPermission='${mode}'`),
+				);
+				strictEqual(spawned, false);
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		}
+	});
+
 	it("ACP permission mediation resolves ask and unknown tools without operator input", async () => {
 		const askSafety: SafetyContract = {
 			classify: () => ({ actionClass: "system_modify", reasons: ["test"] }),

@@ -201,6 +201,14 @@ export function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermission
 			hints: [],
 		};
 		const blocked: SafetyDecision = { kind: "block", classification, rejection };
+		input.safety.audit.recordToolCall?.({
+			tool: mapped.clioToolName,
+			classification,
+			decision: "denied",
+			args: mapped.args,
+			reasons: [rejection.detail],
+			reasonCode: "tool-profile",
+		});
 		return {
 			kind: "deny",
 			mapped,

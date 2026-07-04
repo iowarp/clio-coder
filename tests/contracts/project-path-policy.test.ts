@@ -1,5 +1,5 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -59,6 +59,55 @@ describe("contracts/project path safety policy", () => {
 
 		const protectedWrite = engine.evaluate({ tool: ToolNames.Write, args: { path: "protected/keep.txt" } });
 		strictEqual(protectedWrite.kind, "allow");
+	});
+
+	it("enforces path rules against symlink targets", () => {
+		mkdirSync(join(scratch, "secrets"), { recursive: true });
+		mkdirSync(join(scratch, "vendor"), { recursive: true });
+		writeFileSync(join(scratch, "secrets", "key.txt"), "secret\n", "utf8");
+		symlinkSync(join(scratch, "secrets", "key.txt"), join(scratch, "secret-link"));
+		symlinkSync(join(scratch, "vendor"), join(scratch, "vendor-link"));
+		writeFileSync(
+			join(scratch, ".clio", "safety.yaml"),
+			[
+				"version: 1",
+				"disableDefaultPathPolicy: true",
+				"zeroAccessPaths:",
+				"  - secrets",
+				"readOnlyPaths:",
+				"  - vendor",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const engine = createSafetyPolicyEngine({ cwd: scratch, projectPolicy: loadProjectSafetyPolicy(scratch) });
+		const readViaLink = engine.evaluate({ tool: ToolNames.Read, args: { path: "secret-link" } });
+		strictEqual(readViaLink.kind, "block");
+		strictEqual(readViaLink.reasonCode, "path-policy:zeroAccessPaths");
+
+		const writeViaParentLink = engine.evaluate({ tool: ToolNames.Write, args: { path: "vendor-link/generated.ts" } });
+		strictEqual(writeViaParentLink.kind, "block");
+		strictEqual(writeViaParentLink.reasonCode, "path-policy:readOnlyPaths");
+	});
+
+	it("blocks bash cwd containment escapes through symlinks", () => {
+		const outside = mkdtempSync(join(tmpdir(), "clio-project-policy-outside-"));
+		try {
+			symlinkSync(outside, join(scratch, "outside-link"));
+			writeFileSync(
+				join(scratch, ".clio", "safety.yaml"),
+				["version: 1", "disableDefaultPathPolicy: true", ""].join("\n"),
+				"utf8",
+			);
+			const engine = createSafetyPolicyEngine({ cwd: scratch, projectPolicy: loadProjectSafetyPolicy(scratch) });
+
+			const decision = engine.evaluate({ tool: ToolNames.Bash, args: { command: "pwd", cwd: "outside-link" } });
+			strictEqual(decision.kind, "block");
+			strictEqual(decision.reasonCode, "bash-cwd-escape");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
 	});
 
 	it("rejects absolute and escaping path entries and fails execution closed", () => {

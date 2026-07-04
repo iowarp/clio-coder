@@ -654,7 +654,12 @@ function normalizedGitignoreLines(content: string): string[] {
 }
 
 function hasBlanketClioIgnore(content: string): boolean {
-	return normalizedGitignoreLines(content).some((line) => line === ".clio" || line === ".clio/");
+	return normalizedGitignoreLines(content).some(isBlanketClioIgnoreLine);
+}
+
+function isBlanketClioIgnoreLine(line: string): boolean {
+	if (line.length === 0 || line.startsWith("#") || line.startsWith("!")) return false;
+	return /^(?:\/|\*\*\/)?\.clio(?:\/|\/\*|\/\*\*)?$/.test(line);
 }
 
 function hasDynamicOnlyClioIgnore(content: string): boolean {
@@ -669,7 +674,7 @@ function migrateClioGitignore(content: string): string {
 	const lines = content.split(/\r?\n/);
 	const kept = lines.filter((line) => {
 		const trimmed = line.trim();
-		return trimmed !== ".clio" && trimmed !== ".clio/" && !CLIO_GITIGNORE_DYNAMIC_LINES.has(trimmed);
+		return !isBlanketClioIgnoreLine(trimmed) && !CLIO_GITIGNORE_DYNAMIC_LINES.has(trimmed);
 	});
 	while (kept.length > 0 && kept[kept.length - 1]?.trim() === "") kept.pop();
 	const prefix = kept.length > 0 ? [...kept, ""] : [];

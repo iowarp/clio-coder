@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
@@ -17,7 +18,7 @@ import {
 	loadProjectSafetyPolicy,
 	type ProjectCommandPolicy,
 } from "./project-policy.js";
-import { extractCommandDeleteTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
+import { extractCommandDeleteTargets, extractCommandWriteTargets, tokenizeShellLike } from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 
@@ -107,10 +108,11 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {
-	const cwd = path.resolve(options.cwd ?? process.cwd());
+	const cwd = canonicalizeExistingPath(path.resolve(options.cwd ?? process.cwd()));
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
-	const projectPolicyRoot = projectPolicy.path === null ? cwd : path.dirname(path.dirname(projectPolicy.path));
+	const projectPolicyRoot =
+		projectPolicy.path === null ? cwd : path.dirname(path.dirname(canonicalizeExistingPath(projectPolicy.path)));
 	const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
 		? projectPolicy.pathPolicy
 		: mergePathPolicyInputs(DEFAULT_DAMAGE_CONTROL_PATH_POLICY, projectPolicy.pathPolicy);
@@ -329,33 +331,11 @@ function stripQuotes(token: string): string {
  * zero-access path appearing anywhere in the command is the signal.
  */
 function bashPathTokenCandidates(command: string): string[] {
-	const tokens: string[] = [];
-	let current = "";
-	let quote: '"' | "'" | null = null;
-	const flush = (): void => {
-		if (current.length > 0) tokens.push(current);
-		current = "";
-	};
-	for (const ch of command) {
-		if (quote !== null) {
-			if (ch === quote) quote = null;
-			else current += ch;
-			continue;
-		}
-		if (ch === '"' || ch === "'") {
-			quote = ch;
-			continue;
-		}
-		if (/[\s;|&<>()]/.test(ch)) {
-			flush();
-			continue;
-		}
-		current += ch;
-	}
-	flush();
 	const candidates: string[] = [];
-	for (const token of tokens) {
+	for (const token of tokenizeShellLike(command)) {
 		if (token.length === 0) continue;
+		if (token === ";" || token === "&&" || token === "||" || token === "|" || token === ">" || token === ">>") continue;
+		if (token === "<" || token === "<<") continue;
 		// A token containing whitespace came from a quoted string of prose, not
 		// a path argument; and flags are not paths unless they embed one
 		// (--file=~/.aws/credentials).
@@ -676,7 +656,10 @@ function hasShellOperators(command: string): boolean {
 }
 
 function isUnderOrSame(child: string, parent: string): boolean {
-	const rel = path.relative(path.resolve(parent), path.resolve(child));
+	const rel = path.relative(
+		canonicalizeExistingPath(path.resolve(parent)),
+		canonicalizeExistingPath(path.resolve(child)),
+	);
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
@@ -691,7 +674,8 @@ function pathArg(args: Record<string, unknown> | undefined): string | null {
 }
 
 function cwdArg(args: Record<string, unknown> | undefined, fallback: string): string {
-	return typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(fallback, args.cwd) : fallback;
+	const resolved = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(fallback, args.cwd) : fallback;
+	return canonicalizeExistingPath(resolved);
 }
 
 function serializeArgs(args?: Record<string, unknown>): string {
