@@ -415,6 +415,39 @@ describe("contracts/worker-steer", () => {
 			}
 		});
 
+		it("system_modify escalation carries the builtin confirm rail axis", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command: "sudo whoami" }, { id: "call-system-modify" })], {
+						stopReason: "toolUse",
+					}),
+				],
+				{ autonomy: "full-auto", onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = startWorkerRun(input, (event) => events.push(event));
+				const escalated = await waitFor(
+					() => permissionEvent(events, "clio_permission_escalated"),
+					"worker did not emit clio_permission_escalated",
+				);
+				await expectPending(handle.promise, "worker run");
+
+				strictEqual(escalated.payload?.axis, "net:system-modify-confirm");
+				strictEqual(escalated.payload?.tool, "bash");
+				const decision = escalated.payload?.decision as Record<string, unknown> | undefined;
+				strictEqual(decision?.actionClass, "system_modify");
+				strictEqual(decision?.reasonCode, "system-modify-confirm");
+				strictEqual(decision?.ruleId, "system-modify-confirm");
+				strictEqual(decision?.policySource, "builtin-classifier");
+
+				handle.abort();
+				await handle.promise;
+			} finally {
+				unregister();
+			}
+		});
+
 		it("approve decision releases the parked call and the worker run continues", async () => {
 			const events: unknown[] = [];
 			const { input, unregister } = fauxRuntimeInput(

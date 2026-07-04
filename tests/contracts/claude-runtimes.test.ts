@@ -76,6 +76,8 @@ describe("contracts/claude runtimes safety bridge", () => {
 		strictEqual(systemModify.permissionRequired, true);
 		strictEqual(systemModify.decision.kind, "ask");
 		strictEqual(systemModify.decision.classification.actionClass, "system_modify");
+		strictEqual(systemModify.decision.policy?.reasonCode, "system-modify-confirm");
+		strictEqual(systemModify.decision.policy?.policySource, "builtin-classifier");
 	});
 
 	it("emits autonomy:<level> reasonCode on the clio_tool_finish telemetry for read-only denials", () => {
@@ -111,6 +113,24 @@ describe("contracts/claude runtimes safety bridge", () => {
 		ok(allowFinish && allowFinish.type === "clio_tool_finish");
 		strictEqual(allowFinish.payload.decision, "allowed");
 		strictEqual(allowFinish.payload.reasonCode, "allowed");
+
+		const systemModifyEvents: ClioWorkerEvent[] = [];
+		const systemModify = emitClaudeToolPermissionDecision({
+			toolName: "Bash",
+			input: { command: "sudo true" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "full-auto",
+			emit: (event) => systemModifyEvents.push(event),
+		});
+		strictEqual(systemModify.kind, "deny");
+		ok(systemModify.kind === "deny" && systemModify.permissionRequired);
+		const systemModifyFinish = systemModifyEvents.find((event) => event.type === "clio_tool_finish");
+		ok(systemModifyFinish && systemModifyFinish.type === "clio_tool_finish");
+		strictEqual(systemModifyFinish.payload.decision, "permission_requested");
+		strictEqual(systemModifyFinish.payload.reasonCode, "system-modify-confirm");
+		strictEqual(systemModifyFinish.payload.policySource, "builtin-classifier");
+		strictEqual(systemModifyFinish.payload.ruleId, "system-modify-confirm");
 	});
 
 	it("keeps SDK permission mode open for the Clio all-tool gate", () => {

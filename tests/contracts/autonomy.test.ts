@@ -142,19 +142,19 @@ async function withAuditedRegistry(
 }
 
 describe("contracts/autonomy mapping matrix", () => {
-	// The §2.3 matrix, verbatim: every action class at every level.
+	// The §2.3 level-dependent rows. system_modify is a safety-net rail owned
+	// by the policy engine, not a row owned by the autonomy dial.
 	const expected: Record<string, Record<AutonomyLevel, AutonomyDisposition>> = {
 		read: { "read-only": "allow", suggest: "allow", "auto-edit": "allow", "full-auto": "allow" },
 		write: { "read-only": "deny", suggest: "ask", "auto-edit": "allow", "full-auto": "allow" },
 		"execute:recognized": { "read-only": "deny", suggest: "ask", "auto-edit": "allow", "full-auto": "allow" },
 		"execute:unrecognized": { "read-only": "deny", suggest: "ask", "auto-edit": "ask", "full-auto": "allow" },
 		dispatch: { "read-only": "deny", suggest: "ask", "auto-edit": "allow", "full-auto": "allow" },
-		system_modify: { "read-only": "deny", suggest: "ask", "auto-edit": "ask", "full-auto": "ask" },
 		git_destructive: { "read-only": "deny", suggest: "deny", "auto-edit": "deny", "full-auto": "deny" },
 		unknown: { "read-only": "deny", suggest: "ask", "auto-edit": "ask", "full-auto": "ask" },
 	};
 
-	it("maps every action class at every level per the sd-01 §2.3 matrix", () => {
+	it("maps every level-dependent action class per the sd-01 §2.3 matrix", () => {
 		for (const [row, byLevel] of Object.entries(expected)) {
 			const [actionClass, recognition] = row.split(":") as [ActionClass, string | undefined];
 			const options = actionClass === "execute" ? { executeRecognized: recognition === "recognized" } : {};
@@ -352,6 +352,33 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		);
 	});
 
+	it("system_modify names the builtin confirm rail as the asking axis", async () => {
+		const registry = registryAt("full-auto");
+		const asks: Array<{ decision: SafetyDecision; axis: string }> = [];
+		registry.onPermissionRequired((_call, decision, meta) => {
+			asks.push({ decision, axis: meta.axis });
+			registry.cancelParkedCalls("test done");
+		});
+		await registry.invoke(bashCall("sudo whoami"));
+		const ask = asks[0];
+		ok(ask);
+		strictEqual(ask.axis, "net:system-modify-confirm");
+		const axis = askAxis(ask.decision);
+		strictEqual(axis.kind, "net");
+		ok(axis.kind === "net" && axis.ruleId === "system-modify-confirm", JSON.stringify(axis));
+		strictEqual(ask.decision.policy?.reasonCode, "system-modify-confirm");
+		strictEqual(ask.decision.policy?.policySource, "builtin-classifier");
+
+		const notice = approvalParkedNotice("bash", ask.decision, "full-auto");
+		strictEqual(
+			notice.text,
+			"[approval] bash parked (system_modify): safety-net rail system-modify-confirm asks for confirmation. Approve once, or Esc to cancel.",
+		);
+
+		const body = createPermissionOverlayBody(approvalViewForDecision("bash", ask.decision, "full-auto")).render(80);
+		ok(body.includes("Asked by: safety-net rail system-modify-confirm"), body.join("\n"));
+	});
+
 	it("permission overlay renders real approval request views", () => {
 		const mainView: ApprovalRequestView = {
 			requestId: "perm-main",
@@ -520,6 +547,24 @@ describe("contracts/autonomy approvals contexts", () => {
 		});
 		strictEqual(readOnly.snapshot().toolCallLog[0]?.decision, "denied");
 		match(readOnly.snapshot().toolCallLog[0]?.reason ?? "", /autonomy level is read-only/);
+
+		const fullAutoSystemModify = new AcpToolMediator({
+			safety,
+			cwd: process.cwd(),
+			toolGovernance: "clio-policy",
+			autonomy: "full-auto",
+		});
+		await fullAutoSystemModify.handle({
+			options: [{ optionId: "reject", kind: "reject_once" }],
+			toolCall: { toolCallId: "c4", kind: "execute", rawInput: { command: "sudo whoami" } },
+		});
+		const systemModifyLog = fullAutoSystemModify.snapshot().toolCallLog[0];
+		strictEqual(systemModifyLog?.decision, "denied");
+		match(systemModifyLog?.reason ?? "", /^permission_required:/);
+		match(systemModifyLog?.reason ?? "", /non-stall/);
+		strictEqual(systemModifyLog?.safetyDecision?.reasonCode, "system-modify-confirm");
+		strictEqual(systemModifyLog?.safetyDecision?.policySource, "builtin-classifier");
+		strictEqual(systemModifyLog?.safetyDecision?.ruleId, "system-modify-confirm");
 	});
 });
 
