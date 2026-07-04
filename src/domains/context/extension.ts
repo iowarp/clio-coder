@@ -143,22 +143,28 @@ export function createContextBundle(
 		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
 	};
 
+	// Incremental updates are read-modify-write on the artifact; overlapping runs
+	// would compute from a stale base and drop each other's records, so batches
+	// serialize through this queue and stop() drains it before its final rebuild.
+	let incrementalQueue: Promise<void> = Promise.resolve();
 	const noteFileChanges = (paths: ReadonlyArray<string>, cwd: string = lastCwd): void => {
-		void (async () => {
-			if (paths.length === 0) return;
-			const codewiki = readCodewiki(cwd);
-			if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
-			const rel = paths
-				.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
-				.filter((p) => p.length > 0 && !p.startsWith(".."));
-			const updated = await updateCodewikiPaths(cwd, codewiki, rel);
-			if (updated === codewiki) return; // No indexable file actually changed.
-			writeCodewiki(cwd, updated);
-			persistState(cwd, computeFingerprint(cwd), new Date().toISOString(), readClioState(cwd));
-			contextState.invalidate(cwd);
-		})().catch(() => {
-			// Best-effort: never let incremental indexing surface as a tool error.
-		});
+		incrementalQueue = incrementalQueue
+			.then(async () => {
+				if (paths.length === 0) return;
+				const codewiki = readCodewiki(cwd);
+				if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
+				const rel = paths
+					.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
+					.filter((p) => p.length > 0 && !p.startsWith(".."));
+				const updated = await updateCodewikiPaths(cwd, codewiki, rel);
+				if (updated === codewiki) return; // No indexable file actually changed.
+				writeCodewiki(cwd, updated);
+				persistState(cwd, computeFingerprint(cwd), new Date().toISOString(), readClioState(cwd));
+				contextState.invalidate(cwd);
+			})
+			.catch(() => {
+				// Best-effort: never let incremental indexing surface as a tool error.
+			});
 	};
 
 	let unsubscribeSessionStart: (() => void) | null = null;
@@ -169,6 +175,7 @@ export function createContextBundle(
 		async stop() {
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
+			await incrementalQueue;
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
 			const fingerprint = computeFingerprint(lastCwd);
