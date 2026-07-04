@@ -1,8 +1,19 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
+import {
+	buildCodewiki,
+	listWikiPages,
+	wikiDir,
+	writeCodewiki,
+	writeWikiMeta,
+} from "../../src/domains/context/index.js";
 import type { ObservabilityContract } from "../../src/domains/observability/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { emptyWorkspaceSnapshot } from "../../src/domains/session/workspace/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { abbreviateModelId, clioTheme } from "../../src/interactive/theme/index.js";
@@ -94,6 +105,65 @@ const mockObservability = {
 	sessionCost: () => 0.05,
 } as unknown as ObservabilityContract;
 
+const scratchRoots: string[] = [];
+
+afterEach(() => {
+	for (const root of scratchRoots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+function scratchDashboardProject(): string {
+	const root = mkdtempSync(join(tmpdir(), "clio-welcome-dashboard-"));
+	scratchRoots.push(root);
+	writeFileSync(
+		join(root, "package.json"),
+		JSON.stringify({ name: "welcome-dashboard-fixture", type: "module" }),
+		"utf8",
+	);
+	mkdirSync(join(root, "src"), { recursive: true });
+	writeFileSync(join(root, "src", "index.ts"), "export const dashboardEntry = true;\n", "utf8");
+	return root;
+}
+
+async function writeDashboardCodewiki(cwd: string): Promise<void> {
+	writeCodewiki(cwd, await buildCodewiki({ cwd, language: "typescript", generatedAt: "2026-07-04T00:00:00.000Z" }));
+}
+
+function writeDashboardWiki(cwd: string): void {
+	mkdirSync(wikiDir(cwd), { recursive: true });
+	writeFileSync(join(wikiDir(cwd), "quickstart.md"), "# Quickstart\n\nStart with `src/index.ts`.\n", "utf8");
+	writeWikiMeta(cwd, {
+		version: 1,
+		updatedAt: "2026-07-04T00:00:00.000Z",
+		gitHead: null,
+		model: "test-model",
+		contentHash: "0".repeat(64),
+		pages: listWikiPages(cwd),
+	});
+}
+
+function dashboardStatsFor(cwd: string) {
+	return deriveWelcomeDashboardStats({
+		providers: mockProviders,
+		observability: mockObservability,
+		getSettings: () => mockSettings,
+		getWorkspaceSnapshot: () => emptyWorkspaceSnapshot(cwd),
+	});
+}
+
+function strippedDashboardRow(
+	stats: ReturnType<typeof deriveWelcomeDashboardStats>,
+	width: number,
+	label: string,
+): string {
+	const row = buildWelcomeDashboardLines(stats, width)
+		.map(stripAnsi)
+		.find((line) => line.includes(label));
+	if (!row) throw new Error(`missing dashboard row ${label}`);
+	return row;
+}
+
 describe("welcome-dashboard and footer integration tests", () => {
 	it("derives stats correctly from providers and settings", () => {
 		const stats = deriveWelcomeDashboardStats({
@@ -135,6 +205,32 @@ describe("welcome-dashboard and footer integration tests", () => {
 		// abbreviateModelId now keeps whole dash-separated parts under 18 chars,
 		// so the version suffix survives instead of being clipped to "gemini-3.5".
 		ok(joined.includes("gemini-3.5-flash"), `model label should keep its version suffix, got: ${joined}`);
+	});
+
+	it("renders a no-wiki dashboard row when codewiki exists without Markdown wiki", async () => {
+		const cwd = scratchDashboardProject();
+		await writeDashboardCodewiki(cwd);
+
+		const stats = dashboardStatsFor(cwd);
+		const row = strippedDashboardRow(stats, 120, "Wiki:");
+
+		ok(row.includes("no wiki; run clio context wiki"), row);
+		ok(row.includes("entry points:"), row);
+		ok(row.includes("src/index.ts"), row);
+	});
+
+	it("renders wiki page count, staleness, and digest excerpt in the dashboard row", async () => {
+		const cwd = scratchDashboardProject();
+		await writeDashboardCodewiki(cwd);
+		writeDashboardWiki(cwd);
+
+		const stats = dashboardStatsFor(cwd);
+		const row = strippedDashboardRow(stats, 120, "Wiki:");
+
+		ok(row.includes("1 page"), row);
+		ok(row.includes("fresh"), row);
+		ok(row.includes("entry points:"), row);
+		ok(row.includes("src/index.ts"), row);
 	});
 
 	it("renders every framed line at exactly the requested width (border alignment)", () => {

@@ -1,7 +1,7 @@
 const HELP = `Usage:
   clio context
   clio context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
-  clio context refresh
+  clio context refresh [--wiki]
   clio context wiki [--update] [--status]
   clio context reset [--all]
   clio context index [--json]
@@ -9,7 +9,7 @@ const HELP = `Usage:
 Project context commands:
   clio context              show project context status (CLIO.md, preload, codewiki)
   clio context init         explore the repo and bootstrap CLIO.md and codewiki
-  clio context refresh      re-index the codewiki and refresh .clio state
+  clio context refresh      re-index the codewiki and optionally update the Markdown wiki
   clio context wiki         generate or inspect the agent-authored Markdown wiki
   clio context reset        clear accumulated project context artifacts
   clio context index        build the codewiki index without model calls
@@ -63,20 +63,41 @@ async function printContextStatus(): Promise<number> {
 }
 
 async function runRefreshCommand(args: string[]): Promise<number> {
+	let updateWiki = false;
 	for (const arg of args) {
+		if (arg === "--wiki") {
+			updateWiki = true;
+			continue;
+		}
 		process.stderr.write(`clio context refresh: unknown flag ${arg}\n`);
 		process.stdout.write(HELP);
 		return 2;
 	}
 	try {
 		const { runContextRefresh } = await import("../domains/context/index.js");
-		await runContextRefresh({
+		const result = await runContextRefresh({
 			cwd: process.cwd(),
 			io: {
 				stdout: (s) => process.stdout.write(s),
 				stderr: (s) => process.stderr.write(s),
 			},
+			wiki: updateWiki,
+			...(updateWiki ? { wikiGenerate: (await import("./wiki-generate.js")).modelWikiGenerate() } : {}),
 		});
+		if (result.hint) process.stdout.write(`${result.hint}\n`);
+		if (result.wiki) {
+			if (result.wiki.status === "failed") {
+				process.stderr.write(
+					`clio context refresh: wiki update failed: ${(result.wiki.problems ?? ["unknown failure"]).join("; ")}\n`,
+				);
+				return 1;
+			}
+			process.stdout.write(
+				result.wiki.status === "noop"
+					? `clio context refresh: wiki unchanged (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`
+					: `clio context refresh: wiki updated (${result.wiki.pages} page${result.wiki.pages === 1 ? "" : "s"})\n`,
+			);
+		}
 		return 0;
 	} catch (err) {
 		process.stderr.write(`clio context refresh failed: ${err instanceof Error ? err.message : String(err)}\n`);

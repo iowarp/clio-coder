@@ -38,6 +38,7 @@ export interface ContextContract extends DomainContract {
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
 	/**
 	 * Rebuild the codewiki index and `.clio` state without touching CLIO.md.
+	 * Markdown wiki updates require the explicit refresh input flag.
 	 * Backs `/context refresh` and `clio context refresh`.
 	 */
 	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
