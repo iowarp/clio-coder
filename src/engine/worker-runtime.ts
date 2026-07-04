@@ -416,6 +416,24 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		return true;
 	};
 
+	const denyActiveEscalationOnAbort = (reason: string): void => {
+		const active = activeEscalation;
+		if (!active) return;
+		emit({
+			type: "clio_permission_resolved",
+			payload: {
+				tool: active.tool,
+				actionClass: active.actionClass,
+				mode: "escalate",
+				source: "operator",
+				requestId: active.requestId,
+				decision: "denied",
+				reason,
+			},
+		} as ClioWorkerEvent);
+		clearActiveEscalation();
+	};
+
 	const unsubscribePermission = registry.onPermissionRequired((call, decision, meta) => {
 		const actionClass = decision.classification.actionClass;
 		if (escalationConfig) {
@@ -503,8 +521,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// returning, so cancel it before aborting. cancelParkedCalls is a
 			// no-op when nothing is parked, so deny/fail abort stays unchanged.
 			if (escalationConfig) {
-				clearActiveEscalation();
-				registry.cancelParkedCalls("run aborted while a permission escalation was pending");
+				const reason = "run aborted while a permission escalation was pending";
+				denyActiveEscalationOnAbort(reason);
+				registry.cancelParkedCalls(reason);
 			}
 			agent.abort();
 		},

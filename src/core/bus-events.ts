@@ -366,6 +366,7 @@ export interface PermissionRequestedPayload {
 	agentId?: string | undefined;
 	summary?: string | undefined;
 	timeoutMs?: number | undefined;
+	escalation?: boolean | undefined;
 }
 
 /**

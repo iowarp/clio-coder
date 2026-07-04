@@ -387,9 +387,14 @@ function installPermissionBridge(input: {
 	let sequence = 0;
 	let chain = Promise.resolve();
 	const queuedRequestIds = new Set<string>();
+	const queuedRequestDetails = new Map<string, { tool: string; actionClass: string }>();
 	return input.toolRegistry.onPermissionRequired((call, decision, meta) => {
 		if (queuedRequestIds.has(meta.requestId)) return;
 		queuedRequestIds.add(meta.requestId);
+		queuedRequestDetails.set(meta.requestId, {
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+		});
 		const emitResolution = (payload: { status: "granted" | "denied"; decidedBy: string; reason?: string }): void => {
 			input.bus?.emit(BusChannels.PermissionResolved, {
 				status: payload.status,
@@ -401,17 +406,34 @@ function installPermissionBridge(input: {
 				...(payload.reason !== undefined ? { reason: payload.reason } : {}),
 			});
 		};
+		const emitQueuedErrorResolutions = (currentRequestId: string, reason: string): void => {
+			for (const requestId of queuedRequestIds) {
+				if (requestId === currentRequestId) continue;
+				const details = queuedRequestDetails.get(requestId);
+				input.bus?.emit(BusChannels.PermissionResolved, {
+					status: "denied",
+					requestId,
+					origin: "acp-server",
+					decidedBy: "error",
+					...(details !== undefined ? { tool: details.tool, actionClass: details.actionClass } : {}),
+					reason,
+				});
+			}
+		};
 		const run = async (): Promise<void> => {
 			if (!queuedRequestIds.has(meta.requestId)) return;
 			const sessionId = input.activeSessionId();
+			const noSessionReason = "ACP permission requested with no active session";
 			if (!sessionId) {
 				emitResolution({
 					status: "denied",
 					decidedBy: "error",
-					reason: "ACP permission requested with no active session",
+					reason: noSessionReason,
 				});
+				emitQueuedErrorResolutions(meta.requestId, noSessionReason);
 				queuedRequestIds.clear();
-				input.toolRegistry?.cancelParkedCalls("ACP permission requested with no active session");
+				queuedRequestDetails.clear();
+				input.toolRegistry?.cancelParkedCalls(noSessionReason);
 				return;
 			}
 			const toolCallId = `clio-permission-${++sequence}`;
@@ -466,10 +488,13 @@ function installPermissionBridge(input: {
 					decidedBy: "error",
 					reason: message,
 				});
+				emitQueuedErrorResolutions(meta.requestId, message);
 				queuedRequestIds.clear();
+				queuedRequestDetails.clear();
 				input.toolRegistry?.cancelParkedCalls(message);
 			} finally {
 				queuedRequestIds.delete(meta.requestId);
+				queuedRequestDetails.delete(meta.requestId);
 			}
 		};
 		chain = chain.then(run, run);

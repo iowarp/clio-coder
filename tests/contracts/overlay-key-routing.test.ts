@@ -1,6 +1,12 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type OverlayKeyDeps, type OverlayState, routeOverlayKey } from "../../src/interactive/index.js";
+import {
+	isLiveWorkerEscalationRequest,
+	type OverlayKeyDeps,
+	type OverlayState,
+	routeOverlayKey,
+	shouldAnnouncePermissionRequest,
+} from "../../src/interactive/index.js";
 
 const ESC = "\x1b";
 
@@ -58,5 +64,41 @@ describe("list-overlay key routing", () => {
 		// Before the fix this returned true (input swallowed, hub dead).
 		strictEqual(routeOverlayKey("t", "skills-hub", deps, neverMatches), false);
 		strictEqual(closed(), 0);
+	});
+
+	it("dedupes permission parked notices by requestId", () => {
+		const seen = new Set<string>();
+		let noticeCount = 0;
+		for (const requestId of ["req-one", "req-one", "req-two"]) {
+			if (shouldAnnouncePermissionRequest(seen, requestId)) noticeCount += 1;
+		}
+
+		strictEqual(noticeCount, 2);
+		strictEqual(shouldAnnouncePermissionRequest(seen, "req-one"), false);
+	});
+
+	it("routes only live worker escalation requests to the interactive overlay", () => {
+		strictEqual(
+			isLiveWorkerEscalationRequest({
+				tool: "bash",
+				actionClass: "execute",
+				requestId: "worker-policy-deny",
+				origin: "worker:run-1",
+				requestedBy: "run-1",
+			}),
+			false,
+		);
+		strictEqual(
+			isLiveWorkerEscalationRequest({
+				tool: "bash",
+				actionClass: "execute",
+				requestId: "worker-live",
+				origin: "worker:run-1",
+				requestedBy: "run-1",
+				escalation: true,
+				timeoutMs: 120_000,
+			}),
+			true,
+		);
 	});
 });

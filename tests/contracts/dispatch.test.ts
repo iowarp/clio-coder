@@ -2651,6 +2651,7 @@ rl.once("line", () => {
 						reasonCode?: string;
 						policySource?: string;
 						timeoutMs?: number;
+						escalation?: boolean;
 				  }
 				| undefined;
 			strictEqual(request?.requestedBy, handle.runId);
@@ -2665,6 +2666,7 @@ rl.once("line", () => {
 			strictEqual(request?.reasonCode, "bash-command-substitution");
 			strictEqual(request?.policySource, "builtin-command-allowlist");
 			strictEqual(request?.timeoutMs, 120_000);
+			strictEqual(request?.escalation, true);
 		} finally {
 			unsubscribe();
 			await bundle.extension.stop?.();
@@ -2868,7 +2870,7 @@ rl.once("line", () => {
 				heartbeatAt: { current: Date.now() },
 				abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
 				events: (async function* () {
-					for (const requestId of ["perm-approved", "perm-denied", "perm-timeout"]) {
+					for (const requestId of ["perm-approved", "perm-denied", "perm-timeout", "perm-aborted"]) {
 						yield {
 							type: "clio_permission_escalated",
 							payload: {
@@ -2915,6 +2917,17 @@ rl.once("line", () => {
 						},
 					};
 					yield {
+						type: "clio_permission_resolved",
+						payload: {
+							requestId: "perm-aborted",
+							source: "operator",
+							decision: "denied",
+							tool: "bash",
+							actionClass: "execute",
+							reason: "run aborted while a permission escalation was pending",
+						},
+					};
+					yield {
 						type: "clio_tool_finish",
 						payload: { tool: "bash", durationMs: 2, outcome: "ok", decision: "allowed" },
 					};
@@ -2931,9 +2944,9 @@ rl.once("line", () => {
 				| ({ allowed: number; blocked: number; permissionRequested: number } & EscalationSafetyCounters)
 				| undefined;
 
-			strictEqual(counters?.escalationRequested, 3);
+			strictEqual(counters?.escalationRequested, 4);
 			strictEqual(counters?.escalationApproved, 1);
-			strictEqual(counters?.escalationDenied, 1);
+			strictEqual(counters?.escalationDenied, 2);
 			strictEqual(counters?.escalationTimedOut, 1);
 		} finally {
 			await bundle.extension.stop?.();
@@ -3000,13 +3013,16 @@ rl.once("line", () => {
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.safety?.decisions.permissionRequested, 1);
 			strictEqual(receipt.safety?.blockedAttempts[0]?.actionClass, "system_modify");
-			const request = permissionRequests[0] as { requestId?: string; origin?: string; requestedBy?: string } | undefined;
+			const request = permissionRequests[0] as
+				| { requestId?: string; origin?: string; requestedBy?: string; escalation?: boolean }
+				| undefined;
 			const resolution = permissionEvents[0] as
 				| { requestId?: string; origin?: string; requestedBy?: string; decidedBy?: string }
 				| undefined;
 			strictEqual(request?.requestId, "worker-perm-1");
 			strictEqual(request?.origin, `worker:${handle.runId}`);
 			strictEqual(request?.requestedBy, handle.runId);
+			strictEqual(request?.escalation, undefined);
 			strictEqual(resolution?.requestId, request?.requestId);
 			strictEqual(resolution?.origin, request?.origin);
 			strictEqual(resolution?.requestedBy, handle.runId);

@@ -68,6 +68,7 @@ const PARK_REASONS = new Set<SessionParkReason>([
 	"shutdown",
 ]);
 const RESUME_VIAS = new Set<SessionResumeVia>(["resume", "switch_branch"]);
+const MAX_REQUESTED_PERMISSION_AUDIT_IDS = 4096;
 
 function isSessionParkedPayload(value: unknown): value is SessionParkedPayload {
 	if (!value || typeof value !== "object") return false;
@@ -115,6 +116,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let unsubscribeAgentStatusChanged: (() => void) | null = null;
 	let unsubscribeDispatchCompleted: (() => void) | null = null;
 	let unsubscribeDispatchFailed: (() => void) | null = null;
+	const recordedRequestedPermissionIds = new Set<string>();
 
 	function writeAudit(rec: AuditRecord): void {
 		if (writer === null) return;
@@ -138,6 +140,12 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				if (!isPermissionRequestedPayload(payload)) return;
 				if (payload.origin === undefined || payload.origin === "main") return;
 				if (payload.requestId === undefined) return;
+				if (recordedRequestedPermissionIds.has(payload.requestId)) return;
+				recordedRequestedPermissionIds.add(payload.requestId);
+				if (recordedRequestedPermissionIds.size > MAX_REQUESTED_PERMISSION_AUDIT_IDS) {
+					const oldest = recordedRequestedPermissionIds.values().next().value;
+					if (oldest !== undefined) recordedRequestedPermissionIds.delete(oldest);
+				}
 				const reason = payload.rejection?.short ?? payload.summary;
 				writeAudit(
 					buildPermissionAuditRecord({
@@ -255,6 +263,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			unsubscribeDispatchCompleted = null;
 			unsubscribeDispatchFailed?.();
 			unsubscribeDispatchFailed = null;
+			recordedRequestedPermissionIds.clear();
 			await writer?.close();
 			writer = null;
 		},
