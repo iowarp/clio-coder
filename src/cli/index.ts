@@ -32,9 +32,11 @@ Usage:
   clio doctor [--fix]       diagnose state; --fix creates or repairs it
   clio paths [--json]       print resolved config/data/cache directories
   clio reset                recover or wipe Clio Coder state
-  clio context refresh      re-index the codewiki and restamp the CLIO.md fingerprint footer
-  clio context-clear [--all]  clear accumulated project context artifacts
-  clio context-index [--json]  build the codewiki index without model calls
+  clio context              show project context status (CLIO.md, preload, codewiki)
+  clio context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki
+  clio context refresh      re-index the codewiki and refresh .clio state
+  clio context reset [--all]  clear accumulated project context artifacts
+  clio context index [--json]  build the codewiki index without model calls
   clio uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
   clio upgrade              upgrade Clio Coder and run pending migrations
   clio agents               list discovered agent recipes
@@ -49,7 +51,6 @@ Usage:
   clio skills               list, inspect, validate, or install skills
   clio docs [topic]         serve bundled HTML docs on 127.0.0.1 (--no-open to skip browser)
   clio share export|import  export or import Clio project/resource archives
-  clio context-init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO.md and codewiki
   clio --help, -h           this message
 `;
 

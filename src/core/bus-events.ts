@@ -98,7 +98,7 @@ export interface ContextWarningPayload {
 	warning: string | null;
 }
 
-export type ContextActivityKind = "context-init" | "context-clear" | "context-prime" | "context-handoff" | "compaction";
+export type ContextActivityKind = "context-init" | "context-clear" | "context-refresh" | "compaction";
 export type ContextActivityPhase = "scan" | "codewiki" | "generate" | "clio-md" | "state" | "done";
 export type ContextActivityStatus = "started" | "running" | "completed" | "failed";
 

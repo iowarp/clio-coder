@@ -1,6 +1,12 @@
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
+import {
+	applyInitImplications,
+	CONTEXT_INIT_FLAG_TABLE,
+	type ContextInitOptions,
+	validateInitOptions,
+} from "../domains/context/init-options.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
@@ -78,15 +84,7 @@ export interface RunIo {
 	stderr: (s: string) => void;
 }
 
-export interface InitCommandOptions {
-	preview?: boolean;
-	adopt?: boolean;
-	applyClioMd?: boolean;
-	proposeClioMd?: boolean;
-	includeGlobalImports?: boolean;
-	/** Skip model-driven exploration and use the deterministic heuristic generator. */
-	heuristic?: boolean;
-}
+export type InitCommandOptions = ContextInitOptions;
 
 export interface ContextClearCommandOptions {
 	all?: boolean;
@@ -220,8 +218,8 @@ export interface SlashCommandContext {
 	exportTranscript: (path?: string) => void;
 	runContextClear: (options: ContextClearCommandOptions) => void;
 	/**
-	 * Re-index the codewiki and restamp the CLIO.md fingerprint footer without
-	 * touching handbook prose. Optional until the host wires onContextRefresh.
+	 * Re-index the codewiki and refresh `.clio` state without touching CLIO.md.
+	 * Optional until the host wires onContextRefresh.
 	 */
 	runContextRefresh?: () => void;
 	openSkillsHub?: () => void;
@@ -314,14 +312,10 @@ function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 }
 
 /** Flag set shared by `/context init` and the deprecated `/context-init`. */
-const CONTEXT_INIT_FLAGS: ReadonlyArray<CommandFlagSpec> = [
-	{ name: "--preview" },
-	{ name: "--adopt" },
-	{ name: "--apply", aliases: ["--rewrite"] },
-	{ name: "--propose" },
-	{ name: "--global", aliases: ["--include-global"] },
-	{ name: "--heuristic", aliases: ["--no-generate"] },
-];
+const CONTEXT_INIT_FLAGS: ReadonlyArray<CommandFlagSpec> = CONTEXT_INIT_FLAG_TABLE.map((row) => ({
+	name: row.flag,
+	...(row.aliases ? { aliases: row.aliases } : {}),
+}));
 
 /** Flag set shared by `/context reset` and the deprecated `/context-clear`. */
 const CONTEXT_RESET_FLAGS: ReadonlyArray<CommandFlagSpec> = [
@@ -337,13 +331,10 @@ const COMPACT_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [
 
 function initOptionsFromParsed(parsed: ParsedArgs): InitCommandOptions {
 	const options: InitCommandOptions = {};
-	if (parsed.flags.has("--preview")) options.preview = true;
-	if (parsed.flags.has("--adopt")) options.adopt = true;
-	if (parsed.flags.has("--apply")) options.applyClioMd = true;
-	if (parsed.flags.has("--propose")) options.proposeClioMd = true;
-	if (parsed.flags.has("--global")) options.includeGlobalImports = true;
-	if (parsed.flags.has("--heuristic")) options.heuristic = true;
-	return options;
+	for (const row of CONTEXT_INIT_FLAG_TABLE) {
+		if (parsed.flags.has(row.flag)) options[row.field] = true;
+	}
+	return applyInitImplications(options);
 }
 
 function contextClearOptionsFromParsed(parsed: ParsedArgs): ContextClearCommandOptions {
@@ -694,6 +685,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					ctx.runCompact(command.instructions);
 					return;
 				case "init":
+					{
+						const error = validateInitOptions(command.options);
+						if (error) {
+							ctx.notice("error", error);
+							return;
+						}
+					}
 					ctx.runInit(command.options);
 					return;
 				case "context-clear":

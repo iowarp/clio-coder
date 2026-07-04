@@ -21,7 +21,7 @@ export interface ProjectStructuredContext {
 }
 
 export interface ContextState {
-	clioMd: "ok" | "stale" | "none" | "malformed" | "no-fingerprint";
+	clioMd: "ok" | "stale" | "none" | "malformed";
 	memoryCount: number;
 }
 
@@ -29,9 +29,8 @@ export interface ContextContract extends DomainContract {
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
 	/**
-	 * Rebuild the codewiki index and restamp the CLIO.md fingerprint footer
-	 * without modifying any prose outside the footer comment. Backs
-	 * `/context refresh` and `clio context refresh`.
+	 * Rebuild the codewiki index and `.clio` state without touching CLIO.md.
+	 * Backs `/context refresh` and `clio context refresh`.
 	 */
 	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;

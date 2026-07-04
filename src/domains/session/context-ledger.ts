@@ -170,6 +170,9 @@ const SEGMENT_CATEGORY: Readonly<Record<string, ContextLedgerCategory>> = {
 	"skills-catalog": "skills",
 	memory: "memory",
 	"project-context": "project",
+	"context.project-rules": "project",
+	"context.operator-profile": "memory",
+	"context.clio-repo-awareness": "system",
 	"history-summary": "messages",
 };
 

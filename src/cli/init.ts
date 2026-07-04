@@ -1,6 +1,12 @@
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { runBootstrap } from "../domains/context/index.js";
+import {
+	bootstrapInputFromInitOptions,
+	CONTEXT_INIT_FLAG_TABLE,
+	type ContextInitOptions,
+	validateInitOptions,
+} from "../domains/context/init-options.js";
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
 
 const HELP = `Usage:
@@ -27,6 +33,19 @@ function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
 	return args.includes(name);
 }
 
+function parseContextInitArgs(args: ReadonlyArray<string>): { options: ContextInitOptions; error: string | null } {
+	const options: ContextInitOptions = {};
+	for (const arg of args) {
+		if (arg === "--help" || arg === "-h" || arg === "--yes" || arg === "-y") continue;
+		const row = CONTEXT_INIT_FLAG_TABLE.find((candidate) => candidate.flag === arg || candidate.aliases?.includes(arg));
+		if (!row) {
+			return { options, error: arg.startsWith("-") ? `unknown flag ${arg}` : `unexpected argument ${arg}` };
+		}
+		options[row.field] = true;
+	}
+	return { options, error: null };
+}
+
 async function confirmGitignore(assumeYes: boolean): Promise<boolean> {
 	if (assumeYes) return true;
 	if (!input.isTTY) return false;
@@ -45,14 +64,22 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		return 0;
 	}
 	const assumeYes = hasFlag(args, "--yes") || hasFlag(args, "-y");
-	const preview = hasFlag(args, "--preview");
+	const parsed = parseContextInitArgs(args);
+	if (parsed.error) {
+		process.stderr.write(`clio context-init: ${parsed.error}\n`);
+		process.stdout.write(HELP);
+		return 2;
+	}
+	const validationError = validateInitOptions(parsed.options);
+	if (validationError) {
+		process.stderr.write(`${validationError}\n`);
+		process.stdout.write(HELP);
+		return 2;
+	}
+	const bootstrapOptions = bootstrapInputFromInitOptions(parsed.options);
 	// Model-driven exploration is the default. --heuristic (or legacy --no-generate)
 	// forces the deterministic generator; preview never spawns a model.
-	const heuristic = hasFlag(args, "--heuristic") || hasFlag(args, "--no-generate");
-	const rewriteClioMd = hasFlag(args, "--rewrite");
-	const applyClioMd = hasFlag(args, "--apply") || rewriteClioMd;
-	const proposeClioMd = hasFlag(args, "--propose");
-	const useModel = !heuristic && !preview;
+	const useModel = parsed.options.heuristic !== true && parsed.options.preview !== true;
 	try {
 		await runBootstrap({
 			cwd: process.cwd(),
@@ -61,12 +88,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 				stderr: (s) => process.stderr.write(s),
 			},
 			confirmGitignore: () => confirmGitignore(assumeYes),
-			preview,
-			adopt: hasFlag(args, "--adopt"),
-			applyClioMd,
-			rewriteClioMd,
-			proposeClioMd,
-			includeGlobalImports: hasFlag(args, "--global") || hasFlag(args, "--include-global"),
+			...bootstrapOptions,
 			...(useModel
 				? {
 						generate: modelBootstrapGenerate({

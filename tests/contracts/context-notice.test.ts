@@ -56,6 +56,8 @@ describe("contracts/context startup notice", () => {
 				await bundle.extension.stop?.();
 			});
 			strictEqual(visible.includes("No CLIO.md detected"), true);
+			strictEqual(visible.includes("Run /context init to explore the repo and bootstrap context."), true);
+			strictEqual(visible.includes("/context-init"), false);
 		} finally {
 			process.chdir(previousCwd);
 			rmSync(cwd, { recursive: true, force: true });

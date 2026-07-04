@@ -1,5 +1,6 @@
 import {
 	BusChannels,
+	type ContextActivityStatus,
 	type ContextPrunedPayload,
 	type ContextWarningPayload,
 	type RunAbortSource,
@@ -1722,6 +1723,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return refreshedEntries;
 	};
 
+	// Compaction rides the context island as a single-phase "compaction"
+	// activity (rendered as "Context Compact"). Each stage brackets its work
+	// with a started/completed pair; a throwing summary emits failed. The
+	// island already knows this kind and phase, and `deps.bus` is optional.
+	const emitCompactionActivity = (status: ContextActivityStatus, message: string): void => {
+		deps.bus?.emit(BusChannels.ContextActivity, {
+			kind: "compaction",
+			phase: "done",
+			status,
+			message,
+			at: Date.now(),
+		});
+	};
+
 	/**
 	 * Two-mechanism context protection. When pressure crosses the single
 	 * threshold, first mask the bodies of tool observations older than
@@ -1764,6 +1779,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (masked.changed) {
 					fireCompactionHook("mask_observations", trigger, estimate.tokens);
 					deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+					emitCompactionActivity("started", "compacting context (mask stage)");
 					deps.session.replaceEntries(masked.entries);
 					refreshAgentMessagesFromSession(agentRuntime);
 					deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
@@ -1796,6 +1812,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						snapshotIdAfter: postMaskSnapshot.snapshotId,
 						at: Date.now(),
 					} satisfies ContextPrunedPayload);
+					emitCompactionActivity("completed", `${masked.maskedObservations} observations masked`);
 					const thinkingNote =
 						masked.maskedThinkingBlocks > 0
 							? `, ${masked.maskedThinkingBlocks} thinking blocks dropped (~${masked.maskedThinkingChars} chars)`
@@ -1812,14 +1829,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		fireCompactionHook("llm_summary", trigger);
 		deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+		emitCompactionActivity("started", "compacting context (summary)");
 		let result: CompactResult | null = null;
 		const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
 		try {
 			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
+		} catch (err) {
+			emitCompactionActivity("failed", "compaction failed");
+			throw err;
 		} finally {
 			deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 		}
-		if (!result || result.summary.length === 0) return false;
+		if (!result || result.summary.length === 0) {
+			emitCompactionActivity("completed", "nothing to compact");
+			return false;
+		}
 
 		refreshAgentMessagesFromSession(agentRuntime);
 
@@ -1847,6 +1871,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			snapshotIdAfter: postCompactSnapshot.snapshotId,
 			at: Date.now(),
 		} satisfies ContextPrunedPayload);
+		emitCompactionActivity("completed", `compacted ~${result.tokensBefore} -> ~${tokensAfter} tokens`);
 
 		emitNotice(
 			renderCompactionSummaryLine({
