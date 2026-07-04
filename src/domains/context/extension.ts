@@ -18,7 +18,7 @@ import {
 	writeCodewiki,
 } from "./codewiki/indexer.js";
 import type { ContextContract, ContextState } from "./contract.js";
-import { computeFingerprint } from "./fingerprint.js";
+import { computeFingerprint, isStale } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
@@ -33,11 +33,13 @@ function persistState(
 	fingerprint: ClioProjectState["fingerprint"],
 	indexedAt: string,
 	prev: ClioProjectState | null,
+	codewikiVersion: number,
 ): void {
 	writeClioState(cwd, {
 		version: 1,
 		projectType: prev?.projectType ?? detectProjectType(cwd),
 		fingerprint,
+		codewikiVersion,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
@@ -58,19 +60,20 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	if (process.env.CLIO_BOOTSTRAP_GENERATE_CHILD === "1") return;
 	const state = readClioState(cwd);
 	if (!state && !existsSync(codewikiPath(cwd))) return;
-	const fingerprint = computeFingerprint(cwd);
 	const codewiki = readCodewiki(cwd);
+	const fingerprint = computeFingerprint(cwd, codewiki);
 	const stale =
 		!state ||
-		state.fingerprint.treeHash !== fingerprint.treeHash ||
+		isStale(state.fingerprint, fingerprint) ||
 		!existsSync(codewikiPath(cwd)) ||
 		!codewiki ||
 		codewikiNeedsBackfill(codewiki);
 	if (!stale) return;
 	const indexedAt = new Date().toISOString();
 	const projectType = state?.projectType ?? detectProjectType(cwd);
-	writeCodewiki(cwd, await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
-	persistState(cwd, fingerprint, indexedAt, state);
+	const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	writeCodewiki(cwd, rebuilt);
+	persistState(cwd, computeFingerprint(cwd, rebuilt), indexedAt, state, rebuilt.version);
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
@@ -171,7 +174,7 @@ export function createContextBundle(
 				const updated = await updateCodewikiPaths(cwd, codewiki, rel);
 				if (updated === codewiki) return; // No indexable file actually changed.
 				writeCodewiki(cwd, updated);
-				persistState(cwd, computeFingerprint(cwd), new Date().toISOString(), readClioState(cwd));
+				persistState(cwd, computeFingerprint(cwd, updated), new Date().toISOString(), readClioState(cwd), updated.version);
 				contextState.invalidate(cwd);
 			})
 			.catch(() => {
@@ -190,17 +193,20 @@ export function createContextBundle(
 			await incrementalQueue;
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
-			const fingerprint = computeFingerprint(lastCwd);
-			const codewiki = readCodewiki(lastCwd);
+			let codewiki = readCodewiki(lastCwd);
+			let fingerprint = computeFingerprint(lastCwd, codewiki);
 			let lastIndexedAt = state?.lastIndexedAt;
-			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !codewiki || codewikiNeedsBackfill(codewiki)) {
+			if (!state || isStale(state.fingerprint, fingerprint) || !codewiki || codewikiNeedsBackfill(codewiki)) {
 				lastIndexedAt = new Date().toISOString();
-				writeCodewiki(lastCwd, await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }));
+				codewiki = await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt });
+				writeCodewiki(lastCwd, codewiki);
+				fingerprint = computeFingerprint(lastCwd, codewiki);
 			}
 			writeClioState(lastCwd, {
 				version: 1,
 				projectType,
 				fingerprint,
+				...(codewiki ? { codewikiVersion: codewiki.version } : {}),
 				...(state?.contextSources ? { contextSources: state.contextSources } : {}),
 				...(state?.contextSourceHash ? { contextSourceHash: state.contextSourceHash } : {}),
 				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),

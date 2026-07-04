@@ -37,13 +37,14 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	input.onProgress?.({ phase: "codewiki", status: "started", message: "rebuilding codewiki" });
 	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
 	writeCodewiki(cwd, codewiki);
-	const fingerprint = computeFingerprint(cwd);
+	const fingerprint = computeFingerprint(cwd, codewiki);
 
 	input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
 	writeClioState(cwd, {
 		version: 1,
 		projectType,
 		fingerprint,
+		codewikiVersion: codewiki.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),

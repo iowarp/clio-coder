@@ -38,9 +38,11 @@ async function printContextStatus(): Promise<number> {
 	const codewikiCount = codewiki ? context.codewikiEntries(codewiki).length : 0;
 	const codewikiState = !codewiki
 		? "absent"
-		: state && state.fingerprint.treeHash === context.computeFingerprint(cwd).treeHash
+		: state && !context.isStale(state.fingerprint, context.computeFingerprint(cwd, codewiki))
 			? "fresh"
 			: "stale (run clio context refresh)";
+	const codewikiLines = [`codewiki: ${codewikiState} (${codewikiCount} entr${codewikiCount === 1 ? "y" : "ies"})`];
+	if (codewiki) codewikiLines.push(context.renderCodewikiDigest(codewiki));
 
 	const adoptionSources = state?.contextSources ?? [];
 	const adoptionChanged = adoptionSources.length > 0 && context.adoptionSourcesChanged(adoptionSources);
@@ -50,7 +52,7 @@ async function printContextStatus(): Promise<number> {
 		[
 			`CLIO.md: ${clioMdState}`,
 			`preload: ${preloadClass.label}`,
-			`codewiki: ${codewikiState} (${codewikiCount} entr${codewikiCount === 1 ? "y" : "ies"})`,
+			...codewikiLines,
 			`adoption: ${adoptionSources.length} source${adoptionSources.length === 1 ? "" : "s"}, ${adoptionState}`,
 			"",
 		].join("\n"),

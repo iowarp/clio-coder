@@ -7,7 +7,7 @@ import {
 } from "./clio-md.js";
 import { readCodewiki } from "./codewiki/indexer.js";
 import type { ProjectPromptContext } from "./contract.js";
-import { computeFingerprint } from "./fingerprint.js";
+import { computeFingerprint, isStale } from "./fingerprint.js";
 import { readClioState } from "./state.js";
 
 /**
@@ -28,9 +28,10 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		pieces.push(renderProjectContextFragment(clio.value));
 	}
 	if (clio && !clio.ok) warnings.push(`clio: malformed CLIO.md ignored: ${clio.error}`);
-	if (readCodewiki(cwd)) {
+	const codewiki = readCodewiki(cwd);
+	if (codewiki) {
 		const state = readClioState(cwd);
-		const stale = state ? state.fingerprint.treeHash !== computeFingerprint(cwd).treeHash : true;
+		const stale = state ? isStale(state.fingerprint, computeFingerprint(cwd, codewiki)) : true;
 		const suffix = stale ? " (stale; run /context refresh)" : "";
 		pieces.push(`<codewiki>available${suffix}; use code_nav</codewiki>`);
 	}

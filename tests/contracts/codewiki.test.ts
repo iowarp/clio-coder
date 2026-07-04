@@ -9,6 +9,7 @@ import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	buildCodewiki,
 	codewikiNeedsBackfill,
+	readClioState,
 	readCodewiki,
 	renderCodewikiDigest,
 	runContextRefresh,
@@ -512,6 +513,7 @@ describe("contracts/codewiki", () => {
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "rebuilt"));
 		ok(existsSync(join(scratch, ".clio", "codewiki.json")));
 		ok(existsSync(join(scratch, ".clio", "state.json")));
+		strictEqual(readClioState(scratch)?.codewikiVersion, 4);
 	});
 
 	it("backfills degraded upgraded codewiki artifacts on tool demand", async () => {
@@ -560,6 +562,7 @@ describe("contracts/codewiki", () => {
 		await runContextRefresh({ cwd: scratch });
 		const refreshed = readCodewiki(scratch);
 		ok(refreshed);
+		strictEqual(readClioState(scratch)?.codewikiVersion, 4);
 
 		const originalCwd = process.cwd();
 		process.chdir(scratch);
@@ -571,6 +574,7 @@ describe("contracts/codewiki", () => {
 		}
 		const indexed = readCodewiki(scratch);
 		ok(indexed);
+		strictEqual(readClioState(scratch)?.codewikiVersion, 4);
 		deepStrictEqual(indexed, refreshed);
 	});
 

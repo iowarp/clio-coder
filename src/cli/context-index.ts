@@ -58,11 +58,12 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const codewiki = await buildCodewiki({ cwd, language: profile.projectType });
 	writeCodewiki(cwd, codewiki);
 	const prev = readClioState(cwd);
-	const fingerprint = computeFingerprint(cwd);
+	const fingerprint = computeFingerprint(cwd, codewiki);
 	writeClioState(cwd, {
 		version: 1,
 		projectType: profile.projectType,
 		fingerprint,
+		codewikiVersion: codewiki.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),

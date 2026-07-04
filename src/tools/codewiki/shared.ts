@@ -23,7 +23,8 @@ export async function loadCodewikiForTool(
 		writeClioState(cwd, {
 			version: 1,
 			projectType: prev?.projectType ?? projectType,
-			fingerprint: computeFingerprint(cwd),
+			fingerprint: computeFingerprint(cwd, rebuilt),
+			codewikiVersion: rebuilt.version,
 			...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 			...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 			...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
