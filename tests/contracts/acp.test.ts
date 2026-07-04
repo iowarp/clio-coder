@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { Type } from "typebox";
+import {
+	BusChannels,
+	type PermissionRequestedPayload,
+	type PermissionResolvedPayload,
+} from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
@@ -12,9 +20,11 @@ import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { createStdioServerTransport } from "../../src/engine/acp/transport.js";
+import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 interface RpcClient {
 	request<T>(method: string, params?: unknown): Promise<T>;
+	onRequest(method: string, handler: (params: unknown) => unknown | Promise<unknown>): () => void;
 	notifications: unknown[];
 	waitForNotification(predicate: (value: unknown) => boolean): Promise<unknown>;
 	close(): void;
@@ -65,6 +75,7 @@ function createRpcClient(input: PassThrough, output: PassThrough): RpcClient {
 	let nextId = 1;
 	let buffer = "";
 	const pending = new Map<number, { resolve(value: unknown): void; reject(reason: unknown): void }>();
+	const requestHandlers = new Map<string, (params: unknown) => unknown | Promise<unknown>>();
 	const notifications: unknown[] = [];
 	const waiters: Array<{ predicate(value: unknown): boolean; resolve(value: unknown): void }> = [];
 	output.setEncoding("utf8");
@@ -86,6 +97,27 @@ function createRpcClient(input: PassThrough, output: PassThrough): RpcClient {
 				else entry.resolve(message.result);
 				continue;
 			}
+			if ("id" in message && typeof message.method === "string") {
+				const id = Number(message.id);
+				const handler = requestHandlers.get(message.method);
+				if (handler) {
+					Promise.resolve()
+						.then(() => handler(message.params))
+						.then((result) => {
+							input.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
+						})
+						.catch((error) => {
+							input.write(
+								`${JSON.stringify({
+									jsonrpc: "2.0",
+									id,
+									error: { code: -32000, message: error instanceof Error ? error.message : String(error) },
+								})}\n`,
+							);
+						});
+					continue;
+				}
+			}
 			notifications.push(message);
 			for (let index = 0; index < waiters.length; index += 1) {
 				const waiter = waiters[index];
@@ -104,6 +136,12 @@ function createRpcClient(input: PassThrough, output: PassThrough): RpcClient {
 			return new Promise<T>((resolve, reject) => {
 				pending.set(id, { resolve: (value) => resolve(value as T), reject });
 			});
+		},
+		onRequest(method, handler) {
+			requestHandlers.set(method, handler);
+			return () => {
+				requestHandlers.delete(method);
+			};
 		},
 		waitForNotification(predicate: (value: unknown) => boolean): Promise<unknown> {
 			const existing = notifications.find(predicate);
@@ -349,6 +387,128 @@ const safety: SafetyContract = {
 	audit: { recordCount: () => 0 },
 };
 
+const askSafety: SafetyContract = {
+	classify: () => ({ actionClass: "execute", reasons: ["test"] }),
+	evaluate: () => ({
+		kind: "ask",
+		classification: { actionClass: "execute", reasons: ["test"] },
+		rejection: { short: "approval required", detail: "approval required", hints: [] },
+	}),
+	observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+	scopes: {
+		readonly: READONLY_SCOPE,
+		workspace: WORKSPACE_SCOPE,
+		confirmed: CONFIRMED_SCOPE,
+	},
+	isSubset,
+	audit: { recordCount: () => 0 },
+};
+
+function permissionSpec(name: string, baseActionClass: ActionClass): ToolSpec {
+	return {
+		name: name as ToolName,
+		description: "ACP permission bridge test tool",
+		parameters: Type.Object({}),
+		baseActionClass,
+		run: async () => ({ kind: "ok", output: "ran" }),
+	};
+}
+
+function createPermissionRegistry(): ToolRegistry {
+	const registry = createRegistry({ safety: askSafety });
+	registry.register(permissionSpec(ToolNames.Bash, "execute"));
+	return registry;
+}
+
+function createPermissionChat(registry: ToolRegistry): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command: "sudo true" } });
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: verdict.kind === "ok" ? "allowed" : "denied" }],
+				stopReason: "stop",
+				usage: { input: 1, output: 1 },
+			};
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
+async function runAcpPermissionBridge(
+	outcome: "allow" | "reject" | "timeout",
+): Promise<{ requests: PermissionRequestedPayload[]; resolutions: PermissionResolvedPayload[] }> {
+	const clientToServer = new PassThrough();
+	const serverToClient = new PassThrough();
+	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+	const registry = createPermissionRegistry();
+	const bus = createSafeEventBus();
+	const requests: PermissionRequestedPayload[] = [];
+	const resolutions: PermissionResolvedPayload[] = [];
+	bus.on(BusChannels.PermissionRequested, (payload) => {
+		requests.push(payload);
+	});
+	bus.on(BusChannels.PermissionResolved, (payload) => {
+		resolutions.push(payload);
+	});
+	registry.onPermissionRequired((call, decision, meta) => {
+		bus.emit(BusChannels.PermissionRequested, {
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+			requestId: meta.requestId,
+			origin: "acp-server",
+			axis: meta.axis,
+			...(decision.kind === "ask" ? { rejection: decision.rejection } : {}),
+		});
+	});
+	const chat = createPermissionChat(registry);
+	const server = serveClioAcpAgent({
+		transport,
+		chat,
+		toolRegistry: registry,
+		bus,
+		cwd: process.cwd(),
+		version: "test",
+		permissionTimeoutMs: outcome === "timeout" ? 20 : 1000,
+	});
+	const client = createRpcClient(clientToServer, serverToClient);
+	if (outcome !== "timeout") {
+		client.onRequest("session/request_permission", () => ({
+			outcome: {
+				outcome: "selected",
+				optionId: outcome === "allow" ? "allow-once" : "reject-once",
+			},
+		}));
+	}
+	await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
+	const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+	await client.request("session/prompt", {
+		sessionId: session.sessionId,
+		prompt: [{ type: "text", text: "need permission" }],
+	});
+	await client.request("session/close", { sessionId: session.sessionId });
+	client.close();
+	await server;
+	return { requests, resolutions };
+}
+
 describe("contracts/acp", () => {
 	it("maps agent thought chunks from ACP agents that use the OpenCode update name", () => {
 		const mapper = new AcpEventMapper();
@@ -523,6 +683,38 @@ rl.on("line", (line) => {
 		ok(updates.some((u) => u.sessionUpdate === "tool_call"));
 		ok(updates.some((u) => u.sessionUpdate === "tool_call_update"));
 		strictEqual(code, 0);
+	});
+
+	it("ACP server permission allow resolves the parked request with acp-client identity", async () => {
+		const { requests, resolutions } = await runAcpPermissionBridge("allow");
+
+		strictEqual(requests.length, 1);
+		strictEqual(resolutions.length, 1);
+		strictEqual(requests[0]?.origin, "acp-server");
+		strictEqual(resolutions[0]?.origin, "acp-server");
+		strictEqual(resolutions[0]?.status, "granted");
+		strictEqual(resolutions[0]?.decidedBy, "acp-client");
+		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
+	});
+
+	it("ACP server permission reject resolves the parked request with acp-client identity", async () => {
+		const { requests, resolutions } = await runAcpPermissionBridge("reject");
+
+		strictEqual(requests.length, 1);
+		strictEqual(resolutions.length, 1);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "acp-client");
+		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
+	});
+
+	it("ACP server permission timeout resolves the parked request with timeout identity", async () => {
+		const { requests, resolutions } = await runAcpPermissionBridge("timeout");
+
+		strictEqual(requests.length, 1);
+		strictEqual(resolutions.length, 1);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "timeout");
+		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
 	});
 
 	it("only emits ACP v1 session/update variants and conformant tool calls", async () => {

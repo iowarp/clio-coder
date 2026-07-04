@@ -1918,6 +1918,9 @@ export function createDispatchBundle(
 							reasonCode?: string;
 							policySource?: string;
 							reason?: string;
+							requestId?: string;
+							mode?: "deny" | "fail" | "escalate";
+							source?: "operator" | "timeout" | "policy";
 						};
 					};
 					if (isRecord(event)) {
@@ -1946,11 +1949,28 @@ export function createDispatchBundle(
 						}
 					}
 					if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+						const requestId =
+							typeof event.payload.requestId === "string" ? event.payload.requestId : `delegation-permission-${Date.now()}`;
+						const origin = runIdForPermissionAudit !== null ? `delegation:${runIdForPermissionAudit}` : "delegation:unknown";
+						const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
+						const reason =
+							typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
+						context.bus.emit(BusChannels.PermissionRequested, {
+							tool: event.payload.tool,
+							actionClass,
+							requestId,
+							origin,
+							requestedBy: runIdForPermissionAudit ?? undefined,
+							rejection: { short: reason, detail: reason, hints: [] },
+						});
 						context.bus.emit(BusChannels.PermissionResolved, {
 							status: "denied",
 							tool: event.payload.tool,
-							...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
-							...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
+							requestId,
+							origin,
+							decidedBy: "policy:no-operator",
+							actionClass,
+							reason,
 							...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
 						});
 					}
@@ -2454,6 +2474,7 @@ export function createDispatchBundle(
 		let failureMessage: string | undefined;
 		let runIdForPermissionAudit: string | null = null;
 		let drainStarted = false;
+		let workerPolicyPermissionCounter = 0;
 		let settleEventDrain!: () => void;
 		const eventsDrained = new Promise<void>((resolve) => {
 			settleEventDrain = resolve;
@@ -2519,6 +2540,7 @@ export function createDispatchBundle(
 							actionClass,
 							requestedBy: runIdForPermissionAudit ?? undefined,
 							requestId: event.payload.requestId,
+							...(runIdForPermissionAudit !== null ? { origin: `worker:${runIdForPermissionAudit}` } : {}),
 							agentId: req.agentId,
 							...(typeof event.payload.summary === "string" ? { summary: event.payload.summary } : {}),
 							...(typeof event.payload.timeoutMs === "number" ? { timeoutMs: event.payload.timeoutMs } : {}),
@@ -2543,10 +2565,31 @@ export function createDispatchBundle(
 						}
 					}
 					if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
-						// Escalation resolutions carry a source (operator/timeout); the
-						// existing deny/fail policy path carries none and is unchanged.
+						// Escalation resolutions already have a request event. Policy
+						// deny/fail is non-stalling, so dispatch mints the adjacent pair.
 						const source = event.payload.source;
 						const granted = source === "operator" && event.payload.decision === "approved";
+						const decidedBy = source === "operator" ? "operator" : source === "timeout" ? "timeout" : "policy:no-operator";
+						const requestId =
+							typeof event.payload.requestId === "string"
+								? event.payload.requestId
+								: source === "operator" || source === "timeout"
+									? undefined
+									: `worker-permission-${++workerPolicyPermissionCounter}`;
+						const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
+						const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
+						const reason =
+							typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
+						if (decidedBy === "policy:no-operator" && requestId && origin) {
+							context.bus.emit(BusChannels.PermissionRequested, {
+								tool: event.payload.tool,
+								actionClass,
+								requestId,
+								origin,
+								requestedBy: runIdForPermissionAudit ?? undefined,
+								rejection: { short: reason, detail: reason, hints: [] },
+							});
+						}
 						if (source === "operator") {
 							if (granted) escalationCounts.approved += 1;
 							else escalationCounts.denied += 1;
@@ -2556,8 +2599,11 @@ export function createDispatchBundle(
 						context.bus.emit(BusChannels.PermissionResolved, {
 							status: granted ? "granted" : "denied",
 							tool: event.payload.tool,
-							...(typeof event.payload.actionClass === "string" ? { actionClass: event.payload.actionClass } : {}),
-							...(typeof event.payload.reason === "string" ? { reason: event.payload.reason } : {}),
+							...(requestId !== undefined ? { requestId } : {}),
+							...(origin !== undefined ? { origin } : {}),
+							decidedBy,
+							actionClass,
+							reason,
 							...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
 						});
 					}

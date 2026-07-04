@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
+import { BusChannels } from "../../core/bus-events.js";
+import type { SafeEventBus } from "../../core/event-bus.js";
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { ToolRegistry } from "../../tools/registry.js";
+import { AcpTimeoutError } from "./errors.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
 import type {
 	AcpContentBlock,
@@ -31,6 +34,7 @@ export interface ClioAcpServerOptions {
 	chat: AcpServerChat;
 	session?: SessionContract;
 	toolRegistry?: ToolRegistry;
+	bus?: SafeEventBus;
 	cwd?: string;
 	version?: string;
 	permissionTimeoutMs?: number;
@@ -371,16 +375,33 @@ function rawToolInput(call: { tool: string; args?: Record<string, unknown> }): R
 function installPermissionBridge(input: {
 	transport: AcpJsonRpcPeerTransport;
 	toolRegistry: ToolRegistry | undefined;
+	bus?: SafeEventBus;
 	activeSessionId: () => string | null;
 	permissionTimeoutMs: number;
 }): () => void {
 	if (!input.toolRegistry) return () => {};
 	let sequence = 0;
 	let chain = Promise.resolve();
-	return input.toolRegistry.onPermissionRequired((call, decision) => {
+	return input.toolRegistry.onPermissionRequired((call, decision, meta) => {
+		const emitResolution = (payload: { status: "granted" | "denied"; decidedBy: string; reason?: string }): void => {
+			input.bus?.emit(BusChannels.PermissionResolved, {
+				status: payload.status,
+				requestId: meta.requestId,
+				origin: "acp-server",
+				decidedBy: payload.decidedBy,
+				tool: call.tool,
+				actionClass: decision.classification.actionClass,
+				...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+			});
+		};
 		const run = async (): Promise<void> => {
 			const sessionId = input.activeSessionId();
 			if (!sessionId) {
+				emitResolution({
+					status: "denied",
+					decidedBy: "error",
+					reason: "ACP permission requested with no active session",
+				});
 				input.toolRegistry?.cancelParkedCalls("ACP permission requested with no active session");
 				return;
 			}
@@ -406,17 +427,27 @@ function installPermissionBridge(input: {
 					input.permissionTimeoutMs,
 				);
 				if (response.outcome.outcome === "selected" && response.outcome.optionId.startsWith("allow")) {
+					emitResolution({ status: "granted", decidedBy: "acp-client" });
 					await input.toolRegistry?.resumeParkedCalls({
 						actionClass: decision.classification.actionClass,
 						requestedBy: "acp-client",
 					});
 					return;
 				}
+				emitResolution({
+					status: "denied",
+					decidedBy: "acp-client",
+					reason: "ACP client denied this tool call",
+				});
 				input.toolRegistry?.cancelParkedCalls("ACP client denied this tool call");
 			} catch (err) {
-				input.toolRegistry?.cancelParkedCalls(
-					`ACP permission request failed: ${err instanceof Error ? err.message : String(err)}`,
-				);
+				const message = `ACP permission request failed: ${err instanceof Error ? err.message : String(err)}`;
+				emitResolution({
+					status: "denied",
+					decidedBy: err instanceof AcpTimeoutError ? "timeout" : "error",
+					reason: message,
+				});
+				input.toolRegistry?.cancelParkedCalls(message);
 			}
 		};
 		chain = chain.then(run, run);
@@ -432,6 +463,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	const unregisterPermission = installPermissionBridge({
 		transport: options.transport,
 		toolRegistry: options.toolRegistry,
+		...(options.bus ? { bus: options.bus } : {}),
 		activeSessionId: () => activeSessionId,
 		permissionTimeoutMs,
 	});

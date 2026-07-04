@@ -41,6 +41,7 @@ export interface ToolCallAuditRecord {
 	kind: "tool_call";
 	ts: string;
 	correlationId: string;
+	requestId?: string;
 	tool: string;
 	actionClass: string;
 	decision: ToolCallAuditDecision;
@@ -61,6 +62,7 @@ export interface ToolCallAuditInput {
 	tool: string;
 	classification: { actionClass: string; reasons: ReadonlyArray<string> };
 	decision: ToolCallAuditDecision;
+	requestId?: string;
 	posture?: string;
 	args?: unknown;
 	policy?: SafetyPolicyDecision;
@@ -80,6 +82,9 @@ export interface PermissionAuditRecord {
 	ts: string;
 	correlationId: string;
 	status: "requested" | "granted" | "denied";
+	requestId?: string;
+	origin?: string;
+	decidedBy?: string;
 	tool?: string;
 	actionClass?: string;
 	reason?: string;
@@ -232,6 +237,7 @@ export function buildAuditRecord(input: ToolCallAuditInput): ToolCallAuditRecord
 		decision: input.decision,
 		reasons: input.reasons ?? input.policy?.reasons ?? input.classification.reasons,
 	};
+	if (input.requestId !== undefined) record.requestId = input.requestId;
 	if (input.posture !== undefined) record.posture = input.posture;
 	if (input.policy?.ruleId !== undefined) record.ruleId = input.policy.ruleId;
 	const reasonCode = input.reasonCode ?? input.policy?.reasonCode;
@@ -298,6 +304,9 @@ export function buildSessionResumeAuditRecord(input: {
 
 export function buildPermissionAuditRecord(input: {
 	status: PermissionAuditRecord["status"];
+	requestId?: string;
+	origin?: string;
+	decidedBy?: string;
 	tool?: string;
 	actionClass?: string;
 	reason?: string;
@@ -312,6 +321,9 @@ export function buildPermissionAuditRecord(input: {
 		status: input.status,
 	};
 	if (input.tool !== undefined) record.tool = input.tool;
+	if (input.requestId !== undefined) record.requestId = input.requestId;
+	if (input.origin !== undefined) record.origin = input.origin;
+	if (input.decidedBy !== undefined) record.decidedBy = input.decidedBy;
 	if (input.actionClass !== undefined) record.actionClass = input.actionClass;
 	if (input.reason !== undefined) record.reason = input.reason;
 	if (input.requestedBy !== undefined) record.requestedBy = input.requestedBy;

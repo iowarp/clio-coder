@@ -2469,6 +2469,7 @@ rl.once("line", () => {
 				| {
 						requestedBy?: string;
 						requestId?: string;
+						origin?: string;
 						tool?: string;
 						actionClass?: string;
 						summary?: string;
@@ -2477,6 +2478,7 @@ rl.once("line", () => {
 				| undefined;
 			strictEqual(request?.requestedBy, handle.runId);
 			strictEqual(request?.requestId, "perm-run-1");
+			strictEqual(request?.origin, `worker:${handle.runId}`);
 			strictEqual(request?.tool, "bash");
 			strictEqual(request?.actionClass, "execute");
 			strictEqual(request?.summary, "bash: printf worker-ok");
@@ -2582,6 +2584,98 @@ rl.once("line", () => {
 		}
 	});
 
+	it("ACP delegation clio-policy asks publish adjacent policy request and resolution", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) {
+			configContract.get().delegation.agents = [
+				{
+					id: "opencode",
+					command: "opencode",
+					args: ["acp"],
+					connectTimeoutMs: 5,
+					turnTimeoutMs: 10,
+					permissionTimeoutMs: 15,
+					toolGovernance: "clio-policy",
+				},
+			];
+		}
+		const requests: unknown[] = [];
+		const resolutions: unknown[] = [];
+		const unsubscribeRequested = context.bus.on(BusChannels.PermissionRequested, (payload) => {
+			requests.push(payload);
+		});
+		const unsubscribeResolved = context.bus.on(BusChannels.PermissionResolved, (payload) => {
+			resolutions.push(payload);
+		});
+		const acpExit = deferred<Awaited<AcpDelegationRunHandle["promise"]>>();
+		const acpResult: Awaited<AcpDelegationRunHandle["promise"]> = {
+			messages: [],
+			exitCode: 0,
+			stopReason: "end_turn",
+			usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+			delegation: {
+				acpSessionId: "sess-perm",
+				initialize: null,
+				toolCallsRequested: 1,
+				toolCallsApproved: 0,
+				toolCallsDenied: 1,
+			},
+		};
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => ({
+				pid: 4245,
+				heartbeatAt: { current: Date.now() },
+				abort: () => {},
+				kill: () => {},
+				toolCallLog: () => [],
+				events: (async function* () {
+					yield {
+						type: "clio_permission_resolved",
+						payload: {
+							requestId: "call-ask",
+							tool: "bash",
+							actionClass: "system_modify",
+							mode: "deny",
+							source: "policy",
+							reason: "permission_required: denied by non-stall policy",
+						},
+					};
+				})() as AcpDelegationRunHandle["events"],
+				promise: acpExit.promise,
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "opencode",
+				delegationAgentId: "opencode",
+				task: "delegate permission ask",
+			});
+			await drainEvents(handle.events);
+			acpExit.resolve(acpResult);
+			await handle.finalPromise;
+
+			const request = requests[0] as { requestId?: string; origin?: string; requestedBy?: string } | undefined;
+			const resolution = resolutions[0] as
+				| { requestId?: string; origin?: string; requestedBy?: string; decidedBy?: string; status?: string }
+				| undefined;
+			strictEqual(request?.requestId, "call-ask");
+			strictEqual(request?.origin, `delegation:${handle.runId}`);
+			strictEqual(request?.requestedBy, handle.runId);
+			strictEqual(resolution?.requestId, request?.requestId);
+			strictEqual(resolution?.origin, request?.origin);
+			strictEqual(resolution?.requestedBy, handle.runId);
+			strictEqual(resolution?.decidedBy, "policy:no-operator");
+			strictEqual(resolution?.status, "denied");
+		} finally {
+			unsubscribeRequested();
+			unsubscribeResolved();
+			acpExit.resolve(acpResult);
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("increments receipt counters for requested, approved, denied, and timed-out escalations", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
@@ -2668,7 +2762,11 @@ rl.once("line", () => {
 		const context = stubContext();
 		const configContract = context.getContract<ConfigContract>("config");
 		if (configContract) configContract.get().workers.onPermission = "deny";
+		const permissionRequests: unknown[] = [];
 		const permissionEvents: unknown[] = [];
+		const unsubscribeRequests = context.bus.on(BusChannels.PermissionRequested, (payload) => {
+			permissionRequests.push(payload);
+		});
 		const unsubscribe = context.bus.on(BusChannels.PermissionResolved, (payload) => {
 			permissionEvents.push(payload);
 		});
@@ -2685,7 +2783,14 @@ rl.once("line", () => {
 					events: (async function* () {
 						yield {
 							type: "clio_permission_resolved",
-							payload: { tool: "bash", actionClass: "system_modify", mode: "deny", reason: "permission denied" },
+							payload: {
+								tool: "bash",
+								actionClass: "system_modify",
+								mode: "deny",
+								source: "policy",
+								requestId: "worker-perm-1",
+								reason: "permission denied",
+							},
 						};
 						yield {
 							type: "clio_tool_finish",
@@ -2713,8 +2818,19 @@ rl.once("line", () => {
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.safety?.decisions.permissionRequested, 1);
 			strictEqual(receipt.safety?.blockedAttempts[0]?.actionClass, "system_modify");
-			strictEqual((permissionEvents[0] as { requestedBy?: string } | undefined)?.requestedBy, handle.runId);
+			const request = permissionRequests[0] as { requestId?: string; origin?: string; requestedBy?: string } | undefined;
+			const resolution = permissionEvents[0] as
+				| { requestId?: string; origin?: string; requestedBy?: string; decidedBy?: string }
+				| undefined;
+			strictEqual(request?.requestId, "worker-perm-1");
+			strictEqual(request?.origin, `worker:${handle.runId}`);
+			strictEqual(request?.requestedBy, handle.runId);
+			strictEqual(resolution?.requestId, request?.requestId);
+			strictEqual(resolution?.origin, request?.origin);
+			strictEqual(resolution?.requestedBy, handle.runId);
+			strictEqual(resolution?.decidedBy, "policy:no-operator");
 		} finally {
+			unsubscribeRequests();
 			unsubscribe();
 			await bundle.extension.stop?.();
 		}

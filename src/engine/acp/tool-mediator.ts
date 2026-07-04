@@ -25,6 +25,16 @@ interface MediatorInput {
 	 * because a delegation has no operator to answer a prompt.
 	 */
 	autonomy?: AutonomyLevel;
+	onPermissionResolved?(event: AcpMediatorPermissionResolvedEvent): void;
+}
+
+export interface AcpMediatorPermissionResolvedEvent {
+	requestId: string;
+	tool: string;
+	actionClass: string;
+	mode: "deny";
+	source: "policy";
+	reason: string;
 }
 
 interface MappedToolCall {
@@ -220,8 +230,9 @@ export class AcpToolMediator {
 		if (decision === "approved") this.approved += 1;
 		else this.denied += 1;
 		const loggedSafety = logSafety(safetyDecision);
+		const callId = toolCall?.toolCallId ?? `permission-${this.requested}`;
 		this.log.push({
-			callId: toolCall?.toolCallId ?? `permission-${this.requested}`,
+			callId,
 			tool: mapped.tool,
 			arguments: rawArguments(toolCall, mapped.args),
 			decision,
@@ -230,6 +241,16 @@ export class AcpToolMediator {
 			durationMs: Math.max(0, Date.now() - startedAt),
 			timestamp: new Date().toISOString(),
 		});
+		if (decision === "denied" && reason?.startsWith("permission_required:")) {
+			this.input.onPermissionResolved?.({
+				requestId: callId,
+				tool: mapped.tool,
+				actionClass: safetyDecision?.classification.actionClass ?? "unknown",
+				mode: "deny",
+				source: "policy",
+				reason,
+			});
+		}
 		return responseFor(decision, options);
 	}
 

@@ -35,6 +35,9 @@ function isPermissionResolvedPayload(value: unknown): value is PermissionResolve
 	if (p.actionClass !== undefined && typeof p.actionClass !== "string") return false;
 	if (p.reason !== undefined && typeof p.reason !== "string") return false;
 	if (p.requestedBy !== undefined && typeof p.requestedBy !== "string") return false;
+	if (p.requestId !== undefined && typeof p.requestId !== "string") return false;
+	if (p.origin !== undefined && typeof p.origin !== "string") return false;
+	if (p.decidedBy !== undefined && typeof p.decidedBy !== "string") return false;
 	return true;
 }
 
@@ -117,6 +120,9 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				writeAudit(
 					buildPermissionAuditRecord({
 						status: payload.status,
+						...(payload.requestId !== undefined ? { requestId: payload.requestId } : {}),
+						...(payload.origin !== undefined ? { origin: payload.origin } : {}),
+						...(payload.decidedBy !== undefined ? { decidedBy: payload.decidedBy } : {}),
 						...(payload.tool !== undefined ? { tool: payload.tool } : {}),
 						...(payload.actionClass !== undefined ? { actionClass: payload.actionClass } : {}),
 						...(payload.reason !== undefined ? { reason: payload.reason } : {}),
@@ -266,21 +272,12 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				const auditInput: Parameters<typeof buildAuditRecord>[0] = {
 					tool: call.tool,
 					classification,
-					decision: "permission_requested",
+					decision: "classified",
 					args: call.args,
 					policy,
 				};
 				if (posture !== undefined) auditInput.posture = posture;
 				recordToolCallAudit(auditInput);
-				context.bus.emit(BusChannels.PermissionRequested, {
-					tool: call.tool,
-					actionClass: classification.actionClass,
-					ruleId: policy.ruleId,
-					posture,
-					rejection: policy.rejection,
-					policySource: policy.policySource,
-					reasonCode: policy.reasonCode,
-				});
 				const decision: SafetyDecision = {
 					kind: "ask",
 					classification,

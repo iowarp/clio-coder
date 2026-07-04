@@ -159,17 +159,21 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	let sessionId: string | null = null;
 	let initialized: AcpInitializeResponse | null = null;
 	let aborted = false;
+	const emit = (event: AcpRunEvent): void => {
+		heartbeatAt.current = Date.now();
+		queue.push(event);
+	};
 	const mediator = new AcpToolMediator({
 		safety: input.safety,
 		cwd: input.cwd,
 		toolGovernance: input.agent.toolGovernance ?? "clio-policy",
 		...(input.autonomy !== undefined ? { autonomy: input.autonomy } : {}),
+		onPermissionResolved: (event) =>
+			emit({
+				type: "clio_permission_resolved",
+				payload: event,
+			} as ClioWorkerEvent),
 	});
-
-	const emit = (event: AcpRunEvent): void => {
-		heartbeatAt.current = Date.now();
-		queue.push(event);
-	};
 
 	const unregisters = [
 		transport.onNotification("session/update", (params) => {
