@@ -94,4 +94,36 @@ describe("context activity island", () => {
 		strictEqual(store.current(2001)?.kind, "context-refresh");
 		store.unsubscribe();
 	});
+
+	it("starts a new elapsed timer for non-scan activity starts after a retained terminal event", () => {
+		const bus = createSafeEventBus();
+		const store = createContextActivityStore(bus);
+		bus.emit(BusChannels.ContextActivity, {
+			kind: "context-init",
+			phase: "scan",
+			status: "started",
+			message: "scanning",
+			at: 1000,
+		});
+		bus.emit(BusChannels.ContextActivity, {
+			kind: "context-init",
+			phase: "done",
+			status: "completed",
+			message: "done",
+			at: 2000,
+		});
+		bus.emit(BusChannels.ContextActivity, {
+			kind: "context-refresh",
+			phase: "codewiki",
+			status: "started",
+			message: "rebuilding codewiki",
+			at: 2500,
+		});
+
+		const current = store.current(2600);
+		ok(current);
+		strictEqual(current.kind, "context-refresh");
+		strictEqual(current.startedAtMs, 2500);
+		store.unsubscribe();
+	});
 });

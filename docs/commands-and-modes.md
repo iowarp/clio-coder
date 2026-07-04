@@ -128,8 +128,8 @@ The registry table below lists the available interactive slash commands. The "Al
 `/context` with no arguments opens the context-window ledger overlay. The
 subcommands own the durable project-context noun: `compact` summarizes older
 turns in the session window, `init` bootstraps or updates `CLIO.md` and the
-codewiki, `refresh` re-indexes the codewiki and restamps the `CLIO.md`
-fingerprint footer without touching prose, and `reset` deletes accumulated
+codewiki, `refresh` re-indexes the codewiki and refreshes `.clio/state.json`
+without touching `CLIO.md`, and `reset` deletes accumulated
 context artifacts (`.clio/codewiki.json`, `.clio/state.json`,
 `.clio/handoffs/`, `.clio/proposals/`), preserving `CLIO.md` unless `--all`
 plus `--confirm-all` is given. Session reset stays `/new`; there is

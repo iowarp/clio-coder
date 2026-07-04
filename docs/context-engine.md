@@ -74,7 +74,7 @@ The compiled session prompt preloads the full rendered project context (the `CLI
 
 ## Context refresh
 
-`/context refresh` (and `clio context refresh`) is the cheap staleness fix: it rebuilds the codewiki index, updates `.clio/state.json`, and restamps the `CLIO.md` fingerprint footer (gitHead/treeHash/loc) without modifying any prose outside the footer comment. The stale codewiki marker in the compiled prompt points at it. Regenerating or updating the handbook prose stays with `/context init`.
+`/context refresh` (and `clio context refresh`) is the cheap staleness fix: it rebuilds the codewiki index and updates `.clio/state.json` without reading or writing `CLIO.md`. The stale codewiki marker in the compiled prompt points at it. Regenerating or updating the handbook prose stays with `/context init`.
 
 ---
 

@@ -248,7 +248,7 @@ export interface InteractiveDeps {
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context reset for the current working directory. */
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
-	/** Run /context refresh: re-index codewiki and restamp the CLIO.md fingerprint footer. */
+	/** Run /context refresh: re-index codewiki and refresh .clio state without touching CLIO.md. */
 	onContextRefresh?: () => Promise<void>;
 	/** Advance the orchestrator target one step forward through `provider.scope`. */
 	onCycleScopedModelForward?: () => void;
@@ -986,11 +986,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	};
 	const dismissContextBootstrapNotices = (): void => {
 		for (const notice of notifications.list()) {
-			if (
-				/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|CLIO\.md has no fingerprint footer|CLIO\.md fingerprint differs|Imported agent context changed)/.test(
-					notice.text,
-				)
-			) {
+			if (/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|Imported agent context changed)/.test(notice.text)) {
 				notifications.dismiss(notice.id);
 			}
 		}
