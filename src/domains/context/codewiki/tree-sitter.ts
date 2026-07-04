@@ -36,6 +36,24 @@ const NAME_NODE_TYPES = new Set([
 	"constant_identifier",
 ]);
 
+const FUNCTION_LIKE_NODE_TYPES = new Set([
+	"function_declaration",
+	"function_expression",
+	"generator_function",
+	"generator_function_declaration",
+	"generator_function_expression",
+	"arrow_function",
+	"method_definition",
+	"function_definition",
+	"lambda",
+	"lambda_expression",
+	"method",
+	"singleton_method",
+	"do_block",
+	"method_declaration",
+	"constructor_declaration",
+]);
+
 let parserInit: Promise<void> | null = null;
 
 function ensureParserInit(): Promise<void> {
@@ -95,6 +113,15 @@ function hasAncestor(node: SyntaxNode, type: string): boolean {
 	return false;
 }
 
+function hasFunctionLikeAncestor(node: SyntaxNode): boolean {
+	let current = node.parent;
+	while (current) {
+		if (FUNCTION_LIKE_NODE_TYPES.has(current.type)) return true;
+		current = current.parent;
+	}
+	return false;
+}
+
 function addSymbol(
 	target: ExtractedSymbol[],
 	node: SyntaxNode,
@@ -121,6 +148,7 @@ function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
 	for (const node of descendants(root, ["type_alias_declaration", "enum_declaration"])) addSymbol(symbols, node, "type");
 	for (const node of descendants(root, "method_definition")) addSymbol(symbols, node, "method");
 	for (const node of descendants(root, "variable_declarator")) {
+		if (hasFunctionLikeAncestor(node)) continue;
 		const parentText = node.parent?.text ?? "";
 		addSymbol(symbols, node, parentText.trimStart().startsWith("const") ? "const" : "var");
 	}
@@ -134,6 +162,7 @@ function extractPython(root: SyntaxNode): ExtractedSymbol[] {
 	}
 	for (const node of descendants(root, "class_definition")) addSymbol(symbols, node, "class");
 	for (const node of descendants(root, "assignment")) {
+		if (hasFunctionLikeAncestor(node)) continue;
 		const left = node.childForFieldName("left") ?? node.namedChild(0);
 		if (!left) continue;
 		const name = firstNamedDescendant(left)?.text;
@@ -192,6 +221,7 @@ function extractRuby(root: SyntaxNode): ExtractedSymbol[] {
 	for (const node of descendants(root, "class")) addSymbol(symbols, node, "class");
 	for (const node of descendants(root, "module")) addSymbol(symbols, node, "type");
 	for (const node of descendants(root, "assignment")) {
+		if (hasFunctionLikeAncestor(node)) continue;
 		const name = nameFromNode(node);
 		if (name) addSymbol(symbols, node, /^[A-Z]/.test(name) ? "const" : "var", name);
 	}

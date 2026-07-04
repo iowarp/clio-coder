@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -13,6 +13,16 @@ import {
 	writeCodewiki,
 } from "../../src/domains/context/index.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
+
+type BuiltCodewiki = ReturnType<typeof buildCodewiki>;
+
+function hasSymbol(codewiki: BuiltCodewiki, path: string, name: string, kind?: string): boolean {
+	const file = codewiki.files.find((item) => item.path === path);
+	if (!file) return false;
+	return codewiki.symbols.some(
+		(symbol) => symbol.fileId === file.id && symbol.name === name && (!kind || symbol.kind === kind),
+	);
+}
 
 describe("contracts/codewiki", () => {
 	let scratch: string;
@@ -44,6 +54,10 @@ describe("contracts/codewiki", () => {
 
 		const codewiki = buildCodewiki({ cwd: scratch, language: "typescript", generatedAt: "2026-05-01T00:00:00.000Z" });
 		writeCodewiki(scratch, codewiki);
+		const serialized = readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8");
+		strictEqual(serialized.includes("\n  "), false);
+		strictEqual(serialized.endsWith("\n"), true);
+		deepStrictEqual(JSON.parse(serialized), codewiki);
 		const read = readCodewiki(scratch);
 		ok(read);
 		strictEqual(read.version, 3);
@@ -164,6 +178,91 @@ describe("contracts/codewiki", () => {
 			false,
 		);
 		ok(wasm.symbols.some((symbol) => symbol.name === "stream" && symbol.kind === "func"));
+	});
+
+	it("indexes TS declarations but skips local variables and control-flow junk in both extraction tiers", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(
+			join(scratch, "src", "declarations.ts"),
+			[
+				" export const exportedValue = 1;",
+				"const topLevelValue = 2;",
+				"let topLevelCount = 3;",
+				"",
+				"export function compute(input: number) {",
+				"  const localConst = input + topLevelValue;",
+				"  let localLet = localConst + topLevelCount;",
+				"  if (localLet > 0) {",
+				"    return localLet;",
+				"  }",
+				"  return 0;",
+				"}",
+				"",
+				"export class Widget {",
+				"  render() {",
+				"    return compute(1);",
+				"  }",
+				"",
+				"  static build() {",
+				"    return new Widget();",
+				"  }",
+				"}",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const regex = buildCodewiki({ cwd: scratch, language: "typescript" });
+		const wasm = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "typescript" });
+
+		for (const codewiki of [regex, wasm]) {
+			ok(hasSymbol(codewiki, "src/declarations.ts", "exportedValue", "const"));
+			ok(hasSymbol(codewiki, "src/declarations.ts", "topLevelValue", "const"));
+			ok(hasSymbol(codewiki, "src/declarations.ts", "topLevelCount", "var"));
+			ok(hasSymbol(codewiki, "src/declarations.ts", "compute", "func"));
+			ok(hasSymbol(codewiki, "src/declarations.ts", "Widget", "class"));
+			ok(hasSymbol(codewiki, "src/declarations.ts", "render", "method"));
+			ok(hasSymbol(codewiki, "src/declarations.ts", "build", "method"));
+			strictEqual(hasSymbol(codewiki, "src/declarations.ts", "localConst"), false);
+			strictEqual(hasSymbol(codewiki, "src/declarations.ts", "localLet"), false);
+			strictEqual(hasSymbol(codewiki, "src/declarations.ts", "if", "method"), false);
+		}
+	});
+
+	it("indexes Python module assignments and tree-sitter class attributes but skips function-local assignments", async () => {
+		writeFileSync(
+			join(scratch, "settings.py"),
+			[
+				"MODULE_LIMIT = 3",
+				"module_value = 'ready'",
+				"",
+				"class Settings:",
+				"    class_attr = True",
+				"",
+				"    def load(self):",
+				"        local_attr = False",
+				"        return self.class_attr",
+				"",
+				"def build():",
+				"    local_value = module_value",
+				"    return local_value",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const regex = buildCodewiki({ cwd: scratch, language: "python" });
+		ok(hasSymbol(regex, "settings.py", "MODULE_LIMIT", "const"));
+		ok(hasSymbol(regex, "settings.py", "module_value", "var"));
+		strictEqual(hasSymbol(regex, "settings.py", "local_value"), false);
+		strictEqual(hasSymbol(regex, "settings.py", "local_attr"), false);
+
+		const wasm = await buildCodewikiWithTreeSitter({ cwd: scratch, language: "python" });
+		ok(hasSymbol(wasm, "settings.py", "MODULE_LIMIT", "const"));
+		ok(hasSymbol(wasm, "settings.py", "module_value", "var"));
+		ok(hasSymbol(wasm, "settings.py", "class_attr", "var"));
+		strictEqual(hasSymbol(wasm, "settings.py", "local_value"), false);
+		strictEqual(hasSymbol(wasm, "settings.py", "local_attr"), false);
 	});
 
 	it("records empty source package markers as files with zero symbols", () => {
