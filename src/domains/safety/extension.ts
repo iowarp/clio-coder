@@ -2,6 +2,7 @@ import {
 	type AgentStatusChangedPayload,
 	BusChannels,
 	isRunAbortedPayload,
+	type PermissionRequestedPayload,
 	type PermissionResolvedPayload,
 	type SessionParkedPayload,
 	type SessionResumedPayload,
@@ -38,6 +39,23 @@ function isPermissionResolvedPayload(value: unknown): value is PermissionResolve
 	if (p.requestId !== undefined && typeof p.requestId !== "string") return false;
 	if (p.origin !== undefined && typeof p.origin !== "string") return false;
 	if (p.decidedBy !== undefined && typeof p.decidedBy !== "string") return false;
+	return true;
+}
+
+function isPermissionRequestedPayload(value: unknown): value is PermissionRequestedPayload {
+	if (!value || typeof value !== "object") return false;
+	const p = value as Record<string, unknown>;
+	if (typeof p.tool !== "string" || p.tool.length === 0) return false;
+	if (typeof p.actionClass !== "string" || p.actionClass.length === 0) return false;
+	if (p.origin !== undefined && typeof p.origin !== "string") return false;
+	if (p.requestId !== undefined && typeof p.requestId !== "string") return false;
+	if (p.requestedBy !== undefined && typeof p.requestedBy !== "string") return false;
+	if (p.summary !== undefined && typeof p.summary !== "string") return false;
+	if (p.rejection !== undefined) {
+		const rejection = p.rejection;
+		if (!rejection || typeof rejection !== "object" || Array.isArray(rejection)) return false;
+		if (typeof (rejection as Record<string, unknown>).short !== "string") return false;
+	}
 	return true;
 }
 
@@ -89,6 +107,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	let policyEngine: SafetyPolicyEngine | null = null;
 	let loopState: LoopDetectorState = createLoopState();
 	let recordCount = 0;
+	let unsubscribePermissionRequested: (() => void) | null = null;
 	let unsubscribePermissionResolved: (() => void) | null = null;
 	let unsubscribeRunAborted: (() => void) | null = null;
 	let unsubscribeSessionParked: (() => void) | null = null;
@@ -115,6 +134,23 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		async start() {
 			policyEngine = createSafetyPolicyEngine();
 			writer = openAuditWriter();
+			unsubscribePermissionRequested = context.bus.on(BusChannels.PermissionRequested, (payload) => {
+				if (!isPermissionRequestedPayload(payload)) return;
+				if (payload.origin === undefined || payload.origin === "main") return;
+				if (payload.requestId === undefined) return;
+				const reason = payload.rejection?.short ?? payload.summary;
+				writeAudit(
+					buildPermissionAuditRecord({
+						status: "requested",
+						requestId: payload.requestId,
+						origin: payload.origin,
+						tool: payload.tool,
+						actionClass: payload.actionClass,
+						...(reason !== undefined ? { reason } : {}),
+						...(payload.requestedBy !== undefined ? { requestedBy: payload.requestedBy } : {}),
+					}),
+				);
+			});
 			unsubscribePermissionResolved = context.bus.on(BusChannels.PermissionResolved, (payload) => {
 				if (!isPermissionResolvedPayload(payload)) return;
 				writeAudit(
@@ -203,6 +239,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			unsubscribeDispatchFailed = context.bus.on(BusChannels.DispatchFailed, auditDispatchTerminal);
 		},
 		async stop() {
+			unsubscribePermissionRequested?.();
+			unsubscribePermissionRequested = null;
 			unsubscribePermissionResolved?.();
 			unsubscribePermissionResolved = null;
 			unsubscribeRunAborted?.();

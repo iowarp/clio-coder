@@ -62,6 +62,7 @@ import {
 	middlewareHookFailedSessionNotice,
 	restartRequiredNotice,
 	safetyBlockedNotice,
+	workerEscalationNotice,
 } from "./bus-notices.js";
 import type { ChatLoop } from "./chat-loop.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -125,7 +126,13 @@ import {
 	resolveThinkingLabeler,
 } from "./overlays/thinking-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
-import { createPermissionOverlayBody, PERMISSION_OVERLAY_WIDTH, permissionOverlayTitle } from "./permission-overlay.js";
+import {
+	type ApprovalRequestView,
+	askAxis,
+	createPermissionOverlayBody,
+	PERMISSION_OVERLAY_WIDTH,
+	permissionOverlayTitle,
+} from "./permission-overlay.js";
 import { openProvidersOverlay, type TargetsHubNoticeLevel } from "./providers-overlay.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import {
@@ -1902,7 +1909,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		agentId: string;
 		tool: string;
 		actionClass: string;
-		summary: string;
+		axis: ApprovalRequestView["axis"];
+		reason: string;
 	}> = [];
 	let permissionConfirmJustFired = false;
 	let pendingAskUserCancel: (() => void) | null = null;
@@ -2294,6 +2302,42 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const currentAutonomy = (): string => deps.getSettings?.().autonomy ?? "auto-edit";
 
+	const axisViewFromId = (axisId: string | undefined, fallbackLevel: string): ApprovalRequestView["axis"] | null => {
+		if (axisId?.startsWith("net:")) {
+			const ruleId = axisId.slice("net:".length);
+			return { kind: "net", ruleId: ruleId.length > 0 ? ruleId : "unknown" };
+		}
+		if (axisId?.startsWith("autonomy:")) {
+			const level = axisId.slice("autonomy:".length);
+			return { kind: "autonomy", level: level.length > 0 ? level : fallbackLevel };
+		}
+		return null;
+	};
+
+	const mainApprovalRequestView = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		meta: PermissionRequiredMeta | undefined,
+		autonomy: string,
+	): ApprovalRequestView => {
+		const axisFromMeta = axisViewFromId(meta?.axis, autonomy);
+		const axisFromDecision = askAxis(decision);
+		const axis =
+			axisFromMeta ??
+			(axisFromDecision.kind === "net"
+				? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
+				: { kind: "autonomy" as const, level: autonomy });
+		return {
+			requestId: meta?.requestId ?? "permission-pending",
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+			axis,
+			origin: { kind: "main" },
+			reason:
+				decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
+		};
+	};
+
 	const openPermissionOverlay = (
 		call: ClassifierCall,
 		decision: SafetyDecision,
@@ -2303,12 +2347,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		pendingPermission = { call, decision, ...(meta ? { meta } : {}) };
 		permissionConfirmJustFired = false;
 		overlayState = "permission-confirm";
-		overlayHandle = showClioOverlayFrame(tui, createPermissionOverlayBody(call, decision, currentAutonomy()), {
-			anchor: "center",
-			width: PERMISSION_OVERLAY_WIDTH,
-			title: permissionOverlayTitle(),
-			footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
-		});
+		overlayHandle = showClioOverlayFrame(
+			tui,
+			createPermissionOverlayBody(mainApprovalRequestView(call, decision, meta, currentAutonomy())),
+			{
+				anchor: "center",
+				width: PERMISSION_OVERLAY_WIDTH,
+				title: permissionOverlayTitle(),
+				footerHint: buildHint("commit", [{ key: "Enter", verb: "allow once" }]),
+			},
+		);
 		tui.requestRender();
 	};
 
@@ -2330,24 +2378,24 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		agentId: string;
 		tool: string;
 		actionClass: string;
-		summary: string;
+		axis: ApprovalRequestView["axis"];
+		reason: string;
 	}): void => {
 		if (overlayState !== "closed") return;
-		// Adapt the bus payload into the shapes the shared overlay renders, then
-		// remember the escalation so confirm/deny routes to resolveWorkerPermission.
-		const call: ClassifierCall = { tool: entry.tool, args: {} };
-		const decision = {
-			kind: "ask",
-			classification: { actionClass: entry.actionClass, reasons: [] },
-			rejection: { short: entry.summary, detail: entry.summary, hints: [] },
-		} as unknown as SafetyDecision;
 		pendingWorkerEscalation = { runId: entry.runId, requestId: entry.requestId, agentId: entry.agentId };
-		pendingPermission = { call, decision };
+		pendingPermission = null;
 		permissionConfirmJustFired = false;
 		overlayState = "permission-confirm";
 		overlayHandle = showClioOverlayFrame(
 			tui,
-			createPermissionOverlayBody(call, decision, currentAutonomy(), { agentId: entry.agentId, runId: entry.runId }),
+			createPermissionOverlayBody({
+				requestId: entry.requestId,
+				tool: entry.tool,
+				actionClass: entry.actionClass,
+				axis: entry.axis,
+				origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
+				reason: entry.reason,
+			}),
 			{
 				anchor: "center",
 				width: PERMISSION_OVERLAY_WIDTH,
@@ -2381,10 +2429,17 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			agentId: typeof payload.agentId === "string" ? payload.agentId : "worker",
 			tool: typeof payload.tool === "string" ? payload.tool : "unknown",
 			actionClass: typeof payload.actionClass === "string" ? payload.actionClass : "unknown",
-			summary: typeof payload.summary === "string" ? payload.summary : `${payload.tool ?? "worker"} requires approval`,
+			axis:
+				axisViewFromId(typeof payload.axis === "string" ? payload.axis : undefined, currentAutonomy()) ??
+				(typeof payload.ruleId === "string"
+					? { kind: "net" as const, ruleId: payload.ruleId }
+					: { kind: "autonomy" as const, level: currentAutonomy() }),
+			reason:
+				payload.rejection?.short ??
+				(typeof payload.summary === "string" ? payload.summary : `${payload.tool ?? "worker"} requires approval`),
 		};
-		const notice = `Worker ${entry.agentId} (run ${entry.runId}) asks to run ${entry.tool} (${entry.actionClass}).`;
-		appendNotice("warn", notice, busNoticeSink);
+		const notice = workerEscalationNotice(payload);
+		if (notice !== null) appendNotice(notice.level, notice.text, busNoticeSink);
 		workerEscalationQueue.push(entry);
 		maybeOpenWorkerEscalation();
 	});

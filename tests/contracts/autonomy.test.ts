@@ -20,8 +20,16 @@ import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
-import { approvalParkedNotice, autonomyDeniedNotice } from "../../src/interactive/bus-notices.js";
-import { askAxis, createPermissionOverlayBody } from "../../src/interactive/permission-overlay.js";
+import {
+	approvalParkedNotice,
+	autonomyDeniedNotice,
+	workerEscalationNotice,
+} from "../../src/interactive/bus-notices.js";
+import {
+	type ApprovalRequestView,
+	askAxis,
+	createPermissionOverlayBody,
+} from "../../src/interactive/permission-overlay.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 function mockSpec(name: string, baseActionClass: ActionClass): ToolSpec {
@@ -58,6 +66,24 @@ const writeCall = (filePath: string) => ({ tool: ToolNames.Write, args: { file_p
 
 async function settle(): Promise<void> {
 	await Promise.resolve();
+}
+
+function approvalViewForDecision(
+	tool: string,
+	decision: SafetyDecision,
+	autonomy: string,
+	requestId = "perm-test",
+): ApprovalRequestView {
+	const axis = askAxis(decision);
+	return {
+		requestId,
+		tool,
+		actionClass: decision.classification.actionClass,
+		axis: axis.kind === "net" ? { kind: "net", ruleId: axis.ruleId } : { kind: "autonomy", level: autonomy },
+		origin: { kind: "main" },
+		reason:
+			decision.kind === "ask" ? decision.rejection.short : `${tool} requests ${decision.classification.actionClass}`,
+	};
 }
 
 function readToolCallAuditRows(stateDir: string): ToolCallAuditRecord[] {
@@ -298,7 +324,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		match(notice.text, /^\[approval\] bash parked \(execute\): asks at autonomy auto-edit\./);
 		ok(notice.text.includes(".clio/safety.yaml"));
 
-		const body = createPermissionOverlayBody(bashCall("echo hello"), decision, "auto-edit").render(60);
+		const body = createPermissionOverlayBody(approvalViewForDecision("bash", decision, "auto-edit")).render(60);
 		ok(body.includes("Asked by: autonomy level (auto-edit)"), body.join("\n"));
 	});
 
@@ -319,10 +345,94 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		const notice = approvalParkedNotice("bash", decision, "full-auto");
 		match(notice.text, /^\[approval\] bash parked \(git_destructive\): safety-net rail \S+ asks for confirmation\./);
 
-		const body = createPermissionOverlayBody(bashCall("git stash drop"), decision, "full-auto").render(60);
+		const body = createPermissionOverlayBody(approvalViewForDecision("bash", decision, "full-auto")).render(60);
 		ok(
 			body.some((line) => line.startsWith("Asked by: safety-net rail")),
 			body.join("\n"),
+		);
+	});
+
+	it("permission overlay renders real approval request views", () => {
+		const mainView: ApprovalRequestView = {
+			requestId: "perm-main",
+			tool: "bash",
+			actionClass: "execute",
+			axis: { kind: "autonomy", level: "auto-edit" },
+			origin: { kind: "main" },
+			reason: "bash requires execute confirmation",
+		};
+		deepStrictEqual(createPermissionOverlayBody(mainView).render(80), [
+			"Tool: bash",
+			"Action: execute",
+			"Asked by: autonomy level (auto-edit)",
+			"bash requires execute confirmation",
+			"",
+			"Allowing resumes only this parked tool call.",
+			"Hard-blocked actions remain blocked.",
+		]);
+
+		const workerNetView: ApprovalRequestView = {
+			requestId: "perm-worker-net",
+			tool: "bash",
+			actionClass: "execute",
+			axis: { kind: "net", ruleId: "bash-command-substitution" },
+			origin: { kind: "worker", agentId: "scout", runId: "r-abc" },
+			reason: "bash requires execute confirmation",
+		};
+		deepStrictEqual(createPermissionOverlayBody(workerNetView).render(80), [
+			"Tool: bash",
+			"Action: execute",
+			"Asked by: worker scout (run r-abc), safety-net rail bash-command-substitution",
+			"bash requires execute confirmation",
+			"",
+			"Allowing resumes the parked call inside the worker.",
+			"Hard-blocked actions remain blocked.",
+		]);
+
+		const workerAutonomyView: ApprovalRequestView = {
+			requestId: "perm-worker-autonomy",
+			tool: "write",
+			actionClass: "write",
+			axis: { kind: "autonomy", level: "suggest" },
+			origin: { kind: "worker", agentId: "coder", runId: "r-def" },
+			reason: "write requires write confirmation",
+		};
+		deepStrictEqual(createPermissionOverlayBody(workerAutonomyView).render(80), [
+			"Tool: write",
+			"Action: write",
+			"Asked by: worker coder (run r-def), autonomy level suggest",
+			"write requires write confirmation",
+			"",
+			"Allowing resumes the parked call inside the worker.",
+			"Hard-blocked actions remain blocked.",
+		]);
+	});
+
+	it("worker escalation notices name net rails and autonomy levels", () => {
+		const netNotice = workerEscalationNotice({
+			requestId: "perm-net",
+			origin: "worker:r-abc",
+			agentId: "scout",
+			tool: "bash",
+			actionClass: "execute",
+			axis: "net:bash-command-substitution",
+		});
+		strictEqual(
+			netNotice?.text,
+			"[approval] worker scout (run r-abc) asks to run bash (execute): safety-net rail bash-command-substitution asks for confirmation. Approve once, or Esc to cancel.",
+		);
+
+		const autonomyNotice = workerEscalationNotice({
+			requestId: "perm-autonomy",
+			origin: "worker:r-def",
+			agentId: "coder",
+			tool: "write",
+			actionClass: "write",
+			axis: "autonomy:suggest",
+		});
+		strictEqual(
+			autonomyNotice?.text,
+			"[approval] worker coder (run r-def) asks to run write (write): asks at autonomy suggest. Approve once, or Esc to cancel.",
 		);
 	});
 });

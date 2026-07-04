@@ -348,6 +348,7 @@ export interface PermissionRequestedPayload {
 	actionClass: string;
 	origin?: string | undefined;
 	axis?: string | undefined;
+	reasons?: ReadonlyArray<string> | undefined;
 	ruleId?: string | undefined;
 	posture?: string | undefined;
 	rejection?: { short: string; detail: string; hints: ReadonlyArray<string> } | undefined;

@@ -14,7 +14,7 @@ import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
-import type { ToolCallAuditRecord } from "../../src/domains/safety/audit.js";
+import type { PermissionAuditRecord, ToolCallAuditRecord } from "../../src/domains/safety/audit.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { createSafetyBundle } from "../../src/domains/safety/extension.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
@@ -59,6 +59,23 @@ function toolCallRows(stateDir: string): ToolCallAuditRecord[] {
 	);
 }
 
+function permissionRows(stateDir: string): PermissionAuditRecord[] {
+	const auditDir = join(stateDir, "audit");
+	let files: string[];
+	try {
+		files = readdirSync(auditDir).filter((file) => file.endsWith(".jsonl"));
+	} catch {
+		return [];
+	}
+	return files.flatMap((file) =>
+		readFileSync(join(auditDir, file), "utf8")
+			.split("\n")
+			.filter((line) => line.trim().length > 0)
+			.map((line) => JSON.parse(line) as PermissionAuditRecord)
+			.filter((row) => row.kind === "permission"),
+	);
+}
+
 async function withApprovalHarness<T>(
 	level: AutonomyLevel,
 	fn: (input: {
@@ -68,7 +85,12 @@ async function withApprovalHarness<T>(
 		resolutions: PermissionResolvedPayload[];
 	}) => Promise<T>,
 ): Promise<
-	T & { rows: ToolCallAuditRecord[]; requests: PermissionRequestedPayload[]; resolutions: PermissionResolvedPayload[] }
+	T & {
+		rows: ToolCallAuditRecord[];
+		permissionRows: PermissionAuditRecord[];
+		requests: PermissionRequestedPayload[];
+		resolutions: PermissionResolvedPayload[];
+	}
 > {
 	const originalEnv = { ...process.env };
 	const scratch = mkdtempSync(join(tmpdir(), "clio-approval-identity-"));
@@ -113,7 +135,7 @@ async function withApprovalHarness<T>(
 		const result = await fn({ registry, bus, requests, resolutions });
 		await bundle.extension.stop?.();
 		stopped = true;
-		return { ...result, rows: toolCallRows(stateDir), requests, resolutions };
+		return { ...result, rows: toolCallRows(stateDir), permissionRows: permissionRows(stateDir), requests, resolutions };
 	} finally {
 		if (!stopped) await bundle.extension.stop?.();
 		for (const k of Object.keys(process.env)) {
@@ -156,6 +178,54 @@ describe("contracts/approval identity", () => {
 
 		strictEqual(requests.length, 0);
 		strictEqual(rows.filter((row) => row.decision === "denied").length, 1);
+	});
+
+	it("permission request audit rows are written only for non-main origins", async () => {
+		const { permissionRows } = await withApprovalHarness("auto-edit", async ({ bus }) => {
+			bus.emit(BusChannels.PermissionRequested, {
+				tool: "bash",
+				actionClass: "execute",
+				requestId: "main-req",
+				origin: "main",
+				axis: "autonomy:auto-edit",
+				rejection: { short: "main ask", detail: "main ask", hints: [] },
+			});
+			bus.emit(BusChannels.PermissionRequested, {
+				tool: "bash",
+				actionClass: "execute",
+				requestId: "worker-req",
+				origin: "worker:run-worker",
+				axis: "net:bash-command-substitution",
+				rejection: { short: "worker ask", detail: "worker ask", hints: [] },
+				requestedBy: "run-worker",
+			});
+			bus.emit(BusChannels.PermissionRequested, {
+				tool: "write",
+				actionClass: "write",
+				requestId: "delegation-req",
+				origin: "delegation:run-delegation",
+				axis: "autonomy:suggest",
+				summary: "delegation ask",
+				requestedBy: "run-delegation",
+			});
+			bus.emit(BusChannels.PermissionRequested, {
+				tool: "read",
+				actionClass: "read",
+				requestId: "legacy-main",
+				axis: "autonomy:auto-edit",
+				summary: "legacy ask",
+			});
+			await settle();
+			return {};
+		});
+
+		deepStrictEqual(
+			permissionRows.map((row) => [row.status, row.requestId, row.origin, row.tool, row.actionClass, row.reason]),
+			[
+				["requested", "worker-req", "worker:run-worker", "bash", "execute", "worker ask"],
+				["requested", "delegation-req", "delegation:run-delegation", "write", "write", "delegation ask"],
+			],
+		);
 	});
 
 	it("interactive grant joins request, resolution, and tool-call audit by requestId", async () => {
