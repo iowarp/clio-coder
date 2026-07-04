@@ -200,13 +200,13 @@ export function approvalParkedNotice(tool: string, decision: SafetyDecision, aut
 	if (axis.kind === "net") {
 		return {
 			level: "warn",
-			text: `[approval] ${tool} parked (${actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to cancel.`,
+			text: `[approval] ${tool} parked (${actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to deny this call.`,
 		};
 	}
 	const widen =
 		actionClass === "execute"
 			? " Approve once, or add it to .clio/safety.yaml commands."
-			: " Approve once, or Esc to cancel.";
+			: " Approve once, or Esc to deny this call.";
 	return {
 		level: "warn",
 		text: `[approval] ${tool} parked (${actionClass}): asks at autonomy ${autonomy}.${widen}`,
@@ -222,12 +222,12 @@ export function workerEscalationNotice(payload: unknown): BusNotice | null {
 	if (axis.kind === "net") {
 		return {
 			level: "warn",
-			text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to cancel.`,
+			text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): safety-net rail ${axis.ruleId} asks for confirmation. Approve once, or Esc to deny this call.`,
 		};
 	}
 	return {
 		level: "warn",
-		text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): asks at autonomy ${axis.level}. Approve once, or Esc to cancel.`,
+		text: `[approval] worker ${agentId} (run ${runId}) asks to run ${payload.tool} (${payload.actionClass}): asks at autonomy ${axis.level}. Approve once, or Esc to deny this call.`,
 	};
 }
 

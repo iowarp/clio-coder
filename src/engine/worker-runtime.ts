@@ -353,8 +353,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// One escalation is outstanding at a time. A call that parks while a prior
 	// escalation awaits a decision is re-notified after the active one resolves
 	// (registry.resumeParkedCalls re-fires onPermissionRequired for the next
-	// parked call) or cancelled with it on deny/timeout, so it never gets lost
-	// and the requestId->parked-call mapping stays unambiguous.
+	// parked call), so it never gets lost and the requestId->parked-call
+	// mapping stays unambiguous.
 	const resolveEscalation = (
 		requestId: string,
 		decision: "approve" | "deny",
@@ -376,7 +376,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					reason: `operator approved permission escalation for ${active.tool} (${active.actionClass})`,
 				},
 			} as ClioWorkerEvent);
-			void registry.resumeParkedCalls({ actionClass: active.actionClass, requestedBy: `escalation:${source}` });
+			void registry.resumeParkedCalls({
+				actionClass: active.actionClass,
+				requestId,
+				requestedBy: `escalation:${source}`,
+			});
 			return true;
 		}
 		// A denial resolves to the effective posture: a timeout with fallback
@@ -407,7 +411,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			agent.abort();
 			return true;
 		}
-		registry.cancelParkedCalls(reason);
+		if (source === "operator") registry.cancelParkedCall(requestId, reason);
+		else registry.cancelParkedCalls(reason);
 		return true;
 	};
 

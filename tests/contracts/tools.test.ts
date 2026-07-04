@@ -95,6 +95,38 @@ function resultSize(value: unknown): { truncated?: boolean } | null {
 	return typeof truncated === "boolean" ? { truncated } : {};
 }
 
+function createConfirmableWriteRegistry(executed: string[]) {
+	const spec: ToolSpec = {
+		name: ToolNames.Write,
+		description: "confirmable write",
+		parameters: Type.Object({}),
+		baseActionClass: "write",
+		run: async (args) => {
+			executed.push(String(args.path));
+			return { kind: "ok", output: String(args.path) };
+		},
+	};
+	const registry = createRegistry({
+		safety: {
+			classify: () => ({ actionClass: "write", reasons: [] }),
+			evaluate: (_call, posture) =>
+				posture === "confirmed"
+					? { kind: "allow", classification: { actionClass: "write", reasons: ["confirmed"] } }
+					: {
+							kind: "ask",
+							classification: { actionClass: "write", reasons: ["needs confirmation"] },
+							rejection: { short: "confirm write", detail: "confirm write", hints: [] },
+						},
+			observeLoop: () => ({ looping: false, key: "test", count: 0 }),
+			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+			isSubset: () => true,
+			audit: { recordCount: () => 0 },
+		},
+	});
+	registry.register(spec);
+	return registry;
+}
+
 function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> = {}): RunReceipt {
 	return {
 		runId,
@@ -622,6 +654,65 @@ describe("contracts/tools permission sequencing", () => {
 		await registry.resumeParkedCalls({ actionClass: "write", requestedBy: "test" });
 		strictEqual((await second).kind, "ok");
 		strictEqual(executed.join(","), "one,two");
+	});
+
+	it("denies only the selected parked call and re-emits permission for the next one", async () => {
+		const executed: string[] = [];
+		const registry = createConfirmableWriteRegistry(executed);
+		const requested: Array<{ path: string; requestId: string }> = [];
+		registry.onPermissionRequired((call, _decision, meta) => {
+			requested.push({ path: String(call.args?.path), requestId: meta.requestId });
+		});
+
+		const first = registry.invoke({ tool: ToolNames.Write, args: { path: "one" } });
+		const second = registry.invoke({ tool: ToolNames.Write, args: { path: "two" } });
+
+		strictEqual(registry.parkedCount(), 2);
+		strictEqual(requested.map((request) => request.path).join(","), "one,two");
+		const firstRequestId = requested[0]?.requestId;
+		const secondRequestId = requested[1]?.requestId;
+		ok(firstRequestId);
+		ok(secondRequestId);
+		strictEqual(registry.cancelParkedCall(firstRequestId, "operator declined"), true);
+
+		const firstVerdict = await first;
+		strictEqual(firstVerdict.kind, "blocked");
+		strictEqual(registry.parkedCount(), 1);
+		strictEqual(requested.map((request) => request.path).join(","), "one,two,two");
+		strictEqual(requested[2]?.requestId, secondRequestId);
+
+		await registry.resumeParkedCalls({ actionClass: "write", requestId: secondRequestId, requestedBy: "test" });
+		strictEqual((await second).kind, "ok");
+		strictEqual(executed.join(","), "two");
+		strictEqual(registry.parkedCount(), 0);
+	});
+
+	it("grants by requestId rather than the oldest parked action class", async () => {
+		const executed: string[] = [];
+		const registry = createConfirmableWriteRegistry(executed);
+		const requested: Array<{ path: string; requestId: string }> = [];
+		registry.onPermissionRequired((call, _decision, meta) => {
+			requested.push({ path: String(call.args?.path), requestId: meta.requestId });
+		});
+
+		const first = registry.invoke({ tool: ToolNames.Write, args: { path: "one" } });
+		const second = registry.invoke({ tool: ToolNames.Write, args: { path: "two" } });
+
+		const firstRequestId = requested[0]?.requestId;
+		const secondRequestId = requested[1]?.requestId;
+		ok(firstRequestId);
+		ok(secondRequestId);
+		await registry.resumeParkedCalls({ actionClass: "write", requestId: secondRequestId, requestedBy: "test" });
+
+		strictEqual((await second).kind, "ok");
+		strictEqual(executed.join(","), "two");
+		strictEqual(registry.parkedCount(), 1);
+		strictEqual(requested.map((request) => request.path).join(","), "one,two,one");
+		strictEqual(requested[2]?.requestId, firstRequestId);
+
+		strictEqual(registry.cancelParkedCall(firstRequestId, "operator declined"), true);
+		strictEqual((await first).kind, "blocked");
+		strictEqual(registry.parkedCount(), 0);
 	});
 });
 

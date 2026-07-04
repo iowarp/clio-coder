@@ -106,6 +106,20 @@ function permissionEvent(
 	);
 }
 
+function permissionEvents(
+	events: ReadonlyArray<unknown>,
+	type: "clio_permission_escalated" | "clio_permission_resolved",
+): Array<{ type: string; payload?: Record<string, unknown> }> {
+	return events.filter(
+		(event): event is { type: string; payload?: Record<string, unknown> } =>
+			typeof event === "object" &&
+			event !== null &&
+			(event as { type?: unknown }).type === type &&
+			typeof (event as { payload?: unknown }).payload === "object" &&
+			(event as { payload?: unknown }).payload !== null,
+	);
+}
+
 function toolFinish(events: ReadonlyArray<unknown>): Record<string, unknown> | undefined {
 	return events.find(
 		(event): event is { type: string; payload: Record<string, unknown> } =>
@@ -115,6 +129,19 @@ function toolFinish(events: ReadonlyArray<unknown>): Record<string, unknown> | u
 			typeof (event as { payload?: unknown }).payload === "object" &&
 			(event as { payload?: unknown }).payload !== null,
 	)?.payload;
+}
+
+function toolFinishes(events: ReadonlyArray<unknown>): Record<string, unknown>[] {
+	return events
+		.filter(
+			(event): event is { type: string; payload: Record<string, unknown> } =>
+				typeof event === "object" &&
+				event !== null &&
+				(event as { type?: unknown }).type === "clio_tool_finish" &&
+				typeof (event as { payload?: unknown }).payload === "object" &&
+				(event as { payload?: unknown }).payload !== null,
+		)
+		.map((event) => event.payload);
 }
 
 function fauxRuntimeInput(
@@ -532,6 +559,59 @@ describe("contracts/worker-steer", () => {
 				strictEqual(resolved?.payload?.source, "operator");
 			} finally {
 				escalated.unregister();
+			}
+		});
+
+		it("operator deny resolves one escalation and lets the next request escalate", async () => {
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(
+						[
+							fauxToolCall("bash", { command: "printf worker-one" }, { id: "call-deny-one" }),
+							fauxToolCall("bash", { command: "printf worker-two" }, { id: "call-deny-two" }),
+						],
+						{ stopReason: "toolUse" },
+					),
+					fauxAssistantMessage("queued decisions continued"),
+				],
+				{ onPermission: "escalate", escalation: { timeoutMs: 5_000, fallback: "deny" } },
+			);
+			try {
+				const handle = permissionHandle(startWorkerRun(input, (event) => events.push(event)));
+				const first = await waitFor(
+					() => permissionEvents(events, "clio_permission_escalated")[0],
+					"worker did not emit first clio_permission_escalated",
+				);
+				const firstRequestId = first.payload?.requestId;
+				strictEqual(typeof firstRequestId, "string");
+
+				handle.resolvePermission(firstRequestId as string, "deny");
+				const second = await waitFor(
+					() =>
+						permissionEvents(events, "clio_permission_escalated").find(
+							(event) => event.payload?.requestId !== firstRequestId,
+						),
+					"worker did not emit second clio_permission_escalated",
+				);
+				const secondRequestId = second.payload?.requestId;
+				strictEqual(typeof secondRequestId, "string");
+				handle.resolvePermission(secondRequestId as string, "approve");
+				const result = await handle.promise;
+				const resolved = permissionEvents(events, "clio_permission_resolved");
+				const finishes = toolFinishes(events);
+
+				strictEqual(result.exitCode, 0);
+				strictEqual(resolved.length, 2);
+				strictEqual(resolved[0]?.payload?.requestId, firstRequestId);
+				strictEqual(resolved[0]?.payload?.decision, "denied");
+				strictEqual(resolved[0]?.payload?.source, "operator");
+				strictEqual(resolved[1]?.payload?.requestId, secondRequestId);
+				strictEqual(resolved[1]?.payload?.decision, "approved");
+				strictEqual(resolved[1]?.payload?.source, "operator");
+				strictEqual(finishes.map((finish) => finish.outcome).join(","), "blocked,ok");
+			} finally {
+				unregister();
 			}
 		});
 

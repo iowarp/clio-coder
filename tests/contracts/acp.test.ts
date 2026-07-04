@@ -466,6 +466,40 @@ function createPermissionChat(registry: ToolRegistry): AcpServerChat {
 	};
 }
 
+function createQueuedPermissionChat(registry: ToolRegistry): AcpServerChat {
+	const listeners = new Set<(event: Record<string, unknown>) => void>();
+	let streaming = false;
+	const emit = (event: Record<string, unknown>): void => {
+		for (const listener of listeners) listener(event);
+	};
+	return {
+		async submit(): Promise<void> {
+			streaming = true;
+			const first = registry.invoke({ tool: ToolNames.Bash, args: { command: "sudo true one" } });
+			const second = registry.invoke({ tool: ToolNames.Bash, args: { command: "sudo true two" } });
+			const verdicts = await Promise.all([first, second]);
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: verdicts.map((verdict) => verdict.kind).join(",") }],
+				stopReason: "stop",
+				usage: { input: 1, output: 1 },
+			};
+			emit({ type: "message_end", message });
+			emit({ type: "agent_end", messages: [message] });
+			streaming = false;
+		},
+		cancel(): void {
+			streaming = false;
+		},
+		onEvent(handler: (event: Record<string, unknown>) => void): () => void {
+			listeners.add(handler);
+			return () => listeners.delete(handler);
+		},
+		isStreaming: () => streaming,
+		getSessionId: () => null,
+	};
+}
+
 function createWriteChat(registry: ToolRegistry): AcpServerChat {
 	const listeners = new Set<(event: Record<string, unknown>) => void>();
 	let streaming = false;
@@ -556,6 +590,66 @@ async function runAcpPermissionBridge(
 	client.close();
 	await server;
 	return { requests, resolutions };
+}
+
+async function runAcpQueuedPermissionBridge(): Promise<{
+	requests: PermissionRequestedPayload[];
+	resolutions: PermissionResolvedPayload[];
+	presentedCommands: string[];
+}> {
+	const clientToServer = new PassThrough();
+	const serverToClient = new PassThrough();
+	const transport = createStdioServerTransport({ input: clientToServer, output: serverToClient });
+	const registry = createPermissionRegistry();
+	const bus = createSafeEventBus();
+	const requests: PermissionRequestedPayload[] = [];
+	const resolutions: PermissionResolvedPayload[] = [];
+	const presentedCommands: string[] = [];
+	bus.on(BusChannels.PermissionRequested, (payload) => {
+		requests.push(payload);
+	});
+	bus.on(BusChannels.PermissionResolved, (payload) => {
+		resolutions.push(payload);
+	});
+	registry.onPermissionRequired((call, decision, meta) => {
+		bus.emit(BusChannels.PermissionRequested, {
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+			requestId: meta.requestId,
+			origin: "acp-server",
+			axis: meta.axis,
+			...(decision.kind === "ask" ? { rejection: decision.rejection } : {}),
+		});
+	});
+	const server = serveClioAcpAgent({
+		transport,
+		chat: createQueuedPermissionChat(registry),
+		toolRegistry: registry,
+		bus,
+		cwd: process.cwd(),
+		version: "test",
+		permissionTimeoutMs: 1000,
+	});
+	const client = createRpcClient(clientToServer, serverToClient);
+	const outcomes = ["reject-once", "allow-once"];
+	client.onRequest("session/request_permission", (params) => {
+		if (isRecord(params) && isRecord(params.toolCall) && isRecord(params.toolCall.rawInput)) {
+			presentedCommands.push(String(params.toolCall.rawInput.command));
+		}
+		const optionId = outcomes.shift();
+		if (!optionId) throw new Error("unexpected duplicate ACP permission request");
+		return { outcome: { outcome: "selected", optionId } };
+	});
+	await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "mock-client", version: "1" } });
+	const session = await client.request<{ sessionId: string }>("session/new", { cwd: process.cwd() });
+	await client.request("session/prompt", {
+		sessionId: session.sessionId,
+		prompt: [{ type: "text", text: "need queued permissions" }],
+	});
+	await client.request("session/close", { sessionId: session.sessionId });
+	client.close();
+	await server;
+	return { requests, resolutions, presentedCommands };
 }
 
 describe("contracts/acp", () => {
@@ -754,6 +848,21 @@ rl.on("line", (line) => {
 		strictEqual(resolutions[0]?.status, "denied");
 		strictEqual(resolutions[0]?.decidedBy, "acp-client");
 		strictEqual(resolutions[0]?.requestId, requests[0]?.requestId);
+	});
+
+	it("ACP server reject denies one queued request and allows the next request", async () => {
+		const { requests, resolutions, presentedCommands } = await runAcpQueuedPermissionBridge();
+		const uniqueRequestIds = Array.from(new Set(requests.map((request) => request.requestId)));
+
+		strictEqual(presentedCommands.join(","), "sudo true one,sudo true two");
+		strictEqual(uniqueRequestIds.length, 2);
+		strictEqual(resolutions.length, 2);
+		strictEqual(resolutions[0]?.status, "denied");
+		strictEqual(resolutions[0]?.decidedBy, "acp-client");
+		strictEqual(resolutions[0]?.requestId, uniqueRequestIds[0]);
+		strictEqual(resolutions[1]?.status, "granted");
+		strictEqual(resolutions[1]?.decidedBy, "acp-client");
+		strictEqual(resolutions[1]?.requestId, uniqueRequestIds[1]);
 	});
 
 	it("ACP server permission timeout resolves the parked request with timeout identity", async () => {

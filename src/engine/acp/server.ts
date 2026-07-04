@@ -386,7 +386,10 @@ function installPermissionBridge(input: {
 	if (!input.toolRegistry) return () => {};
 	let sequence = 0;
 	let chain = Promise.resolve();
+	const queuedRequestIds = new Set<string>();
 	return input.toolRegistry.onPermissionRequired((call, decision, meta) => {
+		if (queuedRequestIds.has(meta.requestId)) return;
+		queuedRequestIds.add(meta.requestId);
 		const emitResolution = (payload: { status: "granted" | "denied"; decidedBy: string; reason?: string }): void => {
 			input.bus?.emit(BusChannels.PermissionResolved, {
 				status: payload.status,
@@ -399,6 +402,7 @@ function installPermissionBridge(input: {
 			});
 		};
 		const run = async (): Promise<void> => {
+			if (!queuedRequestIds.has(meta.requestId)) return;
 			const sessionId = input.activeSessionId();
 			if (!sessionId) {
 				emitResolution({
@@ -406,6 +410,7 @@ function installPermissionBridge(input: {
 					decidedBy: "error",
 					reason: "ACP permission requested with no active session",
 				});
+				queuedRequestIds.clear();
 				input.toolRegistry?.cancelParkedCalls("ACP permission requested with no active session");
 				return;
 			}
@@ -434,6 +439,7 @@ function installPermissionBridge(input: {
 					emitResolution({ status: "granted", decidedBy: "acp-client" });
 					await input.toolRegistry?.resumeParkedCalls({
 						actionClass: decision.classification.actionClass,
+						requestId: meta.requestId,
 						requestedBy: "acp-client",
 					});
 					return;
@@ -443,15 +449,27 @@ function installPermissionBridge(input: {
 					decidedBy: "acp-client",
 					reason: "ACP client denied this tool call",
 				});
-				input.toolRegistry?.cancelParkedCalls("ACP client denied this tool call");
+				input.toolRegistry?.cancelParkedCall(meta.requestId, "ACP client denied this tool call");
 			} catch (err) {
 				const message = `ACP permission request failed: ${err instanceof Error ? err.message : String(err)}`;
+				if (err instanceof AcpTimeoutError) {
+					emitResolution({
+						status: "denied",
+						decidedBy: "timeout",
+						reason: message,
+					});
+					input.toolRegistry?.cancelParkedCall(meta.requestId, message);
+					return;
+				}
 				emitResolution({
 					status: "denied",
-					decidedBy: err instanceof AcpTimeoutError ? "timeout" : "error",
+					decidedBy: "error",
 					reason: message,
 				});
+				queuedRequestIds.clear();
 				input.toolRegistry?.cancelParkedCalls(message);
+			} finally {
+				queuedRequestIds.delete(meta.requestId);
 			}
 		};
 		chain = chain.then(run, run);

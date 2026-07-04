@@ -372,7 +372,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		const notice = approvalParkedNotice("bash", ask.decision, "full-auto");
 		strictEqual(
 			notice.text,
-			"[approval] bash parked (system_modify): safety-net rail system-modify-confirm asks for confirmation. Approve once, or Esc to cancel.",
+			"[approval] bash parked (system_modify): safety-net rail system-modify-confirm asks for confirmation. Approve once, or Esc to deny this call.",
 		);
 
 		const body = createPermissionOverlayBody(approvalViewForDecision("bash", ask.decision, "full-auto")).render(80);
@@ -387,14 +387,16 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			axis: { kind: "autonomy", level: "auto-edit" },
 			origin: { kind: "main" },
 			reason: "bash requires execute confirmation",
+			queueDepth: 2,
 		};
 		deepStrictEqual(createPermissionOverlayBody(mainView).render(80), [
 			"Tool: bash",
 			"Action: execute",
 			"Asked by: autonomy level (auto-edit)",
 			"bash requires execute confirmation",
+			"1 of 2 parked",
 			"",
-			"Allowing resumes only this parked tool call.",
+			"Allow or deny applies to this call only.",
 			"Hard-blocked actions remain blocked.",
 		]);
 
@@ -412,7 +414,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			"Asked by: worker scout (run r-abc), safety-net rail bash-command-substitution",
 			"bash requires execute confirmation",
 			"",
-			"Allowing resumes the parked call inside the worker.",
+			"Allow or deny applies to this call only.",
 			"Hard-blocked actions remain blocked.",
 		]);
 
@@ -430,7 +432,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			"Asked by: worker coder (run r-def), autonomy level suggest",
 			"write requires write confirmation",
 			"",
-			"Allowing resumes the parked call inside the worker.",
+			"Allow or deny applies to this call only.",
 			"Hard-blocked actions remain blocked.",
 		]);
 	});
@@ -446,7 +448,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		});
 		strictEqual(
 			netNotice?.text,
-			"[approval] worker scout (run r-abc) asks to run bash (execute): safety-net rail bash-command-substitution asks for confirmation. Approve once, or Esc to cancel.",
+			"[approval] worker scout (run r-abc) asks to run bash (execute): safety-net rail bash-command-substitution asks for confirmation. Approve once, or Esc to deny this call.",
 		);
 
 		const autonomyNotice = workerEscalationNotice({
@@ -459,7 +461,7 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		});
 		strictEqual(
 			autonomyNotice?.text,
-			"[approval] worker coder (run r-def) asks to run write (write): asks at autonomy suggest. Approve once, or Esc to cancel.",
+			"[approval] worker coder (run r-def) asks to run write (write): asks at autonomy suggest. Approve once, or Esc to deny this call.",
 		);
 	});
 });

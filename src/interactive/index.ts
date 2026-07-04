@@ -184,7 +184,7 @@ export interface InteractiveDeps {
 	 * Shared tool registry. When wired, the permission overlay opens automatically
 	 * whenever a tool call is parked waiting for operator confirmation, and the
 	 * confirm / cancel overlay handlers drive `resumeParkedCalls` /
-	 * `cancelParkedCalls` so blocked bash batches run (or reject cleanly)
+	 * `cancelParkedCall` so blocked bash batches run (or reject cleanly)
 	 * after the permission decision rather than stalling indefinitely.
 	 */
 	toolRegistry?: ToolRegistry;
@@ -2064,9 +2064,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				});
 				void deps.toolRegistry?.resumeParkedCalls({
 					actionClass: permission.decision.classification.actionClass,
+					...(permission.meta ? { requestId: permission.meta.requestId } : {}),
 					requestedBy: "tool:one_shot",
 				});
 			} else {
+				const cancellationReason =
+					"User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.";
 				deps.bus.emit(BusChannels.PermissionResolved, {
 					status: "denied",
 					...(permission?.meta ? { requestId: permission.meta.requestId } : {}),
@@ -2078,9 +2081,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					requestedBy: "tool",
 					at: Date.now(),
 				});
-				deps.toolRegistry?.cancelParkedCalls(
-					"User cancelled this tool call from the permission confirmation prompt. Do not retry the same target via another tool. Wait for new instruction.",
-				);
+				if (permission?.meta) deps.toolRegistry?.cancelParkedCall(permission.meta.requestId, cancellationReason);
+				else deps.toolRegistry?.cancelParkedCalls(cancellationReason);
 			}
 		}
 		if (overlayState === "closed" && deps.toolRegistry?.hasParkedCalls() && pendingPermission) {
@@ -2327,6 +2329,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			(axisFromDecision.kind === "net"
 				? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
 				: { kind: "autonomy" as const, level: autonomy });
+		const queueDepth = deps.toolRegistry?.parkedCount();
 		return {
 			requestId: meta?.requestId ?? "permission-pending",
 			tool: call.tool,
@@ -2335,6 +2338,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			origin: { kind: "main" },
 			reason:
 				decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
+			...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
 		};
 	};
 
