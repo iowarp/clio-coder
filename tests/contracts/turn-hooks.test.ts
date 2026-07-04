@@ -452,11 +452,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			),
 			"the continuation reminder should persist as a synthetic user ledger entry",
 		);
-		ok(
-			notices.some(
-				(notice) => notice.level === "info" && notice.text === "model announced work without calling tools; nudge sent",
-			),
-		);
+		ok(notices.some((notice) => notice.level === "info" && notice.text === "turn ended with open work; nudge sent"));
 	});
 
 	it("warns and stops when the model stalls again after the one-shot nudge", async () => {
@@ -564,9 +560,8 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		strictEqual(prompts.length, 4, "a fresh user prompt should get one new auto-continuation");
 		ok((prompts[3] ?? "").includes(STALLED_TURN_REQUEST_CONTINUATION_MESSAGE));
 		strictEqual(
-			notices.filter(
-				(notice) => notice.level === "info" && notice.text === "model announced work without calling tools; nudge sent",
-			).length,
+			notices.filter((notice) => notice.level === "info" && notice.text === "turn ended with open work; nudge sent")
+				.length,
 			2,
 		);
 	});

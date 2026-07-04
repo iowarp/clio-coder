@@ -25,9 +25,9 @@ Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user
 
 Providers that cannot call tools receive no schemas, and the prompt tells the model to proceed without tool calls.
 
-## Seven planes, eighteen tools
+## Seven planes, nineteen tools
 
-The builtin surface is 18 registered tools organized in seven planes. Each plane is one policy unit: its tools share an action class, a size posture, a details schema, and a concurrency rule. `src/tools/policy.ts` asserts these invariants at bootstrap, so drift between the plane design, the safety classifier, and the registered specs fails loudly instead of shipping a surface that behaves differently from what the policy engine assumes.
+The builtin surface is 19 registered tools organized in seven planes. Each plane is one policy unit: its tools share an action class, a size posture, a details schema, and a concurrency rule. `src/tools/policy.ts` asserts these invariants at bootstrap, so drift between the plane design, the safety classifier, and the registered specs fails loudly instead of shipping a surface that behaves differently from what the policy engine assumes.
 
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |
@@ -37,11 +37,12 @@ The builtin surface is 18 registered tools organized in seven planes. Each plane
 | EXECUTE | `git` | read | parallel |
 | ORCHESTRATE | `dispatch`, `steer` | dispatch | sequential |
 | ORCHESTRATE | `monitor` | read | parallel |
+| ORCHESTRATE | `tasks` | read | sequential |
 | RETRIEVE | `web_fetch` | read | parallel |
 | INTERACT | `ask_user` | read | sequential |
 | ARTIFACT | `artifact` | write | sequential |
 
-Two tools sit in a plane for containment rather than class. `git` is read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so it lives in the EXECUTE plane with read-class safety disposition. `monitor` never mutates a run, so it stays read class and parallel inside the ORCHESTRATE plane.
+Three tools sit in a plane for containment rather than class. `git` is read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so it lives in the EXECUTE plane with read-class safety disposition. `monitor` never mutates a run, so it stays read class and parallel inside the ORCHESTRATE plane. `tasks` orchestrates the agent's own work rather than workers: it mutates only the session's task ledger, never the workspace, so it keeps read class (never gated behind a confirmation) but runs sequential so two board mutations in one batch cannot interleave.
 
 Registration is conditional on wiring: `context` gains its workspace scope only when a session contract is bound, `dispatch`/`monitor`/`steer` register only with a dispatch contract, and `ask_user` registers only when an interactive handler exists. Dispatch tool profiles narrow the surface for workers: `minimal-local` is `read`, `grep`, `find`, `ls`, `git`, `context`, `code_nav`; `science-local` adds `verify`; `full-agent` keeps everything.
 

@@ -348,6 +348,32 @@ steer(run_id="run-01H...", action="guide", message="Skip the docs sweep; limit t
 steer(run_id="run-01H...", action="cancel")
 ```
 
+## tasks: the session task board
+
+Declares and tracks the agent's own working plan. Source: `src/tools/tasks.ts`. Read class (never gated); sequential.
+
+Arguments:
+
+- `action` (required). `plan`, `add`, `start`, `done`, `block`, `drop`, or `list`.
+- `title` (required for `plan`). The board title.
+- `tasks` (required for `plan` and `add`). Task titles as an array of strings.
+- `id` (required for `start`, `done`, `block`, `drop`). A task id like `t2`.
+- `note` (optional). Evidence of completion on `done`; the reason on `block` (required there) and `drop`.
+
+`action="plan"` declares a titled board and replaces any prior board; tasks get sequential ids `t1..tN` and start pending. `start` marks one task active and parks any other active task back to pending, so the board always names exactly one current focus. `done` completes a task; its `note` is recorded on the session ledger as passed validation evidence, so a completed task carries its receipt rather than a bare status flip. `block` requires a reason and is the honest state for work waiting on the operator; blocked tasks never trigger the turn-end nudge. `drop` cancels a task; ids are never reused. Every action returns the whole rendered board, so the current state always sits in the latest tool result.
+
+Every mutation persists a full-snapshot `taskLedger` entry in the session ledger: the board replays from the JSONL alone, survives `/resume` and `/fork`, costs nothing at compaction, and feeds the footer tasks row plus the `/tasks` overlay. When a tool-calling turn settles while pending or active tasks remain, the `nudge.open-tasks` middleware carries the turn onward once with the open-task list; record the honest state (`done` with evidence, `block` with a reason, or `drop`) instead of stopping with a stale board.
+
+Dispatched runs link to the live board through the ledger's `activeRunIds` field: the orchestrator attaches a run when its worker process goes live and detaches it when the run finalizes, so a snapshot records which fleet runs were serving the board. The linkage is process-live, so a refold after `/resume` or `/fork` restores it empty (the runs ended with the process that dispatched them). Claude SDK/CLI workers map their `TodoWrite` calls onto this tool, so a Claude worker's todo list lands on the same board rather than writing a separate artifact.
+
+```text
+tasks(action="plan", title="Fix the flaky scheduler test", tasks=["reproduce the failure", "isolate the race", "fix and verify"])
+tasks(action="start", id="t1")
+tasks(action="done", id="t1", note="reproduced 3/3 with CLIO_SEED=7; failure in tests/contracts/scheduler.test.ts:88")
+tasks(action="block", id="t2", note="needs operator decision on the retry policy")
+tasks(action="list")
+```
+
 ## artifact: plans, reviews, and reports
 
 Terminal document writers behind one surface. Source: `src/tools/artifact.ts`.

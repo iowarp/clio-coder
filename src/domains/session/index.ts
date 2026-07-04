@@ -68,6 +68,16 @@ export {
 	protectedArtifactFromSessionEntry,
 	protectedArtifactStateFromSessionEntries,
 } from "./protected-artifacts.js";
+export type {
+	TaskBoardCounts,
+	TaskBoardMutation,
+	TaskBoardMutationResult,
+	TaskBoardSnapshot,
+	TaskBoardStore,
+	TaskBoardStoreDeps,
+	TaskBoardTask,
+} from "./task-board.js";
+export { createTaskBoardStore, foldTaskBoard, taskBoardCounts, toTaskLedgerEntryFields } from "./task-board.js";
 // The tree/ module is a domain-internal building block. Only the
 // overlay-facing types surface here; callers that need deeper helpers import
 // from the concrete submodules directly (session domain only).

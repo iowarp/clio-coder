@@ -39,6 +39,10 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// monitor never mutates a run, so it stays read class and parallel.
 	[ToolNames.Monitor]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Steer]: { plane: "orchestrate", actionClass: "dispatch", executionMode: "sequential" },
+	// tasks orchestrates the agent's own work rather than workers: read class
+	// (session-ledger bookkeeping, no workspace mutation), sequential so two
+	// board mutations in one batch never interleave.
+	[ToolNames.Tasks]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },

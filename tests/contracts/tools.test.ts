@@ -1228,7 +1228,7 @@ describe("contracts/tools dispatch run paths", () => {
 });
 
 describe("contracts/tools prompt hints", () => {
-	it("carries promptHint metadata on exactly the four hinted tools, verbatim", () => {
+	it("carries promptHint metadata on exactly the five hinted tools, verbatim", () => {
 		const registry = testRegistryWithTools([]);
 		registerAllTools(registry, {
 			askUser: async () => ({ answers: [] }),
@@ -1241,7 +1241,7 @@ describe("contracts/tools prompt hints", () => {
 			if (typeof hint === "string") hinted.set(spec.name, hint);
 		}
 
-		deepStrictEqual([...hinted.keys()].sort(), ["ask_user", "code_nav", "context", "dispatch"]);
+		deepStrictEqual([...hinted.keys()].sort(), ["ask_user", "code_nav", "context", "dispatch", "tasks"]);
 		strictEqual(
 			hinted.get("code_nav"),
 			"Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).",
@@ -1251,6 +1251,12 @@ describe("contracts/tools prompt hints", () => {
 			'Call context with scope="skills" to list available skills; when one matches the task, suggest the operator run /skill:<name> and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 		);
 		strictEqual(hinted.get("dispatch"), "Call dispatch with list:true to see the agent fleet.");
+		strictEqual(
+			hinted.get("tasks"),
+			'Before multi-step work, declare a task board: tasks action="plan" with a title and the task list. ' +
+				'Mark one task active with "start" before working it, close it with "done" plus an evidence note ' +
+				'(what proves it works), and use "block" with a reason instead of silently stalling.',
+		);
 		strictEqual(
 			hinted.get("ask_user"),
 			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',

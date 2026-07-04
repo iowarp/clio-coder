@@ -36,7 +36,7 @@ import { getMarketplaceSkills, installSkill } from "../domains/resources/skills/
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
-import type { SessionContract, SessionEntry } from "../domains/session/index.js";
+import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import { probeGit, probeWorkspace } from "../domains/session/workspace/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
@@ -137,6 +137,7 @@ import {
 	type SlashCommandContext,
 } from "./slash-commands.js";
 import { createStatusController, resolveInlineVerb, spinnerFrame, type TurnSummary } from "./status/index.js";
+import { openTasksOverlay } from "./tasks-overlay.js";
 import { abbreviateModelId } from "./theme/index.js";
 import { createDefaultArtifactProviders, verifyReceiptFile } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";
@@ -183,6 +184,8 @@ export interface InteractiveDeps {
 	session?: SessionContract;
 	/** Read current session entries for replay/context rebuilds after local non-chat entries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
+	/** Live session task board for the footer tasks row and the /tasks overlay. */
+	getTaskBoard?: () => TaskBoardSnapshot | null;
 	/** XDG state dir (clioStateDir()). `/view verify` reads from <stateDir>/receipts/<id>.json. */
 	stateDir: string;
 	/** XDG cache dir (clioCacheDir()). The Skills Hub marketplace cache lives here. */
@@ -306,6 +309,7 @@ export type OverlayState =
 	| "cost"
 	| "context-view"
 	| "fleet"
+	| "tasks"
 	| "view"
 	| "thinking"
 	| "model"
@@ -784,6 +788,10 @@ export function routeOverlayKey(
 		// The overlay body owns all keys, including Esc (cancel submenu/confirm, else close).
 		return false;
 	}
+	if (overlayState === "tasks") {
+		// Read-only board view; the overlay body owns Esc (close).
+		return false;
+	}
 	if (overlayState === "view") {
 		// The viewer owns Esc, filter editing, pane focus, verification, and pager keys.
 		return false;
@@ -996,6 +1004,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
+		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 		getContextActivity: () => contextActivityStore.current(),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),
@@ -1480,6 +1489,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openCost: () => openCostOverlayState(),
 		openContextView: () => openContextViewOverlayState(),
 		openFleet: () => openFleetOverlayState(),
+		openTasks: () => openTasksOverlayState(),
 		openView: (filter) => openViewOverlayState(filter),
 		openThinking: () => openThinkingOverlayState(),
 		openModel: () => openModelOverlayState(),
@@ -2453,6 +2463,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		footer.toggleExpanded();
 		renderTaskIsland();
+		tui.requestRender();
+	};
+
+	const openTasksOverlayState = (): void => {
+		if (overlayState !== "closed") return;
+		overlayState = "tasks";
+		overlayHandle = openTasksOverlay(tui, () => deps.getTaskBoard?.() ?? null, {
+			onClose: () => closeOverlay(),
+		});
 		tui.requestRender();
 	};
 

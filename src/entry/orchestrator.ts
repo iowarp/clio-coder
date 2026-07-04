@@ -45,6 +45,7 @@ import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memo
 import {
 	createHookReceiptLog,
 	createSkillsReminderRegistration,
+	createTaskNudgeRegistration,
 	type ExtensionHookRoot,
 	installUserHooks,
 	type MiddlewareContract,
@@ -87,6 +88,7 @@ import {
 	protectedArtifactEntryFromArtifact,
 	protectedArtifactStateFromSessionEntries,
 } from "../domains/session/protected-artifacts.js";
+import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import { serveClioAcpAgent } from "../engine/acp/server.js";
 import {
@@ -696,8 +698,35 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// interview fall back to their stated defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
+	// One task board per orchestrator: the tasks tool mutates it, the turn-end
+	// open-tasks nudge reads it, and the footer/overlay render it. Keyed on the
+	// current session id so resume/fork/new refolds it from taskLedger entries.
+	const taskBoard = createTaskBoardStore({
+		getSessionId: () => session?.current()?.id ?? null,
+		readEntries: () => {
+			const meta = session?.current();
+			return meta ? readSessionEntriesForCompact(meta.id) : [];
+		},
+		appendEntry: (entry) => {
+			session?.appendEntry(entry);
+		},
+	});
+	// Link in-flight dispatch runs to the live board via the ledger's
+	// activeRunIds field: a run is tracked from the moment its child process is
+	// live until it finalizes either way. attach/detach are no-ops when no board
+	// is declared, so an ambient dispatch never forces a board into existence.
+	bus.on(BusChannels.DispatchStarted, (payload) => {
+		if (typeof payload?.runId === "string") taskBoard.attachRun(payload.runId);
+	});
+	bus.on(BusChannels.DispatchCompleted, (payload) => {
+		if (typeof payload?.runId === "string") taskBoard.detachRun(payload.runId);
+	});
+	bus.on(BusChannels.DispatchFailed, (payload) => {
+		if (typeof payload?.runId === "string") taskBoard.detachRun(payload.runId);
+	});
 	registerAllTools(toolRegistry, {
 		...(session ? { session } : {}),
+		taskBoard,
 		dispatch,
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
@@ -848,6 +877,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// message of a run lands. Tool-prose first so its hard-block interruption
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
+	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
 	if (session) {
 		middleware.registerHook(
 			createFinishContractRegistration({
@@ -1020,6 +1050,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
+		getTaskBoard: () => taskBoard.snapshot(),
 		stateDir: clioStateDir(),
 		cacheDir: clioCacheDir(),
 		registerAskUserHandler: (handler) => {

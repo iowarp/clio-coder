@@ -8,11 +8,39 @@ interfaces.
 ## 0.2.8 - 2026-07-02
 
 The toolkit-rework release: the tool surface was redesigned into seven planes
-with 18 tools, every OBSERVE tool now closes through one observation envelope,
+with 19 tools, every OBSERVE tool now closes through one observation envelope,
 and grep/find answer tree visibility from a single ignore policy.
 
 ### Added
 
+- **The session task board: the `tasks` tool, the open-tasks nudge, and
+  `/tasks`.** The dormant `taskLedger` session-entry kind gains its producer.
+  A new ORCHESTRATE-plane `tasks` tool lets the agent declare a titled board
+  before multi-step work (`action="plan"`), mark exactly one task active as
+  its current focus (`start` parks any other active task back to pending),
+  and close each task with a receipt: `done` records an evidence note as
+  passed validation evidence on the ledger, `block` requires a reason, and
+  `drop` cancels. Every mutation persists a full-snapshot `taskLedger` entry,
+  so the board replays from the JSONL alone and survives `/resume` and
+  `/fork`; every tool result renders the whole board back to the model so
+  local models never track state across turns. A `turn_end` middleware
+  registration (`nudge.open-tasks`) carries the turn onward through the
+  existing request-continuation channel when a tool-calling turn settles with
+  pending or active tasks; pure conversation turns, aborted turns, surfaces
+  without the tasks tool, and boards where every remaining task is blocked
+  never nudge, and the chat-loop's one-nudge-per-turn guard bounds the rest.
+  The board surfaces in the expanded footer's Activity quadrant (progress
+  plus the active task), in verb-led transcript sublines with a `n/m done`
+  ledger tail, and in the read-only `/tasks` overlay showing per-task
+  receipts. Narrow worker tool profiles are unchanged; workers on
+  `full-agent` get a private in-memory board. Dispatched runs link to the
+  live board through the ledger's `activeRunIds` field: the orchestrator
+  attaches a run when its child process goes live and detaches it when the
+  run finalizes, so the persisted snapshot and the `/tasks` overlay record
+  which fleet runs served the board (linkage is process-live and refolds
+  empty on replay). Claude SDK/CLI workers map `TodoWrite` to the `tasks`
+  tool rather than `artifact`, so a Claude worker's todo updates land on the
+  same evidence-carrying board and stay outside a narrowed tool profile.
 - **Slash command argument completion.** The editor now completes past the
   command name by walking the same args grammar the parser uses: subcommand
   names complete in first position with their flags as the row hint, declared
@@ -67,10 +95,11 @@ and grep/find answer tree visibility from a single ignore policy.
   are documented in `docs/evals-internal.md`. Benchmark adapters now emit
   sanitized `manifest.json` and `summary.json` files per run, and the tracked
   benchmark tree is limited to public adapters plus sanitized result records.
-- **Toolkit v2: seven planes, 18 tools.** The surface is organized as OBSERVE
+- **Toolkit v2: seven planes, 19 tools.** The surface is organized as OBSERVE
   (read, grep, find, ls, code_nav, context, credential_present), MUTATE
   (write, edit), EXECUTE (bash, git, verify), ORCHESTRATE (dispatch, monitor,
-  steer), RETRIEVE (web_fetch), INTERACT (ask_user), and ARTIFACT (artifact).
+  steer, tasks), RETRIEVE (web_fetch), INTERACT (ask_user), and ARTIFACT
+  (artifact).
   Each plane is one policy unit for action class, size posture, details
   schema, and concurrency. Consolidations: `find` absorbs `glob` (same
   pattern dialect, plus `order="mtime"` for recency); `context` absorbs

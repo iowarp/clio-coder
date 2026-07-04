@@ -113,6 +113,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/cost` | - | `/cost` | Show session token and cost totals |
 | `/context` | `/ctx` | `/context compact [instructions] \| /context init [--preview] [--adopt] [--apply] [--propose] [--global] [--heuristic] \| /context refresh \| /context reset [--all] [--confirm] [--confirm-all]` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
+| `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | - | `/thinking` | Open thinking-level selector |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
@@ -141,6 +142,12 @@ they will be removed in a future release.
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
 
 The `/fleet` overlay displays live running, retrying, and completed fleet dispatch subagents in the current TUI process. It includes three distinct tabs: Status, Profiles, and Bindings. You can cycle between these tabs by pressing `Tab`. The Status tab shows active runs, their execution stats, and scheduled retries with backoff times. The Profiles tab allows creating, editing, renaming, and deleting worker profiles. The Bindings tab supports binding or unbinding specific agents to profiles.
+
+The `/tasks` overlay shows the session task board the agent maintains through
+the `tasks` tool: every task with its status, the evidence note recorded when
+it was completed, and the reason recorded when it was blocked or dropped. The
+board persists in the session ledger as `taskLedger` entries, so it survives
+`/resume` and `/fork` and can be audited from the JSONL alone.
 
 
 ## Keybindings

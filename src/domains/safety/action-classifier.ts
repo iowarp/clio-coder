@@ -63,6 +63,9 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Monitor:
 		case ToolNames.AskUser:
 		case ToolNames.CredentialPresent:
+		// tasks mutates only the session's task ledger, never the workspace,
+		// so it stays read class and is never gated behind a confirmation.
+		case ToolNames.Tasks:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

@@ -110,7 +110,10 @@ const CLAUDE_TOOL_TO_CLIO: Readonly<Record<string, string>> = {
 	WebFetch: ToolNames.WebFetch,
 	WebSearch: ToolNames.WebFetch,
 	Task: ToolNames.Dispatch,
-	TodoWrite: ToolNames.Artifact,
+	// TodoWrite mediates as the tasks tool: both are session-scoped plan
+	// bookkeeping that never mutates the workspace, so it classifies read and
+	// is narrowed away exactly when the profile lacks tasks.
+	TodoWrite: ToolNames.Tasks,
 };
 
 /**
@@ -150,7 +153,7 @@ export function mapClaudeToolCall(toolName: string, input: Record<string, unknow
 		case "Task":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Dispatch, args: { ...input }, known: true };
 		case "TodoWrite":
-			return { claudeToolName: toolName, clioToolName: ToolNames.Artifact, args: { ...input }, known: true };
+			return { claudeToolName: toolName, clioToolName: ToolNames.Tasks, args: { ...input }, known: true };
 		default:
 			return { claudeToolName: toolName, clioToolName: dynamicToolName(toolName), args: { ...input }, known: false };
 	}

@@ -10,6 +10,7 @@ import {
 } from "../../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
+import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import { Text, visibleWidth } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
@@ -82,6 +83,7 @@ export interface FooterDashboardDeps {
 	getContextUsage?: () => ContextUsageSnapshot;
 	getContextLedger?: () => ContextLedger;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
+	getTaskBoard?: () => TaskBoardSnapshot | null;
 	getContextActivity?: () => {
 		message: string;
 		detail: string | null;
@@ -430,6 +432,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				dispatchRows: dispatch,
 				contextActivity: deps.getContextActivity?.() ?? null,
 				lastTurn: deps.getLastTurnSummary?.() ?? null,
+				taskBoard: deps.getTaskBoard?.() ?? null,
 			},
 			notices: deps.getNotifications?.() ?? [],
 			status: status ?? {

@@ -7,7 +7,7 @@
  *   OBSERVE      read, grep, find, ls, code_nav, context, credential_present
  *   MUTATE       write, edit
  *   EXECUTE      bash, git, verify
- *   ORCHESTRATE  dispatch, monitor, steer
+ *   ORCHESTRATE  dispatch, monitor, steer, tasks
  *   RETRIEVE     web_fetch
  *   INTERACT     ask_user
  *   ARTIFACT     artifact
@@ -33,6 +33,7 @@ export const ToolNames = {
 	Dispatch: "dispatch",
 	Monitor: "monitor",
 	Steer: "steer",
+	Tasks: "tasks",
 	// RETRIEVE
 	WebFetch: "web_fetch",
 	// INTERACT
