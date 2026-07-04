@@ -72,7 +72,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 
 export const SETTINGS_LABELS_BY_ID = {
 	autonomy: "Autonomy level",
-	"workers.onPermission": "Worker permission asks",
+	"workers.onPermission": "Worker approvals routing",
 	"delegation.defaults.toolGovernance": "Delegation governance",
 	"skills.trustProjectCompatRoots": "Trust project skill roots",
 	safetyNet: "Safety net",
@@ -143,7 +143,8 @@ export const SETTINGS_SECTION_ROWS = {
 
 const SETTINGS_DESCRIPTIONS_BY_ID = {
 	autonomy: "How freely Clio acts; the safety net always applies.",
-	"workers.onPermission": "What a worker permission ask does when it cannot prompt.",
+	"workers.onPermission":
+		"How a worker resolves an approval ask: deny the call, fail the run, or escalate to this session.",
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
 	"skills.trustProjectCompatRoots": "Whether third-party project skill roots are loaded.",
 	safetyNet: "Always-on rails; tuned in .clio/safety.yaml.",
@@ -183,7 +184,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
-	autonomy: "read-only observes; suggest proposes; auto-edit edits but asks before commands; full-auto runs unattended.",
+	autonomy:
+		"read-only observes; suggest parks non-read calls; auto-edit edits, dispatches, and runs recognized commands; full-auto runs except command substitution and system-level changes.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"compaction.threshold":
@@ -192,7 +194,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"skills.trustProjectCompatRoots":
 		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
 	"workers.onPermission":
-		"deny keeps the run going by turning the ask into a tool denial; fail stops the run as permission_required.",
+		"deny turns the ask into a tool denial and the run continues; fail stops the run as permission_required; escalate forwards the ask to you and falls back per workers.escalation on timeout.",
 	"delegation.defaults.toolGovernance":
 		"clio-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
 	scope: "Comma-separated target or target/model refs. Alt+J / Alt+K step the chat target through this list.",
@@ -204,12 +206,16 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 	autonomy: {
 		"read-only": "observe and answer only; never edits files or runs commands",
 		suggest: "propose every edit and command for your approval",
-		"auto-edit": "edit files freely, but ask before running commands",
-		"full-auto": "edit and run without prompts (the safety net still applies)",
+		"auto-edit":
+			"edits and dispatches run; recognized commands (tests, lint, build, .clio/safety.yaml entries) run; other commands ask",
+		"full-auto":
+			"runs without approval prompts except command substitution and system-level changes; hard blocks always apply",
 	},
 	"workers.onPermission": {
 		deny: "a worker permission ask becomes a tool denial; the run continues",
 		fail: "the run ends immediately as permission_required",
+		escalate:
+			"the ask is forwarded to this session's operator; on timeout it falls back to deny or fail per workers.escalation",
 	},
 	"delegation.defaults.toolGovernance": {
 		"clio-policy": "Clio's safety policy gates the delegated agent's tools",
@@ -495,7 +501,7 @@ export function buildSettingItems(
 			values: ["read-only", "suggest", "auto-edit", "full-auto"],
 		}),
 		settingItem("workers.onPermission", settings.workers.onPermission ?? "deny", {
-			values: ["deny", "fail"],
+			values: ["deny", "fail", "escalate"],
 		}),
 		settingItem("delegation.defaults.toolGovernance", settings.delegation.defaults.toolGovernance, {
 			values: ["clio-policy", "agent-managed", "deny-all"],
@@ -677,7 +683,7 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 				settings.autonomy = value;
 			return;
 		case "workers.onPermission":
-			if (value === "deny" || value === "fail") settings.workers.onPermission = value;
+			if (value === "deny" || value === "fail" || value === "escalate") settings.workers.onPermission = value;
 			return;
 		case "delegation.defaults.toolGovernance":
 			if (value === "clio-policy" || value === "agent-managed" || value === "deny-all")
