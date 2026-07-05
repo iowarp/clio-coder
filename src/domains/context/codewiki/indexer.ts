@@ -502,6 +502,46 @@ const rubyExtractor: LanguageExtractor = {
 	},
 };
 
+const csharpExtractor: LanguageExtractor = {
+	langs: ["c#"],
+	extractImports(_path, text) {
+		// Mirrors the tree-sitter using-directive handling: static prefixes are
+		// stripped and alias directives resolve to their right-hand side.
+		return uniqueSorted(
+			extractMatches(text, /^\s*using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?([A-Za-z_][\w.]*)\s*;/gm),
+		);
+	},
+	extract(_path, text) {
+		const symbols = extractWithLineRegex(text, [
+			{
+				regex:
+					/^\s*(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+([A-Za-z_]\w*)\b/,
+				kind: "class",
+			},
+			{
+				regex: /^\s*(?:public\s+|private\s+|protected\s+|internal\s+|partial\s+)*interface\s+([A-Za-z_]\w*)\b/,
+				kind: "iface",
+			},
+			{
+				regex:
+					/^\s*(?:public\s+|private\s+|protected\s+|internal\s+|readonly\s+|partial\s+)*(?:enum|struct|record)\s+([A-Za-z_]\w*)\b/,
+				kind: "type",
+			},
+			{
+				regex:
+					/^\s*(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|abstract\s+|sealed\s+|async\s+|partial\s+|new\s+)*(?!(?:if|for|foreach|while|switch|catch|return|using|else|do|new|class|interface|enum|struct|record|namespace|lock|throw)\b)[A-Za-z_][\w<>,[\].?\s]*\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*\{?$/,
+				kind: "method",
+			},
+			{
+				regex:
+					/^\s*(?:public\s+|private\s+|protected\s+|internal\s+|static\s+)*const\s+[A-Za-z_][\w<>,[\]\s]*\s+([A-Za-z_]\w*)\s*=/,
+				kind: "const",
+			},
+		]);
+		return { symbols, imports: csharpExtractor.extractImports?.(_path, text) ?? [] };
+	},
+};
+
 const fallbackExtractors: ReadonlyArray<LanguageExtractor> = [
 	tsJsExtractor,
 	pythonExtractor,
@@ -510,6 +550,7 @@ const fallbackExtractors: ReadonlyArray<LanguageExtractor> = [
 	cFamilyExtractor,
 	javaExtractor,
 	rubyExtractor,
+	csharpExtractor,
 ];
 
 function extractWithExtractors(
@@ -567,7 +608,7 @@ function mergeTreeSitterWithRegexImports(
 	};
 }
 
-function fallbackExtraction(language: CodewikiLanguage, relPath: string, text: string): LanguageExtraction {
+export function fallbackExtraction(language: CodewikiLanguage, relPath: string, text: string): LanguageExtraction {
 	return extractWithExtractors(fallbackExtractors, language, relPath, text);
 }
 
