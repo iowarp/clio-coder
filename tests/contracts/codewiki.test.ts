@@ -31,6 +31,19 @@ function hasSymbol(codewiki: BuiltCodewiki, path: string, name: string, kind?: s
 	);
 }
 
+function symbolFor(
+	codewiki: BuiltCodewiki,
+	path: string,
+	name: string,
+	kind?: string,
+): BuiltCodewiki["symbols"][number] | undefined {
+	const file = codewiki.files.find((item) => item.path === path);
+	if (!file) return undefined;
+	return codewiki.symbols.find(
+		(symbol) => symbol.fileId === file.id && symbol.name === name && (!kind || symbol.kind === kind),
+	);
+}
+
 function hasInternalEdge(codewiki: BuiltCodewiki, fromPath: string, toPath: string): boolean {
 	const from = codewiki.files.find((item) => item.path === fromPath);
 	const to = codewiki.files.find((item) => item.path === toPath);
@@ -216,6 +229,47 @@ describe("contracts/codewiki", () => {
 		strictEqual(codewikiNeedsBackfill(rebuilt), false);
 	});
 
+	it("strips legacy signature fields from unsupported symbol kinds on read", () => {
+		mkdirSync(join(scratch, ".clio"), { recursive: true });
+		writeFileSync(
+			join(scratch, ".clio", "codewiki.json"),
+			JSON.stringify({
+				version: 4,
+				language: "typescript",
+				files: [
+					{
+						id: "f_legacy",
+						path: "src/legacy.ts",
+						lang: "typescript",
+						loc: 4,
+						role: "module",
+						hash: "abc123",
+						imports: [],
+					},
+				],
+				symbols: [
+					{ name: "main", kind: "func", fileId: "f_legacy", line: 1, sig: "export function main() {}" },
+					{ name: "Service", kind: "class", fileId: "f_legacy", line: 2, sig: "export class Service {}" },
+					{ name: "value", kind: "const", fileId: "f_legacy", line: 3, sig: "export const value = 1;" },
+					{ name: "state", kind: "var", fileId: "f_legacy", line: 4, sig: "let state = 1;" },
+					{ name: "Runnable", kind: "trait", fileId: "f_legacy", line: 5, sig: "pub trait Runnable {}" },
+					{ name: "Shape", kind: "iface", fileId: "f_legacy", line: 6, sig: "interface Shape {}" },
+				],
+				edges: [],
+			}),
+			"utf8",
+		);
+
+		const read = readCodewiki(scratch);
+		ok(read);
+		strictEqual(symbolFor(read, "src/legacy.ts", "main", "func")?.sig, "export function main() {}");
+		strictEqual(symbolFor(read, "src/legacy.ts", "Service", "class")?.sig, "export class Service {}");
+		strictEqual(symbolFor(read, "src/legacy.ts", "value", "const")?.sig, undefined);
+		strictEqual(symbolFor(read, "src/legacy.ts", "state", "var")?.sig, undefined);
+		strictEqual(symbolFor(read, "src/legacy.ts", "Runnable", "trait")?.sig, undefined);
+		strictEqual(symbolFor(read, "src/legacy.ts", "Shape", "iface")?.sig, undefined);
+	});
+
 	it("indexes non-empty source files across languages, including single-file repositories", async () => {
 		writeFileSync(join(scratch, "rendergit.py"), "import sys\n\ndef render(path):\n    return path\n", "utf8");
 		mkdirSync(join(scratch, "cmd"), { recursive: true });
@@ -244,6 +298,33 @@ describe("contracts/codewiki", () => {
 		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
 
 		ok(codewiki.symbols.some((symbol) => symbol.name === "stream" && symbol.kind === "func"));
+	});
+
+	it("writes signatures only for function, method, class, and type symbols", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(
+			join(scratch, "src", "signatures.ts"),
+			[
+				"export const exportedValue = 1;",
+				"let mutableValue = 2;",
+				"export type Payload = { value: number };",
+				"export class Service {",
+				"  run(): number { return exportedValue; }",
+				"}",
+				"export function makePayload(): Payload { return { value: mutableValue }; }",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
+
+		ok(symbolFor(codewiki, "src/signatures.ts", "Payload", "type")?.sig);
+		ok(symbolFor(codewiki, "src/signatures.ts", "Service", "class")?.sig);
+		ok(symbolFor(codewiki, "src/signatures.ts", "run", "method")?.sig);
+		ok(symbolFor(codewiki, "src/signatures.ts", "makePayload", "func")?.sig);
+		strictEqual(symbolFor(codewiki, "src/signatures.ts", "exportedValue", "const")?.sig, undefined);
+		strictEqual(symbolFor(codewiki, "src/signatures.ts", "mutableValue", "var")?.sig, undefined);
 	});
 
 	it("indexes TS declarations but skips local variables and control-flow junk", async () => {

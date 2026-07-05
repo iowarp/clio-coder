@@ -9,6 +9,7 @@ import { createTreeSitterExtractor } from "./tree-sitter.js";
 export type CodewikiLanguage = SourceProjectType | "config";
 export type CodewikiFileRole = "entry" | "test" | "module" | "config";
 export type CodewikiSymbolKind = "func" | "class" | "method" | "type" | "const" | "var" | "trait" | "iface";
+const CODEWIKI_SYMBOL_KINDS_WITH_SIG = new Set<CodewikiSymbolKind>(["func", "class", "method", "type"]);
 
 export interface CodewikiFile {
 	id: string;
@@ -79,11 +80,11 @@ export interface ExtractedSymbol {
 export interface LanguageExtraction {
 	symbols: ExtractedSymbol[];
 	imports: string[];
-	exports: string[];
 }
 
 export interface LanguageExtractor {
 	langs: ReadonlyArray<CodewikiLanguage>;
+	extractImports?(path: string, text: string): string[];
 	extract(path: string, text: string): LanguageExtraction;
 }
 
@@ -335,6 +336,14 @@ function extractMatches(text: string, regex: RegExp, group = 1): string[] {
 
 const tsJsExtractor: LanguageExtractor = {
 	langs: ["typescript", "javascript"],
+	extractImports(_path, text) {
+		return uniqueSorted([
+			...extractMatches(text, /\bimport\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']([^"']+)["']/g),
+			...extractMatches(text, /\bexport\s+[^'"]*?\s+from\s+["']([^"']+)["']/g),
+			...extractMatches(text, /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g),
+			...extractMatches(text, /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
+		]);
+	},
 	extract(_path, text) {
 		const symbols = extractWithLineRegex(text, [
 			{ regex: /^\s*export\s+default\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)?/, kind: "func" },
@@ -351,37 +360,18 @@ const tsJsExtractor: LanguageExtractor = {
 				kind: "method",
 			},
 		]);
-		const imports = uniqueSorted([
-			...extractMatches(text, /\bimport\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']([^"']+)["']/g),
-			...extractMatches(text, /\bexport\s+[^'"]*?\s+from\s+["']([^"']+)["']/g),
-			...extractMatches(text, /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g),
-			...extractMatches(text, /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
-		]);
-		const exports = uniqueSorted([
-			...extractMatches(
-				text,
-				/^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum|const|let|var)\s+([A-Za-z_$][\w$]*)/gm,
-			),
-			...extractMatches(text, /^\s*export\s*\{\s*([^}]+)\s*\}/gm).flatMap((clause) =>
-				clause
-					.split(",")
-					.map(
-						(part) =>
-							part
-								.trim()
-								.split(/\s+as\s+/i)
-								.pop() ?? "",
-					)
-					.filter(Boolean),
-			),
-			...(text.includes("export default") ? ["default"] : []),
-		]);
-		return { symbols, imports, exports };
+		return { symbols, imports: tsJsExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
 
 const pythonExtractor: LanguageExtractor = {
 	langs: ["python"],
+	extractImports(_path, text) {
+		return uniqueSorted([
+			...extractMatches(text, /^\s*import\s+([A-Za-z_][\w.]*)(?:\s+as\s+\w+)?/gm),
+			...extractMatches(text, /^\s*from\s+([.\w]+)\s+import\s+/gm),
+		]);
+	},
 	extract(_path, text) {
 		const rawSymbols = extractWithLineRegex(text, [
 			{ regex: /^(\s*)def\s+([A-Za-z_]\w*)\s*\(/, kind: "func", nameIndex: 2 },
@@ -396,22 +386,18 @@ const pythonExtractor: LanguageExtractor = {
 			}
 			return symbol;
 		});
-		const imports = uniqueSorted([
-			...extractMatches(text, /^\s*import\s+([A-Za-z_][\w.]*)(?:\s+as\s+\w+)?/gm),
-			...extractMatches(text, /^\s*from\s+([.\w]+)\s+import\s+/gm),
-		]);
-		const exports = uniqueSorted([
-			...extractMatches(text, /__all__\s*=\s*\[([^\]]*)\]/g).flatMap((clause) =>
-				extractMatches(clause, /["']([^"']+)["']/g),
-			),
-			...symbols.filter((symbol) => !symbol.name.startsWith("_")).map((symbol) => symbol.name),
-		]);
-		return { symbols: symbols.sort(compareSymbols), imports, exports };
+		return { symbols: symbols.sort(compareSymbols), imports: pythonExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
 
 const goExtractor: LanguageExtractor = {
 	langs: ["go"],
+	extractImports(_path, text) {
+		return uniqueSorted([
+			...extractMatches(text, /^\s*import\s+"([^"]+)"/gm),
+			...extractMatches(text, /^\s*"([^"]+)"\s*$/gm),
+		]);
+	},
 	extract(_path, text) {
 		const rawSymbols = extractWithLineRegex(text, [
 			{ regex: /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(/, kind: "func" },
@@ -425,17 +411,18 @@ const goExtractor: LanguageExtractor = {
 			if (symbol.kind === "func" && /^\s*func\s+\(/.test(symbol.sig ?? "")) return { ...symbol, kind: "method" };
 			return symbol;
 		});
-		const imports = uniqueSorted([
-			...extractMatches(text, /^\s*import\s+"([^"]+)"/gm),
-			...extractMatches(text, /^\s*"([^"]+)"\s*$/gm),
-		]);
-		const exports = uniqueSorted(symbols.filter((symbol) => /^[A-Z]/.test(symbol.name)).map((symbol) => symbol.name));
-		return { symbols: symbols.sort(compareSymbols), imports, exports };
+		return { symbols: symbols.sort(compareSymbols), imports: goExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
 
 const rustExtractor: LanguageExtractor = {
 	langs: ["rust"],
+	extractImports(_path, text) {
+		return uniqueSorted([
+			...extractMatches(text, /^\s*use\s+([^;]+);/gm).map((item) => item.trim()),
+			...extractMatches(text, /^\s*extern\s+crate\s+([A-Za-z_]\w*)/gm),
+		]);
+	},
 	extract(_path, text) {
 		const symbols = extractWithLineRegex(text, [
 			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?fn\s+([A-Za-z_]\w*)\s*[<(]/, kind: "func" },
@@ -446,19 +433,15 @@ const rustExtractor: LanguageExtractor = {
 			{ regex: /^(?:\s*pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z_]\w*)\b/, kind: "const" },
 			{ regex: /^(?:\s*pub(?:\([^)]*\))?\s+)?static\s+([A-Za-z_]\w*)\b/, kind: "var" },
 		]);
-		const imports = uniqueSorted([
-			...extractMatches(text, /^\s*use\s+([^;]+);/gm).map((item) => item.trim()),
-			...extractMatches(text, /^\s*extern\s+crate\s+([A-Za-z_]\w*)/gm),
-		]);
-		const exports = uniqueSorted([
-			...extractMatches(text, /^\s*pub(?:\([^)]*\))?\s+(?:fn|struct|enum|trait|type|const|static)\s+([A-Za-z_]\w*)/gm),
-		]);
-		return { symbols, imports, exports };
+		return { symbols, imports: rustExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
 
 const cFamilyExtractor: LanguageExtractor = {
 	langs: ["c", "c++"],
+	extractImports(_path, text) {
+		return uniqueSorted(extractMatches(text, /^\s*#\s*include\s+[<"]([^>"]+)[>"]/gm));
+	},
 	extract(_path, text) {
 		const symbols = extractWithLineRegex(text, [
 			{ regex: /^\s*(?:class|struct)\s+([A-Za-z_]\w*)\b/, kind: "class" },
@@ -469,14 +452,15 @@ const cFamilyExtractor: LanguageExtractor = {
 			},
 			{ regex: /^(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
 		]);
-		const imports = uniqueSorted(extractMatches(text, /^\s*#\s*include\s+[<"]([^>"]+)[>"]/gm));
-		const exports = uniqueSorted(symbols.map((symbol) => symbol.name));
-		return { symbols, imports, exports };
+		return { symbols, imports: cFamilyExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
 
 const javaExtractor: LanguageExtractor = {
 	langs: ["java"],
+	extractImports(_path, text) {
+		return uniqueSorted(extractMatches(text, /^\s*import\s+(?:static\s+)?([A-Za-z_][\w.*]*);/gm));
+	},
 	extract(_path, text) {
 		const symbols = extractWithLineRegex(text, [
 			{ regex: /^\s*(?:public\s+|private\s+|protected\s+|abstract\s+|final\s+)*class\s+([A-Za-z_]\w*)\b/, kind: "class" },
@@ -495,16 +479,18 @@ const javaExtractor: LanguageExtractor = {
 				kind: "const",
 			},
 		]);
-		const imports = uniqueSorted(extractMatches(text, /^\s*import\s+(?:static\s+)?([A-Za-z_][\w.*]*);/gm));
-		const exports = uniqueSorted(
-			symbols.filter((symbol) => ["class", "iface", "type"].includes(symbol.kind)).map((symbol) => symbol.name),
-		);
-		return { symbols, imports, exports };
+		return { symbols, imports: javaExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
 
 const rubyExtractor: LanguageExtractor = {
 	langs: ["ruby"],
+	extractImports(_path, text) {
+		return uniqueSorted([
+			...extractMatches(text, /^\s*require\s+["']([^"']+)["']/gm),
+			...extractMatches(text, /^\s*require_relative\s+["']([^"']+)["']/gm).map((item) => `./${item}`),
+		]);
+	},
 	extract(_path, text) {
 		const symbols = extractWithLineRegex(text, [
 			{ regex: /^\s*class\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/, kind: "class" },
@@ -512,12 +498,7 @@ const rubyExtractor: LanguageExtractor = {
 			{ regex: /^\s*def\s+(?:self\.)?([A-Za-z_]\w*[!?=]?)\b/, kind: "func" },
 			{ regex: /^([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
 		]);
-		const imports = uniqueSorted([
-			...extractMatches(text, /^\s*require\s+["']([^"']+)["']/gm),
-			...extractMatches(text, /^\s*require_relative\s+["']([^"']+)["']/gm).map((item) => `./${item}`),
-		]);
-		const exports = uniqueSorted(symbols.filter((symbol) => /^[A-Z]/.test(symbol.name)).map((symbol) => symbol.name));
-		return { symbols, imports, exports };
+		return { symbols, imports: rubyExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
 
@@ -539,7 +520,6 @@ function extractWithExtractors(
 ): LanguageExtraction {
 	const symbols = new Map<string, ExtractedSymbol>();
 	const imports: string[] = [];
-	const exports: string[] = [];
 	for (const extractor of extractors) {
 		if (!extractor.langs.includes(language)) continue;
 		const extracted = extractor.extract(relPath, text);
@@ -548,13 +528,25 @@ function extractWithExtractors(
 			if (!symbols.has(key)) symbols.set(key, symbol);
 		}
 		imports.push(...extracted.imports);
-		exports.push(...extracted.exports);
 	}
 	return {
 		symbols: [...symbols.values()].sort(compareSymbols),
 		imports: uniqueSorted(imports),
-		exports: uniqueSorted(exports),
 	};
+}
+
+function extractImportsWithExtractors(
+	extractors: ReadonlyArray<LanguageExtractor>,
+	language: CodewikiLanguage,
+	relPath: string,
+	text: string,
+): string[] {
+	const imports: string[] = [];
+	for (const extractor of extractors) {
+		if (!extractor.langs.includes(language) || !extractor.extractImports) continue;
+		imports.push(...extractor.extractImports(relPath, text));
+	}
+	return uniqueSorted(imports);
 }
 
 interface BuiltFile {
@@ -568,11 +560,10 @@ function mergeTreeSitterWithRegexImports(
 	text: string,
 	extracted: LanguageExtraction,
 ): LanguageExtraction {
-	const regex = extractWithExtractors(fallbackExtractors, language, relPath, text);
+	const regexImports = extractImportsWithExtractors(fallbackExtractors, language, relPath, text);
 	return {
 		symbols: extracted.symbols.sort(compareSymbols),
-		imports: uniqueSorted([...extracted.imports, ...regex.imports]),
-		exports: uniqueSorted(extracted.exports),
+		imports: uniqueSorted([...extracted.imports, ...regexImports]),
 	};
 }
 
@@ -632,7 +623,7 @@ function buildFile(
 		kind: symbol.kind,
 		fileId: sourceFile.id,
 		line: symbol.line,
-		...(symbol.sig ? { sig: symbol.sig } : {}),
+		...symbolSigFields(symbol.kind, symbol.sig),
 	}));
 	return {
 		file: sourceFile,
@@ -903,12 +894,28 @@ function normalizeCodewikiFile(file: CodewikiFile): CodewikiFile {
 	};
 }
 
+function symbolSigFields(kind: CodewikiSymbolKind, sig: string | undefined): Pick<CodewikiSymbol, "sig"> {
+	if (!CODEWIKI_SYMBOL_KINDS_WITH_SIG.has(kind)) return {};
+	const clean = sig?.trim().slice(0, 240);
+	return clean && clean.length > 0 ? { sig: clean } : {};
+}
+
+function normalizeCodewikiSymbol(symbol: CodewikiSymbol): CodewikiSymbol {
+	return {
+		name: symbol.name,
+		kind: symbol.kind,
+		fileId: symbol.fileId,
+		line: symbol.line,
+		...symbolSigFields(symbol.kind, symbol.sig),
+	};
+}
+
 function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 	return {
 		version: 4,
 		language: codewiki.language,
 		files: codewiki.files.map(normalizeCodewikiFile).sort(compareFiles),
-		symbols: [...codewiki.symbols].sort(compareCodewikiSymbols),
+		symbols: codewiki.symbols.map(normalizeCodewikiSymbol).sort(compareCodewikiSymbols),
 		edges: [...codewiki.edges].sort(compareEdges),
 	};
 }

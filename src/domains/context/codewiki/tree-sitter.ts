@@ -214,13 +214,6 @@ function firstStringValue(node: SyntaxNode | null | undefined): string | null {
 	return stringValue(firstStringDescendant(node));
 }
 
-function addVariableDeclaratorNames(target: string[], node: SyntaxNode): void {
-	for (const declarator of descendants(node, "variable_declarator")) {
-		const name = declarator.childForFieldName("name") ?? firstNamedDescendant(declarator);
-		if (name) target.push(name.text);
-	}
-}
-
 function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
 	for (const node of descendants(root, ["function_declaration", "generator_function_declaration"])) {
@@ -515,69 +508,6 @@ function extractImportsByGrammar(grammar: GrammarName, root: SyntaxNode): string
 	return [];
 }
 
-function extractTsJsExports(root: SyntaxNode): string[] {
-	const exports: string[] = [];
-	for (const node of descendants(root, "export_statement")) {
-		const declaration = node.childForFieldName("declaration");
-		if (declaration) {
-			if (declaration.type === "lexical_declaration" || declaration.type === "variable_declaration") {
-				addVariableDeclaratorNames(exports, declaration);
-			} else {
-				const name = nameFromNode(declaration);
-				if (name) exports.push(name);
-			}
-		}
-		for (const specifier of descendants(node, "export_specifier")) {
-			const alias = specifier.childForFieldName("alias");
-			const name = alias ?? specifier.childForFieldName("name") ?? firstNamedDescendant(specifier);
-			if (name) exports.push(name.text);
-		}
-		if (/^\s*export\s+default\b/.test(node.text)) exports.push("default");
-	}
-	return uniqueSorted(exports);
-}
-
-function extractRustExports(root: SyntaxNode): string[] {
-	const exports: string[] = [];
-	for (const node of descendants(root, [
-		"function_item",
-		"struct_item",
-		"enum_item",
-		"type_item",
-		"trait_item",
-		"const_item",
-		"static_item",
-	])) {
-		if (!node.text.trimStart().startsWith("pub")) continue;
-		const name = nameFromNode(node);
-		if (name) exports.push(name);
-	}
-	return uniqueSorted(exports);
-}
-
-function extractExportsByGrammar(
-	grammar: GrammarName,
-	root: SyntaxNode,
-	symbols: ReadonlyArray<ExtractedSymbol>,
-): string[] {
-	if (grammar === "typescript" || grammar === "tsx" || grammar === "javascript") return extractTsJsExports(root);
-	if (grammar === "python")
-		return uniqueSorted(symbols.filter((symbol) => !symbol.name.startsWith("_")).map((symbol) => symbol.name));
-	if (grammar === "go")
-		return uniqueSorted(symbols.filter((symbol) => /^[A-Z]/.test(symbol.name)).map((symbol) => symbol.name));
-	if (grammar === "rust") return extractRustExports(root);
-	if (grammar === "java") {
-		return uniqueSorted(
-			symbols
-				.filter((symbol) => symbol.kind === "class" || symbol.kind === "iface" || symbol.kind === "type")
-				.map((symbol) => symbol.name),
-		);
-	}
-	if (grammar === "ruby")
-		return uniqueSorted(symbols.filter((symbol) => /^[A-Z]/.test(symbol.name)).map((symbol) => symbol.name));
-	return uniqueSorted(symbols.map((symbol) => symbol.name));
-}
-
 function sortSymbols(symbols: ExtractedSymbol[]): ExtractedSymbol[] {
 	return symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
 }
@@ -604,9 +534,9 @@ export async function createTreeSitterExtractor(): Promise<LanguageExtractor> {
 							? "c"
 							: null;
 			const grammar = grammarForPath(path, lang ?? languageFromPath(path));
-			if (!grammar || text.trim().length === 0) return { symbols: [], imports: [], exports: [] };
+			if (!grammar || text.trim().length === 0) return { symbols: [], imports: [] };
 			const parser = parsers.get(grammar);
-			if (!parser) return { symbols: [], imports: [], exports: [] };
+			if (!parser) return { symbols: [], imports: [] };
 			let tree: Parser.Tree | null = null;
 			try {
 				tree = parser.parse(text);
@@ -614,7 +544,6 @@ export async function createTreeSitterExtractor(): Promise<LanguageExtractor> {
 				return {
 					symbols,
 					imports: extractImportsByGrammar(grammar, tree.rootNode),
-					exports: extractExportsByGrammar(grammar, tree.rootNode, symbols),
 				};
 			} catch {
 				throw new Error(`tree-sitter parse failed for ${path}`);
