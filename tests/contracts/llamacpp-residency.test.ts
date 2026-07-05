@@ -4,18 +4,35 @@ import { residentModelsSummary } from "../../src/cli/targets.js";
 import {
 	observeLlamaCppResidency,
 	parseLlamaCppResident,
+	parseLlamaCppResidentModels,
+	parseLlamaCppRouterProps,
 	resetLlamaCppResidencyState,
 } from "../../src/engine/apis/llamacpp-residency.js";
 import { type ResidencyNotice, setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
 
-function modelsPayload(entries: Array<{ id: string; state: string }>): unknown {
-	return { data: entries.map((entry) => ({ id: entry.id, object: "model", status: { value: entry.state } })) };
+function modelsPayload(entries: Array<{ id: string; state: string; tags?: string[] }>): unknown {
+	return {
+		data: entries.map((entry) => ({
+			id: entry.id,
+			object: "model",
+			status: { value: entry.state },
+			...(entry.tags ? { tags: entry.tags } : {}),
+		})),
+	};
 }
 
 function fetchReturning(payload: unknown, calls: string[]): typeof fetch {
 	return (async (url: unknown) => {
 		calls.push(String(url));
 		return { ok: true, json: async () => payload } as Response;
+	}) as typeof fetch;
+}
+
+function fetchRoutes(routes: Record<string, unknown>, calls: string[]): typeof fetch {
+	return (async (url: unknown) => {
+		const key = String(url);
+		calls.push(key);
+		return { ok: true, json: async () => routes[key] ?? {} } as Response;
 	}) as typeof fetch;
 }
 
@@ -36,13 +53,24 @@ describe("contracts/llamacpp residency observer", () => {
 	it("parses resident ids from the router models payload", () => {
 		const payload = modelsPayload([
 			{ id: "coder", state: "loaded" },
-			{ id: "warming", state: "loading" },
+			{ id: "warming", state: "loading", tags: ["role:scout"] },
 			{ id: "cold", state: "unloaded" },
 		]);
 		deepStrictEqual(parseLlamaCppResident(payload), ["coder", "warming"]);
+		deepStrictEqual(parseLlamaCppResidentModels(payload), [
+			{ id: "coder", tags: [] },
+			{ id: "warming", tags: ["role:scout"] },
+		]);
 		deepStrictEqual(parseLlamaCppResident({}), []);
 		deepStrictEqual(parseLlamaCppResident(null), []);
 		deepStrictEqual(parseLlamaCppResident({ data: [{ id: 42 }] }), []);
+	});
+
+	it("parses router capacity from /props", () => {
+		deepStrictEqual(parseLlamaCppRouterProps({ max_instances: 2 }), { maxInstances: 2 });
+		deepStrictEqual(parseLlamaCppRouterProps({ max_instances: 0 }), {});
+		deepStrictEqual(parseLlamaCppRouterProps({ max_instances: "2" }), {});
+		deepStrictEqual(parseLlamaCppRouterProps(null), {});
 	});
 
 	it("records a swap when the router holds a different model, TTL-deduped", async () => {
@@ -73,7 +101,34 @@ describe("contracts/llamacpp residency observer", () => {
 		strictEqual(notices.length, 1);
 	});
 
-	it("reports double residency as stress and stays silent when clean", async () => {
+	it("reports allowed co-residency as capacity info when the router allows the resident count", async () => {
+		const calls: string[] = [];
+		const stacked = {
+			baseUrl: "http://mini:8080/v1",
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "coder",
+			fetchImpl: fetchRoutes(
+				{
+					"http://mini:8080/v1/models": modelsPayload([
+						{ id: "coder", state: "loaded" },
+						{ id: "scout", state: "loaded", tags: ["role:scout", "pinned:true"] },
+					]),
+					"http://mini:8080/props": { max_instances: 2 },
+				},
+				calls,
+			),
+		};
+		await observeLlamaCppResidency(stacked);
+		strictEqual(notices[0]?.kind, "co-resident");
+		strictEqual(notices[0]?.level, "info");
+		ok(notices[0]?.message.includes("2/2"));
+		ok(notices[0]?.message.includes("scout (scout)"));
+		ok(notices[0]?.message.includes("cannot verify remaining VRAM"));
+		deepStrictEqual(calls, ["http://mini:8080/v1/models", "http://mini:8080/props"]);
+	});
+
+	it("reports double residency as stress when capacity is unknown or exceeded and stays silent when clean", async () => {
 		const stacked = {
 			baseUrl: "http://mini:8080/v1",
 			targetId: "mini",
@@ -90,6 +145,7 @@ describe("contracts/llamacpp residency observer", () => {
 		await observeLlamaCppResidency(stacked);
 		strictEqual(notices[0]?.kind, "stress");
 		strictEqual(notices[0]?.level, "warning");
+		ok(notices[0]?.message.includes("cannot verify enough remaining VRAM"));
 
 		notices.length = 0;
 		resetLlamaCppResidencyState();

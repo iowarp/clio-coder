@@ -68,8 +68,14 @@ export const BusChannels = {
 
 export type BusChannel = (typeof BusChannels)[keyof typeof BusChannels];
 
-/** Collision or stress category for a {@link RuntimeNoticePayload}. */
-export type RuntimeNoticeKind = "will-not-fit" | "about-to-evict" | "swap" | "foreign-backoff" | "stress";
+/** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
+export type RuntimeNoticeKind =
+	| "will-not-fit"
+	| "about-to-evict"
+	| "swap"
+	| "foreign-backoff"
+	| "co-resident"
+	| "stress";
 
 /**
  * Model-residency notice published on {@link BusChannels.RuntimeNotice} by the

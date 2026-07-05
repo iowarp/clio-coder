@@ -25,6 +25,10 @@ still change interfaces.
 - Fixed local model families that declare no reasoning support so Clio no
   longer sends thinking fields, replays prior thinking blocks, surfaces thinking
   stream events, or records reasoning-token usage for those models.
+- Improved llama.cpp router residency notices so multiple resident models within
+  the router's configured instance count are reported as capacity information,
+  not as automatic degradation, and documented the VRAM rule for co-resident
+  scout and code models.
 
 ## 0.2.8 - 2026-07-04
 

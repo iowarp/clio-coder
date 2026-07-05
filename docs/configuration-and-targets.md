@@ -219,6 +219,31 @@ The setting `workers.resilienceCooldownMs` specifies the cooldown duration in mi
 
 The `guardrails` section holds the numeric backstops that bound runaway agent behavior. `turnToolCallBudget` (default `60`) is the orchestrator's per-turn soft tool-call budget: crossing it blocks every further call in the turn with a stop-and-summarize directive, and a hard ceiling 15 calls above it interrupts the turn outright. Separately, an identical-call loop guard trips when the same tool is called with identical arguments three times inside a 30s window; the first two blocks feed the model a strategy-change directive (and, when the looped call already returned a successful result earlier in the run, point it at that result instead), and reaching the second block per turn locks tool use for the rest of that turn so the model answers from what it already gathered, rather than cancelling a turn that may already hold the answer. Only a bounded backstop (two further tool calls after the lockout) falls back to the hard stop. This lockout is an orchestrator behavior (interactive, headless, and ACP alike); dispatched workers keep the immediate at-budget stop and rely on the lifetime cap. `workerToolCallCap` (default `50`) is the lifetime tool-call cap for one dispatched worker run. `maxDispatchRuns` (default `1000`) caps dispatch run-ledger retention. `readMaxBytes` (default `51200`) caps one read-tool call, and `observationTurnBudgetBytes` (default `196608`) is the shared per-turn byte pool across all observation-producing tools. Each value also has a per-process env override intended for CI and one-off experiments (see [environment-variables.md](environment-variables.md)); the settings file is the durable home.
 
+### Local model co-residency and scouts
+
+Clio can use a small scout model beside a larger coding model when your local
+runtime supports multiple resident instances. This is an operator capacity
+decision, not a prompt setting. The safe rule is: after the main resident model
+is loaded, any additional scout or worker model must still fit in the remaining
+GPU memory together with its KV cache, context window, and parallel slots. If
+the runtime spills weights or cache into CPU RAM, generation will be much
+slower even though the target still responds.
+
+For llama.cpp router targets, Clio observes `/v1/models` and `/props`. It can
+tell which models are loaded and whether the resident count is within the
+router's `max_instances`, so an allowed two-model setup is reported as an
+informational co-residency notice. The router response does not expose free
+VRAM or per-model loaded footprint, so Clio cannot prove the loaded set fits.
+Use host tools such as `nvidia-smi`, `rocm-smi`, Vulkan memory telemetry, or
+the runtime's own dashboard to confirm headroom after loading the main coding
+model and the scout model. Lower `--ctx-size`, KV cache precision, parallel
+slots, or unload the scout model if memory pressure pushes work into CPU RAM.
+
+Workers dispatched to separate nodes or separate targets have their own memory
+budgets. Workers routed to the same local target share that target's remaining
+VRAM with the orchestrator and scout model, so the same co-residency rule
+applies.
+
 
 ---
 
