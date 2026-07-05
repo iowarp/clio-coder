@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
-import { createTreeSitterExtractor } from "./tree-sitter.js";
+import { createTreeSitterExtractor, type TreeSitterExtractor } from "./tree-sitter.js";
 
 export type CodewikiLanguage = SourceProjectType | "config";
 export type CodewikiFileRole = "entry" | "test" | "module" | "config";
@@ -88,9 +88,9 @@ export interface LanguageExtractor {
 	extract(path: string, text: string): LanguageExtraction;
 }
 
-let treeSitterExtractorPromise: Promise<LanguageExtractor> | null = null;
+let treeSitterExtractorPromise: Promise<TreeSitterExtractor> | null = null;
 
-function loadTreeSitterExtractor(): Promise<LanguageExtractor> {
+function loadTreeSitterExtractor(): Promise<TreeSitterExtractor> {
 	treeSitterExtractorPromise ??= createTreeSitterExtractor();
 	return treeSitterExtractorPromise;
 }
@@ -787,10 +787,12 @@ async function buildFromPaths(
 	relPaths: ReadonlyArray<string>,
 	options: CodewikiBuildOptions = {},
 ): Promise<Codewiki> {
+	const sortedPaths = [...relPaths].sort(compareStrings);
 	const treeSitterExtractor = await loadTreeSitterExtractor();
+	await treeSitterExtractor.ensureGrammarsForPaths(sortedPaths);
 	const readFile = options.readFile ?? defaultReadFile;
 	const builtFiles: BuiltFile[] = [];
-	for (const relPath of [...relPaths].sort(compareStrings)) {
+	for (const relPath of sortedPaths) {
 		const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
 		if (built) builtFiles.push(built);
 	}
@@ -819,10 +821,9 @@ export async function updateCodewikiPaths(
 	);
 	if (normalizedPaths.length === 0) return codewiki;
 	const existingPaths = new Set(codewiki.files.map((file) => file.path));
-	const treeSitterExtractor = await loadTreeSitterExtractor();
 	const readFile = options.readFile ?? defaultReadFile;
 	const changedPathSet = new Set(normalizedPaths);
-	const rebuiltFiles: BuiltFile[] = [];
+	const rebuildPaths: string[] = [];
 	let hasIndexChange = false;
 	for (const relPath of normalizedPaths) {
 		const wasIndexed = existingPaths.has(relPath);
@@ -836,11 +837,18 @@ export async function updateCodewikiPaths(
 		}
 		if (!wasIndexed && !isCurrentIndexableFile) continue;
 		hasIndexChange = true;
-		if (!isCurrentIndexableFile) continue;
-		const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
-		if (built) rebuiltFiles.push(built);
+		if (isCurrentIndexableFile) rebuildPaths.push(relPath);
 	}
 	if (!hasIndexChange) return codewiki;
+	const rebuiltFiles: BuiltFile[] = [];
+	if (rebuildPaths.length > 0) {
+		const treeSitterExtractor = await loadTreeSitterExtractor();
+		await treeSitterExtractor.ensureGrammarsForPaths(rebuildPaths);
+		for (const relPath of rebuildPaths) {
+			const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
+			if (built) rebuiltFiles.push(built);
+		}
+	}
 	const removedFileIds = new Set(codewiki.files.filter((file) => changedPathSet.has(file.path)).map((file) => file.id));
 	const symbolsByFileId = new Map<string, CodewikiSymbol[]>();
 	for (const symbol of codewiki.symbols) {

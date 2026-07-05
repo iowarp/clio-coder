@@ -512,31 +512,62 @@ function sortSymbols(symbols: ExtractedSymbol[]): ExtractedSymbol[] {
 	return symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
 }
 
-export async function createTreeSitterExtractor(): Promise<LanguageExtractor> {
+function grammarForSourceFile(path: string): GrammarName | null {
+	const lang = path.endsWith(".tsx")
+		? "typescript"
+		: path.endsWith(".jsx")
+			? "javascript"
+			: path.endsWith(".cpp") || path.endsWith(".cc") || path.endsWith(".cxx") || path.endsWith(".hpp")
+				? "c++"
+				: path.endsWith(".c") || path.endsWith(".h")
+					? "c"
+					: null;
+	return grammarForPath(path, lang ?? languageFromPath(path));
+}
+
+export interface TreeSitterExtractor extends LanguageExtractor {
+	ensureGrammarsForPaths(paths: ReadonlyArray<string>): Promise<void>;
+}
+
+export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> {
 	await ensureParserInit();
 	const parsers = new Map<GrammarName, Parser>();
-	for (const [grammar, wasmName] of Object.entries(WASM_BY_GRAMMAR) as Array<[GrammarName, string]>) {
-		const language = await Parser.Language.load(require.resolve(`tree-sitter-wasms/out/${wasmName}`));
-		const parser = new Parser();
-		parser.setLanguage(language);
-		parsers.set(grammar, parser);
-	}
+	const loading = new Map<GrammarName, Promise<void>>();
+	const loadGrammar = (grammar: GrammarName): Promise<void> => {
+		if (parsers.has(grammar)) return Promise.resolve();
+		let pending = loading.get(grammar);
+		if (!pending) {
+			pending = Parser.Language.load(require.resolve(`tree-sitter-wasms/out/${WASM_BY_GRAMMAR[grammar]}`))
+				.then((language) => {
+					const parser = new Parser();
+					parser.setLanguage(language);
+					parsers.set(grammar, parser);
+				})
+				.finally(() => {
+					loading.delete(grammar);
+				});
+			loading.set(grammar, pending);
+		}
+		return pending;
+	};
 	return {
 		langs: ["typescript", "javascript", "python", "go", "rust", "c", "c++", "java", "ruby", "c#"],
+		async ensureGrammarsForPaths(paths: ReadonlyArray<string>): Promise<void> {
+			const needed = new Set<GrammarName>();
+			for (const path of paths) {
+				const grammar = grammarForSourceFile(path);
+				if (grammar) needed.add(grammar);
+			}
+			await Promise.all([...needed].map(loadGrammar));
+		},
 		extract(path: string, text: string): LanguageExtraction {
-			const lang = path.endsWith(".tsx")
-				? "typescript"
-				: path.endsWith(".jsx")
-					? "javascript"
-					: path.endsWith(".cpp") || path.endsWith(".cc") || path.endsWith(".cxx") || path.endsWith(".hpp")
-						? "c++"
-						: path.endsWith(".c") || path.endsWith(".h")
-							? "c"
-							: null;
-			const grammar = grammarForPath(path, lang ?? languageFromPath(path));
+			const grammar = grammarForSourceFile(path);
 			if (!grammar || text.trim().length === 0) return { symbols: [], imports: [] };
 			const parser = parsers.get(grammar);
-			if (!parser) return { symbols: [], imports: [] };
+			// A missing parser means the caller skipped ensureGrammarsForPaths for this
+			// path; throwing routes the file to the regex fallback instead of silently
+			// indexing it with zero symbols.
+			if (!parser) throw new Error(`tree-sitter grammar not loaded for ${path}`);
 			let tree: Parser.Tree | null = null;
 			try {
 				tree = parser.parse(text);
