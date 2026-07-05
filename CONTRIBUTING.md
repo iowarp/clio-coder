@@ -74,10 +74,11 @@ workstation.
 3. Land the release commit through the normal PR flow.
 4. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must
    match `package.json`'s version; the release workflow refuses mismatches.
-5. `.github/workflows/release.yml` reruns the gate once via `prepublishOnly`,
-   publishes to npm with provenance, and creates the GitHub release with the
-   tarball attached. One-time setup: the `NPM_TOKEN` repository secret must
-   hold an automation token that can publish `@iowarp` packages.
+5. `.github/workflows/release.yml` verifies the tag against `package.json`,
+   reruns the full gate, and creates the GitHub release with the tarball
+   attached. The npm publish step stays disabled until the first stable
+   v0.3.0; when it is re-enabled, the `NPM_TOKEN` repository secret must hold
+   an automation token that can publish `@iowarp` packages.
 
 What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 
