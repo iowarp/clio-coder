@@ -47,6 +47,9 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		"~/.pypirc",
 		"~/.git-credentials",
 		".git-credentials",
+		// Remote URLs in the repo git config can embed access tokens, and .git
+		// is hidden from grep/find but not from direct reads without this entry.
+		".git/config",
 		// Clio's own provider secret store. The literal covers a repo-level file
 		// of the same name on purpose; the expanded clioConfigDir() form is
 		// appended at policy construction (policy-engine.ts), since this static
