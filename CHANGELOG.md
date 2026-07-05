@@ -5,33 +5,17 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
-## 0.2.9 - Unreleased
-
-### Changed
-
-- **Codewiki v4 rebuild.** The structural codewiki index is smaller and more
-  navigable: schema v4 stores per-file hashes, imports, and optional summaries,
-  keeps declaration-only symbols, writes compact JSON, and runs one unified
-  async tree-sitter-first pipeline with per-file regex fallback and C# coverage
-  across the ten-language set. Incremental updates now replace only changed
-  indexed paths and rebuild edges, while `.clio/state.json` records
-  `codewikiVersion` and uses the mtime-aware fingerprint plus the single
-  `isStale` tree-hash predicate for refresh decisions. A new explicit wiki
-  layer writes agent-authored `.clio/wiki/` pages with `quickstart.md` as the
-  hub, at most eight pages, and `meta.json` carrying git head and content hash;
-  generation runs only through `clio context wiki`, `clio context wiki
-  --update`, or `clio context refresh --wiki`, with `--status` read-only. Prompt
-  markers, `code_nav mode=wiki`, `clio context` digest output, and the welcome
-  dashboard now surface codewiki/wiki availability and staleness without
-  embedding the artifacts. Existing repositories perform one full re-index after
-  upgrade because the new fingerprint format and v4 per-file hash/import
-  backfill make old artifacts stale.
-
-## 0.2.8 - 2026-07-02
+## 0.2.8 - 2026-07-04
 
 The toolkit-rework release: the tool surface was redesigned into seven planes
 with 19 tools, every OBSERVE tool now closes through one observation envelope,
-and grep/find answer tree visibility from a single ignore policy.
+and grep/find answer tree visibility from a single ignore policy. Two more
+workstreams land alongside it. The approvals plane gained one canonical
+lifecycle: every permission ask carries a request id from park to resolution,
+worker escalations keep their provenance, denials are scoped to one request,
+and receipts grade how faithfully each runtime enforced the autonomy level.
+The codewiki was rebuilt on schema v4 with a separate agent-authored wiki
+layer under `.clio/wiki/`.
 
 ### Added
 
@@ -170,6 +154,38 @@ and grep/find answer tree visibility from a single ignore policy.
   and its resolution source is tallied on the receipt's `safety.decisions`
   escalation counters. Existing `deny`/`fail` behavior is unchanged, and no
   tool schema or prompt text changed. ACP delegations are out of scope.
+- **One approval lifecycle: canonical request identity and resolution
+  provenance.** Every approvable permission ask now mints a `requestId` at the
+  approvals plane and resolves exactly once. `PermissionRequested` and
+  `PermissionResolved` bus payloads carry `requestId`, `origin`, `axis`, and
+  `decidedBy`; audit permission rows record the same fields, so a request
+  joins its resolution on one key across the bus, the ledger, and receipts.
+  The ACP server bridge emits a resolution for every client grant, denial,
+  and timeout instead of leaving dangling request rows, headless auto-denials
+  carry the id, and remote ACP server sessions snapshot the autonomy level at
+  `session/new` so a mid-session settings change cannot alter an in-flight
+  remote session's admission decisions.
+- **Worker escalations keep their provenance.** The dispatch republish
+  forwards the worker decision's reasons, reason code, rule id, and policy
+  source; escalation requests are audited as `status: "requested"` permission
+  rows (previously that enum value had no writer); and the permission overlay
+  renders from a real approval-request view instead of reconstructing a fake
+  safety decision, so a worker ask can finally say it came from a named
+  safety-net rail such as command substitution rather than a generic autonomy
+  label.
+- **Autonomy enforcement grades on receipts.** Worker receipts carry an
+  optional `autonomyEnforcement` block grading how the runtime honored the
+  autonomy model: `mediated` (per-call evaluation through Clio's net and
+  autonomy), `approximated` (posture mapped to external harness flags with no
+  per-call mediation), or `bypassed` (`CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`
+  dangerous modes), sealed into the v3 integrity digest. Evidence raises a
+  warn-level external-bypass finding when a run skipped Clio safety via the
+  bypass flag and an info-level approximation note otherwise, and the
+  provenance projection surfaces the block in `transcript.md`,
+  `trace.cleaned.jsonl`, and compact dispatch output. ACP delegation receipts
+  are unchanged.
+- **Benchmarks.** A HumanEval community adapter joins the benchmark set, and
+  the Python adapters now run through `uv`.
 - **monitor and steer.** `monitor(run_id?, mode=list|status|peek|receipt)`
   inspects dispatched runs, including an in-process rolling event tail
   (`peek`) and the stored receipt JSON (`receipt`, 14KB cap).
@@ -228,6 +244,55 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Changed
 
+- **Codewiki v4 rebuild.** The structural codewiki index is smaller and more
+  navigable: schema v4 stores per-file hashes, imports, and optional summaries,
+  keeps declaration-only symbols, writes compact JSON, and runs one unified
+  async tree-sitter-first pipeline with per-file regex fallback and C# coverage
+  across the ten-language set. Incremental updates now replace only changed
+  indexed paths and rebuild edges, while `.clio/state.json` records
+  `codewikiVersion` and uses the mtime-aware fingerprint plus the single
+  `isStale` tree-hash predicate for refresh decisions. A new explicit wiki
+  layer writes agent-authored `.clio/wiki/` pages with `quickstart.md` as the
+  hub, at most eight pages, and `meta.json` carrying git head and content hash;
+  generation runs only through `clio context wiki`, `clio context wiki
+  --update`, or `clio context refresh --wiki`, with `--status` read-only. Prompt
+  markers, `code_nav mode=wiki`, `clio context` digest output, and the welcome
+  dashboard now surface codewiki/wiki availability and staleness without
+  embedding the artifacts. Existing repositories perform one full re-index after
+  upgrade because the new fingerprint format and v4 per-file hash/import
+  backfill make old artifacts stale.
+- **`system_modify` asks are attributed to the safety net, not the autonomy
+  level.** The level-invariant confirm on system-level changes moved from
+  `mapAutonomy` into the policy engine as a net confirm rail. Outcomes are
+  unchanged at every level on every surface, proven by a pre-committed autonomy
+  admission matrix test that passes byte-identical across the move; only
+  attribution changes. The overlay, notices, and audit ledger now name a
+  safety-net rail instead of the autonomy level, and these asks carry
+  `reasonCode: system-modify-confirm` with `policySource: builtin-classifier`
+  rather than autonomy-adjacent codes.
+- **Denying an approval rejects one request, not the whole queue.** Denying
+  the permission overlay now rejects only the presented request and advances
+  the queue; the next parked call re-presents instead of being cancelled with
+  it. One-shot grants reference the `requestId` they were issued for rather
+  than matching the oldest parked call by action class. Cancel-all remains the
+  behavior for shutdown, headless runs, ACP transport failure, and non-stall
+  timeout paths. Worker escalation tallies may now show more requested and
+  denied entries per run where cancel-all previously collapsed them into one.
+- **Dispatch refuses `suggest` on approximated subprocess runtimes.**
+  Deliberate behavior break: the `claude-code` and `antigravity-code`
+  subprocess runtimes now fail closed at autonomy level `suggest` instead of
+  silently degrading to read-only. A subprocess cannot park a tool call for
+  approval, so `suggest` has no honest mapping there; the runner throws before
+  launching the external CLI. Dispatch to a native or `claude-sdk` worker, or
+  use `read-only` or `auto-edit`.
+- **Settings expose `workers.onPermission=escalate`, and autonomy copy matches
+  enforcement.** The settings center now cycles `deny`/`fail`/`escalate`
+  (previously the most operator-friendly mode was reachable only by
+  hand-editing settings.yaml), the `auto-edit` and `full-auto` value help now
+  state what actually runs and what still asks, and the help-center autonomy
+  topic describes autonomy as harness-enforced admission across four layers
+  (tool surface, safety net, autonomy level, approvals) instead of a
+  prompt-initiative knob.
 - **TUI design system.** Every interactive surface moved onto one presentation
   system, recorded in `docs/tui-design.md`: one token vocabulary, one glyph per
   meaning, one formatter per quantity, one island frame, one status color per
@@ -373,6 +438,34 @@ and grep/find answer tree visibility from a single ignore policy.
 
 ### Fixed
 
+- **Hard blocks precede damage-control asks, and the built-in path policy
+  survives a malformed project policy.** Damage-control ask rules no longer
+  bypass hard blocks: the ask rail now runs only after the invalid-policy
+  fail-closed block and the full path-policy section, so confirming an
+  ask-rule command that targets a zero-access path, or running one under an
+  invalid config, still blocks. The path policy is evaluated regardless of
+  project-policy validity, so built-in credential protection stays active when
+  `.clio/safety.yaml` is malformed instead of failing open for typed
+  read/write/edit. The audit writer also drops its per-row fsync (rows stay
+  visible in-process through writeSync) and fsyncs on flush, close, rotation,
+  and a 5s unref'd interval, removing two fsync stalls from every tool call.
+- **Permission-queue robustness.** Seven audit findings closed in one pass. A
+  parked main-agent call is re-presented after any overlay closes, so a call
+  that parks while a worker-escalation overlay is open no longer hangs. The
+  worker overlay opens only for a live escalation, so policy-denied worker
+  asks under the default deny posture no longer pop a dead overlay. Parked
+  calls subscribe to the run abort signal and a cancelled turn clears the
+  queue, so a stale call cannot resurrect later. Requested-audit rows and
+  parked notices dedupe by `requestId` across tail re-notifies. A worker abort
+  emits a denied escalation resolution so receipt tallies balance. Approval
+  request ids carry a per-registry random token so concurrent workers cannot
+  collide. The ACP bridge emits a denied resolution for every queued request
+  before a cancel-all on no-session or transport failure.
+- **Safety path checks canonicalize through symlinks.** Path-policy and
+  protected-artifact evaluation resolve symlinks before matching, unsupported
+  subprocess permission mediation modes are rejected instead of silently
+  approximated, and compaction and usage-report edge cases around the same
+  paths are hardened.
 - **The compact ctx ledger row joins the kv grammar.** Its `ctx` key reads
   dim and the percent muted, and the pre-measurement `?%` placeholder reads
   dim instead of rendering as bare text.
@@ -527,7 +620,7 @@ and grep/find answer tree visibility from a single ignore policy.
   instead of a local 0.85, so `/context` reserve/free math and the
   auto-compact trigger can no longer disagree when no threshold is configured.
 
-### Removed / BREAKING (unreleased, no compat shims)
+### Removed / BREAKING (no compat shims)
 
 - Guardrail env vars were renamed and repointed at settings. The new
   `guardrails:` settings.yaml section (`turnToolCallBudget`,
