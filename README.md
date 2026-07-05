@@ -148,6 +148,24 @@ can see. The full command and slash-command reference is in
 configuration in depth is covered by
 [docs/configuration-and-targets.md](docs/configuration-and-targets.md).
 
+### Local Scout Residency
+
+Fast scout agents work best when the scout model is already resident next to
+the main coding model on a local router such as llama.cpp. This is safe only
+when the combined model weights, KV caches, context windows, and parallel slot
+settings fit in GPU memory after the resident main model is loaded. If the
+router spills into CPU RAM, scout calls and main turns become slow.
+
+For a two-model local setup, load the main coding model and the small scout
+model manually on the target host, then point Clio's orchestrator and scout or
+worker profile at those models. On llama.cpp routers, keep `max_instances` at
+least as high as the number of models you intend to keep resident. Clio can see
+which router instances are loaded and the router's instance limit, but current
+llama.cpp router responses do not expose free VRAM, so the operator remains
+responsible for confirming the loaded set fits. Worker models running on other
+nodes are unaffected; workers using the same local target share the same
+remaining-VRAM budget.
+
 ## Use Clio with a Subscription
 
 Clio can run on AI subscriptions, not just API keys. You can power Clio using your ChatGPT Plus/Pro subscription or drive Claude Code using your Claude Pro/Max subscription.
