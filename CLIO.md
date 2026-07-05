@@ -7,7 +7,7 @@ Clio Coder is the coding agent in IOWarp's CLIO ecosystem of agentic science: a 
 - Biome owns formatting and lint: tabs, line width 120, double quotes. `npm run lint` must pass with zero diagnostics before review.
 - Tests are node:test files under tests/contracts, tests/smoke, and tests/boundaries, run through tsx. New behavior lands with a test in the matching lane.
 - Commit subjects are conventional and at most 72 characters: feat, fix, docs, test, refactor, build, ci, chore, with an optional scope.
-- Update CHANGELOG.md in the same change for any user-visible behavior, developer workflow, or release-status change.
+- Update CHANGELOG.md in the same change for any user-visible behavior, developer workflow, or release-status change. Keep CHANGELOG.md public-facing and concise; put detailed implementation history, verification notes, and internal rationale in DEVLOG.md when that depth is useful.
 - ASCII punctuation in docs, comments, and commits. No em-dash clause separators and no emojis.
 - No new biome-ignore, ts-ignore, or `any` without a linked tracking issue.
 
@@ -43,4 +43,4 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 
 ## Context artifacts
 
-`CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `dist/` is generated build output. `context-init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
+`CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `CLAUDE.md` and `AGENTS.md` are compatibility symlinks to `CLIO.md` so Claude, Codex, and Clio read the same repository instructions; do not fork those files into separate guidance. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `dist/` is generated build output. `context-init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.

@@ -72,9 +72,10 @@ while keeping every privileged action gated and auditable.
 Clio Coder is alpha software distributed from source. The current release is
 **v0.2.8**. The `@iowarp/clio-coder` package is not yet published to npm;
 install from a source checkout as described below. Interfaces may still move
-between minor versions, and model-specific behavior varies by target. Release
-history lives in the [CHANGELOG](CHANGELOG.md), and every release is gated by
-the deterministic `npm run ci:release` suite.
+between minor versions, and model-specific behavior varies by target. Public
+release notes live in the [CHANGELOG](CHANGELOG.md), the detailed developer log
+lives in [DEVLOG.md](DEVLOG.md), and every release is gated by the
+deterministic `npm run ci:release` suite.
 
 ## Requirements
 
