@@ -81,6 +81,14 @@ export interface SafetyPolicyEngineOptions {
 	cwd?: string;
 	rulePacks?: RulePacks;
 	projectPolicy?: LoadedProjectSafetyPolicy;
+	/**
+	 * Absolute directories a write-class tool call is confined to for this run.
+	 * When present and non-empty, a write/edit target outside every root is a
+	 * final BLOCK (reason code "write-root"). Empty or absent disables the check.
+	 * Enforced at the worker safety seam so both the native worker registry and
+	 * the Claude SDK hook path inherit it.
+	 */
+	writeRoots?: ReadonlyArray<string>;
 }
 
 interface SourcedRule {
@@ -108,8 +116,54 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 
 const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 
+// Write-class tools (action class "write"). bash is execute class and runs its
+// own loop, so it is not covered by the lexical write-root containment below.
+const WRITE_ROOT_TOOLS = new Set<string>([ToolNames.Write, ToolNames.Edit, ToolNames.Artifact]);
+
+function writeRootTargetPath(call: ClassifierCall): string | null {
+	if (!WRITE_ROOT_TOOLS.has(call.tool)) return null;
+	const target = pathArg(call.args);
+	if (target !== null) return target;
+	if (call.tool === ToolNames.Artifact) {
+		const kind = call.args?.kind;
+		return kind === "review" ? "REVIEW.md" : kind === "report" ? "REPORT.md" : "PLAN.md";
+	}
+	return null;
+}
+
+/**
+ * Under active write-root confinement, a tool that can write outside the roots
+ * without a path argument the lexical check can inspect. Execute-class tools run
+ * project scripts or a shell; dispatch spawns a worker not bound to these roots.
+ */
+function isWriteConfinementEscape(call: ClassifierCall, actionClass: string): boolean {
+	if (EXECUTION_TOOLS.has(call.tool)) return true;
+	return actionClass === "execute" || actionClass === "dispatch";
+}
+
+/**
+ * Lexical write-root containment. The target is resolved against the worker cwd
+ * and must equal a root or sit beneath it (`root` + path separator). The check
+ * is lexical and does not chase symlinks, so a symlink inside a root that points
+ * outside is not detected here. Returns the block reason, or null when allowed.
+ */
+function evaluateWriteRoots(roots: ReadonlyArray<string>, writeRootCwd: string, call: ClassifierCall): string | null {
+	if (roots.length === 0) return null;
+	const target = writeRootTargetPath(call);
+	if (target === null) return null;
+	const resolved = path.resolve(writeRootCwd, target);
+	for (const root of roots) {
+		if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) return null;
+	}
+	return `write target '${target}' resolves to '${resolved}', which is outside the permitted write roots for this run: ${roots.join(", ")}`;
+}
+
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {
 	const cwd = canonicalizeExistingPath(path.resolve(options.cwd ?? process.cwd()));
+	// Write-root containment resolves lexically, so it keeps its own un-canonicalized
+	// cwd and roots to compare like against like (the design mandates no symlink chasing).
+	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
+	const writeRoots = (options.writeRoots ?? []).map((root) => path.resolve(root));
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? loadProjectSafetyPolicy(cwd);
 	const projectPolicyRoot =
@@ -147,6 +201,38 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const classification = effectiveClassification(rawClassification, hit?.match);
 
 			const base = baseDecision(call, classification, callCwd, posture, command);
+
+			// Worker write-root containment (Slice C). A write-class tool whose
+			// target escapes every permitted root is a final block, ranked ahead of
+			// the git/system-modify/path-policy rails so an out-of-root write reports
+			// "write-root" even when the classifier escalated it to system_modify
+			// (e.g. a write outside cwd). No-op unless the run carries writeRoots.
+			const writeRootReason = evaluateWriteRoots(writeRoots, writeRootCwd, call);
+			if (writeRootReason !== null) {
+				return blockDecision(base, {
+					ruleId: "write-root",
+					reasonCode: "write-root",
+					reasons: [writeRootReason],
+					policySource: "builtin-classifier",
+				});
+			}
+
+			// Write-confinement is only honest if the run cannot escape the roots by
+			// running an arbitrary command or spawning an unconfined child. Under
+			// active writeRoots, execute-class tools (bash, verify, which run project
+			// scripts) and dispatch (which spawns a worker not bound to these roots)
+			// are blocked outright: they can mutate the filesystem outside the roots.
+			if (writeRoots.length > 0 && isWriteConfinementEscape(call, classification.actionClass)) {
+				return blockDecision(base, {
+					ruleId: "write-root",
+					reasonCode: "write-root",
+					reasons: [
+						`tool '${call.tool}' (${classification.actionClass}) can mutate the filesystem outside the permitted write roots and is blocked under write-root confinement`,
+					],
+					policySource: "builtin-classifier",
+				});
+			}
+
 			// An explicit `ask: true` damage-control rule is an authored
 			// confirm rail and takes precedence over classifier escalation for
 			// the same command (sd-01 M3). Without this, the unconditional

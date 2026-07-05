@@ -77,9 +77,18 @@ export {
 	type WikiGenerateInput,
 	type WikiGenerateMode,
 } from "./wiki/generate.js";
-export { listWikiPages, validateWikiLayout, type WikiLayoutValidation, type WikiPage, wikiDir } from "./wiki/layout.js";
+export {
+	listWikiPages,
+	listWikiPagesInDir,
+	validateWikiLayout,
+	validateWikiLayoutInDir,
+	type WikiLayoutValidation,
+	type WikiPage,
+	wikiDir,
+} from "./wiki/layout.js";
 export {
 	computeWikiContentHash,
+	computeWikiContentHashOfDir,
 	currentWikiGitHead,
 	isWikiMeta,
 	readWikiMeta,

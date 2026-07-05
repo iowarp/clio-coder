@@ -87,6 +87,13 @@ export interface WorkerSpec {
 	 * Default "auto-edit".
 	 */
 	autonomy?: AutonomyLevel;
+	/**
+	 * Absolute directories write-class tool calls are confined to for this run.
+	 * Enforced at the shared worker safety seam so a write/edit target outside
+	 * every root is a final block. Only set on runtimes that mediate per-tool
+	 * calls (native, claude-sdk); dispatch refuses it on subprocess runtimes.
+	 */
+	writeRoots?: ReadonlyArray<string>;
 }
 
 export interface WorkerPromptMessage {
@@ -451,6 +458,13 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.autonomy !== undefined) {
 		readEnum(spec.autonomy, "WorkerSpec.autonomy", SPEC_AUTONOMY_LEVELS);
+	}
+	if (spec.writeRoots !== undefined) {
+		const roots = readStringArray(spec.writeRoots, "WorkerSpec.writeRoots");
+		if (roots.length === 0) throw new Error("WorkerSpec.writeRoots must be a non-empty array when present");
+		for (const root of roots) {
+			if (root.trim().length === 0) throw new Error("WorkerSpec.writeRoots entries must be non-empty strings");
+		}
 	}
 	return spec as unknown as WorkerSpec;
 }

@@ -91,6 +91,12 @@ export interface WorkerRunInput {
 	 * Workers inherit the orchestrator's level; absent means the default.
 	 */
 	autonomy?: AutonomyLevel;
+	/**
+	 * Absolute directories write-class tool calls are confined to for this run.
+	 * Enforced at the shared worker safety seam (createWorkerSafety) so both the
+	 * native registry and the Claude SDK hook path block out-of-root writes.
+	 */
+	writeRoots?: ReadonlyArray<string>;
 }
 
 export interface WorkerRunResult {
@@ -246,7 +252,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The loop guard rides on the registry's middleware contract as a
 	// before_tool registration (engine/loop-guard.ts), so admission and
 	// repetition detection share one seam; there is no agent-loop hook anymore.
-	const safety = createWorkerSafety({ cwd: process.cwd() });
+	const safety = createWorkerSafety({
+		cwd: process.cwd(),
+		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
+	});
 	const registry = createWorkerToolRegistry(
 		input.middlewareSnapshot,
 		safety,

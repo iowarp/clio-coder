@@ -119,8 +119,7 @@ export function writeWikiMeta(cwd: string, meta: WikiMeta): void {
 	safeResourceWrite(wikiMetaPath(cwd), `${JSON.stringify(normalized)}\n`, { encoding: "utf8" });
 }
 
-export function computeWikiContentHash(cwd: string): string {
-	const dir = wikiDir(cwd);
+export function computeWikiContentHashOfDir(dir: string): string {
 	let names: string[];
 	try {
 		names = readdirSync(dir, { withFileTypes: true })
@@ -143,4 +142,8 @@ export function computeWikiContentHash(cwd: string): string {
 		hash.update("\0");
 	}
 	return hash.digest("hex");
+}
+
+export function computeWikiContentHash(cwd: string): string {
+	return computeWikiContentHashOfDir(wikiDir(cwd));
 }

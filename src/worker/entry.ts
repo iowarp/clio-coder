@@ -66,6 +66,7 @@ async function main(): Promise<number> {
 		...(spec.escalation !== undefined ? { escalation: spec.escalation } : {}),
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
+		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
 	if (spec.sessionId) input.sessionId = spec.sessionId;

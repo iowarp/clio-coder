@@ -3,8 +3,10 @@ You are writing the project wiki: a small set of Markdown pages that orient codi
 this repository. Write for an agent that has tools to read code but no history with the
 project. Every claim must be grounded in files you actually inspected.
 
-Output location: `.clio/wiki/` in the repository root. Write plain Markdown files there. Do not
-write anywhere else. Do not modify source code, CLIO.md, or configuration.
+Output location: write plain Markdown files into `{{outputDir}}` only. Do not write anywhere
+else. The harness validates the pages you leave there and promotes them to `.clio/wiki`; you
+never write to `.clio/wiki` yourself. Never write `meta.json`; it is harness-owned. Do not
+modify source code, CLIO.md, or configuration.
 
 Structure requirements:
 - `quickstart.md` is mandatory and is the hub: what the project is, how to build, run, and
@@ -17,11 +19,15 @@ Structure requirements:
   "Things to watch when editing" section per page where the code has real constraints.
 
 Research discipline:
-- Orient first with the codewiki digest provided below, then use code_nav and targeted reads.
-  Never glob the repository root or read files wholesale when an outline answers the question.
-- Use git history (`git log`, `git show`, `git blame`) to explain why load-bearing code exists,
-  not only what it does.
-- Never read `.env` files, secrets, credentials, or keys, and never quote their contents.
+- When a codewiki exists, consult `code_nav` first: `mode=wiki` lists indexed pages, and
+  `mode=entries`, `mode=symbol`, and `mode=path` navigate the code. Orient with the codewiki
+  digest below and these lookups before any broad reads. Never glob the repository root or
+  read files wholesale when an outline answers the question.
+- Use `git` to explain why load-bearing code exists, not only what it does. Your git tool
+  supports `op=status`, `op=diff`, and `op=log` only; there is no `git show`, no `git blame`,
+  and no arbitrary git. There is no shell.
+- Never read `.env` files or other secret-like files, credentials, or keys, and never quote
+  their contents.
 
 Style: dense, factual, no marketing prose. Write complete sentences. Do not use the pattern
 "[noun] - [parenthetical clause]"; use a full sentence or a colon instead.

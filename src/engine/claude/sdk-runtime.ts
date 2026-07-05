@@ -396,7 +396,10 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		else input.signal.addEventListener("abort", abort, { once: true });
 	}
 
-	const safety = createWorkerSafety({ cwd: process.cwd() });
+	const safety = createWorkerSafety({
+		cwd: process.cwd(),
+		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
+	});
 	// Escalation needs the native registry park loop and an operator on the
 	// worker's stdin; the Claude SDK path has neither, so it collapses the
 	// escalate posture to the non-stall deny fallback.

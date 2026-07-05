@@ -5,6 +5,7 @@
  * on `ok` and gets either the typed spec or the list of reasons it failed.
  */
 
+import path from "node:path";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import type { DispatchRequestOrigin, RunLineage } from "./types.js";
 
@@ -39,6 +40,13 @@ export interface JobSpec {
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
+	/**
+	 * Absolute directories write-class tool calls are confined to for this run.
+	 * Resolved against the job cwd at validation time. Enforced at the worker
+	 * safety seam; dispatch admission refuses it on runtimes that cannot mediate
+	 * per-tool calls (subprocess).
+	 */
+	writeRoots?: ReadonlyArray<string>;
 	requestOrigin?: DispatchRequestOrigin;
 	/**
 	 * Threaded output from the previous pipeline step. Set only by the dispatch
@@ -73,6 +81,7 @@ const KNOWN_KEYS = new Set([
 	"noSkills",
 	"skillPaths",
 	"trustProjectCompatRoots",
+	"writeRoots",
 	"requestOrigin",
 	"pipelineInput",
 	"lineage",
@@ -185,6 +194,16 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("writeRoots" in spec && spec.writeRoots !== undefined) {
+		if (
+			!Array.isArray(spec.writeRoots) ||
+			spec.writeRoots.length === 0 ||
+			spec.writeRoots.some((root) => typeof root !== "string" || root.length === 0)
+		) {
+			errors.push("writeRoots must be a non-empty array of non-empty strings");
+		}
+	}
+
 	if ("requestOrigin" in spec && spec.requestOrigin !== undefined) {
 		if (typeof spec.requestOrigin !== "string" || !VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 			errors.push("requestOrigin must be one of: user|agent|internal");
@@ -226,6 +245,14 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.noSkills === "boolean") out.noSkills = spec.noSkills;
 	if (Array.isArray(spec.skillPaths)) out.skillPaths = spec.skillPaths.map((p) => String(p));
 	if (typeof spec.trustProjectCompatRoots === "boolean") out.trustProjectCompatRoots = spec.trustProjectCompatRoots;
+	if (
+		Array.isArray(spec.writeRoots) &&
+		spec.writeRoots.length > 0 &&
+		spec.writeRoots.every((root) => typeof root === "string" && root.length > 0)
+	) {
+		const jobCwd = typeof spec.cwd === "string" && spec.cwd.length > 0 ? spec.cwd : process.cwd();
+		out.writeRoots = spec.writeRoots.map((root) => path.resolve(jobCwd, String(root)));
+	}
 	if (typeof spec.requestOrigin === "string" && VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;
 	}

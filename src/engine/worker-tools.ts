@@ -242,7 +242,7 @@ function toAgentTool(
  * workers do not share counts. The detector matches the orchestrator's
  * behaviour but skips audit-record bookkeeping which the worker does not own.
  */
-export function createWorkerSafety(options: { cwd?: string } = {}): SafetyContract {
+export function createWorkerSafety(options: { cwd?: string; writeRoots?: ReadonlyArray<string> } = {}): SafetyContract {
 	let loopState: LoopDetectorState = createLoopState();
 	const policyEngine = createSafetyPolicyEngine(options);
 	return {

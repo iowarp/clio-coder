@@ -10,6 +10,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { resolve as resolvePath } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
@@ -848,6 +849,22 @@ function assertRuntimeCanHonorWorkerPermissionMode(
 	);
 }
 
+/**
+ * Fail closed when writeRoots are requested on a runtime that cannot enforce
+ * them. Subprocess runtimes (claude-code, antigravity) run their own tool loop
+ * without Clio per-tool mediation, so a write-root confinement they cannot
+ * honor is refused at admission rather than silently ignored. Mirrors
+ * assertToolProfileEnforceable. Native (http) and claude-sdk runtimes mediate
+ * every tool call through the shared worker safety seam and enforce it.
+ */
+function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: ReadonlyArray<string> | undefined): void {
+	if (!writeRoots || writeRoots.length === 0) return;
+	if (runtime.kind !== "subprocess") return;
+	throw new Error(
+		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
+	);
+}
+
 function acpRuntimeLimitations(): string[] {
 	return ["external ACP agent executes its own tools; Clio mediates permission requests and records decisions"];
 }
@@ -989,6 +1006,15 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
 	}
 	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
+	// Carry write-root confinement to the worker safety seam. Refuse it up front
+	// on runtimes that cannot mediate per-tool calls (subprocess) so it is never
+	// silently ignored. Roots are resolved against the job cwd so a relative root
+	// reaches the worker absolute, matching the validation contract.
+	if (input.req.writeRoots !== undefined && input.req.writeRoots.length > 0) {
+		const jobCwd = input.req.cwd !== undefined && input.req.cwd.length > 0 ? input.req.cwd : process.cwd();
+		spec.writeRoots = input.req.writeRoots.map((root) => resolvePath(jobCwd, root));
+	}
+	assertWriteRootsEnforceable(input.target.runtime, spec.writeRoots);
 	// Carry the tool profile so external CLI runtimes that cannot mediate
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
@@ -2429,6 +2455,14 @@ export function createDispatchBundle(
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
 		if (req.delegationAgentId) {
+			// An external ACP agent runs its own tool loop, so Clio cannot mediate
+			// per-tool writes and cannot honor write-root confinement. Fail closed
+			// rather than accept a guarantee we cannot keep.
+			if (req.writeRoots !== undefined && req.writeRoots.length > 0) {
+				throw new Error(
+					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
+				);
+			}
 			return dispatchAcpDelegation(req);
 		}
 

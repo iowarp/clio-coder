@@ -75,6 +75,7 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 	}
 	try {
 		const { runContextRefresh } = await import("../domains/context/index.js");
+		const wikiEntry = updateWiki ? await import("./wiki-generate.js") : null;
 		const result = await runContextRefresh({
 			cwd: process.cwd(),
 			io: {
@@ -82,7 +83,9 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 				stderr: (s) => process.stderr.write(s),
 			},
 			wiki: updateWiki,
-			...(updateWiki ? { wikiGenerate: (await import("./wiki-generate.js")).modelWikiGenerate() } : {}),
+			...(wikiEntry
+				? { wikiGenerate: wikiEntry.modelWikiGenerate(), wikiModel: await wikiEntry.resolveDocumenterModelId() }
+				: {}),
 		});
 		if (result.hint) process.stdout.write(`${result.hint}\n`);
 		if (result.wiki) {
@@ -150,11 +153,11 @@ async function runWikiCommand(args: string[]): Promise<number> {
 	if (status) return runWikiStatusCommand();
 	try {
 		const context = await import("../domains/context/index.js");
-		const { modelWikiGenerate } = await import("./wiki-generate.js");
+		const { modelWikiGenerate, resolveDocumenterModelId } = await import("./wiki-generate.js");
 		const result = await context.runWikiGenerate({
 			cwd: process.cwd(),
 			...(forceUpdate ? { mode: "update" as const } : {}),
-			model: "configured-clio-target",
+			model: await resolveDocumenterModelId(),
 			generate: modelWikiGenerate(),
 		});
 		if (result.status === "failed") {
