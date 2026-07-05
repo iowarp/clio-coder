@@ -35,6 +35,43 @@ change interfaces.
 
 ### Fixed
 
+- **Worker IPC amplification fixed with a worker-only stdout event
+  projection.** The dispatch worker subprocess forwarded every pi `AgentEvent`
+  verbatim to NDJSON stdout (`src/engine/worker-runtime.ts` subscribe sink ->
+  `src/worker/ndjson.ts`). pi's `message_update` carries the full cumulative
+  assistant message twice: the top-level `message` (AgentMessage) and the nested
+  `assistantMessageEvent.partial` (AssistantMessage). Both are re-serialized on
+  every streaming delta, so a long worker response amplified stdout
+  quadratically. A scratch reproduction reproduced the receipt `2runue8q1v7q`
+  postmortem magnitudes: 71.9x for a 1KB response, 530.8x for 10KB, 230.4x for
+  44KB, and 2570x for 100KB. No worker-stdout consumer reads either cumulative
+  snapshot. The dispatch board reads only `assistantMessageEvent.type` for
+  first-token latency (`src/interactive/dispatch-board.ts`); the streamed answer
+  and the finish contract are reconstructed from the last assistant `message_end`
+  (`src/tools/dispatch.ts`, `src/domains/dispatch/extension.ts`); token
+  accounting reads `message_end.message.usage`. The in-process orchestrator
+  surfaces that do render `assistantMessageEvent.partial` live (chat-loop, ACP
+  server, status state machine) subscribe to their own in-process Agent and
+  never cross the worker NDJSON seam, so the fix is scoped to the worker. New
+  `src/worker/event-projection.ts` exposes `projectWorkerEventForStdout`, which
+  strips the two per-delta cumulative snapshots while keeping
+  `type`/`contentIndex`/`delta`; `src/worker/entry.ts` applies it at the emit
+  seam before `emitEvent`. Every non-`message_update` event
+  (`message_end`/`agent_end` transcripts, `clio_*` events, `heartbeat`, and
+  unrecognized events) passes through byte-identical, so unknown-event
+  passthrough and terminal reconstruction are unchanged. Pinned by
+  `tests/contracts/worker-event-projection.test.ts`, which asserts the strip,
+  the retained delta, first-token discriminant preservation, load-bearing and
+  unknown passthrough, and a quadratic-to-linear byte property. Verified live: a
+  real `clio run --agent debugger --json` dispatch on openai-sub/gpt-5.4-mini
+  streamed 313 `message_update` events with zero cumulative `partial`/`message`
+  fields, a max `message_update` line of 1623 bytes, and reconstructed the full
+  1511-character answer from `message_end`. Remaining follow-up: the
+  malformed-stdout-on-abort half of the original finding, where a large NDJSON
+  line can be truncated when `process.exit` races buffered stdout, is far less
+  likely now that lines are slim but is not eliminated; a stdout
+  drain-before-exit is a separate, smaller mitigation.
+
 - **Worker blocked-call spirals now hit the worker cap.** The remaining
   dispatch hardening gap was that rejected attempts were observed for loop
   detection but did not let `workerToolCallCap` become the final verdict when
@@ -104,7 +141,10 @@ change interfaces.
   still had buffered data. I did not change the IPC stream in this hardening
   patch: the safe fix needs a worker-only event projection and backpressure
   aware flush design so dispatch consumers keep their event contract while
-  worker stdout stops reserializing cumulative partials.
+  worker stdout stops reserializing cumulative partials. Update: the
+  amplification half is now fixed by the worker-only stdout event projection
+  described in the Fixed section above; the backpressure/flush half (the
+  truncated stdout line on abort) remains a smaller follow-up.
 
 ## 0.2.8 - 2026-07-04
 

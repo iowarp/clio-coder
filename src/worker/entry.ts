@@ -12,6 +12,7 @@
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
+import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
@@ -74,7 +75,11 @@ async function main(): Promise<number> {
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.runtimeResolution) input.runtimeResolution = spec.runtimeResolution;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
-	const handle = startWorkerRun(input, emitEvent);
+	// Slim streaming events before NDJSON serialization: pi's message_update
+	// carries the full cumulative message twice (top-level + assistantMessageEvent
+	// .partial), which reserializes quadratically on stdout. No worker-stdout
+	// consumer reads those cumulative snapshots (see event-projection.ts).
+	const handle = startWorkerRun(input, (event) => emitEvent(projectWorkerEventForStdout(event)));
 	// Steer lines arriving on stdin after the spec queue onto the agent's
 	// steering queue; the demux buffers any that landed before this point.
 	demux.onSteer((text) => handle.steer(text));
