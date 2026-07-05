@@ -18,6 +18,7 @@ import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
 /**
  * Model-driven CLIO.md generation. Dispatches Clio's internal `scout` shadow
@@ -136,9 +137,11 @@ export async function generateBootstrapWithScout(
 		thinkingLevel: "off",
 		noSkills: true,
 	});
+	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "bootstrap scout");
 	try {
 		const text = await collectDispatchAssistantText(handle.events, input);
 		const receipt = await handle.finalPromise;
+		if (deadline.timedOut()) throw new Error(deadline.message());
 		if (receipt.exitCode !== 0) throw new Error(receiptFailure(receipt));
 		const output = parseBootstrapModelOutput(text);
 		input.progress?.({
@@ -149,9 +152,11 @@ export async function generateBootstrapWithScout(
 		});
 		return output;
 	} catch (err) {
-		dispatch.abort(handle.runId);
+		if (!deadline.timedOut()) dispatch.abort(handle.runId);
 		await handle.finalPromise.catch(() => undefined);
-		throw err;
+		throw deadline.timedOut() ? new Error(deadline.message()) : err;
+	} finally {
+		deadline.clear();
 	}
 }
 

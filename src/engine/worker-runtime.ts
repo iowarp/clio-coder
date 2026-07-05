@@ -10,7 +10,7 @@
  */
 
 import { validateSettingsFile } from "../core/config.js";
-import { configureGuardrails } from "../core/guardrails.js";
+import { configureGuardrails, isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
@@ -275,12 +275,24 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		],
 		input.autonomy,
 	);
+	let workerBoundFailure: string | null = null;
+	let abortWorkerForBound: (() => void) | null = null;
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });
 		},
 		onFinish(event) {
 			emit({ type: "clio_tool_finish", payload: event });
+			if (
+				workerBoundFailure === null &&
+				event.outcome === "blocked" &&
+				typeof event.reason === "string" &&
+				isWorkerToolCallCapExceededReason(event.reason)
+			) {
+				workerBoundFailure = event.reason;
+				process.stderr.write(`[worker] ${event.reason}\n`);
+				abortWorkerForBound?.();
+			}
 		},
 	};
 	const tools = resolveAgentTools({
@@ -315,6 +327,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	if (input.sessionId) options.sessionId = input.sessionId;
 
 	const agent = new Agent(options);
+	abortWorkerForBound = () => agent.abort();
 	const unsubscribe = agent.subscribe(async (event) => {
 		emit(event);
 	});
@@ -496,6 +509,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			await agent.prompt(promptMessagesForWorker(input));
 			await agent.waitForIdle();
 			unsubscribe();
+			if (workerBoundFailure !== null) {
+				return { messages: agent.state.messages, exitCode: 1 };
+			}
 			if (permissionFailure) {
 				return { messages: agent.state.messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			}
@@ -510,6 +526,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			return { messages, exitCode: 0 };
 		} catch (err) {
 			unsubscribe();
+			if (workerBoundFailure !== null) {
+				return { messages: agent.state.messages, exitCode: 1 };
+			}
 			if (permissionFailure) {
 				return { messages: agent.state.messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			}

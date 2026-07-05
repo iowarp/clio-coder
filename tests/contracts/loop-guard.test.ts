@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../../src/core/bus-events.js";
@@ -10,6 +10,7 @@ import type { MiddlewareContract } from "../../src/domains/middleware/index.js";
 import { createMiddlewareContractFromSnapshot } from "../../src/domains/middleware/snapshot.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createLoopState, hashToolCall, observe } from "../../src/domains/safety/loop-detector.js";
+import type { SafetyPolicyDecision } from "../../src/domains/safety/policy-engine.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import {
 	createLoopGuardRegistration,
@@ -21,6 +22,7 @@ import {
 	readOrchTurnToolCallBudget,
 	readWorkerToolCallCap,
 } from "../../src/engine/loop-guard.js";
+import { invokeWorkerTool, type ToolFinishEvent } from "../../src/engine/worker-tools.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 const LOOP_THRESHOLD = createLoopState().maxRepeats;
@@ -190,7 +192,7 @@ describe("unified loop guard registration", () => {
 		}
 		const blocked = await registry.invoke({ tool: ToolNames.Read, args: { path: "one-too-many.md" } });
 		strictEqual(blocked.kind, "blocked");
-		ok(blocked.kind === "blocked" && blocked.reason.includes(`tool-call cap reached (${cap})`));
+		ok(blocked.kind === "blocked" && blocked.reason.includes(`workerToolCallCap reached (${cap})`));
 		strictEqual(guard.callCount(), cap + 1);
 	});
 
@@ -582,5 +584,68 @@ describe("orchestrator per-turn tool-call budget", () => {
 		} finally {
 			configureGuardrails(undefined);
 		}
+	});
+});
+
+describe("guard block receipt accounting", () => {
+	/** Allow decisions carry the policy engine's net-pass fields, as in a real run. */
+	function policyCarryingSafety(): SafetyContract {
+		const base = testSafety();
+		return {
+			...base,
+			evaluate: (call, posture) => {
+				const decision = base.evaluate(call, posture);
+				if (decision.kind !== "allow") return decision;
+				const policy: SafetyPolicyDecision = {
+					kind: "allow",
+					classification: decision.classification,
+					tool: call.tool,
+					actionClass: "read",
+					reasons: [],
+					reasonCode: "allowed",
+					cwd: ".",
+					policySource: "none",
+				};
+				return { ...decision, policy };
+			},
+		};
+	}
+
+	it("re-shapes a loop-guard block into a blocked safety decision", async () => {
+		const safety = policyCarryingSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		for (let i = 1; i < LOOP_THRESHOLD; i++) {
+			strictEqual((await registry.invoke(call, { turnId: "t1" })).kind, "ok", `call ${i} below threshold executes`);
+		}
+		const blocked = await registry.invoke(call, { turnId: "t1" });
+		strictEqual(blocked.kind, "blocked");
+		if (blocked.kind !== "blocked") return;
+		// The admission allow must not leak into the verdict: receipts count
+		// safety.decisions from this decision, so a guard block that keeps the
+		// allow shows a blocked tool attempt with zero blocked decisions.
+		strictEqual(blocked.decision.kind, "block", "guard block re-shapes the decision as a block");
+		ok(blocked.decision.kind === "block" && blocked.decision.rejection.detail.includes("loop detected"));
+		strictEqual(blocked.decision.policy?.reasonCode, "guard_block", "final reason code names the guard axis");
+	});
+
+	it("worker finish events report a guard block as a blocked decision", async () => {
+		const safety = policyCarryingSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		const finishes: ToolFinishEvent[] = [];
+		const telemetry = { onFinish: (event: ToolFinishEvent) => void finishes.push(event) };
+		for (let i = 1; i < LOOP_THRESHOLD; i++) {
+			await invokeWorkerTool(registry, ToolNames.Read, {}, { telemetry });
+		}
+		await rejects(invokeWorkerTool(registry, ToolNames.Read, {}, { telemetry }), /loop detected/);
+		strictEqual(finishes.length, LOOP_THRESHOLD);
+		strictEqual(finishes[0]?.decision, "allowed", "executed calls keep their allow decision");
+		const last = finishes.at(-1);
+		strictEqual(last?.outcome, "blocked");
+		strictEqual(last?.decision, "blocked", "receipts must count the guard block as a blocked decision");
+		strictEqual(last?.reasonCode, "guard_block");
+		strictEqual(last?.actionClass, "read");
 	});
 });

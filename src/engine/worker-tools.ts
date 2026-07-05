@@ -196,6 +196,11 @@ function emitFinish(
 		if (extra.decision.policy?.ruleId !== undefined) event.ruleId = extra.decision.policy.ruleId;
 		if (extra.decision.policy?.reasonCode !== undefined) event.reasonCode = extra.decision.policy.reasonCode;
 		if (extra.decision.policy?.policySource !== undefined) event.policySource = extra.decision.policy.policySource;
+	} else if (outcome === "blocked") {
+		// A blocked verdict that carries no admission decision (not_visible) is
+		// still a safety block. Receipts count safety.decisions from this field,
+		// so a blocked attempt must never land without a blocked decision.
+		event.decision = "blocked";
 	}
 	if (extra?.skillActivation !== undefined) {
 		event.skillActivation = extra.skillActivation;

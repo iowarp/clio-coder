@@ -11,13 +11,100 @@ change interfaces.
 
 - **v0.2.8 Documentation Alignment.** Conducted a thorough documentation pass aligning the entire markdown corpus with v0.2.8 reality. Introduced two new guides: `docs/worker-dispatch-mechanics.md` covering worker subprocess spawning, standard input/output NDJSON protocols, watchdog heartbeats, and permission escalations, and `docs/provider-adapter-cookbook.md` detailing the custom model runtime adapter interface, probing APIs, client factories, and reasoning formats. Corrected and updated all core tools, configs, and TUI design reference files.
 
+### Added
+
+- **Internal generator dispatch deadline.** A live `clio context wiki
+  --update` against a local llama.cpp target ground for over an hour with no
+  end in sight: the documenter model fell into a blocked-call retry spiral
+  (its timeout receipt later showed 17 allowed against 116 blocked calls),
+  and nothing bounded it, because loop-guard blocks do not consume the worker
+  tool-call cap and a continuously streaming model keeps the heartbeat
+  watchdog satisfied. New guardrail `internalDispatchTimeoutMs` (default
+  fifteen minutes, env `CLIO_INTERNAL_DISPATCH_TIMEOUT_MS`) arms a wall-clock
+  deadline in `src/cli/internal-dispatch.ts`, shared by the wiki documenter
+  (`src/cli/wiki-generate.ts`) and the bootstrap scout
+  (`src/cli/bootstrap-generate.ts`). On expiry the run is aborted through the
+  dispatch contract's timeout convention, so the receipt seals as
+  `outcome=canceled` with the timeout in `outcomeDetail`; `.clio/wiki`
+  promotion is untouched and staging/lock cleanup behaves as on any failed
+  run. Verified live: a 3-minute override aborted a real documenter run on
+  the `mini` target at exactly 180s with clean containment. Known remaining
+  gap: user-dispatched fleet workers without an explicit `timeout_ms` can
+  still spiral on blocked calls indefinitely, since blocked attempts do not
+  count toward `workerToolCallCap`.
+
 ### Fixed
+
+- **Worker blocked-call spirals now hit the worker cap.** The remaining
+  dispatch hardening gap was that rejected attempts were observed for loop
+  detection but did not let `workerToolCallCap` become the final verdict when
+  policy or the worker permission posture had already denied the call. A weak
+  model could therefore keep requesting distinct denied tools forever unless a
+  wall-clock timeout was present. `src/engine/loop-guard.ts` now emits the
+  stable bound reason `workerToolCallCap reached (N); abort run`, and
+  `src/tools/registry.ts` lets that specific guard result override rejected
+  attempts with the same `guard_block` blocked verdict shape used for
+  admitted guard blocks. `src/engine/worker-runtime.ts` treats that finish
+  event as terminal, aborts the worker agent, writes the bound to stderr for
+  receipt diagnostics, and exits nonzero. The orchestrator's synthesis
+  lockout/backstop behavior is unchanged; the new terminal cap applies to
+  dispatched workers. Pinned by a faux-runtime worker contract test covering
+  a denied-call spiral and a dispatch receipt test asserting
+  `outcomeDetail` names `workerToolCallCap`.
+
+- **Wiki update progress is visible again.** `src/cli/wiki-generate.ts` no
+  longer silently drains the documenter worker event stream: it emits compact
+  progress events for documenter start, tool start, and tool finish with
+  elapsed time while still draining every event for dispatch finalization.
+  `src/domains/context/wiki/generate.ts` threads the existing context progress
+  sink into the model generator, and `src/cli/context.ts` prints terse stderr
+  lines for `clio context wiki --update`. A contract test pins the documenter
+  progress stream.
+
+- Fixed receipt accounting for guard blocks. A battletest run surfaced a
+  failed documenter receipt with `toolStats.git.blocked=1` but
+  `safety.decisions.blocked=0`: the loop guard had blocked a repeated `git`
+  call after policy admission allowed it, and `runSpec` in
+  `src/tools/registry.ts` returned the blocked verdict with the original
+  allow decision attached. Worker finish events then mapped the call to
+  `decision: "allowed"`, so receipts counted a blocked tool attempt with no
+  blocked safety decision, and the audit ledger's final row for the call
+  stayed `allowed`. The guard-block path now follows the same re-shaping
+  convention as the skill-surface and autonomy denial paths:
+  `guardBlockedVerdict` re-shapes the decision as a block, replaces the
+  net-pass reason code with `guard_block`, and writes a blocked audit
+  disposition. `emitFinish` in `src/engine/worker-tools.ts` additionally
+  defaults a decision-less blocked outcome (`not_visible` verdicts) to a
+  blocked decision so the invariant holds at the producer. Pinned by two new
+  contract tests in `tests/contracts/loop-guard.test.ts` covering the
+  registry verdict shape and the worker finish-event stream that receipts
+  aggregate.
 
 - Fixed reasoning-never local model families so catalog `thinking.mechanism:
   none` stays authoritative when live probes or gateway rows report reasoning.
   LM Studio and OpenAI-compatible adapters no longer replay prior assistant
   thinking blocks, request thinking fields, surface thinking stream events, or
   preserve reasoning-token usage for those models.
+
+### Investigated
+
+- **Worker IPC amplification and malformed stdout.** Receipt
+  `2runue8q1v7q` was a native llama.cpp worker run canceled after 180s with
+  133 tool calls, including 123 `grep` attempts and 116 blocked attempts. It
+  recorded about 4.67M total tokens, mostly cache reads, and one malformed
+  stdout line. The IPC path forwards every pi `AgentEvent` from
+  `agent.subscribe` directly to worker NDJSON stdout, and pi's
+  `message_update` events carry both a cumulative top-level assistant message
+  and a nested assistant event with another cumulative partial. Synthetic
+  sizing shows this shape can be quadratic within a long response: roughly
+  68x amplification for 1KB of 20-character deltas, 532x for 10KB, and over
+  200x for a 44KB response even with 200-character chunks. The malformed
+  stdout line body is not retained by receipts; the most likely cause is a
+  large NDJSON line truncated by timeout/exit while `process.stdout.write`
+  still had buffered data. I did not change the IPC stream in this hardening
+  patch: the safe fix needs a worker-only event projection and backpressure
+  aware flush design so dispatch consumers keep their event contract while
+  worker stdout stops reserializing cumulative partials.
 
 ## 0.2.8 - 2026-07-04
 

@@ -915,6 +915,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"maxDispatchRuns",
 				"readMaxBytes",
 				"observationTurnBudgetBytes",
+				"internalDispatchTimeoutMs",
 			] as const;
 			issues.unknownKeys("guardrails", raw.guardrails, keys);
 			for (const key of keys) {

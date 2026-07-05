@@ -44,3 +44,20 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 ## Context artifacts
 
 `CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `CLAUDE.md` and `AGENTS.md` are compatibility symlinks to `CLIO.md` so Claude, Codex, and Clio read the same repository instructions; do not fork those files into separate guidance. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `dist/` is generated build output. `context-init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
+
+## Imported agent context
+
+Conflict policy: CLIO.md conventions and hard invariants are canonical; project-local imports win over explicit global imports; duplicate rules are merged by normalized text.
+
+### Adopted rules
+
+- No project-specific rules were adopted from external agent configs.
+
+### Source provenance
+
+- No supported project-local agent config files were found.
+
+### Rejected sources
+
+- Claude Code `CLAUDE.md`: skipped symlink skipped.
+- Codex `AGENTS.md`: skipped symlink skipped.

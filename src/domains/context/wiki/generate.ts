@@ -47,6 +47,7 @@ export interface WikiGenerateInput {
 	 * (and the worker it drives) must write only here, never into .clio/wiki.
 	 */
 	outputDir: string;
+	progress?: BootstrapProgressSink;
 }
 
 export type WikiGenerate = (input: WikiGenerateInput) => void | Promise<void>;
@@ -328,7 +329,13 @@ export async function runWikiGenerate(
 			message: mode === "init" ? "drafting project wiki" : "updating project wiki",
 		});
 		try {
-			await input.generate({ cwd, mode, prompt, outputDir: stagingDir });
+			await input.generate({
+				cwd,
+				mode,
+				prompt,
+				outputDir: stagingDir,
+				...(input.onProgress ? { progress: input.onProgress } : {}),
+			});
 		} catch (err) {
 			removeDir(stagingDir);
 			const problem = err instanceof Error ? err.message : String(err);

@@ -8,6 +8,7 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { workerToolCallCapExceededReason } from "../../src/core/guardrails.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
@@ -1801,6 +1802,51 @@ describe("contracts/dispatch", () => {
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "timed_out");
 			strictEqual(receipt.exitCode, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("names workerToolCallCap in the terminal receipt detail", async () => {
+		const context = stubContext();
+		const reason = workerToolCallCapExceededReason(3);
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null; stderrTail?: string }>();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 9999,
+				promise: exit.promise,
+				events: (async function* () {
+					yield {
+						type: "clio_tool_finish",
+						payload: {
+							tool: "bash",
+							durationMs: 1,
+							outcome: "blocked",
+							decision: "blocked",
+							actionClass: "execute",
+							reasonCode: "guard_block",
+							reason,
+						},
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "hit worker tool cap" });
+			await drainEvents(handle.events);
+			exit.resolve({ exitCode: 1, signal: null, stderrTail: `[worker] ${reason}` });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.exitCode, 1);
+			match(receipt.outcomeDetail ?? "", /exit code 1/);
+			match(receipt.outcomeDetail ?? "", /workerToolCallCap reached \(3\)/);
+			strictEqual(receipt.toolStats.find((stat) => stat.tool === "bash")?.blocked, 1);
+			strictEqual(receipt.safety?.decisions.blocked, 1);
+			strictEqual(receipt.safety?.blockedAttempts[0]?.reasonCode, "guard_block");
 		} finally {
 			await bundle.extension.stop?.();
 		}
