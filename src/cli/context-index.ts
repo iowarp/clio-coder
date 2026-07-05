@@ -10,9 +10,9 @@ import { readClioState, statePath, writeClioState } from "../domains/context/sta
 import { detectProjectProfile } from "../domains/session/workspace/project-type.js";
 
 const HELP = `Usage:
-  clio context-index [--json]
+  clio context index [--json]
 
-Build the Stage 1 codewiki index for the current repository without model calls.
+Build the structural codewiki index for the current repository without model calls.
 Writes .clio/codewiki.json and .clio/state.json, then prints source coverage.
 
 Options:

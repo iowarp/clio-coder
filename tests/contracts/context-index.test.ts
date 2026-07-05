@@ -41,7 +41,7 @@ describe("contracts/context-index", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
-	it("builds Stage 1 codewiki and state without model or handoff artifacts", async () => {
+	it("builds the codewiki and state without model or handoff artifacts", async () => {
 		mkdirSync(join(scratch, "app"), { recursive: true });
 		writeFileSync(join(scratch, "app", "main.py"), "def main():\n    return 0\n", "utf8");
 
