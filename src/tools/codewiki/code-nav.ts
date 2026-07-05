@@ -40,6 +40,8 @@ interface NavPayload {
 	next?: string;
 }
 
+const navIndexCache = new WeakMap<Codewiki, NavIndex>();
+
 function regexFromPattern(pattern: string): RegExp | null {
 	if (pattern.startsWith("/") && pattern.lastIndexOf("/") > 0) {
 		const last = pattern.lastIndexOf("/");
@@ -179,6 +181,14 @@ function buildNavIndex(codewiki: Codewiki): NavIndex {
 		);
 	}
 	return { filesById, filesByPath, paths, symbolToFileIds, symbolsByFileId, depsByFileId, dependentsByFileId };
+}
+
+function navIndexFor(codewiki: Codewiki): NavIndex {
+	const cached = navIndexCache.get(codewiki);
+	if (cached) return cached;
+	const index = buildNavIndex(codewiki);
+	navIndexCache.set(codewiki, index);
+	return index;
 }
 
 function runSymbol(index: NavIndex, query: string, limit: number): NavPayload {
@@ -383,7 +393,7 @@ export const codeNavTool: ToolSpec = {
 		const mode = typeof args.mode === "string" ? args.mode : "";
 		const loaded = await loadCodewikiForTool();
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
-		const index = buildNavIndex(loaded.codewiki);
+		const index = navIndexFor(loaded.codewiki);
 		const query = typeof args.query === "string" ? args.query.trim() : "";
 		const limit = parseLimit(args.limit, mode === "entries" ? DEFAULT_ENTRY_LIMIT : DEFAULT_LIMIT);
 		const reservation = reserveObservation(OBSERVE_SELF_CAPS.codeNav, options);
