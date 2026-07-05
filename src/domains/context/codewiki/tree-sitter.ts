@@ -57,6 +57,7 @@ const FUNCTION_LIKE_NODE_TYPES = new Set([
 	"arrow_function",
 	"method_definition",
 	"function_definition",
+	"function_item",
 	"lambda",
 	"lambda_expression",
 	"func_literal",
@@ -67,6 +68,8 @@ const FUNCTION_LIKE_NODE_TYPES = new Set([
 	"constructor_declaration",
 	"local_function_statement",
 ]);
+
+const PY_SCOPE_NODE_TYPES = new Set(["function_definition", "class_definition"]);
 
 let parserInit: Promise<void> | null = null;
 
@@ -135,6 +138,15 @@ function hasFunctionLikeAncestor(node: SyntaxNode): boolean {
 		current = current.parent;
 	}
 	return false;
+}
+
+function nearestAncestorType(node: SyntaxNode, types: ReadonlySet<string>): string | null {
+	let current = node.parent;
+	while (current) {
+		if (types.has(current.type)) return current.type;
+		current = current.parent;
+	}
+	return null;
 }
 
 function addSymbol(
@@ -212,12 +224,29 @@ function addVariableDeclaratorNames(target: string[], node: SyntaxNode): void {
 function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
 	for (const node of descendants(root, ["function_declaration", "generator_function_declaration"])) {
+		if (hasFunctionLikeAncestor(node)) continue;
 		addSymbol(symbols, node, "func");
 	}
-	for (const node of descendants(root, "class_declaration")) addSymbol(symbols, node, "class");
-	for (const node of descendants(root, "interface_declaration")) addSymbol(symbols, node, "iface");
-	for (const node of descendants(root, ["type_alias_declaration", "enum_declaration"])) addSymbol(symbols, node, "type");
-	for (const node of descendants(root, "method_definition")) addSymbol(symbols, node, "method");
+	for (const node of descendants(root, "class_declaration")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "class");
+	}
+	for (const node of descendants(root, "interface_declaration")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "iface");
+	}
+	for (const node of descendants(root, ["type_alias_declaration", "enum_declaration"])) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "type");
+	}
+	for (const node of descendants(root, "method_definition")) {
+		// method_definition covers both class methods (parent class_body) and
+		// object-literal method shorthand (parent object). Only real class
+		// methods on a top-level class belong in the index.
+		if (node.parent?.type !== "class_body") continue;
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "method");
+	}
 	for (const node of descendants(root, "variable_declarator")) {
 		if (hasFunctionLikeAncestor(node)) continue;
 		const parentText = node.parent?.text ?? "";
@@ -229,9 +258,17 @@ function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
 function extractPython(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
 	for (const node of descendants(root, "function_definition")) {
-		addSymbol(symbols, node, hasAncestor(node, "class_definition") ? "method" : "func");
+		// The nearest enclosing scope decides the kind: a class body makes it a
+		// method, module level makes it a func, and a function body makes it a
+		// local definition that never enters the index.
+		const scope = nearestAncestorType(node, PY_SCOPE_NODE_TYPES);
+		if (scope === "function_definition") continue;
+		addSymbol(symbols, node, scope === "class_definition" ? "method" : "func");
 	}
-	for (const node of descendants(root, "class_definition")) addSymbol(symbols, node, "class");
+	for (const node of descendants(root, "class_definition")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "class");
+	}
 	for (const node of descendants(root, "assignment")) {
 		if (hasFunctionLikeAncestor(node)) continue;
 		const left = node.childForFieldName("left") ?? node.namedChild(0);
@@ -262,7 +299,13 @@ function extractGo(root: SyntaxNode): ExtractedSymbol[] {
 
 function extractRust(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
-	for (const node of descendants(root, "function_item")) addSymbol(symbols, node, "func");
+	for (const node of descendants(root, "function_item")) {
+		// Function items nested inside another fn body are locals; impl/trait
+		// members are methods; everything else is a free function.
+		if (hasFunctionLikeAncestor(node)) continue;
+		const isMethod = hasAncestor(node, "impl_item") || hasAncestor(node, "trait_item");
+		addSymbol(symbols, node, isMethod ? "method" : "func");
+	}
 	for (const node of descendants(root, ["struct_item", "enum_item", "type_item"])) addSymbol(symbols, node, "type");
 	for (const node of descendants(root, "trait_item")) addSymbol(symbols, node, "trait");
 	for (const node of descendants(root, "const_item")) addSymbol(symbols, node, "const");
@@ -286,8 +329,20 @@ function extractJava(root: SyntaxNode): ExtractedSymbol[] {
 	for (const node of descendants(root, "enum_declaration")) addSymbol(symbols, node, "type");
 	for (const node of descendants(root, "method_declaration")) addSymbol(symbols, node, "method");
 	for (const node of descendants(root, "field_declaration")) {
-		const name = nameFromNode(node);
-		if (name) addSymbol(symbols, node, /^[A-Z][A-Z0-9_]*$/.test(name) ? "const" : "var", name);
+		// A field_declaration is `modifiers? type declarator (',' declarator)*`.
+		// Record each declarator name, never the shared type identifier. Static
+		// final fields and SCREAMING_CASE names classify as const.
+		const modifiers = node.namedChildren.find((child) => child.type === "modifiers")?.text ?? "";
+		const staticFinal = /\bstatic\b/.test(modifiers) && /\bfinal\b/.test(modifiers);
+		for (const declarator of node.namedChildren) {
+			if (declarator.type !== "variable_declarator") continue;
+			const name =
+				declarator.childForFieldName("name")?.text ??
+				declarator.namedChildren.find((child) => child.type === "identifier")?.text;
+			if (!name) continue;
+			const isConst = staticFinal || /^[A-Z][A-Z0-9_]*$/.test(name);
+			addSymbol(symbols, declarator, isConst ? "const" : "var", name);
+		}
 	}
 	return symbols;
 }

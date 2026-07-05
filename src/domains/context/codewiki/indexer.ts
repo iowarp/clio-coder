@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
+import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { createTreeSitterExtractor } from "./tree-sitter.js";
 
 export type CodewikiLanguage = SourceProjectType | "config";
@@ -92,22 +93,6 @@ function loadTreeSitterExtractor(): Promise<LanguageExtractor> {
 	treeSitterExtractorPromise ??= createTreeSitterExtractor();
 	return treeSitterExtractorPromise;
 }
-
-const EXCLUDED_DIRS = new Set([
-	".git",
-	".clio",
-	".hg",
-	".svn",
-	"node_modules",
-	"dist",
-	"build",
-	"coverage",
-	".venv",
-	"venv",
-	"__pycache__",
-	"target",
-	"vendor",
-]);
 
 const SOURCE_EXTENSIONS = new Map<string, SourceProjectType>([
 	[".ts", "typescript"],

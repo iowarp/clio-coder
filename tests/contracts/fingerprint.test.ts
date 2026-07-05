@@ -37,6 +37,20 @@ describe("contracts/fingerprint", () => {
 		strictEqual(isStale(prev, curr), true);
 	});
 
+	it("ignores gitignored scratch directories when detecting drift", () => {
+		const cwd = scratchProject();
+		writeFileSync(join(cwd, "src", "index.ts"), "export const value = 1;\n", "utf8");
+		const prev = computeFingerprint(cwd);
+
+		for (const dir of [".superpowers", ".codex", ".claude", ".clio-benchmark"]) {
+			mkdirSync(join(cwd, dir), { recursive: true });
+			writeFileSync(join(cwd, dir, "scratch.ts"), "export const scratch = 1;\n", "utf8");
+		}
+		const curr = computeFingerprint(cwd);
+
+		strictEqual(isStale(prev, curr), false);
+	});
+
 	it("does not treat a git-head-only change as stale", () => {
 		const prev: Fingerprint = { treeHash: "a".repeat(64), gitHead: "1".repeat(40), loc: 10 };
 		const curr: Fingerprint = { treeHash: prev.treeHash, gitHead: "2".repeat(40), loc: prev.loc };
