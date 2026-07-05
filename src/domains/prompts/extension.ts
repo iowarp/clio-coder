@@ -210,8 +210,15 @@ function hasCodewiki(text: string): boolean {
 	return text.includes("<codewiki>");
 }
 
+function wikiAvailabilityFromPromptContext(text: string): string | null {
+	const match = /<wiki>([^<]+)<\/wiki>/.exec(text);
+	const value = match?.[1]?.trim();
+	return value && value.length > 0 ? value : null;
+}
+
 function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTools: boolean | null): string {
 	const projectType = projectTypeFromPromptContext(context.text);
+	const wiki = wikiAvailabilityFromPromptContext(context.text);
 	const lines = ["<project-synopsis>"];
 	if (projectType) lines.push(`Language: ${projectType}`);
 	if (context.clioMd) {
@@ -219,6 +226,7 @@ function renderProjectSynopsis(context: ProjectPromptContext, providerSupportsTo
 		lines.push("CLIO.md: available; compact synopsis only because the handbook is too large for automatic preload.");
 	}
 	if (hasCodewiki(context.text)) lines.push("Codewiki: available via code_nav.");
+	if (wiki) lines.push(`Wiki: ${wiki}`);
 	if (providerSupportsTools === false) {
 		lines.push("Tools: unavailable for this target; use this synopsis only as fallback context.");
 	} else {
