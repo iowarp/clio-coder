@@ -249,14 +249,7 @@ policy.
 
 ## Skills
 
-Skills are reusable `SKILL.md` guides the model loads on demand. Clio
-discovers them from per-user and per-project roots, including `.clio/skills`
-and cross-harness layouts such as `.claude/skills` and `.codex/skills`, and
-loads bodies on request through `read_skill`. A skill's `allowed-tools`
-declaration is enforced at tool admission, and every skill can ship
-executable RED-GREEN evals that `clio skills eval <name>` runs instead of
-trusting the prose. Manage them with
-`clio skills list | inspect | validate | create | eval`.
+Skills are reusable `SKILL.md` guides the model loads on demand. Clio discovers them from per-user and per-project roots, including `.clio/skills` and cross-harness layouts such as `.claude/skills` and `.codex/skills`, loading them through `context(scope="skills")`. A skill's `allowed-tools` declaration is enforced at tool admission, and every skill can ship executable RED-GREEN evals that `clio skills eval <name>` runs instead of trusting the prose. Skills are created by directly writing a `SKILL.md` file. Manage them with `clio skills list | search | inspect | validate | install | update | sync | eval`.
 
 This repository also ships a curated skills catalog under
 [skills/](skills/README.md): maintainer-reviewed skills with provenance

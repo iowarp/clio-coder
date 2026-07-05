@@ -41,7 +41,7 @@ The level is persisted as `autonomy` in `settings.yaml`, hot-reloads, and is edi
 
 Every tool call, orchestrator or worker, evaluates in this order:
 
-1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`, `system_modify`) that parks at every level; `pass` hands off to step 2. Blocks precede asks: a damage-control `ask` rule never bypasses a hard block, so confirming an ask-rule command that targets a zero-access path still blocks. The built-in path policy is evaluated even when `.clio/safety.yaml` is malformed, so credential protection never fails open.
+1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`, `system_modify`) that parks at every level; `pass` hands off to step 2. Blocks precede asks: a damage-control `ask` rule never bypasses a hard block, so confirming an ask-rule command that targets a zero-access path still blocks. The built-in path protection (which includes zero-access blocklists for critical files like `.git/config` and `credentials.yaml`, resolved with symlink canonicalization to prevent bypasses) is evaluated even when `.clio/safety.yaml` is malformed, invalid, or attempts to override it. A malformed project policy cannot disable built-in default path protection, so credential protection never fails open.
 2. **Autonomy mapping**: the action class plus the level produce allow, ask, or deny per the matrix above.
 3. **Approvals**: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per `workers.onPermission` in workers, and non-stall denies in delegations.
 
@@ -172,7 +172,7 @@ Path-policy behavior:
 | `zeroAccessPaths` | Blocks read, write, and delete. |
 | `readOnlyPaths` | Allows read, blocks write/delete. |
 | `noDeletePaths` | Blocks delete. |
-| `disableDefaultPathPolicy` | Uses only project path policy rather than merging default damage-control paths. |
+| `disableDefaultPathPolicy` | Uses only project path policy rather than merging default damage-control paths. Note: This cannot disable built-in zero-access protection for critical system paths like `.git/config` and `credentials.yaml`. |
 
 Command entry notes:
 

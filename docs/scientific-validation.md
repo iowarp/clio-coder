@@ -5,13 +5,13 @@
 
 Scientific software development cannot treat simple file presence as proof of correctness. A simulation script that crashes on rank 48, or writes out NetCDF arrays filled with `NaN`s, may still successfully write a file to the disk. 
 
-Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.2.7, core Clio does not parse or enforce a scientific contract schema. The presence of `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
+Clio Coder recognizes **scientific validation contract files** as an opt-in signal for a higher evidence bar. In v0.2.8, core Clio does not parse or enforce a scientific contract schema. The presence of `.clio/validation.yaml`, `.clio/validation.yml`, `validation.yaml`, `validation.yml`, or `VALIDATION.md` at the workspace root raises the default rigor level to `high`; the file contents are advisory material for developers, project agents, and external validators.
 
 The convention below is a recommended shape for scientific projects that need to document expected dimensions, attributes, numerical tolerances, scheduler context, and verification commands for scientific artifacts. Developed at the [Gnosis Research Center (GRC)](https://grc.iit.edu) at Illinois Tech as part of the NSF-funded scientific-software context (NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318)), this convention links execution metadata with physical output checks without claiming that the current harness executes those checks automatically.
 
 ---
 
-## 📋 Validation Contract Convention
+## Validation Contract Convention
 
 A validation contract can be stored as YAML or Markdown. A custom or project-level agent (such as a local `scientific-validator` agent example under `.clio/agents/`) or the developer can draft these files and commit them next to the research code. Clio core currently checks only for the documented filenames at the workspace root.
 
@@ -60,7 +60,7 @@ notes: |
 
 ---
 
-## 🧮 Numerical Tolerances
+## Numerical Tolerances
 
 Comparing floating-point values in scientific computations must accommodate round-offs, hardware differences, and compiler optimizations. Project validators can document any tolerance vocabulary they enforce. A common convention is:
 
@@ -75,9 +75,9 @@ Comparing floating-point values in scientific computations must accommodate roun
 
 ---
 
-## 📂 Common Scientific Artifact Families
+## Common Scientific Artifact Families
 
-The following labels are useful project conventions for validation contracts and reports. They are not a closed, core-enforced enum in v0.2.7:
+The following labels are useful project conventions for validation contracts and reports. They are not a closed, core-enforced enum in v0.2.8:
 
 - **`HDF5` / `NetCDF` / `Zarr`:** Multi-dimensional scientific array files.
 - **`FITS`:** Flexible Image Transport System (used in astrophysics).

@@ -3,7 +3,7 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.2.8). Use it to design, validate, and simulate memory proposals, approval loops, pruning rules, and token budgets.
 
-Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. In evaluations such as [SWE-bench](https://www.swebench.com), capturing granular execution evidence is essential for validating agent claims. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. In v0.2.7, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
+Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. In evaluations such as [SWE-bench](https://www.swebench.com), capturing granular execution evidence is essential for validating agent claims. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. In v0.2.8, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
 
 Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, and `src/cli/memory.ts`.
 
@@ -71,7 +71,7 @@ When a run was chained (pipeline), composed with a persona override, or escalate
 
 ## Evidence Tag Taxonomy and Failure Causes
 
-Clio Coder classifies every run, session, and eval record using a closed set of 23 canonical tags. These tags distinguish general execution characteristics (such as lineage linkages) from actual failure causes.
+Clio Coder classifies every run, session, and eval record using a closed set of 25 canonical tags. These tags distinguish general execution characteristics (such as lineage linkages) from actual failure causes.
 
 ### Complete Taxonomy
 
@@ -99,6 +99,8 @@ Clio Coder classifies every run, session, and eval record using a closed set of 
 | `session-linked` | Provenance | The run is linked back to its originating parent session. |
 | `session-missing` | Provenance | No parent session could be resolved for this run. |
 | `auth-failure` | Failure | Missing or invalid credentials/API keys. |
+| `external-bypass` | Security | An external runner bypassed standard safety gates. |
+| `external-approximation`| Validation | An external runner approximated results rather than fully executing. |
 | `unknown` | Undefined | Unclassified execution failure. |
 
 ---

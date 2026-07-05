@@ -48,11 +48,11 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio components snapshot --out <path>` | Write a component snapshot JSON file. |
 | `clio components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
 | `clio evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
-| `clio eval run\|report\|compare` | Run local eval task files and compare results. |
+| `clio eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
 | `clio memory list\|propose\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
 | `clio evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. |
-| `clio skills list\|search\|inspect\|validate\|create\|install\|update\|sync` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
+| `clio skills list\|search\|inspect\|validate\|install\|update\|sync\|eval` | Manage discovered skills, Clio-native skills, and local marketplace installs. |
 | `clio docs [topic] [--no-open]` | Serve bundled HTML docs on 127.0.0.1. |
 | `clio share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
@@ -287,22 +287,7 @@ credentials are available.
 
 ## Environment Variables
 
-Clio Coder's behavior can be customized or overridden using the following environment variables:
-
-| Variable | Accepted Values | Purpose |
-| --- | --- | --- |
-| `CLIO_RIGOR` | `normal` \| `high` | Overrides the resolved session rigor level (case-insensitive trimming). |
-| `CLIO_HOME` | Absolute directory path | Replaces the config, data, state, and cache roots symmetrically with subdirectories under the given path. |
-| `CLIO_CONFIG_DIR` | Absolute directory path | Overrides the user configuration directory path (highest priority). |
-| `CLIO_DATA_DIR` | Absolute directory path | Overrides the durable data directory path (highest priority). |
-| `CLIO_STATE_DIR` | Absolute directory path | Overrides the machine-produced state directory path (highest priority). |
-| `CLIO_CACHE_DIR` | Absolute directory path | Overrides the disposable cache directory path (highest priority). |
-| `CLIO_ALLOW_EXTERNAL_FULL_ACCESS` | `1` | Enables bypassing subprocess tool permission prompts for `claude-code` and `antigravity-code` worker runtimes under `full-auto` autonomy. |
-| `CLIO_LIVE_SMOKE` | `1` | Enables executing live model smoke tests (`npm run test:live`). |
-| `CLIO_LIVE_TARGET` | Target ID | Specifies the model target to use for live smoke tests. |
-| `CLIO_LIVE_RUNTIME` | Runtime ID | Specifies the runtime provider to use for live smoke tests. |
-| `CLIO_LIVE_MODEL` | Model ID | Specifies the model identifier to use for live smoke tests. |
-| `CLIO_LIVE_BASE_URL` | URL | Specifies the API base endpoint to use for live smoke tests. |
+Clio Coder's behavior can be customized or overridden using various environment variables (such as `CLIO_RIGOR`, `CLIO_HOME`, and guardrail overrides). For the complete, detailed, and maintained inventory of environment variables, please refer to [environment-variables.md](environment-variables.md).
 
 ---
 

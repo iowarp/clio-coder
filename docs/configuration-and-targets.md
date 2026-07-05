@@ -151,6 +151,9 @@ workers:
   agentBindings: {}
   maxRetries: 2
   onPermission: deny
+  escalation:
+    timeoutMs: 120000
+    fallback: deny
   resilienceCooldownMs: 15000
 
 
@@ -201,7 +204,18 @@ Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reas
 
 `defaults.maxTokens` is a global output budget requested for every turn (default `32768`). At request time it is always clamped down to the model's known max-output cap and the remaining context window, so a model that supports less automatically gets less and no per-model tuning is required. A per-target `capabilities.maxTokens` override still records the model's true cap; the request never exceeds it. Set `defaults.maxTokens: 0` to disable the global default and fall back to per-model caps only.
 
-The setting `workers.maxRetries` controls the maximum number of automated retries for retryable failures during fleet dispatch. Setting this value to `0` disables retries entirely. The setting `workers.onPermission` decides how noninteractive workers handle a tool call that asks for permission: `deny` returns a structured denial and lets the run continue, while `fail` finalizes the run as failed with permission required. The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
+The setting `workers.maxRetries` controls the maximum number of automated retries for retryable failures during fleet dispatch. Setting this value to `0` disables retries entirely.
+
+The setting `workers.onPermission` decides how noninteractive workers handle a tool call that asks for permission. It supports three modes:
+- `deny`: Immediately returns a structured denial to the model, and the run continues.
+- `fail`: Finalizes the run as failed, exiting the worker subprocess with exit code 3 ([WORKER_EXIT_PERMISSION_REQUIRED](../src/worker/spec-contract.ts)).
+- `escalate`: Parks the tool call, emits a `clio_permission_escalated` event, and waits for an operator decision on standard input (`stdin`). If no operator decision is received within the configured `workers.escalation.timeoutMs` duration, it applies the fallback posture. If the worker is running headlessly (no operator attached) or under runtimes like `claude-sdk` that lack a native stdin park loop, the system collapses the `escalate` posture to the non-stall fallback posture immediately.
+
+The `workers.escalation` block defines parameters for the escalation mode:
+- `timeoutMs` (default `120000`): The wall-clock budget in milliseconds before the parked call applies the fallback.
+- `fallback` (default `deny`): The fallback posture (`deny` or `fail`) applied upon timeout.
+
+The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
 
 The `guardrails` section holds the numeric backstops that bound runaway agent behavior. `turnToolCallBudget` (default `60`) is the orchestrator's per-turn soft tool-call budget: crossing it blocks every further call in the turn with a stop-and-summarize directive, and a hard ceiling 15 calls above it interrupts the turn outright. Separately, an identical-call loop guard trips when the same tool is called with identical arguments three times inside a 30s window; the first two blocks feed the model a strategy-change directive (and, when the looped call already returned a successful result earlier in the run, point it at that result instead), and reaching the second block per turn locks tool use for the rest of that turn so the model answers from what it already gathered, rather than cancelling a turn that may already hold the answer. Only a bounded backstop (two further tool calls after the lockout) falls back to the hard stop. This lockout is an orchestrator behavior (interactive, headless, and ACP alike); dispatched workers keep the immediate at-budget stop and rely on the lifetime cap. `workerToolCallCap` (default `50`) is the lifetime tool-call cap for one dispatched worker run. `maxDispatchRuns` (default `1000`) caps dispatch run-ledger retention. `readMaxBytes` (default `51200`) caps one read-tool call, and `observationTurnBudgetBytes` (default `196608`) is the shared per-turn byte pool across all observation-producing tools. Each value also has a per-process env override intended for CI and one-off experiments (see [environment-variables.md](environment-variables.md)); the settings file is the durable home.
 

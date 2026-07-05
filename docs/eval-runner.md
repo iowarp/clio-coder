@@ -3,93 +3,148 @@
 > [!TIP]
 > **Interactive Spec Available:** An interactive task suite validator, subprocess execution simulator, and compare calculator is located at [docs/html/eval_blueprint.html](html/eval_blueprint.html) (Version: 0.2.8).
 
-The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows without requiring the runner itself to call a model.
+The local evaluation runner executes repository-local YAML task suites as deterministic subprocess checks. It is useful for comparing harness changes, prompts, tools, or local workflows.
 
-Source of truth: `src/domains/eval/**` and `src/cli/eval.ts`.
+Source of truth: [src/domains/eval/](../src/domains/eval/) and [src/cli/eval.ts](../src/cli/eval.ts).
 
 ---
 
-## CLI
+## CLI Commands
+
+The CLI commands under `clio eval` support running, validating, reporting, comparing, and gating evaluation suites.
 
 ```bash
-clio eval run --task-file tasks.yaml [--repeat <n>]
-clio eval report <evalId> [--format swe-jsonl]
+clio eval validate --suite <suite.yaml>
+clio eval run --suite <suite.yaml> [--target <id>] [--model <id>] [--out <path>] [--clio-entry <path>]
+clio eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--clio-entry <path>]
+clio eval report <evalId> --format text|json|md|swe-jsonl|junit
 clio eval compare <baselineEvalId> <candidateEvalId>
+clio eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
 ```
 
-`clio eval run` writes an eval artifact under `<dataDir>/evals/` and also builds deterministic eval evidence under `<dataDir>/evidence/eval-<evalId>/`.
-
-The option `--format swe-jsonl` for `clio eval report` generates reports in a newline-separated JSONL format. Each line represents a task run containing `instance_id` (the taskId), `model_patch` (the resolved git diff or patch), `model_name_or_path` (the evalId), `status` (pass or fail), `pass`, `tokens`, `wall_time_ms`, and `cost_usd`.
-
+### Command Roles
+* **`validate`**: Validates the structure and constraints of a Suite v2 YAML file without executing it.
+* **`run`**: Runs a Suite v2 (via `--suite`) or a compatibility v1 task file (via `--task-file`). Outputs a text summary and writes an eval artifact under `<dataDir>/evals/` and evidence under `<dataDir>/evidence/eval-<evalId>/`.
+* **`report`**: Formats and prints a report from a saved `evalId`. Supports multiple `--format` outputs:
+  * `text` (default): Human-readable stdout summary.
+  * `json`: Raw JSON structure of the artifact.
+  * `md`: Markdown document with tables and summaries.
+  * `swe-jsonl`: Standardized JSONL format representing task runs (e.g. for SWE-bench comparisons).
+  * `junit`: XML report for CI/CD integration.
+* **`compare`**: Compares two evaluation artifacts (baseline and candidate) by matching tasks.
+* **`gate`**: Compares candidate metrics against baseline or absolute thresholds, exiting non-zero if assertions fail (useful for PR gating).
 
 Exit codes:
 
 | Command | Success | Failure |
 | --- | --- | --- |
-| `eval run` | `0` when all task repetitions pass | `1` when any task fails, `2` for invalid task files/args |
-| `eval report` | `0` when artifact loads | `1` if artifact cannot be read |
-| `eval compare` | `0` when both artifacts load and comparison renders | `1` if artifacts cannot be read |
+| `eval validate` | `0` when validation passes | `2` for validation issues |
+| `eval run` | `0` when all task repetitions pass | `1` when any task fails, `2` for invalid configs |
+| `eval report` | `0` when artifact loads | `1` if artifact cannot be read, `2` for invalid ID |
+| `eval compare` | `0` when both artifacts load and compare succeeds | `1` if artifacts cannot be read, `2` for invalid ID |
+| `eval gate` | `0` when all threshold assertions pass | `1` if assertions fail, `2` for config/invalid ID errors |
 
 ---
 
-## Task-file schema
+## Suite v2 Schema
 
-Task files are YAML with `version: 1` and a non-empty `tasks` array.
+Suite v2 files define matrix targets, workspaces, runner parameters, validation metrics, assertions, and path blocklists.
 
 ```yaml
-version: 1
+version: 2
+suite:
+  id: "science-suite"
+  title: "Scientific Software Evaluation"
+  visibility: "local"
+  description: "Suite for verifying HPC integrations."
+matrix:
+  targets:
+    - id: "local-gemini"
+      model: "gemini-3.5-flash"
+    - id: "local-claude"
+      model: "claude-3-5-sonnet"
+  repeats: 3
 tasks:
-  - id: cli-json-smoke
-    prompt: "Verify the CLI JSON mode still starts."
-    cwd: fixtures/cli-json-smoke
-    setup:
-      - npm install
-    verifier:
-      - npm run build
-      - node dist/cli/index.js --help
-    timeoutMs: 60000
+  - id: "fft-tolerance-check"
     tags:
-      - cli
-      - smoke
+      - numeric
+      - fast
+    workspace:
+      kind: "temp-copy" # local | git | temp-copy
+      path: "fixtures/fft-src"
+      excludes:
+        - "**/node_modules/**"
+    runner:
+      kind: "clio-run" # clio-run | context-index | context-init | external-command
+      prompt: "Optimize the FFT tolerance bounds in solver.ts"
+      timeoutMs: 60000
+    verify:
+      commands:
+        - "npm run test"
+      assertions:
+        - metric: "result.pass"
+          op: "eq"
+          value: true
+        - metric: "tokens.total"
+          op: "lt"
+          value: 15000
+      forbidPaths:
+        - "**/credentials.yaml"
+    metrics:
+      collect:
+        - "tokens.total"
+        - "latency.wallMs"
+    timeoutMs: 90000
 ```
 
-Rules enforced by `src/domains/eval/task-file.ts`:
+### Schema Field Reference
 
-| Field | Requirement |
-| --- | --- |
-| `version` | Must equal `1`. |
-| `tasks` | Non-empty array. |
-| `id` | Non-empty; letters, numbers, dots, underscores, and hyphens only; unique. |
-| `prompt` | Non-empty string. Stored for traceability; the current runner does not send it to a model. |
-| `cwd` | Non-empty relative path under the task file directory. Absolute paths and escapes are rejected. |
-| `setup` | Optional string array; missing means `[]`. |
-| `verifier` | Required non-empty string array. |
-| `timeoutMs` | Positive integer applied per command. |
-| `tags` | Optional string array; missing means `[]`. |
-
-Unknown task fields are validation errors.
+| Field / Section | Sub-fields | Description |
+| --- | --- | --- |
+| `version` | - | Must equal `2`. |
+| `suite` | `id`, `title`, `visibility`, `description` | Metadata identifying the evaluation suite. |
+| `matrix` | `targets[]`, `repeats` | Matrix of execution targets (specifying model and thinking flags) and the repetition count. |
+| `workspace` | `kind`, `path`, `url`, `commit`, `checkout`, `excludes` | Workspace strategy: `local` (run in-place), `git` (clone from URL), or `temp-copy` (isolated copy of a directory). |
+| `runner` | `kind`, `prompt`, `command`, `commands`, `args`, `timeoutMs` | Runner type: `clio-run` (starts Clio agent loop), `context-index` (runs indexer), `context-init` (initializes context), `external-command` (spawns subprocess). |
+| `verify` | `commands`, `assertions`, `forbidPaths` | Validation steps: shell commands, metric assertions (e.g. `op: lt` for max token counts), and files/directories that must not be created or modified (`forbidPaths`). |
+| `metrics` | `collect` | List of metric names to compile for the evaluation runs. |
 
 ---
 
-## Execution model
-
-For each repeat and task:
-
-1. Resolve `cwd` relative to the task file directory.
-2. If `cwd` does not exist, mark the result `cwd_missing`.
-3. Run each `setup` command sequentially using the platform shell.
-4. Stop on the first failed/timed-out setup command.
-5. Run each `verifier` command sequentially.
-6. Stop on the first failed/timed-out verifier command.
-7. Record stdout/stderr with a per-command output cap.
-
-The runner currently records `tokens: 0` and `costUsd: 0` because it does not invoke a model. Receipt-backed harness metrics exist in types for future/linked workflows, while local command runs populate validation evidence from passing verifier commands.
+## Workspace Kinds
+* **`local`**: Executes the task directly in the specified local path.
+* **`git`**: Clones the repository from `url`, checks out the specified `commit` or `checkout` ref, and runs there.
+* **`temp-copy`**: Copies the directory at `path` to a temporary workspace location before running. This prevents side-effects from polluting other task runs.
 
 ---
 
-## Failure classes
+## Runner Kinds
+* **`clio-run`**: Invokes the main Clio Coder agent loop with the task's prompt, tracing all tools.
+* **`context-index`**: Triggers the context engine to build index structures (`codewiki`).
+* **`context-init`**: Initializes workspace files (such as generating `CLIO.md`).
+* **`external-command`**: Spawns an external command or sequence of commands in the task workspace.
 
-| Failure class | Meaning |
+---
+
+## Metric Assertions
+
+Metrics collected during runs can be validated automatically using the `verify.assertions` list. Supported operator fields (`op`) are:
+* `lt` (less than)
+* `lte` (less than or equal)
+* `gt` (greater than)
+* `gte` (greater than or equal)
+* `eq` (equal)
+* `neq` (not equal)
+
+Metrics that can be validated include `tokens.input`, `tokens.output`, `tokens.total`, `latency.wallMs`, `tools.totalCalls`, `tools.failed`, `tools.blocked`, `verifier.exitCode`, and `result.pass`.
+
+---
+
+## Failure Classes
+
+Evaluation tasks may fail with one of the following classes:
+
+| Failure Class | Meaning |
 | --- | --- |
 | `setup_failed` | A setup command exited non-zero. |
 | `verifier_failed` | A verifier command exited non-zero. |
@@ -99,37 +154,14 @@ The runner currently records `tokens: 0` and `costUsd: 0` because it does not in
 
 ---
 
-## Artifact and report fields
+## v1 Compatibility
 
-Eval artifacts have `version: 1` and include:
-
-- `evalId`
-- `taskFile`
-- `taskFileHash`
-- `repeat`
-- `startedAt` / `endedAt`
-- `summary`
-- `results[]`
-
-Summary metrics include runs passed/failed, pass rate, token/cost totals, wall time, receipt-backed run count, tool calls, retries, safety blocks, correction latency, validation evidence count, and failure-class counts.
-
----
-
-## Comparisons
-
+Version 1 task files can still be run directly via:
 ```bash
-clio eval compare eval-baseline eval-candidate
+clio eval run --task-file tasks.yaml [--repeat <n>]
 ```
-
-Comparisons match results by `taskId + repeatIndex`. They report pass-rate, wall-time, token, cost, and harness-metric deltas, plus missing/added result rows when task sets differ.
-
-For useful comparisons, run baseline and candidate from the same task file content and repeat count.
-
----
-
-## Scientific Context and SWE-bench Evaluation
-
-Clio Coder incorporates local task-runner metrics to evaluate performance changes in subagent behaviors. This design is inspired by agent benchmarks like [SWE-bench](https://www.swebench.com), which evaluate AI systems on their ability to resolve real-world software engineering issues in python codebases. 
-
-The evaluation runner collects execution details, token totals, and cost data. Combined with the `--format swe-jsonl` report option, it outputs standardized evaluations suitable for comparing model improvements, tool utility changes, and system prompt effectiveness in scientific software repositories.
-
+Under the hood, these are parsed and wrapped into a Suite v2 adapter with:
+* Workspace kind: `local` (using task `cwd` as workspace path)
+* Runner kind: `external-command` (executing task `setup` commands)
+* Verify commands: Task `verifier` commands
+* Timeout and tags mapped directly

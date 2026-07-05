@@ -239,7 +239,7 @@ Share archives are single JSON files:
   "formatVersion": 1,
   "manifest": {
     "format": "clio.share.v1",
-    "clioVersion": "0.2.7",
+    "clioVersion": "0.2.8",
     "createdAt": "...",
     "files": []
   },

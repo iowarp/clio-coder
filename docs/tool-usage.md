@@ -189,6 +189,31 @@ ls(path="src/tools")
 ls(path="docs", limit=100)
 ```
 
+## credential_present: check environment or file for a credential key
+
+Checks whether a credential key is present in the process environment or an env-style file (like `.env`) without ever returning the value of the credential. Source: `src/tools/credential-present.ts`. Read class; parallel.
+
+Arguments:
+
+- `name` (required). Credential key name, e.g. `OPENAI_API_KEY`. Must match `[A-Za-z_][A-Za-z0-9_]*`.
+- `source` (optional). One of `auto`, `environment` (or `env`), or `file`. Default `auto`.
+  - `auto`: Checks the process environment, and checks the env-style file if `file` is supplied.
+  - `environment`/`env`: Checks only the process environment.
+  - `file`: Checks only the env-style file.
+- `file` (optional). Env-style file path to check, e.g. `.env`.
+
+Returns a JSON presence summary mapping containing:
+- `name`: The checked credential key name.
+- `present`: Boolean indicating if the credential is found in any checked source.
+- `source`: The source that matched (`environment`, `file`, `both`, or `none`).
+- `checked`: Array listing the sources actually checked (`environment` and/or `file`).
+- `file`: The env-style file path checked, if applicable.
+- `fileMissing`: True if the file path was specified but does not exist.
+
+```text
+credential_present(name="OPENAI_API_KEY")
+credential_present(name="MY_SECRET_KEY", source="file", file=".env")
+
 ## dispatch: run bounded tasks on fleet agents
 
 Dispatches one or more tasks to Clio fleet agents and returns per-run receipt summaries. Source: `src/tools/dispatch.ts`.
@@ -246,6 +271,32 @@ verify()
 verify(check="typecheck")
 verify(check="test", args=["tests/contracts/dispatch.test.ts"])
 verify(check="frontend", path="site/index.html", browser="off")
+```
+
+## git: read-only inspection of git repository state
+
+Executes read-only inspection commands against the local git repository. Source: `src/tools/safe-exec.ts`. Read class; parallel.
+
+Arguments:
+
+- `op` (required). The inspection operation to run: `status`, `diff`, or `log`.
+- `path` (optional). Limit diff/log to a specific file or directory path.
+- `cached` (optional boolean). For `op="diff"`: staged changes (`--cached`).
+- `stat` (optional boolean). For `op="diff"`: summary only (`--stat`).
+- `name_only` (optional boolean). For `op="diff"`: file names only.
+- `limit` (optional number). For `op="log"`: commits to show (default 20, max 200).
+- `cwd` (optional). Working directory.
+
+Commands map directly to git subprocess execution:
+- `op="status"` runs `git status --short --branch`.
+- `op="diff"` runs `git diff` with optional `--cached`, `--stat`, or `--name-only` flags.
+- `op="log"` runs `git log --oneline -n <limit>` listing recent commit shas and subjects.
+
+```text
+git(op="status")
+git(op="diff", stat=true)
+git(op="diff", path="src/tools/safe-exec.ts")
+git(op="log", limit=10)
 ```
 
 ## context: workspace snapshot, docs retrieval, and skills
@@ -306,6 +357,33 @@ code_nav(mode="outline", query="src/tools/grep.ts")
 code_nav(mode="dependents", query="src/tools/observation.ts")
 code_nav(mode="entries")
 code_nav(mode="wiki")
+```
+
+## web_fetch: fetch http(s) URLs and convert HTML to markdown
+
+Fetches content from an http(s) URL. HTML content is automatically cleaned and converted to readable Markdown. Source: `src/tools/web-fetch.ts`. Read class; parallel.
+
+Arguments:
+
+- `url` (required). Fully-qualified http(s) URL.
+- `method` (optional). HTTP method (default `GET`).
+- `headers` (optional). Key-value request headers.
+- `body` (optional). Request body string.
+- `timeout_ms` (optional). Request timeout in milliseconds (default 30000).
+- `max_bytes` (optional). Max bytes returned (default 600000, capped at 5MB).
+- `format` (optional). Content parsing format: `auto` (default, converts HTML to Markdown), `markdown`, or `raw`.
+
+Specialized behaviors:
+- **ArXiv Papers**: If the URL points to an arXiv paper or abstract page (such as `arxiv.org/abs/...` or `alphaxiv.org/...`), it automatically retrieves paper metadata, abstract, and any AlphaXiv markdown overview.
+- **ArXiv API Query**: If the URL points to the arXiv search API, it parses the Atom XML and returns a structured markdown listing of papers.
+- **Git Repo Tree Summary**: If the URL points to a GitHub or GitLab directory tree (such as `github.com/.../tree/...`), it fetches repository contents, summarizes the directory tree, and preloads the first few markdown files (e.g. README/SKILL/INSTALL).
+- **HTML Cleaning**: For regular websites, boilerplate content (scripts, styles, svg, iframe, forms) is stripped, and the main article/content area is extracted and parsed into Markdown.
+- **Binary formats**: Non-text, binary, or unsupported content types are rejected.
+
+```text
+web_fetch(url="https://arxiv.org/abs/2303.17564")
+web_fetch(url="https://github.com/iowarp/clio-coder/tree/v0.2.8/docs")
+web_fetch(url="https://example.com", format="raw")
 ```
 
 ## monitor: inspect dispatched runs
@@ -378,6 +456,30 @@ tasks(action="start", id="t1")
 tasks(action="done", id="t1", note="reproduced 3/3 with CLIO_SEED=7; failure in tests/contracts/scheduler.test.ts:88")
 tasks(action="block", id="t2", note="needs operator decision on the retry policy")
 tasks(action="list")
+```
+
+## ask_user: host-owned operator interviews
+
+Runs a host-owned interactive interview or single-question prompt with the operator, recording decisions and/or free-form answers. Source: `src/tools/ask-user.ts`. Read class; sequential.
+
+Arguments:
+
+- `action` (optional). `ask` (default) to present questions; `complete` to finalise the interview and record compact decisions.
+- `mode` (optional). `round` (default) to batch multiple questions; `single_question` for exactly one question.
+- `questions` (optional array). For `action="ask"`, up to four question objects containing:
+  - `question` (required): Question text prompt.
+  - `header` (optional): Short header.
+  - `options` (optional array): Suggested choices (`{label, description}`).
+  - `multi_select` (optional boolean): Allows multiple selections.
+- `decisions` (optional array). For `action="complete"`, key-value objects representing settled configurations.
+- `summary` (optional). Closeout explanation for `action="complete"`.
+- `max_rounds` (optional number). Round limit for this interview (default 6, max 24).
+
+The tool manages a stateful operator interview. The UI presents choices (with an implicit "Other" option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators' inputs or defaults.
+
+```text
+ask_user(action="ask", questions=[{question: "Which database should we use?", options: [{label: "SQLite", description: "Local database"}, {label: "PostgreSQL"}]}])
+ask_user(action="complete", summary="Operator selected SQLite.", decisions=[{key: "db_choice", value: "SQLite"}])
 ```
 
 ## artifact: plans, reviews, and reports

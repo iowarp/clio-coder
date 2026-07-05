@@ -98,16 +98,9 @@ when the operator explicitly asks for it.
 `.clio/codewiki.json` uses schema v4 and is written as compact JSON. File
 records contain a stable id, path, language, line count, role, per-file content
 hash, extracted import specifiers, and an optional first docstring/JSDoc
-summary. Symbol records are declarations only: name, kind, file id, line, and
-optional signature. Edges are built from imports and record either an internal
-file id target or an external module string.
+summary. Symbol records store declaration-level symbols only (such as classes, interfaces, types, global functions, and methods) and intentionally skip function-local symbols. Each record stores name, kind, file id, line, and optional signature. Edges are built from imports and record either an internal file id target or an external module string.
 
-The indexer walks source files and config manifests while excluding generated
-and local-state directories such as `.git`, `.clio`, `node_modules`, `dist`,
-`build`, `coverage`, virtualenvs, `target`, and `vendor`. Source coverage spans
-TypeScript, JavaScript, Python, Rust, Go, C, C++, Java, Ruby, and C#, with
-config entries for manifests such as `package.json`, `pyproject.toml`,
-`Cargo.toml`, `go.mod`, `pom.xml`, `CMakeLists.txt`, `Gemfile`, and `*.csproj`.
+The indexer walks source files and config manifests while excluding generated, scratch, and local-state directories such as `.git`, `.clio`, `.superpowers`, `.codex`, `.claude`, `.clio-benchmark`, `node_modules`, `dist`, `build`, `coverage`, virtualenvs, `target`, and `vendor`. Source coverage spans TypeScript, JavaScript, Python, Rust, Go, C, C++, Java, Ruby, and C#, with config entries for manifests such as `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`, `CMakeLists.txt`, `Gemfile`, and `*.csproj`.
 
 Extraction is async and tree-sitter-first. Clio loads WASM grammars for the ten
 source languages above, extracts symbols/imports/exports from the parsed tree,
@@ -132,12 +125,7 @@ at most eight Markdown pages, rejects empty pages, and requires
 a content hash over the Markdown pages, and the page list. Metadata is written
 only after the generated layout validates and the page content changed.
 
-`clio context wiki` creates a wiki when no metadata exists and updates one when
-metadata is present. `clio context wiki --update` requests update mode
-explicitly. `clio context wiki --status` only reads metadata and does not run a
-model. `clio context refresh --wiki` first rebuilds the structural codewiki and
-then updates an existing wiki when `.clio/wiki/meta.json` exists; when no wiki
-metadata exists, it performs no wiki generation.
+`clio context wiki` creates a wiki when no metadata exists and updates one when metadata is present. During wiki generation, Clio automatically refreshes a stale codewiki index before grounding the model run. The decision to write new pages and update metadata is a no-op if the newly generated content's hash matches the existing content hash. `clio context wiki --update` requests update mode explicitly. `clio context wiki --status` only reads metadata and does not run a model. `clio context refresh --wiki` first rebuilds the structural codewiki and then updates an existing wiki when `.clio/wiki/meta.json` exists; when no wiki metadata exists, it performs no wiki generation.
 
 ### Lifecycle Matrix
 
@@ -149,7 +137,7 @@ metadata exists, it performs no wiki generation.
 | `/context init` or `clio context init` | Performs a full codewiki rebuild before generating, preserving, proposing, or previewing `CLIO.md`; writes state with the fingerprint and codewiki version when it writes state. | No wiki generation. |
 | `/context refresh` or `clio context refresh` | Performs a full codewiki rebuild and writes state. Does not touch `CLIO.md`. | If an existing wiki is stale and `--wiki` was not passed on the CLI, prints a hint to run `clio context refresh --wiki` or `clio context wiki --update`. |
 | `clio context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed documenter path. No wiki metadata means no wiki model call. |
-| `clio context wiki` | Loads the existing codewiki or rebuilds/backfills it before composing the wiki prompt. | Generates or updates `.clio/wiki/` through the configured documenter path and validates the layout before writing metadata. |
+| `clio context wiki` | Automatically refreshes the codewiki index if stale before composing the wiki prompt. | Generates or updates `.clio/wiki/` through the configured documenter path (no-op if content hashes match) and validates the layout before writing metadata. |
 | `clio context wiki --status` | No index rebuild. | Reads metadata and reports page count, update time, recorded git head, and git-head drift. |
 
 ### Staleness
