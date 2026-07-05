@@ -143,8 +143,10 @@ export async function runWikiGenerate(
 	}
 
 	const afterHash = computeWikiContentHash(cwd);
-	const metadataNeedsWrite = !existingMeta || existingMeta.contentHash !== afterHash;
-	if (beforeHash === afterHash && !metadataNeedsWrite) {
+	// The before/after content hashes decide a no-op so scheduled updates never
+	// churn metadata. Missing metadata is the one exception: an unchanged wiki
+	// with no meta.json must still get one written so the artifact is complete.
+	if (beforeHash === afterHash && existingMeta) {
 		progress(input, {
 			phase: "state",
 			status: "completed",
