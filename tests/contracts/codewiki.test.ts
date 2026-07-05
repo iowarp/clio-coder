@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -9,12 +9,14 @@ import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	buildCodewiki,
 	codewikiNeedsBackfill,
+	computeFingerprint,
 	readClioState,
 	readCodewiki,
 	renderCodewikiDigest,
 	runContextRefresh,
 	structuralCodewikiHash,
 	updateCodewikiPaths,
+	writeClioState,
 	writeCodewiki,
 } from "../../src/domains/context/index.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
@@ -539,6 +541,37 @@ describe("contracts/codewiki", () => {
 		if (!loaded.ok) throw new Error(loaded.message);
 		strictEqual(codewikiNeedsBackfill(loaded.codewiki), false);
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "backfilled"));
+	});
+
+	it("rebuilds stale codewiki artifacts on tool demand after source edits", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		const sourcePath = join(scratch, "src", "index.ts");
+		const indexedAt = "2026-05-01T00:00:00.000Z";
+		writeFileSync(sourcePath, "export const staleBefore = true;\n", "utf8");
+		const original = await buildCodewiki({ cwd: scratch, language: "typescript", generatedAt: indexedAt });
+		writeCodewiki(scratch, original);
+		writeClioState(scratch, {
+			version: 1,
+			projectType: "typescript",
+			fingerprint: computeFingerprint(scratch, original),
+			codewikiVersion: original.version,
+			lastSessionAt: indexedAt,
+			lastIndexedAt: indexedAt,
+		});
+
+		writeFileSync(sourcePath, "export const freshAfter = true;\n", "utf8");
+		const future = new Date(Date.now() + 1000);
+		utimesSync(sourcePath, future, future);
+
+		const loaded = await loadCodewikiForTool(scratch);
+
+		if (!loaded.ok) throw new Error(loaded.message);
+		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "freshAfter"));
+		strictEqual(
+			loaded.codewiki.symbols.some((symbol) => symbol.name === "staleBefore"),
+			false,
+		);
+		strictEqual(readClioState(scratch)?.fingerprint.treeHash, computeFingerprint(scratch, loaded.codewiki).treeHash);
 	});
 
 	it("builds identical artifacts through refresh and context-index paths", async () => {

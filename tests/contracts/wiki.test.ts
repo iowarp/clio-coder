@@ -230,6 +230,28 @@ describe("contracts/wiki", () => {
 		deepStrictEqual(modes, ["init", "update"]);
 	});
 
+	it("writes valid metadata for an existing wiki when a no-op generator leaves content unchanged", async () => {
+		writeProjectFile(scratch);
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nExisting wiki page.\n");
+		const contentHash = computeWikiContentHash(scratch);
+
+		const result = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: () => {
+				// The generator intentionally leaves the existing page untouched.
+			},
+		});
+
+		strictEqual(result.status, "generated");
+		strictEqual(result.pages, 1);
+		const meta = readWikiMeta(scratch);
+		ok(meta);
+		strictEqual(meta.model, "test-model");
+		strictEqual(meta.contentHash, contentHash);
+		deepStrictEqual(meta.pages, [{ path: "quickstart.md", title: "Quickstart" }]);
+	});
+
 	it("returns validation failures without writing metadata", async () => {
 		writeProjectFile(scratch);
 

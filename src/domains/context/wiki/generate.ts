@@ -143,7 +143,8 @@ export async function runWikiGenerate(
 	}
 
 	const afterHash = computeWikiContentHash(cwd);
-	if (beforeHash === afterHash) {
+	const metadataNeedsWrite = !existingMeta || existingMeta.contentHash !== afterHash;
+	if (beforeHash === afterHash && !metadataNeedsWrite) {
 		progress(input, {
 			phase: "state",
 			status: "completed",

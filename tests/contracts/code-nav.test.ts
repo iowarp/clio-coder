@@ -1,12 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	buildCodewiki,
+	computeFingerprint,
 	listWikiPages,
 	wikiDir,
+	writeClioState,
 	writeCodewiki,
 	writeWikiMeta,
 } from "../../src/domains/context/index.js";
@@ -60,7 +62,17 @@ describe("contracts/code_nav", () => {
 		);
 		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = 1;\n", "utf8");
 		writeFileSync(join(scratch, "pkg", "util.py"), "import os\n\ndef helper():\n    return os.getcwd()\n", "utf8");
-		writeCodewiki(scratch, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
+		const generatedAt = "2026-05-01T00:00:00.000Z";
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "polyglot", generatedAt });
+		writeCodewiki(scratch, codewiki);
+		writeClioState(scratch, {
+			version: 1,
+			projectType: "polyglot",
+			fingerprint: computeFingerprint(scratch, codewiki),
+			codewikiVersion: codewiki.version,
+			lastSessionAt: generatedAt,
+			lastIndexedAt: generatedAt,
+		});
 		process.chdir(scratch);
 	});
 
@@ -123,6 +135,26 @@ describe("contracts/code_nav", () => {
 		strictEqual(dependents.kind, "ok");
 		const dependentsPayload = parseJsonOutput(dependents.output);
 		ok(Array.isArray(dependentsPayload.dependents) && dependentsPayload.dependents.includes("src/index.ts"));
+	});
+
+	it("reloads stale codewiki before serving symbol results", async () => {
+		const workerPath = join(scratch, "src", "worker.ts");
+		writeFileSync(workerPath, "export const freshWorker = 2;\n", "utf8");
+		const future = new Date(Date.now() + 1000);
+		utimesSync(workerPath, future, future);
+
+		const result = await codeNavTool.run({ mode: "symbol", query: "freshWorker" });
+
+		strictEqual(result.kind, "ok");
+		const payload = parseJsonOutput(result.output);
+		ok(pathsFromFiles(payload.files).includes("src/worker.ts"));
+		ok(
+			Array.isArray(payload.symbols) &&
+				payload.symbols.some((item) => {
+					if (typeof item !== "object" || item === null || Array.isArray(item)) return false;
+					return (item as Record<string, unknown>).name === "freshWorker";
+				}),
+		);
 	});
 
 	it("returns a helpful empty wiki payload when no Markdown wiki exists", async () => {

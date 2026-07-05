@@ -5,7 +5,7 @@ import {
 	readCodewiki,
 	writeCodewiki,
 } from "../../domains/context/codewiki/indexer.js";
-import { computeFingerprint } from "../../domains/context/fingerprint.js";
+import { computeFingerprint, isStale } from "../../domains/context/fingerprint.js";
 import { readClioState, writeClioState } from "../../domains/context/state.js";
 import { detectProjectType } from "../../domains/session/workspace/project-type.js";
 
@@ -13,13 +13,17 @@ export async function loadCodewikiForTool(
 	cwd: string = process.cwd(),
 ): Promise<{ ok: true; codewiki: Codewiki } | { ok: false; message: string }> {
 	const codewiki = readCodewiki(cwd);
-	if (codewiki && !codewikiNeedsBackfill(codewiki)) return { ok: true, codewiki };
+	const state = readClioState(cwd);
+	if (codewiki && !codewikiNeedsBackfill(codewiki)) {
+		const fingerprint = computeFingerprint(cwd, codewiki);
+		if (state && !isStale(state.fingerprint, fingerprint)) return { ok: true, codewiki };
+	}
 	try {
 		const generatedAt = new Date().toISOString();
 		const projectType = detectProjectType(cwd);
 		const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt });
 		writeCodewiki(cwd, rebuilt);
-		const prev = readClioState(cwd);
+		const prev = state;
 		writeClioState(cwd, {
 			version: 1,
 			projectType: prev?.projectType ?? projectType,

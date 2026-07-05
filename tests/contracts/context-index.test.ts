@@ -1,12 +1,22 @@
 import { ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runContextCommand } from "../../src/cli/context.js";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
-import { readCodewiki } from "../../src/domains/context/index.js";
+import type { DomainContext, DomainContract } from "../../src/core/domain-loader.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
+import {
+	ContextDomainModule,
+	listWikiPages,
+	readCodewiki,
+	wikiDir,
+	writeWikiMeta,
+} from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
+import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 
 async function captureStdout<T>(fn: () => Promise<T>): Promise<{ output: string; value: T }> {
 	const originalWrite = process.stdout.write;
@@ -23,6 +33,92 @@ async function captureStdout<T>(fn: () => Promise<T>): Promise<{ output: string;
 		return { output, value };
 	} finally {
 		process.stdout.write = originalWrite;
+	}
+}
+
+function git(cwd: string, args: ReadonlyArray<string>): string {
+	const child = spawnSync("git", [...args], { cwd, encoding: "utf8" });
+	if (child.error) throw child.error;
+	if (child.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${child.stderr}`);
+	return child.stdout.trim();
+}
+
+function initGitRepo(cwd: string): string {
+	git(cwd, ["init"]);
+	git(cwd, ["config", "user.email", "clio-test@example.com"]);
+	git(cwd, ["config", "user.name", "Clio Test"]);
+	git(cwd, ["add", "."]);
+	git(cwd, ["commit", "-m", "initial"]);
+	return git(cwd, ["rev-parse", "--verify", "HEAD"]);
+}
+
+function writeTypescriptProject(cwd: string): void {
+	mkdirSync(join(cwd, "src"), { recursive: true });
+	writeFileSync(join(cwd, "src", "index.ts"), "export const promptFixtureSymbol = true;\n", "utf8");
+}
+
+function writeLargeClioMd(cwd: string): void {
+	const longBody = "This section intentionally pushes the project context over the synopsis threshold.\n".repeat(140);
+	writeFileSync(
+		join(cwd, "CLIO.md"),
+		[
+			"# Large Prompt Fixture",
+			"",
+			"Large fixture used to test compact project synopsis mode.",
+			"",
+			"## Notes",
+			"",
+			longBody,
+		].join("\n"),
+		"utf8",
+	);
+}
+
+function writeWikiPage(cwd: string, name: string, text: string): void {
+	mkdirSync(wikiDir(cwd), { recursive: true });
+	writeFileSync(join(wikiDir(cwd), name), text, "utf8");
+}
+
+function writeStaleWiki(cwd: string): void {
+	const head = initGitRepo(cwd);
+	writeWikiPage(cwd, "quickstart.md", "# Quickstart\n\nStart with `src/index.ts`.\n");
+	writeWikiMeta(cwd, {
+		version: 1,
+		updatedAt: "2026-07-04T00:00:00.000Z",
+		gitHead: head,
+		model: "test-model",
+		contentHash: "0".repeat(64),
+		pages: listWikiPages(cwd),
+	});
+	writeFileSync(join(cwd, "src", "extra.ts"), "export const extra = true;\n", "utf8");
+	git(cwd, ["add", "src/extra.ts"]);
+	git(cwd, ["commit", "-m", "add extra"]);
+}
+
+async function compileProjectPrompt(cwd: string) {
+	const bus = createSafeEventBus();
+	const contracts = new Map<string, DomainContract>();
+	const domainContext: DomainContext = {
+		bus,
+		getContract<T extends DomainContract>(name: string): T | undefined {
+			return contracts.get(name) as T | undefined;
+		},
+	};
+	const contextBundle = await ContextDomainModule.createExtension(domainContext);
+	contracts.set("context", contextBundle.contract);
+	const promptsBundle = createPromptsBundle(domainContext);
+	await promptsBundle.extension.start();
+	try {
+		return await promptsBundle.contract.compileSessionPrompt({
+			cwd,
+			sessionInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+			},
+		});
+	} finally {
+		await promptsBundle.extension.stop?.();
 	}
 }
 
@@ -106,5 +202,38 @@ describe("contracts/context-index", () => {
 		strictEqual(value, 0);
 		ok(output.includes("codewiki: absent"));
 		strictEqual(output.includes("entry points:"), false);
+	});
+
+	it("preserves wiki availability and stale suffix in project synopsis mode", async () => {
+		const absentClio = join(scratch, "absent-clio");
+		mkdirSync(absentClio, { recursive: true });
+		writeTypescriptProject(absentClio);
+		writeStaleWiki(absentClio);
+
+		const absentPrompt = await compileProjectPrompt(absentClio);
+
+		strictEqual(absentPrompt.projectPreload?.mode, "synopsis");
+		ok(absentPrompt.systemPrompt.includes("<project-synopsis>"));
+		ok(
+			absentPrompt.systemPrompt.includes(
+				"Wiki: 1 pages at .clio/wiki (start: quickstart.md) (stale; run clio context wiki --update)",
+			),
+		);
+
+		const largeClio = join(scratch, "large-clio");
+		mkdirSync(largeClio, { recursive: true });
+		writeTypescriptProject(largeClio);
+		writeLargeClioMd(largeClio);
+		writeStaleWiki(largeClio);
+
+		const largePrompt = await compileProjectPrompt(largeClio);
+
+		strictEqual(largePrompt.projectPreload?.mode, "synopsis");
+		ok(largePrompt.systemPrompt.includes("CLIO.md: available; compact synopsis only because the handbook is too large"));
+		ok(
+			largePrompt.systemPrompt.includes(
+				"Wiki: 1 pages at .clio/wiki (start: quickstart.md) (stale; run clio context wiki --update)",
+			),
+		);
 	});
 });
