@@ -11,6 +11,7 @@ import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
 /**
  * Model id recorded on wiki metadata when the documenter target cannot be
@@ -24,8 +25,64 @@ export interface ModelWikiGenerateOptions {
 	dispatch?: DispatchContract;
 }
 
-async function drainDispatchEvents(events: AsyncIterable<unknown>): Promise<void> {
-	for await (const _event of events) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toolNameFromEvent(event: unknown): string | null {
+	if (!isRecord(event)) return null;
+	const payload = event.payload;
+	if (!isRecord(payload)) return null;
+	return typeof payload.tool === "string" && payload.tool.length > 0 ? payload.tool : null;
+}
+
+function toolOutcomeFromEvent(event: unknown): string | null {
+	if (!isRecord(event)) return null;
+	const payload = event.payload;
+	if (!isRecord(payload)) return null;
+	return typeof payload.outcome === "string" && payload.outcome.length > 0 ? payload.outcome : null;
+}
+
+function formatElapsed(ms: number): string {
+	if (!Number.isFinite(ms) || ms < 0) return "elapsed unknown";
+	if (ms < 1000) return `elapsed ${Math.round(ms)}ms`;
+	return `elapsed ${Math.round(ms / 1000)}s`;
+}
+
+async function drainDispatchEvents(events: AsyncIterable<unknown>, input: WikiGenerateInput): Promise<void> {
+	const startedAt = Date.now();
+	for await (const event of events) {
+		if (isRecord(event) && event.type === "agent_start") {
+			input.progress?.({
+				phase: "generate",
+				status: "running",
+				message: "documenter started wiki update",
+				detail: formatElapsed(Date.now() - startedAt),
+			});
+		}
+		if (isRecord(event) && event.type === "clio_tool_start") {
+			const tool = toolNameFromEvent(event);
+			if (tool) {
+				input.progress?.({
+					phase: "generate",
+					status: "running",
+					message: `documenter running ${tool}`,
+					detail: formatElapsed(Date.now() - startedAt),
+				});
+			}
+		}
+		if (isRecord(event) && event.type === "clio_tool_finish") {
+			const tool = toolNameFromEvent(event);
+			const outcome = toolOutcomeFromEvent(event) ?? "done";
+			if (tool) {
+				input.progress?.({
+					phase: "generate",
+					status: "running",
+					message: `documenter ${tool} ${outcome}`,
+					detail: formatElapsed(Date.now() - startedAt),
+				});
+			}
+		}
 		// Drain the event stream so finalization cannot block on an unread iterator.
 	}
 }
@@ -36,6 +93,12 @@ function receiptFailure(receipt: RunReceipt): string {
 }
 
 export async function generateWikiWithDocumenter(dispatch: DispatchContract, input: WikiGenerateInput): Promise<void> {
+	input.progress?.({
+		phase: "generate",
+		status: "running",
+		message: "dispatching internal documenter shadow agent",
+		detail: "agent=documenter",
+	});
 	const handle = await dispatch.dispatch({
 		agentId: "documenter",
 		task: input.prompt,
@@ -48,14 +111,18 @@ export async function generateWikiWithDocumenter(dispatch: DispatchContract, inp
 		// adversarial writer cannot touch the promoted wiki or the wider repo.
 		writeRoots: [input.outputDir],
 	});
+	const deadline = armInternalDispatchDeadline(dispatch, handle.runId, "wiki documenter");
 	try {
-		await drainDispatchEvents(handle.events);
+		await drainDispatchEvents(handle.events, input);
 		const receipt = await handle.finalPromise;
+		if (deadline.timedOut()) throw new Error(deadline.message());
 		if (receipt.exitCode !== 0) throw new Error(receiptFailure(receipt));
 	} catch (err) {
-		dispatch.abort(handle.runId);
+		if (!deadline.timedOut()) dispatch.abort(handle.runId);
 		await handle.finalPromise.catch(() => undefined);
-		throw err;
+		throw deadline.timedOut() ? new Error(deadline.message()) : err;
+	} finally {
+		deadline.clear();
 	}
 }
 

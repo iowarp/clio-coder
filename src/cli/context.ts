@@ -1,3 +1,5 @@
+import type { BootstrapProgressEvent } from "../domains/context/index.js";
+
 const HELP = `Usage:
   clio context
   clio context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
@@ -14,6 +16,12 @@ Project context commands:
   clio context reset        clear accumulated project context artifacts
   clio context index        build the codewiki index without model calls
 `;
+
+function printWikiProgress(event: BootstrapProgressEvent): void {
+	if (event.status === "completed") return;
+	const detail = event.detail ? ` (${event.detail})` : "";
+	process.stderr.write(`clio context wiki: ${event.message}${detail}\n`);
+}
 
 async function printContextStatus(): Promise<number> {
 	const context = await import("../domains/context/index.js");
@@ -159,6 +167,7 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			...(forceUpdate ? { mode: "update" as const } : {}),
 			model: await resolveDocumenterModelId(),
 			generate: modelWikiGenerate(),
+			onProgress: printWikiProgress,
 		});
 		if (result.status === "failed") {
 			process.stderr.write(`clio context wiki failed: ${(result.problems ?? ["unknown failure"]).join("; ")}\n`);

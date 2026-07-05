@@ -12,10 +12,11 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | Variable | Settings key | Default | Controls |
 | --- | --- | --- | --- |
 | `CLIO_TURN_TOOL_CALL_BUDGET` | `guardrails.turnToolCallBudget` | 60 | Orchestrator per-turn soft tool-call budget; the hard interrupt ceiling sits 15 above it (`src/engine/loop-guard.ts`). |
-| `CLIO_WORKER_TOOL_CALL_CAP` | `guardrails.workerToolCallCap` | 50 | Lifetime tool-call cap per dispatched worker run (`src/engine/loop-guard.ts`). |
+| `CLIO_WORKER_TOOL_CALL_CAP` | `guardrails.workerToolCallCap` | 50 | Lifetime tool-call cap per dispatched worker run, including blocked and guard-denied attempts (`src/engine/loop-guard.ts`). |
 | `CLIO_MAX_RUNS` | `guardrails.maxDispatchRuns` | 1000 | Dispatch run-ledger retention cap (`src/domains/dispatch/state.ts`). |
 | `CLIO_READ_MAX_BYTES` | `guardrails.readMaxBytes` | 51200 | Per-call byte cap for the read tool, floored at 1024 (`src/tools/read.ts`). |
 | `CLIO_OBSERVATION_TURN_BUDGET_BYTES` | `guardrails.observationTurnBudgetBytes` | 196608 | Shared per-turn byte pool across observation tools (`src/tools/observation.ts`). |
+| `CLIO_INTERNAL_DISPATCH_TIMEOUT_MS` | `guardrails.internalDispatchTimeoutMs` | 900000 | Wall-clock cap for one internal generator dispatch: the wiki documenter and the bootstrap scout (`src/cli/internal-dispatch.ts`). |
 
 ## Behavior knobs without a settings key
 

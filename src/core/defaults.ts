@@ -435,13 +435,17 @@ retry:
 #   maxDispatchRuns             dispatch run-ledger retention cap.
 #   readMaxBytes                per-call byte cap for the read tool.
 #   observationTurnBudgetBytes  shared per-turn byte pool for observation tools.
+#   internalDispatchTimeoutMs   wall-clock cap for one internal generator
+#                               dispatch (wiki documenter, bootstrap scout).
 # Each value also has a per-process env override (CLIO_TURN_TOOL_CALL_BUDGET,
 # CLIO_WORKER_TOOL_CALL_CAP, CLIO_MAX_RUNS, CLIO_READ_MAX_BYTES,
-# CLIO_OBSERVATION_TURN_BUDGET_BYTES) meant for CI and one-off experiments.
+# CLIO_OBSERVATION_TURN_BUDGET_BYTES, CLIO_INTERNAL_DISPATCH_TIMEOUT_MS) meant
+# for CI and one-off experiments.
 guardrails:
   turnToolCallBudget: 60
   workerToolCallCap: 50
   maxDispatchRuns: 1000
   readMaxBytes: 51200
   observationTurnBudgetBytes: 196608
+  internalDispatchTimeoutMs: 900000
 `;

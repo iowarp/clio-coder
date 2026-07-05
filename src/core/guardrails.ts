@@ -34,6 +34,15 @@ export interface GuardrailValues {
 	readMaxBytes: number;
 	/** Shared per-turn byte pool across all observation-producing tools. */
 	observationTurnBudgetBytes: number;
+	/**
+	 * Wall-clock cap in milliseconds for one internal generator dispatch (the
+	 * wiki documenter and the bootstrap scout). Backstop for a degenerate model
+	 * that keeps streaming without finishing: continuous output satisfies the
+	 * heartbeat watchdog, and a run mid-generation spends no tool calls, so
+	 * neither existing guard ends it. Healthy runs finish in minutes; this is
+	 * not a routine ceiling.
+	 */
+	internalDispatchTimeoutMs: number;
 }
 
 export const GUARDRAIL_DEFAULTS: GuardrailValues = {
@@ -42,6 +51,7 @@ export const GUARDRAIL_DEFAULTS: GuardrailValues = {
 	maxDispatchRuns: 1000,
 	readMaxBytes: 50 * 1024,
 	observationTurnBudgetBytes: 192 * 1024,
+	internalDispatchTimeoutMs: 15 * 60 * 1000,
 };
 
 /** Per-process env overrides, one per guardrail. */
@@ -51,7 +61,16 @@ export const GUARDRAIL_ENV_VARS: Readonly<Record<keyof GuardrailValues, string>>
 	maxDispatchRuns: "CLIO_MAX_RUNS",
 	readMaxBytes: "CLIO_READ_MAX_BYTES",
 	observationTurnBudgetBytes: "CLIO_OBSERVATION_TURN_BUDGET_BYTES",
+	internalDispatchTimeoutMs: "CLIO_INTERNAL_DISPATCH_TIMEOUT_MS",
 };
+
+export function workerToolCallCapExceededReason(cap: number): string {
+	return `workerToolCallCap reached (${cap}); abort run`;
+}
+
+export function isWorkerToolCallCapExceededReason(reason: string): boolean {
+	return /^workerToolCallCap reached \([1-9]\d*\); abort run$/.test(reason);
+}
 
 let configured: Partial<GuardrailValues> = {};
 

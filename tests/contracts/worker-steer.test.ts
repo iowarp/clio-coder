@@ -708,6 +708,39 @@ describe("contracts/worker-steer", () => {
 		});
 	});
 
+	describe("worker runtime guardrail bounds", () => {
+		it("terminates a denied-call spiral at workerToolCallCap", async () => {
+			const previousCap = process.env.CLIO_WORKER_TOOL_CALL_CAP;
+			process.env.CLIO_WORKER_TOOL_CALL_CAP = "3";
+			const events: unknown[] = [];
+			const { input, unregister } = fauxRuntimeInput(
+				Array.from({ length: 8 }, (_, i) =>
+					fauxAssistantMessage([fauxToolCall("bash", { command: `printf denied-${i}` }, { id: `call-denied-${i}` })], {
+						stopReason: "toolUse",
+					}),
+				),
+				{ onPermission: "deny" },
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				const finishes = toolFinishes(events);
+				const capFinish = finishes.find((finish) => String(finish.reason ?? "").includes("workerToolCallCap reached (3)"));
+
+				strictEqual(result.exitCode, 1);
+				strictEqual(finishes.length, 4, "three denied calls are followed by the terminal cap block");
+				strictEqual(finishes.filter((finish) => finish.decision === "permission_requested").length, 3);
+				strictEqual(capFinish?.outcome, "blocked");
+				strictEqual(capFinish?.decision, "blocked");
+				strictEqual(capFinish?.reasonCode, "guard_block");
+				strictEqual(capFinish?.actionClass, "execute");
+			} finally {
+				unregister();
+				if (previousCap === undefined) Reflect.deleteProperty(process.env, "CLIO_WORKER_TOOL_CALL_CAP");
+				else process.env.CLIO_WORKER_TOOL_CALL_CAP = previousCap;
+			}
+		});
+	});
+
 	describe("spawned worker send", () => {
 		it("delivers a steer line to the child stdin and reports false after exit", async () => {
 			const scratch = mkdtempSync(join(tmpdir(), "clio-steer-transport-"));

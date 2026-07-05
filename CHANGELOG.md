@@ -10,6 +10,24 @@ still change interfaces.
 
 ## Unreleased
 
+- Bounded dispatched worker blocked-call spirals: `workerToolCallCap` now
+  counts blocked and guard-denied attempts, not just successful executions, and
+  a worker that keeps requesting denied tools terminates with
+  `workerToolCallCap reached (...)` recorded in receipt diagnostics.
+- `clio context wiki --update` now prints terse documenter progress while the
+  internal worker runs, including tool start/finish lines and elapsed time, so
+  long wiki updates no longer sit silent for minutes.
+- Added a wall-clock deadline for internal generator dispatches: `clio context
+  wiki --update` and `context-init` now abort the documenter or scout run
+  after `guardrails.internalDispatchTimeoutMs` (default fifteen minutes,
+  env `CLIO_INTERNAL_DISPATCH_TIMEOUT_MS`) instead of grinding indefinitely
+  when a slow or rambling model keeps streaming without finishing. The abort
+  records the timeout cause in the run receipt.
+- Fixed run receipts undercounting blocked safety decisions: a call that
+  passed policy admission but was stopped by a tool guard (loop guard,
+  protected artifacts, dispatch dedup) now records a blocked decision with
+  reason code `guard_block` instead of repeating the admission's allow, so
+  `safety.decisions.blocked` matches the blocked attempts in tool stats.
 - Fixed session branch replay to follow the active turn path: after a `/tree`
   switch, resume, fork, and transcript replay no longer resurrect abandoned
   sibling turns from the append-only session file.

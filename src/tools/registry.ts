@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { TSchema } from "typebox";
+import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import {
 	evaluateSkillToolSurface,
 	type PendingSkillToolPolicy,
@@ -326,7 +327,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// registrations; the first block_tool effect decides the verdict.
 		const beforeEffects = runToolHook("before_tool", spec, call, decision, options);
 		const block = firstBlockToolEffect(beforeEffects);
-		if (block) return { kind: "blocked", reason: block.reason, decision };
+		if (block) {
+			const verdict = guardBlockedVerdict(decision, call.tool, block.reason);
+			recordRegistryDisposition(call, verdict.decision, "blocked", {
+				reasonCode: GUARD_BLOCK_REASON_CODE,
+				reasons: [block.reason],
+			});
+			return verdict;
+		}
 		try {
 			const preparedArgs = prepareToolArgs(spec, call.args ?? {});
 			const result = shapeToolResult(spec, await spec.run(preparedArgs, options), options);
@@ -473,18 +481,27 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	 * blocked call would never trip the detector (the former worker guard sat
 	 * in front of admission and had this coverage).
 	 */
-	const observeBlockedAttempt = (call: ClassifierCall, verdict: RegistryVerdict, options?: ToolInvokeOptions): void => {
-		if (verdict.kind !== "blocked") return;
-		observeRejectedAttempt(call, verdict.decision, options);
+	const observeBlockedAttempt = (
+		call: ClassifierCall,
+		verdict: RegistryVerdict,
+		options?: ToolInvokeOptions,
+	): RegistryVerdict | null => {
+		if (verdict.kind !== "blocked") return null;
+		return guardOverrideForRejectedAttempt(
+			call,
+			verdict.decision,
+			observeRejectedAttempt(call, verdict.decision, options),
+		);
 	};
 
 	/**
 	 * Run before_tool hooks for an attempt that will not execute, so repetition
-	 * detectors see it. Effects never change the rejection itself; the returned
-	 * value is the first block_tool reason (the loop guard's actionable
-	 * feedback), which the park-denial path substitutes for its generic reason
-	 * so a model retrying a denied call learns to stop instead of looping until
-	 * the run times out.
+	 * detectors see it. Most effects do not change the rejection itself; the
+	 * worker tool-call cap is the exception, because it is the deterministic
+	 * run bound for denied-call spirals. The returned value is the first
+	 * block_tool reason (the loop guard's actionable feedback), which the
+	 * park-denial path substitutes for its generic reason so a model retrying a
+	 * denied call learns to stop instead of looping until the run times out.
 	 */
 	const observeRejectedAttempt = (
 		call: ClassifierCall,
@@ -498,6 +515,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		return firstBlockToolEffect(effects)?.reason ?? null;
 	};
 
+	const guardOverrideForRejectedAttempt = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		reason: string | null,
+	): RegistryVerdict | null => {
+		if (reason === null || !isWorkerToolCallCapExceededReason(reason)) return null;
+		const verdict = guardBlockedVerdict(decision, call.tool, reason);
+		recordRegistryDisposition(call, verdict.decision, "blocked", {
+			reasonCode: GUARD_BLOCK_REASON_CODE,
+			reasons: [reason],
+		});
+		return verdict;
+	};
+
 	const cleanupParkedEntry = (entry: ParkedCall): void => {
 		entry.abortCleanup?.();
 		delete entry.abortCleanup;
@@ -509,7 +540,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// identical retries trip the loop detector. When the detector fires, its
 		// reason replaces the generic denial so the model gets recovery guidance.
 		const loopReason = observeRejectedAttempt(entry.call, entry.decision, entry.options);
-		entry.resolve({ kind: "blocked", reason: loopReason ?? reason, decision: entry.decision });
+		entry.resolve(
+			guardOverrideForRejectedAttempt(entry.call, entry.decision, loopReason) ?? {
+				kind: "blocked",
+				reason: loopReason ?? reason,
+				decision: entry.decision,
+			},
+		);
 	};
 
 	const reparkEntry = (entry: ParkedCall, index?: number): void => {
@@ -569,8 +606,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		async invoke(call, options) {
 			const outcome = admit(call, undefined, options);
 			if (outcome.kind === "terminal") {
-				observeBlockedAttempt(call, outcome.verdict, options);
-				return outcome.verdict;
+				return observeBlockedAttempt(call, outcome.verdict, options) ?? outcome.verdict;
 			}
 			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision, options);
 			const abortReason = "run aborted before the operator decided";
@@ -639,8 +675,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				}
 				cleanupParkedEntry(entry);
 				if (outcome.kind === "terminal") {
-					observeBlockedAttempt(entry.call, outcome.verdict, entry.options);
-					entry.resolve(outcome.verdict);
+					entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
 					continue;
 				}
 				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision, entry.options));
@@ -695,6 +730,35 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 		reasons: [`registered tool: ${spec.name}`],
 	};
 	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
+}
+
+/** Final reason code for a before_tool guard block, matching the audit convention (sd-01 §2.5). */
+const GUARD_BLOCK_REASON_CODE = "guard_block";
+
+/**
+ * Terminal blocked verdict for a before_tool guard block (loop guard,
+ * protected artifacts, dispatch dedup, declarative block rules) on a call
+ * whose admission already passed. The decision is re-shaped as a block, and
+ * the carried policy's net-pass reasonCode is replaced with the guard axis,
+ * so downstream consumers (worker finish events, dispatch receipts, audit)
+ * count a blocked safety decision instead of repeating the admission's allow.
+ */
+function guardBlockedVerdict(
+	decision: SafetyDecision,
+	tool: string,
+	reason: string,
+): Extract<RegistryVerdict, { kind: "blocked" }> {
+	const blocked: SafetyDecision = {
+		kind: "block",
+		classification: decision.classification,
+		rejection: {
+			short: `${tool} blocked: tool guard`,
+			detail: reason,
+			hints: [],
+		},
+		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: GUARD_BLOCK_REASON_CODE } } : {}),
+	};
+	return { kind: "blocked", reason, decision: blocked };
 }
 
 /**

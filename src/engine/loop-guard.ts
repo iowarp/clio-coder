@@ -21,7 +21,7 @@ import {
 	type ToolBudgetExceededPayload,
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
+import { GUARDRAIL_DEFAULTS, resolveGuardrail, workerToolCallCapExceededReason } from "../core/guardrails.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
@@ -343,7 +343,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const now = options.now?.() ?? Date.now();
 			count += 1;
 			if (cap !== undefined && count > cap) {
-				return [{ kind: "block_tool", reason: `tool-call cap reached (${cap}); abort turn`, severity: "hard-block" }];
+				return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
 			}
 			const turnKey = input.turnId ?? NO_TURN_BUCKET;
 
