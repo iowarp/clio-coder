@@ -3,8 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { codewikiPath, serializeCodewiki } from "../../src/domains/context/codewiki/indexer.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	buildCodewiki,
@@ -22,6 +24,9 @@ import {
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
 
 type BuiltCodewiki = Awaited<ReturnType<typeof buildCodewiki>>;
+type ContextBundle = ReturnType<typeof createContextBundle>;
+
+const INDEXED_AT = "2026-05-01T00:00:00.000Z";
 
 function hasSymbol(codewiki: BuiltCodewiki, path: string, name: string, kind?: string): boolean {
 	const file = codewiki.files.find((item) => item.path === path);
@@ -67,6 +72,47 @@ async function captureStdout<T>(fn: () => Promise<T>): Promise<T> {
 	} finally {
 		process.stdout.write = originalWrite;
 	}
+}
+
+function writeIndexedCodewiki(cwd: string, codewiki: BuiltCodewiki): void {
+	writeCodewiki(cwd, codewiki);
+	writeClioState(cwd, {
+		version: 1,
+		projectType: codewiki.language,
+		fingerprint: computeFingerprint(cwd, codewiki),
+		codewikiVersion: codewiki.version,
+		lastSessionAt: INDEXED_AT,
+		lastIndexedAt: INDEXED_AT,
+	});
+}
+
+async function withContextBundle(cwd: string, fn: (bundle: ContextBundle) => Promise<void>): Promise<void> {
+	const originalCwd = process.cwd();
+	process.chdir(cwd);
+	const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+	try {
+		await bundle.extension.start();
+		await fn(bundle);
+	} finally {
+		try {
+			await bundle.extension.stop?.();
+		} finally {
+			process.chdir(originalCwd);
+		}
+	}
+}
+
+async function waitForCodewiki(
+	cwd: string,
+	predicate: (codewiki: BuiltCodewiki) => boolean,
+	message: string,
+): Promise<BuiltCodewiki> {
+	for (let attempt = 0; attempt < 200; attempt += 1) {
+		const codewiki = readCodewiki(cwd);
+		if (codewiki && predicate(codewiki)) return codewiki;
+		await delay(25);
+	}
+	throw new Error(message);
 }
 
 describe("contracts/codewiki", () => {
@@ -506,6 +552,93 @@ describe("contracts/codewiki", () => {
 		incremental = await updateCodewikiPaths(scratch, incremental, ["src/worker.ts"]);
 		deepStrictEqual(incremental, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
 		ok(hasExternalEdge(incremental, "src/feature.ts", "./worker.js"));
+	});
+
+	it("keeps extension incremental bytes equal to a full rebuild across cached batches", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(
+			join(scratch, "src", "index.ts"),
+			"import { worker } from './worker.js';\nexport const main = worker;\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = 1;\n", "utf8");
+		writeFileSync(join(scratch, "src", "remove.ts"), "export const remove = true;\n", "utf8");
+		const initial = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		writeIndexedCodewiki(scratch, initial);
+
+		await withContextBundle(scratch, async (bundle) => {
+			writeFileSync(
+				join(scratch, "src", "feature.ts"),
+				"import { worker } from './worker.js';\nexport const feature = worker;\n",
+				"utf8",
+			);
+			bundle.contract.noteFileChanges(["src/feature.ts"], scratch);
+			await waitForCodewiki(
+				scratch,
+				(codewiki) => hasSymbol(codewiki, "src/feature.ts", "feature", "const"),
+				"feature.ts was not indexed incrementally",
+			);
+
+			writeFileSync(
+				join(scratch, "src", "index.ts"),
+				"import { feature } from './feature.js';\nexport const main = feature;\n",
+				"utf8",
+			);
+			bundle.contract.noteFileChanges([join(scratch, "src", "index.ts")], scratch);
+			await waitForCodewiki(
+				scratch,
+				(codewiki) =>
+					codewiki.files.find((file) => file.path === "src/index.ts")?.imports.includes("./feature.js") ?? false,
+				"index.ts import change was not indexed incrementally",
+			);
+
+			rmSync(join(scratch, "src", "worker.ts"));
+			bundle.contract.noteFileChanges(["src/worker.ts"], scratch);
+		});
+
+		const actual = readFileSync(codewikiPath(scratch), "utf8");
+		const rebuilt = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		strictEqual(actual, serializeCodewiki(rebuilt));
+	});
+
+	it("misses the extension cache after an external codewiki overwrite", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "base.ts"), "export const baseBefore = true;\n", "utf8");
+		const initial = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		writeIndexedCodewiki(scratch, initial);
+
+		await withContextBundle(scratch, async (bundle) => {
+			writeFileSync(join(scratch, "src", "first.ts"), "export const first = true;\n", "utf8");
+			bundle.contract.noteFileChanges(["src/first.ts"], scratch);
+			const afterBatchOne = await waitForCodewiki(
+				scratch,
+				(codewiki) => hasSymbol(codewiki, "src/first.ts", "first", "const"),
+				"first.ts was not indexed incrementally",
+			);
+			const markerFile: BuiltCodewiki["files"][number] = {
+				id: "f_external_marker",
+				path: "virtual/external-marker.ts",
+				lang: "typescript",
+				loc: 1,
+				role: "module",
+				hash: "external-marker",
+				imports: [],
+			};
+			writeCodewiki(scratch, {
+				...afterBatchOne,
+				files: [...afterBatchOne.files, markerFile],
+				symbols: [...afterBatchOne.symbols, { name: "externalMarker", kind: "const", fileId: markerFile.id, line: 1 }],
+			});
+
+			writeFileSync(join(scratch, "src", "base.ts"), "export const baseAfter = true;\n", "utf8");
+			bundle.contract.noteFileChanges(["src/base.ts"], scratch);
+		});
+
+		const final = readCodewiki(scratch);
+		ok(final);
+		ok(hasSymbol(final, "virtual/external-marker.ts", "externalMarker", "const"));
+		ok(hasSymbol(final, "src/base.ts", "baseAfter", "const"));
+		strictEqual(hasSymbol(final, "src/base.ts", "baseBefore", "const"), false);
 	});
 
 	it("reads only changed files during incremental updates", async () => {
