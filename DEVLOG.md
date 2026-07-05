@@ -7,6 +7,10 @@ change interfaces.
 
 ## Unreleased
 
+### Added
+
+- **v0.2.8 Documentation Alignment.** Conducted a thorough documentation pass aligning the entire markdown corpus with v0.2.8 reality. Introduced two new guides: `docs/worker-dispatch-mechanics.md` covering worker subprocess spawning, standard input/output NDJSON protocols, watchdog heartbeats, and permission escalations, and `docs/provider-adapter-cookbook.md` detailing the custom model runtime adapter interface, probing APIs, client factories, and reasoning formats. Corrected and updated all core tools, configs, and TUI design reference files.
+
 ### Fixed
 
 - Fixed reasoning-never local model families so catalog `thinking.mechanism:

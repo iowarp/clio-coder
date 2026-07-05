@@ -102,18 +102,18 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
-3. **Verify Integrity**: Recomputes the SHA256 digest using the version 3 fields. The v3 digest covers the new `findingsSummary` field (containing tags, firstPassSuccess, and findingCount) to prevent tampering.
+3. **Verify Integrity**: Recomputes the SHA256 digest using the version 3 fields. The v3 digest covers the `findingsSummary` field (containing tags, firstPassSuccess, and findingCount) and the `autonomyEnforcement` field to prevent tampering.
 4. **Report Result**: The viewer reports success or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 
 ## Receipt Fields for Dispatch Provenance
 
-A receipt carries three optional provenance field sets that answer "what happened" for a chained (pipeline), composed (persona override), or escalated run. Each set is folded onto the receipt only when the run actually exercised the feature, so a run that used none of them produces a receipt byte-identical to a pre-0.2.8 receipt. Automation consumers must treat every field below as optional and absent by default.
+A receipt carries optional provenance and context field sets that answer "what happened" for a chained (pipeline), composed (persona override), escalated, or external run. Each set is folded onto the receipt only when the run actually exercised the feature, so a run that used none of them produces a receipt byte-identical to a pre-0.2.8 receipt. Automation consumers must treat every field below as optional and absent by default.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
-The `Status` column follows the `docs/model-catalog.md` labeling convention. All three sets are new in the unreleased 0.2.8 and are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
+All sets are new in v0.2.8 and are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
 
 | Field path | Type | When present | Meaning | Status |
 | --- | --- | --- | --- | --- |
@@ -126,6 +126,12 @@ The `Status` column follows the `docs/model-catalog.md` labeling convention. All
 | `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |
 | `safety.decisions.escalationDenied` | `number` | Run saw at least one permission escalation | Escalations the operator denied | experimental |
 | `safety.decisions.escalationTimedOut` | `number` | Run saw at least one permission escalation | Escalations resolved by the timeout fallback (no operator decision) | experimental |
+| `autonomyEnforcement.grade` | `string` | Always in v0.2.8 | The autonomy grade level enforced for the run | experimental |
+| `autonomyEnforcement.autonomy` | `number` | Always in v0.2.8 | The exact numeric autonomy dial value | experimental |
+| `autonomyEnforcement.externalMode` | `string` | When running external worker | The execution mode of the external worker runtime | experimental |
+| `autonomyEnforcement.dangerousBypass` | `boolean` | When running external worker | Whether a safety bypass was explicitly activated | experimental |
+| `projectContext.clioMdHash` | `string` | Always in v0.2.8 | SHA-256 hash of active `CLIO.md` when the run started | experimental |
+| `projectContext.gitSha` | `string` | Always in v0.2.8 | Active git commit hash when the run started | experimental |
 
 The escalation counters appear together and only when `escalationRequested` is present (at least one escalation occurred), so a deny-all or non-escalating run keeps its `safety.decisions` block unchanged.
 

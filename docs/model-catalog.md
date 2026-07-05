@@ -35,16 +35,16 @@ dispatch canonicalizes requested model ids against the live catalog when one is
 available, so a short alias can resolve to the canonical live id before the
 worker spec and receipt are written.
 
-## First benchmark harness
+## Benchmarking Models
 
-A simple model/config benchmark runner ships under `benchmarks/`:
+Model and config benchmark adapters ship under [benchmarks/community/](../benchmarks/community/). These adapters (such as `bench:swe`, `bench:scicode`, and the fleet benchmark `bench:tb`) drive Clio through the CLI or `clio eval`. 
 
+For example, to run the fleet benchmark:
 ```sh
-npm run build
-npm run bench:models -- --target mini --limit 3
+npm run bench:tb -- --limit 3
 ```
 
-The runner discovers models with `clio models --probe --json`, creates a gitignored `.clio-benchmark/` run directory, asks each model/config combo to generate a single-file Clio Coder website at `app.html`, and scores the artifact with a static rubric. The matrix records context-window, thinking, sampling, weight quantization, and KV-cache quantization settings so server-side sweeps (Q4/Q5/Q6/IQ/UD quants and f16 vs q8 KV) can be compared consistently. Current per-request Clio overrides cover model, thinking level, sampling, context-window, and KV-cache mode where the runtime adapter supports those fields. Weight quantization remains a serving preset choice and should be recorded in the report.
+The benchmarks record context-window, thinking, sampling, weight quantization, and KV-cache settings so sweeps can be compared consistently.
 
 ## What “sanctioned” means
 
@@ -163,6 +163,7 @@ The Context Engine evaluates thinking mechanisms per model target and manages li
 - **LM Studio Native (`lmstudio-native`):** Because LM Studio does not expose a native reasoning field, the engine replays prior thinking blocks by prepending them to assistant message payloads. These are formatted as a text-prepended part wrapped in `<think>` and `</think>` tags.
 - **OpenAI Completions (`openai-completions`):** The OpenAI-compatible completions provider preserves reasoning blocks within assistant messages. It replays thinking blocks via the `reasoning_content` parameter in the message history, ensuring that the model maintains its chain-of-thought across conversational turns without stripping the data.
 - **Anthropic OAuth / API (`anthropic-max`):** Uses the `anthropic-extended` thinking format. The engine supports Anthropic's native extended thinking block protocol, streaming thinking increments and outputting them wrapped appropriately or natively depending on target capabilities.
+- **Reasoning-Never Models (`thinking.mechanism: none`):** When a model is configured or cataloged with `thinking.mechanism: none`, it is treated as a reasoning-never model. For these models, Clio must not send any thinking fields or parameters in requests, must not replay thinking blocks, must not surface thinking events to the TUI, and must not preserve or log reasoning token usage in metrics.
 
 ---
 

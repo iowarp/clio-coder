@@ -1,4 +1,11 @@
-# Config knobs audit
+# Config Knobs Audit (Historical Appendix)
+
+> [!IMPORTANT]
+> This document is a historical record of the point-in-time configuration knob audit conducted on 2026-07-03.
+> It details the pre-consolidation state of the codebase before the `v0.2.8` release.
+> For the current, active, and authoritative reference of environment variables, please refer to [environment-variables.md](environment-variables.md).
+
+---
 
 Point-in-time inventory of every tunable knob outside `settings.yaml`: environment variables, the compiled-in defaults behind them, and the CLI flags that bridge into them. Gathered 2026-07-03 by sweeping `src/` for `process.env` reads and cross-checking `scripts/`, `benchmarks/`, and `docs/`. Purpose: reason about which knobs earn their keep, which belong in `settings.yaml`, and which are dead.
 
@@ -13,7 +20,7 @@ Most knobs come in a pair that looks redundant but is not:
 
 Every runtime-tunable value needs both halves; the pair is one knob, not two. The real bloat questions are different ones: whether a knob should exist at all, whether env is the right surface for it (versus `settings.yaml` or a CLI flag), and whether its name says what it does. Those are called out in the findings at the bottom.
 
-## 1. Operator tuning knobs (read by `src/`)
+## 1. Operator tuning knobs (read by `src/`) (Pre-consolidated State)
 
 | Env var | Default | Read at | Controls |
 |---|---|---|---|
@@ -41,7 +48,7 @@ Every runtime-tunable value needs both halves; the pair is one knob, not two. Th
 | `CLIO_SKILL_MARKETPLACE_INDEX` | unset | `src/domains/resources/skills/marketplace.ts` | Marketplace index path override. |
 | `CLIO_MODEL_CATALOG_DIRS` | unset | `src/domains/providers/knowledge-base-path.ts` | Extra model-catalog directories. |
 
-## 2. Directory and install layout
+## 2. Directory and install layout (Pre-consolidated State)
 
 | Env var | Default | Read at | Controls |
 |---|---|---|---|
@@ -50,7 +57,7 @@ Every runtime-tunable value needs both halves; the pair is one knob, not two. Th
 | `CLIO_BIN_DIR` | `~/.local/bin` | `src/cli/uninstall.ts` | Where the launcher symlink lives. |
 | `CLIO_PACKAGE_ROOT` | auto-detected | `src/core/package-root.ts` | Package root override for bundled-asset resolution. |
 
-## 3. Debug and trace toggles
+## 3. Debug and trace toggles (Pre-consolidated State)
 
 All default off; all enabled with `1`.
 
@@ -64,7 +71,7 @@ All default off; all enabled with `1`.
 | `CLIO_RUNTIME_VERBOSE` | `src/engine/apis/lmstudio-native.ts` | Verbose runtime logging. |
 | `CLIO_HOOK_BUDGET_DEBUG` | `src/domains/middleware/runtime.ts` | Per-overrun hook-budget diagnostics. |
 
-## 4. Internal plumbing (set by Clio for itself; not operator knobs)
+## 4. Internal plumbing (Pre-consolidated State)
 
 | Env var | Set by | Read at | Purpose |
 |---|---|---|---|
@@ -72,7 +79,7 @@ All default off; all enabled with `1`.
 | `CLIO_RESUME_SESSION_ID` | restart/resume flow | `src/entry/orchestrator.ts` (consumed then deleted) | Hands the session id across a self-restart. |
 | `CLIO_BOOTSTRAP_GENERATE_CHILD` | context bootstrap | `src/domains/context/extension.ts` | Marks the child process that generates CLIO.md so it skips recursion. |
 
-## 5. Test-only
+## 5. Test-only (Pre-consolidated State)
 
 | Env var | Read at | Purpose |
 |---|---|---|
@@ -80,11 +87,11 @@ All default off; all enabled with `1`.
 | `CLIO_TEST_UPGRADE_NO_NETWORK` | `src/cli/upgrade.ts` | Skips npm install during upgrade tests. |
 | `CLIO_REQUIRE_HOME_PREFIX` | `src/core/init.ts` | Test guardrail: aborts if resolved dirs escape `CLIO_HOME`. |
 
-## 6. CLI flags that bridge through env vars
+## 6. CLI flags that bridge through env vars (Pre-consolidated State)
 
 `clio run --max-context-tokens` and `--kv-cache-mode` (`src/cli/run.ts:143-234`) and the print-mode sampling flags (`src/cli/modes/print.ts:306-333`) do not plumb their values through function arguments. They mutate `process.env` (`CLIO_MAX_CONTEXT_TOKENS`, `CLIO_KV_CACHE_MODE`, `CLIO_SAMPLING_OVERRIDES`), run the command, then restore the previous value in a `finally`. The env var is the transport between the CLI layer and deep engine code.
 
-## 7. Script- and benchmark-only vars (never read by `src/`)
+## 7. Script- and benchmark-only vars (Pre-consolidated State)
 
 | Env var(s) | Used by |
 |---|---|
@@ -96,10 +103,10 @@ All default off; all enabled with `1`.
 
 ## Findings and consolidation candidates
 
-1. **Naming: `CLIO_MAX_TOOL_CALLS` vs `CLIO_ORCH_MAX_TOOL_CALLS`.** These sound like the same knob but govern different axes (worker lifetime cap vs orchestrator per-turn budget). If touched, rename toward what they bound: `CLIO_WORKER_TOOL_CALL_CAP` and `CLIO_TURN_TOOL_CALL_BUDGET`.
-2. **Operator policy living in env instead of settings.** The guard budgets (`CLIO_ORCH_MAX_TOOL_CALLS`, `CLIO_MAX_TOOL_CALLS`), tool byte caps (`CLIO_READ_MAX_BYTES`, `CLIO_OBSERVATION_TURN_BUDGET_BYTES`), and `CLIO_MAX_RUNS` are durable operator policy, the same species as `compaction.threshold` or `budget.sessionCeilingUsd`, which live in `settings.yaml`. Candidates for a `guardrails:` settings section, keeping env as an emergency override at most. Env should be for per-invocation and CI overrides, not for the primary home of policy.
-3. **The env-bridge pattern (§6) is the real implementation bloat.** Set-env / run / restore-env in `run.ts` and `print.ts` is process-global mutation standing in for parameter passing, and it is the pattern that multiplies env vars: every new run-scoped option gets a new `CLIO_*` var by default. New run-scoped options should plumb through options objects instead.
-4. **Undocumented knobs.** `docs/` mentions roughly half the operator knobs. Undocumented today: both tool-call budgets, `CLIO_MAX_RUNS`, `CLIO_MAX_CONTEXT_TOKENS`, `CLIO_KV_CACHE_MODE`, `CLIO_SAMPLING_OVERRIDES`, `CLIO_RESIDENCY`, all five hook-budget vars, `CLIO_STATUS_STUCK_MS`, `CLIO_SHUTDOWN_HOOK_MS`, `CLIO_SKILL_MARKETPLACE_INDEX`, and every debug toggle. Whatever survives this audit should land in one reference table in `docs/`.
-5. **Dead reference.** `CLIO_NO_UPDATE_NOTIFIER` (§7): delete the setters or implement the notifier suppression.
+1. **Naming: `CLIO_MAX_TOOL_CALLS` vs `CLIO_ORCH_MAX_TOOL_CALLS`.** These sound like the same knob but govern different axes (worker lifetime cap vs orchestrator per-turn budget). They were renamed to `CLIO_WORKER_TOOL_CALL_CAP` and `CLIO_TURN_TOOL_CALL_BUDGET`.
+2. **Operator policy living in env instead of settings.** The guard budgets, tool byte caps, and `CLIO_MAX_RUNS` are durable operator policy, the same species as `compaction.threshold` or `budget.sessionCeilingUsd`, which live in `settings.yaml`. These moved to a `guardrails:` settings section, keeping env as an emergency override.
+3. **The env-bridge pattern (§6) is the real implementation bloat.** Set-env / run / restore-env in `run.ts` and `print.ts` was collapsed into `CLIO_RUN_OVERRIDES`.
+4. **Undocumented knobs.** Many operator knobs were undocumented in v0.2.7. Whatever survived the audit was consolidated into [environment-variables.md](environment-variables.md).
+5. **Dead reference.** `CLIO_NO_UPDATE_NOTIFIER` (§7) was removed.
 6. **Overlap to check: skills trust.** `CLIO_TRUST_PROJECT_SKILLS` (env) and `skills.trustProjectCompatRoots` (settings) are adjacent trust decisions with different surfaces and different names. They govern different roots today, but one `skills.trust*` settings block with both switches would be easier to reason about.
 7. **Healthy as-is.** Directory overrides (§2), debug toggles (§3), internal plumbing (§4), and test-only vars (§5) are all conventional env usage and cheap to keep. The hook-budget family is five vars but one subsystem with sane defaults; fold into settings only if hook tuning becomes routine.
