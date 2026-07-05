@@ -377,7 +377,7 @@ function parseLimit(value: unknown, fallback: number): number {
 export const codeNavTool: ToolSpec = {
 	name: ToolNames.CodeNav,
 	description:
-		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, dependents lists importers, wiki lists Markdown wiki pages.",
+		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, dependents lists importers, wiki lists this repository's generated Markdown wiki pages. For Clio's bundled product docs use the context tool with scope=docs.",
 	parameters: Type.Object({
 		mode: stringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], "Lookup mode."),
 		query: Type.Optional(Type.String({ description: "Symbol name, indexed path, path pattern, or path substring." })),
