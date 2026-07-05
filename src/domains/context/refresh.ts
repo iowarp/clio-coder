@@ -20,6 +20,12 @@ export interface RunContextRefreshInput {
 	onProgress?: BootstrapProgressSink;
 	wiki?: boolean;
 	wikiGenerate?: WikiGenerate;
+	/**
+	 * Resolved wire model id of the documenter target, recorded on the wiki
+	 * metadata when `--wiki` updates run. Supplied by the CLI, which can load the
+	 * providers contract; absent for callers that never trigger wiki generation.
+	 */
+	wikiModel?: string;
 }
 
 export interface RunContextRefreshResult {
@@ -69,7 +75,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		wikiResult = await runWikiGenerate({
 			cwd,
 			mode: "update",
-			model: "configured-clio-target",
+			model: input.wikiModel ?? "unresolved-documenter-target",
 			...(input.wikiGenerate ? { generate: input.wikiGenerate } : {}),
 			...(input.onProgress ? { onProgress: input.onProgress } : {}),
 		});

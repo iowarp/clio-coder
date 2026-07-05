@@ -12,14 +12,20 @@ export interface BuildWikiPromptInput {
 	mode: WikiGenerateMode;
 	codewiki: Codewiki;
 	gitHead?: string | null;
+	/**
+	 * Absolute staging directory the writer must target. Substituted for the
+	 * literal `{{outputDir}}` token in the mode fragment so the prompt always
+	 * points the writer at the harness-owned staging path, never at .clio/wiki.
+	 */
+	outputDir: string;
 }
 
 function fragmentPath(mode: WikiGenerateMode): string {
 	return join(resolvePackageRoot(), "src", "domains", "prompts", "fragments", "wiki", `${mode}.md`);
 }
 
-function readWikiFragment(mode: WikiGenerateMode): string {
-	return readFileSync(fragmentPath(mode), "utf8").trim();
+function readWikiFragment(mode: WikiGenerateMode, outputDir: string): string {
+	return readFileSync(fragmentPath(mode), "utf8").trim().split("{{outputDir}}").join(outputDir);
 }
 
 function gitEvidence(cwd: string, gitHead: string | null | undefined): string {
@@ -42,7 +48,7 @@ function gitEvidence(cwd: string, gitHead: string | null | undefined): string {
 
 export function buildWikiPrompt(input: BuildWikiPromptInput): string {
 	const sections = [
-		readWikiFragment(input.mode),
+		readWikiFragment(input.mode, input.outputDir),
 		"## Codewiki digest",
 		"```text",
 		renderCodewikiDigest(input.codewiki),

@@ -1291,6 +1291,30 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("accepts and normalizes writeRoots onto the validated job spec", () => {
+		const good = validateJobSpec({
+			agentId: "documenter",
+			task: "write wiki",
+			cwd: "/work/repo",
+			writeRoots: ["staging/wiki", "/abs/root"],
+		});
+		strictEqual(good.ok, true);
+		if (good.ok) {
+			deepStrictEqual((good.spec as { writeRoots?: readonly string[] }).writeRoots, [
+				"/work/repo/staging/wiki",
+				"/abs/root",
+			]);
+		}
+
+		const empty = validateJobSpec({ agentId: "documenter", task: "write wiki", writeRoots: [] });
+		strictEqual(empty.ok, false);
+		if (!empty.ok) ok(empty.errors.some((error) => error.includes("writeRoots")));
+
+		const blank = validateJobSpec({ agentId: "documenter", task: "write wiki", writeRoots: [""] });
+		strictEqual(blank.ok, false);
+		if (!blank.ok) ok(blank.errors.some((error) => error.includes("writeRoots")));
+	});
+
 	it("keeps memory before pipeline input and the stable system prompt untouched by dynamic context", () => {
 		const recipe: AgentRecipe = {
 			id: "coder",
@@ -3099,6 +3123,93 @@ rl.once("line", () => {
 			} finally {
 				await bundle.extension.stop?.();
 			}
+		}
+	});
+
+	it("threads writeRoots onto the native worker spec", async () => {
+		const context = stubContext();
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 4242,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const roots = ["/tmp/clio-wiki-staging-abc"];
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "stage wiki", writeRoots: roots });
+			await handle.finalPromise;
+			deepStrictEqual((capturedSpec as WorkerSpec | null)?.writeRoots, roots);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("refuses writeRoots on a subprocess runtime before spawning", async () => {
+		const target: TargetDescriptor = {
+			id: "subprocess-write-roots",
+			runtime: "claude-code",
+			defaultModel: "claude-sonnet",
+		};
+		const runtime: RuntimeDescriptor = {
+			id: "claude-code",
+			displayName: "Claude Code",
+			kind: "subprocess",
+			apiFamily: "claude-code-subprocess",
+			auth: "claude-cli",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: () => ({ id: "claude-sonnet", provider: "claude-code" }) as never,
+		};
+		const context = stubContext({ target, runtime });
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "stage wiki", writeRoots: ["/tmp/staging"] }),
+				/cannot enforce writeRoots/,
+			);
+			strictEqual(spawned, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("refuses writeRoots on an ACP delegation target before delegating", async () => {
+		const context = stubContext();
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					task: "stage wiki",
+					delegationAgentId: "external-agent",
+					writeRoots: ["/tmp/staging"],
+				}),
+				/writeRoots cannot be enforced on an ACP delegation target/,
+			);
+			strictEqual(spawned, false);
+		} finally {
+			await bundle.extension.stop?.();
 		}
 	});
 

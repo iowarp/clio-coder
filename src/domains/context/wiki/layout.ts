@@ -12,8 +12,7 @@ function compareStrings(a: string, b: string): number {
 	return a.localeCompare(b);
 }
 
-function wikiPageFileNames(cwd: string): string[] {
-	const dir = wikiDir(cwd);
+function wikiPageFileNamesInDir(dir: string): string[] {
 	let entries: import("node:fs").Dirent[];
 	try {
 		entries = readdirSync(dir, { withFileTypes: true });
@@ -35,10 +34,9 @@ export function wikiDir(cwd: string): string {
 	return join(cwd, ".clio", "wiki");
 }
 
-export function listWikiPages(cwd: string): WikiPage[] {
-	const dir = wikiDir(cwd);
+export function listWikiPagesInDir(dir: string): WikiPage[] {
 	const pages: WikiPage[] = [];
-	for (const name of wikiPageFileNames(cwd)) {
+	for (const name of wikiPageFileNamesInDir(dir)) {
 		let text = "";
 		try {
 			text = readFileSync(join(dir, name), "utf8");
@@ -50,9 +48,12 @@ export function listWikiPages(cwd: string): WikiPage[] {
 	return pages;
 }
 
-export function validateWikiLayout(cwd: string): WikiLayoutValidation {
-	const dir = wikiDir(cwd);
-	const pages = wikiPageFileNames(cwd);
+export function listWikiPages(cwd: string): WikiPage[] {
+	return listWikiPagesInDir(wikiDir(cwd));
+}
+
+export function validateWikiLayoutInDir(dir: string): WikiLayoutValidation {
+	const pages = wikiPageFileNamesInDir(dir);
 	const problems: string[] = [];
 	if (!existsSync(join(dir, "quickstart.md"))) {
 		problems.push("quickstart.md is missing");
@@ -71,4 +72,8 @@ export function validateWikiLayout(cwd: string): WikiLayoutValidation {
 		}
 	}
 	return problems.length === 0 ? { ok: true } : { ok: false, problems };
+}
+
+export function validateWikiLayout(cwd: string): WikiLayoutValidation {
+	return validateWikiLayoutInDir(wikiDir(cwd));
 }

@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -51,6 +51,28 @@ function writeProjectFile(cwd: string): void {
 function writeWikiPage(cwd: string, name: string, text: string): void {
 	mkdirSync(wikiDir(cwd), { recursive: true });
 	writeFileSync(join(wikiDir(cwd), name), text, "utf8");
+}
+
+// Writers target the harness-provided staging directory, mirroring how the
+// documenter writes into input.outputDir rather than into .clio/wiki directly.
+function writeStagingPage(outputDir: string, name: string, text: string): void {
+	mkdirSync(outputDir, { recursive: true });
+	writeFileSync(join(outputDir, name), text, "utf8");
+}
+
+function clioEntryNames(cwd: string): string[] {
+	return readdirSync(join(cwd, ".clio"));
+}
+
+function writeExistingWikiMeta(cwd: string): void {
+	writeWikiMeta(cwd, {
+		version: 1,
+		updatedAt: "2026-07-04T00:00:00.000Z",
+		gitHead: null,
+		model: "seed-model",
+		contentHash: computeWikiContentHash(cwd),
+		pages: listWikiPages(cwd),
+	});
 }
 
 function git(cwd: string, args: ReadonlyArray<string>): string {
@@ -195,15 +217,20 @@ describe("contracts/wiki", () => {
 	it("generates pages with a fake callback and preserves metadata on noop", async () => {
 		writeProjectFile(scratch);
 		const modes: string[] = [];
-		const cannedGenerate = async (input: { cwd: string; mode: "init" | "update"; prompt: string }): Promise<void> => {
+		const cannedGenerate = async (input: {
+			cwd: string;
+			mode: "init" | "update";
+			prompt: string;
+			outputDir: string;
+		}): Promise<void> => {
 			modes.push(input.mode);
 			ok(input.prompt.includes("## Codewiki digest"));
-			writeWikiPage(
-				input.cwd,
+			writeStagingPage(
+				input.outputDir,
 				"quickstart.md",
 				"# Quickstart\n\nThis project exposes `src/index.ts`.\n\n- [Architecture](architecture.md): Runtime map.\n",
 			);
-			writeWikiPage(input.cwd, "architecture.md", "# Architecture\n\nThe entry point is `src/index.ts:1`.\n");
+			writeStagingPage(input.outputDir, "architecture.md", "# Architecture\n\nThe entry point is `src/index.ts:1`.\n");
 		};
 
 		const first = await runWikiGenerate({ cwd: scratch, model: "test-model", generate: cannedGenerate });
@@ -233,8 +260,8 @@ describe("contracts/wiki", () => {
 
 	it("rebuilds a stale codewiki before grounding the writer prompt and reuses a fresh one", async () => {
 		writeProjectFile(scratch);
-		const generate = async (input: { cwd: string }): Promise<void> => {
-			writeWikiPage(input.cwd, "quickstart.md", "# Quickstart\n\nSee `src/index.ts`.\n");
+		const generate = async (input: { outputDir: string }): Promise<void> => {
+			writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nSee `src/index.ts`.\n");
 		};
 
 		const first = await runWikiGenerate({ cwd: scratch, model: "test-model", generate });
@@ -278,6 +305,161 @@ describe("contracts/wiki", () => {
 		deepStrictEqual(meta.pages, [{ path: "quickstart.md", title: "Quickstart" }]);
 	});
 
+	it("promotes an init run and leaves no staging or wiki-prev directories", async () => {
+		writeProjectFile(scratch);
+
+		const result = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nSee `src/index.ts`.\n");
+			},
+		});
+
+		strictEqual(result.status, "generated");
+		ok(existsSync(join(wikiDir(scratch), "quickstart.md")));
+		const entries = clioEntryNames(scratch);
+		ok(!entries.some((name) => name.startsWith("wiki-staging-")), `unexpected staging dir: ${entries.join(", ")}`);
+		ok(!entries.includes("wiki-prev"));
+		ok(!entries.includes("wiki.lock"));
+	});
+
+	it("contains a crashing writer: the prior wiki stays byte-identical with no staging leftover", async () => {
+		writeProjectFile(scratch);
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nStable trusted content.\n");
+		writeExistingWikiMeta(scratch);
+		const pageBefore = readFileSync(join(wikiDir(scratch), "quickstart.md"), "utf8");
+		const metaBefore = readFileSync(wikiMetaPath(scratch), "utf8");
+
+		const result = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nHALF-WRITTEN partial page\n");
+				throw new Error("writer crashed mid-run");
+			},
+		});
+
+		strictEqual(result.status, "failed");
+		ok(result.problems?.some((problem) => /writer crashed/.test(problem)));
+		strictEqual(readFileSync(join(wikiDir(scratch), "quickstart.md"), "utf8"), pageBefore);
+		strictEqual(readFileSync(wikiMetaPath(scratch), "utf8"), metaBefore);
+		ok(!clioEntryNames(scratch).some((name) => name.startsWith("wiki-staging-")));
+	});
+
+	it("restores the validated seed when a writer bypasses staging and taints the live wiki", async () => {
+		writeProjectFile(scratch);
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nTrusted seeded content.\n");
+		writeExistingWikiMeta(scratch);
+		const pageBefore = readFileSync(join(wikiDir(scratch), "quickstart.md"), "utf8");
+
+		const result = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: () => {
+				// Bypass outputDir and write directly into .clio/wiki. generate.ts trusts
+				// only the staged copy; the tainted live wiki must be overwritten with the
+				// validated seed rather than left in place.
+				writeWikiPage(scratch, "garbage.md", "# Garbage\n\nuntrusted direct write\n");
+			},
+		});
+
+		strictEqual(result.status, "generated");
+		// The untrusted page is gone and the trusted prior page is intact.
+		ok(!existsSync(join(wikiDir(scratch), "garbage.md")));
+		strictEqual(readFileSync(join(wikiDir(scratch), "quickstart.md"), "utf8"), pageBefore);
+		const meta = readWikiMeta(scratch);
+		ok(meta);
+		ok(!meta.pages.some((page) => page.path === "garbage.md"));
+		ok(!clioEntryNames(scratch).some((name) => name.startsWith("wiki-staging-")));
+	});
+
+	it("seeds staging for update runs: an edit promotes, an untouched run no-ops", async () => {
+		writeProjectFile(scratch);
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nOriginal quickstart line.\n");
+		writeWikiPage(scratch, "architecture.md", "# Architecture\n\nOriginal architecture body.\n");
+		writeExistingWikiMeta(scratch);
+
+		let seededPages: string[] = [];
+		const editResult = await runWikiGenerate({
+			cwd: scratch,
+			model: "edit-model",
+			generate: (input) => {
+				seededPages = readdirSync(input.outputDir).sort();
+				ok(readFileSync(join(input.outputDir, "quickstart.md"), "utf8").includes("Original quickstart line."));
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nEdited quickstart line.\n");
+			},
+		});
+
+		deepStrictEqual(seededPages, ["architecture.md", "quickstart.md"]);
+		strictEqual(editResult.status, "generated");
+		strictEqual(readWikiMeta(scratch)?.model, "edit-model");
+		ok(readFileSync(join(wikiDir(scratch), "quickstart.md"), "utf8").includes("Edited quickstart line."));
+		ok(readFileSync(join(wikiDir(scratch), "architecture.md"), "utf8").includes("Original architecture body."));
+
+		const metaRaw = readFileSync(wikiMetaPath(scratch), "utf8");
+		const noopResult = await runWikiGenerate({
+			cwd: scratch,
+			model: "noop-model",
+			generate: () => {
+				// Leave the seeded pages untouched: an accurate wiki is a no-op.
+			},
+		});
+		strictEqual(noopResult.status, "noop");
+		strictEqual(readFileSync(wikiMetaPath(scratch), "utf8"), metaRaw);
+	});
+
+	it("single-flights concurrent runs and reclaims a dead lock", async () => {
+		writeProjectFile(scratch);
+		let releaseGate!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			releaseGate = resolve;
+		});
+		const firstPromise = runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: async (input) => {
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nFirst run content.\n");
+				await gate;
+			},
+		});
+		// The lock is taken synchronously before the first run suspends, so a
+		// concurrent run must fail while the first is parked in its callback.
+		const second = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nSecond run content.\n");
+			},
+		});
+		strictEqual(second.status, "failed");
+		ok(second.problems?.some((problem) => /already running/.test(problem)));
+
+		releaseGate();
+		strictEqual((await firstPromise).status, "generated");
+
+		// The lock is released, so a later run succeeds.
+		const third = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nThird run content.\n");
+			},
+		});
+		strictEqual(third.status, "generated");
+
+		// A leftover lock left by a crashed run (dead pid) is reclaimed.
+		writeFileSync(join(scratch, ".clio", "wiki.lock"), "999999999", "utf8");
+		const fourth = await runWikiGenerate({
+			cwd: scratch,
+			model: "test-model",
+			generate: (input) => {
+				writeStagingPage(input.outputDir, "quickstart.md", "# Quickstart\n\nFourth run content.\n");
+			},
+		});
+		strictEqual(fourth.status, "generated");
+	});
+
 	it("returns validation failures without writing metadata", async () => {
 		writeProjectFile(scratch);
 
@@ -285,7 +467,7 @@ describe("contracts/wiki", () => {
 			cwd: scratch,
 			model: "test-model",
 			generate: (input) => {
-				writeWikiPage(input.cwd, "notes.md", "# Notes\n");
+				writeStagingPage(input.outputDir, "notes.md", "# Notes\n");
 			},
 		});
 
@@ -305,18 +487,24 @@ describe("contracts/wiki", () => {
 	});
 
 	it("composes init and update prompts from fragments, digest, and git evidence", () => {
-		const initPrompt = buildWikiPrompt({ cwd: scratch, mode: "init", codewiki: promptCodewiki() });
+		const outputDir = join(scratch, ".clio", "wiki-staging-xyz");
+		const initPrompt = buildWikiPrompt({ cwd: scratch, mode: "init", codewiki: promptCodewiki(), outputDir });
 		ok(initPrompt.includes("## Codewiki digest"));
 		ok(initPrompt.includes("Structure requirements:"));
 		ok(initPrompt.includes("src/index.ts"));
+		// The {{outputDir}} token is substituted with the staging path and never leaks.
+		ok(initPrompt.includes(outputDir));
+		ok(!initPrompt.includes("{{outputDir}}"));
 
 		const updatePrompt = buildWikiPrompt({
 			cwd: scratch,
 			mode: "update",
 			codewiki: promptCodewiki(),
 			gitHead: "0000000000000000000000000000000000000000",
+			outputDir,
 		});
 		ok(updatePrompt.includes("## Git evidence"));
+		ok(updatePrompt.includes(outputDir));
 		ok(updatePrompt.includes("Git evidence unavailable") || updatePrompt.includes("Git evidence is empty"));
 	});
 
