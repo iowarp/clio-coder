@@ -3,7 +3,12 @@ import { describe, it } from "node:test";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { RUN_OVERRIDES_ENV } from "../../src/core/run-overrides.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
-import { assistantMessage, loadModelConfig } from "../../src/engine/apis/lmstudio-native.js";
+import {
+	assistantMessage,
+	type LmStudioRunDeps,
+	loadModelConfig,
+	runStream,
+} from "../../src/engine/apis/lmstudio-native.js";
 
 interface ClioModel extends Model<"lmstudio-native"> {
 	clio?: {
@@ -14,14 +19,18 @@ interface ClioModel extends Model<"lmstudio-native"> {
 	};
 }
 
-function model(quirks?: LocalModelQuirks): Model<"lmstudio-native"> {
+interface CapturedLmStudioHistory {
+	messages: Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>;
+}
+
+function model(quirks?: LocalModelQuirks, opts?: { reasoning?: boolean }): Model<"lmstudio-native"> {
 	const fixture: ClioModel = {
 		id: "local-model",
 		name: "Local Model",
 		api: "lmstudio-native",
 		provider: "lmstudio-native",
 		baseUrl: "ws://127.0.0.1:1234",
-		reasoning: false,
+		reasoning: opts?.reasoning ?? false,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 8192,
@@ -93,6 +102,136 @@ describe("lmstudio-native thinking replay", () => {
 			type: "text",
 			text: "Done.",
 		});
+	});
+
+	it("can skip assistant thinking replay for reasoning-never models", () => {
+		const content: AssistantMessage["content"] = [
+			{ type: "thinking", thinking: "Determining path..." },
+			{ type: "text", text: "Done." },
+		];
+		const message = assistantMessage(content, { preserveThinking: false });
+		strictEqual(message.role, "assistant");
+		strictEqual(message.content.length, 1);
+		deepStrictEqual(message.content[0], {
+			type: "text",
+			text: "Done.",
+		});
+	});
+
+	it("suppresses SDK-classified reasoning fragments for reasoning-never models", async () => {
+		const noThinkingModel = model({ thinking: { mechanism: "none" } }, { reasoning: true });
+		const context = {
+			messages: [
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "old hidden reasoning" },
+						{ type: "text", text: "old visible answer" },
+					],
+					api: "lmstudio-native",
+					provider: "lmstudio-native",
+					model: noThinkingModel.id,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: 0,
+				},
+				{ role: "user", content: "continue", timestamp: 0 },
+			],
+		} as Parameters<typeof runStream>[1];
+		let capturedHistory!: CapturedLmStudioHistory;
+		const deps: LmStudioRunDeps = {
+			createClient: () =>
+				({
+					files: {
+						prepareImageBase64: async () => {
+							throw new Error("image preparation not expected");
+						},
+					},
+					llm: {
+						listLoaded: async () => [],
+						model: async () => ({
+							respond: (history, opts) => {
+								capturedHistory = history as CapturedLmStudioHistory;
+								return {
+									result: async () => {
+										opts.onPredictionFragment?.({
+											content: "<think>",
+											tokensCount: 1,
+											containsDrafted: false,
+											reasoningType: "reasoningStartTag",
+											isStructural: false,
+										});
+										opts.onPredictionFragment?.({
+											content: "hidden reasoning",
+											tokensCount: 3,
+											containsDrafted: false,
+											reasoningType: "reasoning",
+											isStructural: false,
+										});
+										opts.onPredictionFragment?.({
+											content: "</think>",
+											tokensCount: 1,
+											containsDrafted: false,
+											reasoningType: "reasoningEndTag",
+											isStructural: false,
+										});
+										opts.onPredictionFragment?.({
+											content: "Visible answer.",
+											tokensCount: 4,
+											containsDrafted: false,
+											reasoningType: "none",
+											isStructural: false,
+										});
+										return {
+											stats: {
+												promptTokensCount: 5,
+												predictedTokensCount: 9,
+												totalTokensCount: 14,
+												stopReason: "eosFound",
+											},
+										};
+									},
+								};
+							},
+						}),
+					},
+				}) as ReturnType<LmStudioRunDeps["createClient"]>,
+			reconcile: async () => ({ decision: "observe", evict: [], keepResident: false, notices: [] }),
+			discoverLoadedContext: async () => undefined,
+		};
+
+		const events: Array<{ type: string; message?: AssistantMessage }> = [];
+		for await (const event of runStream(noThinkingModel, context, undefined, deps, { thinkingLevel: "off" })) {
+			events.push(event as { type: string; message?: AssistantMessage });
+		}
+
+		ok(capturedHistory.messages, "history should have been sent to LM Studio");
+		const replayedAssistant = capturedHistory.messages.find((entry) => entry.role === "assistant");
+		ok(replayedAssistant, "assistant replay message should be present");
+		strictEqual(
+			replayedAssistant.content?.some((part) => part.text?.includes("old hidden reasoning")),
+			false,
+		);
+		strictEqual(
+			events.some((event) => event.type === "thinking_delta"),
+			false,
+		);
+		const done = events.find((event) => event.type === "done");
+		ok(done && "message" in done, "stream should finish with a done message");
+		const message = done.message as AssistantMessage;
+		strictEqual(
+			message.content.some((block) => block.type === "thinking"),
+			false,
+		);
+		strictEqual(message.content.find((block) => block.type === "text")?.text, "Visible answer.");
+		strictEqual((message.usage as { reasoningTokens?: number }).reasoningTokens, undefined);
 	});
 });
 

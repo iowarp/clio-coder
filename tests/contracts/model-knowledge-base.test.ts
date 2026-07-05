@@ -5,11 +5,14 @@ import { delimiter, dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import type { TargetStatus } from "../../src/domains/providers/contract.js";
 import {
 	MODEL_CATALOG_DIRS_ENV,
 	MODEL_CATALOG_OVERLAY_DIR,
 	resolveProviderModelCatalogDirs,
 } from "../../src/domains/providers/knowledge-base-path.js";
+import { resolveModelCapabilities } from "../../src/domains/providers/model-capabilities.js";
+import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 
@@ -20,6 +23,41 @@ function scratchDir(prefix: string): string {
 function writeCatalog(dir: string, name: string, yaml: string): void {
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, name), yaml, "utf8");
+}
+
+const LOCAL_BASE_CAPABILITIES: CapabilityFlags = {
+	...EMPTY_CAPABILITIES,
+	chat: true,
+	tools: true,
+	toolCallFormat: "openai",
+	contextWindow: 8192,
+	maxTokens: 4096,
+};
+
+function localStatus(modelId: string, probeCapabilities?: Partial<CapabilityFlags>): TargetStatus {
+	return {
+		target: { id: "mini", runtime: "llamacpp", defaultModel: modelId },
+		runtime: {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			tier: "local-native",
+			apiFamily: "openai-completions",
+			auth: "api-key",
+			defaultCapabilities: LOCAL_BASE_CAPABILITIES,
+			synthesizeModel: () => {
+				throw new Error("not used");
+			},
+		},
+		available: true,
+		reason: "test",
+		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
+		capabilities: LOCAL_BASE_CAPABILITIES,
+		probeCapabilities: probeCapabilities ?? null,
+		probeModelCapabilities: probeCapabilities ? { [modelId]: probeCapabilities } : undefined,
+		probeModelId: modelId,
+		discoveredModels: [modelId],
+	} as TargetStatus;
 }
 
 describe("contracts/model knowledge base", () => {
@@ -166,5 +204,22 @@ describe("contracts/model knowledge base", () => {
 		// Ornith is reasoning class "always": it cannot be silenced.
 		const ornithQuirks = kb.lookup("Ornith-1.0-35B-Q4_K_M-262K")?.entry.quirks as LocalModelQuirks | undefined;
 		strictEqual(ornithQuirks?.thinking?.mechanism, "always-on");
+	});
+
+	it("keeps catalog reasoning class authoritative over noisy live reasoning detection", () => {
+		const bundled = join(dirname(fileURLToPath(import.meta.url)), "../../src/domains/providers/models");
+		const kb = new FileKnowledgeBase([{ dir: bundled, label: "bundled" }]);
+		const qwopus = "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K";
+		const ornith = "Ornith-1.0-35B-Q4_K_M-262K";
+
+		const noThinkingCaps = resolveModelCapabilities(localStatus(qwopus, { reasoning: true }), qwopus, kb, {
+			detectedReasoning: true,
+		});
+		strictEqual(noThinkingCaps.reasoning, false);
+
+		const alwaysThinkingCaps = resolveModelCapabilities(localStatus(ornith, { reasoning: false }), ornith, kb, {
+			detectedReasoning: false,
+		});
+		strictEqual(alwaysThinkingCaps.reasoning, true);
 	});
 });

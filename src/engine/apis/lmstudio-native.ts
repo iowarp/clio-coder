@@ -33,7 +33,10 @@ import {
 	LMStudioClient,
 } from "@lmstudio/sdk";
 import { runOverrides } from "../../core/run-overrides.js";
-import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
+import {
+	reasoningClassForMechanism,
+	resolveModelRuntimeCapabilitiesForModel,
+} from "../../domains/providers/model-runtime-capabilities.js";
 import { lmStudioQuietLogger } from "../../domains/providers/runtimes/common/lmstudio-logger.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import {
@@ -260,9 +263,13 @@ async function userMessage(
 	return { role: "user", content: parts };
 }
 
-export function assistantMessage(content: AssistantMessage["content"], opts?: { harmony?: boolean }): ChatMessageData {
+export function assistantMessage(
+	content: AssistantMessage["content"],
+	opts?: { harmony?: boolean; preserveThinking?: boolean },
+): ChatMessageData {
 	const parts: AssistantPart[] = [];
 	const thinkingParts: string[] = [];
+	const preserveThinking = opts?.preserveThinking ?? true;
 	for (const block of content) {
 		if (block.type === "text") {
 			parts.push({ type: "text", text: block.text });
@@ -274,7 +281,7 @@ export function assistantMessage(content: AssistantMessage["content"], opts?: { 
 			};
 			if (block.id) req.id = block.id;
 			parts.push({ type: "toolCallRequest", toolCallRequest: req });
-		} else if (block.type === "thinking") {
+		} else if (preserveThinking && block.type === "thinking") {
 			const thinkingVal = (block as ThinkingContent).thinking;
 			if (thinkingVal) {
 				thinkingParts.push(thinkingVal);
@@ -305,7 +312,7 @@ function toolResultMessage(msg: Extract<Message, { role: "toolResult" }>): ChatM
 async function buildChatHistory(
 	client: Pick<LmStudioRunClient, "files">,
 	context: Context,
-	opts?: { harmony?: boolean },
+	opts?: { harmony?: boolean; preserveThinking?: boolean },
 ): Promise<ChatHistoryData> {
 	const messages: ChatMessageData[] = [];
 	const imageCounter = { next: 0 };
@@ -718,6 +725,15 @@ export function runStream(
 				throw new Error(message);
 			}
 			stream.push({ type: "start", partial: output });
+			// Resolve once per request and make the resolved reasoning class
+			// authoritative for the whole adapter. LM Studio may classify
+			// <think> tags even when the catalog says the selected family is
+			// reasoning-never; in that case Clio suppresses those fragments rather
+			// than surfacing thinking blocks or reasoning-token usage.
+			const requestedThinkingLevel = thinkingLevelFromHintOrModel(hints, model);
+			const resolved = resolveModelRuntimeCapabilitiesForModel(model, requestedThinkingLevel);
+			const applied = resolved.thinking;
+			const suppressThinking = reasoningClassForMechanism(applied.mechanism) === "never";
 			// LM Studio's `result.stats.predictedTokensCount` is the total of all generated
 			// tokens with no separate reasoning column. Sum the per-fragment `tokensCount`
 			// for any fragment whose `reasoningType` belongs to a reasoning block (the
@@ -790,6 +806,7 @@ export function runStream(
 			};
 			const emitThinking = (chunk: string, tokensHint?: number) => {
 				if (!chunk) return;
+				if (suppressThinking) return;
 				closeActiveText();
 				let current = activeThinkingRef.block;
 				if (!current) {
@@ -831,8 +848,7 @@ export function runStream(
 			type GemmaState = "idle" | "thought" | "toolcall";
 			let gemmaPending = "";
 			let gemmaState: GemmaState = "idle";
-			const responseParser = resolveModelRuntimeCapabilitiesForModel(model, thinkingLevelFromHintOrModel(hints, model))
-				.response.parser;
+			const responseParser = resolved.response.parser;
 			const harmonyParser = responseParser === "harmony" ? new HarmonyResponseParser() : null;
 			const flushGemmaPending = () => {
 				if (gemmaPending.length === 0) return;
@@ -934,13 +950,15 @@ export function runStream(
 					// agent message is non-empty and pi-agent-core's loop can chain
 					// correctly when the model only emits reasoning + tool calls.
 					if (fragment.reasoningType === "reasoningStartTag" || fragment.reasoningType === "reasoningEndTag") {
-						reasoningTokensAccum += fragment.tokensCount ?? 0;
+						if (!suppressThinking) reasoningTokensAccum += fragment.tokensCount ?? 0;
 						return;
 					}
 					if (fragment.reasoningType === "reasoning") {
 						flushNonReasoningPending();
-						reasoningTokensAccum += fragment.tokensCount ?? 0;
-						emitThinking(fragment.content, 0);
+						if (!suppressThinking) {
+							reasoningTokensAccum += fragment.tokensCount ?? 0;
+							emitThinking(fragment.content, 0);
+						}
 						return;
 					}
 					routeNonReasoningChunk(fragment.content);
@@ -1018,9 +1036,6 @@ export function runStream(
 			// (effort-levels, budget-tokens, on-off, always-on, none). The bare
 			// `stream` path leaves `hints.thinkingLevel` unset and falls back to
 			// medium when the model advertises reasoning.
-			const requestedThinkingLevel = thinkingLevelFromHintOrModel(hints, model);
-			const resolved = resolveModelRuntimeCapabilitiesForModel(model, requestedThinkingLevel);
-			const applied = resolved.thinking;
 			// The LM Studio SDK has no separate thinking-budget channel; the budget
 			// from `applied.budgetTokens` is informational only here and surfaces
 			// through the prompt Runtime block. `maxPredictedTokens` stays driven
@@ -1036,7 +1051,7 @@ export function runStream(
 			}
 			if (options?.temperature !== undefined) predictionOpts.temperature = options.temperature;
 			const harmony = resolved.response.parser === "harmony";
-			const history = await buildChatHistory(client, context, { harmony });
+			const history = await buildChatHistory(client, context, { harmony, preserveThinking: !suppressThinking });
 			if (aborted) throw new Error("Request was aborted");
 			const prediction = llm.respond(history, predictionOpts);
 			const result = await prediction.result();
