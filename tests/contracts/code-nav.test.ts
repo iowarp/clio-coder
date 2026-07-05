@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import {
 	writeWikiMeta,
 } from "../../src/domains/context/index.js";
 import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
+import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
 
 function parseJsonOutput(output: string): Record<string, unknown> {
 	const json = output.split("\n[", 1)[0] ?? output;
@@ -155,6 +156,37 @@ describe("contracts/code_nav", () => {
 					return (item as Record<string, unknown>).name === "freshWorker";
 				}),
 		);
+	});
+
+	it("reuses fresh codewiki artifact objects and invalidates after artifact rewrites", async () => {
+		const first = await loadCodewikiForTool(scratch);
+		const second = await loadCodewikiForTool(scratch);
+		ok(first.ok);
+		ok(second.ok);
+		strictEqual(second.codewiki, first.codewiki);
+
+		writeFileSync(join(scratch, "src", "cache.ts"), "export const cacheProbe = 1;\n", "utf8");
+		const generatedAt = "2026-05-01T00:00:01.000Z";
+		const rebuilt = await buildCodewiki({ cwd: scratch, language: "polyglot", generatedAt });
+		writeCodewiki(scratch, rebuilt);
+		writeClioState(scratch, {
+			version: 1,
+			projectType: "polyglot",
+			fingerprint: computeFingerprint(scratch, rebuilt),
+			codewikiVersion: rebuilt.version,
+			lastSessionAt: generatedAt,
+			lastIndexedAt: generatedAt,
+		});
+		const future = new Date(Date.now() + 1000);
+		utimesSync(join(scratch, ".clio", "codewiki.json"), future, future);
+
+		const third = await loadCodewikiForTool(scratch);
+		const fourth = await loadCodewikiForTool(scratch);
+		ok(third.ok);
+		ok(fourth.ok);
+		notStrictEqual(third.codewiki, first.codewiki);
+		strictEqual(fourth.codewiki, third.codewiki);
+		ok(third.codewiki.symbols.some((symbol) => symbol.name === "cacheProbe"));
 	});
 
 	it("returns a helpful empty wiki payload when no Markdown wiki exists", async () => {
