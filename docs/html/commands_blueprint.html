@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clio Coder Commands &amp; Modes Blueprint (v0.2.6)</title>
+  <title>Clio Coder Commands &amp; Modes Blueprint (v0.2.8)</title>
   
   <style>
     :root {
@@ -453,7 +453,7 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="version-badge">Clio Coder v0.2.6</span>
+        <span class="version-badge">Clio Coder v0.2.8</span>
         <a href="index.html" class="back-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           Dashboard Hub
@@ -625,9 +625,9 @@
               <td>Deploy worker agent locally</td>
             </tr>
             <tr>
-              <td><code>/context-view</code></td>
-              <td><code>/context-view</code></td>
-              <td>Visualize active context breakdown (system/files/history)</td>
+              <td><code>/context</code></td>
+              <td><code>/context [compact|init|refresh|reset]</code></td>
+              <td>Context hub: window ledger overlay plus compact, init, refresh, and reset</td>
             </tr>
             <tr>
               <td><code>/resume</code></td>
@@ -640,7 +640,7 @@
     </main>
 
     <footer>
-      <p>Clio Coder UI Command specs &bull; Version 0.2.6</p>
+      <p>Clio Coder UI Command specs &bull; Version 0.2.8</p>
     </footer>
   </div>
 
@@ -667,11 +667,12 @@
       { cmd: "/model", usage: "/model [pattern]", desc: "Opens the model selector or sets a model from live and configured catalog rows." },
       { cmd: "/skill", usage: "/skill [name] [task]", desc: "Opens the Skills Hub or invokes a selected skill." },
       { cmd: "/view", usage: "/view [filter] | /view verify <runId>", desc: "Browses receipts, dispatch outputs, durable tool output, and compaction summaries." },
-      { cmd: "/context-view", usage: "/context-view", desc: "Visualizes token sliding window and compaction breakdown." },
+      { cmd: "/context", usage: "/context", desc: "Visualizes token sliding window and compaction breakdown." },
       { cmd: "/help", usage: "/help [query]", desc: "Searches available shortcuts and operating posture documentation." },
       { cmd: "/quit", usage: "/quit", desc: "Exits clio process cleanly." },
-      { cmd: "/context-init", usage: "/context-init", desc: "Explore the repo and bootstrap project context: CLIO.md and codewiki." },
-      { cmd: "/context-clear", usage: "/context-clear", desc: "Clear accumulated project context artifacts." },
+      { cmd: "/context init", usage: "/context init [flags]", desc: "Explore the repo and bootstrap project context: CLIO.md and codewiki." },
+      { cmd: "/context refresh", usage: "/context refresh", desc: "Re-index the codewiki and restamp the CLIO.md fingerprint footer." },
+      { cmd: "/context reset", usage: "/context reset [--all]", desc: "Clear accumulated project context artifacts (CLIO.md preserved without --all)." },
       { cmd: "/prompts", usage: "/prompts", desc: "List prompt templates." },
       { cmd: "/extensions", usage: "/extensions", desc: "List installed extensions." },
       { cmd: "/share", usage: "/share export <path> | /share import <path>", desc: "Export or import Clio archives." },
@@ -685,7 +686,9 @@
       { cmd: "/new", usage: "/new", desc: "Start a fresh session." },
       { cmd: "/tree", usage: "/tree", desc: "Open session tree navigator." },
       { cmd: "/fork", usage: "/fork", desc: "Fork from an assistant turn." },
-      { cmd: "/compact", usage: "/compact [instructions]", desc: "Compact earlier context." }
+      { cmd: "/context compact", usage: "/context compact [instructions]", desc: "Compact earlier context." },
+      { cmd: "/tasks", usage: "/tasks", desc: "Read-only overlay of the session task board with per-task receipts." },
+      { cmd: "/export", usage: "/export [path]", desc: "Write the session transcript to Markdown with tool segments expanded." }
     ];
 
     let selectedIndex = 0;
