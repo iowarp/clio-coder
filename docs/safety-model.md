@@ -1,7 +1,7 @@
 # Clio Coder Safety Model
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.7).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/safety_blueprint.html](html/safety_blueprint.html) (Version: 0.2.8).
 
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
@@ -31,6 +31,8 @@ The `autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is 
 - **`auto-edit`**: workspace edits and recognized commands run; unrecognized bash asks instead of blocking.
 - **`full-auto`**: bash runs without prompting; the net is the protection, not the prompt. `system_modify` still asks because it reaches outside the workspace; `unknown` still asks because the net cannot reason about calls it cannot classify.
 
+The `system_modify` confirm is level-invariant, so it is enforced and attributed as a safety-net confirm rail: the overlay, notices, and audit ledger name the net (reason code `system-modify-confirm`, policy source `builtin-classifier`), not the autonomy level. The matrix row above is unchanged in outcome at every level; only `read-only` converts the ask to a denial. `unknown` remains in the autonomy mapping because the registry substitutes a registered tool's base action class after the net evaluates.
+
 The level is persisted as `autonomy` in `settings.yaml`, hot-reloads, and is edited in the `/settings` Autonomy & Safety section.
 
 ---
@@ -39,7 +41,7 @@ The level is persisted as `autonomy` in `settings.yaml`, hot-reloads, and is edi
 
 Every tool call, orchestrator or worker, evaluates in this order:
 
-1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`) that parks at every level; `pass` hands off to step 2.
+1. **Safety net** (policy engine + middleware guards): `block` is final at every level; `ask` is a confirm rail (damage-control `ask` rules, project `requireConfirmation`, `system_modify`) that parks at every level; `pass` hands off to step 2. Blocks precede asks: a damage-control `ask` rule never bypasses a hard block, so confirming an ask-rule command that targets a zero-access path still blocks. The built-in path policy is evaluated even when `.clio/safety.yaml` is malformed, so credential protection never fails open.
 2. **Autonomy mapping**: the action class plus the level produce allow, ask, or deny per the matrix above.
 3. **Approvals**: whatever asked in step 1 or 2 parks interactively, denies deterministically headless, resolves per `workers.onPermission` in workers, and non-stall denies in delegations.
 
@@ -68,7 +70,7 @@ Escalation can never hang a run. Every escalated ask resolves by an operator dec
 
 ## Operating Posture and Visible Tools
 
-Clio operates under a single operating posture with a standard, unified visible toolset. The 18 built-in tools are organized in seven planes; each plane is one policy unit for action class, size posture, and concurrency, asserted at bootstrap by `src/tools/policy.ts` so the classifier and the registered specs can never drift apart silently.
+Clio operates under a single operating posture with a standard, unified visible toolset. The 19 built-in tools are organized in seven planes; each plane is one policy unit for action class, size posture, and concurrency, asserted at bootstrap by `src/tools/policy.ts` so the classifier and the registered specs can never drift apart silently.
 
 | Plane | Tools | Action class |
 | --- | --- | --- |
@@ -77,12 +79,12 @@ Clio operates under a single operating posture with a standard, unified visible 
 | EXECUTE | `bash`, `verify` | `execute` |
 | EXECUTE | `git` | `read` |
 | ORCHESTRATE | `dispatch`, `steer` | `dispatch` |
-| ORCHESTRATE | `monitor` | `read` |
+| ORCHESTRATE | `monitor`, `tasks` | `read` |
 | RETRIEVE | `web_fetch` | `read` |
 | INTERACT | `ask_user` | `read` |
 | ARTIFACT | `artifact` | `write` |
 
-`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane; `monitor` never mutates a run, so it stays read class inside the ORCHESTRATE plane. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
+`git` is read-only inspection on the safe-exec spine, so it carries the read class despite living in the EXECUTE plane; `monitor` and `tasks` never mutate a run or the workspace, so they stay read class inside the ORCHESTRATE plane. `gateway` is a design-reserved name only (see `src/core/tool-names.ts`), not a registered tool.
 
 Target capability, dispatch tool profiles, and recipe constraints can further narrow the tools available to a run. That narrowing is convenience and budget control; safety still lives in code gates.
 
@@ -208,22 +210,36 @@ Dispatch workers can run the same HTTP, native, or pi-ai-backed runtimes as the 
 Three integration paths exist for driving Claude Code, ranging from fully enforced to advisory gating:
 
 - **`claude-sdk` (Enforced Safety):** Drives [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) directly. This is the **strong safety path** because Clio enforces tool gating before execution. Clio registers a `PreToolUse` hook (which fires for all tool uses, including auto-allowed reads) and wraps `canUseTool` for permission paths. Every tool request is mapped into a Clio tool/action class, evaluated by the safety net, and passed through the active autonomy matrix. Because a dispatched worker is noninteractive, any `ask` decision is resolved as a non-stall denial (`workers.onPermission=deny` returns denial; `workers.onPermission=fail` terminates the run with a permission-required code).
-- **`claude-code` (Subprocess Gating):** Drives `claude -p` as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary's command-line parameters (such as `--permission-mode` and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. A dangerous bypass (`--allow-dangerously-skip-permissions`) is only sent when autonomy is `full-auto` and `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`.
+- **`claude-code` (Subprocess Gating):** Drives `claude -p` as a subprocess. Because the CLI lacks a direct callback hook, Clio cannot evaluate each tool invocation. Instead, Clio maps the active autonomy level to the binary's command-line parameters (such as `--permission-mode` and tool allowlists). Unrecognized tools are gated by the subprocess runtime itself. Dispatch at autonomy `suggest` is refused outright (the same applies to `antigravity-code`): a subprocess cannot park a tool call for approval, so `suggest` has no honest mapping and the runner fails closed before launching the external CLI. A dangerous bypass (`--allow-dangerously-skip-permissions`) is only sent when autonomy is `full-auto` and `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`, and it is never silent: the run's receipt records it (see the enforcement grades below) and evidence raises an external-bypass finding.
 - **Claude Code over ACP (Advisory Gating):** Drives Zed's `@zed-industries/claude-code-acp` (or `@agentclientprotocol/claude-agent-acp`) bridge as an [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agent. Clio's ACP mediator intercepts tool calls and filters them against the safety net, but gating is ultimately **advisory** as Claude governs its own runtime execution. For strict, code-enforced per-tool safety, `claude-sdk` is preferred over ACP.
 
 All Claude Code runtimes rely on the user's existing CLI authentication and store no credentials in Clio.
+
+### Autonomy enforcement grades
+
+How faithfully a runtime can honor the autonomy model is a recorded fact, not an assumption. Worker receipts carry an optional `autonomyEnforcement` block sealed into the integrity digest:
+
+- **`mediated`**: per-call evaluation through Clio's net and autonomy mapping (native workers, `claude-sdk`).
+- **`approximated`**: the posture is mapped to external harness flags with no per-call mediation (`claude-code`, `antigravity-code` subprocesses).
+- **`bypassed`**: a dangerous external mode ran under `CLIO_ALLOW_EXTERNAL_FULL_ACCESS=1`, where even net blocks do not exist.
+
+Evidence raises a warn-level external-bypass finding for bypassed runs and an info-level approximation note otherwise, and the provenance projection surfaces the block in `transcript.md`, `trace.cleaned.jsonl`, and compact dispatch output. The product statement is: safety-net blocks are final on mediated runtimes; on approximated runtimes Clio maps your autonomy level to the closest external posture and records that it did; bypassed runs are explicitly marked in receipts and evidence.
 
 ---
 
 ## Approvals
 
-An `ask` can come from either axis: a safety-net confirm rail (damage-control `ask` rule, project `requireConfirmation`) or the autonomy mapping. The permission overlay names the asking axis on its `Asked by:` line, and the transcript carries an `[approval]` notice for every parked call. How an ask resolves depends on the context:
+An `ask` can come from either axis: a safety-net confirm rail (damage-control `ask` rule, project `requireConfirmation`, `system_modify`) or the autonomy mapping. The permission overlay names the asking axis on its `Asked by:` line, and the transcript carries an `[approval]` notice for every parked call.
+
+Every approvable ask has one canonical identity: a `requestId` minted at the approvals plane. The `PermissionRequested` and `PermissionResolved` bus payloads and the audit permission rows all carry it, along with `origin` (who asked), `axis` (which rail or level), and `decidedBy` (who or what answered), so a request joins its resolution on one key across the bus, the ledger, and receipts, and every request resolves exactly once. Worker escalations forward their full decision provenance (reasons, reason code, rule id, policy source), so the overlay names the real asking rail for a worker exactly as it does for the main agent.
+
+How an ask resolves depends on the context:
 
 ### Interactive TUI Behavior
 
 In interactive mode, a permission request opens a queued overlay prompt immediately in the TUI.
 - **Queued Overlays:** If multiple tools or worker dispatches require permission during a single turn, the TUI queues the requests. Closing one overlay automatically pops the next permission overlay in the queue.
-- **Operator Options:** The operator can grant permission once, which resumes only the parked tool call without changing the overall operating posture. Cancelling or denying the prompt cancels the parked tool call cleanly.
+- **Operator Options:** The operator can grant permission once, which resumes only the parked tool call without changing the overall operating posture; the one-shot grant is scoped to the presented request's `requestId`. Denying rejects only the presented request and advances the queue; the next parked call re-presents. Cancel-all is reserved for shutdown, an aborted turn, headless runs, and transport failure, where no operator can answer.
 
 ### Deterministic Headless Behavior
 
@@ -235,8 +251,9 @@ When executing tasks in headless mode through `clio run`, there is no terminal o
 
 ### Workers and delegations
 
-- **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `workers.onPermission`: `deny` continues the run with a rejection; `fail` ends it.
+- **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `workers.onPermission`: `deny` continues the run with a rejection; `fail` ends it; `escalate` forwards it to the interactive operator (see the escalation section above). All three values are editable in the `/settings` center.
 - **Delegations (ACP)** under `clio-policy` governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.
+- **ACP server sessions** (a remote client driving Clio) snapshot the autonomy level at `session/new`, so a mid-session settings change on the host cannot alter an in-flight remote session's admission decisions.
 
 ---
 
@@ -304,4 +321,6 @@ Safety decisions feed receipts, audit rows, and evidence artifacts. Audit rows f
 - policy source and rule IDs;
 - project policy hash/path;
 - blocked/asked/allowed decision counts;
+- permission request and resolution rows, joinable on `requestId`;
+- the worker `autonomyEnforcement` grade where present;
 - tool statistics and failure messages.
