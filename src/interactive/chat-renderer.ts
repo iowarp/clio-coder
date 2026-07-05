@@ -25,6 +25,7 @@ import type {
 	SessionInfoEntry,
 	ThinkingLevelChangeEntry,
 } from "../domains/session/entries.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
@@ -108,9 +109,10 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
  */
 export interface RehydrateChatPanelOptions {
 	/**
-	 * Stop replay after the matching turn id (inclusive). /fork passes the
-	 * selected parent turn id so the new branch's chat panel shows only the
-	 * pre-fork transcript. Unset (default) replays the entire list.
+	 * Pin the active-branch leaf and stop replay after that turn (inclusive).
+	 * /tree switches and /fork pass the selected turn id so replay follows
+	 * that turn's ancestry. Unset (default) treats the most recently appended
+	 * message turn as the leaf.
 	 */
 	uptoTurnId?: string;
 	/**
@@ -628,15 +630,20 @@ function repairToolResultOrphans(
 
 /**
  * Normalize a heterogeneous session JSONL stream into the entry sequence the
- * replay surfaces should show. When the slice contains a compaction boundary,
- * render the latest summary first and keep only the retained suffix plus
- * later entries, mirroring pi-coding-agent's buildSessionContext behavior.
+ * replay surfaces should show. The stream is first narrowed to the active
+ * branch of the turn tree (uptoTurnId pins the leaf; otherwise the most
+ * recent append wins), so abandoned sibling turns from earlier /tree
+ * switches never replay. When the remaining slice contains a compaction
+ * boundary, render the latest summary first and keep only the retained
+ * suffix plus later entries, mirroring pi-coding-agent's
+ * buildSessionContext behavior.
  */
 export function selectReplayEntries(
 	turns: ReadonlyArray<unknown>,
 	options: RehydrateChatPanelOptions = {},
 ): SessionEntry[] {
-	const entries = truncateAtTurn(collectSessionEntries(turns), options.uptoTurnId);
+	const active = filterEntriesToActivePath(collectSessionEntries(turns), options.uptoTurnId);
+	const entries = truncateAtTurn(active, options.uptoTurnId);
 	const compactionIndex = latestCompactionIndex(entries);
 	if (compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
 
