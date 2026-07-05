@@ -244,6 +244,20 @@ export interface RunReceiptDelegation {
 }
 
 export interface RunReceiptSafetySummary {
+	/**
+	 * The decision axis: how the safety classifier admitted each tool call. It is
+	 * distinct from the outcome axis (`blockedAttempts`, plus `toolStats`/
+	 * `toolActivity` blocked counts), which records whether a call executed.
+	 * `allowed` + `blocked` + `permissionRequested` equals the total tool calls.
+	 * `blocked` counts only hard denials by a policy rule or a tool guard
+	 * (reason code `guard_block`); a call that required permission and was denied
+	 * non-interactively is counted under `permissionRequested`, not `blocked`, so
+	 * scripts can tell "approval would have been needed" apart from a policy
+	 * block (see docs/safety-model.md). Such a call still appears in
+	 * `blockedAttempts` because its outcome was blocked, so `decisions.blocked`
+	 * is not a proxy for the number of blocked attempts; use `blockedAttempts`
+	 * or the `toolStats`/`toolActivity` blocked counts for that.
+	 */
 	decisions: {
 		allowed: number;
 		blocked: number;
