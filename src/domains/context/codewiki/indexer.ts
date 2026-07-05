@@ -818,22 +818,43 @@ export function codewikiPath(cwd: string): string {
 	return join(cwd, ".clio", "codewiki.json");
 }
 
-export function writeCodewiki(cwd: string, codewiki: Codewiki): void {
-	safeResourceWrite(codewikiPath(cwd), `${JSON.stringify(normalizeCodewiki(codewiki))}\n`, {
-		encoding: "utf8",
-	});
+export function serializeCodewiki(codewiki: Codewiki): string {
+	return `${JSON.stringify(normalizeCodewiki(codewiki))}\n`;
 }
 
-export function readCodewiki(cwd: string): Codewiki | null {
-	const filePath = codewikiPath(cwd);
-	if (!existsSync(filePath)) return null;
+export function writeCodewiki(cwd: string, codewiki: Codewiki): string {
+	const serialized = serializeCodewiki(codewiki);
+	safeResourceWrite(codewikiPath(cwd), serialized, {
+		encoding: "utf8",
+	});
+	return serialized;
+}
+
+export function parseCodewikiRaw(raw: string): Codewiki | null {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(filePath, "utf8"));
+		parsed = JSON.parse(raw);
 	} catch {
 		return null;
 	}
 	return upgradeCodewiki(parsed);
+}
+
+export function readCodewikiRaw(cwd: string): { raw: string; codewiki: Codewiki } | null {
+	const filePath = codewikiPath(cwd);
+	if (!existsSync(filePath)) return null;
+	let raw: string;
+	try {
+		raw = readFileSync(filePath, "utf8");
+	} catch {
+		return null;
+	}
+	const codewiki = parseCodewikiRaw(raw);
+	return codewiki ? { raw, codewiki } : null;
+}
+
+export function readCodewiki(cwd: string): Codewiki | null {
+	return readCodewikiRaw(cwd)?.codewiki ?? null;
 }
 
 export function isCodewiki(value: unknown): value is Codewiki {

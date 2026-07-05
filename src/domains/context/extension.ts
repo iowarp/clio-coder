@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
 import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -11,8 +12,10 @@ import { runContextClear } from "./clear.js";
 import { tryReadClioMd } from "./clio-md.js";
 import {
 	buildCodewiki,
+	type Codewiki,
 	codewikiNeedsBackfill,
 	codewikiPath,
+	parseCodewikiRaw,
 	readCodewiki,
 	updateCodewikiPaths,
 	writeCodewiki,
@@ -78,6 +81,16 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
+const CODEWIKI_CACHE_LIMIT = 4;
+
+interface CachedCodewiki {
+	hash: string;
+	codewiki: Codewiki;
+}
+
+function codewikiContentHash(raw: string): string {
+	return createHash("sha256").update(raw).digest("hex");
+}
 
 function memoryCount(): number {
 	try {
@@ -149,6 +162,42 @@ export function createContextBundle(
 	let lastCwd = process.cwd();
 	let startupHints: string[] = [];
 	const contextState = createContextStateReader();
+	const codewikiCache = new Map<string, CachedCodewiki>();
+	const rememberCodewiki = (cwd: string, hash: string, codewiki: Codewiki): void => {
+		codewikiCache.delete(cwd);
+		codewikiCache.set(cwd, { hash, codewiki });
+		while (codewikiCache.size > CODEWIKI_CACHE_LIMIT) {
+			const oldest = codewikiCache.keys().next().value;
+			if (oldest === undefined) break;
+			codewikiCache.delete(oldest);
+		}
+	};
+	const readCachedCodewiki = (cwd: string): Codewiki | null => {
+		let raw: string;
+		try {
+			raw = readFileSync(codewikiPath(cwd), "utf8");
+		} catch {
+			codewikiCache.delete(cwd);
+			return null;
+		}
+		const hash = codewikiContentHash(raw);
+		const cached = codewikiCache.get(cwd);
+		if (cached && cached.hash === hash) {
+			rememberCodewiki(cwd, hash, cached.codewiki);
+			return cached.codewiki;
+		}
+		const codewiki = parseCodewikiRaw(raw);
+		if (!codewiki) {
+			codewikiCache.delete(cwd);
+			return null;
+		}
+		rememberCodewiki(cwd, hash, codewiki);
+		return codewiki;
+	};
+	const writeCachedCodewiki = (cwd: string, codewiki: Codewiki): void => {
+		const serialized = writeCodewiki(cwd, codewiki);
+		rememberCodewiki(cwd, codewikiContentHash(serialized), codewiki);
+	};
 	const onStart = (): void => {
 		lastCwd = process.cwd();
 		void ensureCodewikiFresh(lastCwd).catch(() => {
@@ -167,14 +216,14 @@ export function createContextBundle(
 		incrementalQueue = incrementalQueue
 			.then(async () => {
 				if (paths.length === 0) return;
-				const codewiki = readCodewiki(cwd);
+				const codewiki = readCachedCodewiki(cwd);
 				if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
 				const rel = paths
 					.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
 					.filter((p) => p.length > 0 && !p.startsWith(".."));
 				const updated = await updateCodewikiPaths(cwd, codewiki, rel);
 				if (updated === codewiki) return; // No indexable file actually changed.
-				writeCodewiki(cwd, updated);
+				writeCachedCodewiki(cwd, updated);
 				persistState(cwd, computeFingerprint(cwd, updated), new Date().toISOString(), readClioState(cwd), updated.version);
 				contextState.invalidate(cwd);
 			})
@@ -194,13 +243,13 @@ export function createContextBundle(
 			await incrementalQueue;
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
-			let codewiki = readCodewiki(lastCwd);
+			let codewiki = readCachedCodewiki(lastCwd);
 			let fingerprint = computeFingerprint(lastCwd, codewiki);
 			let lastIndexedAt = state?.lastIndexedAt;
 			if (!state || isStale(state.fingerprint, fingerprint) || !codewiki || codewikiNeedsBackfill(codewiki)) {
 				lastIndexedAt = new Date().toISOString();
 				codewiki = await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt });
-				writeCodewiki(lastCwd, codewiki);
+				writeCachedCodewiki(lastCwd, codewiki);
 				fingerprint = computeFingerprint(lastCwd, codewiki);
 			}
 			writeClioState(lastCwd, {
