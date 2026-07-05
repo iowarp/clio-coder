@@ -7,7 +7,7 @@ import {
 } from "./clio-md.js";
 import { readCodewiki } from "./codewiki/indexer.js";
 import type { ProjectPromptContext } from "./contract.js";
-import { computeFingerprint, isStale } from "./fingerprint.js";
+import { computeFingerprintCached, isStale } from "./fingerprint.js";
 import { readClioState } from "./state.js";
 import { listWikiPages, validateWikiLayout } from "./wiki/layout.js";
 import { wikiStaleness } from "./wiki/staleness.js";
@@ -34,7 +34,7 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	const codewiki = readCodewiki(cwd);
 	if (codewiki) {
 		const state = readClioState(cwd);
-		const stale = state ? isStale(state.fingerprint, computeFingerprint(cwd, codewiki)) : true;
+		const stale = state ? isStale(state.fingerprint, computeFingerprintCached(cwd, codewiki)) : true;
 		const suffix = stale ? " (stale; run /context refresh)" : "";
 		pieces.push(`<codewiki>available${suffix}; use code_nav</codewiki>`);
 	}
