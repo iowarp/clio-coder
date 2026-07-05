@@ -10,7 +10,6 @@
 # https://huggingface.co/unsloth/NVIDIA-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-GGUF
 # https://huggingface.co/mradermacher/Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled-i1-GGUF
 # https://huggingface.co/deepreinforce-ai/Ornith-1.0-35B-GGUF
-# docs/.superpowers/reference/llama-bench-findings.md
 #
 # This knowledge base is intentionally narrow. It describes only the local
 # models curated for Clio's local coding workflows and leaves cloud GPT models
@@ -103,9 +102,9 @@
         topK: 20
         maxTokens: 4096
     gpuTiers:
-      "32gb": "Default mini llama.cpp orchestrator model; benchmarked with 1 GiB VRAM headroom on a 31.859 GiB card."
+      "32gb": "Default 32 GB local llama.cpp orchestrator profile; benchmarked with roughly 1 GiB VRAM headroom on a 32 GiB class card."
     runtimePreference:
-      llamaCpp: "OpenAI-compatible chat completions with --jinja. Deployed mini preset uses ctx=262144, parallel=4, batch=2048, ubatch=512, and q8 KV cache."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Recommended local profile uses ctx=262144, parallel=4, batch=2048, ubatch=512, and q8 KV cache."
       openaiCompat: "Use only when a gateway fronts the same llama.cpp chat-completions surface."
     llamaCpp:
       ctxSize: 262144
@@ -122,10 +121,10 @@
         high: 16384
       guidance: |
         AgenticQwen is the tuned local default for Clio source work on
-        mini's llama.cpp server. Thinking emits through the qwen chat template;
+        a local llama.cpp server. Thinking emits through the qwen chat template;
         keep high reasoning for main-agent work and preserve visible thinking
         blocks in receipts.
-    serving: "Use the mini llama-server preset from docs/.superpowers/reference/llama-bench-findings.md."
+    serving: "Use the llama.cpp settings listed above for a 262144-token local profile."
 
 - family: nemotron-3-nano-omni-30b-a3b-reasoning
   matchPatterns:
@@ -222,7 +221,7 @@
     runtimePreference:
       lmstudioNative: "Usable for text and vision when loaded in LM Studio. Keep openai-compat available for tool fallback."
       openaiCompat: "Preferred local gateway path for tool-call stress tests."
-      llamaCpp: "OpenAI-compatible chat completions with --jinja. Current mini preset emits reasoning_content without a separate --reasoning flag."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Local llama.cpp profile emits reasoning_content without a separate --reasoning flag."
     llamaCpp:
       ctxSize: 262144
       cacheTypeK: q8_0
@@ -280,9 +279,9 @@
         repeatPenalty: 1.05
         maxTokens: 4096
     gpuTiers:
-      "32gb": "Loaded on mini's Radeon AI PRO R9700 with Q4_K_M, ctx=262144, q8 KV, flash attention, and parallel=1."
+      "32gb": "32 GB local profile with Q4_K_M, ctx=262144, q8 KV, flash attention, and parallel=1."
     runtimePreference:
-      llamaCpp: "OpenAI-compatible chat completions with --jinja and --reasoning on. Mini preset uses ctx=262144, parallel=1, batch=2048, ubatch=512, flash attention, and q8 KV cache."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja and --reasoning on. Recommended local profile uses ctx=262144, parallel=1, batch=2048, ubatch=512, flash attention, and q8 KV cache."
       openaiCompat: "Preferred when a gateway fronts the same llama.cpp chat-completions surface with qwen reasoning/tool parsing."
     llamaCpp:
       ctxSize: 262144
@@ -296,7 +295,7 @@
     thinking:
       mechanism: always-on
       guidance: |
-        Ornith emits a Qwen-style <think> block by default. Mini's llama.cpp
+        Ornith emits a Qwen-style <think> block by default. The local llama.cpp
         router is configured with --reasoning on, so the OpenAI-compatible
         response separates this trace into reasoning_content while content
         contains the final answer.
@@ -421,7 +420,7 @@
         leak into visible text.
     serving: "LilaRest publishes no per-model sampler; values inherit the gemma family default per the official Google Gemma 4 31B card. KV cache budget at f16, ctx=122880 is roughly 57 GB on top of ~21 GB of NVFP4 weights."
 
-# The qat/UD-Q4_K_XL/MTP build is the mini llama.cpp gemma variant and is a
+# The qat/UD-Q4_K_XL/MTP build is the long-context llama.cpp gemma profile and is a
 # different serving profile from the NVFP4 turbo family above: 262K context
 # (not 122880), q8 KV, F16 gemma4v mmproj vision, and MTP speculative decoding.
 # Its longest matchPattern (gemma-4-31b-it-qat-...) is longer than the NVFP4
@@ -461,7 +460,7 @@
         repetitionPenalty: 1.0
         maxTokens: 32768
       instruct:
-        temperature: 0.7  # 0.7 keeps tool-call JSON parseable; mini's router serves this qat build at 0.8
+        temperature: 0.7  # 0.7 keeps tool-call JSON parseable; router profiles may serve this qat build at 0.8
         topP: 0.95
         topK: 64
         minP: 0.0
@@ -469,9 +468,9 @@
         maxTokens: 32768
     chatTemplate: "gemma-channel"
     gpuTiers:
-      "32gb": "Loaded on mini's Radeon AI PRO R9700 (vulkan) with UD-Q4_K_XL weights, ctx=262144, q8 KV, flash attention, parallel=1, F16 gemma4v mmproj (vision) and MTP draft (spec-type draft-mtp, n_max 4) both active."
+      "32gb": "32 GB Vulkan llama.cpp profile with UD-Q4_K_XL weights, ctx=262144, q8 KV, flash attention, parallel=1, F16 gemma4v mmproj (vision), and MTP draft (spec-type draft-mtp, n_max 4) both active."
     runtimePreference:
-      llamaCpp: "OpenAI-compatible chat completions with --jinja and --reasoning off. Mini preset serves at ctx=262144, q8 KV, flash attention, parallel=1, batch=1024, ubatch=256, with F16 mmproj vision and draft-mtp speculative decoding; sampler temperature 0.8, top_p 0.95, top_k 64, repeat_penalty 1.05."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja and --reasoning off. Recommended local profile serves at ctx=262144, q8 KV, flash attention, parallel=1, batch=1024, ubatch=256, with F16 mmproj vision and draft-mtp speculative decoding; sampler temperature 0.8, top_p 0.95, top_k 64, repeat_penalty 1.05."
       openaiCompat: "Fallback when a gateway fronts the same llama.cpp chat-completions surface; the openai-compat surface does not expose the channel-marker classifier, so visible text may show raw thought markers."
     llamaCpp:
       ctxSize: 262144
@@ -487,13 +486,13 @@
       mechanism: on-off
       guidance: |
         Gemma 4 31B IT QAT exposes thinking only as on or off via the gemma-4
-        enable_thinking template; intermediate levels coerce to on. Mini's
-        llama.cpp preset serves it with --reasoning off (default_reasoning off),
+        enable_thinking template; intermediate levels coerce to on. A local
+        llama.cpp profile serves it with --reasoning off (default_reasoning off),
         so the chain-of-thought is not requested; if the template emits one it
         surfaces via reasoning_content and is accounted as reasoning tokens. The
         QAT weights hold tool-call JSON together better than the NVFP4 turbo
         build, but the instruct profile still pins a conservative temperature.
-    serving: "Gemma 4 31B IT QAT, UD-Q4_K_XL, served as a mini llama.cpp router model (vulkan) with MTP speculative decoding (spec-type draft-mtp, n_max 4, draft mtp-gemma-4-31B-it) and F16 gemma4v mmproj vision both active at 262k. Reasoning off by default; gemma-4 thinking is on/off. Sampler temperature 0.8, top_p 0.95, top_k 64, repeat_penalty 1.05."
+    serving: "Gemma 4 31B IT QAT, UD-Q4_K_XL, served as a local llama.cpp router model (vulkan) with MTP speculative decoding (spec-type draft-mtp, n_max 4, draft mtp-gemma-4-31B-it) and F16 gemma4v mmproj vision both active at 262k. Reasoning off by default; gemma-4 thinking is on/off. Sampler temperature 0.8, top_p 0.95, top_k 64, repeat_penalty 1.05."
 
 - family: gemopus-4-31b-it
   matchPatterns:
@@ -641,9 +640,9 @@
         repeatPenalty: 1.05
         maxTokens: 32768
     gpuTiers:
-      "32gb": "Default model on mini's Radeon AI PRO R9700: Q4_K_M, ctx=262144, q8 KV, flash attention, parallel=1, with F32 mmproj (vision) and draft-mtp speculative decoding both active. Measured ~26.5 GiB used / ~6 GiB free at 262k."
+      "32gb": "Default 32 GB local profile: Q4_K_M, ctx=262144, q8 KV, flash attention, parallel=1, with F32 mmproj (vision) and draft-mtp speculative decoding both active. Leaves several GiB free at 262k on a 32 GiB class card."
     runtimePreference:
-      llamaCpp: "OpenAI-compatible chat completions with --jinja. Mini preset serves text-only with reasoning off and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Recommended local profile serves text-only with reasoning off and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
       openaiCompat: "Use when a gateway fronts the same llama.cpp chat-completions surface with qwen tool parsing."
     llamaCpp:
       ctxSize: 262144
@@ -664,7 +663,7 @@
         line (Opus-distilled traces over Qwen3.6 35B-A3B). The creator's card
         specifies thinking-off execution for the Coder-MTP variants; the dial
         clamps to off at every level and no request may re-enable thinking.
-    serving: "Jackrong Qwopus3.6 35B-A3B Coder MTP, Q4_K_M. Thinking-off coder/agent tuned for tool-use loops. Served as the mini router default with MTP speculative decoding (spec-type draft-mtp, n_max 2) and F32 mmproj vision both active at 262k."
+    serving: "Jackrong Qwopus3.6 35B-A3B Coder MTP, Q4_K_M. Thinking-off coder/agent tuned for tool-use loops. Served as a local router default with MTP speculative decoding (spec-type draft-mtp, n_max 2) and F32 mmproj vision both active at 262k."
 
 - family: qwopus3.6-27b-coder
   matchPatterns:
@@ -771,7 +770,7 @@
         maxTokens: 8192
         reasoningBudget: 4096
     gpuTiers:
-      "32gb": "Main-agent candidate for the mini and dynamo class when Gemma behavior is preferred."
+      "32gb": "Main-agent candidate for 32 GB and larger local systems when Gemma behavior is preferred."
     runtimePreference:
       lmstudioNative: "Use for already-loaded LM Studio sessions and multimodal checks."
       openaiCompat: "Preferred fallback when SDK rawTools do not match the template."
@@ -825,8 +824,8 @@
     runtimePreference:
       lmstudioNative: "Use when LM Studio SDK tool extraction is verified for the loaded template."
       openaiCompat: "Preferred fallback for LM Studio gateway tool calls."
-      anthropicCompat: "Do not select for the current mini llama.cpp target; /v1/messages returned 404 while /v1/models and OpenAI-compatible chat worked."
-      llamaCpp: "OpenAI-compatible chat completions with --jinja. Current mini preset disables thinking in chat_template_kwargs."
+      anthropicCompat: "Do not select for the current llama.cpp target profile; /v1/messages returned 404 while /v1/models and OpenAI-compatible chat worked."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Recommended local profile disables thinking in chat_template_kwargs."
     llamaCpp:
       ctxSize: 1048576
       cacheTypeK: q8_0
@@ -841,7 +840,7 @@
       guidance: |
         Nemotron Cascade 2 chat template exposes thinking through
         chat_template_kwargs.enable_thinking. Intermediate levels coerce to on.
-        The mini llama.cpp preset disables thinking in the template kwargs by
+        The recommended llama.cpp profile disables thinking in the template kwargs by
         default; flip via the runtime override when reasoning is needed.
     serving: "NVIDIA card recommends vLLM with nemotron_v3 reasoning and qwen3_coder tool parsing."
 

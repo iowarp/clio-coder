@@ -6,7 +6,7 @@ import {
 	type EvalSuiteTaskV2,
 	type EvalSuiteV2,
 	type EvalWorkspaceKind,
-} from "./suite-v2.js";
+} from "./suite.js";
 
 const RUNNER_KINDS = new Set<EvalRunnerKind>(["clio-run", "context-index", "context-init", "external-command"]);
 const WORKSPACE_KINDS = new Set<EvalWorkspaceKind>(["local", "git", "temp-copy"]);

@@ -1,4 +1,4 @@
-import type { EvalSuiteTargetV2 } from "../schema/suite-v2.js";
+import type { EvalSuiteTargetV2 } from "../schema/suite.js";
 import { type EvalRunnerOutput, runShellCommand, shellQuote } from "./external-command.js";
 
 export async function runContextIndexRunner(

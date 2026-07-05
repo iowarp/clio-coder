@@ -1,4 +1,4 @@
-import type { EvalArtifactV2 } from "../schema/artifact-v2.js";
+import type { EvalArtifactV2 } from "../schema/artifact.js";
 
 export function renderEvalTextReportV2(artifact: EvalArtifactV2): string {
 	return [

@@ -10,6 +10,7 @@ still change interfaces.
 
 ## Unreleased
 
+- Cleaned eval-domain source filenames and scrubbed developer-local target names and paths from the model catalog, benchmark examples, and HTML docs.
 - Aligned documentation corpus with v0.2.8 capabilities, resolving stale descriptions across the configuration, TUI, evals, and safety sections, and introduced new guides for worker dispatch mechanics and custom model runtime adapters.
 - Refreshed the clio docs visual viewer to align with v0.2.8, updating all HTML blueprints, adding 8 missing blueprints with interactive simulators, unifying style templates, and adding dashboard category search filters.
 - Fixed local model families that declare no reasoning support so Clio no

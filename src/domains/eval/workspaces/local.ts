@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { EvalWorkspaceV2 } from "../schema/suite-v2.js";
+import type { EvalWorkspaceV2 } from "../schema/suite.js";
 
 export interface PreparedEvalWorkspace {
 	dir: string;

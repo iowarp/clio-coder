@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { EvalArtifactV2 } from "../../src/domains/eval/schema/artifact-v2.js";
+import type { EvalArtifactV2 } from "../../src/domains/eval/schema/artifact.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
 import { loadV1TaskFileAsSuite } from "../../src/domains/eval/suites/load.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
