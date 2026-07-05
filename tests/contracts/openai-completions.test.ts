@@ -125,6 +125,152 @@ describe("openai-completions thinking preservation", () => {
 		strictEqual(assistant.reasoning_content, "secret reasoning");
 	});
 
+	it("does not replay or request thinking for reasoning-never chat-template models", async () => {
+		const model = {
+			id: "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K",
+			name: "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K",
+			api: "openai-completions",
+			provider: "llamacpp",
+			baseUrl: "http://127.0.0.1:1/v1",
+			// Simulates a live probe or gateway row that reports reasoning even
+			// though the catalog quirks say this family is reasoning-never.
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+				thinkingFormat: "qwen-chat-template",
+			},
+			clio: {
+				targetId: "mini",
+				runtimeId: "llamacpp",
+				lifecycle: "user-managed",
+				quirks: { thinking: { mechanism: "none" } },
+			},
+		} as unknown as Model<"openai-completions">;
+
+		const context = {
+			messages: [
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "do not replay me", thinkingSignature: "reasoning_content" },
+						{ type: "text", text: "visible answer" },
+					],
+					api: "openai-completions",
+					provider: "llamacpp",
+					model: model.id,
+					usage: usage(),
+					stopReason: "stop",
+					timestamp: 0,
+				},
+				{ role: "user", content: "continue", timestamp: 0 },
+			],
+		} as unknown as Context;
+
+		const controller = new AbortController();
+		let captured:
+			| {
+					messages?: Array<{ role?: string; reasoning_content?: string; content?: string }>;
+					chat_template_kwargs?: Record<string, unknown>;
+					enable_thinking?: boolean;
+					reasoning?: unknown;
+					reasoning_effort?: string;
+					thinking?: unknown;
+			  }
+			| undefined;
+
+		const stream = openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "fake-key",
+			reasoning: "low",
+			signal: controller.signal,
+			onPayload: (payload) => {
+				captured = payload as typeof captured;
+				controller.abort();
+				return undefined;
+			},
+		});
+		try {
+			for await (const _event of stream) {
+				// drain; the request aborts inside onPayload
+			}
+		} catch {
+			// an aborted request may surface as an error/throw assertion
+		}
+
+		ok(captured?.messages, "onPayload should have captured the body");
+		const assistant = captured.messages.find((m) => m.role === "assistant");
+		ok(assistant, "assistant message should survive in the replay history");
+		strictEqual(assistant.reasoning_content, undefined);
+		strictEqual(assistant.content, "visible answer");
+		strictEqual(captured.chat_template_kwargs, undefined);
+		strictEqual(captured.enable_thinking, undefined);
+		strictEqual(captured.reasoning, undefined);
+		strictEqual(captured.reasoning_effort, undefined);
+		strictEqual(captured.thinking, undefined);
+	});
+
+	it("removes top-level reasoning objects for reasoning-never OpenRouter-format models", async () => {
+		const model = {
+			id: "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K",
+			name: "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K",
+			api: "openai-completions",
+			provider: "openrouter",
+			baseUrl: "http://127.0.0.1:1/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 262144,
+			maxTokens: 32768,
+			compat: {
+				supportsStore: false,
+				supportsDeveloperRole: false,
+				supportsReasoningEffort: false,
+				supportsUsageInStreaming: true,
+				maxTokensField: "max_tokens",
+				supportsStrictMode: false,
+				thinkingFormat: "openrouter",
+			},
+			clio: {
+				targetId: "mini-router",
+				runtimeId: "openrouter",
+				lifecycle: "user-managed",
+				quirks: { thinking: { mechanism: "none" } },
+			},
+		} as unknown as Model<"openai-completions">;
+		const context = { messages: [{ role: "user", content: "continue", timestamp: 0 }] } as unknown as Context;
+		const controller = new AbortController();
+		let captured: { reasoning?: unknown } | undefined;
+
+		const stream = openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "fake-key",
+			reasoning: "low",
+			signal: controller.signal,
+			onPayload: (payload) => {
+				captured = payload as typeof captured;
+				controller.abort();
+				return undefined;
+			},
+		});
+		try {
+			for await (const _event of stream) {
+				// drain; the request aborts inside onPayload
+			}
+		} catch {
+			// an aborted request may surface as an error/throw assertion
+		}
+
+		ok(captured, "onPayload should have captured the body");
+		strictEqual(captured.reasoning, undefined);
+	});
+
 	it("suppresses chat_template_kwargs for strict gateways while keeping reasoning_effort", async () => {
 		const model = {
 			id: "gpt-oss-120b",

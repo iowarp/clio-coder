@@ -5,6 +5,16 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## Unreleased
+
+### Fixed
+
+- Fixed reasoning-never local model families so catalog `thinking.mechanism:
+  none` stays authoritative when live probes or gateway rows report reasoning.
+  LM Studio and OpenAI-compatible adapters no longer replay prior assistant
+  thinking blocks, request thinking fields, surface thinking stream events, or
+  preserve reasoning-token usage for those models.
+
 ## 0.2.8 - 2026-07-04
 
 The toolkit-rework release: the tool surface was redesigned into seven planes

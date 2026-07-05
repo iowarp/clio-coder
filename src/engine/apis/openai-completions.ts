@@ -16,6 +16,7 @@ import { type ApiProvider, streamOpenAICompletions, streamSimpleOpenAICompletion
 import {
 	type AppliedThinking,
 	type ResolvedModelRuntimeCapabilities,
+	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilitiesForModel,
 } from "../../domains/providers/model-runtime-capabilities.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
@@ -96,6 +97,59 @@ function applyOpenAISamplingProfile(
 
 type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 
+const THINKING_CHAT_TEMPLATE_KWARGS = new Set([
+	"enable_thinking",
+	"preserve_thinking",
+	"reasoning_effort",
+	"thinking_budget",
+]);
+
+type UsageWithReasoningAliases = Usage & { reasoning?: number; reasoningTokens?: number; reasoning_tokens?: number };
+
+function stripThinkingRequestFields(payload: Record<string, unknown>): Record<string, unknown> {
+	const next: Record<string, unknown> = { ...payload };
+	delete next.enable_thinking;
+	delete next.reasoning;
+	delete next.reasoning_effort;
+	delete next.thinking;
+	if (isPlainRecord(next.chat_template_kwargs)) {
+		const chatTemplateKwargs: Record<string, unknown> = { ...next.chat_template_kwargs };
+		for (const key of THINKING_CHAT_TEMPLATE_KWARGS) delete chatTemplateKwargs[key];
+		if (Object.keys(chatTemplateKwargs).length > 0) next.chat_template_kwargs = chatTemplateKwargs;
+		else delete next.chat_template_kwargs;
+	}
+	return next;
+}
+
+function stripsThinking(resolved: ResolvedModelRuntimeCapabilities): boolean {
+	return reasoningClassForMechanism(resolved.thinking.mechanism) === "never";
+}
+
+function stripThinkingFromMessage(message: AssistantMessage): AssistantMessage {
+	const content = message.content.filter((block) => block.type !== "thinking");
+	const usage = { ...message.usage } as UsageWithReasoningAliases;
+	delete usage.reasoning;
+	delete usage.reasoningTokens;
+	delete usage.reasoning_tokens;
+	return { ...message, content, usage };
+}
+
+function stripThinkingFromContext(context: Context): Context {
+	return {
+		...context,
+		messages: context.messages.map((message) => {
+			if (message.role !== "assistant") return message;
+			const content = message.content.filter((block) => block.type !== "thinking");
+			return content.length === message.content.length ? message : { ...message, content };
+		}),
+	};
+}
+
+function withStrippedPartial<TEvent extends AssistantMessageEvent>(event: TEvent): TEvent {
+	if (!("partial" in event)) return event;
+	return { ...event, partial: stripThinkingFromMessage(event.partial as AssistantMessage) };
+}
+
 /**
  * Apply thinking-mechanism payload mutations to an openai-compat request body
  * after the catalog sampler is in place. Each mechanism owns the wire fields
@@ -106,8 +160,9 @@ type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined
  *     budget remains informational and surfaces through the prompt only.
  *   - `on-off` writes `chat_template_kwargs.enable_thinking` matching the
  *     existing nemotron-cascade YAML precedent.
- *   - `always-on` and `none` do not touch the payload; the helper still
- *     drove sampler selection upstream.
+ *   - `none` removes thinking controls that lower layers may have added from
+ *     stale/live-probed `model.reasoning` state.
+ *   - `always-on` does not touch the payload; the backend/model owns it.
  */
 function applyThinkingPayload(
 	payload: Record<string, unknown>,
@@ -115,7 +170,8 @@ function applyThinkingPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
 	model: Model<Api>,
 ): Record<string, unknown> {
-	if (applied.mechanism === "always-on" || applied.mechanism === "none") return payload;
+	if (applied.mechanism === "none") return stripThinkingRequestFields(payload);
+	if (applied.mechanism === "always-on") return payload;
 	const next: Record<string, unknown> = { ...payload };
 	if (
 		resolved.request.reasoningEffort &&
@@ -222,7 +278,8 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 		!profile &&
 		applied.mechanism !== "effort-levels" &&
 		applied.mechanism !== "budget-tokens" &&
-		applied.mechanism !== "on-off"
+		applied.mechanism !== "on-off" &&
+		applied.mechanism !== "none"
 	) {
 		return options;
 	}
@@ -234,6 +291,35 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
 	}
 	return merged as TOptions;
+}
+
+function stripNeverReasoningFromStream(
+	source: ReturnType<typeof streamOpenAICompletions>,
+	resolved: ResolvedModelRuntimeCapabilities,
+): ReturnType<typeof streamOpenAICompletions> {
+	if (!stripsThinking(resolved)) return source;
+	const stripped = createAssistantMessageEventStream();
+	(async () => {
+		try {
+			for await (const event of source) {
+				if (event.type === "thinking_start" || event.type === "thinking_delta" || event.type === "thinking_end") {
+					continue;
+				}
+				if (event.type === "done") {
+					stripped.push({ ...event, message: stripThinkingFromMessage(event.message) });
+				} else if (event.type === "error") {
+					stripped.push({ ...event, error: stripThinkingFromMessage(event.error) });
+				} else {
+					stripped.push(withStrippedPartial(event as AssistantMessageEvent));
+				}
+			}
+			stripped.end();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(message);
+		}
+	})();
+	return stripped;
 }
 
 function thinkingLevelFromSimple(options: SimpleStreamOptions | undefined): ThinkingLevel {
@@ -320,8 +406,6 @@ function estimateReasoningTokens(content: AssistantMessage["content"]): number {
 	if (chars === 0) return 0;
 	return Math.max(1, Math.round(chars / REASONING_CHARS_PER_TOKEN));
 }
-
-type UsageWithReasoningAliases = Usage & { reasoningTokens?: number; reasoning_tokens?: number };
 
 function positiveNumber(value: unknown): boolean {
 	return typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -558,11 +642,19 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		// Bare `stream` callers don't communicate thinking state; fall back to
 		// the model's reasoning capability so the catalog still applies.
 		const resolved = resolvedCapabilitiesForModel(model, model.reasoning === true ? "medium" : "off");
+		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
 		const withSamplers = withSamplingOverrides(model, options, resolved);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
-					streamOpenAICompletions(model, context, withRemainingContextBudget(model, context, withSamplers)),
+					stripNeverReasoningFromStream(
+						streamOpenAICompletions(
+							model,
+							effectiveContext,
+							withRemainingContextBudget(model, effectiveContext, withSamplers),
+						),
+						resolved,
+					),
 					resolved,
 				),
 			),
@@ -573,11 +665,19 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 	streamSimple: (model, context, options?: SimpleStreamOptions) => {
 		observeResidencyForModel(model);
 		const resolved = resolvedCapabilitiesForModel(model, thinkingLevelFromSimple(options));
+		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
 		const withSamplers = withSamplingOverrides(model, options, resolved);
 		return guardMalformedToolCalls(
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
-					streamSimpleOpenAICompletions(model, context, withRemainingContextBudget(model, context, withSamplers)),
+					stripNeverReasoningFromStream(
+						streamSimpleOpenAICompletions(
+							model,
+							effectiveContext,
+							withRemainingContextBudget(model, effectiveContext, withSamplers),
+						),
+						resolved,
+					),
 					resolved,
 				),
 			),

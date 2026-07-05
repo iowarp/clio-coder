@@ -3,6 +3,7 @@ import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catal
 import type { TargetStatus } from "./contract.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
+import { extractLocalModelQuirks } from "./types/local-model-quirks.js";
 
 function normalizedModelId(wireModelId: string | null | undefined): string | null {
 	const trimmed = wireModelId?.trim();
@@ -40,6 +41,17 @@ export interface ResolveModelCapabilitiesOptions {
 	 * the merged value untouched.
 	 */
 	detectedReasoning?: boolean | null;
+}
+
+function applyReasoningResolution(
+	caps: CapabilityFlags,
+	kbHit: ReturnType<KnowledgeBase["lookup"]> | null | undefined,
+	detectedReasoning: boolean | null,
+): CapabilityFlags {
+	const mechanism = extractLocalModelQuirks(kbHit?.entry.quirks)?.thinking?.mechanism;
+	if (mechanism === "none") return { ...caps, reasoning: false };
+	if (mechanism === "always-on") return { ...caps, reasoning: true };
+	return detectedReasoning === null ? caps : { ...caps, reasoning: detectedReasoning };
 }
 
 /**
@@ -88,32 +100,37 @@ export function resolveModelCapabilities(
 	options?: ResolveModelCapabilitiesOptions,
 ): CapabilityFlags {
 	const detectedReasoning = options?.detectedReasoning ?? null;
-	const applyDetected = (caps: CapabilityFlags): CapabilityFlags =>
-		detectedReasoning === null ? caps : { ...caps, reasoning: detectedReasoning };
 
-	if (!status.runtime) return applyDetected(status.capabilities);
+	if (!status.runtime) {
+		const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
+		const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
+		return applyReasoningResolution(status.capabilities, kbHit, detectedReasoning);
+	}
 	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
 	const baseCapabilities = capabilitiesFromCatalogModel(
 		status.runtime.defaultCapabilities ?? EMPTY_CAPABILITIES,
 		modelId ? getCatalogModelForRuntime(status.runtime.id, modelId) : undefined,
 	);
+	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
 	const hasModernProbeFields = status.probeCapabilities !== undefined || status.probeModelCapabilities !== undefined;
 	if (!hasModernProbeFields) {
 		if (!modelId || modelId === normalizedModelId(status.target.defaultModel)) {
-			return applyDetected(status.capabilities);
+			return applyReasoningResolution(status.capabilities, kbHit, detectedReasoning);
 		}
-		const kbHit = knowledgeBase?.lookup(modelId) ?? null;
-		return applyDetected(
+		return applyReasoningResolution(
 			mergeCapabilities(baseCapabilities, kbHit?.entry.capabilities ?? null, null, status.target.capabilities ?? null),
+			kbHit,
+			detectedReasoning,
 		);
 	}
-	const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
-	return applyDetected(
+	return applyReasoningResolution(
 		mergeCapabilities(
 			baseCapabilities,
 			kbHit?.entry.capabilities ?? null,
 			probeCapabilitiesForModel(status, modelId),
 			status.target.capabilities ?? null,
 		),
+		kbHit,
+		detectedReasoning,
 	);
 }
