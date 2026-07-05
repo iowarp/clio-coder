@@ -15,6 +15,9 @@ export interface CodewikiFile {
 	lang: CodewikiLanguage;
 	loc: number;
 	role: CodewikiFileRole;
+	hash: string;
+	imports: string[];
+	summary?: string;
 }
 
 export interface CodewikiSymbol {
@@ -38,7 +41,7 @@ export interface CodewikiExternalEdge {
 export type CodewikiEdge = CodewikiInternalEdge | CodewikiExternalEdge;
 
 export interface Codewiki {
-	version: 3;
+	version: 4;
 	language: ProjectType;
 	files: CodewikiFile[];
 	symbols: CodewikiSymbol[];
@@ -59,6 +62,12 @@ export interface BuildCodewikiInput {
 	generatedAt?: string;
 }
 
+export type CodewikiReadFile = (path: string) => string | null;
+
+export interface CodewikiBuildOptions {
+	readFile?: CodewikiReadFile;
+}
+
 export interface ExtractedSymbol {
 	name: string;
 	kind: CodewikiSymbolKind;
@@ -75,6 +84,13 @@ export interface LanguageExtraction {
 export interface LanguageExtractor {
 	langs: ReadonlyArray<CodewikiLanguage>;
 	extract(path: string, text: string): LanguageExtraction;
+}
+
+let treeSitterExtractorPromise: Promise<LanguageExtractor> | null = null;
+
+function loadTreeSitterExtractor(): Promise<LanguageExtractor> {
+	treeSitterExtractorPromise ??= createTreeSitterExtractor();
+	return treeSitterExtractorPromise;
 }
 
 const EXCLUDED_DIRS = new Set([
@@ -162,6 +178,18 @@ function compareStrings(a: string, b: string): number {
 
 function stableFileId(path: string): string {
 	return `f_${createHash("sha256").update(path).digest("hex").slice(0, 16)}`;
+}
+
+function contentHash(text: string): string {
+	return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+function defaultReadFile(path: string): string | null {
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
 }
 
 function extensionOf(name: string): string {
@@ -330,10 +358,11 @@ const tsJsExtractor: LanguageExtractor = {
 			{ regex: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)\b/, kind: "iface" },
 			{ regex: /^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\b/, kind: "type" },
 			{ regex: /^\s*(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)\b/, kind: "type" },
-			{ regex: /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\b/, kind: "const" },
-			{ regex: /^\s*(?:export\s+)?(?:let|var)\s+([A-Za-z_$][\w$]*)\b/, kind: "var" },
+			{ regex: /^(?:\s*export\s+)?const\s+([A-Za-z_$][\w$]*)\b/, kind: "const" },
+			{ regex: /^(?:\s*export\s+)?(?:let|var)\s+([A-Za-z_$][\w$]*)\b/, kind: "var" },
 			{
-				regex: /^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{?$/,
+				regex:
+					/^(?: {2,}|\t+)(?:public\s+|private\s+|protected\s+|static\s+|override\s+|abstract\s+|async\s+|get\s+|set\s+)*(?!(?:if|for|while|switch|catch|return|typeof|else|do|new|await|yield)\b)([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{?$/,
 				kind: "method",
 			},
 		]);
@@ -404,8 +433,8 @@ const goExtractor: LanguageExtractor = {
 			{ regex: /^\s*type\s+([A-Za-z_]\w*)\s+interface\b/, kind: "iface" },
 			{ regex: /^\s*type\s+([A-Za-z_]\w*)\s+struct\b/, kind: "type" },
 			{ regex: /^\s*type\s+([A-Za-z_]\w*)\b/, kind: "type" },
-			{ regex: /^\s*const\s+([A-Za-z_]\w*)\b/, kind: "const" },
-			{ regex: /^\s*var\s+([A-Za-z_]\w*)\b/, kind: "var" },
+			{ regex: /^const\s+([A-Za-z_]\w*)\b/, kind: "const" },
+			{ regex: /^var\s+([A-Za-z_]\w*)\b/, kind: "var" },
 		]);
 		const symbols: ExtractedSymbol[] = rawSymbols.map((symbol) => {
 			if (symbol.kind === "func" && /^\s*func\s+\(/.test(symbol.sig ?? "")) return { ...symbol, kind: "method" };
@@ -429,8 +458,8 @@ const rustExtractor: LanguageExtractor = {
 			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z_]\w*)\b/, kind: "type" },
 			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?trait\s+([A-Za-z_]\w*)\b/, kind: "trait" },
 			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?type\s+([A-Za-z_]\w*)\b/, kind: "type" },
-			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z_]\w*)\b/, kind: "const" },
-			{ regex: /^\s*(?:pub(?:\([^)]*\))?\s+)?static\s+([A-Za-z_]\w*)\b/, kind: "var" },
+			{ regex: /^(?:\s*pub(?:\([^)]*\))?\s+)?const\s+([A-Za-z_]\w*)\b/, kind: "const" },
+			{ regex: /^(?:\s*pub(?:\([^)]*\))?\s+)?static\s+([A-Za-z_]\w*)\b/, kind: "var" },
 		]);
 		const imports = uniqueSorted([
 			...extractMatches(text, /^\s*use\s+([^;]+);/gm).map((item) => item.trim()),
@@ -453,7 +482,7 @@ const cFamilyExtractor: LanguageExtractor = {
 				regex: /^\s*(?:template\s*<[^>]+>\s*)?(?:[A-Za-z_][\w:<>,*&\s]+\s+)+([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?\{?$/,
 				kind: "func",
 			},
-			{ regex: /^\s*(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
+			{ regex: /^(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
 		]);
 		const imports = uniqueSorted(extractMatches(text, /^\s*#\s*include\s+[<"]([^>"]+)[>"]/gm));
 		const exports = uniqueSorted(symbols.map((symbol) => symbol.name));
@@ -477,8 +506,7 @@ const javaExtractor: LanguageExtractor = {
 				kind: "method",
 			},
 			{
-				regex:
-					/^\s*(?:public\s+|private\s+|protected\s+|static\s+|final\s+)*[A-Za-z_][\w<>,[\]\s]*\s+([A-Z][A-Z0-9_]*)\s*=/,
+				regex: /^\s*public\s+(?:static\s+|final\s+)*[A-Za-z_][\w<>,[\]\s]*\s+([A-Z][A-Z0-9_]*)\s*=/,
 				kind: "const",
 			},
 		]);
@@ -497,7 +525,7 @@ const rubyExtractor: LanguageExtractor = {
 			{ regex: /^\s*class\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/, kind: "class" },
 			{ regex: /^\s*module\s+([A-Z]\w*(?:::[A-Z]\w*)*)\b/, kind: "type" },
 			{ regex: /^\s*def\s+(?:self\.)?([A-Za-z_]\w*[!?=]?)\b/, kind: "func" },
-			{ regex: /^\s*([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
+			{ regex: /^([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
 		]);
 		const imports = uniqueSorted([
 			...extractMatches(text, /^\s*require\s+["']([^"']+)["']/gm),
@@ -547,44 +575,83 @@ function extractWithExtractors(
 interface BuiltFile {
 	file: CodewikiFile;
 	symbols: CodewikiSymbol[];
-	imports: string[];
-	exports: string[];
-	summary?: string;
 }
 
-function buildFile(cwd: string, relPath: string, extractors: ReadonlyArray<LanguageExtractor>): BuiltFile | null {
+function mergeTreeSitterWithRegexImports(
+	language: CodewikiLanguage,
+	relPath: string,
+	text: string,
+	extracted: LanguageExtraction,
+): LanguageExtraction {
+	const regex = extractWithExtractors(fallbackExtractors, language, relPath, text);
+	return {
+		symbols: extracted.symbols.sort(compareSymbols),
+		imports: uniqueSorted([...extracted.imports, ...regex.imports]),
+		exports: uniqueSorted(extracted.exports),
+	};
+}
+
+function fallbackExtraction(language: CodewikiLanguage, relPath: string, text: string): LanguageExtraction {
+	return extractWithExtractors(fallbackExtractors, language, relPath, text);
+}
+
+function extractSourceFile(
+	language: CodewikiLanguage,
+	relPath: string,
+	text: string,
+	treeSitterExtractor: LanguageExtractor,
+): LanguageExtraction {
+	if (!treeSitterExtractor.langs.includes(language)) return fallbackExtraction(language, relPath, text);
+	try {
+		return mergeTreeSitterWithRegexImports(language, relPath, text, treeSitterExtractor.extract(relPath, text));
+	} catch {
+		return fallbackExtraction(language, relPath, text);
+	}
+}
+
+function buildFile(
+	cwd: string,
+	relPath: string,
+	treeSitterExtractor: LanguageExtractor,
+	readFile: CodewikiReadFile,
+): BuiltFile | null {
 	const language = languageForPath(relPath);
 	if (!language) return null;
-	let text: string;
+	let text: string | null;
 	try {
-		text = readFileSync(join(cwd, relPath), "utf8");
+		text = readFile(join(cwd, relPath));
 	} catch {
 		return null;
 	}
+	if (text === null) return null;
 	const file: CodewikiFile = {
 		id: stableFileId(relPath),
 		path: relPath,
 		lang: language,
 		loc: lineCount(text),
 		role: roleFor(relPath, language),
+		hash: contentHash(text),
+		imports: [],
 	};
 	const isSource = language !== "config";
-	if (!isSource || text.trim().length === 0) return { file, symbols: [], imports: [], exports: [] };
-	const extracted = extractWithExtractors(extractors, language, relPath, text);
+	if (!isSource || text.trim().length === 0) return { file, symbols: [] };
+	const extracted = extractSourceFile(language, relPath, text, treeSitterExtractor);
+	const summary = firstDocSummary(text);
+	const sourceFile: CodewikiFile = {
+		...file,
+		imports: extracted.imports,
+		...(summary ? { summary } : {}),
+	};
 	const symbols = extracted.symbols.map((symbol) => ({
 		name: symbol.name,
 		kind: symbol.kind,
-		fileId: file.id,
+		fileId: sourceFile.id,
 		line: symbol.line,
 		...(symbol.sig ? { sig: symbol.sig } : {}),
 	}));
-	const summary = firstDocSummary(text);
 	return {
-		file,
+		file: sourceFile,
 		symbols,
-		imports: extracted.imports,
-		exports: extracted.exports,
-		...(summary ? { summary } : {}),
 	};
 }
 
@@ -632,16 +699,16 @@ function resolveImport(
 	return null;
 }
 
-function buildEdges(cwd: string, builtFiles: ReadonlyArray<BuiltFile>): CodewikiEdge[] {
-	const pathToId = new Map(builtFiles.map((item) => [item.file.path, item.file.id] as const));
+function buildEdges(cwd: string, files: ReadonlyArray<CodewikiFile>): CodewikiEdge[] {
+	const pathToId = new Map(files.map((file) => [file.path, file.id] as const));
 	const edges: CodewikiEdge[] = [];
 	const seen = new Set<string>();
-	for (const item of builtFiles) {
-		for (const specifier of item.imports) {
-			const target = resolveImport(cwd, item.file.path, specifier, pathToId);
+	for (const file of files) {
+		for (const specifier of file.imports) {
+			const target = resolveImport(cwd, file.path, specifier, pathToId);
 			const edge = target
-				? ({ fileId: item.file.id, toFileId: target } satisfies CodewikiInternalEdge)
-				: ({ fileId: item.file.id, externalModule: specifier } satisfies CodewikiExternalEdge);
+				? ({ fileId: file.id, toFileId: target } satisfies CodewikiInternalEdge)
+				: ({ fileId: file.id, externalModule: specifier } satisfies CodewikiExternalEdge);
 			const key = "toFileId" in edge ? `${edge.fileId}\0${edge.toFileId}` : `${edge.fileId}\0${edge.externalModule}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
@@ -676,73 +743,99 @@ function promoteSingleSourceEntry(files: CodewikiFile[]): CodewikiFile[] {
 	return files.map((file) => (file.id === only.id ? { ...file, role: "entry" } : file));
 }
 
-function buildFromPaths(
-	cwd: string,
-	language: ProjectType,
-	relPaths: ReadonlyArray<string>,
-	extractors: ReadonlyArray<LanguageExtractor>,
-): Codewiki {
-	const builtFiles: BuiltFile[] = [];
-	for (const relPath of [...relPaths].sort(compareStrings)) {
-		const built = buildFile(cwd, relPath, extractors);
-		if (built) builtFiles.push(built);
-	}
-	const files = promoteSingleSourceEntry(builtFiles.map((item) => item.file).sort(compareFiles));
+function codewikiFromBuiltFiles(cwd: string, language: ProjectType, builtFiles: ReadonlyArray<BuiltFile>): Codewiki {
+	const baseBuiltFiles = builtFiles.map((item) => ({
+		...item,
+		file: { ...item.file, role: roleFor(item.file.path, item.file.lang) },
+	}));
+	const files = promoteSingleSourceEntry(baseBuiltFiles.map((item) => item.file).sort(compareFiles));
 	const roleById = new Map(files.map((file) => [file.id, file.role] as const));
-	const normalizedBuilt = builtFiles.map((item) => {
+	const normalizedBuilt = baseBuiltFiles.map((item) => {
 		const role = roleById.get(item.file.id);
 		return role && role !== item.file.role ? { ...item, file: { ...item.file, role } } : item;
 	});
+	const normalizedFiles = normalizedBuilt.map((item) => item.file).sort(compareFiles);
 	return {
-		version: 3,
+		version: 4,
 		language,
-		files,
+		files: normalizedFiles,
 		symbols: normalizedBuilt.flatMap((item) => item.symbols).sort(compareCodewikiSymbols),
-		edges: buildEdges(cwd, normalizedBuilt),
+		edges: buildEdges(cwd, normalizedFiles),
 	};
 }
 
-export function buildCodewiki(input: BuildCodewikiInput): Codewiki {
-	const files: string[] = [];
-	walkFiles(input.cwd, input.cwd, files);
-	return buildFromPaths(input.cwd, input.language, files, fallbackExtractors);
+async function buildFromPaths(
+	cwd: string,
+	language: ProjectType,
+	relPaths: ReadonlyArray<string>,
+	options: CodewikiBuildOptions = {},
+): Promise<Codewiki> {
+	const treeSitterExtractor = await loadTreeSitterExtractor();
+	const readFile = options.readFile ?? defaultReadFile;
+	const builtFiles: BuiltFile[] = [];
+	for (const relPath of [...relPaths].sort(compareStrings)) {
+		const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
+		if (built) builtFiles.push(built);
+	}
+	return codewikiFromBuiltFiles(cwd, language, builtFiles);
 }
 
-export async function buildCodewikiWithTreeSitter(input: BuildCodewikiInput): Promise<Codewiki> {
+export async function buildCodewiki(input: BuildCodewikiInput, options: CodewikiBuildOptions = {}): Promise<Codewiki> {
 	const files: string[] = [];
 	walkFiles(input.cwd, input.cwd, files);
-	const treeSitterExtractor = await createTreeSitterExtractor();
-	return buildFromPaths(input.cwd, input.language, files, [treeSitterExtractor, ...fallbackExtractors]);
+	return buildFromPaths(input.cwd, input.language, files, options);
 }
 
 /**
  * Apply an incremental update for a set of changed paths. The changed file
- * records and symbols are replaced in-place, and edges are rebuilt from the
- * current source tree so imports stay normalized after adds/removes.
+ * records and symbols are replaced in-place, and edges are rebuilt from stored
+ * imports across the merged file set.
  */
-export function updateCodewikiPaths(cwd: string, codewiki: Codewiki, paths: ReadonlyArray<string>): Codewiki {
-	const normalizedPaths = paths.map(normalizeInputPath).filter((path) => path.length > 0 && !path.startsWith(".."));
+export async function updateCodewikiPaths(
+	cwd: string,
+	codewiki: Codewiki,
+	paths: ReadonlyArray<string>,
+	options: CodewikiBuildOptions = {},
+): Promise<Codewiki> {
+	const normalizedPaths = uniqueSorted(
+		paths.map(normalizeInputPath).filter((path) => path.length > 0 && !path.startsWith("..")),
+	);
 	if (normalizedPaths.length === 0) return codewiki;
 	const existingPaths = new Set(codewiki.files.map((file) => file.path));
-	let changed = false;
+	const treeSitterExtractor = await loadTreeSitterExtractor();
+	const readFile = options.readFile ?? defaultReadFile;
+	const changedPathSet = new Set(normalizedPaths);
+	const rebuiltFiles: BuiltFile[] = [];
+	let hasIndexChange = false;
 	for (const relPath of normalizedPaths) {
-		if (existingPaths.has(relPath) || isIndexablePath(relPath)) {
-			changed = true;
-			break;
+		const wasIndexed = existingPaths.has(relPath);
+		let isCurrentIndexableFile = false;
+		if (isIndexablePath(relPath)) {
+			try {
+				isCurrentIndexableFile = statSync(join(cwd, relPath)).isFile();
+			} catch {
+				isCurrentIndexableFile = false;
+			}
 		}
+		if (!wasIndexed && !isCurrentIndexableFile) continue;
+		hasIndexChange = true;
+		if (!isCurrentIndexableFile) continue;
+		const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
+		if (built) rebuiltFiles.push(built);
 	}
-	if (!changed) return codewiki;
-	const allPaths = new Set(codewiki.files.map((file) => file.path));
-	for (const relPath of normalizedPaths) {
-		allPaths.delete(relPath);
-		if (!isIndexablePath(relPath)) continue;
-		try {
-			if (statSync(join(cwd, relPath)).isFile()) allPaths.add(relPath);
-		} catch {
-			// deleted file: already removed from the set
-		}
+	if (!hasIndexChange) return codewiki;
+	const removedFileIds = new Set(codewiki.files.filter((file) => changedPathSet.has(file.path)).map((file) => file.id));
+	const symbolsByFileId = new Map<string, CodewikiSymbol[]>();
+	for (const symbol of codewiki.symbols) {
+		if (removedFileIds.has(symbol.fileId)) continue;
+		const symbols = symbolsByFileId.get(symbol.fileId) ?? [];
+		symbols.push(symbol);
+		symbolsByFileId.set(symbol.fileId, symbols);
 	}
-	return buildFromPaths(cwd, codewiki.language, [...allPaths], fallbackExtractors);
+	const keptFiles: BuiltFile[] = codewiki.files
+		.filter((file) => !changedPathSet.has(file.path))
+		.map((file) => ({ file, symbols: symbolsByFileId.get(file.id) ?? [] }));
+	return codewikiFromBuiltFiles(cwd, codewiki.language, [...keptFiles, ...rebuiltFiles]);
 }
 
 export function codewikiPath(cwd: string): string {
@@ -750,7 +843,7 @@ export function codewikiPath(cwd: string): string {
 }
 
 export function writeCodewiki(cwd: string, codewiki: Codewiki): void {
-	safeResourceWrite(codewikiPath(cwd), `${JSON.stringify(normalizeCodewiki(codewiki), null, 2)}\n`, {
+	safeResourceWrite(codewikiPath(cwd), `${JSON.stringify(normalizeCodewiki(codewiki))}\n`, {
 		encoding: "utf8",
 	});
 }
@@ -797,8 +890,13 @@ export function codewikiEntries(codewiki: Codewiki): CodewikiEntry[] {
 			exports: uniqueSorted(exportsByFile.get(file.id) ?? []),
 			imports: uniqueSorted(importsByFile.get(file.id) ?? []),
 			kind: file.role === "entry" ? "entry-point" : file.role === "test" ? "test" : "module",
+			...(file.summary ? { summary: file.summary } : {}),
 		}))
 		.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export function codewikiNeedsBackfill(codewiki: Codewiki): boolean {
+	return codewiki.files.some((file) => file.lang !== "config" && file.hash.length === 0);
 }
 
 export function structuralCodewikiHash(codewiki: Codewiki): string {
@@ -807,20 +905,50 @@ export function structuralCodewikiHash(codewiki: Codewiki): string {
 		.digest("hex");
 }
 
+function normalizeCodewikiFile(file: CodewikiFile): CodewikiFile {
+	return {
+		id: file.id,
+		path: file.path,
+		lang: file.lang,
+		loc: file.loc,
+		role: file.role,
+		hash: file.hash,
+		imports: uniqueSorted(file.imports),
+		...(file.summary ? { summary: file.summary } : {}),
+	};
+}
+
 function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 	return {
-		version: 3,
+		version: 4,
 		language: codewiki.language,
-		files: [...codewiki.files].sort(compareFiles),
+		files: codewiki.files.map(normalizeCodewikiFile).sort(compareFiles),
 		symbols: [...codewiki.symbols].sort(compareCodewikiSymbols),
 		edges: [...codewiki.edges].sort(compareEdges),
 	};
 }
 
 function upgradeCodewiki(value: unknown): Codewiki | null {
-	if (isCodewikiV3(value)) return normalizeCodewiki(value);
+	if (isCodewikiV4(value)) return normalizeCodewiki(value);
+	if (isCodewikiV3(value)) return upgradeV3Codewiki(value);
 	if (isCodewikiV2(value)) return upgradeV2Codewiki(value);
 	return null;
+}
+
+interface CodewikiFileV3 {
+	id: string;
+	path: string;
+	lang: CodewikiLanguage;
+	loc: number;
+	role: CodewikiFileRole;
+}
+
+interface CodewikiV3 {
+	version: 3;
+	language: ProjectType;
+	files: CodewikiFileV3[];
+	symbols: CodewikiSymbol[];
+	edges: CodewikiEdge[];
 }
 
 interface CodewikiV2 {
@@ -830,8 +958,22 @@ interface CodewikiV2 {
 	entries: CodewikiEntry[];
 }
 
+function upgradeV3Codewiki(value: CodewikiV3): Codewiki {
+	return normalizeCodewiki({
+		version: 4,
+		language: value.language,
+		files: value.files.map((file) => ({
+			...file,
+			hash: "",
+			imports: [],
+		})),
+		symbols: value.symbols,
+		edges: value.edges,
+	});
+}
+
 function upgradeV2Codewiki(value: CodewikiV2): Codewiki {
-	const files: CodewikiFile[] = value.entries.map((entry) => {
+	const files: CodewikiFileV3[] = value.entries.map((entry) => {
 		const lang =
 			languageForPath(entry.path) ??
 			(value.language === "unknown" || value.language === "polyglot" || value.language === "dotfiles"
@@ -861,7 +1003,7 @@ function upgradeV2Codewiki(value: CodewikiV2): Codewiki {
 			edges.push(toFileId ? { fileId, toFileId } : { fileId, externalModule: item });
 		}
 	}
-	return normalizeCodewiki({
+	return upgradeV3Codewiki({
 		version: 3,
 		language: value.language,
 		files,
@@ -870,12 +1012,20 @@ function upgradeV2Codewiki(value: CodewikiV2): Codewiki {
 	});
 }
 
-function isCodewikiV3(value: unknown): value is Codewiki {
+function isCodewikiV4(value: unknown): value is Codewiki {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const obj = value as Record<string, unknown>;
+	if (obj.version !== 4 || typeof obj.language !== "string") return false;
+	if (!Array.isArray(obj.files) || !Array.isArray(obj.symbols) || !Array.isArray(obj.edges)) return false;
+	return obj.files.every(isCodewikiFile) && obj.symbols.every(isCodewikiSymbol) && obj.edges.every(isCodewikiEdge);
+}
+
+function isCodewikiV3(value: unknown): value is CodewikiV3 {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
 	if (obj.version !== 3 || typeof obj.language !== "string") return false;
 	if (!Array.isArray(obj.files) || !Array.isArray(obj.symbols) || !Array.isArray(obj.edges)) return false;
-	return obj.files.every(isCodewikiFile) && obj.symbols.every(isCodewikiSymbol) && obj.edges.every(isCodewikiEdge);
+	return obj.files.every(isCodewikiFileV3) && obj.symbols.every(isCodewikiSymbol) && obj.edges.every(isCodewikiEdge);
 }
 
 function isCodewikiV2(value: unknown): value is CodewikiV2 {
@@ -903,6 +1053,26 @@ const FILE_ROLES = new Set<CodewikiFileRole>(["entry", "test", "module", "config
 const SYMBOL_KINDS = new Set<CodewikiSymbolKind>(["func", "class", "method", "type", "const", "var", "trait", "iface"]);
 
 function isCodewikiFile(value: unknown): value is CodewikiFile {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const obj = value as Record<string, unknown>;
+	return (
+		typeof obj.id === "string" &&
+		typeof obj.path === "string" &&
+		typeof obj.lang === "string" &&
+		CODEWIKI_LANGUAGES.has(obj.lang as CodewikiLanguage) &&
+		typeof obj.loc === "number" &&
+		Number.isInteger(obj.loc) &&
+		obj.loc >= 0 &&
+		typeof obj.role === "string" &&
+		FILE_ROLES.has(obj.role as CodewikiFileRole) &&
+		typeof obj.hash === "string" &&
+		Array.isArray(obj.imports) &&
+		obj.imports.every((item) => typeof item === "string") &&
+		(!("summary" in obj) || typeof obj.summary === "string")
+	);
+}
+
+function isCodewikiFileV3(value: unknown): value is CodewikiFileV3 {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
 	return (

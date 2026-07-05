@@ -9,12 +9,20 @@ import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
 import { tryReadClioMd } from "./clio-md.js";
-import { buildCodewiki, codewikiPath, readCodewiki, updateCodewikiPaths, writeCodewiki } from "./codewiki/indexer.js";
+import {
+	buildCodewiki,
+	codewikiNeedsBackfill,
+	codewikiPath,
+	readCodewiki,
+	updateCodewikiPaths,
+	writeCodewiki,
+} from "./codewiki/indexer.js";
 import type { ContextContract, ContextState } from "./contract.js";
-import { computeFingerprint } from "./fingerprint.js";
+import { computeFingerprint, isStale } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
+import { runWikiGenerate } from "./wiki/generate.js";
 
 /**
  * Persist the current Clio state for `cwd`, preserving imported-context source
@@ -26,11 +34,13 @@ function persistState(
 	fingerprint: ClioProjectState["fingerprint"],
 	indexedAt: string,
 	prev: ClioProjectState | null,
+	codewikiVersion: number,
 ): void {
 	writeClioState(cwd, {
 		version: 1,
 		projectType: prev?.projectType ?? detectProjectType(cwd),
 		fingerprint,
+		codewikiVersion,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
@@ -45,20 +55,26 @@ function persistState(
  * pulls, and out-of-session edits) and again at stop. Skips projects that were
  * never indexed so we never index an arbitrary directory unprompted.
  */
-function ensureCodewikiFresh(cwd: string): void {
+async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	// The bootstrap model-generation child runs a headless session purely to draft
 	// CLIO.md; it must not re-index while the parent context-init owns the rebuild.
 	if (process.env.CLIO_BOOTSTRAP_GENERATE_CHILD === "1") return;
 	const state = readClioState(cwd);
 	if (!state && !existsSync(codewikiPath(cwd))) return;
-	const fingerprint = computeFingerprint(cwd);
+	const codewiki = readCodewiki(cwd);
+	const fingerprint = computeFingerprint(cwd, codewiki);
 	const stale =
-		!state || state.fingerprint.treeHash !== fingerprint.treeHash || !existsSync(codewikiPath(cwd)) || !readCodewiki(cwd);
+		!state ||
+		isStale(state.fingerprint, fingerprint) ||
+		!existsSync(codewikiPath(cwd)) ||
+		!codewiki ||
+		codewikiNeedsBackfill(codewiki);
 	if (!stale) return;
 	const indexedAt = new Date().toISOString();
 	const projectType = state?.projectType ?? detectProjectType(cwd);
-	writeCodewiki(cwd, buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt }));
-	persistState(cwd, fingerprint, indexedAt, state);
+	const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	writeCodewiki(cwd, rebuilt);
+	persistState(cwd, computeFingerprint(cwd, rebuilt), indexedAt, state, rebuilt.version);
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
@@ -135,32 +151,36 @@ export function createContextBundle(
 	const contextState = createContextStateReader();
 	const onStart = (): void => {
 		lastCwd = process.cwd();
-		try {
-			ensureCodewikiFresh(lastCwd);
-		} catch {
+		void ensureCodewikiFresh(lastCwd).catch(() => {
 			// Indexing is best-effort; a failed refresh must not block session start.
-		}
+		});
 		startupHints = collectStartupHints(lastCwd, options);
 		if (process.env.CLIO_INTERACTIVE === "1") return;
 		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
 	};
 
+	// Incremental updates are read-modify-write on the artifact; overlapping runs
+	// would compute from a stale base and drop each other's records, so batches
+	// serialize through this queue and stop() drains it before its final rebuild.
+	let incrementalQueue: Promise<void> = Promise.resolve();
 	const noteFileChanges = (paths: ReadonlyArray<string>, cwd: string = lastCwd): void => {
-		try {
-			if (paths.length === 0) return;
-			const codewiki = readCodewiki(cwd);
-			if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
-			const rel = paths
-				.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
-				.filter((p) => p.length > 0 && !p.startsWith(".."));
-			const updated = updateCodewikiPaths(cwd, codewiki, rel);
-			if (updated === codewiki) return; // No indexable file actually changed.
-			writeCodewiki(cwd, updated);
-			persistState(cwd, computeFingerprint(cwd), new Date().toISOString(), readClioState(cwd));
-			contextState.invalidate(cwd);
-		} catch {
-			// Best-effort: never let incremental indexing surface as a tool error.
-		}
+		incrementalQueue = incrementalQueue
+			.then(async () => {
+				if (paths.length === 0) return;
+				const codewiki = readCodewiki(cwd);
+				if (!codewiki) return; // Not indexed yet; session start/stop owns first build.
+				const rel = paths
+					.map((p) => (isAbsolute(p) ? relative(cwd, p) : p))
+					.filter((p) => p.length > 0 && !p.startsWith(".."));
+				const updated = await updateCodewikiPaths(cwd, codewiki, rel);
+				if (updated === codewiki) return; // No indexable file actually changed.
+				writeCodewiki(cwd, updated);
+				persistState(cwd, computeFingerprint(cwd, updated), new Date().toISOString(), readClioState(cwd), updated.version);
+				contextState.invalidate(cwd);
+			})
+			.catch(() => {
+				// Best-effort: never let incremental indexing surface as a tool error.
+			});
 	};
 
 	let unsubscribeSessionStart: (() => void) | null = null;
@@ -168,21 +188,26 @@ export function createContextBundle(
 		start() {
 			unsubscribeSessionStart = _context.bus.on(BusChannels.SessionStart, onStart);
 		},
-		stop() {
+		async stop() {
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
+			await incrementalQueue;
 			const projectType = detectProjectType(lastCwd);
 			const state = readClioState(lastCwd);
-			const fingerprint = computeFingerprint(lastCwd);
+			let codewiki = readCodewiki(lastCwd);
+			let fingerprint = computeFingerprint(lastCwd, codewiki);
 			let lastIndexedAt = state?.lastIndexedAt;
-			if (!state || state.fingerprint.treeHash !== fingerprint.treeHash || !readCodewiki(lastCwd)) {
+			if (!state || isStale(state.fingerprint, fingerprint) || !codewiki || codewikiNeedsBackfill(codewiki)) {
 				lastIndexedAt = new Date().toISOString();
-				writeCodewiki(lastCwd, buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt }));
+				codewiki = await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt });
+				writeCodewiki(lastCwd, codewiki);
+				fingerprint = computeFingerprint(lastCwd, codewiki);
 			}
 			writeClioState(lastCwd, {
 				version: 1,
 				projectType,
 				fingerprint,
+				...(codewiki ? { codewikiVersion: codewiki.version } : {}),
 				...(state?.contextSources ? { contextSources: state.contextSources } : {}),
 				...(state?.contextSourceHash ? { contextSourceHash: state.contextSourceHash } : {}),
 				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),
@@ -254,6 +279,25 @@ export function createContextBundle(
 					phase: "done",
 					status: "failed",
 					message: "context refresh failed",
+					detail: err instanceof Error ? err.message : String(err),
+				});
+				throw err;
+			}
+		},
+		async runWikiGenerate(input) {
+			const emitProgress = (event: Omit<ContextActivityPayload, "kind" | "at">): void => {
+				_context.bus.emit(BusChannels.ContextActivity, { kind: "context-wiki", at: Date.now(), ...event });
+				input?.onProgress?.(event);
+			};
+			try {
+				return await runWikiGenerate(
+					input ? { ...input, onProgress: emitProgress } : { model: "configured-clio-target", onProgress: emitProgress },
+				);
+			} catch (err) {
+				emitProgress({
+					phase: "done",
+					status: "failed",
+					message: "context wiki failed",
 					detail: err instanceof Error ? err.message : String(err),
 				});
 				throw err;

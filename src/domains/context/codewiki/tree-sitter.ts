@@ -12,7 +12,18 @@ type SyntaxNode = Parser.SyntaxNode;
 
 const require = createRequire(import.meta.url);
 
-type GrammarName = "typescript" | "tsx" | "javascript" | "python" | "go" | "rust" | "c" | "cpp" | "java" | "ruby";
+type GrammarName =
+	| "typescript"
+	| "tsx"
+	| "javascript"
+	| "python"
+	| "go"
+	| "rust"
+	| "c"
+	| "cpp"
+	| "java"
+	| "ruby"
+	| "c_sharp";
 
 const WASM_BY_GRAMMAR: Record<GrammarName, string> = {
 	typescript: "tree-sitter-typescript.wasm",
@@ -25,6 +36,7 @@ const WASM_BY_GRAMMAR: Record<GrammarName, string> = {
 	cpp: "tree-sitter-cpp.wasm",
 	java: "tree-sitter-java.wasm",
 	ruby: "tree-sitter-ruby.wasm",
+	c_sharp: "tree-sitter-c_sharp.wasm",
 };
 
 const NAME_NODE_TYPES = new Set([
@@ -34,6 +46,26 @@ const NAME_NODE_TYPES = new Set([
 	"field_identifier",
 	"constant",
 	"constant_identifier",
+]);
+
+const FUNCTION_LIKE_NODE_TYPES = new Set([
+	"function_declaration",
+	"function_expression",
+	"generator_function",
+	"generator_function_declaration",
+	"generator_function_expression",
+	"arrow_function",
+	"method_definition",
+	"function_definition",
+	"lambda",
+	"lambda_expression",
+	"func_literal",
+	"method",
+	"singleton_method",
+	"do_block",
+	"method_declaration",
+	"constructor_declaration",
+	"local_function_statement",
 ]);
 
 let parserInit: Promise<void> | null = null;
@@ -57,6 +89,7 @@ function grammarForPath(path: string, lang: CodewikiLanguage): GrammarName | nul
 	if (lang === "c++") return "cpp";
 	if (lang === "java") return "java";
 	if (lang === "ruby") return "ruby";
+	if (lang === "c#") return "c_sharp";
 	return null;
 }
 
@@ -95,6 +128,15 @@ function hasAncestor(node: SyntaxNode, type: string): boolean {
 	return false;
 }
 
+function hasFunctionLikeAncestor(node: SyntaxNode): boolean {
+	let current = node.parent;
+	while (current) {
+		if (FUNCTION_LIKE_NODE_TYPES.has(current.type)) return true;
+		current = current.parent;
+	}
+	return false;
+}
+
 function addSymbol(
 	target: ExtractedSymbol[],
 	node: SyntaxNode,
@@ -111,6 +153,62 @@ function descendants(root: SyntaxNode, types: string | string[]): SyntaxNode[] {
 	return root.descendantsOfType(types);
 }
 
+function compareStrings(a: string, b: string): number {
+	return a.localeCompare(b);
+}
+
+function uniqueSorted(values: Iterable<string>): string[] {
+	return [...new Set([...values].filter((value) => value.trim().length > 0))].sort(compareStrings);
+}
+
+function cleanStringLiteral(value: string): string {
+	const trimmed = value.trim();
+	if (
+		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+		(trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+		(trimmed.startsWith("`") && trimmed.endsWith("`")) ||
+		(trimmed.startsWith("<") && trimmed.endsWith(">"))
+	) {
+		return trimmed.slice(1, -1);
+	}
+	return trimmed;
+}
+
+function stringValue(node: SyntaxNode | null | undefined): string | null {
+	if (!node) return null;
+	const value = cleanStringLiteral(node.text);
+	return value.length > 0 ? value : null;
+}
+
+function firstStringDescendant(node: SyntaxNode | null | undefined): SyntaxNode | null {
+	if (!node) return null;
+	if (
+		node.type === "string" ||
+		node.type === "string_literal" ||
+		node.type === "interpreted_string_literal" ||
+		node.type === "raw_string_literal" ||
+		node.type === "system_lib_string"
+	) {
+		return node;
+	}
+	for (const child of node.namedChildren) {
+		const found = firstStringDescendant(child);
+		if (found) return found;
+	}
+	return null;
+}
+
+function firstStringValue(node: SyntaxNode | null | undefined): string | null {
+	return stringValue(firstStringDescendant(node));
+}
+
+function addVariableDeclaratorNames(target: string[], node: SyntaxNode): void {
+	for (const declarator of descendants(node, "variable_declarator")) {
+		const name = declarator.childForFieldName("name") ?? firstNamedDescendant(declarator);
+		if (name) target.push(name.text);
+	}
+}
+
 function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
 	for (const node of descendants(root, ["function_declaration", "generator_function_declaration"])) {
@@ -121,6 +219,7 @@ function extractTsJs(root: SyntaxNode): ExtractedSymbol[] {
 	for (const node of descendants(root, ["type_alias_declaration", "enum_declaration"])) addSymbol(symbols, node, "type");
 	for (const node of descendants(root, "method_definition")) addSymbol(symbols, node, "method");
 	for (const node of descendants(root, "variable_declarator")) {
+		if (hasFunctionLikeAncestor(node)) continue;
 		const parentText = node.parent?.text ?? "";
 		addSymbol(symbols, node, parentText.trimStart().startsWith("const") ? "const" : "var");
 	}
@@ -134,6 +233,7 @@ function extractPython(root: SyntaxNode): ExtractedSymbol[] {
 	}
 	for (const node of descendants(root, "class_definition")) addSymbol(symbols, node, "class");
 	for (const node of descendants(root, "assignment")) {
+		if (hasFunctionLikeAncestor(node)) continue;
 		const left = node.childForFieldName("left") ?? node.namedChild(0);
 		if (!left) continue;
 		const name = firstNamedDescendant(left)?.text;
@@ -149,8 +249,14 @@ function extractGo(root: SyntaxNode): ExtractedSymbol[] {
 	for (const node of descendants(root, "type_spec")) {
 		addSymbol(symbols, node, node.text.includes("interface") ? "iface" : "type");
 	}
-	for (const node of descendants(root, "const_spec")) addSymbol(symbols, node, "const");
-	for (const node of descendants(root, "var_spec")) addSymbol(symbols, node, "var");
+	for (const node of descendants(root, "const_spec")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "const");
+	}
+	for (const node of descendants(root, "var_spec")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "var");
+	}
 	return symbols;
 }
 
@@ -192,13 +298,40 @@ function extractRuby(root: SyntaxNode): ExtractedSymbol[] {
 	for (const node of descendants(root, "class")) addSymbol(symbols, node, "class");
 	for (const node of descendants(root, "module")) addSymbol(symbols, node, "type");
 	for (const node of descendants(root, "assignment")) {
+		if (hasFunctionLikeAncestor(node)) continue;
 		const name = nameFromNode(node);
 		if (name) addSymbol(symbols, node, /^[A-Z]/.test(name) ? "const" : "var", name);
 	}
 	return symbols;
 }
 
-function extractByGrammar(grammar: GrammarName, root: SyntaxNode): ExtractedSymbol[] {
+function extractCSharp(root: SyntaxNode): ExtractedSymbol[] {
+	const symbols: ExtractedSymbol[] = [];
+	for (const node of descendants(root, "class_declaration")) {
+		if (!hasFunctionLikeAncestor(node)) addSymbol(symbols, node, "class");
+	}
+	for (const node of descendants(root, "interface_declaration")) {
+		if (!hasFunctionLikeAncestor(node)) addSymbol(symbols, node, "iface");
+	}
+	for (const node of descendants(root, ["enum_declaration", "struct_declaration", "record_declaration"])) {
+		if (!hasFunctionLikeAncestor(node)) addSymbol(symbols, node, "type");
+	}
+	for (const node of descendants(root, ["method_declaration", "constructor_declaration"]))
+		addSymbol(symbols, node, "method");
+	for (const node of descendants(root, "property_declaration")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		addSymbol(symbols, node, "var");
+	}
+	for (const node of descendants(root, "field_declaration")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		const text = node.text;
+		const isConst = /\bconst\b/.test(text) || (/\bstatic\b/.test(text) && /\breadonly\b/.test(text));
+		addSymbol(symbols, node, isConst ? "const" : "var");
+	}
+	return symbols;
+}
+
+function extractSymbolsByGrammar(grammar: GrammarName, root: SyntaxNode): ExtractedSymbol[] {
 	if (grammar === "typescript" || grammar === "tsx" || grammar === "javascript") return extractTsJs(root);
 	if (grammar === "python") return extractPython(root);
 	if (grammar === "go") return extractGo(root);
@@ -206,7 +339,188 @@ function extractByGrammar(grammar: GrammarName, root: SyntaxNode): ExtractedSymb
 	if (grammar === "c" || grammar === "cpp") return extractCFamily(root);
 	if (grammar === "java") return extractJava(root);
 	if (grammar === "ruby") return extractRuby(root);
+	if (grammar === "c_sharp") return extractCSharp(root);
 	return [];
+}
+
+function extractTsJsImports(root: SyntaxNode): string[] {
+	const imports: string[] = [];
+	for (const node of descendants(root, "import_statement")) {
+		const source = stringValue(node.childForFieldName("source")) ?? firstStringValue(node);
+		if (source) imports.push(source);
+	}
+	for (const node of descendants(root, "export_statement")) {
+		const source = stringValue(node.childForFieldName("source"));
+		if (source) imports.push(source);
+	}
+	for (const node of descendants(root, "call_expression")) {
+		const callee = node.childForFieldName("function");
+		if (!callee || (callee.text !== "require" && callee.text !== "import" && callee.type !== "import")) continue;
+		const source = firstStringValue(node.childForFieldName("arguments"));
+		if (source) imports.push(source);
+	}
+	return uniqueSorted(imports);
+}
+
+function extractPythonImports(root: SyntaxNode): string[] {
+	const imports: string[] = [];
+	for (const node of descendants(root, "import_statement")) {
+		for (const child of node.namedChildren) {
+			if (child.type === "dotted_name") imports.push(child.text);
+			if (child.type === "aliased_import") {
+				const name = child.childForFieldName("name") ?? child.namedChild(0);
+				if (name) imports.push(name.text);
+			}
+		}
+	}
+	for (const node of descendants(root, "import_from_statement")) {
+		const moduleName =
+			node.childForFieldName("module_name") ??
+			node.namedChildren.find((child) => child.type === "relative_import" || child.type === "dotted_name");
+		if (moduleName) imports.push(moduleName.text);
+	}
+	return uniqueSorted(imports);
+}
+
+function extractGoImports(root: SyntaxNode): string[] {
+	const imports: string[] = [];
+	for (const node of descendants(root, "import_spec")) {
+		const source = stringValue(node.childForFieldName("path"));
+		if (source) imports.push(source);
+	}
+	return uniqueSorted(imports);
+}
+
+function extractRustImports(root: SyntaxNode): string[] {
+	const imports: string[] = [];
+	for (const node of descendants(root, "use_declaration")) {
+		const argument = node.childForFieldName("argument") ?? node.namedChild(0);
+		if (argument) imports.push(argument.text.trim());
+	}
+	for (const node of descendants(root, "extern_crate_declaration")) {
+		const name = node.childForFieldName("name") ?? node.namedChildren.find((child) => child.type === "identifier");
+		if (name) imports.push(name.text.trim());
+	}
+	return uniqueSorted(imports);
+}
+
+function extractCFamilyImports(root: SyntaxNode): string[] {
+	const imports: string[] = [];
+	for (const node of descendants(root, "preproc_include")) {
+		const source = stringValue(node.childForFieldName("path") ?? firstStringDescendant(node));
+		if (source) imports.push(source);
+	}
+	return uniqueSorted(imports);
+}
+
+function extractJavaImports(root: SyntaxNode): string[] {
+	const imports: string[] = [];
+	for (const node of descendants(root, "import_declaration")) {
+		const source = node.text
+			.replace(/^import\s+/, "")
+			.replace(/^static\s+/, "")
+			.replace(/;$/, "")
+			.trim();
+		if (source) imports.push(source);
+	}
+	return uniqueSorted(imports);
+}
+
+function extractRubyImports(root: SyntaxNode): string[] {
+	return uniqueSorted([
+		...Array.from(root.text.matchAll(/^\s*require\s+["']([^"']+)["']/gm), (match) => match[1] ?? ""),
+		...Array.from(root.text.matchAll(/^\s*require_relative\s+["']([^"']+)["']/gm), (match) => `./${match[1] ?? ""}`),
+	]);
+}
+
+function extractCSharpImports(root: SyntaxNode): string[] {
+	const imports: string[] = [];
+	for (const node of descendants(root, "using_directive")) {
+		let source = node.text
+			.replace(/^using\s+/, "")
+			.replace(/;$/, "")
+			.trim();
+		if (source.startsWith("static ")) source = source.slice("static ".length).trim();
+		const aliasIndex = source.indexOf("=");
+		if (aliasIndex !== -1) source = source.slice(aliasIndex + 1).trim();
+		if (source) imports.push(source);
+	}
+	return uniqueSorted(imports);
+}
+
+function extractImportsByGrammar(grammar: GrammarName, root: SyntaxNode): string[] {
+	if (grammar === "typescript" || grammar === "tsx" || grammar === "javascript") return extractTsJsImports(root);
+	if (grammar === "python") return extractPythonImports(root);
+	if (grammar === "go") return extractGoImports(root);
+	if (grammar === "rust") return extractRustImports(root);
+	if (grammar === "c" || grammar === "cpp") return extractCFamilyImports(root);
+	if (grammar === "java") return extractJavaImports(root);
+	if (grammar === "ruby") return extractRubyImports(root);
+	if (grammar === "c_sharp") return extractCSharpImports(root);
+	return [];
+}
+
+function extractTsJsExports(root: SyntaxNode): string[] {
+	const exports: string[] = [];
+	for (const node of descendants(root, "export_statement")) {
+		const declaration = node.childForFieldName("declaration");
+		if (declaration) {
+			if (declaration.type === "lexical_declaration" || declaration.type === "variable_declaration") {
+				addVariableDeclaratorNames(exports, declaration);
+			} else {
+				const name = nameFromNode(declaration);
+				if (name) exports.push(name);
+			}
+		}
+		for (const specifier of descendants(node, "export_specifier")) {
+			const alias = specifier.childForFieldName("alias");
+			const name = alias ?? specifier.childForFieldName("name") ?? firstNamedDescendant(specifier);
+			if (name) exports.push(name.text);
+		}
+		if (/^\s*export\s+default\b/.test(node.text)) exports.push("default");
+	}
+	return uniqueSorted(exports);
+}
+
+function extractRustExports(root: SyntaxNode): string[] {
+	const exports: string[] = [];
+	for (const node of descendants(root, [
+		"function_item",
+		"struct_item",
+		"enum_item",
+		"type_item",
+		"trait_item",
+		"const_item",
+		"static_item",
+	])) {
+		if (!node.text.trimStart().startsWith("pub")) continue;
+		const name = nameFromNode(node);
+		if (name) exports.push(name);
+	}
+	return uniqueSorted(exports);
+}
+
+function extractExportsByGrammar(
+	grammar: GrammarName,
+	root: SyntaxNode,
+	symbols: ReadonlyArray<ExtractedSymbol>,
+): string[] {
+	if (grammar === "typescript" || grammar === "tsx" || grammar === "javascript") return extractTsJsExports(root);
+	if (grammar === "python")
+		return uniqueSorted(symbols.filter((symbol) => !symbol.name.startsWith("_")).map((symbol) => symbol.name));
+	if (grammar === "go")
+		return uniqueSorted(symbols.filter((symbol) => /^[A-Z]/.test(symbol.name)).map((symbol) => symbol.name));
+	if (grammar === "rust") return extractRustExports(root);
+	if (grammar === "java") {
+		return uniqueSorted(
+			symbols
+				.filter((symbol) => symbol.kind === "class" || symbol.kind === "iface" || symbol.kind === "type")
+				.map((symbol) => symbol.name),
+		);
+	}
+	if (grammar === "ruby")
+		return uniqueSorted(symbols.filter((symbol) => /^[A-Z]/.test(symbol.name)).map((symbol) => symbol.name));
+	return uniqueSorted(symbols.map((symbol) => symbol.name));
 }
 
 function sortSymbols(symbols: ExtractedSymbol[]): ExtractedSymbol[] {
@@ -223,7 +537,7 @@ export async function createTreeSitterExtractor(): Promise<LanguageExtractor> {
 		parsers.set(grammar, parser);
 	}
 	return {
-		langs: ["typescript", "javascript", "python", "go", "rust", "c", "c++", "java", "ruby"],
+		langs: ["typescript", "javascript", "python", "go", "rust", "c", "c++", "java", "ruby", "c#"],
 		extract(path: string, text: string): LanguageExtraction {
 			const lang = path.endsWith(".tsx")
 				? "typescript"
@@ -241,13 +555,14 @@ export async function createTreeSitterExtractor(): Promise<LanguageExtractor> {
 			let tree: Parser.Tree | null = null;
 			try {
 				tree = parser.parse(text);
-				const symbols = sortSymbols(extractByGrammar(grammar, tree.rootNode));
-				return { symbols, imports: [], exports: symbols.map((symbol) => symbol.name) };
+				const symbols = sortSymbols(extractSymbolsByGrammar(grammar, tree.rootNode));
+				return {
+					symbols,
+					imports: extractImportsByGrammar(grammar, tree.rootNode),
+					exports: extractExportsByGrammar(grammar, tree.rootNode, symbols),
+				};
 			} catch {
-				// A grammar that crashes on one file (some web-tree-sitter grammars throw on
-				// otherwise valid input) must degrade to no extraction for that file, never
-				// abort the whole codewiki build.
-				return { symbols: [], imports: [], exports: [] };
+				throw new Error(`tree-sitter parse failed for ${path}`);
 			} finally {
 				tree?.delete();
 			}
@@ -265,5 +580,6 @@ function languageFromPath(path: string): CodewikiLanguage {
 	if (/\.(c|h)$/.test(path)) return "c";
 	if (path.endsWith(".java")) return "java";
 	if (path.endsWith(".rb")) return "ruby";
+	if (path.endsWith(".cs")) return "c#";
 	return "config";
 }

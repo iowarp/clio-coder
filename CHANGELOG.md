@@ -5,6 +5,28 @@ follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 semantic versioning for a pre-1.0 project: minor versions may change
 interfaces.
 
+## 0.2.9 - Unreleased
+
+### Changed
+
+- **Codewiki v4 rebuild.** The structural codewiki index is smaller and more
+  navigable: schema v4 stores per-file hashes, imports, and optional summaries,
+  keeps declaration-only symbols, writes compact JSON, and runs one unified
+  async tree-sitter-first pipeline with per-file regex fallback and C# coverage
+  across the ten-language set. Incremental updates now replace only changed
+  indexed paths and rebuild edges, while `.clio/state.json` records
+  `codewikiVersion` and uses the mtime-aware fingerprint plus the single
+  `isStale` tree-hash predicate for refresh decisions. A new explicit wiki
+  layer writes agent-authored `.clio/wiki/` pages with `quickstart.md` as the
+  hub, at most eight pages, and `meta.json` carrying git head and content hash;
+  generation runs only through `clio context wiki`, `clio context wiki
+  --update`, or `clio context refresh --wiki`, with `--status` read-only. Prompt
+  markers, `code_nav mode=wiki`, `clio context` digest output, and the welcome
+  dashboard now surface codewiki/wiki availability and staleness without
+  embedding the artifacts. Existing repositories perform one full re-index after
+  upgrade because the new fingerprint format and v4 per-file hash/import
+  backfill make old artifacts stale.
+
 ## 0.2.8 - 2026-07-02
 
 The toolkit-rework release: the tool surface was redesigned into seven planes

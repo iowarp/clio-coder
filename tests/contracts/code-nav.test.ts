@@ -1,9 +1,15 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { buildCodewiki, writeCodewiki } from "../../src/domains/context/index.js";
+import {
+	buildCodewiki,
+	listWikiPages,
+	wikiDir,
+	writeCodewiki,
+	writeWikiMeta,
+} from "../../src/domains/context/index.js";
 import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
 
 function parseJsonOutput(output: string): Record<string, unknown> {
@@ -26,23 +32,35 @@ function pathsFromFiles(value: unknown): string[] {
 		.filter((path) => path.length > 0);
 }
 
+function writeWikiPage(cwd: string, name: string, text: string): void {
+	mkdirSync(wikiDir(cwd), { recursive: true });
+	writeFileSync(join(wikiDir(cwd), name), text, "utf8");
+}
+
 describe("contracts/code_nav", () => {
 	let scratch: string;
 	let originalCwd: string;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		originalCwd = process.cwd();
 		scratch = mkdtempSync(join(tmpdir(), "clio-code-nav-"));
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		mkdirSync(join(scratch, "pkg"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "index.ts"),
-			"import { worker } from './worker.js';\nexport function main() { return worker; }\n",
+			[
+				"/**",
+				" * Runs the TypeScript entry.",
+				" */",
+				"import { worker } from './worker.js';",
+				"export function main() { return worker; }",
+				"",
+			].join("\n"),
 			"utf8",
 		);
 		writeFileSync(join(scratch, "src", "worker.ts"), "export const worker = 1;\n", "utf8");
 		writeFileSync(join(scratch, "pkg", "util.py"), "import os\n\ndef helper():\n    return os.getcwd()\n", "utf8");
-		writeCodewiki(scratch, buildCodewiki({ cwd: scratch, language: "polyglot" }));
+		writeCodewiki(scratch, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
 		process.chdir(scratch);
 	});
 
@@ -79,11 +97,14 @@ describe("contracts/code_nav", () => {
 
 		const entries = await codeNavTool.run({ mode: "entries" });
 		strictEqual(entries.kind, "ok");
-		ok(pathsFromFiles(parseJsonOutput(entries.output).files).includes("src/index.ts"));
+		const entriesPayload = parseJsonOutput(entries.output);
+		ok(pathsFromFiles(entriesPayload.files).includes("src/index.ts"));
 
 		const outline = await codeNavTool.run({ mode: "outline", query: "src/index.ts" });
 		strictEqual(outline.kind, "ok");
 		const outlinePayload = parseJsonOutput(outline.output);
+		const outlineFile = outlinePayload.file as Record<string, unknown>;
+		strictEqual(outlineFile.summary, "Runs the TypeScript entry.");
 		ok(
 			Array.isArray(outlinePayload.symbols) &&
 				outlinePayload.symbols.some((item) => {
@@ -102,5 +123,57 @@ describe("contracts/code_nav", () => {
 		strictEqual(dependents.kind, "ok");
 		const dependentsPayload = parseJsonOutput(dependents.output);
 		ok(Array.isArray(dependentsPayload.dependents) && dependentsPayload.dependents.includes("src/index.ts"));
+	});
+
+	it("returns a helpful empty wiki payload when no Markdown wiki exists", async () => {
+		const result = await codeNavTool.run({ mode: "wiki" });
+
+		strictEqual(result.kind, "ok");
+		const payload = parseJsonOutput(result.output);
+		ok(Array.isArray(payload.pages) && payload.pages.length === 0);
+		strictEqual((payload.staleness as Record<string, unknown>).state, "absent");
+		strictEqual(payload.message, "no wiki exists; run clio context wiki");
+	});
+
+	it("lists Markdown wiki pages and staleness through mode=wiki", async () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nStart here.\n");
+		writeWikiPage(scratch, "architecture.md", "# Architecture\n\nRuntime map.\n");
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: null,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		const result = await codeNavTool.run({ mode: "wiki" });
+
+		strictEqual(result.kind, "ok");
+		const payload = parseJsonOutput(result.output);
+		ok(Array.isArray(payload.pages));
+		const pages = payload.pages as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			pages.map((page) => page.path),
+			["architecture.md", "quickstart.md"],
+		);
+		strictEqual(pages.find((page) => page.path === "quickstart.md")?.title, "Quickstart");
+		strictEqual((payload.staleness as Record<string, unknown>).state, "fresh");
+	});
+
+	it("advertises wiki in the mode enum and keeps unknown modes rejected", async () => {
+		const parameters = codeNavTool.parameters as unknown as {
+			properties?: { mode?: { enum?: unknown } };
+		};
+		const modeEnum = parameters.properties?.mode?.enum;
+		ok(Array.isArray(modeEnum));
+		ok(modeEnum.includes("wiki"));
+
+		const result = await codeNavTool.run({ mode: "unknown" });
+		strictEqual(result.kind, "error");
+		strictEqual(
+			result.message,
+			"code_nav: mode must be symbol, path, entries, outline, deps, dependents, or wiki; got 'unknown'",
+		);
 	});
 });

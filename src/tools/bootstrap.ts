@@ -123,7 +123,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.codeNav, "Raise limit or use a narrower mode/query."),
 		costLatency: "local_fast",
-		promptHint: "Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).",
+		promptHint:
+			"Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents, wiki).",
 	},
 	[ToolNames.Context]: {
 		objective: "Return workspace, bundled-docs, or skill context.",

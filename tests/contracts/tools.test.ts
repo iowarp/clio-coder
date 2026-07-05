@@ -1449,7 +1449,7 @@ describe("contracts/tools prompt hints", () => {
 		deepStrictEqual([...hinted.keys()].sort(), ["ask_user", "code_nav", "context", "dispatch", "tasks"]);
 		strictEqual(
 			hinted.get("code_nav"),
-			"Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).",
+			"Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents, wiki).",
 		);
 		strictEqual(
 			hinted.get("context"),
