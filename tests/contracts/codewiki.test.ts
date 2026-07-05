@@ -747,4 +747,185 @@ describe("contracts/codewiki", () => {
 		ok(codewiki);
 		ok(hasSymbol(codewiki, "src/index.ts", "stopWritten", "const"));
 	});
+
+	it("skips TS function-local functions, classes, and object-literal methods", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(
+			join(scratch, "src", "nested.ts"),
+			[
+				"export function outer() {",
+				"  function innerFn() {",
+				"    return 1;",
+				"  }",
+				"  class LocalClass {",
+				"    localMethod() {",
+				"      return 2;",
+				"    }",
+				"  }",
+				"  return new LocalClass();",
+				"}",
+				"",
+				"const registry = {",
+				"  handler() {",
+				"    return 3;",
+				"  },",
+				"};",
+				"",
+				"export class Service {",
+				"  start() {",
+				"    return outer();",
+				"  }",
+				"}",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
+
+		ok(hasSymbol(codewiki, "src/nested.ts", "outer", "func"));
+		ok(hasSymbol(codewiki, "src/nested.ts", "registry", "const"));
+		ok(hasSymbol(codewiki, "src/nested.ts", "Service", "class"));
+		ok(hasSymbol(codewiki, "src/nested.ts", "start", "method"));
+		strictEqual(hasSymbol(codewiki, "src/nested.ts", "innerFn"), false);
+		strictEqual(hasSymbol(codewiki, "src/nested.ts", "LocalClass"), false);
+		strictEqual(hasSymbol(codewiki, "src/nested.ts", "localMethod"), false);
+		strictEqual(hasSymbol(codewiki, "src/nested.ts", "handler"), false);
+	});
+
+	it("skips Python function-local nested functions and classes", async () => {
+		writeFileSync(
+			join(scratch, "service.py"),
+			[
+				"class Service:",
+				"    def handle(self):",
+				"        def inner():",
+				"            return 1",
+				"",
+				"        class LocalError(Exception):",
+				"            pass",
+				"",
+				"        return inner()",
+				"",
+				"def build():",
+				"    def helper():",
+				"        return 2",
+				"    return helper()",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "python" });
+
+		ok(hasSymbol(codewiki, "service.py", "Service", "class"));
+		ok(hasSymbol(codewiki, "service.py", "handle", "method"));
+		ok(hasSymbol(codewiki, "service.py", "build", "func"));
+		strictEqual(hasSymbol(codewiki, "service.py", "inner"), false);
+		strictEqual(hasSymbol(codewiki, "service.py", "helper"), false);
+		strictEqual(hasSymbol(codewiki, "service.py", "LocalError"), false);
+	});
+
+	it("labels Rust impl functions as methods and skips nested function items", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(
+			join(scratch, "src", "lib.rs"),
+			[
+				"pub fn free_fn() {",
+				"    fn nested_fn() {}",
+				"}",
+				"",
+				"pub struct Widget;",
+				"",
+				"impl Widget {",
+				"    pub fn method_a(&self) {}",
+				"    fn method_b() {",
+				"        fn deep() {}",
+				"    }",
+				"}",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "rust" });
+
+		ok(hasSymbol(codewiki, "src/lib.rs", "free_fn", "func"));
+		ok(hasSymbol(codewiki, "src/lib.rs", "Widget", "type"));
+		ok(hasSymbol(codewiki, "src/lib.rs", "method_a", "method"));
+		ok(hasSymbol(codewiki, "src/lib.rs", "method_b", "method"));
+		strictEqual(hasSymbol(codewiki, "src/lib.rs", "nested_fn"), false);
+		strictEqual(hasSymbol(codewiki, "src/lib.rs", "deep"), false);
+	});
+
+	it("records Java field declarators and classifies constants without the type name", async () => {
+		writeFileSync(
+			join(scratch, "Config.java"),
+			[
+				"class Config {",
+				"    public String name;",
+				"    private int count, total;",
+				"    public static final int MAX_SIZE = 3;",
+				'    static final String NAME = "clio";',
+				"    void run() {",
+				"        int local = 1;",
+				"    }",
+				"}",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "java" });
+
+		ok(hasSymbol(codewiki, "Config.java", "name", "var"));
+		ok(hasSymbol(codewiki, "Config.java", "count", "var"));
+		ok(hasSymbol(codewiki, "Config.java", "total", "var"));
+		ok(hasSymbol(codewiki, "Config.java", "MAX_SIZE", "const"));
+		ok(hasSymbol(codewiki, "Config.java", "NAME", "const"));
+		ok(hasSymbol(codewiki, "Config.java", "run", "method"));
+		strictEqual(hasSymbol(codewiki, "Config.java", "String"), false);
+		strictEqual(hasSymbol(codewiki, "Config.java", "int"), false);
+		strictEqual(hasSymbol(codewiki, "Config.java", "local"), false);
+	});
+
+	it("excludes gitignored scratch directories from the index", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "real.ts"), "export const real = 1;\n", "utf8");
+		for (const dir of [".superpowers", ".codex", ".claude", ".clio-benchmark"]) {
+			mkdirSync(join(scratch, dir), { recursive: true });
+			writeFileSync(join(scratch, dir, "scratch.ts"), "export const scratch = 1;\n", "utf8");
+		}
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
+
+		ok(codewiki.files.some((file) => file.path === "src/real.ts"));
+		strictEqual(
+			codewiki.files.some((file) =>
+				[".superpowers/", ".codex/", ".claude/", ".clio-benchmark/"].some((prefix) => file.path.startsWith(prefix)),
+			),
+			false,
+		);
+		strictEqual(hasSymbol(codewiki, ".superpowers/scratch.ts", "scratch"), false);
+	});
+
+	it("keeps incremental and full rebuilds equal while excluding scratch directories", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		mkdirSync(join(scratch, ".superpowers"), { recursive: true });
+		writeFileSync(join(scratch, "src", "alpha.ts"), "export const alpha = 1;\n", "utf8");
+		writeFileSync(join(scratch, ".superpowers", "plan.ts"), "export const plan = 1;\n", "utf8");
+
+		let incremental = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		deepStrictEqual(incremental, await buildCodewiki({ cwd: scratch, language: "typescript" }));
+
+		// A scratch-dir path never enters the index, even through the incremental path.
+		writeFileSync(join(scratch, ".superpowers", "plan.ts"), "export const plan = 2;\n", "utf8");
+		const afterScratch = await updateCodewikiPaths(scratch, incremental, [".superpowers/plan.ts"]);
+		strictEqual(afterScratch, incremental);
+
+		// A real edit stays byte-identical to a full rebuild with scratch present.
+		writeFileSync(join(scratch, "src", "beta.ts"), "export const beta = 1;\n", "utf8");
+		incremental = await updateCodewikiPaths(scratch, incremental, ["src/beta.ts"]);
+		deepStrictEqual(incremental, await buildCodewiki({ cwd: scratch, language: "typescript" }));
+	});
 });

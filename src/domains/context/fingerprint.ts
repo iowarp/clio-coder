@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { type Codewiki, readCodewiki } from "./codewiki/indexer.js";
+import { EXCLUDED_DIRS } from "./excluded-dirs.js";
 
 export interface Fingerprint {
 	treeHash: string;
@@ -10,7 +11,6 @@ export interface Fingerprint {
 	loc: number;
 }
 
-const EXCLUDED_DIRS = new Set([".git", "node_modules", "dist", "build", ".clio", ".venv", "target"]);
 const LOC_EXTENSIONS = new Set([
 	".ts",
 	".tsx",
