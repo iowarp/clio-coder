@@ -125,6 +125,43 @@ change interfaces.
 
 ### Investigated
 
+- **Blocked tool calls never finalize their interactive transcript render.**
+  In the real TUI, a tool call denied by the safety net (for example a
+  secret-path `read .env` or `bash ls .env`, or a system_modify write) keeps a
+  `Running tool: <name>` spinner subline and a now-relative elapsed timer in the
+  transcript instead of settling into a terminal blocked state with a fixed
+  duration. Successful calls in the same turn render `... checkmark . <ms>`. The
+  elapsed value is recomputed as `now - startedAt` whenever any later turn
+  streams, because the once-per-second tool-elapsed refresh at
+  `src/interactive/index.ts:1872-1878` only ticks while `chat.isStreaming()`, so
+  a blocked call from an earlier turn can read `reading .env . 19m12s` with a
+  live spinner many minutes later. Reproduced live against mini/Qwopus3.6-35B:
+  two blocked `.env` tools and a later blocked `.git/config` read all kept
+  `Running tool` spinners while the same turn's successful `credential_present`
+  showed a `checkmark . 50ms` terminal line, and each turn itself sealed as
+  done. The denial is still surfaced (the `! [safety-net] blocked ...` notice
+  renders and the turn completes), so this is a cosmetic truthfulness bug on the
+  blocked-tool display path, not a functional failure. Narrowed but not yet
+  pinned to a test-backed fix: (1) a headless `clio run --json-events full` probe
+  showed pi DOES emit `tool_execution_end` for a blocked orchestrator tool
+  (matching toolCallId, isError=true), so it is not an engine event gap; (2) a
+  deterministic `createChatPanel` replay (start + end(isError) + follow-up text +
+  `agent_end`, single and multi-tool) finalizes every blocked segment to
+  `reading .env cross . 5ms` even rendered twenty minutes later, so the chat
+  panel is correct for a single assistant entry; (3) the `agent_end` settle at
+  `src/interactive/chat-panel.ts:810-818` only walks the LAST transcript entry
+  (`transcript[transcript.length - 1]`), so an unfinished tool segment held in an
+  earlier assistant entry is never settled. The observed live turn does not
+  reproduce in the single-entry replay, so the real trigger is most likely a
+  mid-turn transcript boundary (a notice, retryStatus, or entry split) that
+  leaves the blocked segment in a non-last assistant entry that the `agent_end`
+  settle skips. NEXT FIXER: reproduce the entry-splitting turn in a chat-panel
+  replay test, then either make the `agent_end` settle walk every assistant entry
+  from the turn or settle a segment when its blocked result lands. Deferred
+  rather than patched in this loop because the exact split trigger is not yet
+  reproduced, and a speculative change to the streaming transcript lifecycle
+  could miss the real case or regress the well-tested happy path.
+
 - **Worker IPC amplification and malformed stdout.** Receipt
   `2runue8q1v7q` was a native llama.cpp worker run canceled after 180s with
   133 tool calls, including 123 `grep` attempts and 116 blocked attempts. It
