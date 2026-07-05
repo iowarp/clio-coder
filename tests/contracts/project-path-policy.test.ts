@@ -19,6 +19,20 @@ describe("contracts/project path safety policy", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
+	it("blocks reads of the repo git config through the default policy", () => {
+		mkdirSync(join(scratch, ".git"), { recursive: true });
+		writeFileSync(join(scratch, ".git", "config"), "[remote]\n\turl = https://token@example.com/repo.git\n", "utf8");
+		writeFileSync(join(scratch, "notes.txt"), "plain project file\n", "utf8");
+
+		const engine = createSafetyPolicyEngine({ cwd: scratch });
+		const configRead = engine.evaluate({ tool: ToolNames.Read, args: { path: ".git/config" } });
+		strictEqual(configRead.kind, "block");
+		strictEqual(configRead.reasonCode, "path-policy:zeroAccessPaths");
+
+		const normalRead = engine.evaluate({ tool: ToolNames.Read, args: { path: "notes.txt" } });
+		strictEqual(normalRead.kind, "allow");
+	});
+
 	it("loads .clio/safety.yaml path rules and enforces real tool calls", () => {
 		const policyPath = join(scratch, ".clio", "safety.yaml");
 		writeFileSync(
