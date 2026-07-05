@@ -34,7 +34,7 @@ export async function loadCodewikiForTool(
 		return { ok: true, codewiki: rebuilt };
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		return { ok: false, message: `codewiki unavailable. run /context-init to rebuild it. ${msg}` };
+		return { ok: false, message: `codewiki unavailable. run /context refresh to rebuild it. ${msg}` };
 	}
 }
 
