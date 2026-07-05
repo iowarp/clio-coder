@@ -10,6 +10,12 @@ still change interfaces.
 
 ## Unreleased
 
+- Fixed quadratic worker stdout amplification. A dispatched worker subprocess no
+  longer reserializes the full cumulative assistant message on every streaming
+  delta: a worker-only event projection slims each `message_update` before NDJSON
+  serialization, so a long worker response streams in linear stdout bytes instead
+  of quadratic. Dispatch consumer contracts are unchanged, so first-token
+  latency, the final answer, and token accounting all behave as before.
 - Bounded dispatched worker blocked-call spirals: `workerToolCallCap` now
   counts blocked and guard-denied attempts, not just successful executions, and
   a worker that keeps requesting denied tools terminates with
