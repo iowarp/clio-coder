@@ -369,7 +369,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.Context,
 		description:
-			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (omit query to list the corpus), scope=skills lists available skills or loads one by name.",
+			"Environment context: scope=workspace returns the git/project snapshot, scope=docs searches Clio's bundled documentation (omit query to list the corpus), scope=skills lists available skills or loads one by name. For repository code and the repo's generated wiki use code_nav (mode=wiki).",
 		parameters: Type.Object({
 			scope: stringEnum(["workspace", "docs", "skills"], "Context source."),
 			query: Type.Optional(Type.String({ description: "scope=docs: question or terms; omit to list the corpus." })),
