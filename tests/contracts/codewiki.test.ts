@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import {
 	existsSync,
 	mkdirSync,
@@ -16,6 +16,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { codewikiPath, fallbackExtraction, serializeCodewiki } from "../../src/domains/context/codewiki/indexer.js";
+import { createTreeSitterExtractor } from "../../src/domains/context/codewiki/tree-sitter.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	buildCodewiki,
@@ -212,6 +213,18 @@ describe("contracts/codewiki", () => {
 		ok(codewiki.files.some((file) => file.path === "app.py"));
 		ok(codewiki.files.some((file) => file.path === "fixtures/sample.rb"));
 		ok(codewiki.symbols.some((symbol) => symbol.name === "ApiClient"));
+	});
+
+	it("loads grammars on demand and throws for paths never ensured", async () => {
+		const extractor = await createTreeSitterExtractor();
+		throws(() => extractor.extract("app.py", "def run():\n    return 1\n"), /grammar not loaded/);
+
+		await extractor.ensureGrammarsForPaths(["app.py"]);
+		const extraction = extractor.extract("app.py", "def run():\n    return 1\n");
+		ok(extraction.symbols.some((symbol) => symbol.name === "run" && symbol.kind === "func"));
+
+		// Ensuring python must not implicitly load unrelated grammars.
+		throws(() => extractor.extract("main.go", "package main\nfunc main() {}\n"), /grammar not loaded/);
 	});
 
 	it("treats v1 codewiki files as stale instead of throwing", () => {
