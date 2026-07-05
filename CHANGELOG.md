@@ -10,6 +10,15 @@ still change interfaces.
 
 ## Unreleased
 
+- Fixed session branch replay to follow the active turn path: after a `/tree`
+  switch, resume, fork, and transcript replay no longer resurrect abandoned
+  sibling turns from the append-only session file.
+- Fixed `/fork` copying unanchored sidecar entries (such as task ledgers) and
+  compaction summaries written after the fork point into the forked session.
+- Fixed compaction summarizing abandoned sibling turns after a `/tree`
+  switch; summaries now cover only the active branch.
+- Fixed resume landing on an abandoned branch leaf when a turn switch and
+  re-append happened within the same millisecond.
 - Cleaned eval-domain source filenames and scrubbed developer-local target names and paths from the model catalog, benchmark examples, and HTML docs.
 - Aligned documentation corpus with v0.2.8 capabilities, resolving stale descriptions across the configuration, TUI, evals, and safety sections, and introduced new guides for worker dispatch mechanics and custom model runtime adapters.
 - Refreshed the clio docs visual viewer to align with v0.2.8, updating all HTML blueprints, adding 8 missing blueprints with interactive simulators, unifying style templates, and adding dashboard category search filters.

@@ -91,6 +91,7 @@ import {
 	protectedArtifactStateFromSessionEntries,
 } from "../domains/session/protected-artifacts.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import { serveClioAcpAgent } from "../engine/acp/server.js";
 import {
@@ -360,7 +361,12 @@ async function runCompactionFlow(
 	if (!resolved) {
 		throw new Error("no model configured; set orchestrator.target + orchestrator.model");
 	}
-	const entries = readSessionEntriesForCompact(meta.id);
+	// Summarize only the active branch: after a /tree switch the raw file
+	// still holds abandoned sibling turns, and a summary that folds them in
+	// would persist abandoned content back into the active context. The full
+	// file read stays in place for the task board, protected artifacts, and
+	// the masking rewrite, which are session-global.
+	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id));
 	if (entries.length === 0) return null;
 
 	const result = await compact({

@@ -120,22 +120,33 @@ function treeFromLinearPath(path: ReadonlyArray<LinkedRecord>): SessionTreeNode[
 		}));
 }
 
-function sessionEntryBelongsToPath(entry: SessionEntry, pathIds: ReadonlySet<string>): boolean {
+/**
+ * Unanchored sidecars (parentTurnId null) carry no turn pointer, so file
+ * position is the only branch signal: anything written after the fork-point
+ * turn belongs to the timeline that diverged from it, not to the fork.
+ * `atOrBeforeForkPoint` is that positional verdict, computed by the caller.
+ */
+function sessionEntryBelongsToPath(
+	entry: SessionEntry,
+	pathIds: ReadonlySet<string>,
+	atOrBeforeForkPoint: boolean,
+): boolean {
 	if (entry.kind === "message") return pathIds.has(entry.turnId);
 	if (entry.kind === "label") return pathIds.has(entry.targetTurnId);
 	if (entry.kind === "sessionInfo") return entry.targetTurnId ? pathIds.has(entry.targetTurnId) : false;
 	if (entry.kind === "compactionSummary") {
-		return (
-			(entry.firstKeptTurnId.length > 0 && pathIds.has(entry.firstKeptTurnId)) ||
-			entry.parentTurnId === null ||
-			pathIds.has(entry.parentTurnId)
-		);
+		// A summary describes history as of its write position. One written
+		// after the fork point did not exist when the forked timeline split,
+		// even when its firstKeptTurnId lands on the fork path; copying it
+		// would open the fork at the summary boundary and hide the transcript.
+		if (!atOrBeforeForkPoint) return false;
+		if (entry.firstKeptTurnId.length > 0 && pathIds.has(entry.firstKeptTurnId)) return true;
 	}
-	return entry.parentTurnId === null || pathIds.has(entry.parentTurnId);
+	return entry.parentTurnId === null ? atOrBeforeForkPoint : pathIds.has(entry.parentTurnId);
 }
 
-function entryBelongsToPath(entry: unknown, pathIds: ReadonlySet<string>): boolean {
-	if (isSessionEntry(entry)) return sessionEntryBelongsToPath(entry, pathIds);
+function entryBelongsToPath(entry: unknown, pathIds: ReadonlySet<string>, atOrBeforeForkPoint: boolean): boolean {
+	if (isSessionEntry(entry)) return sessionEntryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
 	const linked = linkedRecordFromEntry(entry);
 	return linked !== null && pathIds.has(linked.id);
 }
@@ -153,9 +164,10 @@ function branchEntriesFromParent(
 	const linked = parsed.map(linkedRecordFromEntry).filter((entry): entry is LinkedRecord => entry !== null);
 	const path = traceAncestry(linked, leafTurnId);
 	const pathIds = new Set(path.map((record) => record.id));
-	const entries = parsed.filter((entry) => {
+	const forkPointIndex = parsed.findIndex((entry) => linkedRecordFromEntry(entry)?.id === leafTurnId);
+	const entries = parsed.filter((entry, index) => {
 		if (isSessionHeader(entry)) return false;
-		return entryBelongsToPath(entry, pathIds);
+		return entryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex);
 	});
 	return {
 		parentCurrentPath,

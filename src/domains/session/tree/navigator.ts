@@ -66,8 +66,12 @@ function pickMeta(meta: SessionMeta): TreeSnapshot["meta"] {
 
 /**
  * Compute the natural leaf of a tree: the most recent node with no children.
- * Returns null for an empty tree. Used by tree() when the caller has not
- * explicitly tracked a current-branch pointer yet.
+ * Timestamp ties break toward the later node in append order, since nodes
+ * append in creation order and ISO timestamps only carry millisecond
+ * precision; a branch switch and re-append inside one millisecond must still
+ * resolve to the newest branch. Returns null for an empty tree. Used by
+ * tree() when the caller has not explicitly tracked a current-branch
+ * pointer yet.
  */
 export function computeLeafId(nodes: ReadonlyArray<SessionTreeNode>): string | null {
 	if (nodes.length === 0) return null;
@@ -78,7 +82,7 @@ export function computeLeafId(nodes: ReadonlyArray<SessionTreeNode>): string | n
 	let leaf: SessionTreeNode | null = null;
 	for (const node of nodes) {
 		if (hasChild.has(node.id)) continue;
-		if (!leaf || node.at > leaf.at) leaf = node;
+		if (!leaf || node.at >= leaf.at) leaf = node;
 	}
 	return leaf?.id ?? null;
 }
