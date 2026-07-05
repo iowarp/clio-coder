@@ -25,6 +25,7 @@ Produce a proposed CLIO.md draft with these possible sections:
 3. Hard invariants. Zero to three numbered rules, each at most 280 characters. Only include rules the project enforces at build time. If the project has none, omit the section.
 
 4. Custom H2 sections. Prefer four to eight sections when the repository structure supports them, each with a title and markdown body. Use these for repository-specific architecture boundaries, ownership boundaries, context-retrieval strategy, generated/local artifact policy, workflow traps, failure modes, and verification expectations that are not obvious from the language. Keep each section dense and actionable for a coding agent. Do not add generic "how to build/test" guidance. If an existing CLIO.md is supplied, preserve its useful custom sections instead of replacing them with generic architecture prose.
+If you include context-retrieval or navigation guidance, reference the code_nav tool with modes symbol, path, entries, outline, deps, dependents, and wiki. Never invent or assume other navigation tool names.
 
 5. Imported agent context. Only when adoption mode is requested. Use the scanner-provided provenance, conflict policy, adopted rules, conflicts, and rejected source summaries.
 

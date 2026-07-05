@@ -23,7 +23,7 @@ src/cli owns command parsing and headless runs; src/interactive owns the TUI; sr
 
 ## Context retrieval
 
-The codewiki indexes the repository; refresh it after structural edits. For navigational tasks, prefer the indexed tools (entry_points, where_is, find_symbol) before broad reads. Useful starting points: src/cli/index.ts, src/domains/context/bootstrap.ts, src/domains/dispatch/index.ts, src/engine/index.ts, and src/tools/registry.ts.
+The codewiki indexes the repository; refresh it after structural edits. For navigational tasks, prefer `code_nav` before broad file reads, using modes `symbol`, `path`, `entries`, `outline`, `deps`, `dependents`, and `wiki`. When `.clio/wiki` exists, start with `code_nav mode=wiki` and read `.clio/wiki/quickstart.md`. Useful starting points: src/cli/index.ts, src/domains/context/bootstrap.ts, src/domains/dispatch/index.ts, src/engine/index.ts, and src/tools/registry.ts.
 
 ## Build, packaging, and release
 

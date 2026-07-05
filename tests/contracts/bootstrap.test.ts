@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { buildBootstrapPrompt } from "../../src/domains/context/bootstrap-prompt.js";
 import { parseClioMd, renderProjectContextFragment, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import { fallbackBootstrapOutput, runBootstrap, runContextClear } from "../../src/domains/context/index.js";
@@ -64,6 +65,27 @@ describe("contracts/bootstrap", () => {
 			strictEqual(parsed.value.sections[0]?.body, "Do not cross the engine boundary for SDK details.");
 			ok(renderProjectContextFragment(parsed.value).includes("## Architecture traps"));
 		}
+	});
+
+	it("builds bootstrap prompt text with real code navigation guidance", () => {
+		const prompt = buildBootstrapPrompt({
+			cwd: scratch,
+			projectType: "typescript",
+			siblingFiles: [],
+			adoption: {
+				cwd: scratch,
+				homeDir: scratch,
+				includeGlobal: false,
+				sources: [],
+				rejected: [],
+				importedRules: [],
+				conflicts: [],
+				sourceHash: "0".repeat(64),
+				sourceSnapshots: [],
+			},
+		});
+
+		ok(prompt.includes("code_nav"), prompt);
 	});
 
 	it("demotes nested generated headings so CLIO.md keeps one H1", async () => {
