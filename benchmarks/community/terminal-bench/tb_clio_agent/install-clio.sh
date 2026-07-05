@@ -36,13 +36,15 @@ log "clio $(clio --version 2>/dev/null || echo unknown)"
 if [ -z "${CLIO_MAIN_URL:-}" ] || [ -z "${CLIO_WORKER_URL:-}" ]; then
   log "CLIO_MAIN_URL and CLIO_WORKER_URL must be set for Terminal-Bench runs"; exit 1
 fi
+CLIO_MAIN_TARGET=${CLIO_MAIN_TARGET:-local-main}
+CLIO_WORKER_TARGET=${CLIO_WORKER_TARGET:-local-worker}
 mkdir -p "$HOME/.config/clio"
 cat > "$HOME/.config/clio/settings.yaml" <<YAML
 version: 1
 identity: clio
 autonomy: ${CLIO_AUTONOMY:-full-auto}
 targets:
-  - id: mini
+  - id: ${CLIO_MAIN_TARGET}
     runtime: llamacpp
     url: ${CLIO_MAIN_URL}
     auth:
@@ -51,7 +53,7 @@ targets:
       - ${CLIO_MAIN_MODEL}
     defaultModel: ${CLIO_MAIN_MODEL}
     gateway: true
-  - id: dynamo
+  - id: ${CLIO_WORKER_TARGET}
     runtime: lmstudio-native
     url: ${CLIO_WORKER_URL}
     auth:
@@ -61,12 +63,12 @@ targets:
     defaultModel: ${CLIO_WORKER_MODEL}
     gateway: true
 orchestrator:
-  target: mini
+  target: ${CLIO_MAIN_TARGET}
   model: ${CLIO_MAIN_MODEL}
   thinkingLevel: low
 workers:
   default:
-    target: dynamo
+    target: ${CLIO_WORKER_TARGET}
     model: ${CLIO_WORKER_MODEL}
     thinkingLevel: low
   onPermission: deny

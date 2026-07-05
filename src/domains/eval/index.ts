@@ -1,11 +1,3 @@
-export type {
-	EvalCompareDeltas,
-	EvalCompareMatchedChange,
-	EvalCompareResultRef,
-	EvalCompareTotals,
-	EvalComparisonSummary,
-} from "./compare.js";
-export { compareEvalArtifacts, EVAL_COMPARE_MATCHING_RULE, renderEvalComparison } from "./compare.js";
 export {
 	addEvalHarnessMetrics,
 	evalHarnessMetricsFromCommands,
@@ -13,9 +5,17 @@ export {
 	subtractEvalHarnessMetrics,
 	sumEvalHarnessMetrics,
 	ZERO_EVAL_HARNESS_METRICS,
-} from "./metrics.js";
+} from "./harness-metrics.js";
 export { evalClioProvenance, evalEnvironmentProvenance } from "./provenance.js";
 export { renderEvalReport, renderSummaryLines, renderSweJsonl } from "./report.js";
+export type {
+	EvalCompareDeltas,
+	EvalCompareMatchedChange,
+	EvalCompareResultRef,
+	EvalCompareTotals,
+	EvalComparisonSummary,
+} from "./run-compare.js";
+export { compareEvalArtifacts, EVAL_COMPARE_MATCHING_RULE, renderEvalComparison } from "./run-compare.js";
 export { runEvalTasks, summarizeEvalResults } from "./runner.js";
 export { linkEvalArtifactRuntimePaths } from "./runtime-paths.js";
 export {

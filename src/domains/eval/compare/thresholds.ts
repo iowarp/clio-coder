@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import type { EvalArtifactV2 } from "../schema/artifact-v2.js";
-import type { EvalMetricAssertion, EvalSuiteThresholdsV2 } from "../schema/suite-v2.js";
+import type { EvalArtifactV2 } from "../schema/artifact.js";
+import type { EvalMetricAssertion, EvalSuiteThresholdsV2 } from "../schema/suite.js";
 
 export function loadThresholds(path: string): EvalSuiteThresholdsV2 {
 	const parsed = parseYaml(readFileSync(path, "utf8")) as unknown;

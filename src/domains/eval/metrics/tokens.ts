@@ -1,4 +1,4 @@
-import { type EvalTokenMetricsV2, ZERO_TOKEN_METRICS_V2 } from "../schema/artifact-v2.js";
+import { type EvalTokenMetricsV2, ZERO_TOKEN_METRICS_V2 } from "../schema/artifact.js";
 
 export function tokenMetricsFrom(metrics: Readonly<Record<string, unknown>>): EvalTokenMetricsV2 {
 	return {

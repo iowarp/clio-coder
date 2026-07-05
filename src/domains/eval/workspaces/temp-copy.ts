@@ -1,7 +1,7 @@
 import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
-import type { EvalWorkspaceV2 } from "../schema/suite-v2.js";
+import type { EvalWorkspaceV2 } from "../schema/suite.js";
 import type { PreparedEvalWorkspace } from "./local.js";
 
 export async function prepareTempCopyWorkspace(

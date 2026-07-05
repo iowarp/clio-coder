@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import type { EvalWorkspaceV2 } from "../schema/suite-v2.js";
+import type { EvalWorkspaceV2 } from "../schema/suite.js";
 import type { PreparedEvalWorkspace } from "./local.js";
 
 export async function prepareGitWorkspace(workspace: EvalWorkspaceV2): Promise<PreparedEvalWorkspace> {

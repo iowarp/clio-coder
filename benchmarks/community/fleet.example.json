@@ -6,14 +6,14 @@
 		"local-single": {
 			"description": "One endpoint serves both orchestrator and workers.",
 			"orchestrator": {
-				"target": "mini",
+				"target": "local-main",
 				"runtime": "llamacpp",
 				"url": "http://orchestrator.example:8080",
 				"model": "example-coder-model",
 				"thinking": "off"
 			},
 			"workers": {
-				"target": "mini",
+				"target": "local-main",
 				"runtime": "llamacpp",
 				"url": "http://orchestrator.example:8080",
 				"model": "example-coder-model",
@@ -23,14 +23,14 @@
 		"local-split": {
 			"description": "Separate endpoints for orchestrator and worker runs.",
 			"orchestrator": {
-				"target": "mini",
+				"target": "local-main",
 				"runtime": "llamacpp",
 				"url": "http://orchestrator.example:8080",
 				"model": "example-orchestrator-model",
 				"thinking": "off"
 			},
 			"workers": {
-				"target": "dynamo",
+				"target": "local-worker",
 				"runtime": "lmstudio-native",
 				"url": "http://worker.example:1234",
 				"model": "example-worker-model",

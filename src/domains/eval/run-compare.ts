@@ -1,4 +1,4 @@
-import { subtractEvalHarnessMetrics } from "./metrics.js";
+import { subtractEvalHarnessMetrics } from "./harness-metrics.js";
 import type { EvalFailureClass, EvalHarnessMetrics, EvalRunArtifact, EvalRunRecord, EvalSummary } from "./types.js";
 
 export const EVAL_COMPARE_MATCHING_RULE = "taskId+repeatIndex";

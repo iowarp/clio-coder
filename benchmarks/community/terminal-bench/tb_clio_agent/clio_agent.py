@@ -42,13 +42,15 @@ try:
     _DEF = {
         "main_target": _F["orchestrator"]["target"],
         "main_model": _F["orchestrator"]["model"],
+        "worker_target": _F["workers"]["target"],
         "worker_model": _F["workers"]["model"],
         "autonomy": _F.get("autonomy", "full-auto"),
     }
 except Exception:
     _DEF = {
-        "main_target": "mini",
+        "main_target": "local-main",
         "main_model": "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K",
+        "worker_target": "local-worker",
         "worker_model": "qwopus3.6-27b-v1-preview",
         "autonomy": "full-auto",
     }
@@ -65,6 +67,10 @@ class ClioAgent(AbstractInstalledAgent):
         self._main_model = kwargs.get(
             "main_model",
             os.environ.get("CLIO_MAIN_MODEL", _DEF["main_model"]),
+        )
+        self._worker_target = kwargs.get(
+            "worker_target",
+            os.environ.get("CLIO_WORKER_TARGET", _DEF["worker_target"]),
         )
         self._worker_model = kwargs.get(
             "worker_model", os.environ.get("CLIO_WORKER_MODEL", _DEF["worker_model"])
@@ -83,8 +89,10 @@ class ClioAgent(AbstractInstalledAgent):
         return {
             "CLIO_AUTONOMY": os.environ.get("CLIO_AUTONOMY", "full-auto"),
             "CLIO_MAIN_URL": os.environ.get("CLIO_MAIN_URL", ""),
+            "CLIO_MAIN_TARGET": self._main_target,
             "CLIO_MAIN_MODEL": self._main_model,
             "CLIO_WORKER_URL": os.environ.get("CLIO_WORKER_URL", ""),
+            "CLIO_WORKER_TARGET": self._worker_target,
             "CLIO_WORKER_MODEL": self._worker_model,
             "CLIO_TARBALL_URL": os.environ.get("CLIO_TARBALL_URL", ""),
             # Local llama.cpp / LM Studio ignore the key value, but Clio requires one to be

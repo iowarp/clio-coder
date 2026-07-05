@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { redactArtifactForStorage } from "./artifacts/redact.js";
-import { evalHarnessMetricsFromCommands, ZERO_EVAL_HARNESS_METRICS } from "./metrics.js";
+import { evalHarnessMetricsFromCommands, ZERO_EVAL_HARNESS_METRICS } from "./harness-metrics.js";
 import type {
 	EvalArtifactPaths,
 	EvalClioProvenance,

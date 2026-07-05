@@ -1,4 +1,4 @@
-import type { EvalArtifactV2 } from "../schema/artifact-v2.js";
+import type { EvalArtifactV2 } from "../schema/artifact.js";
 
 export function withEvidenceArtifactPath(artifact: EvalArtifactV2, evidencePath: string): EvalArtifactV2 {
 	return {

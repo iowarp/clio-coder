@@ -1,5 +1,5 @@
-import type { EvalArtifactV2 } from "../schema/artifact-v2.js";
-import type { EvalMetricAssertion, EvalSuiteThresholdsV2 } from "../schema/suite-v2.js";
+import type { EvalArtifactV2 } from "../schema/artifact.js";
+import type { EvalMetricAssertion, EvalSuiteThresholdsV2 } from "../schema/suite.js";
 import { evaluateMetricAssertion, metricValue } from "./thresholds.js";
 
 export interface EvalGateFailure {

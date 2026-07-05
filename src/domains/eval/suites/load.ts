@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { EvalSuiteV2, LoadedEvalSuiteV2 } from "../schema/suite-v2.js";
+import type { EvalSuiteV2, LoadedEvalSuiteV2 } from "../schema/suite.js";
 import { type EvalValidationIssue, validateEvalSuiteV2 } from "../schema/validate.js";
 import { loadEvalTaskFile } from "../task-file.js";
 

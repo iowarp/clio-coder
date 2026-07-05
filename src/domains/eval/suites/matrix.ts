@@ -1,4 +1,4 @@
-import type { EvalSuiteTargetV2, EvalSuiteTaskV2, EvalSuiteV2 } from "../schema/suite-v2.js";
+import type { EvalSuiteTargetV2, EvalSuiteTaskV2, EvalSuiteV2 } from "../schema/suite.js";
 
 export interface EvalMatrixRun {
 	task: EvalSuiteTaskV2;

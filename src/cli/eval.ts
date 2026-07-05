@@ -16,7 +16,7 @@ import { renderEvalJunitReportV2 } from "../domains/eval/reports/junit.js";
 import { renderEvalMarkdownReportV2 } from "../domains/eval/reports/markdown.js";
 import { renderEvalSweJsonlReportV2 } from "../domains/eval/reports/swe-jsonl.js";
 import { renderEvalTextReportV2 } from "../domains/eval/reports/text.js";
-import type { EvalArtifactV2 } from "../domains/eval/schema/artifact-v2.js";
+import type { EvalArtifactV2 } from "../domains/eval/schema/artifact.js";
 import { EvalSuiteFileError, loadEvalSuiteFile, loadV1TaskFileAsSuite } from "../domains/eval/suites/load.js";
 import { resolveSuiteForRun } from "../domains/eval/suites/resolve.js";
 import { runEvalSuiteV2 } from "../domains/eval/suites/run.js";

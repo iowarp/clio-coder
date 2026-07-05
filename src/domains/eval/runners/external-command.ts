@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { EvalRunnerV2 } from "../schema/suite-v2.js";
+import type { EvalRunnerV2 } from "../schema/suite.js";
 
 export interface EvalRunnerOutput {
 	exitCode: number;

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { evalHarnessMetricsFromCommands, sumEvalHarnessMetrics } from "./metrics.js";
+import { evalHarnessMetricsFromCommands, sumEvalHarnessMetrics } from "./harness-metrics.js";
 import { type EvalProvenanceOptions, evalClioProvenance, evalEnvironmentProvenance } from "./provenance.js";
 import type {
 	EvalCommandPhase,

@@ -1,4 +1,4 @@
-import type { EvalArtifactV2 } from "../schema/artifact-v2.js";
+import type { EvalArtifactV2 } from "../schema/artifact.js";
 
 export function renderEvalJunitReportV2(artifact: EvalArtifactV2): string {
 	const cases = artifact.results

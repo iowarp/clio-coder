@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../../core/safe-id.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import type { EvalArtifactV2 } from "../schema/artifact-v2.js";
+import type { EvalArtifactV2 } from "../schema/artifact.js";
 import { evalRoot, loadEvalArtifact } from "../store.js";
 import type { EvalRunArtifact } from "../types.js";
 import { redactArtifactForStorage } from "./redact.js";

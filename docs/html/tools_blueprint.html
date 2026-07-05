@@ -1425,7 +1425,7 @@
     write: { actionClass: 'write', estimate: 180, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "content": "// Modifying compile results"\n}' },
     edit: { actionClass: 'write', estimate: 220, preset: '{\n  "path": "src/domains/prompts/compiler.ts",\n  "edits": [\n    {\n      "oldText": "function lookupFragment() {",\n      "newText": "function lookupFragment() {\\n  // Optimized lookup"\n    }\n  ]\n}' },
     // EXECUTE
-    bash: { actionClass: 'execute', estimate: 160, preset: '{\n  "command": "npm run build && npm run test",\n  "cwd": "/home/akougkas/workspace"\n}' },
+    bash: { actionClass: 'execute', estimate: 160, preset: '{\n  "command": "npm run build && npm run test",\n  "cwd": "/workspace"\n}' },
     git: { actionClass: 'read', estimate: 90, preset: '{\n  "op": "status"\n}' },
     verify: { actionClass: 'execute', estimate: 110, preset: '{\n  "check": "test"\n}' },
     // ORCHESTRATE
