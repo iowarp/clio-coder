@@ -434,46 +434,43 @@
 <body>
   <div class="container">
     <header>
-      <div class="header-logo">
-        <svg viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <h1>Documentation Alignment Portal</h1>
-      <p class="subtitle">Interactive Visual Specification for Source-First Guidelines and Claim Linting</p>
-      
-      <div class="meta-grid">
-        <div class="meta-badge">
-          <span class="label">Release:</span>
-          <span class="value">v0.2.8</span>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 64 64" width="48" height="48" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <div class="meta-badge">
-          <span class="label">Scope:</span>
-          <span class="value">docs/*.md / link checks</span>
-        </div>
-        <div class="meta-badge">
-          <span class="label">Constraint:</span>
-          <span class="value">Source-first Alignment</span>
+        <div class="header-title-wrapper">
+          <h1>Documentation Alignment Portal</h1>
+          <p>Interactive Visual Specification for Source-First Guidelines and Claim Linting</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/documentation-guide.md</span>
+            <span class="chip chip-orange">clio docs documentation</span>
+          </div>
         </div>
       </div>
-
-      <div class="tabs-nav">
-        <button type="button" class="tab-btn active" onclick="_switchTab('linter')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Markdown Link Linter
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('phrasing')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-          Claim Class Checker
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('tracker')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
-          Update Checklist
-        </button>
-        <button type="button" class="tab-btn" onclick="_switchTab('flowchart')">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><title>Icon</title><path d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2zM12 11h.01M12 7h.01M12 15h.01"/></svg>
-          Doc Lifecycle Flow
-        </button>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.8</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
       </div>
     </header>
+
+    <div class="tabs-nav" style="justify-content: center; margin-bottom: 2rem;">
+      <button type="button" class="tab-btn active" onclick="_switchTab('linter')">
+        Markdown Link Linter
+      </button>
+      <button type="button" class="tab-btn" onclick="_switchTab('phrasing')">
+        Claim Class Checker
+      </button>
+      <button type="button" class="tab-btn" onclick="_switchTab('tracker')">
+        Update Checklist
+      </button>
+      <button type="button" class="tab-btn" onclick="_switchTab('flowchart')">
+        Doc Lifecycle Flow
+      </button>
+    </div>
+
 
     <!-- Tab 1: Markdown Link Linter -->
     <div id="linter" class="tab-pane active">

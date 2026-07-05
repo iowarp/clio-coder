@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TUI Design System Blueprint (v0.2.8)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    /* Terminal custom styles */
+    .terminal-container {
+      background: #060913;
+      border: 1px solid #1f354f;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      padding: 1.25rem;
+      color: #b0c4de;
+      box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+      position: relative;
+    }
+    .terminal-header {
+      border-bottom: 1px solid #1f354f;
+      padding-bottom: 0.5rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: #6a7c85;
+    }
+    
+    .tui-accent { color: #46e5d0; }
+    .tui-success { color: #57e389; }
+    .tui-warn { color: #ffb454; }
+    .tui-error { color: #ff5c66; }
+    .tui-reason { color: #9d8cff; }
+    .tui-dim { color: #6a7a85; }
+    .tui-muted { color: #8a99a4; }
+    
+    .color-swatch {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.1);
+      display: inline-block;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Clio TUI Design System</h1>
+          <p>Glyph vocabularies, layout rules, and live CLI transcript terminal formatting</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/tui-design.md</span>
+            <span class="chip chip-orange">clio docs tui_design</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.8</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Clio's interactive TUI operates under the core design tenet: color indicates state, boxes outline structure, and brand icons represent identity.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('token-lab')">
+            Color &amp; Glyph Lab
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('terminal-sim')">
+            Transcript Previewer
+          </button>
+        </div>
+
+        <!-- Tab 1: Token Lab -->
+        <div class="tab-pane active" id="pane-token-lab">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>TUI Color Semantic Tokens</h3>
+                <p>Click any token row to highlight in the simulator:</p>
+                
+                <table class="env-table" style="cursor: pointer;">
+                  <thead>
+                    <tr>
+                      <th>Token</th>
+                      <th>Color Value</th>
+                      <th>Typical Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr onclick="previewToken('accent')">
+                      <td class="env-name" style="color:#46e5d0;">accent</td>
+                      <td><span class="color-swatch" style="background:#46e5d0;"></span> #46E5D0</td>
+                      <td>Brand headers, cursor, tool actions</td>
+                    </tr>
+                    <tr onclick="previewToken('success')">
+                      <td class="env-name" style="color:#57e389;">success</td>
+                      <td><span class="color-swatch" style="background:#57e389;"></span> #57E389</td>
+                      <td>Success ticks, clean state status</td>
+                    </tr>
+                    <tr onclick="previewToken('warning')">
+                      <td class="env-name" style="color:#ffb454;">warning</td>
+                      <td><span class="color-swatch" style="background:#ffb454;"></span> #FFB454</td>
+                      <td>Warnings, truncations, cache issues</td>
+                    </tr>
+                    <tr onclick="previewToken('error')">
+                      <td class="env-name" style="color:#ff5c66;">error</td>
+                      <td><span class="color-swatch" style="background:#ff5c66;"></span> #FF5C66</td>
+                      <td>Failures, bad loops, errors</td>
+                    </tr>
+                    <tr onclick="previewToken('reason')">
+                      <td class="env-name" style="color:#9d8cff;">reason</td>
+                      <td><span class="color-swatch" style="background:#9d8cff;"></span> #9D8CFF</td>
+                      <td>Purple reasoning fields and thinking states</td>
+                    </tr>
+                    <tr onclick="previewToken('dim')">
+                      <td class="env-name" style="color:#6a7a85;">dim</td>
+                      <td><span class="color-swatch" style="background:#6a7a85;"></span> #6A7A85</td>
+                      <td>Keys, delimiters, separators</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Glyph Vocabulary Constants</h3>
+                <p>Glyph representations loaded from <code>glyphs.ts</code>:</p>
+                
+                <table class="env-table">
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Token Key</th>
+                      <th>Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="font-size:1.1rem; text-align:center;"><code>✦</code></td>
+                      <td><code>agent</code></td>
+                      <td>Voice character for Clio Agent response lines</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:1.1rem; text-align:center;"><code>›</code></td>
+                      <td><code>user</code></td>
+                      <td>Voice character for user prompts</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:1.1rem; text-align:center;"><code>✓</code></td>
+                      <td><code>ok</code></td>
+                      <td>Success indicator checks</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:1.1rem; text-align:center;"><code>✗</code></td>
+                      <td><code>error</code></td>
+                      <td>Failure indicator cross</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:1.1rem; text-align:center;"><code>▰</code></td>
+                      <td><code>contextFull</code></td>
+                      <td>Context window gauge meter cell</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Transcript Sim -->
+        <div class="tab-pane" id="pane-terminal-sim">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Choreography Options</h3>
+                <p>Configure the state of the active step in our simulated terminal:</p>
+                
+                <div class="form-group">
+                  <label for="stepState">Active Step State</label>
+                  <select id="stepState" onchange="renderTerminalSim()">
+                    <option value="thinking">Model Thinking (reasoning Purple)</option>
+                    <option value="executing">Tool Executing (gear Cyan)</option>
+                    <option value="success">Success Final (tick Green)</option>
+                    <option value="error">Failure Blocked (cross Red)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="inputText">Simulated Prompt</label>
+                  <input type="text" id="inputText" value="npm run build" oninput="renderTerminalSim()">
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Simulated CLI Frame Preview</h3>
+                
+                <div class="terminal-container" id="terminalSim">
+                  <!-- Generated dynamically -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="provider_adapter_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Provider Adapter Cookbook</span>
+          </a>
+          <a href="worker_dispatch_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Worker Dispatch Mechanics</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder TUI Blueprint &bull; Version 0.2.8 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function previewToken(token) {
+      alert(`Token ${token} clicked. Semantics are loaded natively under themes/tokens.ts`);
+    }
+
+    function renderTerminalSim() {
+      const state = document.getElementById("stepState").value;
+      const cmd = document.getElementById("inputText").value;
+      const container = document.getElementById("terminalSim");
+
+      let html = `<div class="terminal-header"><span>clio-coder-tui</span><span>v0.2.8</span></div>`;
+      html += `<div><span class="tui-accent">›</span> <span style="color:#fff;">${cmd}</span></div>`;
+
+      if (state === 'thinking') {
+        html += `
+          <div style="margin-top:0.5rem;"><span class="tui-reason">⣾</span> <span class="tui-reason">Thinking...</span></div>
+          <div style="margin-top:0.25rem; border-left: 2px solid #9d8cff; padding-left: 0.5rem; color:#888;">
+            Analyzing repository boundaries...<br>
+            Checking compilation states...
+          </div>
+        `;
+      } else if (state === 'executing') {
+        html += `
+          <div style="margin-top:0.5rem;"><span class="tui-accent">⚙</span> <span class="tui-accent">Tool Executing...</span></div>
+          <div style="margin-top:0.25rem; color:#8a99a4;">
+            ▸ bash(command="npm run build")
+          </div>
+        `;
+      } else if (state === 'success') {
+        html += `
+          <div style="margin-top:0.5rem;"><span class="tui-success">✓</span> <span class="tui-success">Build completed successfully</span></div>
+          <div style="margin-top:0.25rem; color:#8a99a4;">
+            Checked 787 files. Output directory generated at dist/
+          </div>
+        `;
+      } else if (state === 'error') {
+        html += `
+          <div style="margin-top:0.5rem;"><span class="tui-error">✗</span> <span class="tui-error">Compilation failed</span></div>
+          <div style="margin-top:0.25rem; color:#ff5c66;">
+            Error: Cannot find module './missing-file.js'
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    // Init
+    window.onload = () => {
+      renderTerminalSim();
+      window.previewToken = previewToken;
+      window.renderTerminalSim = renderTerminalSim;
+    };
+  </script>
+</body>
+</html>

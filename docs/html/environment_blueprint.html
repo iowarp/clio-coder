@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Environment Variables Blueprint (v0.2.8)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    /* Environment resolver custom styling */
+    .path-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+    .path-label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .path-value {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--color-cyan);
+    }
+    
+    /* Env table custom styling */
+    .env-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.85rem;
+    }
+    .env-table th, .env-table td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .env-table th {
+      color: #fff;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .env-name {
+      font-family: var(--font-mono);
+      color: var(--color-cyan);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+            <rect x="9" y="9" width="6" height="6"></rect>
+            <line x1="9" y1="1" x2="9" y2="4"></line>
+            <line x1="15" y1="1" x2="15" y2="4"></line>
+            <line x1="9" y1="20" x2="9" y2="23"></line>
+            <line x1="15" y1="20" x2="15" y2="23"></line>
+            <line x1="20" y1="9" x2="23" y2="9"></line>
+            <line x1="20" y1="15" x2="23" y2="15"></line>
+            <line x1="1" y1="9" x2="4" y2="9"></line>
+            <line x1="1" y1="15" x2="4" y2="15"></line>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Environment Variables</h1>
+          <p>Process overrides, directory layout overrides, and internal plumbing variables</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/environment-variables.md</span>
+            <span class="chip chip-orange">clio docs environment</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.8</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Environment variables allow operator-scoped and process-scoped overrides (such as CI or one-off tests). The settings YAML file remains the primary home for durable configuration, but env vars override settings values on runtime startup.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('explorer')">
+            Env Variables Explorer
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('resolver')">
+            Path Resolver
+          </button>
+        </div>
+
+        <!-- Tab 1: Explorer -->
+        <div class="tab-pane active" id="pane-explorer">
+          <div class="glass-card">
+            <h3>Variables Matrix</h3>
+            <p>Filter or search process environment variables:</p>
+            
+            <div class="form-group" style="margin-top: 1rem;">
+              <input type="text" id="envSearch" placeholder="Search variables (e.g. CLIO_HOME, turn, budget)..." oninput="filterEnvTable()" style="padding: 0.65rem 0.85rem; font-size: 0.9rem;">
+            </div>
+
+            <div class="filter-tags" style="justify-content: flex-start; margin-bottom: 1rem;">
+              <button type="button" class="filter-tag active" id="btn-all" onclick="filterCategory('all')">All roles</button>
+              <button type="button" class="filter-tag" id="btn-guard" onclick="filterCategory('guardrail')">Guardrails</button>
+              <button type="button" class="filter-tag" id="btn-knob" onclick="filterCategory('knob')">Knobs</button>
+              <button type="button" class="filter-tag" id="btn-layout" onclick="filterCategory('layout')">Layout</button>
+              <button type="button" class="filter-tag" id="btn-debug" onclick="filterCategory('debug')">Debugging</button>
+              <button type="button" class="filter-tag" id="btn-plumbing" onclick="filterCategory('plumbing')">Plumbing</button>
+              <button type="button" class="filter-tag" id="btn-test" onclick="filterCategory('test')">Test-Only</button>
+            </div>
+
+            <table class="env-table">
+              <thead>
+                <tr>
+                  <th>Variable</th>
+                  <th>Default</th>
+                  <th>Controls / Scope</th>
+                </tr>
+              </thead>
+              <tbody id="envTableBody">
+                <tr data-cat="guardrail">
+                  <td class="env-name">CLIO_TURN_TOOL_CALL_BUDGET</td>
+                  <td><code>60</code></td>
+                  <td>Orchestrator per-turn soft tool-call budget; hard ceiling sits 15 above.</td>
+                </tr>
+                <tr data-cat="guardrail">
+                  <td class="env-name">CLIO_WORKER_TOOL_CALL_CAP</td>
+                  <td><code>50</code></td>
+                  <td>Lifetime tool-call cap per dispatched worker process run.</td>
+                </tr>
+                <tr data-cat="guardrail">
+                  <td class="env-name">CLIO_MAX_RUNS</td>
+                  <td><code>1000</code></td>
+                  <td>Dispatch run-ledger retention cap.</td>
+                </tr>
+                <tr data-cat="guardrail">
+                  <td class="env-name">CLIO_READ_MAX_BYTES</td>
+                  <td><code>51200</code></td>
+                  <td>Per-call byte cap for the file read tool (min 1024).</td>
+                </tr>
+                <tr data-cat="guardrail">
+                  <td class="env-name">CLIO_OBSERVATION_TURN_BUDGET_BYTES</td>
+                  <td><code>196608</code></td>
+                  <td>Shared per-turn byte pool across observation tools.</td>
+                </tr>
+                <tr data-cat="knob">
+                  <td class="env-name">CLIO_RIGOR</td>
+                  <td><code>normal</code></td>
+                  <td>Finish-contract evidence validation bar (normal or high).</td>
+                </tr>
+                <tr data-cat="knob">
+                  <td class="env-name">CLIO_RESIDENCY</td>
+                  <td><code>observe</code></td>
+                  <td>Control local model residency managers (observe/off).</td>
+                </tr>
+                <tr data-cat="knob">
+                  <td class="env-name">CLIO_TRUST_PROJECT_SKILLS</td>
+                  <td><code>off</code></td>
+                  <td>Enable project-local skills execution (1/0).</td>
+                </tr>
+                <tr data-cat="knob">
+                  <td class="env-name">CLIO_ALLOW_EXTERNAL_FULL_ACCESS</td>
+                  <td><code>off</code></td>
+                  <td>Let full-auto pass to external runtimes.</td>
+                </tr>
+                <tr data-cat="layout">
+                  <td class="env-name">CLIO_HOME</td>
+                  <td><code>unset</code></td>
+                  <td>Override installation root path. Sets config, state, and cache relative to it.</td>
+                </tr>
+                <tr data-cat="layout">
+                  <td class="env-name">CLIO_CONFIG_DIR</td>
+                  <td><code>Platform XDG</code></td>
+                  <td>Settings directory path override.</td>
+                </tr>
+                <tr data-cat="layout">
+                  <td class="env-name">CLIO_DATA_DIR</td>
+                  <td><code>Platform XDG</code></td>
+                  <td>Data directory path override.</td>
+                </tr>
+                <tr data-cat="layout">
+                  <td class="env-name">CLIO_STATE_DIR</td>
+                  <td><code>Platform XDG</code></td>
+                  <td>State and session directory path override.</td>
+                </tr>
+                <tr data-cat="layout">
+                  <td class="env-name">CLIO_CACHE_DIR</td>
+                  <td><code>Platform XDG</code></td>
+                  <td>Marketplace/models caching path override.</td>
+                </tr>
+                <tr data-cat="debug">
+                  <td class="env-name">CLIO_BUS_TRACE</td>
+                  <td><code>off</code></td>
+                  <td>Trace event-bus events to stderr.</td>
+                </tr>
+                <tr data-cat="debug">
+                  <td class="env-name">CLIO_TIMING</td>
+                  <td><code>off</code></td>
+                  <td>Print boot timing reports.</td>
+                </tr>
+                <tr data-cat="plumbing">
+                  <td class="env-name">CLIO_INTERACTIVE</td>
+                  <td><code>off</code></td>
+                  <td>Flag indicating interactive TUI mode. Cleaned from children.</td>
+                </tr>
+                <tr data-cat="plumbing">
+                  <td class="env-name">CLIO_RUN_OVERRIDES</td>
+                  <td><code>unset</code></td>
+                  <td>JSON envelope for process option bindings.</td>
+                </tr>
+                <tr data-cat="test">
+                  <td class="env-name">CLIO_WORKER_FAUX</td>
+                  <td><code>unset</code></td>
+                  <td>Fake LLM responses mapping framework for test assertions.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab 2: Resolver -->
+        <div class="tab-pane" id="pane-resolver">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Directory Resolver Calculator</h3>
+                <p>Input variables to see where Clio resolves session and configuration folders:</p>
+                
+                <div class="form-group">
+                  <label for="osSelect">Operating System</label>
+                  <select id="osSelect" onchange="resolvePaths()">
+                    <option value="linux">Linux</option>
+                    <option value="macos">macOS</option>
+                    <option value="windows">Windows</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="clioHomeInput">CLIO_HOME (Override)</label>
+                  <input type="text" id="clioHomeInput" value="" placeholder="e.g. /home/user/my_clio_tree" oninput="resolvePaths()">
+                </div>
+
+                <div class="form-group">
+                  <label for="clioConfigInput">CLIO_CONFIG_DIR (Override)</label>
+                  <input type="text" id="clioConfigInput" value="" placeholder="e.g. /etc/clio" oninput="resolvePaths()">
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Effective Resolved Paths</h3>
+                <p>Resolution order: <code>env > settings > platform XDG</code></p>
+                
+                <div class="path-row">
+                  <span class="path-label">Config Folder</span>
+                  <span class="path-value" id="valConfig">/home/user/.config/clio</span>
+                </div>
+                <div class="path-row">
+                  <span class="path-label">Data Folder</span>
+                  <span class="path-value" id="valData">/home/user/.local/share/clio</span>
+                </div>
+                <div class="path-row">
+                  <span class="path-label">State Folder</span>
+                  <span class="path-value" id="valState">/home/user/.local/state/clio</span>
+                </div>
+                <div class="path-row">
+                  <span class="path-label">Cache Folder</span>
+                  <span class="path-value" id="valCache">/home/user/.cache/clio</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="alcf_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">ALCF Inference Provider</span>
+          </a>
+          <a href="tool_usage_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Tool Usage Reference</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Env Blueprint &bull; Version 0.2.8 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    let activeCat = 'all';
+
+    function filterCategory(cat) {
+      activeCat = cat;
+      document.querySelectorAll('.filter-tag').forEach(b => b.classList.remove('active'));
+      const activeBtn = document.getElementById(`btn-${cat}`);
+      if (activeBtn) activeBtn.classList.add('active');
+      filterEnvTable();
+    }
+
+    function filterEnvTable() {
+      const q = document.getElementById("envSearch").value.toLowerCase().trim();
+      const rows = document.querySelectorAll("#envTableBody tr");
+
+      rows.forEach(row => {
+        const name = row.querySelector(".env-name").innerText.toLowerCase();
+        const desc = row.cells[2].innerText.toLowerCase();
+        const cat = row.getAttribute("data-cat");
+
+        const matchesQ = !q || name.includes(q) || desc.includes(q);
+        const matchesCat = activeCat === 'all' || cat === activeCat;
+
+        if (matchesQ && matchesCat) {
+          row.style.display = "";
+        } else {
+          row.style.display = "none";
+        }
+      });
+    }
+
+    function resolvePaths() {
+      const os = document.getElementById("osSelect").value;
+      const clioHome = document.getElementById("clioHomeInput").value.trim();
+      const clioConfig = document.getElementById("clioConfigInput").value.trim();
+
+      let config = "";
+      let data = "";
+      let state = "";
+      let cache = "";
+
+      if (clioHome) {
+        config = `${clioHome}/config`;
+        data = `${clioHome}/data`;
+        state = `${clioHome}/state`;
+        cache = `${clioHome}/cache`;
+      } else {
+        if (os === "linux") {
+          config = "~/.config/clio";
+          data = "~/.local/share/clio";
+          state = "~/.local/state/clio";
+          cache = "~/.cache/clio";
+        } else if (os === "macos") {
+          config = "~/Library/Application Support/clio";
+          data = "~/Library/Application Support/clio";
+          state = "~/Library/Application Support/clio/state";
+          cache = "~/Library/Caches/clio";
+        } else {
+          config = "%APPDATA%\\clio";
+          data = "%LOCALAPPDATA%\\clio";
+          state = "%LOCALAPPDATA%\\clio\\state";
+          cache = "%LOCALAPPDATA%\\clio\\cache";
+        }
+      }
+
+      if (clioConfig) {
+        config = clioConfig;
+      }
+
+      document.getElementById("valConfig").innerText = config;
+      document.getElementById("valData").innerText = data;
+      document.getElementById("valState").innerText = state;
+      document.getElementById("valCache").innerText = cache;
+    }
+
+    // Init
+    window.onload = () => {
+      resolvePaths();
+      // Make functions globally available
+      window.filterCategory = filterCategory;
+    };
+  </script>
+</body>
+</html>
