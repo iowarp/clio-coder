@@ -1,12 +1,21 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { codewikiPath, serializeCodewiki } from "../../src/domains/context/codewiki/indexer.js";
+import { codewikiPath, fallbackExtraction, serializeCodewiki } from "../../src/domains/context/codewiki/indexer.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
 	buildCodewiki,
@@ -514,6 +523,41 @@ describe("contracts/codewiki", () => {
 		strictEqual(untouched, removed);
 	});
 
+	it("reconciles a rename when both old and new paths are reported", async () => {
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(
+			join(scratch, "src", "index.ts"),
+			"import { helper } from './old-name.js';\nexport const main = helper;\n",
+			"utf8",
+		);
+		writeFileSync(join(scratch, "src", "old-name.ts"), "export const helper = 1;\n", "utf8");
+		const original = await buildCodewiki({ cwd: scratch, language: "typescript" });
+		ok(hasInternalEdge(original, "src/index.ts", "src/old-name.ts"));
+
+		renameSync(join(scratch, "src", "old-name.ts"), join(scratch, "src", "new-name.ts"));
+		writeFileSync(
+			join(scratch, "src", "index.ts"),
+			"import { helper } from './new-name.js';\nexport const main = helper;\n",
+			"utf8",
+		);
+
+		// A rename reported with only the destination keeps the stale source record;
+		// renames are intentionally not inferred, and the fingerprint rail triggers a
+		// full rebuild for moves no tool reported.
+		const destinationOnly = await updateCodewikiPaths(scratch, original, ["src/new-name.ts"]);
+		ok(destinationOnly.files.some((file) => file.path === "src/old-name.ts"));
+		ok(hasSymbol(destinationOnly, "src/new-name.ts", "helper", "const"));
+
+		const updated = await updateCodewikiPaths(scratch, original, ["src/old-name.ts", "src/new-name.ts", "src/index.ts"]);
+		deepStrictEqual(updated, await buildCodewiki({ cwd: scratch, language: "typescript" }));
+		strictEqual(
+			updated.files.some((file) => file.path === "src/old-name.ts"),
+			false,
+		);
+		ok(hasSymbol(updated, "src/new-name.ts", "helper", "const"));
+		ok(hasInternalEdge(updated, "src/index.ts", "src/new-name.ts"));
+	});
+
 	it("matches full rebuilds after incremental add, import modification, and delete", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		mkdirSync(join(scratch, "pkg"), { recursive: true });
@@ -916,6 +960,44 @@ describe("contracts/codewiki", () => {
 		ok(hasSymbol(codewiki, "Widget.cs", "Color", "type"));
 		ok(hasExternalEdge(codewiki, "Widget.cs", "System.Text"));
 		strictEqual(hasSymbol(codewiki, "Widget.cs", "localValue"), false);
+	});
+
+	it("extracts C# declarations through the regex fallback when tree-sitter fails", () => {
+		const extraction = fallbackExtraction(
+			"c#",
+			"Widget.cs",
+			[
+				"using System.Text;",
+				"using static System.Math;",
+				"using Alias = System.Collections.Generic;",
+				"",
+				"public interface IService {",
+				"    void Run();",
+				"}",
+				"",
+				"public sealed class Widget {",
+				"    public const int Max = 3;",
+				"",
+				"    public void Run(int count) {",
+				"    }",
+				"}",
+				"",
+				"public record Thing(int Id);",
+				"public struct Bag {}",
+				"public enum Color { Red }",
+				"",
+			].join("\n"),
+		);
+
+		const kindsByName = new Map(extraction.symbols.map((symbol) => [symbol.name, symbol.kind]));
+		strictEqual(kindsByName.get("IService"), "iface");
+		strictEqual(kindsByName.get("Widget"), "class");
+		strictEqual(kindsByName.get("Max"), "const");
+		strictEqual(kindsByName.get("Run"), "method");
+		strictEqual(kindsByName.get("Thing"), "type");
+		strictEqual(kindsByName.get("Bag"), "type");
+		strictEqual(kindsByName.get("Color"), "type");
+		deepStrictEqual(extraction.imports, ["System.Collections.Generic", "System.Math", "System.Text"]);
 	});
 
 	it("skips Go function-local var and const specs while keeping package declarations", async () => {
