@@ -62,7 +62,7 @@ while keeping every privileged action gated and auditable.
 - **ACP interop.** `clio acp` serves the Agent Client Protocol over stdio for
   ACP frontends, and dispatch can delegate tasks to external ACP agents while
   Clio mediates permissions.
-- **Project context and skills.** `clio context-init` bootstraps a checked-in
+- **Project context and skills.** `clio context init` bootstraps a checked-in
   `CLIO.md` as the canonical project guide, and reusable `SKILL.md` guides
   load on demand from per-user and per-project discovery roots, including
   cross-harness layouts.
@@ -70,7 +70,7 @@ while keeping every privileged action gated and auditable.
 ## Status
 
 Clio Coder is alpha software distributed from source. The current release is
-**v0.2.7**. The `@iowarp/clio-coder` package is not yet published to npm;
+**v0.2.8**. The `@iowarp/clio-coder` package is not yet published to npm;
 install from a source checkout as described below. Interfaces may still move
 between minor versions, and model-specific behavior varies by target. Release
 history lives in the [CHANGELOG](CHANGELOG.md), and every release is gated by
@@ -235,7 +235,7 @@ clio run --agent coder "Refactor src/engine/parser.ts"
 ## Project Context: CLIO.md
 
 Clio loads a checked-in `CLIO.md` as the canonical project guide on every
-session. Run `clio context-init` in your repository to bootstrap one: the bootstrap
+session. Run `clio context init` in your repository to bootstrap one: the bootstrap
 agent grounds it in your real source structure and can adopt existing
 `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Cursor, and Copilot context with
 provenance and conflict reporting.
