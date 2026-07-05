@@ -1,10 +1,17 @@
 import { ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { writeCodewiki } from "../../src/domains/context/codewiki/indexer.js";
-import { computeFingerprint, type Fingerprint, isStale } from "../../src/domains/context/fingerprint.js";
+import { setTimeout as delay } from "node:timers/promises";
+import { buildCodewiki, writeCodewiki } from "../../src/domains/context/codewiki/indexer.js";
+import {
+	computeFingerprint,
+	computeFingerprintCached,
+	type Fingerprint,
+	isStale,
+} from "../../src/domains/context/fingerprint.js";
 
 const scratchRoots: string[] = [];
 
@@ -21,7 +28,34 @@ function scratchProject(): string {
 	return root;
 }
 
+function treeHashForPaths(cwd: string, relPaths: ReadonlyArray<string>): string {
+	const hash = createHash("sha256");
+	for (const relPath of [...relPaths].sort((a, b) => a.localeCompare(b))) {
+		const stat = statSync(join(cwd, relPath));
+		hash.update(`${relPath}:${stat.size}:${Math.floor(stat.mtimeMs)}\n`);
+	}
+	return hash.digest("hex");
+}
+
 describe("contracts/fingerprint", () => {
+	it("only marks indexable file changes stale", () => {
+		const cwd = scratchProject();
+		const sourcePath = join(cwd, "src", "index.ts");
+		writeFileSync(sourcePath, "export const value = 1;\n", "utf8");
+		const initial = computeFingerprint(cwd);
+
+		const readmePath = join(cwd, "README.md");
+		writeFileSync(readmePath, "# Fixture\n", "utf8");
+		strictEqual(computeFingerprint(cwd).treeHash, initial.treeHash);
+
+		writeFileSync(readmePath, "# Fixture\n\nUpdated notes.\n", "utf8");
+		strictEqual(computeFingerprint(cwd).treeHash, initial.treeHash);
+
+		writeFileSync(join(cwd, "src", "extra.ts"), "export const extra = 1;\n", "utf8");
+		const withExtraSource = computeFingerprint(cwd);
+		strictEqual(isStale(initial, withExtraSource), true);
+	});
+
 	it("marks same-size content edits stale through file mtime", () => {
 		const cwd = scratchProject();
 		const filePath = join(cwd, "src", "index.ts");
@@ -35,6 +69,42 @@ describe("contracts/fingerprint", () => {
 		const curr = computeFingerprint(cwd);
 
 		strictEqual(isStale(prev, curr), true);
+	});
+
+	it("matches the codewiki indexer file set", async () => {
+		const cwd = scratchProject();
+		mkdirSync(join(cwd, "scripts"), { recursive: true });
+		mkdirSync(join(cwd, "assets"), { recursive: true });
+		mkdirSync(join(cwd, "node_modules", "pkg"), { recursive: true });
+		writeFileSync(join(cwd, "src", "index.ts"), "export const value = 1;\n", "utf8");
+		writeFileSync(join(cwd, "src", "types.d.ts"), "export interface Ignored {}\n", "utf8");
+		writeFileSync(join(cwd, "scripts", "tool.py"), "print('indexed')\n", "utf8");
+		writeFileSync(join(cwd, "package.json"), '{"name":"fixture"}\n', "utf8");
+		writeFileSync(join(cwd, "README.md"), "# Not indexed\n", "utf8");
+		writeFileSync(join(cwd, "assets", "logo.svg"), "<svg />\n", "utf8");
+		writeFileSync(join(cwd, "node_modules", "pkg", "index.ts"), "export const ignored = true;\n", "utf8");
+
+		const codewiki = await buildCodewiki({ cwd, language: "typescript" });
+		const indexedPaths = codewiki.files.map((file) => file.path);
+
+		strictEqual(indexedPaths.length, 3);
+		strictEqual(computeFingerprint(cwd, codewiki).treeHash, treeHashForPaths(cwd, indexedPaths));
+	});
+
+	it("caches fingerprints within the ttl and refreshes after expiry", async () => {
+		const cwd = scratchProject();
+		const filePath = join(cwd, "src", "index.ts");
+		writeFileSync(filePath, "export const value = 1;\n", "utf8");
+
+		const first = computeFingerprintCached(cwd, null, { ttlMs: 10 });
+		const second = computeFingerprintCached(cwd, null, { ttlMs: 10 });
+		strictEqual(second, first);
+
+		await delay(20);
+		writeFileSync(filePath, "export const value = 100;\n", "utf8");
+		const third = computeFingerprintCached(cwd, null, { ttlMs: 10 });
+
+		strictEqual(isStale(first, third), true);
 	});
 
 	it("ignores gitignored scratch directories when detecting drift", () => {

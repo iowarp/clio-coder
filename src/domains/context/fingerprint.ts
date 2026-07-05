@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { type Codewiki, readCodewiki } from "./codewiki/indexer.js";
+import { type Codewiki, isIndexablePath, readCodewiki } from "./codewiki/indexer.js";
 import { EXCLUDED_DIRS } from "./excluded-dirs.js";
 
 export interface Fingerprint {
@@ -10,6 +10,19 @@ export interface Fingerprint {
 	gitHead: string | null;
 	loc: number;
 }
+
+export interface FingerprintCacheOptions {
+	ttlMs?: number;
+}
+
+const DEFAULT_FINGERPRINT_CACHE_TTL_MS = 5_000;
+
+interface CachedFingerprint {
+	fingerprint: Fingerprint;
+	expiresAtMs: number;
+}
+
+const cachedFingerprints = new Map<string, CachedFingerprint>();
 
 const LOC_EXTENSIONS = new Set([
 	".ts",
@@ -33,12 +46,6 @@ function extensionOf(name: string): string {
 	return index === -1 ? "" : name.slice(index);
 }
 
-function excludeFile(name: string): boolean {
-	if (name.endsWith(".lock")) return true;
-	if (/\.tar($|\.)/.test(name)) return true;
-	return false;
-}
-
 function walkFiles(cwd: string, dir: string, out: string[]): void {
 	let entries: import("node:fs").Dirent[];
 	try {
@@ -53,8 +60,8 @@ function walkFiles(cwd: string, dir: string, out: string[]): void {
 			continue;
 		}
 		if (!entry.isFile()) continue;
-		if (excludeFile(entry.name)) continue;
-		out.push(relative(cwd, join(dir, entry.name)).split("\\").join("/"));
+		const relPath = relative(cwd, join(dir, entry.name)).split("\\").join("/");
+		if (isIndexablePath(relPath)) out.push(relPath);
 	}
 }
 
@@ -114,6 +121,24 @@ export function computeFingerprint(cwd: string, codewiki: Codewiki | null = read
 		gitHead: currentGitHead(cwd),
 		loc: artifactLoc ?? loc,
 	};
+}
+
+export function computeFingerprintCached(
+	cwd: string,
+	codewiki: Codewiki | null = readCodewiki(cwd),
+	options: FingerprintCacheOptions = {},
+): Fingerprint {
+	const now = Date.now();
+	const cached = cachedFingerprints.get(cwd);
+	if (cached && cached.expiresAtMs > now) return cached.fingerprint;
+
+	const fingerprint = computeFingerprint(cwd, codewiki);
+	const ttlMs = options.ttlMs ?? DEFAULT_FINGERPRINT_CACHE_TTL_MS;
+	cachedFingerprints.set(cwd, {
+		fingerprint,
+		expiresAtMs: Date.now() + Math.max(0, ttlMs),
+	});
+	return fingerprint;
 }
 
 export function isStale(prev: Fingerprint, curr: Fingerprint): boolean {

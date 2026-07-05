@@ -202,7 +202,7 @@ function languageForPath(relPath: string): CodewikiLanguage | null {
 	return CONFIG_FILE_NAMES.has(name) || name.endsWith(".csproj") ? "config" : null;
 }
 
-function isIndexablePath(relPath: string): boolean {
+export function isIndexablePath(relPath: string): boolean {
 	if (relPath.split("/").some((segment) => EXCLUDED_DIRS.has(segment))) return false;
 	return languageForPath(relPath) !== null;
 }
