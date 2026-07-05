@@ -1,4 +1,5 @@
 import { notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +10,13 @@ import {
 	buildCodewiki,
 	ContextDomainModule,
 	computeFingerprint,
+	listWikiPages,
+	renderPromptContext,
 	serializeClioMd,
+	wikiDir,
 	writeClioState,
 	writeCodewiki,
+	writeWikiMeta,
 } from "../../src/domains/context/index.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
@@ -43,7 +48,7 @@ const TOOL_HINTS = {
 	},
 	code_nav: {
 		tool: "code_nav",
-		hint: "Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents).",
+		hint: "Use code_nav for indexed code navigation (modes: symbol, path, entries, outline, deps, dependents, wiki).",
 	},
 	context: {
 		tool: "context",
@@ -83,6 +88,35 @@ function writeClioMd(cwd: string): void {
 		}),
 		"utf8",
 	);
+}
+
+function writePromptWiki(cwd: string, gitHead: string): void {
+	mkdirSync(wikiDir(cwd), { recursive: true });
+	writeFileSync(join(wikiDir(cwd), "quickstart.md"), "# Quickstart\n\nStart with `src/index.ts`.\n", "utf8");
+	writeWikiMeta(cwd, {
+		version: 1,
+		updatedAt: "2026-07-04T00:00:00.000Z",
+		gitHead,
+		model: "test-model",
+		contentHash: "0".repeat(64),
+		pages: listWikiPages(cwd),
+	});
+}
+
+function git(cwd: string, args: ReadonlyArray<string>): string {
+	const child = spawnSync("git", [...args], { cwd, encoding: "utf8" });
+	if (child.error) throw child.error;
+	if (child.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${child.stderr}`);
+	return child.stdout.trim();
+}
+
+function initGitRepo(cwd: string): string {
+	git(cwd, ["init"]);
+	git(cwd, ["config", "user.email", "clio-test@example.com"]);
+	git(cwd, ["config", "user.name", "Clio Test"]);
+	git(cwd, ["add", "."]);
+	git(cwd, ["commit", "-m", "initial"]);
+	return git(cwd, ["rev-parse", "--verify", "HEAD"]);
 }
 
 async function compileProjectPrompt(cwd: string) {
@@ -436,7 +470,7 @@ describe("contracts/prompts compiler logic", () => {
 		const freshWiki = scratchProject();
 		writeClioMd(freshWiki);
 		const generatedAt = "2026-05-01T00:00:00.000Z";
-		writeCodewiki(freshWiki, buildCodewiki({ cwd: freshWiki, language: "typescript", generatedAt }));
+		writeCodewiki(freshWiki, await buildCodewiki({ cwd: freshWiki, language: "typescript", generatedAt }));
 		writeClioState(freshWiki, {
 			version: 1,
 			projectType: "typescript",
@@ -466,6 +500,56 @@ describe("contracts/prompts compiler logic", () => {
 		ok(existsSync(join(staleWiki, ".clio", "codewiki.json")));
 		strictEqual(result.systemPrompt.includes("Codewiki: available"), false);
 		strictEqual(result.systemPrompt.includes("legacySymbol"), false);
+	});
+
+	it("renders wiki prompt markers for fresh, stale, and absent wiki states", async () => {
+		const generatedAt = "2026-05-01T00:00:00.000Z";
+		const absent = scratchProject();
+		writeCodewiki(absent, await buildCodewiki({ cwd: absent, language: "typescript", generatedAt }));
+		writeClioState(absent, {
+			version: 1,
+			projectType: "typescript",
+			fingerprint: computeFingerprint(absent),
+			lastSessionAt: generatedAt,
+			lastIndexedAt: generatedAt,
+		});
+		strictEqual(renderPromptContext(absent).text.includes("<wiki>"), false);
+
+		const fresh = scratchProject();
+		writeCodewiki(fresh, await buildCodewiki({ cwd: fresh, language: "typescript", generatedAt }));
+		writeClioState(fresh, {
+			version: 1,
+			projectType: "typescript",
+			fingerprint: computeFingerprint(fresh),
+			lastSessionAt: generatedAt,
+			lastIndexedAt: generatedAt,
+		});
+		const freshHead = initGitRepo(fresh);
+		writePromptWiki(fresh, freshHead);
+		const freshText = renderPromptContext(fresh).text;
+		ok(freshText.includes("<codewiki>available; use code_nav</codewiki>"));
+		ok(freshText.includes("<wiki>1 pages at .clio/wiki (start: quickstart.md)</wiki>"));
+		ok(freshText.indexOf("<codewiki>") < freshText.indexOf("<wiki>"));
+
+		const stale = scratchProject();
+		writeCodewiki(stale, await buildCodewiki({ cwd: stale, language: "typescript", generatedAt }));
+		writeClioState(stale, {
+			version: 1,
+			projectType: "typescript",
+			fingerprint: computeFingerprint(stale),
+			lastSessionAt: generatedAt,
+			lastIndexedAt: generatedAt,
+		});
+		const staleHead = initGitRepo(stale);
+		writePromptWiki(stale, staleHead);
+		writeFileSync(join(stale, "src", "extra.ts"), "export const extra = true;\n", "utf8");
+		git(stale, ["add", "src/extra.ts"]);
+		git(stale, ["commit", "-m", "add extra"]);
+		ok(
+			renderPromptContext(stale).text.includes(
+				"<wiki>1 pages at .clio/wiki (start: quickstart.md) (stale; run clio context wiki --update)</wiki>",
+			),
+		);
 	});
 });
 

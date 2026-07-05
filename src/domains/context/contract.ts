@@ -3,6 +3,7 @@ import type { RunBootstrapInput, RunBootstrapResult } from "./bootstrap.js";
 import type { RunContextClearInput, RunContextClearResult } from "./clear.js";
 import type { ParsedClioMd } from "./clio-md.js";
 import type { RunContextRefreshInput, RunContextRefreshResult } from "./refresh.js";
+import type { RunWikiGenerateInput, RunWikiGenerateResult } from "./wiki/generate.js";
 
 export interface ProjectPromptContext {
 	text: string;
@@ -37,9 +38,11 @@ export interface ContextContract extends DomainContract {
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
 	/**
 	 * Rebuild the codewiki index and `.clio` state without touching CLIO.md.
+	 * Markdown wiki updates require the explicit refresh input flag.
 	 * Backs `/context refresh` and `clio context refresh`.
 	 */
 	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
+	runWikiGenerate(input?: RunWikiGenerateInput): Promise<RunWikiGenerateResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
 	/**
 	 * Parsed CLIO.md structured fields (project name, conventions, invariants)

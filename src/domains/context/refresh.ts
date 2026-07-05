@@ -3,6 +3,9 @@ import type { BootstrapIo, BootstrapProgressSink } from "./bootstrap.js";
 import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint, type Fingerprint } from "./fingerprint.js";
 import { readClioState, writeClioState } from "./state.js";
+import { type RunWikiGenerateResult, runWikiGenerate, type WikiGenerate } from "./wiki/generate.js";
+import { readWikiMeta } from "./wiki/meta.js";
+import { wikiStaleness } from "./wiki/staleness.js";
 
 /**
  * `/context refresh` and `clio context refresh`: rebuild the codewiki index
@@ -15,35 +18,43 @@ export interface RunContextRefreshInput {
 	io?: BootstrapIo;
 	now?: () => Date;
 	onProgress?: BootstrapProgressSink;
+	wiki?: boolean;
+	wikiGenerate?: WikiGenerate;
 }
 
 export interface RunContextRefreshResult {
 	action: "refreshed";
 	codewikiEntries: number;
 	fingerprint: Fingerprint;
+	wiki?: RunWikiGenerateResult;
+	hint?: string;
 }
 
 function indexedSourceFileCount(codewiki: Codewiki): number {
 	return codewiki.files.filter((file) => file.lang !== "config").length;
 }
 
+const STALE_WIKI_REFRESH_HINT = "wiki is stale; run clio context refresh --wiki or clio context wiki --update";
+
 export async function runContextRefresh(input: RunContextRefreshInput = {}): Promise<RunContextRefreshResult> {
 	const cwd = input.cwd ?? process.cwd();
 	const now = input.now ?? (() => new Date());
 	const prev = readClioState(cwd);
+	const hasWiki = readWikiMeta(cwd) !== null;
 	const projectType = prev?.projectType ?? detectProjectType(cwd);
 	const indexedAt = now().toISOString();
 
 	input.onProgress?.({ phase: "codewiki", status: "started", message: "rebuilding codewiki" });
-	const codewiki = buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
 	writeCodewiki(cwd, codewiki);
-	const fingerprint = computeFingerprint(cwd);
+	const fingerprint = computeFingerprint(cwd, codewiki);
 
 	input.onProgress?.({ phase: "state", status: "running", message: "writing state" });
 	writeClioState(cwd, {
 		version: 1,
 		projectType,
 		fingerprint,
+		codewikiVersion: codewiki.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
@@ -52,7 +63,27 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 	});
 
 	const entries = indexedSourceFileCount(codewiki);
+	let wikiResult: RunWikiGenerateResult | undefined;
+	let hint: string | undefined;
+	if (input.wiki === true && hasWiki) {
+		wikiResult = await runWikiGenerate({
+			cwd,
+			mode: "update",
+			model: "configured-clio-target",
+			...(input.wikiGenerate ? { generate: input.wikiGenerate } : {}),
+			...(input.onProgress ? { onProgress: input.onProgress } : {}),
+		});
+	} else if (input.wiki !== true && hasWiki && wikiStaleness(cwd).state === "stale") {
+		hint = STALE_WIKI_REFRESH_HINT;
+	}
+
 	input.io?.stdout(`clio context refresh: codewiki rebuilt (${entries} source file${entries === 1 ? "" : "s"})\n`);
 	input.onProgress?.({ phase: "done", status: "completed", message: "context refreshed" });
-	return { action: "refreshed", codewikiEntries: entries, fingerprint };
+	return {
+		action: "refreshed",
+		codewikiEntries: entries,
+		fingerprint,
+		...(wikiResult ? { wiki: wikiResult } : {}),
+		...(hint ? { hint } : {}),
+	};
 }

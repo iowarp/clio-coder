@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { type Codewiki, readCodewiki } from "./codewiki/indexer.js";
 
 export interface Fingerprint {
 	treeHash: string;
@@ -83,35 +84,38 @@ function countLines(filePath: string): number {
 	}
 }
 
-export function computeFingerprint(cwd: string): Fingerprint {
+function locFromCodewiki(codewiki: Codewiki | null): number | null {
+	if (!codewiki) return null;
+	return codewiki.files.reduce((sum, file) => (file.lang === "config" ? sum : sum + file.loc), 0);
+}
+
+export function computeFingerprint(cwd: string, codewiki: Codewiki | null = readCodewiki(cwd)): Fingerprint {
 	const files: string[] = [];
 	walkFiles(cwd, cwd, files);
 	files.sort((a, b) => a.localeCompare(b));
 
 	const hash = createHash("sha256");
+	const artifactLoc = locFromCodewiki(codewiki);
 	let loc = 0;
 	for (const relPath of files) {
 		const absPath = join(cwd, relPath);
-		let size = 0;
+		let stat: ReturnType<typeof statSync>;
 		try {
-			size = statSync(absPath).size;
+			stat = statSync(absPath);
 		} catch {
 			continue;
 		}
-		hash.update(`${relPath}:${size}\n`);
-		if (LOC_EXTENSIONS.has(extensionOf(relPath))) loc += countLines(absPath);
+		hash.update(`${relPath}:${stat.size}:${Math.floor(stat.mtimeMs)}\n`);
+		if (artifactLoc === null && LOC_EXTENSIONS.has(extensionOf(relPath))) loc += countLines(absPath);
 	}
 
 	return {
 		treeHash: hash.digest("hex"),
 		gitHead: currentGitHead(cwd),
-		loc,
+		loc: artifactLoc ?? loc,
 	};
 }
 
 export function isStale(prev: Fingerprint, curr: Fingerprint): boolean {
-	if (prev.gitHead !== curr.gitHead && prev.treeHash !== curr.treeHash) return true;
-	const locDelta = Math.abs(curr.loc - prev.loc) / Math.max(prev.loc, 1);
-	if (locDelta > 0.1) return true;
-	return false;
+	return prev.treeHash !== curr.treeHash;
 }

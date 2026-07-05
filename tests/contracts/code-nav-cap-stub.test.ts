@@ -15,12 +15,12 @@ describe("contracts/code_nav cap stub bounds a huge query continuation", () => {
 	let scratch: string;
 	let originalCwd: string;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		originalCwd = process.cwd();
 		scratch = mkdtempSync(join(tmpdir(), "clio-code-nav-cap-"));
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "index.ts"), "export function main() { return 1; }\n", "utf8");
-		writeCodewiki(scratch, buildCodewiki({ cwd: scratch, language: "polyglot" }));
+		writeCodewiki(scratch, await buildCodewiki({ cwd: scratch, language: "polyglot" }));
 		process.chdir(scratch);
 	});
 

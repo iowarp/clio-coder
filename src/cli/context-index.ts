@@ -1,5 +1,5 @@
 import {
-	buildCodewikiWithTreeSitter,
+	buildCodewiki,
 	type Codewiki,
 	codewikiPath,
 	structuralCodewikiHash,
@@ -55,14 +55,15 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const cwd = process.cwd();
 	const now = new Date().toISOString();
 	const profile = detectProjectProfile(cwd);
-	const codewiki = await buildCodewikiWithTreeSitter({ cwd, language: profile.projectType });
+	const codewiki = await buildCodewiki({ cwd, language: profile.projectType });
 	writeCodewiki(cwd, codewiki);
 	const prev = readClioState(cwd);
-	const fingerprint = computeFingerprint(cwd);
+	const fingerprint = computeFingerprint(cwd, codewiki);
 	writeClioState(cwd, {
 		version: 1,
 		projectType: profile.projectType,
 		fingerprint,
+		codewikiVersion: codewiki.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),

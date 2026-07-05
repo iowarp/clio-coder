@@ -3,6 +3,9 @@ import { join, normalize } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../../core/tool-names.js";
 import type { Codewiki, CodewikiFile, CodewikiSymbol } from "../../domains/context/codewiki/indexer.js";
+import { listWikiPages, validateWikiLayout } from "../../domains/context/wiki/layout.js";
+import { readWikiMeta } from "../../domains/context/wiki/meta.js";
+import { wikiStaleness } from "../../domains/context/wiki/staleness.js";
 import { compileGlobRegex } from "../ignore-policy.js";
 import {
 	finalizeObservation,
@@ -107,6 +110,7 @@ function fileSummary(file: CodewikiFile): Record<string, unknown> {
 		lang: file.lang,
 		loc: file.loc,
 		role: file.role,
+		...(file.summary ? { summary: file.summary } : {}),
 	};
 }
 
@@ -327,6 +331,34 @@ function runDependents(index: NavIndex, query: string, limit: number): NavPayloa
 	};
 }
 
+function runWiki(cwd: string): NavPayload {
+	const meta = readWikiMeta(cwd);
+	if (!meta) {
+		return {
+			payload: {
+				pages: [],
+				staleness: { state: "absent" },
+				message: "no wiki exists; run clio context wiki",
+			},
+			shownCount: 0,
+			totalCount: 0,
+		};
+	}
+	const validation = validateWikiLayout(cwd);
+	const pages = validation.ok ? listWikiPages(cwd) : meta.pages;
+	return {
+		payload: {
+			pages,
+			staleness: wikiStaleness(cwd),
+			...(!validation.ok
+				? { message: `wiki layout invalid; run clio context wiki --update (${validation.problems.join("; ")})` }
+				: {}),
+		},
+		shownCount: pages.length,
+		totalCount: pages.length,
+	};
+}
+
 function parseLimit(value: unknown, fallback: number): number {
 	if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.min(Math.floor(value), MAX_LIMIT);
 	return fallback;
@@ -335,9 +367,9 @@ function parseLimit(value: unknown, fallback: number): number {
 export const codeNavTool: ToolSpec = {
 	name: ToolNames.CodeNav,
 	description:
-		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, dependents lists importers.",
+		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, dependents lists importers, wiki lists Markdown wiki pages.",
 	parameters: Type.Object({
-		mode: stringEnum(["symbol", "path", "entries", "outline", "deps", "dependents"], "Lookup mode."),
+		mode: stringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], "Lookup mode."),
 		query: Type.Optional(Type.String({ description: "Symbol name, indexed path, path pattern, or path substring." })),
 		limit: Type.Optional(
 			Type.Number({
@@ -349,7 +381,7 @@ export const codeNavTool: ToolSpec = {
 	executionMode: "parallel",
 	async run(args, options): Promise<ToolResult> {
 		const mode = typeof args.mode === "string" ? args.mode : "";
-		const loaded = loadCodewikiForTool();
+		const loaded = await loadCodewikiForTool();
 		if (!loaded.ok) return { kind: "error", message: loaded.message };
 		const index = buildNavIndex(loaded.codewiki);
 		const query = typeof args.query === "string" ? args.query.trim() : "";
@@ -400,9 +432,10 @@ export const codeNavTool: ToolSpec = {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
 			return close(runDependents(index, query, limit));
 		}
+		if (mode === "wiki") return close(runWiki(process.cwd()));
 		return {
 			kind: "error",
-			message: `code_nav: mode must be symbol, path, entries, outline, deps, or dependents; got '${mode}'`,
+			message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, or wiki; got '${mode}'`,
 		};
 	},
 };

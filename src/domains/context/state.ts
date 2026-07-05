@@ -10,6 +10,7 @@ export interface ClioProjectState {
 	projectType?: ProjectType;
 	fingerprint: Fingerprint;
 	bootstrapFingerprint?: Fingerprint;
+	codewikiVersion?: number;
 	contextSources?: AdoptionSourceSnapshot[];
 	contextSourceHash?: string;
 	lastInitAt?: string;
@@ -69,6 +70,13 @@ function isProjectState(value: unknown): value is ClioProjectState {
 		"bootstrapFingerprint" in obj &&
 		obj.bootstrapFingerprint !== undefined &&
 		!isFingerprint(obj.bootstrapFingerprint)
+	) {
+		return false;
+	}
+	if (
+		"codewikiVersion" in obj &&
+		obj.codewikiVersion !== undefined &&
+		(typeof obj.codewikiVersion !== "number" || !Number.isInteger(obj.codewikiVersion) || obj.codewikiVersion < 1)
 	) {
 		return false;
 	}

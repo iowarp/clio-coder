@@ -275,31 +275,37 @@ context(scope="skills", name="context-prime", include_tree=true)
 
 ## code_nav: navigate the codewiki index
 
-Structural navigation over the persisted codewiki index (`.clio/codewiki.json`, built by `clio context-index`). Source: `src/tools/codewiki/code-nav.ts`. Errors cleanly when the index has not been built.
+Structural navigation over the persisted codewiki index (`.clio/codewiki.json`)
+and the optional Markdown wiki metadata. The index is built by context init,
+refresh, or index commands and can be rebuilt/backfilled on tool demand. Source:
+`src/tools/codewiki/code-nav.ts`.
 
 Arguments:
 
-- `mode` (required). `symbol`, `path`, `entries`, `outline`, `deps`, or `dependents`.
-- `query` (required for every mode except `entries`). Symbol name, indexed path, path pattern, or path substring.
+- `mode` (required). `symbol`, `path`, `entries`, `outline`, `deps`, `dependents`, or `wiki`.
+- `query` (required for every mode except `entries` and `wiki`). Symbol name, indexed path, path pattern, or path substring.
 - `limit` (optional). Default 50 (25 for `entries`), max 200.
 
 Modes:
 
-- `symbol`: exact symbol name lookup. Returns the definition records (name, kind, path, line, signature) plus owning file summaries, so you get the exact `file:line` without grepping. No match suggests `next: mode=path query=<q>`.
-- `path`: match indexed file paths by glob, `/regex/flags`, regex-looking pattern, or plain substring.
-- `entries`: likely entry points, ranked from file roles and package.json `main`/`bin`.
-- `outline`: all symbols declared in one file, sorted by line.
-- `deps`: a file's internal and external imports. `dependents`: the files that import it.
+- `symbol`: returns declaration records for an exact symbol name, including path, line, kind, and signature.
+- `path`: returns indexed files whose paths match a glob, `/regex/flags`, regex-looking pattern, or substring.
+- `entries`: returns likely entry points ranked from file roles and `package.json` `main`/`bin`.
+- `outline`: returns declarations in one indexed file, sorted by line.
+- `deps`: returns one indexed file's internal and external imports.
+- `dependents`: returns indexed files that import the target file.
+- `wiki`: returns Markdown wiki pages plus absent/fresh/stale wiki state and layout warnings.
 
 For `outline`, `deps`, and `dependents` the query must resolve to exactly one indexed file: an exact path or a substring matching one path. An ambiguous substring errors with the match count. Output is always parseable JSON (empty results carry empty arrays, an `omitted` count, and `next`); an omitted remainder suggests `next: limit=<2x>`. 16KB cap with the JSON stub on overflow.
 
-Reach for code_nav instead of grep when you want a definition site, a file's structure, or change-impact fan-out; it reads the local index, not the tree.
+Reach for code_nav instead of grep when you want a definition site, a file's structure, change-impact fan-out, or wiki inventory; it reads local artifacts, not the tree.
 
 ```text
 code_nav(mode="symbol", query="finalizeObservation")
 code_nav(mode="outline", query="src/tools/grep.ts")
 code_nav(mode="dependents", query="src/tools/observation.ts")
 code_nav(mode="entries")
+code_nav(mode="wiki")
 ```
 
 ## monitor: inspect dispatched runs

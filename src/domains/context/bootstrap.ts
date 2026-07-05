@@ -11,7 +11,7 @@ import {
 	scanAgentConfigs,
 } from "./adoption.js";
 import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
-import { buildCodewikiWithTreeSitter, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
+import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.js";
 import { computeFingerprint } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
@@ -744,6 +744,7 @@ function writeProjectState(
 	indexedAt: string,
 	adoption: AdoptionScanResult,
 	recordAdoption: boolean,
+	codewikiVersion: number,
 ): string {
 	const finalFingerprint = computeFingerprint(cwd);
 	const statePath = resolveStatePath(cwd);
@@ -754,6 +755,7 @@ function writeProjectState(
 		version: 1,
 		projectType,
 		fingerprint: finalFingerprint,
+		codewikiVersion,
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
 		lastIndexedAt: indexedAt,
@@ -840,7 +842,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	// Index the repository before generation so the generator can ground CLIO.md
 	// in the real structure (entry points, key modules), not just sibling prose.
 	progress(input, { phase: "codewiki", status: "started", message: "building codewiki index" });
-	const codewiki = await buildCodewikiWithTreeSitter({ cwd, language: projectType, generatedAt: indexedAt });
+	const codewiki = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
 	const codewikiEntryCount = indexedSourceFileCount(codewiki);
 	progress(input, {
 		phase: "codewiki",
@@ -964,7 +966,15 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	});
 	progress(input, { phase: "state", status: "started", message: "persisting codewiki and project state" });
 	writeCodewiki(cwd, codewiki);
-	const statePath = writeProjectState(cwd, projectType, now, indexedAt, adoption, input.adopt === true);
+	const statePath = writeProjectState(
+		cwd,
+		projectType,
+		now,
+		indexedAt,
+		adoption,
+		input.adopt === true,
+		codewiki.version,
+	);
 	progress(input, {
 		phase: "state",
 		status: "completed",

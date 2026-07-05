@@ -98,6 +98,11 @@ function fitLines(lines: string[], tokenBudget: number): string {
 	return out.join("\n");
 }
 
+function entryPointLine(file: CodewikiFile): string {
+	const base = `- ${file.path} (${file.lang}, ${file.loc} loc)`;
+	return file.summary ? `${base}: ${file.summary.slice(0, 160)}` : base;
+}
+
 export function renderCodewikiDigest(codewiki: Codewiki, tokenBudget = 1200): string {
 	const files = sourceFiles(codewiki);
 	const areaCounts = countBy(files.map((file) => topTwoSegments(file.path)))
@@ -116,7 +121,7 @@ export function renderCodewikiDigest(codewiki: Codewiki, tokenBudget = 1200): st
 		`roles: ${roleCounts || "none"}`,
 		`areas: ${areaCounts.join(", ") || "none"}`,
 		"entry points:",
-		...entryPoints(codewiki, 12).map((file) => `- ${file.path} (${file.lang}, ${file.loc} loc)`),
+		...entryPoints(codewiki, 12).map(entryPointLine),
 		"key symbols:",
 		...keySymbols(codewiki, 40).map((symbol) => {
 			const file = fileById.get(symbol.fileId);

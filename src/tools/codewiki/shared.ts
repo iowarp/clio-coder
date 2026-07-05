@@ -1,23 +1,30 @@
-import { buildCodewiki, type Codewiki, readCodewiki, writeCodewiki } from "../../domains/context/codewiki/indexer.js";
+import {
+	buildCodewiki,
+	type Codewiki,
+	codewikiNeedsBackfill,
+	readCodewiki,
+	writeCodewiki,
+} from "../../domains/context/codewiki/indexer.js";
 import { computeFingerprint } from "../../domains/context/fingerprint.js";
 import { readClioState, writeClioState } from "../../domains/context/state.js";
 import { detectProjectType } from "../../domains/session/workspace/project-type.js";
 
-export function loadCodewikiForTool(
+export async function loadCodewikiForTool(
 	cwd: string = process.cwd(),
-): { ok: true; codewiki: Codewiki } | { ok: false; message: string } {
+): Promise<{ ok: true; codewiki: Codewiki } | { ok: false; message: string }> {
 	const codewiki = readCodewiki(cwd);
-	if (codewiki) return { ok: true, codewiki };
+	if (codewiki && !codewikiNeedsBackfill(codewiki)) return { ok: true, codewiki };
 	try {
 		const generatedAt = new Date().toISOString();
 		const projectType = detectProjectType(cwd);
-		const rebuilt = buildCodewiki({ cwd, language: projectType, generatedAt });
+		const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt });
 		writeCodewiki(cwd, rebuilt);
 		const prev = readClioState(cwd);
 		writeClioState(cwd, {
 			version: 1,
 			projectType: prev?.projectType ?? projectType,
-			fingerprint: computeFingerprint(cwd),
+			fingerprint: computeFingerprint(cwd, rebuilt),
+			codewikiVersion: rebuilt.version,
 			...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 			...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
 			...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),

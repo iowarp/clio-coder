@@ -68,28 +68,125 @@ Settings validation is strict: an older file still carrying the removed `compact
 
 The compiled session prompt preloads the full rendered project context (the `CLIO.md` fragment plus project-type and codewiki markers) only when a parseable `CLIO.md` exists and the rendered text stays within 8000 characters and 220 lines; otherwise it preloads a compact synopsis. The rule lives in `src/domains/prompts/preload.ts` and every reporting surface classifies with it:
 
-- `/context init` and `clio context-init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
+- `/context init` and `clio context init` print `preload: full (N.NkB, N lines)` or `preload: synopsis (reason: size|lines)` after the summary, and warn when a full preload is within 10% of either limit.
 - `clio config inspect` shows the preload class in the `CLIO.md` entry's detail.
 - The `/context` overlay shows a `project preload:` line under the category legend once a session prompt has compiled.
 
 ## Context refresh
 
-`/context refresh` (and `clio context refresh`) is the cheap staleness fix: it rebuilds the codewiki index and updates `.clio/state.json` without reading or writing `CLIO.md`. The stale codewiki marker in the compiled prompt points at it. Regenerating or updating the handbook prose stays with `/context init`.
+`/context refresh` and `clio context refresh` rebuild the structural codewiki
+and restamp `.clio/state.json` without reading or writing `CLIO.md`. The CLI
+flag `--wiki` is the only refresh path that may update the Markdown wiki, and
+it only runs when an existing wiki metadata file is present. Regenerating or
+updating handbook prose stays with `/context init`.
 
 ---
 
-## Codewiki Indexing and Navigation
+## Codewiki and Wiki
 
-The command `clio context-index` builds the Stage 1 codewiki index without invoking any models. It writes the results to `.clio/codewiki.json` and updates the fingerprint state in `.clio/state.json`. Indexing is deterministic. The same tree produces the identical structural hash on every run, making it safe to run in CI pipelines or compare across environments. The indexer walks selected source and config extensions. Extraction uses web-tree-sitter WASM grammars where available and regex fallback extractors for TypeScript, JavaScript, Python, Go, Rust, C, C++, Java, and Ruby. Unsupported file types are skipped rather than parsed as plain text. The schema tracks:
-- Files: path, language, line count, and role.
-- Symbols: name, kind, line number, and signature.
-- Import edges: internal path links and external modules.
+Project context has two local layers. The structural layer is model-free and
+feeds navigation. The Markdown wiki layer is agent-authored and exists only
+when the operator explicitly asks for it.
 
-### code_nav Modes
-Subagents query the compiled codewiki using the read-only `code_nav` tool instead of performing recursive grep searches. All lookups read the persisted index files locally for high performance. The tool supports the following modes:
-- **symbol**: Find defining files, lines, and signatures for a specific symbol name.
-- **path**: Search files using a glob pattern, regex pattern, or plain substring match.
-- **entries**: List entry points based on file roles and package definitions up to a hard cap of 200 results.
-- **outline**: Outline all symbols declared within a specific file path.
-- **deps**: List internal and external import dependencies for a specific file.
-- **dependents**: List all workspace files that import a specific target path.
+| Layer | Artifact | Producer | Model use | Prompt surfacing |
+| --- | --- | --- | --- | --- |
+| Structural codewiki | `.clio/codewiki.json` plus `.clio/state.json` | `context init`, `context refresh`, `context index`, session freshness checks, and incremental mutation observers | None | `<codewiki>available...; use code_nav</codewiki>` |
+| Markdown wiki | `.clio/wiki/*.md` plus `.clio/wiki/meta.json` | `clio context wiki` or `clio context refresh --wiki` | Yes, through the configured documenter dispatch path | `<wiki>N pages at .clio/wiki (start: quickstart.md)...</wiki>` |
+
+### Structural Index
+
+`.clio/codewiki.json` uses schema v4 and is written as compact JSON. File
+records contain a stable id, path, language, line count, role, per-file content
+hash, extracted import specifiers, and an optional first docstring/JSDoc
+summary. Symbol records are declarations only: name, kind, file id, line, and
+optional signature. Edges are built from imports and record either an internal
+file id target or an external module string.
+
+The indexer walks source files and config manifests while excluding generated
+and local-state directories such as `.git`, `.clio`, `node_modules`, `dist`,
+`build`, `coverage`, virtualenvs, `target`, and `vendor`. Source coverage spans
+TypeScript, JavaScript, Python, Rust, Go, C, C++, Java, Ruby, and C#, with
+config entries for manifests such as `package.json`, `pyproject.toml`,
+`Cargo.toml`, `go.mod`, `pom.xml`, `CMakeLists.txt`, `Gemfile`, and `*.csproj`.
+
+Extraction is async and tree-sitter-first. Clio loads WASM grammars for the ten
+source languages above, extracts symbols/imports/exports from the parsed tree,
+and merges regex import extraction for languages with regex extractors. If a
+tree-sitter parse fails for one file, that file falls back to the available
+regex extractor instead of aborting the whole build. C# is covered by the
+tree-sitter C# grammar.
+
+Incremental updates are real updates, not a full rebuild hidden behind the
+name. Successful file-mutating tools report changed paths through the
+middleware observer. The context domain coalesces those paths, reads only the
+changed indexable files, replaces their file and symbol records, removes
+deleted records, and rebuilds edges from the merged import set. Non-indexable
+paths are no-ops.
+
+### Markdown Wiki
+
+The wiki lives under `.clio/wiki/` and is written by the `documenter` agent.
+`quickstart.md` is mandatory and acts as the hub. The layout validator allows
+at most eight Markdown pages, rejects empty pages, and requires
+`quickstart.md`. `meta.json` records `updatedAt`, `gitHead`, the model label,
+a content hash over the Markdown pages, and the page list. Metadata is written
+only after the generated layout validates and the page content changed.
+
+`clio context wiki` creates a wiki when no metadata exists and updates one when
+metadata is present. `clio context wiki --update` requests update mode
+explicitly. `clio context wiki --status` only reads metadata and does not run a
+model. `clio context refresh --wiki` first rebuilds the structural codewiki and
+then updates an existing wiki when `.clio/wiki/meta.json` exists; when no wiki
+metadata exists, it performs no wiki generation.
+
+### Lifecycle Matrix
+
+| Event | Structural codewiki behavior | Markdown wiki behavior |
+| --- | --- | --- |
+| Session start | If state or `.clio/codewiki.json` already exists, Clio checks freshness best-effort and performs a full rebuild when the index is stale, missing, unreadable, or needs v4 backfill. Never-indexed directories are skipped. | No generation or update. Existing wiki status may surface in the welcome dashboard. |
+| In-session edits | Successful file mutations enqueue changed paths for incremental `updateCodewikiPaths`; the queue is serialized and best-effort. | No automatic update. |
+| Session stop | Drains the incremental queue, then rebuilds only when state is stale, the index is missing, or v4 backfill is needed. State records `lastSessionAt`, `lastIndexedAt` when applicable, and `codewikiVersion`. | No automatic update. |
+| `/context init` or `clio context init` | Performs a full codewiki rebuild before generating, preserving, proposing, or previewing `CLIO.md`; writes state with the fingerprint and codewiki version when it writes state. | No wiki generation. |
+| `/context refresh` or `clio context refresh` | Performs a full codewiki rebuild and writes state. Does not touch `CLIO.md`. | If an existing wiki is stale and `--wiki` was not passed on the CLI, prints a hint to run `clio context refresh --wiki` or `clio context wiki --update`. |
+| `clio context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed documenter path. No wiki metadata means no wiki model call. |
+| `clio context wiki` | Loads the existing codewiki or rebuilds/backfills it before composing the wiki prompt. | Generates or updates `.clio/wiki/` through the configured documenter path and validates the layout before writing metadata. |
+| `clio context wiki --status` | No index rebuild. | Reads metadata and reports page count, update time, recorded git head, and git-head drift. |
+
+### Staleness
+
+Codewiki staleness is controlled by one predicate:
+`isStale(prev, curr)` compares only `fingerprint.treeHash`. The fingerprint
+hash is mtime-aware: it walks the repository, excludes generated/local-state
+directories and lock/archive files, and hashes each included relative path,
+file size, and floored `mtimeMs`. The fingerprint also records `gitHead` and
+`loc`; `loc` comes from the codewiki artifact when available, otherwise from a
+line count over source extensions. Those fields are reporting data, not the
+stale predicate.
+
+`.clio/state.json` stores the fingerprint and optional `codewikiVersion`.
+Legacy v2/v3 codewiki files can still be read as degraded v4 artifacts, but
+their missing per-file hashes/imports make `codewikiNeedsBackfill` true. The
+next session freshness check, `code_nav` demand load, wiki generation, or
+explicit refresh rebuilds them into full v4.
+
+Wiki staleness is separate. `.clio/wiki/meta.json` records the git head used
+when the wiki content last changed. If the current git head differs, Clio
+counts changed files with `git diff --name-only <recorded>..HEAD` and reports
+the wiki as stale. Git-less or unreadable git states degrade to `fresh` with a
+warning because Clio cannot prove drift.
+
+### Surfacing and Navigation
+
+The compiled prompt surfaces only markers, never the codewiki JSON or wiki page
+contents. Fresh codewiki renders as `<codewiki>available; use code_nav</codewiki>`.
+A stale codewiki marker adds `(stale; run /context refresh)`. A valid wiki marker
+names the page count and `quickstart.md`; a stale wiki marker adds `(stale; run
+clio context wiki --update)`.
+
+`clio context` prints a structural digest from `renderCodewikiDigest`: schema
+version, project language, file/config/symbol/edge counts, language and role
+counts, top areas, entry points, key symbols, and dependency samples. The
+welcome dashboard shows module count, wiki page count and freshness, and a
+small entry-point excerpt from the same digest. Agents query the structural
+layer through the read-only `code_nav` tool. See [tool-usage.md](tool-usage.md)
+for the full mode reference.

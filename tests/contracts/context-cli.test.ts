@@ -82,4 +82,12 @@ describe("contracts/context cli router", () => {
 		match(refresh.stderr, /clio context refresh: unknown flag --bogus/);
 		match(refresh.stdout, /Usage:/);
 	});
+
+	it("accepts clio context refresh --wiki without a model call when no wiki exists", () => {
+		const result = runHandler(scratch, "context", ["refresh", "--wiki"]);
+
+		strictEqual(result.status, 0);
+		strictEqual(result.stderr, "");
+		match(result.stdout, /clio context refresh: codewiki rebuilt/);
+	});
 });
