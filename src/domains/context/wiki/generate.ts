@@ -8,7 +8,7 @@ import {
 	readCodewiki,
 	writeCodewiki,
 } from "../codewiki/indexer.js";
-import { computeFingerprint } from "../fingerprint.js";
+import { computeFingerprint, isStale } from "../fingerprint.js";
 import { readClioState, writeClioState } from "../state.js";
 import { listWikiPages, validateWikiLayout } from "./layout.js";
 import { computeWikiContentHash, currentWikiGitHead, readWikiMeta, wikiMetaPath, writeWikiMeta } from "./meta.js";
@@ -50,12 +50,17 @@ function indexedSourceFileCount(codewiki: Codewiki): number {
 
 async function loadOrBuildCodewiki(cwd: string): Promise<Codewiki> {
 	const existing = readCodewiki(cwd);
-	if (existing && !codewikiNeedsBackfill(existing)) return existing;
+	const prev = readClioState(cwd);
+	// Mirror the code_nav demand-load freshness check: a stale index must never
+	// ground the wiki writer prompt, so drift forces a rebuild here too.
+	if (existing && !codewikiNeedsBackfill(existing)) {
+		const fingerprint = computeFingerprint(cwd, existing);
+		if (prev && !isStale(prev.fingerprint, fingerprint)) return existing;
+	}
 	const generatedAt = new Date().toISOString();
 	const projectType = detectProjectType(cwd);
 	const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt });
 	writeCodewiki(cwd, rebuilt);
-	const prev = readClioState(cwd);
 	writeClioState(cwd, {
 		version: 1,
 		projectType: prev?.projectType ?? projectType,

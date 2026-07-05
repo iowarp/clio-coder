@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { Codewiki } from "../../src/domains/context/codewiki/indexer.js";
+import { type Codewiki, readCodewiki } from "../../src/domains/context/codewiki/indexer.js";
 import {
 	buildWikiPrompt,
 	computeWikiContentHash,
@@ -19,6 +19,7 @@ import {
 	wikiStaleness,
 	writeWikiMeta,
 } from "../../src/domains/context/index.js";
+import { readClioState } from "../../src/domains/context/state.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const TSX_LOADER = join(REPO_ROOT, "node_modules/tsx/dist/loader.mjs");
@@ -228,6 +229,31 @@ describe("contracts/wiki", () => {
 		strictEqual(readFileSync(wikiMetaPath(scratch), "utf8"), rawMeta);
 		strictEqual(readWikiMeta(scratch)?.updatedAt, updatedAt);
 		deepStrictEqual(modes, ["init", "update"]);
+	});
+
+	it("rebuilds a stale codewiki before grounding the writer prompt and reuses a fresh one", async () => {
+		writeProjectFile(scratch);
+		const generate = async (input: { cwd: string }): Promise<void> => {
+			writeWikiPage(input.cwd, "quickstart.md", "# Quickstart\n\nSee `src/index.ts`.\n");
+		};
+
+		const first = await runWikiGenerate({ cwd: scratch, model: "test-model", generate });
+		strictEqual(first.status, "generated");
+		const initialState = readClioState(scratch);
+		ok(initialState);
+
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		const freshRun = await runWikiGenerate({ cwd: scratch, model: "test-model", generate });
+		strictEqual(freshRun.status, "noop");
+		strictEqual(readClioState(scratch)?.lastIndexedAt, initialState.lastIndexedAt);
+
+		writeFileSync(join(scratch, "src", "extra.ts"), "export function extraEntry(): void {}\n", "utf8");
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		const staleRun = await runWikiGenerate({ cwd: scratch, model: "test-model", generate });
+		strictEqual(staleRun.status, "noop");
+		const rebuilt = readCodewiki(scratch);
+		ok(rebuilt?.files.some((file) => file.path === "src/extra.ts"));
+		ok(readClioState(scratch)?.lastIndexedAt !== initialState.lastIndexedAt);
 	});
 
 	it("writes valid metadata for an existing wiki when a no-op generator leaves content unchanged", async () => {
