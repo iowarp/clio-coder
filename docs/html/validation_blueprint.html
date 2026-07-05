@@ -403,26 +403,28 @@
 <body>
   <div class="container">
     <header>
-      <div class="header-logo">
-        <svg viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <h1>Scientific Validation Contracts</h1>
-      <p class="subtitle">Interactive Visual Specification for Numeric Tolerances & HPC Artifact Verifications</p>
-      
-      <div class="meta-grid">
-        <div class="meta-badge">
-          <span class="label">Release:</span>
-          <span class="value">v0.2.8</span>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 64 64" width="48" height="48" role="img" aria-label="Clio Coder logo"><title>Clio Coder logo</title><rect x="8" y="8" width="48" height="48" rx="12" fill="rgba(0,240,255,0.12)" stroke="rgba(0,240,255,0.65)"/><path d="M32 14 16 23l16 9 16-9-16-9Z" fill="none" stroke="#00f0ff" stroke-width="3" stroke-linejoin="round"/><path d="M16 32l16 9 16-9M16 41l16 9 16-9" fill="none" stroke="#bd00ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <div class="meta-badge">
-          <span class="label">Scope:</span>
-          <span class="value">YAML contracts / NetCDF, HDF5 / HPC</span>
-        </div>
-        <div class="meta-badge">
-          <span class="label">Tolerances:</span>
-          <span class="value">relative / absolute / ULP</span>
+        <div class="header-title-wrapper">
+          <h1>Scientific Validation Contracts</h1>
+          <p>Interactive Visual Specification for Numeric Tolerances & HPC Artifact Verifications</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/scientific-validation.md</span>
+            <span class="chip chip-orange">clio docs validation</span>
+          </div>
         </div>
       </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.8</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
 
       <div class="tabs-nav">
         <button type="button" class="tab-btn active" onclick="_switchTab('calculator')">

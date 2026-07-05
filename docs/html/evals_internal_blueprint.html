@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Internal Eval Suites Blueprint (v0.2.8)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .internal-warning {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--color-rose);
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-rose);"><title>Icon</title>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1 style="background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-rose)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Internal Eval Suites</h1>
+          <p>Private validation matrices, regression seeds, and offline datasets guidelines</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/evals-internal.md</span>
+            <span class="chip chip-orange" style="color: var(--color-rose); border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05);">clio docs evals_internal</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge" style="color: var(--color-rose); border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.08);">Clio Coder v0.2.8 (Internal)</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="internal-warning">
+          <strong>INTERNAL DEVELOPMENT NOTICE:</strong> These specifications represent private datasets and validation benchmarks. Keep all raw calibration outputs and prompt matrices out of public pull requests.
+        </div>
+
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Private evaluation suites operate locally. We run them from the repository root pointing to external paths, ensuring dataset privacy while validating orchestrator performance.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('seeds')">
+            Regression Seeds
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('gates')">
+            Internal Gates Checklist
+          </button>
+        </div>
+
+        <!-- Tab 1: Seeds -->
+        <div class="tab-pane active" id="pane-seeds">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Regression Seed Selector</h3>
+                <p>Select a seed pattern to view its YAML specification template:</p>
+                
+                <div class="form-group">
+                  <label for="seedSelect">YAML Seed</label>
+                  <select id="seedSelect" onchange="updateSeedYaml()">
+                    <option value="regression">Context Regression (context determinism)</option>
+                    <option value="matrix">Model Matrix (target smoke suite)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>YAML Specification</h3>
+                <pre><code id="seedYamlCode">// Populated dynamically</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Gates -->
+        <div class="tab-pane" id="pane-gates">
+          <div class="glass-card">
+            <h3>Internal Sanitization Gates</h3>
+            <p>Ensure these checks are satisfied before copy-promoting metrics summaries to <code>benchmarks/results/</code>:</p>
+            
+            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
+              <label class="checkbox-item"><input type="checkbox"> No secret tokens or private keys in target parameters.</label>
+              <label class="checkbox-item"><input type="checkbox"> Output logs are stripped of internal file path structures.</label>
+              <label class="checkbox-item"><input type="checkbox"> Evaded files are sanitized to `manifest.json` and `summary.json` only.</label>
+              <label class="checkbox-item"><input type="checkbox"> Run IDs do not expose host user names or local system metadata.</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="worker_dispatch_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Worker Dispatch Mechanics</span>
+          </a>
+          <a href="config_knobs_audit_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Config Knobs Audit</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Internal Evals Blueprint &bull; Version 0.2.8 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    const SEEDS = {
+      regression: `version: 2
+suite:
+  id: internal-context-regression
+  title: Internal context regression
+  visibility: private
+matrix:
+  targets:
+    - id: local
+  repeats: 3
+tasks:
+  - id: context-index-private
+    workspace:
+      kind: local
+      path: .
+    runner:
+      kind: context-index
+    verify:
+      assertions:
+        - metric: context.indexedFiles
+          op: gt
+          value: 0`,
+      matrix: `version: 2
+suite:
+  id: internal-model-matrix
+  title: Internal model matrix
+  visibility: private
+matrix:
+  targets:
+    - id: local-fast
+      model: example-fast-model
+    - id: local-deep
+      model: example-deep-model
+  repeats: 2`
+    };
+
+    function updateSeedYaml() {
+      const val = document.getElementById("seedSelect").value;
+      document.getElementById("seedYamlCode").innerText = SEEDS[val];
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    // Init
+    window.onload = () => {
+      updateSeedYaml();
+      window.updateSeedYaml = updateSeedYaml;
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tool Usage Reference Blueprint (v0.2.8)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    /* Custom calculator styling */
+    .calc-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .atlas-grid {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 1.5rem;
+    }
+    .atlas-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .atlas-btn {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-card);
+      color: var(--text-muted);
+      padding: 0.6rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      text-align: left;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .atlas-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: #fff;
+    }
+    .atlas-btn.active {
+      border-color: var(--color-cyan);
+      color: var(--color-cyan);
+      background: rgba(0, 212, 219, 0.05);
+    }
+    .atlas-details {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border-card);
+      border-radius: 10px;
+      padding: 1.25rem;
+    }
+    @media (max-width: 768px) {
+      .atlas-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Tool Usage Reference</h1>
+          <p>The seven-plane tool surface, observation budgets, and dynamic continuation limits</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/tool-usage.md</span>
+            <span class="chip chip-orange">clio docs tool_usage</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.8</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Clio Coder exposes 19 built-in tools organized across 7 distinct planes. This reference covers argument surfaces, result formatting, and turn budget mechanics.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('atlas')">
+            Seven-Plane Tool Atlas
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('calc')">
+            Observation Envelope Calculator
+          </button>
+        </div>
+
+        <!-- Tab 1: Tool Atlas -->
+        <div class="tab-pane active" id="pane-atlas">
+          <div class="glass-card">
+            <h3>Tool Surface Planes</h3>
+            <p>Select a plane below to explore its available tools and parameters:</p>
+            
+            <div class="atlas-grid" style="margin-top:1.5rem;">
+              <div class="atlas-menu">
+                <button type="button" class="atlas-btn active" onclick="selectPlane(1)">1. Read Plane</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(2)">2. Edit Plane</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(3)">3. Execute Plane</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(4)">4. Search Plane</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(5)">5. Fleet Plane</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(6)">6. Context Plane</button>
+                <button type="button" class="atlas-btn" onclick="selectPlane(7)">7. Communication Plane</button>
+              </div>
+
+              <div class="atlas-details" id="planeDetails">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Truncation Calculator -->
+        <div class="tab-pane" id="pane-calc">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Envelope &amp; Budget Parameters</h3>
+                <p>Simulate a tool result to calculate truncation thresholds, offload directories, and per-turn budget usages:</p>
+                
+                <div class="form-group">
+                  <label for="toolSelect">Tool Type</label>
+                  <select id="toolSelect" onchange="runCalc()">
+                    <option value="read">read (cap: 50KB)</option>
+                    <option value="grep">grep (cap: 16KB)</option>
+                    <option value="find">find (cap: 8KB)</option>
+                    <option value="ls">ls (cap: 8KB)</option>
+                    <option value="code_nav">code_nav (cap: 16KB)</option>
+                    <option value="context">context (cap: 50KB)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="resultSize">Collected Result Size (KB)</label>
+                  <input type="range" id="resultSize" min="1" max="100" step="1" value="25" oninput="runCalc()">
+                  <span id="txtResultSize" style="font-family:var(--font-mono); font-size:0.8rem;">25 KB</span>
+                </div>
+
+                <div class="form-group">
+                  <label for="budgetUsed">Budget Already Used in Turn (KB)</label>
+                  <input type="range" id="budgetUsed" min="0" max="250" step="10" value="40" oninput="runCalc()">
+                  <span id="txtBudgetUsed" style="font-family:var(--font-mono); font-size:0.8rem;">40 KB</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Simulator Verdict</h3>
+                
+                <div id="calcVerdictBox" class="verdict-box normal">
+                  <strong id="calcTitle" style="display:block; font-size:1.1rem">FITS CLEANLY</strong>
+                  <span id="calcDesc">Output fits within per-call caps and turn budgets.</span>
+                </div>
+
+                <div id="noticePreviewBox" style="margin-top:1.5rem;">
+                  <div class="form-group">
+                    <label>Envelope Notice String</label>
+                  </div>
+                  <pre><code id="noticeText">None (full content returned)</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="environment_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Environment Variables</span>
+          </a>
+          <a href="provider_adapter_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Provider Adapter Cookbook</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Tool Usage Blueprint &bull; Version 0.2.8 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    const PLANES = {
+      1: {
+        title: "Read Plane",
+        tools: [
+          { name: "read", params: "path, offset, limit, tail", desc: "Reads text files line by line, capped at 50KB or 2000 lines. Larger files must be paged or offset." }
+        ]
+      },
+      2: {
+        title: "Edit Plane",
+        tools: [
+          { name: "edit", params: "path, edits: {oldText, newText}[]", desc: " Surgical matching/patching edits in files. Matches exactly one region. Uses exact, fuzzy, and indent-relaxed fallback algorithms." },
+          { name: "write", params: "path, content", desc: "Overwrites entire files. Serialized with edit via file mutation lock queues." }
+        ]
+      },
+      3: {
+        title: "Execute Plane",
+        tools: [
+          { name: "bash", params: "command, cwd, timeout_ms", desc: "Executes a shell command in a persistent or single-session bash subprocess. Captures profile paths." }
+        ]
+      },
+      4: {
+        title: "Search Plane",
+        tools: [
+          { name: "grep", params: "Query, SearchPath, Includes, MatchPerLine", desc: "Ripgrep search across workspace directory models." },
+          { name: "find", params: "SearchPath, Query", desc: "Locates files by glob patterns." },
+          { name: "ls", params: "DirectoryPath", desc: "List directory contents." }
+        ]
+      },
+      5: {
+        title: "Fleet Plane",
+        tools: [
+          { name: "dispatch", params: "Agent, Prompt, Workspace", desc: "Runs separate worker agents on the same workspace." },
+          { name: "monitor", params: "RunId", desc: "Inspect active/dispatched worker execution timelines." },
+          { name: "steer", params: "RunId, Action", desc: "Steers or cancels dispatched runs." }
+        ]
+      },
+      6: {
+        title: "Context Plane",
+        tools: [
+          { name: "context", params: "scope, query", desc: "Gathers workspace priming inputs, codewiki listings, and local documentation folders." },
+          { name: "code_nav", params: "mode, query", desc: "Navigates codewiki indexes by symbols, outline, dependents, or wiki." }
+        ]
+      },
+      7: {
+        title: "Communication Plane",
+        tools: [
+          { name: "ask_user", params: "Prompt, Options", desc: "Asks clarification questions or gets approvals from operator." },
+          { name: "artifact", params: "Title, Type, Data", desc: "Creates markdown blueprints/reports." }
+        ]
+      }
+    };
+
+    function selectPlane(planeId) {
+      document.querySelectorAll(".atlas-btn").forEach((b, idx) => {
+        b.classList.toggle("active", idx + 1 === planeId);
+      });
+
+      const p = PLANES[planeId];
+      let html = `<h3>${p.title}</h3><div style="margin-top:1rem; display:flex; flex-direction:column; gap:1.25rem;">`;
+      
+      p.tools.forEach(t => {
+        html += `
+          <div>
+            <strong style="color:var(--color-cyan); font-family:var(--font-mono); font-size:1.05rem;">${t.name}()</strong>
+            <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.25rem;">Arguments: <code>${t.params}</code></div>
+            <p style="font-size:0.875rem; color:var(--text-muted); margin:0;">${t.desc}</p>
+          </div>
+        `;
+      });
+      html += "</div>";
+
+      document.getElementById("planeDetails").innerHTML = html;
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    function runCalc() {
+      const tool = document.getElementById("toolSelect").value;
+      const size = parseInt(document.getElementById("resultSize").value);
+      const used = parseInt(document.getElementById("budgetUsed").value);
+
+      document.getElementById("txtResultSize").innerText = `${size} KB`;
+      document.getElementById("txtBudgetUsed").innerText = `${used} KB`;
+
+      let cap = 8;
+      if (tool === 'read' || tool === 'context') cap = 50;
+      if (tool === 'grep' || tool === 'code_nav') cap = 16;
+
+      const totalBudget = 192;
+      const budgetLeft = Math.max(0, totalBudget - used);
+      
+      const vBox = document.getElementById("calcVerdictBox");
+      const vTitle = document.getElementById("calcTitle");
+      const vDesc = document.getElementById("calcDesc");
+      const notice = document.getElementById("noticeText");
+
+      if (used >= totalBudget) {
+        vBox.className = "verdict-box error";
+        vTitle.innerText = "BUDGET EXHAUSTED";
+        vDesc.innerText = `The per-turn observation budget is depleted. The call will short-circuit immediately.`;
+        notice.innerText = `[observation budget exhausted for this turn before ${tool} ...]`;
+        return;
+      }
+
+      const effectiveCap = Math.min(cap, budgetLeft);
+      
+      if (size <= effectiveCap) {
+        vBox.className = "verdict-box normal";
+        vTitle.innerText = "FITS CLEANLY";
+        vDesc.innerText = `Result (${size} KB) fits inside effective cap of ${effectiveCap} KB (budget remaining: ${budgetLeft} KB).`;
+        notice.innerText = `None (full content returned)`;
+      } else {
+        vBox.className = "verdict-box warn";
+        vTitle.innerText = "TRUNCATED & OFFLOADED";
+        vDesc.innerText = `Result (${size} KB) exceeds cap limits. Clio will truncate output to ${effectiveCap} KB and write full content to local scratch folder.`;
+        
+        let noticeStr = `[${tool}: ${Math.floor(effectiveCap * 10)}/100 lines shown (${effectiveCap}KB of ${size}KB)`;
+        if (tool !== 'read') {
+          noticeStr += ` | full: .clio/state/scratch/session_123/call_abc.txt`;
+        }
+        noticeStr += ` | next: offset=${Math.floor(effectiveCap * 10) + 1}]`;
+        
+        notice.innerText = noticeStr;
+      }
+    }
+
+    // Init
+    window.onload = () => {
+      selectPlane(1);
+      runCalc();
+      window.selectPlane = selectPlane;
+      window.runCalc = runCalc;
+    };
+  </script>
+</body>
+</html>

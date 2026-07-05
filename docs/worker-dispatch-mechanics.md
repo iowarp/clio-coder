@@ -1,5 +1,8 @@
 # Worker Dispatch Mechanics
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive NDJSON protocol timeline stream and heartbeat watchdog simulator is located at [docs/html/worker_dispatch_blueprint.html](html/worker_dispatch_blueprint.html) (Version: 0.2.8).
+
 This document describes the design and lifecycle of Clio Coder dispatched workers, focusing on the spawning sequence, execution isolation, the standard input/output NDJSON communication loop, and permission escalation routing.
 
 Source of truth:

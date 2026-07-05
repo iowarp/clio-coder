@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Provider Adapter Cookbook Blueprint (v0.2.8)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    /* Custom builder style */
+    .checkbox-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .checkbox-item input {
+      width: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Provider Adapter Cookbook</h1>
+          <p>Custom inference API connectors, endpoint probing logic, and runtime registry templates</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/provider-adapter-cookbook.md</span>
+            <span class="chip chip-orange">clio docs provider_adapter</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.8</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>This blueprint provides boilerplate and step-by-step guides for integrating custom local/remote inference adapters inside Clio Coder.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('builder')">
+            Descriptor Builder
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('checklist')">
+            Capability checklist
+          </button>
+        </div>
+
+        <!-- Tab 1: Builder -->
+        <div class="tab-pane active" id="pane-builder">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Descriptor Properties</h3>
+                <p>Customize fields below to build your TypeScript adapter plugin:</p>
+                
+                <div class="form-group">
+                  <label for="runtimeId">Runtime ID</label>
+                  <input type="text" id="runtimeId" value="my-custom-service" oninput="generateDescriptor()">
+                </div>
+
+                <div class="form-group">
+                  <label for="runtimeName">Display Name</label>
+                  <input type="text" id="runtimeName" value="My Custom Service Native Client" oninput="generateDescriptor()">
+                </div>
+
+                <div class="form-group">
+                  <label for="runtimeKind">Client Type</label>
+                  <select id="runtimeKind" onchange="generateDescriptor()">
+                    <option value="http">http (Rest API / JSON endpoints)</option>
+                    <option value="sdk">sdk (e.g. Anthropic, Vertex SDKs)</option>
+                    <option value="subprocess">subprocess (spawn CLI worker)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="authType">Authentication Mechanism</label>
+                  <select id="authType" onchange="generateDescriptor()">
+                    <option value="api-key">api-key (API credential token)</option>
+                    <option value="oauth">oauth (OAuth login PKCE flow)</option>
+                    <option value="none">none (Unauthenticated endpoint)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label>Capabilities</label>
+                  <div class="checkbox-group">
+                    <label class="checkbox-item"><input type="checkbox" id="capTools" checked onchange="generateDescriptor()"> Tools support</label>
+                    <label class="checkbox-item"><input type="checkbox" id="capReasoning" onchange="generateDescriptor()"> Reasoning / Thinking</label>
+                    <label class="checkbox-item"><input type="checkbox" id="capVision" onchange="generateDescriptor()"> Vision inputs</label>
+                    <label class="checkbox-item"><input type="checkbox" id="capEmbed" onchange="generateDescriptor()"> Embeddings</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Generated Runtime Plugin</h3>
+                <p>Save this file as <code>src/domains/providers/runtimes/custom/my-custom-service.ts</code>:</p>
+                
+                <pre><code id="generatedDescriptorCode">// Populated dynamically</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Checklist -->
+        <div class="tab-pane" id="pane-checklist">
+          <div class="glass-card">
+            <h3>Adapter Capability Requirements</h3>
+            <p>Clio's runtime uses standard features mapped as follows:</p>
+            
+            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
+              <div class="verdict-box normal" style="margin-top:0;">
+                <strong>Chat Completion (REQUIRED)</strong>
+                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">The model must process system instructions and a replayed array of assistant/user/tool messages.</span>
+              </div>
+              <div class="verdict-box warn" style="margin-top:0;">
+                <strong>Function Calling / Tools (HIGHLY RECOMMENDED)</strong>
+                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">Enables Clio to issue file search, read, write, and bash commands. If disabled, Clio acts in a conversational-only posture.</span>
+              </div>
+              <div class="verdict-box normal" style="margin-top:0; background:rgba(59, 130, 246, 0.08); border-color:rgba(59, 130, 246, 0.3); color:#3b82f6;">
+                <strong>Structured JSON Outputs (RECOMMENDED)</strong>
+                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">Used for structured change manifests (`clio evolve`) and local evaluation reports.</span>
+              </div>
+              <div class="verdict-box normal" style="margin-top:0; background:rgba(255,255,255,0.02); border-color:var(--border-card); color:var(--text-muted);">
+                <strong>Fill-in-the-Middle FIM (OPTIONAL)</strong>
+                <span style="display:block; font-size:0.85rem; margin-top:0.25rem;">Enables surgical code edits when exact line matching fails.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="tool_usage_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Tool Usage Reference</span>
+          </a>
+          <a href="tui_design_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">TUI Design System</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Provider Adapter Cookbook Blueprint &bull; Version 0.2.8 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function generateDescriptor() {
+      const id = document.getElementById("runtimeId").value;
+      const name = document.getElementById("runtimeName").value;
+      const kind = document.getElementById("runtimeKind").value;
+      const auth = document.getElementById("authType").value;
+      
+      const tools = document.getElementById("capTools").checked;
+      const reasoning = document.getElementById("capReasoning").checked;
+      const vision = document.getElementById("capVision").checked;
+      const embed = document.getElementById("capEmbed").checked;
+      
+      const cred = auth === 'api-key' ? `\n  credentialsEnvVar: "${id.toUpperCase().replace(/-/g, '_')}_API_KEY",` : '';
+
+      const code = `import { type RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+
+export const customRuntime: RuntimeDescriptor = {
+  id: "${id}",
+  displayName: "${name}",
+  kind: "${kind}",
+  tier: "local-native",
+  apiFamily: "openai-responses",
+  auth: "${auth}",${cred}
+
+  defaultCapabilities: {
+    chat: true,
+    tools: ${tools},
+    toolCallFormat: "openai",
+    reasoning: ${reasoning},
+    structuredOutputs: "json-schema",
+    vision: ${vision},
+    embeddings: ${embed},
+    contextWindow: 16384,
+    maxTokens: 4096
+  },
+
+  async probe(target, ctx) {
+    // Check health endpoint & return models list
+    return { ok: true, serverVersion: "custom/1.0", models: ["model-v1"] };
+  },
+
+  synthesizeModel(target, wireModelId, kb) {
+    // Factory method building model connection
+    throw new Error("Method not implemented.");
+  }
+};`;
+
+      document.getElementById("generatedDescriptorCode").innerText = code;
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    // Init
+    window.onload = () => {
+      generateDescriptor();
+      window.generateDescriptor = generateDescriptor;
+    };
+  </script>
+</body>
+</html>

@@ -1,5 +1,8 @@
 # Config Knobs Audit (Historical Appendix)
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive historical knobs auditor and consolidation resolver is located at [docs/html/config_knobs_audit_blueprint.html](html/config_knobs_audit_blueprint.html) (Version: 0.2.8).
+
 > [!IMPORTANT]
 > This document is a historical record of the point-in-time configuration knob audit conducted on 2026-07-03.
 > It details the pre-consolidation state of the codebase before the `v0.2.8` release.

@@ -1,5 +1,8 @@
 # Internal Eval Suites
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive internal evaluation suite regression seeds explorer and internal validation checklist is located at [docs/html/evals_internal_blueprint.html](html/evals_internal_blueprint.html) (Version: 0.2.8).
+
 Private suites should live outside this repository. Keep datasets, prompts,
 live fleet coordinates, calibration outputs, and raw run artifacts in a private
 checkout or object store.

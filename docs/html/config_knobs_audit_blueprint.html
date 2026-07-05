@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Config Knobs Audit Historical Appendix Blueprint (v0.2.8)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .historical-notice {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: var(--color-amber);
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-amber);"><title>Icon</title>
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1 style="background: linear-gradient(to right, #ffffff, #c7d2fe, var(--color-amber)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Config Knobs Audit</h1>
+          <p>Point-in-time inventory of legacy env variables and consolidation records</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/config-knobs-audit.md</span>
+            <span class="chip chip-orange" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.05);">clio docs config_knobs_audit</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge" style="color: var(--color-amber); border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.08);">Clio Coder v0.2.8 (Historical)</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="historical-notice">
+          <strong>HISTORICAL RECORD:</strong> This document reflects pre-consolidated states prior to version `v0.2.8`. For active reference, check environment variables directly.
+        </div>
+
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Consolidation audits are conducted to move process variables into standard settings YAML files. This minimizes process namespace pollution and ensures clean, reproducible environments.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('auditor')">
+            Historical Knobs Auditor
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('findings')">
+            Audit Findings
+          </button>
+        </div>
+
+        <!-- Tab 1: Auditor -->
+        <div class="tab-pane active" id="pane-auditor">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Legacy Variable Selector</h3>
+                <p>Select a pre-consolidation variable to trace its history:</p>
+                
+                <div class="form-group">
+                  <label for="knobSelect">Legacy Env Variable</label>
+                  <select id="knobSelect" onchange="updateAuditDetails()">
+                    <option value="orch_calls">CLIO_ORCH_MAX_TOOL_CALLS</option>
+                    <option value="max_context">CLIO_MAX_CONTEXT_TOKENS</option>
+                    <option value="sampling">CLIO_SAMPLING_OVERRIDES</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Consolidation Audit Record</h3>
+                
+                <div class="verdict-box warn" id="auditStatusBox" style="margin-top:0;">
+                  <strong id="auditStatusTitle" style="display:block; font-size:1.1rem">RETIRED / CONSOLIDATED</strong>
+                  <span id="auditStatusDesc">Trace details...</span>
+                </div>
+                
+                <div style="margin-top: 1rem;">
+                  <strong>v0.2.8 Replacement:</strong>
+                  <code id="auditReplacement" style="display:block; margin-top:0.25rem; font-size:0.9rem; color:var(--color-cyan);">settings.yaml</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Findings -->
+        <div class="tab-pane" id="pane-findings">
+          <div class="glass-card">
+            <h3>Audit Findings Summary</h3>
+            <p>During the consolidation sweep on 2026-07-03, the following tasks were completed:</p>
+            <ul>
+              <li><strong>Guardrails section added:</strong> All soft and hard loop ceilings are now defined under <code>guardrails:</code> settings structures.</li>
+              <li><strong>Bridge variables collapsed:</strong> Legacy variables used to pass CLI parameters into deep engines are replaced by <code>CLIO_RUN_OVERRIDES</code> JSON transport configurations.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="evals_internal_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">Internal Eval Suites</span>
+          </a>
+          <a href="index.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Dashboard Hub</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Config Audit Blueprint &bull; Version 0.2.8 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    const AUDITS = {
+      orch_calls: {
+        desc: "Orchestrator per-turn soft and hard tool call limits.",
+        rep: "CLIO_TURN_TOOL_CALL_BUDGET / guardrails.turnToolCallBudget"
+      },
+      max_context: {
+        desc: "Context-window override for local models.",
+        rep: "CLIO_RUN_OVERRIDES / clio run --max-context-tokens"
+      },
+      sampling: {
+        desc: "JSON sampling-parameter overrides passed from CLI print modes.",
+        rep: "CLIO_RUN_OVERRIDES / sampling flags"
+      }
+    };
+
+    function updateAuditDetails() {
+      const val = document.getElementById("knobSelect").value;
+      const data = AUDITS[val];
+      document.getElementById("auditStatusDesc").innerText = data.desc;
+      document.getElementById("auditReplacement").innerText = data.rep;
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    // Init
+    window.onload = () => {
+      updateAuditDetails();
+      window.updateAuditDetails = updateAuditDetails;
+    };
+  </script>
+</body>
+</html>

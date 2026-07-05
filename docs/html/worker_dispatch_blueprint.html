@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Worker Dispatch Mechanics Blueprint (v0.2.8)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    /* Custom protocol simulator styles */
+    .protocol-scroller {
+      background: #060913;
+      border: 1px solid #1f354f;
+      border-radius: 8px;
+      padding: 1rem;
+      height: 300px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: #b0c4de;
+    }
+    .stream-line {
+      margin-bottom: 0.5rem;
+      line-height: 1.4;
+      display: flex;
+      gap: 0.5rem;
+    }
+    .stream-dir {
+      font-weight: 700;
+    }
+    .dir-in { color: #bd00ff; }
+    .dir-out { color: #00d4db; }
+    .dir-sys { color: #6a7a85; }
+    
+    .btn-group-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-cyan);"><title>Icon</title>
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        </div>
+        <div class="header-title-wrapper">
+          <h1>Worker Dispatch Mechanics</h1>
+          <p>Environment isolation, child process setup, and NDJSON stdin/stdout streams</p>
+          <div class="meta-chips-row">
+            <span class="chip">Source: docs/worker-dispatch-mechanics.md</span>
+            <span class="chip chip-orange">clio docs worker_dispatch</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="version-badge">Clio Coder v0.2.8</span>
+        <a href="index.html" class="back-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><title>Icon</title><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          Dashboard Hub
+        </a>
+      </div>
+    </header>
+
+    <div class="page-layout-grid">
+      <nav class="sidebar" aria-label="Table of Contents">
+        <div class="toc-container">
+          <div class="toc-title">On This Page</div>
+          <ul class="toc-list">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+      </nav>
+
+      <main>
+        <div class="glass-card">
+          <h2>Overview Summary</h2>
+          <p>Dispatched worker processes run completely headlessly in environment-scrubbed isolation, exchanging event payloads with the parent orchestrator via standard stdin/stdout JSON lines.</p>
+        </div>
+
+        <div class="tabs-nav">
+          <button type="button" class="tab-btn active" onclick="switchTab('simulator')">
+            Protocol Stream Simulator
+          </button>
+          <button type="button" class="tab-btn" onclick="switchTab('details')">
+            Exit Code Reference
+          </button>
+        </div>
+
+        <!-- Tab 1: Simulator -->
+        <div class="tab-pane active" id="pane-simulator">
+          <div class="blueprint-layout">
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Sequence Controls</h3>
+                <p>Simulate parent-child messages:</p>
+                
+                <div class="btn-group-grid">
+                  <button type="button" class="tab-btn" onclick="logEvent('spawn')">1. Spawn Worker</button>
+                  <button type="button" class="tab-btn" onclick="logEvent('spec')">2. Send Spec</button>
+                  <button type="button" class="tab-btn" onclick="logEvent('heartbeat')">3. Emit Heartbeat</button>
+                  <button type="button" class="tab-btn" onclick="logEvent('escalate')">4. Escalate Tool</button>
+                  <button type="button" class="tab-btn" onclick="logEvent('decision')">5. Decision Stdin</button>
+                  <button type="button" class="tab-btn" onclick="logEvent('finish')">6. Finish Run</button>
+                </div>
+                
+                <button type="button" class="tab-btn" style="margin-top:1.5rem; width:100%; border-color:var(--color-rose); color:var(--color-rose);" onclick="clearStream()">Reset Log</button>
+              </div>
+            </div>
+
+            <div class="specs-col">
+              <div class="glass-card">
+                <h3>Live NDJSON Timeline</h3>
+                <p>Scroll down to see lines written to standard streams:</p>
+                
+                <div class="protocol-scroller" id="scroller">
+                  <div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> Process idle. Click Spawn Worker to begin.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Details -->
+        <div class="tab-pane" id="pane-details">
+          <div class="glass-card">
+            <h3>Worker Exit Codes Specs</h3>
+            <p>Parent checks exit codes when child process terminates:</p>
+            
+            <table class="env-table" style="margin-top:1rem;">
+              <thead>
+                <tr>
+                  <th>Exit Code</th>
+                  <th>Symbolic Name</th>
+                  <th>Triggering Condition</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>0</code></td>
+                  <td><code>WORKER_EXIT_SUCCESS</code></td>
+                  <td>Run finished successfully with finish-contract evidence.</td>
+                </tr>
+                <tr>
+                  <td><code>1</code></td>
+                  <td><code>WORKER_EXIT_GENERIC_ERROR</code></td>
+                  <td>Unhandled exception or parsing crash during chat loop.</td>
+                </tr>
+                <tr>
+                  <td><code>3</code></td>
+                  <td><code>WORKER_EXIT_PERMISSION_REQUIRED</code></td>
+                  <td>A suggested tool required approval under strict non-interactive policy.</td>
+                </tr>
+                <tr>
+                  <td><code>4</code></td>
+                  <td><code>WORKER_EXIT_SIGTERM</code></td>
+                  <td>Watchdog timed out or operator aborted execution stream.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Related Navigation -->
+        <nav class="related-nav" aria-label="Related Pages">
+          <a href="tui_design_blueprint.html" class="nav-link-card">
+            <span class="nav-label">Previous Blueprint</span>
+            <span class="nav-title">TUI Design System</span>
+          </a>
+          <a href="evals_internal_blueprint.html" class="nav-link-card next">
+            <span class="nav-label">Next Blueprint</span>
+            <span class="nav-title">Internal Eval Suites</span>
+          </a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <p>Clio Coder Worker Dispatch Blueprint &bull; Version 0.2.8 &bull; Gnosis Research Center</p>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    function clearStream() {
+      const scr = document.getElementById("scroller");
+      scr.innerHTML = `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> Process reset. Click Spawn to begin.</div>`;
+    }
+
+    function logEvent(type) {
+      const scr = document.getElementById("scroller");
+      const stamp = Date.now();
+      let html = "";
+      
+      if (type === 'spawn') {
+        html = `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> node dist/worker/entry.js (pid 48123) spawned with scrubbed process.env</div>`;
+      } else if (type === 'spec') {
+        html = `<div class="stream-line"><span class="stream-dir dir-in">stdin &gt;</span> <code>{"type":"spec","sessionId":"sess-9f2","autonomy":"suggest","model":"gpt-4o"}</code></div>`;
+      } else if (type === 'heartbeat') {
+        html = `<div class="stream-line"><span class="stream-dir dir-out">&lt; stdout</span> <code>{"type":"heartbeat","at":${stamp}}</code></div>`;
+      } else if (type === 'escalate') {
+        html = `<div class="stream-line"><span class="stream-dir dir-out">&lt; stdout</span> <code>{"type":"permission_escalation","requestId":"req-ab5","tool":"bash","command":"rm -rf tmp"}</code></div>`;
+      } else if (type === 'decision') {
+        html = `<div class="stream-line"><span class="stream-dir dir-in">stdin &gt;</span> <code>{"type":"permission_decision","requestId":"req-ab5","decision":"approve"}</code></div>`;
+      } else if (type === 'finish') {
+        html = `<div class="stream-line"><span class="stream-dir dir-out">&lt; stdout</span> <code>{"type":"completion","exitCode":0,"findingsSummary":"Built targets successfully"}</code></div>\n`;
+        html += `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> Worker child process terminated with exit code 0.</div>`;
+      }
+
+      scr.innerHTML += html;
+      scr.scrollTop = scr.scrollHeight;
+      
+      if (window.initTableOfContents) window.initTableOfContents();
+    }
+
+    // Init
+    window.onload = () => {
+      // Make functions globally available
+      window.clearStream = clearStream;
+      window.logEvent = logEvent;
+    };
+  </script>
+</body>
+</html>

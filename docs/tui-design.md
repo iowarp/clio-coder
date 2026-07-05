@@ -1,5 +1,8 @@
 # Clio TUI Design System
 
+> [!TIP]
+> **Interactive Spec Available:** An interactive color/glyph token laboratory and terminal transcript preview renderer is located at [docs/html/tui_design_blueprint.html](html/tui_design_blueprint.html) (Version: 0.2.8).
+
 This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under [src/interactive/](../src/interactive/).
 
 The governing principle: **the user reads state from color, structure from frames, and identity from brand marks.** Everything that is not state or structure remains visually quiet.
