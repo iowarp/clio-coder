@@ -19,6 +19,7 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "../../src/engine/ai.js";
+import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import { startWorkerRun, type WorkerRunHandle, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
@@ -896,5 +897,59 @@ rl.on("line", (line) => {
 				await bundle.extension.stop?.();
 			}
 		});
+	});
+});
+
+describe("worker locked-turn markup sanitation", () => {
+	function assistantMessageEnds(events: ReadonlyArray<unknown>): Array<{ content?: unknown }> {
+		return events
+			.filter(
+				(event): event is { type: string; message: { role?: string; content?: unknown } } =>
+					typeof event === "object" &&
+					event !== null &&
+					(event as { type?: unknown }).type === "message_end" &&
+					(event as { message?: { role?: string } }).message?.role === "assistant",
+			)
+			.map((event) => event.message);
+	}
+
+	function messageText(message: { content?: unknown }): string {
+		const content = Array.isArray(message.content) ? message.content : [];
+		return content
+			.filter(
+				(block): block is { type: string; text: string } =>
+					typeof block === "object" &&
+					block !== null &&
+					(block as { type?: unknown }).type === "text" &&
+					typeof (block as { text?: unknown }).text === "string",
+			)
+			.map((block) => block.text)
+			.join("");
+	}
+
+	it("sanitizes the post-lockout markup reply before it reaches worker stdout", async () => {
+		// Trip the worker's synthesis lockout with identical read calls (two
+		// execute, the third is block #1, the fourth is block #2 = lockout),
+		// then answer the forced text-only round with dead tool-call markup,
+		// exactly what the mini target did in the battletest evidence.
+		const markup = "<tool_call>\n<function=read>\n<parameter=path>\nREADME.md\n</parameter>\n</function>\n</tool_call>";
+		const events: unknown[] = [];
+		const readCall = (id: string) =>
+			fauxAssistantMessage([fauxToolCall("read", { path: "README.md" }, { id })], { stopReason: "toolUse" });
+		const { input, unregister } = fauxRuntimeInput(
+			[readCall("call-1"), readCall("call-2"), readCall("call-3"), readCall("call-4"), fauxAssistantMessage(markup)],
+			{ allowedTools: [ToolNames.Read], task: "summarize README.md" },
+		);
+		try {
+			const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+			strictEqual(result.exitCode, 0, "the sanitized turn ends the run cleanly, no backstop abort");
+			const finals = assistantMessageEnds(events);
+			ok(finals.length >= 5, "all scripted rounds reached stdout");
+			const finalText = messageText(finals[finals.length - 1] ?? {});
+			strictEqual(finalText, lockedSynthesisFallbackText(), "the markup-only reply became the fallback message");
+			ok(!finalText.includes("<tool_call>"), "no dead markup reaches the dispatch consumer");
+		} finally {
+			unregister();
+		}
 	});
 });

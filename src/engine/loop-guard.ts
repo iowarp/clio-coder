@@ -26,6 +26,7 @@ import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.j
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { createLoopState, hashToolCall } from "../domains/safety/loop-detector.js";
+import type { AgentMessage } from "./types.js";
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
 
@@ -161,6 +162,94 @@ function synthesisBackstopReason(tool: string): string {
 		`loop guard: tool calls stayed disabled and ${tool} was called again instead of answering, so the turn is ` +
 		"being stopped. Summarize what you found for the operator."
 	);
+}
+
+/**
+ * Dead tool-call markup a model can emit as plain text once tool_choice is
+ * forced to none: the chat template's call syntax arrives as prose because the
+ * runtime no longer parses it into a structured call. Measured on the mini
+ * target, roughly one locked turn in three answered the forced text-only round
+ * this way. Complete blocks are stripped wherever they appear; unterminated
+ * trailing blocks (a length stop mid-markup) are stripped only when followed
+ * by a call body (`<function=` or a JSON opener), so prose that merely quotes
+ * the "<tool_call>" phrase survives.
+ */
+const DEAD_TOOL_CALL_MARKUP_PATTERNS: ReadonlyArray<RegExp> = [
+	/<tool_call>[\s\S]*?<\/tool_call>/gi,
+	/<function=[\w.-]+>[\s\S]*?<\/function>/gi,
+	/<tool_call>\s*(?:<function=|[{[])[\s\S]*$/i,
+	/<function=[\w.-]+>[\s\S]*$/i,
+];
+
+/** Strip dead tool-call markup from locked-turn text; trims only when something was stripped. */
+export function stripDeadToolCallMarkup(text: string): string {
+	let out = text;
+	for (const pattern of DEAD_TOOL_CALL_MARKUP_PATTERNS) {
+		out = out.replace(pattern, "");
+	}
+	return out === text ? text : out.trim();
+}
+
+/**
+ * Final-answer replacement when a locked turn's reply was nothing but dead
+ * tool-call markup. Rendered as the assistant turn (TUI, headless result,
+ * session ledger), so it explains the stop the way the loop-guard closing
+ * messages do.
+ */
+export function lockedSynthesisFallbackText(): string {
+	return (
+		"[Clio Coder] loop guard: tool calls were disabled for the rest of this turn, but the reply contained only " +
+		"tool-call markup, which cannot run and was removed. Ask me to continue with a different approach, or " +
+		"narrow the request."
+	);
+}
+
+/**
+ * Sanitize the assistant message a synthesis-locked turn produced: strip dead
+ * tool-call markup from its text blocks and fall back to
+ * {@link lockedSynthesisFallbackText} when nothing remains. Mutates the message
+ * in place; pi stores the same object in agent state before listeners run, so
+ * one mutation at the subscribe seam covers the emitted event, the session
+ * ledger, receipts, and the next round's provider payload without any surface
+ * re-implementing the rule. Returns whether the message changed.
+ *
+ * Deliberately narrow: only assistant messages that finished ("stop", or
+ * "length" for a mid-markup cutoff) with no structured tool call are touched.
+ * Aborted and error messages keep their text (their flows carry their own
+ * closing messages), and callers gate on the lockout being active so ordinary
+ * turns and user text are never sanitized.
+ */
+export function sanitizeLockedSynthesisMessage(message: AgentMessage | undefined): boolean {
+	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return false;
+	const record = message as { content?: unknown; stopReason?: unknown };
+	const stopReason = record.stopReason;
+	if (stopReason !== undefined && stopReason !== "stop" && stopReason !== "length") return false;
+	if (!Array.isArray(record.content)) return false;
+	const blocks = record.content as Array<{ type?: unknown; text?: unknown }>;
+	if (blocks.some((block) => block?.type === "toolCall")) return false;
+	let changed = false;
+	for (const block of blocks) {
+		if (block?.type !== "text" || typeof block.text !== "string") continue;
+		const stripped = stripDeadToolCallMarkup(block.text);
+		if (stripped !== block.text) {
+			block.text = stripped;
+			changed = true;
+		}
+	}
+	if (!changed) return false;
+	const remaining = blocks
+		.filter((block): block is { type: "text"; text: string } => block?.type === "text" && typeof block.text === "string")
+		.map((block) => block.text)
+		.join("")
+		.trim();
+	if (remaining.length === 0) {
+		const firstText = blocks.find(
+			(block): block is { type: "text"; text: string } => block?.type === "text" && typeof block.text === "string",
+		);
+		if (firstText) firstText.text = lockedSynthesisFallbackText();
+		else blocks.push({ type: "text", text: lockedSynthesisFallbackText() });
+	}
+	return true;
 }
 
 /**

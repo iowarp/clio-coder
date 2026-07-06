@@ -19,10 +19,13 @@ import {
 	isLoopGuardSynthesisBackstopReason,
 	LOOP_GUARD_REGISTRATION_ID,
 	LOOP_SYNTHESIS_BACKSTOP_DENIALS,
+	lockedSynthesisFallbackText,
 	ORCH_TURN_TOOL_CALL_HARD_MARGIN,
 	readOrchTurnToolCallBudget,
 	readWorkerToolCallCap,
+	sanitizeLockedSynthesisMessage,
 } from "../../src/engine/loop-guard.js";
+import type { AgentMessage } from "../../src/engine/types.js";
 import { invokeWorkerTool, type ToolFinishEvent } from "../../src/engine/worker-tools.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -813,5 +816,113 @@ describe("guard block receipt accounting", () => {
 		strictEqual(last?.decision, "blocked", "receipts must count the guard block as a blocked decision");
 		strictEqual(last?.reasonCode, "guard_block");
 		strictEqual(last?.actionClass, "read");
+	});
+});
+
+describe("locked-turn tool-call markup sanitizer", () => {
+	function assistantMessage(text: string, overrides: Record<string, unknown> = {}): AgentMessage {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text }],
+			stopReason: "stop",
+			timestamp: Date.now(),
+			...overrides,
+		} as unknown as AgentMessage;
+	}
+
+	function textOf(message: AgentMessage): string {
+		const content = (message as { content?: Array<{ type?: string; text?: string }> }).content ?? [];
+		return content
+			.filter((block) => block?.type === "text" && typeof block.text === "string")
+			.map((block) => block.text)
+			.join("");
+	}
+
+	// Evidence shape 1 (battletest cycle7-absence r2): the locked round's whole
+	// reply is one dead <tool_call> block. Nothing remains, so the fallback
+	// stop message replaces it.
+	it("replaces a markup-only reply with the fallback stop message", () => {
+		const markup =
+			"<tool_call>\n<function=grep>\n<parameter=pattern>\nhttp|network\n</parameter>\n<parameter=mode>\nfiles\n</parameter>\n</function>\n</tool_call>";
+		const message = assistantMessage(markup);
+		strictEqual(sanitizeLockedSynthesisMessage(message), true);
+		strictEqual(textOf(message), lockedSynthesisFallbackText());
+	});
+
+	// Evidence shape 2 (battletest converge2-t03 honest-absence r1): prose
+	// lead-in followed by a dead block. The prose survives; the markup goes.
+	it("keeps surrounding prose when stripping a dead block", () => {
+		const message = assistantMessage(
+			"Let me try different search terms related to network request handling:\n\n<tool_call>\n<function=grep>\n<parameter=pattern>\nhttp_error\n</parameter>\n</function>\n</tool_call>",
+		);
+		strictEqual(sanitizeLockedSynthesisMessage(message), true);
+		strictEqual(textOf(message), "Let me try different search terms related to network request handling:");
+	});
+
+	it("strips an unterminated trailing block cut off by a length stop", () => {
+		const message = assistantMessage(
+			"Based on what I found:\n<tool_call>\n<function=read>\n<parameter=path>\nsrc/index.ts",
+			{ stopReason: "length" },
+		);
+		strictEqual(sanitizeLockedSynthesisMessage(message), true);
+		strictEqual(textOf(message), "Based on what I found:");
+	});
+
+	it("strips bare function-call markup without the tool_call wrapper", () => {
+		const message = assistantMessage("<function=grep>\n<parameter=pattern>\nfoo\n</parameter>\n</function>");
+		strictEqual(sanitizeLockedSynthesisMessage(message), true);
+		strictEqual(textOf(message), lockedSynthesisFallbackText());
+	});
+
+	it("strips a JSON-style tool_call body", () => {
+		const message = assistantMessage('Answer below.\n<tool_call>\n{"name": "grep", "arguments": {"pattern": "x"}}');
+		strictEqual(sanitizeLockedSynthesisMessage(message), true);
+		strictEqual(textOf(message), "Answer below.");
+	});
+
+	it("leaves plain prose untouched, including a quoted <tool_call> mention", () => {
+		const prose =
+			"I could not finish because tool calls are disabled; writing <tool_call> blocks would not run. The repo has no network layer.";
+		const message = assistantMessage(prose);
+		strictEqual(sanitizeLockedSynthesisMessage(message), false);
+		strictEqual(textOf(message), prose);
+	});
+
+	it("never touches messages that carry structured tool calls", () => {
+		const message = assistantMessage("<tool_call>dead</tool_call>", {
+			content: [
+				{ type: "text", text: "<tool_call><function=grep></function></tool_call>" },
+				{ type: "toolCall", id: "c1", name: "grep", arguments: {} },
+			],
+			stopReason: "toolUse",
+		});
+		strictEqual(sanitizeLockedSynthesisMessage(message), false);
+	});
+
+	it("never touches aborted or error messages", () => {
+		const aborted = assistantMessage("<tool_call><function=grep></function></tool_call>", { stopReason: "aborted" });
+		const errored = assistantMessage("<tool_call><function=grep></function></tool_call>", { stopReason: "error" });
+		strictEqual(sanitizeLockedSynthesisMessage(aborted), false);
+		strictEqual(sanitizeLockedSynthesisMessage(errored), false);
+	});
+
+	it("never touches non-assistant messages", () => {
+		const user = {
+			role: "user",
+			content: [{ type: "text", text: "<tool_call>user pasted markup</tool_call>" }],
+		} as unknown as AgentMessage;
+		strictEqual(sanitizeLockedSynthesisMessage(user), false);
+		strictEqual(sanitizeLockedSynthesisMessage(undefined), false);
+	});
+
+	it("keeps prose from a second text block when the first is only markup", () => {
+		const message = assistantMessage("", {
+			content: [
+				{ type: "text", text: "<tool_call>\n<function=grep>\n</function>\n</tool_call>" },
+				{ type: "text", text: "The feature does not exist in this repository." },
+			],
+		});
+		strictEqual(sanitizeLockedSynthesisMessage(message), true);
+		strictEqual(textOf(message), "The feature does not exist in this repository.");
 	});
 });
