@@ -1472,7 +1472,7 @@ describe("contracts/tools prompt hints", () => {
 		strictEqual(hinted.get("dispatch"), "Call dispatch with list:true to see the agent fleet.");
 		strictEqual(
 			hinted.get("tasks"),
-			'Before multi-step work, declare a task board: tasks action="plan" with a title and the task list. ' +
+			'When a request contains three or more distinct steps, declare the board before your first edit: tasks action="plan" with a title and the task list. ' +
 				'Mark one task active with "start" before working it, close it with "done" plus an evidence note ' +
 				'(what proves it works), and use "block" with a reason instead of silently stalling.',
 		);

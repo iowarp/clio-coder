@@ -62,7 +62,7 @@ const TOOL_HINTS = {
 	tasks: {
 		tool: "tasks",
 		hint:
-			'Before multi-step work, declare a task board: tasks action="plan" with a title and the task list. ' +
+			'When a request contains three or more distinct steps, declare the board before your first edit: tasks action="plan" with a title and the task list. ' +
 			'Mark one task active with "start" before working it, close it with "done" plus an evidence note ' +
 			'(what proves it works), and use "block" with a reason instead of silently stalling.',
 	},
@@ -368,7 +368,7 @@ describe("contracts/prompts compiler logic", () => {
 			"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 			'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
-			"Routing order: orient with structured observe tools before bash; put multi-step work on the task board; dispatch only bounded parallel or delegated subwork and synthesize the receipts; validate with verify or git diff before final claims.",
+			'Routing order: orient with structured observe tools before bash; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; dispatch only bounded parallel or delegated subwork and synthesize the receipts; validate with verify or git diff before final claims.',
 			'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
 			'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
 			TOOL_HINTS.ask_user.hint,
