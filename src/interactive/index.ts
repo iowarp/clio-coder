@@ -491,6 +491,10 @@ export function isCtrlCKey(data: string): boolean {
 	return matchesKey(data, "ctrl+c") && !isKeyRelease(data);
 }
 
+export function isEscapeKey(data: string): boolean {
+	return matchesKey(data, "escape") && !isKeyRelease(data);
+}
+
 /** Title-case a KeyId for display, e.g. `alt+x` → `Alt+X`. Falls back to `Alt+X`. */
 function formatKeyLabel(keyId: string | undefined): string {
 	if (!keyId || keyId.length === 0) return "Alt+X";
@@ -598,7 +602,7 @@ export function routeLeaderKey(data: string, state: LeaderKeyState, deps: Leader
 	if (state.status === "pending") {
 		if (deps.now > state.expiresAt) return { state: IDLE_LEADER_STATE, consumed: true };
 		if (deps.isRelease?.(data) ?? false) return { state, consumed: true };
-		if (matchesKey(data, "escape")) return { state: IDLE_LEADER_STATE, consumed: true };
+		if (isEscapeKey(data)) return { state: IDLE_LEADER_STATE, consumed: true };
 		const base = baseLetterFromInput(data);
 		const target = base ? deps.leaderTargets.find((entry) => entry.key === base) : undefined;
 		if (target) {
@@ -614,11 +618,11 @@ export function routeLeaderKey(data: string, state: LeaderKeyState, deps: Leader
 
 /** Pure permission overlay key router: returns true when the input was consumed. */
 export function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps): boolean {
-	if (data === ENTER) {
+	if (matchesKey(data, "enter") && !isKeyRelease(data)) {
 		deps.confirmPermission();
 		return true;
 	}
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.cancelPermission();
 		return true;
 	}
@@ -627,7 +631,7 @@ export function routePermissionOverlayKey(data: string, deps: PermissionOverlayK
 
 /** Pure overlay key router for the dispatch board. */
 export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -636,7 +640,7 @@ export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOv
 
 /** Pure overlay key router for the target hub. Esc closes; hub keys fall through to the focused view. */
 export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -645,7 +649,7 @@ export function routeProvidersOverlayKey(data: string, deps: ProvidersOverlayKey
 
 /** Pure overlay key router for auth overlays. Esc closes; input handles Enter itself. */
 export function routeAuthOverlayKey(data: string, deps: AuthOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -654,7 +658,7 @@ export function routeAuthOverlayKey(data: string, deps: AuthOverlayKeyDeps): boo
 
 /** Pure overlay key router for the /cost overlay. Esc closes; everything else is swallowed. */
 export function routeCostOverlayKey(data: string, deps: CostOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -666,7 +670,7 @@ export function routeCostOverlayKey(data: string, deps: CostOverlayKeyDeps): boo
  * Enter fall through to the focused SelectList.
  */
 export function routeThinkingOverlayKey(data: string, deps: ThinkingOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -678,7 +682,7 @@ export function routeThinkingOverlayKey(data: string, deps: ThinkingOverlayKeyDe
  * Esc closes; arrows and Enter fall through to the focused SelectList.
  */
 export function routeModelOverlayKey(data: string, deps: ModelOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -690,7 +694,7 @@ export function routeModelOverlayKey(data: string, deps: ModelOverlayKeyDeps): b
  * toggles inclusion and Enter commits, both handled inside ScopedOverlayBox.
  */
 export function routeScopedModelsOverlayKey(data: string, deps: ScopedModelsOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -702,7 +706,7 @@ export function routeScopedModelsOverlayKey(data: string, deps: ScopedModelsOver
  * key falls through to the focused SettingsList for cycling and search.
  */
 export function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -714,7 +718,7 @@ export function routeSettingsOverlayKey(data: string, deps: SettingsOverlayKeyDe
  * and Enter fall through to the focused SelectList (same policy as /resume).
  */
 export function routeMessagePickerOverlayKey(data: string, deps: MessagePickerOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
 	}
@@ -723,7 +727,7 @@ export function routeMessagePickerOverlayKey(data: string, deps: MessagePickerOv
 
 /** Pure overlay key router for ask_user. Esc resolves the tool call as cancelled; input falls through. */
 export function routeAskUserOverlayKey(data: string, deps: AskUserOverlayKeyDeps): boolean {
-	if (data === ESC) {
+	if (isEscapeKey(data)) {
 		deps.cancelAskUser();
 		return true;
 	}
@@ -3301,11 +3305,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		// this fall-through Esc was short-circuited above the overlay router and stole
 		// the keystroke from any open modal, forcing the user to press Esc twice to
 		// dismiss modals that opened mid-stream.
-		if (data === ESC && activeEditorBash) {
+		if (isEscapeKey(data) && activeEditorBash) {
 			activeEditorBash.abort();
 			return { consume: true };
 		}
-		if (data === ESC && deps.chat.isStreaming()) {
+		if (isEscapeKey(data) && deps.chat.isStreaming()) {
 			cancelActiveRun();
 			return { consume: true };
 		}

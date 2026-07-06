@@ -10,6 +10,9 @@ still change interfaces.
 
 ## Unreleased
 
+- Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
+  cancels active runs and closes Clio-owned overlays, permission prompts, and
+  ask_user prompts.
 - Fixed quadratic worker stdout amplification. A dispatched worker subprocess no
   longer reserializes the full cumulative assistant message on every streaming
   delta: a worker-only event projection slims each `message_update` before NDJSON
