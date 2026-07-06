@@ -95,6 +95,19 @@ export function autonomyAskRejection(level: AutonomyLevel, tool: string, actionC
 		detail:
 			`Autonomy ${level} routes ${actionClass} actions through operator approval. ` +
 			"The call is parked until the operator approves it once or cancels it.",
-		hints: ["Approving resumes only this call.", "Recognized commands can be added to .clio/safety.yaml."],
+		hints: [
+			"Approving resumes only this call.",
+			"Recognized commands can be added to .clio/safety.yaml.",
+			// The sanctioned pivots for a gated shell command: typed verification
+			// and read-class observe tools run without approval at this level,
+			// and models otherwise stall retrying denied bash for checks or
+			// directory listings.
+			...(actionClass === "execute"
+				? [
+						'A declared package.json check runs without approval through the verify tool: verify(check="<script>").',
+						"Read-only inspection runs without approval through the ls, read, grep, and find tools.",
+					]
+				: []),
+		],
 	};
 }

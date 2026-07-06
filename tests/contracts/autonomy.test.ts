@@ -14,6 +14,7 @@ import {
 	AUTONOMY_LEVELS,
 	type AutonomyDisposition,
 	type AutonomyLevel,
+	autonomyAskRejection,
 	mapAutonomy,
 } from "../../src/domains/safety/autonomy.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
@@ -655,5 +656,27 @@ describe("contracts/autonomy audit honesty", () => {
 			["classified", "permission_requested", "allowed"],
 		);
 		strictEqual(rows.filter((row) => row.decision === "allowed").length, 1);
+	});
+});
+
+describe("contracts/autonomy ask rejection hints", () => {
+	it("execute asks name the approval-free pivots: verify and the observe tools", () => {
+		const rejection = autonomyAskRejection("auto-edit", "bash", "execute");
+		ok(
+			rejection.hints.some((hint) => hint.includes('verify(check="<script>")')),
+			"the verify pivot reaches the model",
+		);
+		ok(
+			rejection.hints.some((hint) => hint.includes("ls, read, grep, and find")),
+			"the observe-tool pivot reaches the model",
+		);
+	});
+
+	it("non-execute asks carry no shell-pivot hints", () => {
+		const rejection = autonomyAskRejection("suggest", "write", "write");
+		strictEqual(
+			rejection.hints.some((hint) => hint.includes("verify(check")),
+			false,
+		);
 	});
 });
