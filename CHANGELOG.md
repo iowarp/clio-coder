@@ -10,6 +10,30 @@ still change interfaces.
 
 ## Unreleased
 
+- clio eval run: a relative --clio-entry now resolves against the invoking
+  directory instead of breaking inside temp-copy eval workspaces.
+- Blocked-call recovery now names the sanctioned pivots at the point of
+  failure: an execute approval denial tells the model that declared
+  package.json checks run through verify(check="<script>") and that ls,
+  read, grep, and find need no approval, which measured runs showed turns a
+  denied-bash retry spiral into verify-then-edit-then-verify.
+- The loop guard gained a result-stagnation detector: consecutive same-shape
+  calls that return byte-identical bytes while only limit/offset change are
+  blocked with targeted feedback, closing the escalation cycle
+  (limit 10000 -> 20000 -> 50000 -> repeat) that evaded the verbatim
+  detector.
+- Bundled-docs retrieval fixes measured from live traces: an unclosed code
+  fence in docs/tool-usage.md had swallowed every tool section after
+  credential_present (dispatch, verify, context, tasks, artifact) out of the
+  docs index; docs search snippets now anchor on the line matching the most
+  query terms instead of the first match, so parameter lists surface instead
+  of section intros; and docs follow-up text now says cited files are
+  bundled with Clio, not workspace paths, ending read/find chases after
+  citations.
+- A once-per-session task-board reminder now rides the user message when a
+  request literally enumerates three or more steps, the one channel
+  battery-tested local models reliably act on; the static routing line and
+  tasks hint alone measured 0-for-3 on board adoption at temperature 0.
 - The system prompt's Tool Contract now teaches a deterministic routing order
   (structured observation before bash, task board for multi-step work, bounded
   dispatch with receipt synthesis, validation before final claims) and a
