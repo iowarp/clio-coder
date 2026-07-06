@@ -83,7 +83,7 @@ import {
 } from "./context-activity.js";
 import { openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
-import { createDispatchBoardStore, formatDispatchBoardLines, formatTaskIslandLines } from "./dispatch-board.js";
+import { createDispatchBoardStore, createDispatchBoardView, formatTaskIslandLines } from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import {
 	type EditorSteerMention,
@@ -1115,10 +1115,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	// The permission overlay is rebuilt per open because its body depends on
 	// the parked tool call.
-	const dispatchBoard = new Text(
-		formatDispatchBoardLines(dispatchBoardStore.rows(), 76, observabilitySnapshot).join("\n"),
-		0,
-		0,
+	// The dispatch board renders live at the width the overlay actually grants;
+	// the cached observability snapshot supplies each card's evidence/proof
+	// state and is kept current by the single subscription above.
+	const dispatchBoard = createDispatchBoardView(
+		() => dispatchBoardStore.rows(),
+		() => observabilitySnapshot,
 	);
 	const taskIsland = new Text("", 0, 0);
 	const contextIsland = new Text("", 0, 0);
@@ -1966,14 +1968,6 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	});
 	contextIslandHandle.setHidden(true);
 
-	const renderDispatchBoard = (): void => {
-		// The cached observability snapshot supplies each card's evidence/proof
-		// state; it is kept current by the single subscription above, so rendering
-		// reads it directly instead of opening another subscription.
-		dispatchBoard.setText(formatDispatchBoardLines(dispatchBoardStore.rows(), 76, observabilitySnapshot).join("\n"));
-		dispatchBoard.invalidate();
-	};
-
 	const renderTaskIsland = (): void => {
 		const rows = dispatchBoardStore.activeRows();
 		const contextActive = contextActivityStore.active();
@@ -1999,9 +1993,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const startDispatchBoardTicker = (): void => {
 		stopDispatchBoardTicker();
+		// The board component renders statelessly, so keeping spinners and
+		// elapsed times moving only needs a repaint request.
 		dispatchBoardTicker = setInterval(() => {
 			if (overlayState !== "dispatch-board") return;
-			renderDispatchBoard();
 			tui.requestRender();
 		}, 250);
 	};
@@ -3020,13 +3015,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return;
 		}
 		if (overlayState !== "closed") return;
-		renderDispatchBoard();
 		overlayState = "dispatch-board";
+		// Size to the terminal at open: near-full width on narrow screens, capped
+		// at 96 columns so ultrawide terminals keep readable cards. pi clamps the
+		// overlay if the terminal shrinks and the live board re-renders to fit.
 		overlayHandle = showClioOverlayFrame(tui, dispatchBoard, {
 			title: "Dispatch Board",
 			footerHint: buildHint("browse", []),
 			anchor: "center",
-			width: 80,
+			width: Math.max(44, Math.min(96, terminal.columns - 4)),
 		});
 		startDispatchBoardTicker();
 		tui.requestRender();
@@ -3202,41 +3199,28 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		deps.bus.on(BusChannels.DispatchEnqueued, () => {
 			footer.refresh();
 			renderTaskIsland();
-			tui.requestRender();
-			if (overlayState !== "dispatch-board") return;
-			renderDispatchBoard();
+			// The dispatch-board overlay renders live from the store, so this
+			// repaint request refreshes it too when it is open.
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchStarted, () => {
 			footer.refresh();
 			renderTaskIsland();
 			tui.requestRender();
-			if (overlayState !== "dispatch-board") return;
-			renderDispatchBoard();
-			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchProgress, () => {
 			footer.refresh();
 			renderTaskIsland();
-			tui.requestRender();
-			if (overlayState !== "dispatch-board") return;
-			renderDispatchBoard();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchCompleted, () => {
 			footer.refresh();
 			renderTaskIsland();
 			tui.requestRender();
-			if (overlayState !== "dispatch-board") return;
-			renderDispatchBoard();
-			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.DispatchFailed, () => {
 			footer.refresh();
 			renderTaskIsland();
-			tui.requestRender();
-			if (overlayState !== "dispatch-board") return;
-			renderDispatchBoard();
 			tui.requestRender();
 		}),
 		deps.bus.on(BusChannels.ContextActivity, () => {

@@ -9,7 +9,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
-import { truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import {
@@ -362,7 +362,7 @@ export function formatDispatchBoardLines(
 		const theme = clioTheme();
 		const lines = ["", "No active dispatches", "Delegated runs appear here with live status and telemetry.", ""];
 		return lines.map((line) => {
-			const padding = Math.max(0, Math.floor((width - 4 - visibleWidth(line)) / 2));
+			const padding = Math.max(0, Math.floor((width - visibleWidth(line)) / 2));
 			return theme.fg("dim", " ".repeat(padding) + line);
 		});
 	}
@@ -374,6 +374,26 @@ export function formatDispatchBoardLines(
 		body.push(...card);
 	}
 	return body;
+}
+
+/**
+ * Live dispatch-board component. Cards render at the width the TUI actually
+ * grants instead of a baked-in 76-column layout, so a narrow terminal no
+ * longer clips telemetry mid-token and a wide one no longer wastes the frame.
+ * Rendering is stateless: rows and the observability snapshot are read per
+ * render, and the overlay's ticker plus bus-driven requestRender calls drive
+ * repaints (running rows read the clock for spinner and elapsed time).
+ */
+export function createDispatchBoardView(
+	rows: () => ReadonlyArray<DispatchBoardRow>,
+	observability: () => ObservabilitySnapshot | undefined,
+): Component {
+	return {
+		render(width: number): string[] {
+			return formatDispatchBoardLines(rows(), Math.max(1, width), observability());
+		},
+		invalidate(): void {},
+	};
 }
 
 export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {

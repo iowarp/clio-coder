@@ -10,6 +10,7 @@ import type {
 import { visibleWidth } from "../../src/engine/tui.js";
 import {
 	createDispatchBoardStore,
+	createDispatchBoardView,
 	type DispatchBoardRow,
 	deriveRunEvidenceState,
 	dispatchStatusPresentation,
@@ -475,5 +476,48 @@ describe("dispatch board truncation grammar", () => {
 		ok(labelRow, lines.join("\n"));
 		ok(labelRow.includes("…"), `a clipped agent label should carry an ellipsis, got: ${labelRow}`);
 		ok(labelRow.includes("running"), `the status word should survive the label clip, got: ${labelRow}`);
+	});
+});
+
+describe("dispatch board live view", () => {
+	it("renders at the granted width instead of a baked-in 76-column layout", () => {
+		const row = makeRow({
+			targetId: "blade-llamacpp-server-primary-fallback",
+			wireModelId: "meta-llama-3.3-70b-instruct-q4_k_m-131072ctx",
+		});
+		const view = createDispatchBoardView(
+			() => [row],
+			() => undefined,
+		);
+		for (const width of [44, 60, 76, 96]) {
+			const lines = view.render(width);
+			ok(lines.length > 0, `width ${width} should render a card`);
+			for (const line of lines) {
+				ok(visibleWidth(line) <= width, `width ${width} line "${stripSgr(line)}" spans ${visibleWidth(line)}`);
+				ok(!hasTruncatedAnsi(line), `width ${width} line must not cut through an escape sequence`);
+			}
+		}
+	});
+
+	it("reads rows and observability live so a repaint reflects store changes", () => {
+		let rows: DispatchBoardRow[] = [];
+		let snapshot: ObservabilitySnapshot | undefined;
+		const view = createDispatchBoardView(
+			() => rows,
+			() => snapshot,
+		);
+		ok(
+			view
+				.render(76)
+				.map(stripSgr)
+				.some((line) => line.includes("No active dispatches")),
+			"empty store renders the empty state",
+		);
+
+		rows = [makeRow({ runId: "run-9", agentId: "prover" })];
+		snapshot = makeSnapshot({ runs: [runSummary("run-9", readyEvidence("EV1"))] });
+		const rendered = view.render(76).map(stripSgr).join("\n");
+		ok(rendered.includes("prover"), `a row added after construction renders: ${rendered}`);
+		ok(rendered.includes("evidence:EV1"), `the live observability snapshot supplies proof state: ${rendered}`);
 	});
 });

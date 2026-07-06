@@ -9,6 +9,26 @@ change interfaces.
 
 ### Fixed
 
+- **The dispatch board renders live at its granted width.** The board was a
+  pre-rendered `Text` baked at 76 columns inside a fixed 80-column overlay.
+  pi-tui clamps overlays to the terminal, and `ClioOverlayFrame` pads child
+  lines with an empty-ellipsis clip, so on any terminal narrower than the
+  overlay the 76-column cards were cut mid-token with no marker: telemetry
+  and model ids read as complete data. New `createDispatchBoardView` in
+  `src/interactive/dispatch-board.ts` is a stateless component whose
+  `render(width)` formats the store's rows at the width the frame actually
+  grants, reading rows and the observability snapshot per paint.
+  `src/interactive/index.ts` drops the `renderDispatchBoard` re-bake path
+  entirely: the 250ms ticker and the dispatch bus handlers now just request a
+  repaint, and the overlay opens at `min(96, columns - 4)` (floor 44) so
+  narrow terminals get a near-full-width board and ultrawide ones keep
+  readable cards. The empty state centers across the true content width
+  (the old `- 4` predated the frame handing in content width). Pinned by two
+  live-view contracts in `tests/contracts/dispatch-board.test.ts` (width
+  obedience at 44/60/76/96 with no cut escape sequences; rows and proof state
+  read live after construction). Verified in the real TUI via tmux: the board
+  opens at 96 columns on a 200-column terminal and re-renders cleanly at 80.
+
 - **Context meters portray the autocompact reserve and unknown windows
   truthfully.** The proportional meter rendered reserve cells with the same
   filled glyph as consumed context, only dimmed, so an 85%-used window with a
