@@ -133,7 +133,9 @@ describe("IT2: Harness-state pill", () => {
 			{ phase: "thinking", label: "thinking", live: true, staticGlyph: "◐", token: "reason" },
 			{ phase: "writing", label: "writing", live: true, staticGlyph: "◑", token: "accent" },
 			{ phase: "tool_running", label: "tool bash", live: true, staticGlyph: "⚙", token: "accent" },
-			{ phase: "tool_blocked", label: "blocked", live: false, staticGlyph: "⏸", token: "warning" },
+			// tool_blocked fires only on PermissionRequested, so the pill names the
+			// wait for confirmation instead of contradicting the ask overlay.
+			{ phase: "tool_blocked", label: "confirm", live: false, staticGlyph: "⏸", token: "warning" },
 			{ phase: "retrying", label: "retry 2/5", live: false, staticGlyph: "↻", token: "warning" },
 			{ phase: "compacting", label: "compacting", live: true, staticGlyph: "♻", token: "reason" },
 			{ phase: "dispatching", label: "dispatch", live: true, staticGlyph: "⇲", token: "action" },
