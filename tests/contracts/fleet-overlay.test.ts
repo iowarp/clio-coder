@@ -1,11 +1,16 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { ClioSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import type {
 	ObservabilityNotice,
 	ObservabilityRunSummary,
 	ObservabilitySnapshot,
 } from "../../src/domains/observability/index.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import {
 	type Component,
 	type OverlayHandle,
@@ -22,6 +27,7 @@ import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
+const ENTER = "\r";
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 const hasTruncatedAnsi = (text: string): boolean =>
 	text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "").includes(ESC);
@@ -116,6 +122,82 @@ function fakeTui(
 
 function evidenceErrorNotice(runId: string, message: string): ObservabilityNotice {
 	return { id: `notice-${runId}`, at: 0, kind: "evidence", level: "error", message, ref: { runId } };
+}
+
+function spec(id: string, audience: AgentSpec["audience"]): AgentSpec {
+	return {
+		id,
+		name: id,
+		description: `${id} agent`,
+		source: "builtin",
+		filepath: `/builtin/${id}.md`,
+		tools: [],
+		category: "research",
+		capabilityClass: "read-only",
+		latencyClass: "fast",
+		projectContextTier: "bounded",
+		audience,
+		tags: [],
+		skills: [],
+		output: null,
+		body: "",
+	};
+}
+
+function fakeAgents(): AgentsContract {
+	const specs = [
+		spec("coder", "base"),
+		spec("scout", "shadow"),
+		spec("provenance", "shadow"),
+		spec("internal-scout-helper", "internal"),
+		spec("claude-cli", "base"),
+	];
+	return {
+		list: () => [],
+		get: () => null,
+		listSpecs: () => specs,
+		getSpec: (id: string) => specs.find((entry) => entry.id === id) ?? null,
+		reload() {},
+		parseFleet: () => ({ steps: [] }),
+	};
+}
+
+function settingsForFleet(): ClioSettings {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [{ id: "mini", runtime: "openai-compat", url: "http://localhost:1234", defaultModel: "model-old" }];
+	settings.workers.profiles.fast = { target: "mini", model: "model-old", thinkingLevel: "off" };
+	settings.workers.agentBindings.scout = "fast";
+	settings.delegation.agents = [{ id: "claude-cli", command: "claude", args: ["--acp"] }];
+	return settings;
+}
+
+function fakeProviders(settings: () => Readonly<ClioSettings>): ProvidersContract {
+	return {
+		list: () =>
+			settings().targets.map((target) => ({
+				target,
+				runtime: null,
+				available: true,
+				reason: "",
+				health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: 1 },
+				capabilities: {
+					chat: true,
+					tools: true,
+					reasoning: false,
+					vision: false,
+					audio: false,
+					embeddings: false,
+					rerank: false,
+					fim: false,
+					contextWindow: 4096,
+					maxTokens: 1024,
+				},
+				discoveredModels: ["model-new", "model-old"],
+				discoveredModelsSource: "probe",
+			})),
+		getTarget: (id: string) => settings().targets.find((target) => target.id === id) ?? null,
+		getRuntime: () => null,
+	} as unknown as ProvidersContract;
 }
 
 describe("fleet overlay", () => {
@@ -250,5 +332,99 @@ describe("fleet overlay", () => {
 		const lines = harness.component().render(132);
 		for (const line of lines) strictEqual(visibleWidth(line), 132);
 		handle.hide();
+	});
+
+	it("exposes shadow native agents in the binding picker while keeping ACP and internal agents out", () => {
+		const harness = fakeTui();
+		const dispatch = { snapshot: () => snapshot() } as unknown as DispatchContract;
+		let settings = settingsForFleet();
+		settings.workers.agentBindings = {};
+		const handle = openFleetOverlay(harness.tui, dispatch, {
+			agents: fakeAgents(),
+			getSettings: () => settings,
+			writeSettings: (next) => {
+				settings = next;
+			},
+		});
+		try {
+			const component = harness.component();
+			component.handleInput?.("\t");
+			component.handleInput?.("\t");
+			component.handleInput?.("b");
+
+			const rendered = strip(component.render(132).join("\n"));
+			ok(rendered.includes("scout (shadow)"), rendered);
+			ok(rendered.includes("provenance (shadow)"), rendered);
+			ok(rendered.includes("coder (base)"), rendered);
+			ok(!rendered.includes("internal-scout-helper"), rendered);
+			ok(!rendered.includes("claude-cli"), rendered);
+		} finally {
+			handle.hide();
+		}
+	});
+
+	it("renders every bindable native agent in the bindings tab, even when unbound", () => {
+		const harness = fakeTui();
+		const dispatch = { snapshot: () => snapshot() } as unknown as DispatchContract;
+		let settings = settingsForFleet();
+		const handle = openFleetOverlay(harness.tui, dispatch, {
+			agents: fakeAgents(),
+			getSettings: () => settings,
+			writeSettings: (next) => {
+				settings = next;
+			},
+		});
+		try {
+			const component = harness.component();
+			component.handleInput?.("\t");
+			component.handleInput?.("\t");
+
+			const rendered = strip(component.render(132).join("\n"));
+			ok(rendered.includes("agent routes (3)"), rendered);
+			ok(rendered.includes("coder"), rendered);
+			ok(rendered.includes("provenance"), rendered);
+			ok(rendered.includes("scout"), rendered);
+			ok(rendered.includes("(unbound)"), rendered);
+			ok(rendered.includes("fast"), rendered);
+			ok(!rendered.includes("internal-scout-helper"), rendered);
+			ok(!rendered.includes("claude-cli"), rendered);
+		} finally {
+			handle.hide();
+		}
+	});
+
+	it("lets the bindings tab change the selected shadow agent profile model", () => {
+		const harness = fakeTui();
+		const dispatch = { snapshot: () => snapshot() } as unknown as DispatchContract;
+		let settings = settingsForFleet();
+		const handle = openFleetOverlay(harness.tui, dispatch, {
+			agents: fakeAgents(),
+			providers: fakeProviders(() => settings),
+			getSettings: () => settings,
+			writeSettings: (next) => {
+				settings = next;
+			},
+		});
+		try {
+			const component = harness.component();
+			component.handleInput?.("\t");
+			component.handleInput?.("\t");
+			component.handleInput?.("k");
+			let rendered = strip(component.render(132).join("\n"));
+			ok(rendered.includes("scout"), rendered);
+			ok(rendered.includes("shadow"), rendered);
+			ok(rendered.includes("model-old"), rendered);
+
+			component.handleInput?.("m");
+			rendered = strip(component.render(132).join("\n"));
+			ok(rendered.includes("Select model for mini"), rendered);
+			ok(rendered.includes("model-new"), rendered);
+
+			component.handleInput?.(ENTER);
+
+			strictEqual(settings.workers.profiles.fast?.model, "model-new");
+		} finally {
+			handle.hide();
+		}
 	});
 });

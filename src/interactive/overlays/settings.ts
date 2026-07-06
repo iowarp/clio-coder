@@ -61,7 +61,7 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 const SETTINGS_SECTION_DESCRIPTIONS = {
 	safety: "How freely Clio acts, and how delegated agents' tools are governed.",
 	orchestrator: "The target and model that drive the interactive chat loop.",
-	fleet: "Defaults applied to dispatched workers (/run, clio run).",
+	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers.",
 	models: "The /models picker, favorites, and Alt+J / Alt+K cycling.",
 	budget: "Cost ceiling, per-turn output budget, and worker concurrency.",
 	compaction: "When and how the context window is summarized under pressure.",
@@ -82,6 +82,8 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.default.target": "Default target",
 	"workers.default.model": "Default model",
 	"workers.default.thinkingLevel": "Default thinking level",
+	"workers.profiles": "Worker profiles",
+	"workers.agentBindings": "Agent bindings",
 	"workers.maxRetries": "Worker retries",
 	scope: "Model cycle set",
 	"modelSelector.recentLimit": "Recent models kept",
@@ -121,7 +123,14 @@ export const SETTINGS_SECTION_ROWS = {
 		"safetyNet",
 	],
 	orchestrator: ["orchestrator.thinkingLevel", "orchestrator.target", "orchestrator.model"],
-	fleet: ["workers.default.target", "workers.default.model", "workers.default.thinkingLevel", "workers.maxRetries"],
+	fleet: [
+		"workers.default.target",
+		"workers.default.model",
+		"workers.default.thinkingLevel",
+		"workers.profiles",
+		"workers.agentBindings",
+		"workers.maxRetries",
+	],
 	models: ["scope", "modelSelector.recentLimit", "modelSelector.favorites"],
 	budget: ["budget.sessionCeilingUsd", "defaults.maxTokens", "budget.concurrency"],
 	compaction: ["compaction.auto", "compaction.threshold", "compaction.excludeLastTurns"],
@@ -154,6 +163,8 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.default.target": "Default /run target id.",
 	"workers.default.model": "Default /run wire model id.",
 	"workers.default.thinkingLevel": "Reasoning budget for dispatched workers.",
+	"workers.profiles": "Named target/model/thinking choices that native workers can use.",
+	"workers.agentBindings": "Pins native Clio agents, including shadow agents, to worker profiles.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
 	scope: "Alt+J and Alt+K model cycle set.",
 	"modelSelector.recentLimit": "How many recently used models /models remembers.",
@@ -195,6 +206,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
 	"workers.onPermission":
 		"deny turns the ask into a tool denial and the run continues; fail stops the run as permission_required; escalate forwards the ask to you and falls back per workers.escalation on timeout.",
+	"workers.agentBindings":
+		"Use /fleet to bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles.",
 	"delegation.defaults.toolGovernance":
 		"clio-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
 	scope: "Comma-separated target or target/model refs. Alt+J / Alt+K step the chat target through this list.",
@@ -486,6 +499,8 @@ export function buildSettingItems(
 		settings.workers.default.model,
 		settings.workers.default.thinkingLevel,
 	);
+	const profileCount = Object.keys(settings.workers.profiles ?? {}).length;
+	const bindingCount = Object.keys(settings.workers.agentBindings ?? {}).length;
 	const targetSubmenu = options?.providers ? selectTargetSubmenu(options.providers) : editTextSubmenu("Type target id");
 	const orchestratorModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().orchestrator.target ?? undefined)
@@ -534,6 +549,14 @@ export function buildSettingItems(
 		}),
 		settingItem("workers.default.thinkingLevel", workerThinking.display, {
 			values: workerThinking.values,
+		}),
+		settingItem("workers.profiles", profileCount > 0 ? `${profileCount} profile(s)` : "(none)", {
+			affordance: "manage in /fleet profiles",
+			readOnly: true,
+		}),
+		settingItem("workers.agentBindings", bindingCount > 0 ? `${bindingCount} binding(s)` : "(none)", {
+			affordance: "manage in /fleet bindings",
+			readOnly: true,
 		}),
 		settingItem("workers.maxRetries", String(settings.workers.maxRetries), {
 			values: ["0", "1", "2", "3", "5", "8"],

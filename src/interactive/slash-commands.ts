@@ -239,7 +239,7 @@ export interface SlashCommandContext {
 	openCost: () => void;
 	/** Open the read-only `/context` overlay: categorized context-window ledger. */
 	openContextView: () => void;
-	/** Open the read-only `/fleet` overlay: running, retrying, and totals. */
+	/** Open `/fleet`: running workers plus worker profile and agent-binding settings. */
 	openFleet: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
 	openTasks: () => void;

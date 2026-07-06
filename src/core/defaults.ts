@@ -299,15 +299,22 @@ orchestrator:
   thinkingLevel: off
 
 # Worker targets for dispatch. \`default\` preserves the legacy behavior when a
-# recipe or request does not specify an override. \`profiles\` are named worker
-# choices that /run and clio run can select explicitly or by required capability.
+# recipe or request does not specify an override. \`profiles\` are named
+# target/model/thinking choices. \`agentBindings\` pins native Clio agents,
+# including shadow agents such as scout/researcher/provenance, to a profile.
 workers:
   default:
     target: null
     model: null
     thinkingLevel: off
   profiles: {}
-  # agentBindings: map an agent id to a profiles key, e.g. scout: fast-local
+  # Example profile entry:
+  # profiles:
+  #   fast-local:
+  #     target: local-lmstudio
+  #     model: your-model-id
+  #     thinkingLevel: off
+  # agentBindings maps agent id -> profiles key, e.g. scout: fast-local.
   agentBindings: {}
   maxRetries: 2
   # onPermission: what a worker does when a tool call needs interactive
@@ -322,10 +329,6 @@ workers:
     timeoutMs: 120000
     fallback: deny
   resilienceCooldownMs: 15000
-  # fast-local:
-  #   target: local-lmstudio
-  #   model: your-model-id
-  #   thinkingLevel: off
 
 # Alt+J / Alt+K cycling order: plain target ids or "target/model" refs.
 scope: []

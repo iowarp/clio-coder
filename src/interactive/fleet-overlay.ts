@@ -45,7 +45,8 @@ interface ProfileRow {
 
 interface BindingRow {
 	agentId: string;
-	profileName: string;
+	audience: string;
+	profileName: string | null;
 	target: string;
 	model: string;
 	warning: string | null;
@@ -263,6 +264,8 @@ function footerForMode(mode: FleetMode): string {
 		return buildHint("browse", [
 			{ key: "Tab", verb: "mode" },
 			{ key: "b", verb: "bind" },
+			{ key: "p", verb: "profile" },
+			{ key: "m", verb: "model" },
 			{ key: "u", verb: "unbind" },
 		]);
 	}
@@ -315,7 +318,14 @@ function profileLine(row: ProfileRow, selected: boolean, width: number): string 
 function bindingHeader(width: number): string {
 	return dim(
 		fitContentLine(
-			[fitLeft("agent", 20), fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), "warning"].join(" "),
+			[
+				fitLeft("agent", 16),
+				fitLeft("audience", 8),
+				fitLeft("profile", 18),
+				fitLeft("target", 18),
+				fitLeft("model", 26),
+				"warning",
+			].join(" "),
 			width,
 		),
 	);
@@ -324,8 +334,9 @@ function bindingHeader(width: number): string {
 function bindingLine(row: BindingRow, selected: boolean, width: number): string {
 	return truncateToWidth(
 		`${selectionMarker(selected)}${[
-			muted(fitLeft(row.agentId, 20)),
-			muted(fitLeft(row.profileName, 20)),
+			muted(fitLeft(row.agentId, 16)),
+			muted(fitLeft(row.audience, 8)),
+			muted(fitLeft(row.profileName ?? "(unbound)", 18)),
 			muted(fitLeft(row.target, 18)),
 			muted(fitLeft(row.model, 26)),
 			rowWarning(row.warning),
@@ -445,6 +456,14 @@ class FleetOverlayBody implements Component {
 				this.bindAgent();
 				return;
 			}
+			if (data === "p") {
+				this.editSelectedBindingProfile();
+				return;
+			}
+			if (data === "m") {
+				this.editSelectedBindingModel();
+				return;
+			}
 			if (data === "u") {
 				this.unbindSelectedAgent();
 				return;
@@ -494,18 +513,35 @@ class FleetOverlayBody implements Component {
 
 	private bindingRows(settings = this.currentSettings()): BindingRow[] {
 		if (!settings) return [];
-		return Object.entries(settings.workers.agentBindings)
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([agentId, profileName]) => {
-				const profile = settings.workers.profiles[profileName];
-				return {
-					agentId,
-					profileName,
-					target: normalizeSettingValue(profile?.target),
-					model: normalizeSettingValue(profile?.model),
-					warning: profile ? null : "missing profile",
-				};
+		const acpAgentIds = new Set(settings.delegation.agents.map((agent) => agent.id));
+		const rows = new Map<string, BindingRow>();
+		for (const spec of this.options.agents?.listSpecs() ?? []) {
+			if (spec.audience === "internal" || acpAgentIds.has(spec.id)) continue;
+			const profileName = settings.workers.agentBindings[spec.id] ?? null;
+			const profile = profileName ? settings.workers.profiles[profileName] : null;
+			rows.set(spec.id, {
+				agentId: spec.id,
+				audience: spec.audience,
+				profileName,
+				target: normalizeSettingValue(profileName ? profile?.target : settings.workers.default.target),
+				model: normalizeSettingValue(profileName ? profile?.model : settings.workers.default.model),
+				warning: profileName && !profile ? "missing profile" : null,
 			});
+		}
+		for (const [agentId, profileName] of Object.entries(settings.workers.agentBindings)) {
+			if (rows.has(agentId)) continue;
+			const profile = settings.workers.profiles[profileName];
+			const spec = this.options.agents?.getSpec(agentId) ?? null;
+			rows.set(agentId, {
+				agentId,
+				audience: spec?.audience ?? "(unknown)",
+				profileName,
+				target: normalizeSettingValue(profile?.target),
+				model: normalizeSettingValue(profile?.model),
+				warning: profile ? (this.options.agents && !spec ? "unknown agent" : null) : "missing profile",
+			});
+		}
+		return [...rows.values()].sort((a, b) => a.agentId.localeCompare(b.agentId));
 	}
 
 	private profileWarning(settings: Readonly<ClioSettings>, profile: ClioSettings["workers"]["default"]): string | null {
@@ -562,9 +598,9 @@ class FleetOverlayBody implements Component {
 
 	private renderBindings(width: number): string[] {
 		const rows = this.bindingRows();
-		const lines = [listGroupHeader(`agent bindings (${rows.length})`), divider(width), bindingHeader(width)];
+		const lines = [listGroupHeader(`agent routes (${rows.length})`), divider(width), bindingHeader(width)];
 		if (rows.length === 0) {
-			lines.push(muted("no agent bindings configured. press b to bind one"));
+			lines.push(muted("no bindable native agents found"));
 		} else {
 			const selected = Math.min(this.selectedByMode.bindings, rows.length - 1);
 			rows.forEach((row, index) => {
@@ -679,26 +715,32 @@ class FleetOverlayBody implements Component {
 	private editSelectedProfileModel(): void {
 		const row = this.selectedProfileRow();
 		if (!row) return;
+		this.openModelPickerForProfile(row.name);
+	}
+
+	private openModelPickerForProfile(name: string, agentId?: string): void {
 		if (!this.options.providers) {
-			this.notice("warning", "model picker unavailable", `fleet:profile:${row.name}`);
+			this.notice("warning", "model picker unavailable", `fleet:profile:${name}`);
 			return;
 		}
 		this.openSubmenu(
 			selectModelSubmenu(
 				this.options.providers,
-				() => this.currentSettings()?.workers.profiles[row.name]?.target ?? undefined,
+				() => this.currentSettings()?.workers.profiles[name]?.target ?? undefined,
 			),
-			this.currentSettings()?.workers.profiles[row.name]?.model ?? "",
+			this.currentSettings()?.workers.profiles[name]?.model ?? "",
 			(value) => {
 				const model = value.trim();
 				const next = this.mutateSettings((settings) => {
-					const profile = settings.workers.profiles[row.name];
+					const profile = settings.workers.profiles[name];
 					if (!profile) return;
 					profile.model = model.length > 0 ? model : null;
 				});
-				if (next?.workers.profiles[row.name]) {
-					this.selectProfileByName(row.name);
-					this.notice("success", `profile ${row.name} model ${normalizeSettingValue(model)}`, `fleet:profile:${row.name}`);
+				if (next?.workers.profiles[name]) {
+					this.selectProfileByName(name);
+					if (agentId) this.selectBindingByAgent(agentId);
+					const subject = agentId ? `agent ${agentId} profile ${name}` : `profile ${name}`;
+					this.notice("success", `${subject} model ${normalizeSettingValue(model)}`, `fleet:profile:${name}`);
 				}
 			},
 		);
@@ -808,7 +850,7 @@ class FleetOverlayBody implements Component {
 		}
 		const items = specs.map((spec) => ({
 			value: spec.id,
-			label: `${spec.id} (${spec.name})`,
+			label: `${spec.id} (${spec.audience})`,
 			description: spec.description,
 		}));
 		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
@@ -868,9 +910,37 @@ class FleetOverlayBody implements Component {
 		this.requestRender();
 	}
 
+	private editSelectedBindingProfile(): void {
+		const row = this.selectedBindingRow();
+		if (!row) return;
+		this.openProfilePickerForAgent(row.agentId);
+	}
+
+	private editSelectedBindingModel(): void {
+		const row = this.selectedBindingRow();
+		if (!row) return;
+		if (!row.profileName) {
+			this.notice("warning", `bind agent ${row.agentId} to a profile first`, `fleet:bind:${row.agentId}`);
+			this.requestRender();
+			return;
+		}
+		const settings = this.currentSettings();
+		if (!settings?.workers.profiles[row.profileName]) {
+			this.notice("warning", `profile ${row.profileName} is missing`, `fleet:profile:${row.profileName}`);
+			this.requestRender();
+			return;
+		}
+		this.openModelPickerForProfile(row.profileName, row.agentId);
+	}
+
 	private unbindSelectedAgent(): void {
 		const row = this.selectedBindingRow();
 		if (!row) return;
+		if (!row.profileName) {
+			this.notice("warning", `agent ${row.agentId} is not bound`, `fleet:unbind:${row.agentId}`);
+			this.requestRender();
+			return;
+		}
 		const next = this.mutateSettings((settings) => {
 			delete settings.workers.agentBindings[row.agentId];
 		});

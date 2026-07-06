@@ -18,7 +18,6 @@ import { routingChangeNotices } from "../core/session-routing.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { clioConfigDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
-import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -1519,7 +1518,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		listPrompts: () => deps.resources?.prompts(process.cwd()) ?? { items: [], diagnostics: [] },
 		openSkillsHub: () => openSkillsHubState(),
 		listExtensions: () => deps.extensions?.list(process.cwd(), { all: true }) ?? [],
-		listAgents: () => deps.agents?.listSpecs().filter(isUserVisibleAgent) ?? [],
+		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
 		listDelegationAgents: () => deps.getSettings?.().delegation.agents ?? [],
 		exportShareArchive: (outPath) => {
 			if (!deps.share) throw new Error("share domain is not loaded");

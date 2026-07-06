@@ -25,6 +25,8 @@ const READ_ONLY_IDS = new Set<EditableSettingId>([
 	"safetyNet",
 	"modelSelector.favorites",
 	"theme",
+	"workers.profiles",
+	"workers.agentBindings",
 	"targets",
 	"keybindings",
 	"delegation.agents",
@@ -39,6 +41,8 @@ function settingsWithTargets(): ClioSettings {
 	settings.autonomy = "auto-edit";
 	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.workers.profiles.fast = { target: "target-b", model: "model-b", thinkingLevel: "off" };
+	settings.workers.agentBindings.scout = "fast";
 	settings.scope = ["target-a/model-a", "target-b/model-b"];
 	settings.budget.sessionCeilingUsd = 5;
 	settings.compaction = { auto: true, threshold: 0.8, excludeLastTurns: 6 };
