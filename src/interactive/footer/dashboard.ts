@@ -269,11 +269,18 @@ export function renderFooterStatusLines(state: FooterDashboardRenderState, width
 	);
 }
 
-function expandedWideColumnWidths(width: number, totalSepWidth: number): [number, number, number, number] {
+/**
+ * Column widths for the four-section ultrawide dashboard. Growth is
+ * round-robin (CONTEXT first) so every quadrant shares the surplus instead of
+ * ACTIVITY absorbing it alone: CONTEXT needs the most room (meter, chips, and
+ * legend rows clip earliest), SESSION and WORKSPACE carry long target ids and
+ * paths, and only width beyond every cap spills into ACTIVITY.
+ */
+export function expandedWideColumnWidths(width: number, totalSepWidth: number): [number, number, number, number] {
 	const available = Math.max(0, width - totalSepWidth);
 	const widths: [number, number, number, number] = [27, 29, 31, 24];
 	let remaining = Math.max(0, available - widths.reduce((sum, item) => sum + item, 0));
-	const max: [number, number, number, number] = [30, 34, 36, Number.POSITIVE_INFINITY];
+	const max: [number, number, number, number] = [40, 44, 56, Number.POSITIVE_INFINITY];
 	const order = [2, 1, 3, 0] as const;
 	let cursor = 0;
 	while (remaining > 0) {

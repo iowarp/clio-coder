@@ -26,6 +26,11 @@ export const GLYPH = {
 	barEmpty: "░",
 	contextFull: "▰",
 	contextFree: "▱",
+	// Autocompact reserve cells: held-back headroom is neither used nor free,
+	// so it carries its own glyph and never reads as filled when only color is
+	// lost. The medium-shade block is single-width in the same fonts that carry
+	// the barFull/barEmpty fallbacks.
+	contextReserve: "▒",
 	info: "ℹ",
 	warn: "⚠",
 	warnInline: "!",

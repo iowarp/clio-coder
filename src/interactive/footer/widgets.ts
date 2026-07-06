@@ -13,6 +13,7 @@ import {
 	type ClioToken,
 	clioTheme,
 	formatCompactMs,
+	formatContextPercent,
 	GLYPH,
 	joinChips,
 	joinSections,
@@ -330,8 +331,10 @@ export function compactSecondaryLine(
 		// The row follows the kv grammar: dim key, muted value. An unmeasured
 		// percent renders the ?% placeholder dim because it is scaffolding for a
 		// number that has not arrived, not a measurement.
-		const percent =
-			context.ledger.percent !== null ? theme.fg("muted", `${context.ledger.percent.toFixed(1)}%`) : theme.fg("dim", "?%");
+		const percent = theme.fg(
+			context.ledger.percent !== null ? "muted" : "dim",
+			formatContextPercent(context.ledger.percent),
+		);
 		left = `${theme.fg("dim", "ctx")} ${renderContextMeterBar(context.ledger, barCells, theme)} ${percent}`;
 	} else {
 		left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));
@@ -438,8 +441,10 @@ export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantO
 function expandedContextBarCells(width: number | undefined): number {
 	if (typeof width !== "number" || !Number.isFinite(width) || width <= 0) return 12;
 	const budget = Math.max(6, Math.floor(width) - CONTEXT_BAR_LABEL_WIDTH - 1);
-	const desired = width >= 36 ? 16 : width >= 32 ? 14 : 12;
-	return Math.max(8, Math.min(16, desired, budget));
+	// A wider quadrant earns a finer meter: every extra cell is real resolution,
+	// up to 24 cells so the bar never dwarfs the facts beneath it.
+	const desired = width >= 48 ? 24 : width >= 36 ? 16 : width >= 32 ? 14 : 12;
+	return Math.max(8, Math.min(24, desired, budget));
 }
 
 function formatUsedWindow(used: number | null, contextWindow: number | null): string | null {
@@ -504,19 +509,37 @@ function ledgerChatChips(theme: ClioTheme, ledger: ContextLedger): string {
 	]);
 }
 
-/** Swatch legend covering exactly the categories present in the meter. */
-function ledgerLegend(theme: ClioTheme, ledger: ContextLedger): string {
-	return ledger.meter
-		.map((group) => {
-			const labelToken: ClioToken = group.category === "free" || group.category === "reserve" ? "dim" : "muted";
-			return `${contextCategorySwatch(group.category, theme)} ${theme.fg(labelToken, CONTEXT_SHORT_LABEL[group.category])}`;
-		})
-		.join(" ");
+/**
+ * Swatch legend covering exactly the categories present in the meter, packed
+ * into as many rows as the quadrant needs. A ledger can carry ten categories,
+ * more than one quadrant row holds, and dropping tail entries would hide
+ * whole categories, so the legend wraps by whole chips instead of clipping.
+ */
+function ledgerLegendRows(theme: ClioTheme, ledger: ContextLedger, width: number | undefined): string[] {
+	const chips = ledger.meter.map((group) => {
+		const labelToken: ClioToken = group.category === "free" || group.category === "reserve" ? "dim" : "muted";
+		return `${contextCategorySwatch(group.category, theme)} ${theme.fg(labelToken, CONTEXT_SHORT_LABEL[group.category])}`;
+	});
+	const budget =
+		typeof width === "number" && Number.isFinite(width) && width > 0 ? Math.floor(width) : Number.POSITIVE_INFINITY;
+	const rows: string[] = [];
+	let current = "";
+	for (const chip of chips) {
+		const candidate = current.length > 0 ? `${current} ${chip}` : chip;
+		if (current.length > 0 && visibleWidth(candidate) > budget) {
+			rows.push(current);
+			current = chip;
+		} else {
+			current = candidate;
+		}
+	}
+	if (current.length > 0) rows.push(current);
+	return rows;
 }
 
 function ledgerBar(theme: ClioTheme, ledger: ContextLedger, cells: number): string {
-	const percent = ledger.percent !== null ? `${ledger.percent.toFixed(1)}%` : "--%";
-	return `${renderContextMeterBar(ledger, cells, theme)}  ${theme.fg("muted", percent)}`;
+	const percent = theme.fg(ledger.percent !== null ? "muted" : "dim", formatContextPercent(ledger.percent));
+	return `${renderContextMeterBar(ledger, cells, theme)}  ${percent}`;
 }
 
 export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuadrantOptions = {}): string[] {
@@ -528,12 +551,12 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 	let bar: string;
 	let fill: string;
 	let chatFree: string;
-	let legend: string;
+	let legendRows: string[];
 	if (hasLedger && ledger) {
 		bar = ledgerBar(theme, ledger, barCells);
 		fill = ledgerSystemChips(theme, ledger);
 		chatFree = ledgerChatChips(theme, ledger);
-		legend = ledgerLegend(theme, ledger);
+		legendRows = ledgerLegendRows(theme, ledger, options.width);
 	} else {
 		const composition = contextComposition(facts);
 		fill = joinChips(theme, [
@@ -549,7 +572,9 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 		bar = buildSegmentedContextBar(theme, barCells, facts.contextWindow ?? 0, contextBreakdownForBar(facts));
 		const filledChar = visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull;
 		const freeChar = visibleWidth(GLYPH.contextFree) === 1 ? GLYPH.contextFree : GLYPH.barEmpty;
-		legend = `${theme.fg("info", `${filledChar} sys`)} ${theme.fg("warning", `${filledChar} tools`)} ${theme.fg("accent", `${filledChar} chat`)} ${theme.style("frame", `${freeChar} free`, { dim: true })}`;
+		legendRows = [
+			`${theme.fg("info", `${filledChar} sys`)} ${theme.fg("warning", `${filledChar} tools`)} ${theme.fg("accent", `${filledChar} chat`)} ${theme.style("frame", `${freeChar} free`, { dim: true })}`,
+		];
 	}
 
 	const usedTokens = hasLedger && ledger ? ledger.usedTokens : facts.used;
@@ -564,7 +589,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 		facts.extensions && facts.extensions.installed > 0
 			? kv("ext", `${facts.extensions.active}/${facts.extensions.installed}`)
 			: statusRow(null),
-		legendRow(legend),
+		...legendRows.map((row) => legendRow(row)),
 	]);
 }
 

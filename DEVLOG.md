@@ -7,6 +7,41 @@ change interfaces.
 
 ## Unreleased
 
+### Fixed
+
+- **Context meters portray the autocompact reserve and unknown windows
+  truthfully.** The proportional meter rendered reserve cells with the same
+  filled glyph as consumed context, only dimmed, so an 85%-used window with a
+  15% reserve was indistinguishable from a 97%-used one wherever color was
+  weak or absent. `contextCategoryGlyph` in `src/interactive/context-meter.ts`
+  now assigns the reserve its own `GLYPH.contextReserve` medium-shade block
+  (`filled / reserve / free` are three distinct glyphs), which flows through
+  the footer bar, the expanded quadrant, the /context-view overlay grid, and
+  every legend swatch from the one shared helper. The unknown-percent grammar
+  was also split across surfaces (`?%` in the compact footer, `--%` in the
+  expanded quadrant, segmented bar, and overlay); a shared
+  `formatContextPercent` in `src/interactive/theme/labels.ts` now renders `?%`
+  at all four sites, dim in the footers because it is scaffolding for a number
+  that has not arrived. Pinned by `tests/contracts/context-meter.test.ts`
+  (glyph distinctness, bar/grid/swatch alignment, grammar) and the updated
+  segmented-bar assertion in `tests/contracts/footer-redesign.test.ts`.
+
+- **Ultrawide expanded-footer quadrants share surplus width instead of
+  starving CONTEXT.** `expandedWideColumnWidths` capped the four columns at
+  30/34/36 and gave every remaining cell to ACTIVITY, so a 200-column
+  terminal rendered a 91-cell ACTIVITY column of mostly blank space while
+  CONTEXT clipped its fill chips, chat chips, and legend at 36. Caps are now
+  40 (WORKSPACE), 44 (SESSION), and 56 (CONTEXT) with the same
+  CONTEXT-first round-robin, so surplus spills into ACTIVITY only after every
+  quadrant reaches its useful size; the context meter grows to 24 cells in
+  quadrants at least 48 wide; and the ledger legend packs its category chips
+  into as many full rows as the quadrant needs (`ledgerLegendRows`) instead
+  of clipping tail categories behind an ellipsis. The helper is exported and
+  directly tested (exact allocations at 120/200/240, exact-fill property),
+  and the dashboard overflow contract now also runs at 200 and 240 columns.
+  Verified with a deterministic render harness at 80/120/200 using a real
+  262K ledger with a live reserve.
+
 ### Added
 
 - **v0.2.8 Documentation Alignment.** Conducted a thorough documentation pass aligning the entire markdown corpus with v0.2.8 reality. Introduced two new guides: `docs/worker-dispatch-mechanics.md` covering worker subprocess spawning, standard input/output NDJSON protocols, watchdog heartbeats, and permission escalations, and `docs/provider-adapter-cookbook.md` detailing the custom model runtime adapter interface, probing APIs, client factories, and reasoning formats. Corrected and updated all core tools, configs, and TUI design reference files.
