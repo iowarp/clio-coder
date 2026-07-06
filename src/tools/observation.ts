@@ -343,6 +343,21 @@ function limitedBudgetNote(reservation: ObservationReservation): string {
 }
 
 /**
+ * Budget directive carried inside the JSON cap stub when the shared pool (not
+ * the tool's self cap) bounded this call. Retrying cannot succeed: every
+ * further call this turn gets an equal or smaller cap, so the only productive
+ * moves are answering from gathered content or continuing next turn. Without
+ * this the stub reads as a transient size error and invites a retry spiral.
+ */
+function jsonStubBudgetNote(reservation: ObservationReservation): string {
+	return (
+		`per-turn observation budget nearly exhausted: ${formatSize(reservation.usedBeforeBytes)} of ` +
+		`${formatSize(reservation.limitBytes)} already returned this turn. Do not retry this call; answer from ` +
+		"what you have gathered, or continue in a follow-up turn."
+	);
+}
+
+/**
  * Close out an observation: offload the full rendering when truncated, append
  * exactly one notice line (text) or substitute the parseable stub (json), and
  * charge the turn pool. Untruncated results get no notice.
@@ -351,6 +366,7 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 	const format = input.format ?? "text";
 	let output = input.output;
 	let truncated = input.truncated;
+	let shownCount = input.shownCount;
 	let offloadPath: string | null = null;
 	const bodyBytes = byteLength(output);
 	const totalBytes = input.totalBytes ?? byteLength(input.fullOutput ?? input.output);
@@ -358,12 +374,19 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 
 	if (format === "json" && bodyBytes > input.reservation.callCapBytes) {
 		// A JSON payload must parse or be replaced whole; never cut mid-document.
+		// The stub shows nothing of the payload, so the envelope must say so
+		// (shownCount 0), and when the shared pool bounded the call, the stub
+		// carries the budget directive instead of a continuation that can never
+		// fit this turn.
 		truncated = true;
+		shownCount = 0;
 		offloadPath = writeToolOffload(input.fullOutput ?? output, input.options);
+		const poolBound = input.reservation.limited;
 		output = JSON.stringify({
 			error: `result exceeded ${formatSize(input.reservation.callCapBytes)}`,
+			...(poolBound ? { budget: jsonStubBudgetNote(input.reservation) } : {}),
 			...(offloadPath !== null ? { offloadPath } : {}),
-			...(next !== undefined && next.length > 0 ? { next } : {}),
+			...(!poolBound && next !== undefined && next.length > 0 ? { next } : {}),
 		});
 	} else if (truncated && input.fullOutput !== undefined) {
 		offloadPath = writeToolOffload(input.fullOutput, input.options);
@@ -383,7 +406,7 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 	const observation: Observation = {
 		tool: input.tool,
 		unit: input.unit,
-		shownCount: input.shownCount,
+		shownCount,
 		totalCount: input.totalCount,
 		shownBytes,
 		// shownBytes counts the appended notice/limited-budget lines; totalBytes

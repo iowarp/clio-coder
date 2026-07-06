@@ -78,7 +78,17 @@ export const readTool: ToolSpec = {
 			const totalBytes = Buffer.byteLength(content, "utf8");
 			const startIndex = Math.min(offset - 1, totalLines);
 			if (tail === null && offset > 1 && startIndex >= totalLines) {
-				return { kind: "error", message: `read: offset ${offset} is beyond end of file (${totalLines} lines total)` };
+				// The anchor matters for weak models: a bare "beyond end of file"
+				// reads as a paging mistake and triggers a tail-re-reading walk. Say
+				// plainly that nothing exists past the last line and that re-reading
+				// cannot produce new content.
+				return {
+					kind: "error",
+					message:
+						`read: offset ${offset} is beyond end of file (${totalLines} lines total). The file ends at line ` +
+						`${totalLines} and has no further content; do not page past it or re-read the tail — a read covering ` +
+						`line ${totalLines} has already returned everything.`,
+				};
 			}
 			const cap = reservation.callCapBytes;
 

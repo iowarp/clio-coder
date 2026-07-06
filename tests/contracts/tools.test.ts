@@ -840,6 +840,20 @@ describe("contracts/tools result shaping and truncation", () => {
 		}
 	});
 
+	it("anchors the past-EOF read error so a paging model stops instead of walking the tail", async () => {
+		const root = scratchDir();
+		const file = join(root, "short.txt");
+		writeFileSync(file, "one\ntwo\nthree\n", "utf8");
+
+		const result = await readTool.run({ path: file, offset: 4 });
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") {
+			ok(result.message.includes("beyond end of file (3 lines total)"), "names the bound");
+			ok(result.message.includes("no further content"), "states nothing exists past the last line");
+			ok(result.message.includes("already returned everything"), "anchors on content the model already has");
+		}
+	});
+
 	it("applies an aggregate per-turn observation budget across large reads", async () => {
 		const root = scratchDir();
 		const first = join(root, "first.txt");

@@ -1245,6 +1245,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// at agent_end, no terminal ledger row was ever written for this turn,
 		// so one is synthesized below.
 		let pendingTerminalToolResult: { toolCallId: string; toolName: string } | null = null;
+		// state.messages length when this run started; agent state appends every
+		// message of the run (prompts, assistant, tool results) via message_end,
+		// so the slice from here is the run's real message window.
+		let runStartMessageCount = 0;
 
 		handle.agent.subscribe(async (event) => {
 			const eventAt = Date.now();
@@ -1261,9 +1265,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					...(durationMs !== undefined ? { durationMs } : {}),
 					resultSummary: toolResultSummary(event.result),
 				} as typeof event;
+			} else if (event.type === "agent_end") {
+				// The engine's failure path (an abort or a thrown provider error)
+				// replaces the run's message window with one synthetic zero-usage
+				// failure message, which zeroed token usage, tool counts, and cache
+				// records for every aborted turn. Rebuild the real window from agent
+				// state, which already holds all of this run's messages plus that
+				// failure message.
+				const runMessages = localRuntime.agent.state.messages.slice(runStartMessageCount);
+				if (runMessages.length > event.messages.length) {
+					enrichedEvent = { ...event, messages: runMessages } as typeof event;
+				}
 			}
 			const publicEvent = enrichedEvent;
 			if (publicEvent?.type === "agent_start") {
+				runStartMessageCount = localRuntime.agent.state.messages.length;
 				streamStartedAt = eventAt;
 				firstAssistantDeltaAt = null;
 				apiCallStartedAt = null;
@@ -2279,23 +2295,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// a cancelled run must not deliver queued steers or follow-ups, and
 			// the stranded-steer fallback must find an empty mirror.
 			clearQueuedMirror();
-			const interruptReason = options?.reason?.trim();
-			if (wasStreaming && interruptReason) {
-				// System-initiated interrupt (loop guard): show the stop reason
-				// immediately, but persist the durable closing turn only when the
-				// run settles (submit's finally). The abort below still lets the
-				// in-flight tool results land; persisting here would interleave an
-				// assistant turn between a tool-call message and its results, which
-				// strict chat templates reject on replay. `activeInterruptReason`
-				// meanwhile suppresses the empty aborted messages the abort leaves
-				// behind, in both the ledger and the live transcript.
-				activeInterruptReason = interruptReason;
-				emit({ type: "message_end", message: noticeMessage(interruptReason) });
+			const requestedReason = options?.reason?.trim();
+			if (wasStreaming) {
+				// Show the stop reason immediately, but persist the durable closing
+				// turn only when the run settles (submit's finally). The abort below
+				// still lets the in-flight tool results land; persisting here would
+				// interleave an assistant turn between a tool-call message and its
+				// results, which strict chat templates reject on replay.
+				// `activeInterruptReason` meanwhile suppresses the empty aborted
+				// messages the abort leaves behind, in both the ledger and the live
+				// transcript. Operator cancels take the same path with the default
+				// text, so they no longer render a redundant "[aborted] Request was
+				// aborted" turn on top of the cancellation notice.
+				activeInterruptReason =
+					requestedReason && requestedReason.length > 0 ? requestedReason : "[Clio Coder] active response cancelled.";
+				emit({ type: "message_end", message: noticeMessage(activeInterruptReason) });
 			}
 			runtime?.agent.abort();
-			if (wasStreaming && !interruptReason) {
-				emitNotice("[Clio Coder] active response cancelled.");
-			}
 			if (wasStreaming && deps.bus) {
 				deps.bus.emit(BusChannels.RunAborted, {
 					source: options?.source ?? "stream_cancel",
@@ -2303,7 +2319,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					startedAt: null,
 					elapsedMs: null,
 					at: Date.now(),
-					reason: options?.auditReason ?? (interruptReason ? "loop guard stopped a runaway turn" : "user cancelled stream"),
+					reason: options?.auditReason ?? (requestedReason ? "loop guard stopped a runaway turn" : "user cancelled stream"),
 				});
 			}
 		},
