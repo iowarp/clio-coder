@@ -1,4 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { resetLlamaCppResidencyState } from "../../src/engine/apis/llamacpp-residency.js";
@@ -341,6 +344,10 @@ describe("openai-completions thinking preservation", () => {
 
 	it("awaits llama.cpp router residency before constructing the chat payload", async () => {
 		resetLlamaCppResidencyState();
+		// The residency lock file lives in the state dir; point it at a scratch
+		// dir so the contract test never writes outside the repo sandbox.
+		const originalStateDir = process.env.CLIO_STATE_DIR;
+		process.env.CLIO_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-residency-test-"));
 		const originalFetch = globalThis.fetch;
 		const events: string[] = [];
 		let modelPolls = 0;
@@ -418,6 +425,8 @@ describe("openai-completions thinking preservation", () => {
 			ok(payloadIndex > loadIndex, events.join("\n"));
 		} finally {
 			globalThis.fetch = originalFetch;
+			if (originalStateDir === undefined) delete process.env.CLIO_STATE_DIR;
+			else process.env.CLIO_STATE_DIR = originalStateDir;
 			resetLlamaCppResidencyState();
 		}
 	});

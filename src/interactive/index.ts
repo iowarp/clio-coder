@@ -1254,10 +1254,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		footer.refresh();
 		tui.requestRender();
 	});
-	// Model-residency visibility. The VRAM-aware reconciler (engine/residency.ts)
-	// emits over the bus instead of importing TUI code; this subscriber renders
-	// each will-not-fit, about-to-evict, foreign-backoff, or stress notice. The
-	// key folds repeats of the same kind for one target so turns do not spam.
+	// Model-residency visibility. The capacity-aware reconciler
+	// (engine/apis/residency.ts) emits over the bus instead of importing TUI
+	// code; this subscriber renders each will-not-fit, about-to-evict, swap,
+	// co-resident, or stress notice. The key folds repeats of the same kind
+	// for one target so turns do not spam.
 	const unsubscribeRuntimeNotice = deps.bus.on(BusChannels.RuntimeNotice, (payload) => {
 		const evt = payload as RuntimeNoticePayload | null | undefined;
 		if (!evt || typeof evt !== "object" || typeof evt.message !== "string" || typeof evt.kind !== "string") return;

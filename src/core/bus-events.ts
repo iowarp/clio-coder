@@ -69,20 +69,14 @@ export const BusChannels = {
 export type BusChannel = (typeof BusChannels)[keyof typeof BusChannels];
 
 /** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
-export type RuntimeNoticeKind =
-	| "will-not-fit"
-	| "about-to-evict"
-	| "swap"
-	| "foreign-backoff"
-	| "co-resident"
-	| "stress";
+export type RuntimeNoticeKind = "will-not-fit" | "about-to-evict" | "swap" | "co-resident" | "stress";
 
 /**
  * Model-residency notice published on {@link BusChannels.RuntimeNotice} by the
- * VRAM-aware reconciler (src/engine/apis/residency.ts). Notices are
- * informational and non-blocking: a notice never cancels a turn. `kind` is the
- * collision or stress category, `detail` carries the numeric VRAM and footprint
- * facts when the runtime exposed them, and `message` is the rendered
+ * capacity-aware residency reconciler (src/engine/apis/residency.ts). Notices
+ * are informational and non-blocking: a notice never cancels a turn. `kind` is
+ * the collision or stress category, `detail` carries the numeric capacity and
+ * footprint facts when the runtime exposed them, and `message` is the rendered
  * operator-facing line. A genuine VRAM miss surfaces a `will-not-fit` notice
  * carrying the same content the turn fails with, instead of a bare SDK error.
  */

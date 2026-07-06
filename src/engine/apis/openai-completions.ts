@@ -25,6 +25,7 @@ import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { ensureLlamaCppResidency } from "./llamacpp-residency.js";
 import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./output-budget.js";
+import { residencyManagedFor } from "./residency.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 
 /**
@@ -41,7 +42,8 @@ interface ClioRuntimeMetadata {
 	clio?: {
 		targetId: string;
 		runtimeId: string;
-		lifecycle: "user-managed" | "clio-managed";
+		/** Present only when settings set the target lifecycle explicitly. */
+		lifecycle?: "user-managed" | "clio-managed";
 		gateway?: boolean;
 		quirks?: LocalModelQuirks;
 		chatTemplateKwargsUnsupported?: boolean;
@@ -635,6 +637,7 @@ async function ensureResidencyForModel(model: Model<"openai-completions">): Prom
 		targetId: metadata.targetId ?? model.provider,
 		runtimeId: metadata.runtimeId,
 		keepModelId: model.id,
+		managed: residencyManagedFor(metadata.lifecycle),
 	});
 }
 

@@ -473,7 +473,7 @@ Useful flags:
 | `--api-key <literal>` | Store an API key in `credentials.yaml`. |
 | `--force` | Allow model/capability choices outside the local catalog guardrails. |
 | `--gateway` | Mark target as a gateway. |
-| `--lifecycle <user-managed|clio-managed>` | Resident model lifecycle policy. |
+| `--lifecycle <user-managed|clio-managed>` | Resident model lifecycle policy. An explicit `user-managed` makes Clio observe-only on this target (never load/unload models); unset means Clio manages residency. |
 | `--set-orchestrator` | Use this target as the chat default. |
 | `--set-fleet-default` | Use this target as the fleet default. |
 | `--context-window <N>` | Override the target context-window capability. |

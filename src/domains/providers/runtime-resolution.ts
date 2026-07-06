@@ -4,6 +4,7 @@ import { getCatalogModelForRuntime } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
+import { hasLiveModelCatalog } from "./model-discovery.js";
 import {
 	type ReasoningClass,
 	type ResolvedModelRuntimeCapabilities,
@@ -258,6 +259,33 @@ function probeReasoningApplies(status: TargetStatus, wireModelId: string): boole
 	return probeCapabilitiesForModel(status, wireModelId)?.reasoning !== undefined;
 }
 
+/**
+ * Warn instead of silently passing a model id the target does not advertise.
+ * The id still resolves (local servers accept ids they never listed), but a
+ * typo or a stale settings entry surfaces here instead of at stream time.
+ * Silent only when there is no basis to judge: no configured wireModels and
+ * no live catalog yet.
+ */
+function unknownModelDiagnostic(
+	target: TargetDescriptor,
+	status: TargetStatus,
+	wireModelId: string,
+): RuntimeResolutionDiagnostic | null {
+	const configured = (target.wireModels ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
+	const live = hasLiveModelCatalog(status) ? status.discoveredModels : null;
+	if (configured.length === 0 && live === null) return null;
+	if (configured.includes(wireModelId) || (live?.includes(wireModelId) ?? false)) return null;
+	const sources = [
+		...(configured.length > 0 ? ["configured wireModels"] : []),
+		...(live !== null ? ["live model catalog"] : []),
+	].join(" or ");
+	return diagnostic(
+		"warning",
+		"model-not-in-catalog",
+		`model '${wireModelId}' is not in target '${target.id}' ${sources}; requests will send the id as-is. Fix the settings entry or add the model to the server if this is unintended.`,
+	);
+}
+
 function modelCapabilitiesFor(
 	providers: ProvidersContract,
 	status: TargetStatus,
@@ -335,6 +363,8 @@ export function resolveRuntimeTarget(
 	}
 
 	const status = statusFor(providers, target, runtime, wireModelId);
+	const unknownModel = unknownModelDiagnostic(target, status, wireModelId);
+	if (unknownModel) diagnostics.push(unknownModel);
 
 	const requestedThinkingLevel = input.requestedThinkingLevel ?? "off";
 	const capabilityResolution = modelCapabilitiesFor(providers, status, wireModelId);

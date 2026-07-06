@@ -1172,9 +1172,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// Same target+runtime, new wireModelId: hot-swap the model in place on
 		// the live agent. Mirrors the pi-coding-agent setModel pattern (mutate
 		// `agent.state.model`, re-clamp thinking level, persist) so the runtime
-		// keeps its conversation, subscribers, and pending tool calls. Local
-		// runtimes (LM Studio, Ollama) manage their own resident-model lifecycle
-		// via JIT load and TTL; Clio does not micromanage server-side eviction.
+		// keeps its conversation, subscribers, and pending tool calls.
+		// Server-side residency for the new model is reconciled by the engine
+		// adapters at the top of the next stream (engine/apis/residency.ts):
+		// co-resident when capacity allows, swapping only when a slot must be
+		// freed, never evicting protected models.
 		if (
 			runtime &&
 			runtime.targetId === target.target.id &&

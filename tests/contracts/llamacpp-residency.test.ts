@@ -3,13 +3,20 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { residentModelsSummary } from "../../src/cli/targets.js";
 import {
 	ensureLlamaCppResidency,
-	observeLlamaCppResidency,
+	type LlamaCppResidencyInput,
 	parseLlamaCppResident,
 	parseLlamaCppResidentModels,
 	parseLlamaCppRouterProps,
 	resetLlamaCppResidencyState,
 } from "../../src/engine/apis/llamacpp-residency.js";
-import { type ResidencyNotice, setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
+import {
+	type ResidencyNotice,
+	setProtectedModelsProvider,
+	setResidencyNoticeSink,
+} from "../../src/engine/apis/residency.js";
+
+const SCOUT = "MiniCPM5-1B-Q8_0-131K";
+const CODER = "Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K";
 
 function modelsPayload(entries: Array<{ id: string; state: string; tags?: string[] }>): unknown {
 	return {
@@ -22,21 +29,6 @@ function modelsPayload(entries: Array<{ id: string; state: string; tags?: string
 	};
 }
 
-function fetchReturning(payload: unknown, calls: string[]): typeof fetch {
-	return (async (url: unknown) => {
-		calls.push(String(url));
-		return { ok: true, json: async () => payload } as Response;
-	}) as typeof fetch;
-}
-
-function fetchRoutes(routes: Record<string, unknown>, calls: string[]): typeof fetch {
-	return (async (url: unknown) => {
-		const key = String(url);
-		calls.push(key);
-		return { ok: true, json: async () => routes[key] ?? {} } as Response;
-	}) as typeof fetch;
-}
-
 function jsonResponse(payload: unknown): Response {
 	return new Response(JSON.stringify(payload), {
 		status: 200,
@@ -44,7 +36,60 @@ function jsonResponse(payload: unknown): Response {
 	});
 }
 
-describe("contracts/llamacpp residency observer", () => {
+interface RouterCall {
+	url: string;
+	method: string;
+	body?: unknown;
+}
+
+/**
+ * Minimal stateful fake of the mini router: /v1/models reflects load state,
+ * /props advertises capacity, POST /models/load|unload mutate the state.
+ */
+function fakeRouter(initial: Array<{ id: string; state: string; tags?: string[] }>, maxInstances?: number) {
+	const states = new Map(initial.map((entry) => [entry.id, entry.state]));
+	const tags = new Map(initial.map((entry) => [entry.id, entry.tags ?? []]));
+	const calls: RouterCall[] = [];
+	const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+		const href = String(url);
+		const method = init?.method ?? "GET";
+		const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+		calls.push({ url: href, method, body });
+		if (href.endsWith("/v1/models")) {
+			return jsonResponse(
+				modelsPayload([...states.entries()].map(([id, state]) => ({ id, state, tags: tags.get(id) ?? [] }))),
+			);
+		}
+		if (href.endsWith("/props")) {
+			return jsonResponse(maxInstances === undefined ? {} : { max_instances: maxInstances });
+		}
+		if (href.endsWith("/models/load")) {
+			states.set(String(body.model), "loaded");
+			return jsonResponse({ ok: true });
+		}
+		if (href.endsWith("/models/unload")) {
+			states.set(String(body.model), "unloaded");
+			return jsonResponse({ ok: true });
+		}
+		throw new Error(`unexpected fetch ${method} ${href}`);
+	}) as typeof fetch;
+	const posts = () => calls.filter((call) => call.method === "POST").map((call) => [call.url, call.body]);
+	return { fetchImpl, calls, posts, states };
+}
+
+function ensureInput(fetchImpl: typeof fetch, keepModelId: string, managed = true): LlamaCppResidencyInput {
+	return {
+		baseUrl: "http://mini:8080/v1",
+		targetId: "mini",
+		runtimeId: "llamacpp",
+		keepModelId,
+		managed,
+		fetchImpl,
+		withLock: async (_targetKey, fn) => fn(),
+	};
+}
+
+describe("contracts/llamacpp router residency", () => {
 	let notices: ResidencyNotice[];
 
 	beforeEach(() => {
@@ -55,6 +100,7 @@ describe("contracts/llamacpp residency observer", () => {
 
 	afterEach(() => {
 		setResidencyNoticeSink(null);
+		setProtectedModelsProvider(null);
 		resetLlamaCppResidencyState();
 	});
 
@@ -81,159 +127,173 @@ describe("contracts/llamacpp residency observer", () => {
 		deepStrictEqual(parseLlamaCppRouterProps(null), {});
 	});
 
-	it("records a swap when the router holds a different model, TTL-deduped", async () => {
-		const calls: string[] = [];
-		let now = 1_000;
-		const input = {
-			baseUrl: "http://mini:8080/v1",
-			targetId: "mini",
-			runtimeId: "llamacpp",
-			keepModelId: "requested-model",
-			fetchImpl: fetchReturning(modelsPayload([{ id: "resident-model", state: "loaded" }]), calls),
-			now: () => now,
-			ttlMs: 10_000,
-		};
+	it("scout-as-keep never evicts the co-resident coder within capacity (the shipped regression)", async () => {
+		const router = fakeRouter(
+			[
+				{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
+				{ id: CODER, state: "loaded", tags: ["role:code"] },
+			],
+			2,
+		);
 
-		await observeLlamaCppResidency(input);
-		strictEqual(notices.length, 1);
-		strictEqual(notices[0]?.kind, "swap");
-		strictEqual(notices[0]?.level, "info");
-		ok(notices[0]?.message.includes("resident-model"));
-		ok(notices[0]?.message.includes("requested-model"));
-		deepStrictEqual(calls, ["http://mini:8080/v1/models"]);
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, SCOUT));
 
-		// Within the TTL the observer neither refetches nor re-notices.
-		now += 100;
-		await observeLlamaCppResidency(input);
-		strictEqual(calls.length, 1);
-		strictEqual(notices.length, 1);
+		deepStrictEqual(router.posts(), [], "a scout turn with both models resident must not touch the router");
+		strictEqual(router.states.get(CODER), "loaded");
 	});
 
-	it("reports allowed co-residency as capacity info when the router allows the resident count", async () => {
-		const calls: string[] = [];
-		const stacked = {
-			baseUrl: "http://mini:8080/v1",
-			targetId: "mini",
-			runtimeId: "llamacpp",
-			keepModelId: "coder",
-			fetchImpl: fetchRoutes(
-				{
-					"http://mini:8080/v1/models": modelsPayload([
-						{ id: "coder", state: "loaded" },
-						{ id: "scout", state: "loaded", tags: ["role:scout", "pinned:true"] },
-					]),
-					"http://mini:8080/props": { max_instances: 2 },
-				},
-				calls,
-			),
-		};
-		await observeLlamaCppResidency(stacked);
+	it("coder-as-keep leaves the pinned scout resident within capacity", async () => {
+		const router = fakeRouter(
+			[
+				{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
+				{ id: CODER, state: "loaded", tags: ["role:code"] },
+			],
+			2,
+		);
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, CODER));
+
+		deepStrictEqual(router.posts(), []);
+		strictEqual(router.states.get(SCOUT), "loaded");
+	});
+
+	it("loads into a free slot without evicting anything", async () => {
+		const router = fakeRouter(
+			[
+				{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
+				{ id: CODER, state: "unloaded", tags: ["role:code"] },
+			],
+			2,
+		);
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, CODER));
+
+		deepStrictEqual(router.posts(), [["http://mini:8080/models/load", { model: CODER }]]);
+		strictEqual(router.states.get(SCOUT), "loaded");
 		strictEqual(notices[0]?.kind, "co-resident");
-		strictEqual(notices[0]?.level, "info");
-		ok(notices[0]?.message.includes("2/2"));
-		ok(notices[0]?.message.includes("scout (scout)"));
-		ok(notices[0]?.message.includes("cannot verify remaining VRAM"));
-		deepStrictEqual(calls, ["http://mini:8080/v1/models", "http://mini:8080/props"]);
 	});
 
-	it("reports double residency as stress when capacity is unknown or exceeded and stays silent when clean", async () => {
-		const stacked = {
-			baseUrl: "http://mini:8080/v1",
-			targetId: "mini",
-			runtimeId: "llamacpp",
-			keepModelId: "coder",
-			fetchImpl: fetchReturning(
-				modelsPayload([
-					{ id: "coder", state: "loaded" },
-					{ id: "other", state: "loaded" },
-				]),
-				[],
-			),
-		};
-		await observeLlamaCppResidency(stacked);
-		strictEqual(notices[0]?.kind, "stress");
-		strictEqual(notices[0]?.level, "warning");
-		ok(notices[0]?.message.includes("cannot verify enough remaining VRAM"));
+	it("capacity-full eviction picks the non-protected resident, spares the pinned scout, and config-protected models", async () => {
+		setProtectedModelsProvider(() => ["configured-model"]);
+		const router = fakeRouter(
+			[
+				{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
+				{ id: "configured-model", state: "loaded" },
+				{ id: "old-scratch", state: "loaded" },
+				{ id: "new-code", state: "unloaded" },
+			],
+			3,
+		);
 
-		notices.length = 0;
-		resetLlamaCppResidencyState();
-		await observeLlamaCppResidency({
-			...stacked,
-			fetchImpl: fetchReturning(modelsPayload([{ id: "coder", state: "loaded" }]), []),
-		});
-		strictEqual(notices.length, 0);
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, "new-code"));
+
+		deepStrictEqual(router.posts(), [
+			["http://mini:8080/models/unload", { model: "old-scratch" }],
+			["http://mini:8080/models/load", { model: "new-code" }],
+		]);
+		strictEqual(router.states.get(SCOUT), "loaded");
+		strictEqual(router.states.get("configured-model"), "loaded");
 	});
 
-	it("degrades fetch failures silently and never throws", async () => {
-		await observeLlamaCppResidency({
-			baseUrl: "http://mini:8080/v1",
-			targetId: "mini",
-			runtimeId: "llamacpp",
-			keepModelId: "coder",
-			fetchImpl: (async () => {
-				throw new Error("offline");
-			}) as typeof fetch,
-		});
-		strictEqual(notices.length, 0);
+	it("declines with an error notice when every slot is pinned", async () => {
+		const router = fakeRouter(
+			[
+				{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
+				{ id: "pinned-coder", state: "loaded", tags: ["pinned:true"] },
+			],
+			2,
+		);
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, "third-model"));
+
+		deepStrictEqual(router.posts(), []);
+		strictEqual(notices.at(-1)?.kind, "will-not-fit");
+		strictEqual(notices.at(-1)?.level, "error");
 	});
 
-	it("loads the selected model, unloads prior code residents, and restores the scout", async () => {
-		const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+	it("CLIO_RESIDENCY/lifecycle opt-out (managed=false) observes without loading or unloading", async () => {
+		const router = fakeRouter(
+			[
+				{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
+				{ id: "other", state: "loaded" },
+				{ id: "wanted", state: "unloaded" },
+			],
+			2,
+		);
+
+		await ensureLlamaCppResidency(ensureInput(router.fetchImpl, "wanted", false));
+
+		deepStrictEqual(router.posts(), [], "observe-only must never mutate the router");
+	});
+
+	it("TTL-dedupes repeat ensures for the same (target, model)", async () => {
+		let now = 1_000;
+		const router = fakeRouter([{ id: CODER, state: "loaded", tags: ["role:code"] }], 2);
+		const input = { ...ensureInput(router.fetchImpl, CODER), now: () => now, ttlMs: 10_000 };
+
+		await ensureLlamaCppResidency(input);
+		const callsAfterFirst = router.calls.length;
+		ok(callsAfterFirst > 0);
+
+		now += 100;
+		await ensureLlamaCppResidency(input);
+		strictEqual(router.calls.length, callsAfterFirst, "a TTL-fresh ensure must not refetch");
+	});
+
+	it("restores a pinned resident displaced by a capacity-unknown load", async () => {
+		// Without readable capacity the router may satisfy the load by
+		// displacing its LRU resident. The fake mimics that: loading new-code
+		// silently unloads the scout once.
+		const calls: RouterCall[] = [];
 		let modelPolls = 0;
 		const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+			const href = String(url);
 			const method = init?.method ?? "GET";
 			const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-			calls.push({ url: String(url), method, body });
-			if (String(url) === "http://mini:8080/v1/models") {
+			calls.push({ url: href, method, body });
+			if (href === "http://mini:8080/v1/models") {
 				modelPolls += 1;
 				const entries =
 					modelPolls === 1
 						? [
-								{ id: "MiniCPM5-1B-Q8_0-131K", state: "loaded", tags: ["role:scout", "pinned:true"] },
+								{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
 								{ id: "old-code", state: "loaded", tags: ["role:code"] },
 								{ id: "new-code", state: "unloaded", tags: ["role:code"] },
 							]
 						: modelPolls < 4
 							? [
-									{ id: "MiniCPM5-1B-Q8_0-131K", state: "unloaded", tags: ["role:scout", "pinned:true"] },
+									{ id: SCOUT, state: "unloaded", tags: ["role:scout", "pinned:true"] },
 									{ id: "new-code", state: "loaded", tags: ["role:code"] },
 								]
 							: [
-									{ id: "MiniCPM5-1B-Q8_0-131K", state: "loaded", tags: ["role:scout", "pinned:true"] },
+									{ id: SCOUT, state: "loaded", tags: ["role:scout", "pinned:true"] },
 									{ id: "new-code", state: "loaded", tags: ["role:code"] },
 								];
 				return jsonResponse(modelsPayload(entries));
 			}
-			if (String(url) === "http://mini:8080/models/unload" || String(url) === "http://mini:8080/models/load") {
+			if (href === "http://mini:8080/props") return jsonResponse({});
+			if (href === "http://mini:8080/models/unload" || href === "http://mini:8080/models/load") {
 				return jsonResponse({ ok: true });
 			}
-			throw new Error(`unexpected fetch ${method} ${String(url)}`);
+			throw new Error(`unexpected fetch ${method} ${href}`);
 		}) as typeof fetch;
 
-		await ensureLlamaCppResidency({
-			baseUrl: "http://mini:8080/v1",
-			targetId: "mini",
-			runtimeId: "llamacpp",
-			keepModelId: "new-code",
-			fetchImpl,
-		});
+		await ensureLlamaCppResidency(ensureInput(fetchImpl, "new-code"));
 
 		deepStrictEqual(
 			calls.filter((call) => call.method === "POST").map((call) => [call.url, call.body]),
 			[
 				["http://mini:8080/models/unload", { model: "old-code" }],
 				["http://mini:8080/models/load", { model: "new-code" }],
-				["http://mini:8080/models/load", { model: "MiniCPM5-1B-Q8_0-131K" }],
+				["http://mini:8080/models/load", { model: SCOUT }],
 			],
 		);
 		ok(
 			!calls.some(
-				(call) => call.url === "http://mini:8080/models/unload" && JSON.stringify(call.body ?? {}).includes("MiniCPM5"),
+				(call) => call.url === "http://mini:8080/models/unload" && JSON.stringify(call.body ?? {}).includes("MiniCPM"),
 			),
 			"scout/pinned resident must never be unloaded",
 		);
-		strictEqual(notices[0]?.kind, "swap");
-		ok(notices[0]?.message.includes("old-code"));
 	});
 
 	it("does not manage non-router llama.cpp model payloads", async () => {
@@ -243,15 +303,21 @@ describe("contracts/llamacpp residency observer", () => {
 			return jsonResponse({ data: [{ id: "new-code", object: "model", owned_by: "llamacpp" }] });
 		}) as typeof fetch;
 
-		await ensureLlamaCppResidency({
-			baseUrl: "http://plain-llama:8080/v1",
-			targetId: "plain-llama",
-			runtimeId: "llamacpp",
-			keepModelId: "new-code",
-			fetchImpl,
-		});
+		await ensureLlamaCppResidency(ensureInput(fetchImpl, "new-code"));
 
-		deepStrictEqual(calls, ["GET http://plain-llama:8080/v1/models"]);
+		deepStrictEqual(calls, ["GET http://mini:8080/v1/models"]);
+	});
+
+	it("degrades fetch failures silently and never throws", async () => {
+		await ensureLlamaCppResidency(
+			ensureInput(
+				(async () => {
+					throw new Error("offline");
+				}) as typeof fetch,
+				"coder",
+			),
+		);
+		strictEqual(notices.length, 0);
 	});
 });
 

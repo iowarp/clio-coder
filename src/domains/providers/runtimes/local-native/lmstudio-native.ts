@@ -404,6 +404,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 		const baseUrl = target.url ? toWebSocketUrl(target.url) : "";
 		const pricing = target.pricing;
 		const quirks = extractLocalModelQuirks(kb?.entry.quirks);
+		const lifecycle = targetLifecycle(target);
 		const model: Model<Api> & ClioLocalModelMetadata = {
 			id: wireModelId,
 			name: `${wireModelId} (${target.id})`,
@@ -423,7 +424,7 @@ const lmstudioNativeRuntime: RuntimeDescriptor = {
 			clio: {
 				targetId: target.id,
 				runtimeId: target.runtime,
-				lifecycle: targetLifecycle(target),
+				...(lifecycle ? { lifecycle } : {}),
 				...(target.gateway === true ? { gateway: true } : {}),
 				...(kb?.entry.family ? { family: kb.entry.family } : {}),
 				...(quirks ? { quirks } : {}),

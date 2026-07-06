@@ -53,6 +53,13 @@ export interface WorkerSpec {
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
 	middlewareSnapshot?: MiddlewareSnapshot;
+	/**
+	 * Wire model ids the operator's configuration references (orchestrator
+	 * model, worker default/profile models, target default models). The worker
+	 * seeds its residency layer with these so it never evicts another
+	 * profile's model from a shared local server.
+	 */
+	protectedModels?: ReadonlyArray<string>;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
 	/** Skill names the agent recipe binds to this run; context(scope=skills) admits exactly these. */
@@ -419,6 +426,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "apiKey", "WorkerSpec");
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
 	validateAllowedTools(spec.allowedTools);
+	readOptionalStringArray(spec, "protectedModels", "WorkerSpec");
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.modelCapabilities !== undefined)
 		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");

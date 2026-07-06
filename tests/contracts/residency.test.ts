@@ -1,5 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { protectedResidencyModelIds } from "../../src/core/residency-protection.js";
 import {
 	decideResidency,
 	markClioLoaded,
@@ -8,6 +10,8 @@ import {
 	reconcileResidency,
 	resetResidencyState,
 	residencyManaged,
+	residencyManagedFor,
+	setProtectedModelsProvider,
 	setResidencyNoticeSink,
 } from "../../src/engine/apis/residency.js";
 
@@ -20,8 +24,10 @@ function baseAdapter(overrides: Partial<ResidencyAdapter> = {}): ResidencyAdapte
 		runtimeId: "ollama-native",
 		keepModelId: "new-model",
 		managed: true,
+		strategy: "scheduler",
 		listResident: async () => [],
 		unload: async () => {},
+		withLock: async (_targetKey, fn) => fn(),
 		...overrides,
 	};
 }
@@ -33,113 +39,220 @@ describe("contracts/model residency decision", () => {
 
 	afterEach(() => {
 		setResidencyNoticeSink(null);
+		setProtectedModelsProvider(null);
 		resetResidencyState();
 	});
 
-	it("swaps out a foreign resident model instead of silently stacking on top", () => {
+	it("co-hosts within known capacity: keep-not-resident loads without evicting anything", () => {
 		const plan = decideResidency({
-			targetId: "local",
-			runtimeId: "lmstudio-native",
-			keepModelId: "new-model",
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "coder",
 			managed: true,
-			resident: [{ modelId: "foreign-model", loadedByClio: false, sizeVramBytes: 8 * GIB }],
+			strategy: "router",
+			capacity: 2,
+			resident: [
+				{ modelId: "scout", loadedByClio: false, tags: ["role:scout", "pinned:true"] as string[], protection: "tag" },
+			],
 		});
 
-		// The requested model is not resident: never load on top of another
-		// large model. The swap is a recorded, warning-level transition.
+		strictEqual(plan.decision, "reconcile");
+		deepStrictEqual(plan.evict, []);
+		strictEqual(plan.keepResident, false);
+		strictEqual(plan.notices[0]?.kind, "co-resident");
+		strictEqual(plan.notices[0]?.level, "info");
+	});
+
+	it("keep-resident never evicts co-residents, whoever loaded them", () => {
+		const plan = decideResidency({
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "scout",
+			managed: true,
+			strategy: "router",
+			capacity: 2,
+			resident: [
+				{ modelId: "scout", loadedByClio: false, protection: "tag" },
+				{ modelId: "coder", loadedByClio: false },
+			],
+		});
+
+		strictEqual(plan.decision, "reconcile");
+		strictEqual(plan.keepResident, true);
+		deepStrictEqual(plan.evict, []);
+		deepStrictEqual(plan.fallbackEvict, []);
+		strictEqual(plan.notices[0]?.kind, "co-resident");
+	});
+
+	it("capacity-full eviction chooses a non-protected resident and spares protected ones", () => {
+		const plan = decideResidency({
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "third-model",
+			managed: true,
+			strategy: "router",
+			capacity: 2,
+			resident: [
+				{ modelId: "scout", loadedByClio: false, protection: "tag" },
+				{ modelId: "old-code", loadedByClio: false },
+			],
+		});
+
 		strictEqual(plan.decision, "reconcile");
 		deepStrictEqual(
 			plan.evict.map((entry) => entry.modelId),
-			["foreign-model"],
+			["old-code"],
 		);
-		strictEqual(plan.notices[0]?.kind, "swap");
-		strictEqual(plan.notices[0]?.level, "warning");
-		deepStrictEqual(plan.notices[0]?.detail, { freedVramBytes: 8 * GIB, swappedOut: "foreign-model" });
+		strictEqual(plan.notices.at(-1)?.kind, "swap");
 	});
 
-	it("leaves foreign residents alone when the requested model is already served, but reports them", () => {
+	it("capacity-full falls back to a config-protected resident only when nothing unprotected is left, with a warning", () => {
 		const plan = decideResidency({
-			targetId: "local",
-			runtimeId: "lmstudio-native",
-			keepModelId: "new-model",
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "third-model",
 			managed: true,
+			strategy: "router",
+			capacity: 2,
 			resident: [
-				{ modelId: "new-model", loadedByClio: false },
+				{ modelId: "scout", loadedByClio: false, protection: "tag" },
+				{ modelId: "configured-coder", loadedByClio: false, protection: "config" },
+			],
+		});
+
+		strictEqual(plan.decision, "reconcile");
+		deepStrictEqual(
+			plan.evict.map((entry) => entry.modelId),
+			["configured-coder"],
+		);
+		strictEqual(plan.notices.at(-1)?.kind, "swap");
+		strictEqual(plan.notices.at(-1)?.level, "warning");
+		deepStrictEqual(plan.notices.at(-1)?.detail, { swappedOut: "configured-coder", configProtected: true });
+	});
+
+	it("declines when every slot holds a tag-pinned model", () => {
+		const plan = decideResidency({
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "third-model",
+			managed: true,
+			strategy: "router",
+			capacity: 2,
+			resident: [
+				{ modelId: "scout", loadedByClio: false, protection: "tag" },
+				{ modelId: "pinned-coder", loadedByClio: false, protection: "tag" },
+			],
+		});
+
+		strictEqual(plan.decision, "decline");
+		deepStrictEqual(plan.evict, []);
+		strictEqual(plan.notices.at(-1)?.kind, "will-not-fit");
+		strictEqual(plan.notices.at(-1)?.level, "error");
+	});
+
+	it("router without readable capacity conservatively swaps only unprotected residents", () => {
+		const plan = decideResidency({
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "new-code",
+			managed: true,
+			strategy: "router",
+			resident: [
+				{ modelId: "scout", loadedByClio: false, protection: "tag" },
+				{ modelId: "old-code", loadedByClio: false },
+				{ modelId: "configured", loadedByClio: false, protection: "config" },
+			],
+		});
+
+		strictEqual(plan.decision, "reconcile");
+		deepStrictEqual(
+			plan.evict.map((entry) => entry.modelId),
+			["old-code"],
+		);
+	});
+
+	it("jit strategy evicts nothing up front and ranks fallback candidates unprotected-first", () => {
+		const plan = decideResidency({
+			targetId: "dynamo",
+			runtimeId: "lmstudio-native",
+			keepModelId: "worker-model",
+			managed: true,
+			strategy: "jit",
+			resident: [
+				{ modelId: "configured-orch", loadedByClio: false, protection: "config" },
 				{ modelId: "operator-model", loadedByClio: false },
 			],
 		});
 
-		strictEqual(plan.decision, "observe");
-		strictEqual(plan.keepResident, true);
+		strictEqual(plan.decision, "reconcile");
 		deepStrictEqual(plan.evict, []);
-		strictEqual(plan.notices[0]?.kind, "foreign-backoff");
-		strictEqual(plan.notices[0]?.level, "warning");
+		deepStrictEqual(
+			plan.fallbackEvict.map((entry) => entry.modelId),
+			["operator-model", "configured-orch"],
+		);
 	});
 
-	it("evicts only Clio-loaded residents and counts their VRAM as reclaimable", () => {
+	it("scheduler strategy releases only Clio's own unprotected stragglers", () => {
 		const plan = decideResidency({
 			targetId: "local",
 			runtimeId: "ollama-native",
 			keepModelId: "new-model",
 			managed: true,
-			vram: { freeBytes: 4 * GIB },
-			requestedFootprintBytes: 10 * GIB,
-			resident: [{ modelId: "old-model", loadedByClio: true, sizeVramBytes: 8 * GIB }],
+			strategy: "scheduler",
+			resident: [
+				{ modelId: "clio-straggler", loadedByClio: true },
+				{ modelId: "operator-model", loadedByClio: false },
+				{ modelId: "configured", loadedByClio: true, protection: "config" },
+			],
 		});
 
 		strictEqual(plan.decision, "reconcile");
-		strictEqual(plan.fits, true);
 		deepStrictEqual(
 			plan.evict.map((entry) => entry.modelId),
-			["old-model"],
+			["clio-straggler"],
 		);
-		strictEqual(plan.notices[0]?.kind, "about-to-evict");
-		deepStrictEqual(plan.notices[0]?.detail, { freedVramBytes: 8 * GIB });
+		strictEqual(plan.notices.at(-1)?.kind, "about-to-evict");
 	});
 
-	it("declines before evicting when the requested model still will not fit", () => {
+	it("observe-only opt-out never evicts and still reports", () => {
 		const plan = decideResidency({
 			targetId: "local",
-			runtimeId: "ollama-native",
-			keepModelId: "too-large",
-			managed: true,
-			contextLength: 131_072,
-			vram: { freeBytes: 1 * GIB },
-			requestedFootprintBytes: 8 * GIB,
-			resident: [{ modelId: "old-model", loadedByClio: true, sizeVramBytes: 2 * GIB }],
-		});
-
-		strictEqual(plan.decision, "decline");
-		strictEqual(plan.fits, false);
-		deepStrictEqual(plan.evict, []);
-		strictEqual(plan.notices.at(-1)?.kind, "will-not-fit");
-		deepStrictEqual(plan.notices.at(-1)?.detail, {
-			requestedFootprintBytes: 8 * GIB,
-			availableBytes: 3 * GIB,
-			freeBytes: 1 * GIB,
-			reclaimableBytes: 2 * GIB,
-			contextLength: 131_072,
-		});
-	});
-
-	it("emits stress notices for context overflow and CPU/GPU split residents", () => {
-		const plan = decideResidency({
-			targetId: "local",
-			runtimeId: "ollama-native",
+			runtimeId: "lmstudio-native",
 			keepModelId: "new-model",
 			managed: false,
-			contextLength: 262_144,
-			modelMaxContext: 131_072,
-			resident: [{ modelId: "split-model", loadedByClio: false, sizeVramBytes: 12 * GIB, sizeBytes: 20 * GIB }],
+			strategy: "jit",
+			resident: [{ modelId: "operator-model", loadedByClio: false }],
 		});
 
 		strictEqual(plan.decision, "observe");
+		deepStrictEqual(plan.evict, []);
+		deepStrictEqual(plan.fallbackEvict, []);
+	});
+
+	it("emits stress notices for context overflow, CPU/GPU split residents, and over-capacity stacks", () => {
+		const plan = decideResidency({
+			targetId: "local",
+			runtimeId: "llamacpp",
+			keepModelId: "coder",
+			managed: true,
+			strategy: "router",
+			capacity: 2,
+			contextLength: 262_144,
+			modelMaxContext: 131_072,
+			resident: [
+				{ modelId: "coder", loadedByClio: false },
+				{ modelId: "split-model", loadedByClio: false, sizeVramBytes: 12 * GIB, sizeBytes: 20 * GIB },
+				{ modelId: "extra", loadedByClio: false },
+			],
+		});
+
 		deepStrictEqual(
 			plan.notices.map((notice) => notice.kind),
-			["stress", "stress"],
+			["stress", "stress", "stress"],
 		);
 		deepStrictEqual(plan.notices[0]?.detail, { requestedContext: 262_144, modelMaxContext: 131_072 });
 		deepStrictEqual(plan.notices[1]?.detail, { residentVramBytes: 12 * GIB, residentTotalBytes: 20 * GIB });
+		deepStrictEqual(plan.notices[2]?.detail, { residentCount: 3, maxInstances: 2 });
 	});
 });
 
@@ -150,10 +263,11 @@ describe("contracts/model residency reconciler", () => {
 
 	afterEach(() => {
 		setResidencyNoticeSink(null);
+		setProtectedModelsProvider(null);
 		resetResidencyState();
 	});
 
-	it("unloads Clio-loaded residents, emits notices, and TTL-skips repeat reconciles", async () => {
+	it("unloads Clio-loaded stragglers, emits notices, and TTL-skips repeat reconciles", async () => {
 		const notices: ResidencyNotice[] = [];
 		const unloaded: string[] = [];
 		let listCalls = 0;
@@ -183,8 +297,60 @@ describe("contracts/model residency reconciler", () => {
 
 		now += 100;
 		const second = await reconcileResidency(adapter);
-		strictEqual(second.decision, "skip");
-		strictEqual(listCalls, 1, "TTL skip must avoid another resident-list probe");
+		strictEqual(second.decision, "reconcile");
+		strictEqual(second.keepResident, true);
+		strictEqual(listCalls, 1, "TTL hit must avoid another resident-list probe");
+	});
+
+	it("classifies configured models as protected via the provider, including worker processes' view", async () => {
+		setProtectedModelsProvider(() => ["orchestrator-coder"]);
+		const notices: ResidencyNotice[] = [];
+		const unloaded: string[] = [];
+		setResidencyNoticeSink((notice) => notices.push(notice));
+
+		// A fresh process has an empty Clio-loaded registry, so the resident
+		// coder looks foreign; config protection must still spare it.
+		const plan = await reconcileResidency(
+			baseAdapter({
+				targetKey: "lmstudio-native|ws://dynamo:1234",
+				runtimeId: "lmstudio-native",
+				strategy: "jit",
+				keepModelId: "worker-model",
+				listResident: async () => [{ modelId: "orchestrator-coder" }, { modelId: "operator-model" }],
+				unload: async (modelId) => {
+					unloaded.push(modelId);
+				},
+			}),
+		);
+
+		strictEqual(plan.decision, "reconcile");
+		deepStrictEqual(unloaded, [], "jit strategy must not evict before a failed load");
+		deepStrictEqual(
+			plan.fallbackEvict.map((entry) => entry.modelId),
+			["operator-model", "orchestrator-coder"],
+			"config-protected resident ranks last among fallback candidates",
+		);
+	});
+
+	it("serializes mutations through the adapter lock", async () => {
+		const order: string[] = [];
+		markClioLoaded("target", "old-model");
+		await reconcileResidency(
+			baseAdapter({
+				targetKey: "target",
+				listResident: async () => [{ modelId: "old-model" }],
+				unload: async (modelId) => {
+					order.push(`unload:${modelId}`);
+				},
+				withLock: async (targetKey, fn) => {
+					order.push(`lock:${targetKey}`);
+					const result = await fn();
+					order.push("unlock");
+					return result;
+				},
+			}),
+		);
+		deepStrictEqual(order, ["lock:target", "unload:old-model", "unlock"]);
 	});
 
 	it("degrades list and unload failures instead of throwing into the turn", async () => {
@@ -214,34 +380,68 @@ describe("contracts/model residency reconciler", () => {
 		);
 	});
 
-	it("uses adapter VRAM probes and declines without unloading when still too large", async () => {
+	it("caches an opt-out observation so its notices dedupe per TTL", async () => {
 		const notices: ResidencyNotice[] = [];
-		const unloaded: string[] = [];
-		markClioLoaded("target", "old-model");
 		setResidencyNoticeSink((notice) => notices.push(notice));
-		const result = await reconcileResidency(
-			baseAdapter({
-				targetKey: "target",
-				contextLength: 65_536,
-				listResident: async () => [{ modelId: "old-model", sizeVramBytes: 2 * GIB }],
-				detectVram: async () => ({ freeBytes: 1 * GIB }),
-				estimateFootprintBytes: async () => 8 * GIB,
-				unload: async (modelId) => {
-					unloaded.push(modelId);
-				},
-			}),
-		);
+		let listCalls = 0;
+		let now = 1_000;
+		const adapter = baseAdapter({
+			managed: false,
+			now: () => now,
+			ttlMs: 10_000,
+			contextLength: 262_144,
+			modelMaxContext: 131_072,
+			listResident: async () => {
+				listCalls += 1;
+				return [{ modelId: "operator-model" }];
+			},
+		});
 
-		strictEqual(result.decision, "decline");
-		strictEqual(result.fits, false);
-		deepStrictEqual(unloaded, []);
-		strictEqual(notices.at(-1)?.kind, "will-not-fit");
+		const first = await reconcileResidency(adapter);
+		strictEqual(first.decision, "observe");
+		strictEqual(notices.length, 1);
+
+		now += 100;
+		const second = await reconcileResidency(adapter);
+		strictEqual(second.decision, "observe");
+		strictEqual(listCalls, 1);
+		strictEqual(notices.length, 1);
 	});
 
-	it("uses the CLIO_RESIDENCY opt-out as the single observe-only switch", () => {
+	it("uses the CLIO_RESIDENCY opt-out as the process-wide observe-only switch", () => {
 		strictEqual(residencyManaged({}), true);
 		strictEqual(residencyManaged({ CLIO_RESIDENCY: "observe" }), false);
 		strictEqual(residencyManaged({ CLIO_RESIDENCY: "user-managed" }), false);
 		strictEqual(residencyManaged({ CLIO_RESIDENCY: "clio-managed" }), true);
+	});
+
+	it("honors the explicit per-target lifecycle opt-out alongside the env switch", () => {
+		strictEqual(residencyManagedFor(undefined, {}), true);
+		strictEqual(residencyManagedFor("clio-managed", {}), true);
+		strictEqual(residencyManagedFor("user-managed", {}), false);
+		strictEqual(residencyManagedFor("clio-managed", { CLIO_RESIDENCY: "observe" }), false);
+	});
+});
+
+describe("contracts/residency-protection settings extraction", () => {
+	it("collects orchestrator, worker default/profile, and target default model ids", () => {
+		const settings = {
+			...DEFAULT_SETTINGS,
+			targets: [
+				{ id: "mini", runtime: "llamacpp", defaultModel: "Qwopus3.6-35B" },
+				{ id: "dynamo", runtime: "lmstudio-native" },
+			],
+			orchestrator: { ...DEFAULT_SETTINGS.orchestrator, target: "mini", model: "Qwopus3.6-35B" },
+			workers: {
+				...DEFAULT_SETTINGS.workers,
+				default: { target: "dynamo", model: "qwopus3.6-27b-coder-mtp", thinkingLevel: "off" as const },
+				profiles: {
+					scout: { target: "mini", model: "MiniCPM5-1B", thinkingLevel: "off" as const },
+					empty: { target: null, model: null, thinkingLevel: "off" as const },
+				},
+			},
+		};
+
+		deepStrictEqual(protectedResidencyModelIds(settings), ["Qwopus3.6-35B", "qwopus3.6-27b-coder-mtp", "MiniCPM5-1B"]);
 	});
 });

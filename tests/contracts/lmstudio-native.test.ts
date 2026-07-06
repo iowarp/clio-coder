@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { RUN_OVERRIDES_ENV } from "../../src/core/run-overrides.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
@@ -7,8 +7,10 @@ import {
 	assistantMessage,
 	type LmStudioRunDeps,
 	loadModelConfig,
+	type ResidentModelEntry,
 	runStream,
 } from "../../src/engine/apis/lmstudio-native.js";
+import { reconcileResidency, resetResidencyState, setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
 
 interface ClioModel extends Model<"lmstudio-native"> {
 	clio?: {
@@ -203,7 +205,7 @@ describe("lmstudio-native thinking replay", () => {
 						}),
 					},
 				}) as ReturnType<LmStudioRunDeps["createClient"]>,
-			reconcile: async () => ({ decision: "observe", evict: [], keepResident: false, notices: [] }),
+			reconcile: async () => ({ decision: "observe", evict: [], fallbackEvict: [], keepResident: false, notices: [] }),
 			discoverLoadedContext: async () => undefined,
 		};
 
@@ -266,5 +268,108 @@ describe("contracts/lmstudio-native KV-cache env override", () => {
 		strictEqual(result.llamaVCacheQuantizationType, "q5_0");
 		strictEqual(result.useFp16ForKVCache, true);
 		strictEqual(stderr, "clio: ignoring invalid kv-cache-mode override 'bogus'\n");
+	});
+});
+
+describe("contracts/lmstudio-native co-resident residency", () => {
+	beforeEach(() => {
+		resetResidencyState();
+		setResidencyNoticeSink(() => {});
+	});
+
+	afterEach(() => {
+		setResidencyNoticeSink(null);
+		resetResidencyState();
+	});
+
+	function residencyDeps(opts: {
+		resident: string[];
+		unloaded: string[];
+		failLoadsBeforeSuccess?: number;
+	}): LmStudioRunDeps {
+		let loadAttempts = 0;
+		const residentEntries: ResidentModelEntry[] = opts.resident.map((modelKey) => ({
+			modelKey,
+			unload: async () => {
+				opts.unloaded.push(modelKey);
+			},
+		}));
+		return {
+			createClient: () =>
+				({
+					files: {
+						prepareImageBase64: async () => {
+							throw new Error("image preparation not expected");
+						},
+					},
+					llm: {
+						listLoaded: async () => residentEntries,
+						model: async () => {
+							loadAttempts += 1;
+							if (loadAttempts <= (opts.failLoadsBeforeSuccess ?? 0)) {
+								throw new Error("insufficient VRAM for JIT load");
+							}
+							return {
+								respond: (_history, _opts) => ({
+									result: async () => ({
+										stats: {
+											promptTokensCount: 3,
+											predictedTokensCount: 2,
+											totalTokensCount: 5,
+											stopReason: "eosFound" as const,
+										},
+									}),
+								}),
+							};
+						},
+					},
+				}) as ReturnType<LmStudioRunDeps["createClient"]>,
+			reconcile: reconcileResidency,
+			discoverLoadedContext: async () => undefined,
+			lock: async (_targetKey, fn) => fn(),
+		};
+	}
+
+	const context = {
+		messages: [{ role: "user", content: "hello", timestamp: 0 }],
+	} as Parameters<typeof runStream>[1];
+
+	it("co-hosts with an operator-loaded model when the JIT load succeeds", async () => {
+		const unloaded: string[] = [];
+		const deps = residencyDeps({ resident: ["operator-model"], unloaded });
+
+		const events: Array<{ type: string }> = [];
+		for await (const event of runStream(model(), context, undefined, deps, { thinkingLevel: "off" })) {
+			events.push(event as { type: string });
+		}
+
+		deepStrictEqual(unloaded, [], "a successful co-resident load must not evict the operator's model");
+		ok(events.some((event) => event.type === "done"));
+	});
+
+	it("swaps the fallback candidate and retries once after a will-not-fit JIT failure", async () => {
+		const unloaded: string[] = [];
+		const deps = residencyDeps({ resident: ["operator-model"], unloaded, failLoadsBeforeSuccess: 1 });
+
+		const events: Array<{ type: string }> = [];
+		for await (const event of runStream(model(), context, undefined, deps, { thinkingLevel: "off" })) {
+			events.push(event as { type: string });
+		}
+
+		deepStrictEqual(unloaded, ["operator-model"], "the failed load justifies exactly one recorded swap");
+		ok(events.some((event) => event.type === "done"));
+	});
+
+	it("fails with a will-not-fit error when the retry also cannot fit", async () => {
+		const unloaded: string[] = [];
+		const deps = residencyDeps({ resident: ["operator-model"], unloaded, failLoadsBeforeSuccess: 2 });
+
+		const events: Array<{ type: string; error?: AssistantMessage }> = [];
+		for await (const event of runStream(model(), context, undefined, deps, { thinkingLevel: "off" })) {
+			events.push(event as { type: string; error?: AssistantMessage });
+		}
+
+		const error = events.find((event) => event.type === "error");
+		ok(error?.error?.errorMessage?.includes("could not load"), error?.error?.errorMessage);
 	});
 });

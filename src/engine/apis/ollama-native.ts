@@ -34,8 +34,8 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { calculateEngineCost } from "../ai.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
-import { type ResidencyAdapter, reconcileResidency, residencyManaged } from "./residency.js";
-import type { ResidentModelInfo, ResidentModelManager } from "./resident-models.js";
+import { type ResidencyAdapter, reconcileResidency, residencyManagedFor } from "./residency.js";
+import type { ResidentModelInfo } from "./resident-models.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
@@ -44,7 +44,8 @@ interface ClioRuntimeMetadata {
 	clio?: {
 		targetId: string;
 		runtimeId: string;
-		lifecycle: "user-managed" | "clio-managed";
+		/** Present only when settings set the target lifecycle explicitly. */
+		lifecycle?: "user-managed" | "clio-managed";
 		gateway?: boolean;
 		family?: string;
 		quirks?: LocalModelQuirks;
@@ -61,23 +62,26 @@ function ollamaTargetId(model: Model<"ollama-native">): string {
 
 /**
  * Reconcile Ollama residency before a turn streams. Both the interactive and
- * headless paths reach here through runStream, so this is the single place that
- * decides Ollama load and evict. Ollama pins the active model with
- * `keep_alive: -1`, so a prior Clio-pinned model lingers until evicted; the
- * reconciler releases Clio-loaded stragglers and backs off when a foreign model
- * is present. Best-effort: a failure never blocks the turn.
+ * headless paths reach here through runStream, so this is the single place
+ * that decides Ollama residency. Ollama schedules loads and fits itself, so
+ * co-resident and operator-loaded models stay; the reconciler only releases
+ * Clio's own unprotected stragglers, which Clio pinned with `keep_alive: -1`
+ * and nothing else ever reclaims. Best-effort: a failure never blocks the
+ * turn.
  */
 async function reconcileOllamaResidency(model: Model<"ollama-native">, headers: Record<string, string>): Promise<void> {
 	const baseUrl = model.baseUrl;
 	if (!baseUrl) return;
+	const metadata = (model as Model<"ollama-native"> & ClioRuntimeMetadata).clio;
 	const adapter: ResidencyAdapter = {
 		targetKey: `ollama-native|${baseUrl}`,
 		targetId: ollamaTargetId(model),
 		runtimeId: "ollama-native",
 		keepModelId: model.id,
-		managed: residencyManaged(),
+		managed: residencyManagedFor(metadata?.lifecycle),
+		strategy: "scheduler",
 		listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)),
-		unload: (id) => ollamaResidentManager.unload(baseUrl, id, headers),
+		unload: (id) => unloadOllamaModel(baseUrl, id, headers),
 	};
 	try {
 		await reconcileResidency(adapter);
@@ -212,8 +216,9 @@ function buildRequest(
 		model: model.id,
 		messages: buildMessages(context),
 		stream: true,
-		// Pin the active model resident; chat-loop fires a `keep_alive: 0` sweep
-		// on hot-swap to evict any previously-pinned models.
+		// Pin the active model resident. The pre-turn reconciler releases
+		// Clio-pinned stragglers this leaves behind after a model switch;
+		// operator-loaded and configured models stay resident.
 		keep_alive: -1,
 	};
 	if (context.tools && context.tools.length > 0) req.tools = context.tools.map(toolToOllama);
@@ -281,17 +286,13 @@ export async function listResidentOllamaModels(client: OllamaEvictClient): Promi
 }
 
 /**
- * Resident-model lifecycle for Ollama. Ollama pins the active model with
- * `keep_alive: -1`, so eviction fires `keep_alive: 0` against a model to let
- * its weights release. Wired into the shared resident abstraction so chat-loop
- * never branches on the runtime id.
+ * Release one resident model. Ollama pins the active model with
+ * `keep_alive: -1`, so eviction fires `keep_alive: 0` against it to let its
+ * weights release.
  */
-export const ollamaResidentManager: ResidentModelManager = {
-	listResident: (baseUrl, headers) => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)),
-	async unload(baseUrl, modelId, headers): Promise<void> {
-		await ollamaEvictClient(baseUrl, headers).generate({ model: modelId, prompt: "", keep_alive: 0, stream: false });
-	},
-};
+async function unloadOllamaModel(baseUrl: string, modelId: string, headers?: Record<string, string>): Promise<void> {
+	await ollamaEvictClient(baseUrl, headers).generate({ model: modelId, prompt: "", keep_alive: 0, stream: false });
+}
 
 function mapStopReason(reason: string | undefined, hadToolCall: boolean): AssistantMessage["stopReason"] {
 	if (hadToolCall) return "toolUse";

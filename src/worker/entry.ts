@@ -10,7 +10,7 @@
  */
 
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
-import { setResidencyNoticeSink } from "../engine/apis/residency.js";
+import { setProtectedModelsProvider, setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
@@ -34,6 +34,10 @@ async function main(): Promise<number> {
 	process.stdin.resume();
 
 	const spec = await demux.readSpec();
+	// The worker has no settings view of its own; the dispatcher copied the
+	// operator's configured model ids onto the spec so this process protects
+	// the same residents as the orchestrator.
+	setProtectedModelsProvider(() => spec.protectedModels ?? []);
 	const stopHeartbeat = startWorkerHeartbeat();
 
 	const runtime = await resolveWorkerRuntime(spec.runtimeId);
