@@ -2686,6 +2686,7 @@ rl.once("line", () => {
 							requestId: "perm-run-1",
 							tool: "bash",
 							summary: "bash: printf worker-ok",
+							target: "printf worker-ok",
 							axis: "net:bash-command-substitution",
 							decision: {
 								actionClass: "execute",
@@ -2716,6 +2717,7 @@ rl.once("line", () => {
 						actionClass?: string;
 						axis?: string;
 						summary?: string;
+						target?: string;
 						reasons?: ReadonlyArray<string>;
 						ruleId?: string;
 						reasonCode?: string;
@@ -2731,6 +2733,7 @@ rl.once("line", () => {
 			strictEqual(request?.actionClass, "execute");
 			strictEqual(request?.axis, "net:bash-command-substitution");
 			strictEqual(request?.summary, "bash: printf worker-ok");
+			strictEqual(request?.target, "printf worker-ok");
 			deepStrictEqual(request?.reasons, ["command substitution requires confirmation"]);
 			strictEqual(request?.ruleId, "bash-command-substitution");
 			strictEqual(request?.reasonCode, "bash-command-substitution");

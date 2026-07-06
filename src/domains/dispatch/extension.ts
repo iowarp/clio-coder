@@ -2587,6 +2587,7 @@ export function createDispatchBundle(
 							// clio_permission_resolved escalate path).
 							requestId?: string;
 							summary?: string;
+							target?: string;
 							axis?: string;
 							timeoutMs?: number;
 							source?: "operator" | "timeout" | "policy";
@@ -2626,6 +2627,9 @@ export function createDispatchBundle(
 							...(axis !== null ? { axis } : {}),
 							agentId: req.agentId,
 							...(typeof event.payload.summary === "string" ? { summary: event.payload.summary } : {}),
+							...(typeof event.payload.target === "string" && event.payload.target.length > 0
+								? { target: event.payload.target }
+								: {}),
 							...(reasons !== null ? { reasons } : {}),
 							...(reasonCode !== null ? { reasonCode } : {}),
 							...(ruleId !== null ? { ruleId } : {}),

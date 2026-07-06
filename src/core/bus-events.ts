@@ -371,6 +371,8 @@ export interface PermissionRequestedPayload {
 	requestId?: string | undefined;
 	agentId?: string | undefined;
 	summary?: string | undefined;
+	/** Sanitized one-line preview of the call's object (command, path, or compact args). */
+	target?: string | undefined;
 	timeoutMs?: number | undefined;
 	escalation?: boolean | undefined;
 }

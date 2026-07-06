@@ -10,6 +10,12 @@ still change interfaces.
 
 ## Unreleased
 
+- Worker permission escalations now show the operator what the call will
+  touch: the approval overlay's Target row (the command for bash, the path
+  for file tools) appears for dispatched workers' asks, not just the main
+  agent's, so the operator no longer decides blind. The preview is sanitized
+  on both sides of the worker boundary; the call arguments themselves never
+  leave the worker.
 - Context meters now draw the autocompact reserve with its own medium-shade
   glyph in the footer bars, the expanded dashboard, and the /context-view
   overlay, so a window holding a large reserve no longer looks nearly full,

@@ -9,6 +9,26 @@ change interfaces.
 
 ### Fixed
 
+- **Worker escalations carry the call's target to the approval overlay.**
+  The prior session's Target row (05c543f7) covered only main-agent asks: the
+  overlay derives the target from the parked call's args, and worker
+  escalations crossed the NDJSON stdout seam with no args, so the operator
+  approved or denied a worker's `bash`/`write` blind. The escalation payload
+  now carries a `target` string derived at the one place the args exist, the
+  worker's `onPermissionRequired` seam in `src/engine/worker-runtime.ts`,
+  capped at 200 chars to bound the NDJSON line. The description and
+  sanitization logic moved from `src/interactive/permission-overlay.ts` to a
+  shared `src/domains/safety/call-target.ts` (`describeCallTarget`, new
+  `sanitizeCallTargetText`); the overlay module re-exports both, so its
+  public surface is unchanged. The dispatch extension forwards the field into
+  the `PermissionRequested` bus payload, and the TUI re-sanitizes it at the
+  trust boundary before it reaches `ApprovalRequestView.target`, since a
+  hostile worker could otherwise style the overlay that approves it. Pinned
+  at all three seams: the worker emit (`worker-steer.test.ts`), the extension
+  republish (`dispatch.test.ts`), and the overlay render plus stdout-crossing
+  sanitization (`autonomy.test.ts`). Boundary check clean; the engine already
+  value-imports safety modules.
+
 - **The dispatch board renders live at its granted width.** The board was a
   pre-rendered `Text` baked at 76 columns inside a fixed 80-column overlay.
   pi-tui clamps overlays to the terminal, and `ClioOverlayFrame` pads child

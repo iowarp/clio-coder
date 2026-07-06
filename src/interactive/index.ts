@@ -35,6 +35,7 @@ import {
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { getMarketplaceSkills, installSkill } from "../domains/resources/skills/marketplace.js";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
@@ -2412,6 +2413,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		actionClass: string;
 		axis: ApprovalRequestView["axis"];
 		reason: string;
+		target?: string;
 	}): void => {
 		if (overlayState !== "closed") return;
 		pendingWorkerEscalation = { runId: entry.runId, requestId: entry.requestId, agentId: entry.agentId };
@@ -2427,6 +2429,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				axis: entry.axis,
 				origin: { kind: "worker", agentId: entry.agentId, runId: entry.runId },
 				reason: entry.reason,
+				...(entry.target !== undefined && entry.target.length > 0 ? { target: entry.target } : {}),
 			}),
 			{
 				anchor: "center",
@@ -2471,6 +2474,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			reason:
 				payload.rejection?.short ??
 				(typeof payload.summary === "string" ? payload.summary : `${payload.tool ?? "worker"} requires approval`),
+			// The preview crossed the worker's stdout, an untrusted seam, so it is
+			// re-sanitized here before it can style the overlay that approves it.
+			...(typeof payload.target === "string" && payload.target.length > 0
+				? { target: sanitizeCallTargetText(payload.target).slice(0, 200) }
+				: {}),
 		};
 		const notice = workerEscalationNotice(payload);
 		if (notice !== null) appendNotice(notice.level, notice.text, busNoticeSink);
