@@ -550,6 +550,32 @@ describe("worker synthesis lockout", () => {
 		);
 	});
 
+	it("fires onSynthesisLockout exactly once when the lockout engages", async () => {
+		const safety = testSafety();
+		let lockouts = 0;
+		const bundle = createMiddlewareBundle({
+			registrations: [
+				createLoopGuardRegistration({
+					safety,
+					toolCallCap: 50,
+					turnSynthesisLockout: true,
+					onSynthesisLockout: () => {
+						lockouts += 1;
+					},
+				}),
+			],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		for (let i = 1; i < LOOP_THRESHOLD; i++) await registry.invoke(call);
+		await registry.invoke(call); // block #1
+		strictEqual(lockouts, 0, "no lockout before the budget");
+		await registry.invoke(call); // block #2: lockout engages
+		strictEqual(lockouts, 1, "lockout callback fired at the budget");
+		await registry.invoke(call); // post-lockout denial
+		strictEqual(lockouts, 1, "denials after the lockout do not re-fire the callback");
+	});
+
 	it("keeps the backstop predicate specific to the backstop reason", () => {
 		strictEqual(
 			isLoopGuardSynthesisBackstopReason(

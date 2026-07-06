@@ -10,7 +10,7 @@ import type { CapabilityFlags } from "../../src/domains/providers/types/capabili
 import { availableThinkingLevels, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { createEngineAi } from "../../src/engine/ai.js";
-import { patchProviderThinkingPayload } from "../../src/engine/provider-payload.js";
+import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "../../src/engine/provider-payload.js";
 
 const engineAi = createEngineAi();
 
@@ -102,6 +102,30 @@ describe("contracts/thinking-runtime", () => {
 		const patched = patchProviderThinkingPayload(payload, sonnet, "high") as Record<string, unknown>;
 
 		deepStrictEqual(patched.thinking, { type: "enabled", budget_tokens: 7168, display: "summarized" });
+	});
+});
+
+describe("contracts/tool-choice lockout payload patch", () => {
+	it("forces tool_choice none on an OpenAI-family payload that carries tools", () => {
+		const model = { api: "openai-completions" } as Parameters<typeof patchToolChoiceNonePayload>[1];
+		const patched = patchToolChoiceNonePayload({ model: "m", tools: [{ type: "function" }] }, model) as Record<
+			string,
+			unknown
+		>;
+		strictEqual(patched.tool_choice, "none");
+		ok(Array.isArray(patched.tools), "tool schema bytes stay in the payload untouched");
+	});
+
+	it("uses the Anthropic tool_choice object shape", () => {
+		const model = { api: "anthropic-messages" } as Parameters<typeof patchToolChoiceNonePayload>[1];
+		const patched = patchToolChoiceNonePayload({ model: "m", tools: [{}] }, model) as Record<string, unknown>;
+		deepStrictEqual(patched.tool_choice, { type: "none" });
+	});
+
+	it("leaves payloads without a tool surface alone", () => {
+		const model = { api: "openai-completions" } as Parameters<typeof patchToolChoiceNonePayload>[1];
+		strictEqual(patchToolChoiceNonePayload({ model: "m" }, model), undefined);
+		strictEqual(patchToolChoiceNonePayload("not-a-record", model), undefined);
 	});
 });
 

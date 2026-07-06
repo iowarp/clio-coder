@@ -226,6 +226,13 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * of denials rather than burning the lifetime {@link toolCallCap}.
 	 */
 	turnSynthesisLockout?: boolean;
+	/**
+	 * Invoked when a turn enters the synthesis lockout. Surfaces without a bus
+	 * (workers) use it to flip their request-level tool-choice lock so the next
+	 * model round is text-only; the orchestrator gets the same signal from the
+	 * LoopBlocked "lockout" bus event instead.
+	 */
+	onSynthesisLockout?: () => void;
 	now?: () => number;
 }
 
@@ -452,6 +459,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// chance to answer from what it gathered.
 		if (synthesisLockout && reachedBudget) {
 			enterLockout(turnKey, { tool, repeatCount, blocksThisTurn });
+			options.onSynthesisLockout?.();
 			emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: "lockout" }, now);
 			return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
 		}

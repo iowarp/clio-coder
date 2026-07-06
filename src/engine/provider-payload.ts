@@ -105,6 +105,25 @@ export function patchProviderThinkingPayload(
 	);
 }
 
+/**
+ * Force a text-only round by setting the request-level tool-choice knob to
+ * "none". Used while a loop-guard synthesis lockout is active: the lockout
+ * directive alone relies on model compliance, and measured local models kept
+ * calling tools until the backstop stopped the turn, throwing away everything
+ * the turn had gathered. The tool schema bytes are untouched (the prompt
+ * prefix and tool surface stay byte-stable); only this request's routing
+ * changes, so prompt-prefix caches are unaffected.
+ *
+ * Returns undefined when the payload carries no tool surface (nothing to
+ * lock) or is not a record (unknown provider shape; leave it alone).
+ */
+export function patchToolChoiceNonePayload(payload: unknown, model: Model<never>): unknown | undefined {
+	if (!isRecord(payload)) return undefined;
+	if (!("tools" in payload) || payload.tools === undefined || payload.tools === null) return undefined;
+	if (isAnthropicMessagesApi(model.api)) return { ...payload, tool_choice: { type: "none" } };
+	return { ...payload, tool_choice: "none" };
+}
+
 export function patchReasoningSummaryPayload(
 	payload: unknown,
 	model: Model<never>,

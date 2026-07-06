@@ -50,7 +50,7 @@ import {
 	isLoopGuardSynthesisBackstopReason,
 	readWorkerToolCallCap,
 } from "./loop-guard.js";
-import { patchProviderThinkingPayload } from "./provider-payload.js";
+import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
@@ -261,6 +261,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
 	});
+	// Flipped by the loop guard's lockout callback; read by onPayload below to
+	// force the remaining model rounds text-only via tool_choice none.
+	let synthesisToolLock = false;
 	const registry = createWorkerToolRegistry(
 		input.middlewareSnapshot,
 		safety,
@@ -280,7 +283,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// so protect_path effects from snapshot rules behave identically in
 		// workers.
 		[
-			createLoopGuardRegistration({ safety, toolCallCap: readWorkerToolCallCap(), turnSynthesisLockout: true }),
+			createLoopGuardRegistration({
+				safety,
+				toolCallCap: readWorkerToolCallCap(),
+				turnSynthesisLockout: true,
+				// Once locked, the next model round is forced text-only at the
+				// request level (tool_choice none in onPayload below): the lockout
+				// directive alone relies on model compliance, and measured local
+				// models kept calling tools until the backstop aborted the run.
+				onSynthesisLockout: () => {
+					synthesisToolLock = true;
+				},
+			}),
 			createProtectedArtifactsRegistration(),
 		],
 		input.autonomy,
@@ -330,8 +344,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			tools,
 			messages: [],
 		},
-		onPayload: async (payload, currentModel) =>
-			patchProviderThinkingPayload(payload, currentModel as Model<never>, effectiveThinkingLevel),
+		onPayload: async (payload, currentModel) => {
+			const thinkingPatched = patchProviderThinkingPayload(payload, currentModel as Model<never>, effectiveThinkingLevel);
+			if (!synthesisToolLock) return thinkingPatched;
+			return patchToolChoiceNonePayload(thinkingPatched ?? payload, currentModel as Model<never>) ?? thinkingPatched;
+		},
 		getApiKey: async () => input.apiKey,
 	};
 	if (input.sessionId) options.sessionId = input.sessionId;

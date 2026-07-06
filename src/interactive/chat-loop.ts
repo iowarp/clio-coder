@@ -75,7 +75,7 @@ import {
 import { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
-import { patchProviderThinkingPayload } from "../engine/provider-payload.js";
+import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import type { resolveAgentTools } from "../engine/worker-tools.js";
 import { finalizeAskUserInterview } from "../tools/ask-user.js";
@@ -464,6 +464,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		),
 	];
 
+	// Loop-guard synthesis lockout: once the guard locks a turn, the remaining
+	// model rounds are forced text-only at the request level (tool_choice
+	// none in onPayload). The lockout directive alone relies on model
+	// compliance, and measured local models kept calling tools until the
+	// backstop stopped the turn, throwing away everything the turn had
+	// gathered. Cleared when the next user turn starts.
+	let synthesisToolLock = false;
+	const unsubscribeSynthesisLock =
+		deps.bus?.on(BusChannels.LoopBlocked, (payload) => {
+			const disposition = (payload as { disposition?: unknown } | null)?.disposition;
+			if (disposition === "lockout") synthesisToolLock = true;
+		}) ?? null;
+
 	/**
 	 * Capture a context snapshot from the runtime's live agent state. All
 	 * capture sites (turn submit, both compaction paths) flow through this
@@ -664,6 +677,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		});
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
+		synthesisToolLock = false;
 	};
 
 	const appendToolCallTurn = (event: Extract<AgentEvent, { type: "tool_execution_start" }>): void => {
@@ -1199,8 +1213,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				messages: priorMessages,
 			},
 			maxRetryDelayMs: retrySettings().maxDelayMs,
-			onPayload: async (payload, currentModel) =>
-				patchProviderThinkingPayload(payload, currentModel as Model<never>, currentThinkingLevel),
+			onPayload: async (payload, currentModel) => {
+				const thinkingPatched = patchProviderThinkingPayload(payload, currentModel as Model<never>, currentThinkingLevel);
+				if (!synthesisToolLock) return thinkingPatched;
+				return patchToolChoiceNonePayload(thinkingPatched ?? payload, currentModel as Model<never>) ?? thinkingPatched;
+			},
 			getApiKey: async () => {
 				if (!targetRequiresAuth(target.target, target.runtime)) {
 					return LOCAL_API_KEY_FALLBACK;
@@ -1970,6 +1987,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		});
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
+		synthesisToolLock = false;
 		const sessionId = deps.session.current()?.id ?? null;
 		if (sessionId) {
 			agentRuntime.agent.sessionId = sessionId;
@@ -2449,6 +2467,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		dispose(): void {
 			unsubscribeConfigReload?.();
+			unsubscribeSynthesisLock?.();
 			for (const unsubscribe of unsubscribeColdReasonSources) unsubscribe?.();
 			if (runtime) {
 				runtime.agent.abort();
