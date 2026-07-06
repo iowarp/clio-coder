@@ -4,8 +4,8 @@ import { GUARDRAIL_DEFAULTS, GUARDRAIL_ENV_VARS, resolveGuardrail } from "../cor
 import { ToolNames } from "../core/tool-names.js";
 import { finalizeObservation, observationBudgetExhausted, reserveObservation } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
-import { isSessionOffloadPath } from "./result-shaping.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
+import { isSessionOffloadPath } from "./result-shaping.js";
 import {
 	DEFAULT_MAX_LINES,
 	formatSize,
