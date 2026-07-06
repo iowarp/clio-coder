@@ -10,6 +10,19 @@ still change interfaces.
 
 ## Unreleased
 
+- The system prompt's Tool Contract now teaches a deterministic routing order
+  (structured observation before bash, task board for multi-step work, bounded
+  dispatch with receipt synthesis, validation before final claims) and a
+  failure-recovery rule that points a confused model at context(scope="docs")
+  instead of blind retries. Skill listing is gated to skill-shaped tasks or
+  explicit operator skill requests, so ordinary multi-step coding no longer
+  spends a skill-listing call. The artifact tool's metadata objective no
+  longer implies skills can be written as artifacts.
+- The Coder, Tester, Debugger, and Verifier built-in agents now declare
+  code_nav and prefer indexed navigation over broad reads when a codewiki
+  exists. Docs were realigned with the shipped surface: five tools carry
+  prompt hints (including tasks) and the built-in agent tool table matches
+  the recipes.
 - Fixed the observation-budget retry trap: when the shared per-turn pool (not
   the tool's own cap) bounds a JSON observation such as a docs search, the cap
   stub now says the budget is nearly exhausted and directs the model to answer

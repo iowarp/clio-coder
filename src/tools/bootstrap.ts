@@ -264,7 +264,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {
-		objective: "Write terminal plan/review/report documents or a reusable skill.",
+		objective: "Write terminal plan/review/report documents that complete the turn.",
 		uiLabel: "Artifact",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,

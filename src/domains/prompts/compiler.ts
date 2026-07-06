@@ -141,7 +141,9 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 		'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
-		'For a multi-step task, list installed skills once with context (scope="skills"); if one matches the task, suggest the operator run /skill:<name> before proceeding, and never load a skill the operator did not request.',
+		"Routing order: orient with structured observe tools before bash; put multi-step work on the task board; dispatch only bounded parallel or delegated subwork and synthesize the receipts; validate with verify or git diff before final claims.",
+		'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
+		'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
 	];
 	// One hint per tool, sorted by tool name: deterministic bytes regardless
 	// of surface or registration order, and removing a tool from the surface

@@ -47,11 +47,11 @@ User-facing agents visible in `clio agents` and `/agents`.
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
 | `architect` | read, grep, find, ls, code_nav, git, artifact, context | Designs changes across boundaries, contracts, migrations, and validation gates. | `artifact-write` | `deep` |
-| `coder` | read, write, edit, grep, find, ls, web_fetch, git, verify | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
-| `debugger` | read, grep, find, ls, git, verify | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
-| `documenter` | read, write, edit, grep, find, ls, git, verify | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
-| `tester` | read, write, edit, grep, find, ls, git, verify | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
-| `verifier` | read, grep, find, ls, git, verify | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
+| `coder` | read, write, edit, grep, find, ls, web_fetch, git, verify, code_nav | Implements bounded code changes and behavior-preserving refactors. | `workspace-edit` | `balanced` |
+| `debugger` | read, grep, find, ls, git, verify, code_nav | Diagnoses failing code, tests, or receipts without making edits. | `verification` | `balanced` |
+| `documenter` | read, write, edit, grep, find, ls, git, verify, code_nav, context | Updates developer-facing docs, examples, and operational runbooks. | `workspace-edit` | `balanced` |
+| `tester` | read, write, edit, grep, find, ls, git, verify, code_nav | Adds focused deterministic tests for regressions and missing coverage. | `workspace-edit` | `balanced` |
+| `verifier` | read, grep, find, ls, git, verify, code_nav | Independently runs and reports test, lint, build, review, and release gates. | `verification` | `fast` |
 
 ### Shipped Shadow Agents
 Internal orchestration helpers. They are hidden from default displays (but visible via `clio agents --all` and in a separate section of the prompt catalog).
