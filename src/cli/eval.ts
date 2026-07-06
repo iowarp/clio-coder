@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir } from "../core/xdg.js";
 import { loadEvalArtifactAny, writeEvalArtifactV2 } from "../domains/eval/artifacts/store.js";
@@ -212,7 +213,9 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 		if (parsed.target !== undefined) resolveOptions.target = parsed.target;
 		if (parsed.model !== undefined) resolveOptions.model = parsed.model;
 		const suite = resolveSuiteForRun(loaded.suite, resolveOptions);
-		const clioEntry = parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js";
+		// Runner commands execute with cwd inside prepared eval workspaces, so a
+		// relative --clio-entry must be pinned to the invoking directory here.
+		const clioEntry = resolve(parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js");
 		const artifact = await runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
 		const artifactPath = await writeEvalArtifactV2(clioDataDir(), artifact, parsed.out);
 		process.stdout.write(`${renderEvalTextReportV2(artifact)}artifact: ${artifactPath}\n`);
