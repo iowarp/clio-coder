@@ -275,7 +275,15 @@ function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: st
 	if (matches.length > 1) {
 		return { error: `ambiguous path '${query}' matched ${matches.length} files; use an exact indexed path` };
 	}
-	return { error: `path '${query}' is not in the codewiki` };
+	// Point-of-failure redirect: measured on a live coder worker, symbol names
+	// fed to deps mode ("mean", "median") returned a bare not-found that gave
+	// the model nothing to pivot on, and it retried the same call into the
+	// loop guard. Name the working alternatives instead.
+	return {
+		error:
+			`path '${query}' is not an indexed file path. deps/dependents/outline take file paths; ` +
+			`for a symbol name use mode=symbol query=${query}, or use grep/read on the workspace directly.`,
+	};
 }
 
 function runOutline(index: NavIndex, query: string, limit: number): NavPayload | ToolResult {
