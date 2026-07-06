@@ -87,6 +87,39 @@ const NO_TURN_BUCKET = "no-turn";
 const LOOP_WINDOW_MS = createLoopState().windowMs;
 
 /**
+ * Arguments that only change how much of the same answer comes back, never
+ * which answer it is. Stripped from the stagnation fingerprint so a model
+ * cycling limit/offset escalations on an otherwise identical call is caught,
+ * while genuinely different queries (new pattern, new path) reset the streak.
+ */
+const SIZE_ONLY_ARG_KEYS = new Set(["limit", "offset", "max_bytes", "context"]);
+
+/**
+ * Same-shape calls with byte-identical results tolerated before the next one
+ * is blocked. Two identical results already prove the size knobs are not
+ * adding information; the third attempt is never productive. Verbatim repeats
+ * trip the identical-call detector first; this catches the escalation cycle
+ * (limit: 10000 -> 20000 -> 50000 -> ...) that varies args enough to evade it.
+ */
+export const RESULT_STAGNATION_THRESHOLD = 3;
+
+function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
+	const reduced: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(args ?? {})) {
+		if (!SIZE_ONLY_ARG_KEYS.has(key)) reduced[key] = value;
+	}
+	return hashToolCall(tool, reduced);
+}
+
+function stagnationBlockReason(tool: string, identicalResults: number): string {
+	return (
+		`loop detected: the last ${identicalResults} ${tool} calls returned byte-identical results even though ` +
+		`size arguments (limit/offset) changed. Raising them is not producing new information. ` +
+		`Re-read the result above, change the query or tool, or answer from what you have.`
+	);
+}
+
+/**
  * Base block reason: names the loop and asks for a strategy change (block #1).
  * When the same call already returned a successful result earlier this run, the
  * reason says so and points the model at that result — for a weak local model
@@ -211,6 +244,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * many distinct calls before it starts repeating one).
 	 */
 	const succeededFingerprints = new Map<string, number>();
+	/**
+	 * Per-turn streak of consecutive same-shape calls (size args ignored) whose
+	 * outputs hashed identically. Only the latest streak per turn is tracked:
+	 * stagnation is a consecutive-call property, so any differently shaped or
+	 * differently answered call resets it.
+	 */
+	const stagnationByTurn = new Map<string, { reducedFingerprint: string; resultFingerprint: string; streak: number }>();
 	let count = 0;
 
 	const bumpBoundedCounter = (store: Map<string, number>, key: string, limit = LOOP_GUARD_TURN_LIMIT): number => {
@@ -247,6 +287,42 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const tool = input.toolName;
 		if (typeof tool !== "string" || tool.length === 0) return;
 		bumpBoundedCounter(succeededFingerprints, hashToolCall(tool, input.toolArgs ?? {}), SUCCEEDED_FINGERPRINT_LIMIT);
+	};
+
+	// after_tool touchpoint: extend or reset the per-turn stagnation streak. A
+	// result without a fingerprint (errors, non-string outputs) breaks the
+	// streak rather than extending it.
+	const recordResultForStagnation = (input: MiddlewareHookInput): void => {
+		const turnKey = input.turnId ?? NO_TURN_BUCKET;
+		const tool = input.toolName;
+		const resultFingerprint = input.metadata?.resultFingerprint;
+		if (
+			typeof tool !== "string" ||
+			tool.length === 0 ||
+			input.metadata?.resultKind !== "ok" ||
+			typeof resultFingerprint !== "string"
+		) {
+			stagnationByTurn.delete(turnKey);
+			return;
+		}
+		const reducedFingerprint = stagnationFingerprint(tool, input.toolArgs);
+		const previous = stagnationByTurn.get(turnKey);
+		if (
+			previous !== undefined &&
+			previous.reducedFingerprint === reducedFingerprint &&
+			previous.resultFingerprint === resultFingerprint
+		) {
+			previous.streak += 1;
+			return;
+		}
+		if (!stagnationByTurn.has(turnKey)) {
+			while (stagnationByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+				const oldest = stagnationByTurn.keys().next().value;
+				if (typeof oldest !== "string") break;
+				stagnationByTurn.delete(oldest);
+			}
+		}
+		stagnationByTurn.set(turnKey, { reducedFingerprint, resultFingerprint, streak: 1 });
 	};
 
 	const bumpTurnBlocks = (turnId: string): number => bumpBoundedCounter(blocksByTurn, turnId);
@@ -342,6 +418,38 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		return null;
 	};
 
+	// Shared loop-block machinery for both detectors: bump the turn's block
+	// count, enter the synthesis lockout at the budget, and emit visibility.
+	const blockAsLoop = (
+		input: MiddlewareHookInput,
+		turnKey: string,
+		tool: string,
+		repeatCount: number,
+		baseReason: string,
+		now: number,
+	): ReadonlyArray<MiddlewareEffect> => {
+		const blocksThisTurn = bumpTurnBlocks(turnKey);
+		const reachedBudget = blocksThisTurn >= budget;
+		// Budget reached with the synthesis lockout wired: enter the lockout
+		// instead of stopping the turn. The block reason becomes the
+		// synthesize-now directive; the LoopBlocked event carries "lockout"
+		// (not "stop") so no surface cancels — the model gets its one bounded
+		// chance to answer from what it gathered.
+		if (synthesisLockout && reachedBudget) {
+			enterLockout(turnKey, { tool, repeatCount, blocksThisTurn });
+			emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: "lockout" }, now);
+			return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
+		}
+		// Below budget, or a surface without the lockout (workers): the
+		// existing per-block behavior. Reaching the budget without a lockout
+		// still stops the turn with the "being stopped" reason.
+		emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: reachedBudget ? "stop" : "block" }, now);
+		const reason = reachedBudget
+			? `${baseReason} Loop budget exhausted (${blocksThisTurn} blocks this turn); the agent is being stopped.`
+			: baseReason;
+		return [{ kind: "block_tool", reason, severity: "hard-block" }];
+	};
+
 	return {
 		id: LOOP_GUARD_REGISTRATION_ID,
 		description:
@@ -351,6 +459,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "after_tool") {
 				recordSuccessfulResult(input);
+				recordResultForStagnation(input);
 				return [];
 			}
 			const now = options.now?.() ?? Date.now();
@@ -398,36 +507,37 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				return evaluateTurnBudget(input, now) ?? [];
 			}
 			const verdict = options.safety.observeLoop(fingerprint, now);
-			if (!verdict.looping) return evaluateTurnBudget(input, now) ?? [];
-			const tool = input.toolName ?? "unknown";
-			const blocksThisTurn = bumpTurnBlocks(turnKey);
-			const reachedBudget = blocksThisTurn >= budget;
-			const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
-			const base = loopBlockBaseReason(tool, verdict.count, priorSuccesses);
-
-			// Budget reached with the synthesis lockout wired: enter the lockout
-			// instead of stopping the turn. The block reason becomes the
-			// synthesize-now directive; the LoopBlocked event carries "lockout"
-			// (not "stop") so no surface cancels — the model gets its one bounded
-			// chance to answer from what it gathered.
-			if (synthesisLockout && reachedBudget) {
-				enterLockout(turnKey, { tool, repeatCount: verdict.count, blocksThisTurn });
-				emitLoopBlocked(input, { tool, repeatCount: verdict.count, blocksThisTurn, disposition: "lockout" }, now);
-				return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
+			if (verdict.looping) {
+				const tool = input.toolName ?? "unknown";
+				const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
+				return blockAsLoop(
+					input,
+					turnKey,
+					tool,
+					verdict.count,
+					loopBlockBaseReason(tool, verdict.count, priorSuccesses),
+					now,
+				);
 			}
 
-			// Below budget, or a surface without the lockout (workers): the
-			// existing per-block behavior. Reaching the budget without a lockout
-			// still stops the turn with the "being stopped" reason.
-			emitLoopBlocked(
-				input,
-				{ tool, repeatCount: verdict.count, blocksThisTurn, disposition: reachedBudget ? "stop" : "block" },
-				now,
-			);
-			const reason = reachedBudget
-				? `${base} Loop budget exhausted (${blocksThisTurn} blocks this turn); the agent is being stopped.`
-				: base;
-			return [{ kind: "block_tool", reason, severity: "hard-block" }];
+			// Stagnation detection: the incoming call has the same shape (size
+			// args ignored) as a streak of calls whose results hashed identical.
+			// The escalation cycle (limit: 10k -> 20k -> 50k -> 10k ...) varies
+			// arguments enough to evade the verbatim detector while never
+			// producing new information; block the attempt the streak proves
+			// futile.
+			const toolName = input.toolName;
+			if (typeof toolName === "string" && toolName.length > 0) {
+				const entry = stagnationByTurn.get(turnKey);
+				if (
+					entry !== undefined &&
+					entry.streak >= RESULT_STAGNATION_THRESHOLD - 1 &&
+					entry.reducedFingerprint === stagnationFingerprint(toolName, input.toolArgs)
+				) {
+					return blockAsLoop(input, turnKey, toolName, entry.streak + 1, stagnationBlockReason(toolName, entry.streak), now);
+				}
+			}
+			return evaluateTurnBudget(input, now) ?? [];
 		},
 	};
 }
