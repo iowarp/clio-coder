@@ -35,6 +35,27 @@ change interfaces.
 
 ### Fixed
 
+- **Blocked tool errors now carry the policy's recovery guidance to the
+  model.** Live evidence: a `read .env` probe against mini/Qwopus3.6-35B drew
+  five blocked calls in one turn because the model retried the same target
+  through bash (`cat`, `ls -la`, `stat`) after the read block. The model-visible
+  error was only `rejection.short` (`read blocked: read`): the single throw
+  seam at `src/engine/worker-tools.ts` (runValidatedToolCall, shared by the
+  orchestrator agent bridge and workers) threw `verdict.reason` and dropped
+  `rejection.detail` (the policy engine's authored reasons, including
+  model-actionable text such as the zero-access bash guidance) and
+  `rejection.hints` (hard-block notices) on the floor. New
+  `formatModelRejection(reason, rejection?)` in
+  `src/domains/safety/rejection-feedback.ts` composes the verdict reason
+  (loop-guard substitutions stay first), the detail lines, the hints, and a
+  standing `Do not retry this action through another tool; pivot or report
+  the blocker.` instruction, deduplicated line by line. Receipts, telemetry,
+  and UI notices keep the terse reason: only the thrown tool error changed.
+  Contract tests cover the composition (dedupe, loop-guard head, no-rejection
+  degrade) and an end-to-end zero-access read through the real registry.
+  This complements the workerToolCallCap bound from the prior session by
+  shrinking the spiral at its source instead of only bounding it.
+
 - **Blocked tool calls now settle in the interactive transcript.** The
   previously deferred blocked-tool render finding is resolved with the exact
   trigger reproduced in a deterministic replay test. Root cause: a mid-turn

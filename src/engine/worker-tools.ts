@@ -32,6 +32,7 @@ import {
 	observe as observeLoopState,
 } from "../domains/safety/loop-detector.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
+import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { applyToolProfile, type ToolProfileName } from "../tools/profiles.js";
@@ -132,7 +133,13 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
 		});
-		throw new Error(verdict.reason);
+		// The model sees only this thrown message. The short verdict reason
+		// starves the next turn of the policy's why and how-to-recover, so
+		// compose the rejection detail and hints into the tool error; the
+		// telemetry event above keeps the terse reason for receipts and UI.
+		const rejection =
+			verdict.kind === "blocked" && "rejection" in verdict.decision ? verdict.decision.rejection : undefined;
+		throw new Error(formatModelRejection(verdict.reason, rejection));
 	}
 	if (verdict.result.kind === "error") {
 		emitFinish(telemetry, spec.name, startedAt, "error", {
