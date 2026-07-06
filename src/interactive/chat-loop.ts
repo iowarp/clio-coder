@@ -718,13 +718,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		lastTurnId = turn.id;
 	};
 
+	/**
+	 * Notices are message_end-only. The synthetic agent_end this used to emit
+	 * rebuilt the status summary from just the notice message, wiping the real
+	 * run's usage on thrown paths where the engine's agent_end had already
+	 * landed. Run closure is the engine's job (handleRunFailure delivers
+	 * agent_end on abort and provider-failure paths) and RunAborted carries
+	 * abort provenance to the status reducer; a notice never ends a run.
+	 */
 	const emitNotice = (text: string): void => {
-		const message = noticeMessage(text);
-		emit({ type: "message_end", message });
-		emit({ type: "agent_end", messages: [message] });
-	};
-
-	const emitStreamingNotice = (text: string): void => {
 		emit({ type: "message_end", message: noticeMessage(text) });
 	};
 
@@ -812,7 +814,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (toolProseAbortReason === null) {
 				toolProseAbortReason = message;
 				agentRuntime.agent.abort();
-				emitStreamingNotice(message);
+				emitNotice(message);
 			}
 			return;
 		}
@@ -1406,7 +1408,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						if (assessment.kind === "loop") {
 							toolProseAbortReason = `[Clio Coder] aborted local model turn: ${assessment.reason}.`;
 							localRuntime.agent.abort();
-							emitStreamingNotice(toolProseAbortReason);
+							emitNotice(toolProseAbortReason);
 						}
 					}
 				}
@@ -2237,7 +2239,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (deps.providers.getRuntime(agentRuntime.runtimeId)?.tier === "local-native") {
 					runExpectedColdReasons = reasons;
 					stampColdReasonsPending = true;
-					emitStreamingNotice(`[context engine] backend prefix cache likely cold this turn: ${reasons.join(", ")}`);
+					emitNotice(`[context engine] backend prefix cache likely cold this turn: ${reasons.join(", ")}`);
 				}
 			}
 
