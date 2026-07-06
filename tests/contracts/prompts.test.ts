@@ -44,7 +44,7 @@ const TOOL_HINTS = {
 	ask_user: {
 		tool: "ask_user",
 		hint:
-			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
+			'Use ask_user only when blocked on a decision the request does not answer; never ask about anything the operator already stated. One question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
 	},
 	code_nav: {
 		tool: "code_nav",
@@ -478,7 +478,7 @@ describe("contracts/prompts compiler logic", () => {
 			},
 		});
 		ok(active.systemPrompt.includes("first load that skill via context"));
-		ok(active.systemPrompt.includes("Use ask_user for operator interviews"));
+		ok(active.systemPrompt.includes("Use ask_user only when blocked on a decision the request does not answer"));
 		ok(active.systemPrompt.includes("If cancelled, continue with defaults"));
 
 		const inactive = compile(table, {
