@@ -9,6 +9,60 @@ change interfaces.
 
 ### Fixed
 
+- **Settle blocked tool display when end event lands under an overlay.**
+  P2 root cause: the status reducer swallowed tool_execution_end while an
+  overlay phase was visible, and popOverlay restored the stale tool overlay
+  and tool_running resumePhase; the fix scrubs the settled tool from the
+  status and every stashed overlay frame (state-machine.ts).
+
+- **Loop detector keeps recent attempts and scopes per turn.**
+  P3(a) design: retention is windowMs OR last-4-attempts;
+  keepLastAttempts=4 is sized so consecutive and single-interleaved spirals
+  trip at the threshold while a fix-verify loop (identical check separated by
+  two or more calls) stays below it; the detector key is turn-prefixed
+  because the ageless floor plus session-long state would otherwise flag one
+  identical call per turn across turns. Pinned test "counts the block budget
+  per turn, not globally" was minimally edited for this intentional contract
+  change (t2 now builds its own streak; per-turn budget semantics unchanged).
+
+- **Exempt session offload reads from the observation pool.**
+  P3(c): only the read tool needed the exemption because offload notices
+  direct the model to `read` specifically; the exempt reservation is
+  untracked but still self-capped per call.
+
+- **Worker subprocesses drain stdout before exiting.**
+  P4: drain stdout before exiting worker processes. Write callbacks are
+  FIFO, so an empty write's callback fires only after all buffered lines are
+  flushed. This ensures large NDJSON lines (e.g., big tool results) are not
+  truncated mid-line on process exit (entry.ts, ndjson.ts).
+
+- **Notices no longer emit a synthetic agent_end.**
+  P5: emitStreamingNotice was collapsed into emitNotice; run closure is
+  guaranteed by pi's handleRunFailure emitting agent_end on abort and
+  provider-failure paths, and RunAborted carries abort provenance to the
+  status reducer. No pinned tests needed edits.
+
+- **Fix import order in read.ts.**
+  Chore: resolved a minor lint warning by correcting the import order of
+  isSessionOffloadPath in read.ts.
+
+### Added
+
+- **One-time bash-result nudge names the observe tools.**
+  P6: point-of-failure conditioning following the edit-result validation
+  nudge (14bfd607); one nudge per session, bounded set, prompt prefix and
+  tool schemas byte-stable.
+
+### Deferred
+
+- **Near-duplicate spirals detection.**
+  P3(b) DEFERRED: near-duplicate spirals (shrinking read ranges over
+  already-returned content) remain invisible; catching them needs result
+  content comparison (prefix/substring hashing) beyond the byte-identical
+  stagnation detector; no bounded extension was obvious.
+
+### Fixed
+
 - **Worker escalations carry the call's target to the approval overlay.**
   The prior session's Target row (05c543f7) covered only main-agent asks: the
   overlay derives the target from the parked call's args, and worker

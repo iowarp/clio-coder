@@ -10,6 +10,24 @@ still change interfaces.
 
 ## Unreleased
 
+- Blocked tool calls now settle in the TUI: when a call's end event lands
+  while a permission prompt (or another overlay) is still visible, the
+  status no longer resurrects a perpetual "running tool" line with a
+  growing timer after the overlay clears.
+- The verbatim loop detector no longer goes blind on slow local inference:
+  the most recent attempts are retained regardless of age, and detection is
+  scoped to the turn so rerunning the same command once per user turn is
+  never flagged as a loop.
+- The "full: <path>" escape hatch on truncated results now works when it is
+  offered: reads of the session's own offload files are exempt from the
+  per-turn observation budget.
+- Worker subprocesses drain stdout before exiting, so a large single tool
+  result can no longer be truncated mid-line in dispatch output.
+- Chat notices no longer fabricate a turn end: run summaries (token usage,
+  tool counts) survive error notices, and idle notices no longer flash a
+  spurious "done" status.
+- The first shell file-inspection command per session (cat/ls/grep and
+  friends) now gets a one-time pointer to the structured observe tools.
 - Synthesis-locked turns now sanitize their final answer: dead tool-call
   markup a model writes as plain text under the forced text-only round (for
   example a literal `<tool_call>` block) is stripped before the message
