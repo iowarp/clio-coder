@@ -138,6 +138,17 @@ describe("contracts/code_nav", () => {
 		ok(Array.isArray(dependentsPayload.dependents) && dependentsPayload.dependents.includes("src/index.ts"));
 	});
 
+	it("redirects a symbol name fed to a path mode instead of a bare not-found", async () => {
+		// Point-of-failure conditioning: a bare "not in the codewiki" gave a
+		// live worker nothing to pivot on and it retried the identical call
+		// into the loop guard. The error must name the working alternatives.
+		const result = await codeNavTool.run({ mode: "deps", query: "someSymbolName" });
+		strictEqual(result.kind, "error");
+		ok(result.kind === "error" && result.message.includes("deps/dependents/outline take file paths"));
+		ok(result.kind === "error" && result.message.includes("mode=symbol query=someSymbolName"));
+		ok(result.kind === "error" && result.message.includes("grep/read"));
+	});
+
 	it("reloads stale codewiki before serving symbol results", async () => {
 		const workerPath = join(scratch, "src", "worker.ts");
 		writeFileSync(workerPath, "export const freshWorker = 2;\n", "utf8");
