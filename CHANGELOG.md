@@ -15,6 +15,10 @@ still change interfaces.
   overlay, so a window holding a large reserve no longer looks nearly full,
   and the distinction survives without color. An unmeasured context window
   reads `?%` everywhere; the old `--%` placeholder is gone.
+- The dispatch board overlay now renders at the width the terminal actually
+  grants instead of a fixed 76-column layout, so narrow terminals no longer
+  clip worker telemetry mid-token and the board sizes itself (up to 96
+  columns) on wide screens.
 - The expanded footer dashboard shares ultrawide terminals fairly: the
   CONTEXT quadrant can now grow wide enough to show its fill and chat facts
   unclipped, with a finer meter, and the category legend wraps by whole
