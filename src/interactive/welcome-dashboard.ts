@@ -19,15 +19,8 @@ import {
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import {
-	type Component,
-	getCapabilities,
-	Image,
-	type ImageTheme,
-	truncateToWidth,
-	visibleWidth,
-} from "../engine/tui.js";
-import { abbreviateModelId, brandMark, type ClioTheme, clioTheme, frame } from "./theme/index.js";
+import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
+import { abbreviateModelId, brandMark, type ClioTheme, clioTheme, fitUnits, frame } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
 	providers: ProvidersContract;
@@ -342,32 +335,16 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		`${theme.fg("accent", "Alt+U")} to toggle dashboard`,
 	];
 
-	// The wiki and hint rows are the lines long enough to overflow. Drop whole
-	// ` · `-separated units and close with a dim ellipsis instead of cutting a
-	// path or phrase mid-glyph, so a truncated row still reads as complete facts.
-	const joinUnitsToWidth = (prefix: string, units: readonly string[], maxWidth: number): string => {
-		const sep = " · ";
-		let line = prefix;
-		for (let index = 0; index < units.length; index += 1) {
-			const candidate = index === 0 ? `${line}${units[index]}` : `${line}${sep}${units[index]}`;
-			// Reserve two columns for the ` …` marker unless this is the last unit.
-			const reserve = index < units.length - 1 ? 2 : 0;
-			if (visibleWidth(candidate) + reserve > maxWidth) {
-				if (index === 0) return truncateToWidth(candidate, Math.max(0, maxWidth), "…", false);
-				return `${line} ${theme.fg("dim", "…")}`;
-			}
-			line = candidate;
-		}
-		return line;
-	};
-
+	// The wiki and hint rows are the lines long enough to overflow. fitUnits
+	// drops whole ` · `-separated units and closes with a dim ellipsis instead of
+	// cutting a path or phrase mid-glyph, so a truncated row still reads as facts.
 	if (safeWidth >= WIDE_MIN) {
 		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
 		const targetLine = `  ${theme.fg("muted", "Target:")}   ${targetVal} · ${thinkVal}${healthStr}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = joinUnitsToWidth(`  ${theme.fg("muted", "Wiki:")}     `, wikiUnits, contentWidth);
+		const wikiLine = fitUnits(theme, `  ${theme.fg("muted", "Wiki:")}     `, wikiUnits, contentWidth);
 		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${profileStr} · ${compactStr}`;
-		const hintLine = joinUnitsToWidth(`  ${theme.fg("muted", "Hint:")}     `, hintUnits, contentWidth);
+		const hintLine = fitUnits(theme, `  ${theme.fg("muted", "Hint:")}     `, hintUnits, contentWidth);
 
 		return frame(
 			theme,
@@ -378,9 +355,9 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	} else if (safeWidth >= MID_MIN) {
 		const targetLine = `  ${theme.fg("muted", "Target:")}  ${targetVal} · ${thinkVal}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")} ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = joinUnitsToWidth(`  ${theme.fg("muted", "Wiki:")}    `, wikiUnits, contentWidth);
+		const wikiLine = fitUnits(theme, `  ${theme.fg("muted", "Wiki:")}    `, wikiUnits, contentWidth);
 		const configLine = `  ${theme.fg("muted", "Config:")}  ${safetyStr} · ${profileStr}`;
-		const hintLine = joinUnitsToWidth(`  ${theme.fg("muted", "Hint:")}    `, hintUnits, contentWidth);
+		const hintLine = fitUnits(theme, `  ${theme.fg("muted", "Hint:")}    `, hintUnits, contentWidth);
 
 		return frame(
 			theme,

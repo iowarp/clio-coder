@@ -13,6 +13,21 @@ still change interfaces.
 - Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
   cancels active runs and closes Clio-owned overlays, permission prompts, and
   ask_user prompts.
+- Unified truncation grammar across the dispatch board, task island, and
+  /tasks overlay: overflowing rows drop whole facts behind a dim ellipsis
+  instead of clipping paths, model ids, or prose mid-word, and no row leaves a
+  dangling separator. The /tasks overlay also drops its duplicated run-id
+  receipt lines: one proof anchor and one in-flight line render each run id
+  exactly once, and completed-task evidence no longer repeats a run id
+  extracted from its own prose.
+- The permission overlay now shows what it is approving: a Target row carries
+  the parked call's command or path. The misleading `<tool> blocked: <class>`
+  line is gone from the ask overlay (the call is parked, not blocked), and the
+  footer pill reads `confirm` instead of `blocked` while a confirmation waits.
+- Blocked tool calls now return recovery guidance to the model instead of a
+  bare label. The tool error carries the policy's reasons, the rule id, any
+  hints, and a standing instruction not to retry the action through another
+  tool, which shrinks blocked-call retry spirals on local models.
 - Cleaned up the welcome banner's Wiki row: entry points now render as bare
   paths instead of raw digest bullets (no more dangling `entry points: · -`
   fragments), and the Wiki and Hint rows truncate by dropping whole facts with

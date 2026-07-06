@@ -17,6 +17,7 @@ import {
 	type ClioToken,
 	clioTheme,
 	dotSep,
+	fitUnits,
 	formatCompactMs,
 	frame,
 	GLYPH,
@@ -243,20 +244,23 @@ function cardKvKey(theme: ClioTheme, key: string): string {
 }
 
 // A `proof` key-value row: the colored state marker, an optional failure reason,
-// then the dim `/view` filter an operator would type. The card frame truncates
-// this ANSI-aware, so an overlong reason or filter is clipped, never overflowed.
-function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation): string | null {
+// then the dim `/view` filter an operator would type. A row that fits keeps its
+// dim middot join; an overflowing one is refit unit-by-unit so it closes on a
+// whole unit or a dim ellipsis instead of the frame leaving a dangling ` · `.
+function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, contentWidth: number): string | null {
 	const presentation = evidenceStatePresentation(evidence.state);
 	if (!presentation) return null;
-	const dot = dotSep(theme);
-	const parts = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word}`)];
-	if (evidence.state === "failed" && evidence.reason) parts.push(theme.fg("muted", evidence.reason));
-	parts.push(theme.fg("dim", evidence.viewFilter));
-	return `${cardKvKey(theme, "proof")}${parts.join(dot)}`;
+	const key = cardKvKey(theme, "proof");
+	const units = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word}`)];
+	if (evidence.state === "failed" && evidence.reason) units.push(theme.fg("muted", evidence.reason));
+	units.push(theme.fg("dim", evidence.viewFilter));
+	const full = `${key}${units.join(dotSep(theme))}`;
+	return visibleWidth(full) <= contentWidth ? full : fitUnits(theme, key, units, contentWidth);
 }
 
 export function renderDispatchCard(row: DispatchBoardRow, width: number, evidence?: RunEvidencePresentation): string[] {
 	const theme = clioTheme();
+	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
 	const cost = formatUsd(row.costUsd);
@@ -291,8 +295,11 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	);
 	const total = theme.fg("muted", `total ${formatFooterTokens(row.tokenCount)}`);
 
+	// The model id is user data and can outrun the card; mark the cut with `…`
+	// rather than hard-clipping it mid-token into a string that reads whole.
+	const targetLine = truncateToWidth(`${cardKvKey(theme, "target")}${target}`, contentWidth, "…", false);
 	const bodyLines = [
-		`${cardKvKey(theme, "target")}${target}`,
+		targetLine,
 		`${cardKvKey(theme, "status")}${statusStr}${dot}${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}${dot}${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
 		`${cardKvKey(theme, "telemetry")}${up}${dot}${down}${dot}${total}`,
 	];
@@ -300,7 +307,7 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	// evidence state for this run; an unknown/none state adds no line, so cards
 	// without evidence keep their existing three-line body.
 	if (evidence) {
-		const proofLine = evidenceCardLine(theme, evidence);
+		const proofLine = evidenceCardLine(theme, evidence, contentWidth);
 		if (proofLine !== null) bodyLines.push(proofLine);
 	}
 	if (detail !== null) bodyLines.push(`${cardKvKey(theme, "detail")}${theme.fg("dim", detail)}`);
@@ -322,9 +329,15 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	const glyph = theme.fg(presentation.token, presentation.glyph);
 	const statusStr = theme.fg(presentation.token, presentation.label);
 
+	// Reserve the glyph, separators, status word, and elapsed so a long agent
+	// label is clipped with a `…` marker rather than shoved off the row unmarked.
+	const labelChrome =
+		visibleWidth(presentation.glyph) + 1 + 3 + visibleWidth(presentation.label) + 3 + visibleWidth(elapsed);
+	const clampedLabel = truncateToWidth(agentLabel, Math.max(1, width - labelChrome), "…", false);
+
 	// The agent label drops its accent color for plain bold; the status word is
 	// the only status-colored element on the row, with dim middot separators.
-	const line1 = `${glyph} ${theme.paint(agentLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
+	const line1 = `${glyph} ${theme.paint(clampedLabel, { bold: true })}${dot}${statusStr}${dot}${theme.fg("muted", elapsed)}`;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;

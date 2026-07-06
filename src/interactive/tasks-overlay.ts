@@ -1,7 +1,7 @@
 import { type TaskBoardSnapshot, type TaskBoardTask, taskBoardCounts } from "../domains/session/task-board.js";
 import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
-import { type ClioToken, clioTheme, GLYPH, rule } from "./theme/index.js";
+import { type ClioToken, clioTheme, fitUnits, GLYPH, rule } from "./theme/index.js";
 
 /**
  * The `/tasks` overlay: a read-only view of the session task board the agent
@@ -32,7 +32,7 @@ function muted(text: string): string {
 }
 
 function fitContentLine(text: string, width: number): string {
-	return truncateToWidth(text, Math.max(1, width), "", true);
+	return truncateToWidth(text, Math.max(1, width), "…", true);
 }
 
 function firstUsefulToken(values: ReadonlyArray<string>): string | null {
@@ -52,31 +52,11 @@ function taskLedgerProofRef(board: TaskBoardSnapshot): string {
 	return taskToken ? `task-ledger:${taskToken}` : "task-ledger";
 }
 
-function taskProofRefs(board: TaskBoardSnapshot): string[] {
-	const refs = [`proof ${taskLedgerProofRef(board)}`];
-	for (const runId of board.activeRunIds) {
-		const token = runId.trim();
-		if (token.length === 0) continue;
-		refs.push(`run ${token} dispatch:${token} evidence:${token}`);
-	}
-	return refs;
-}
-
-function extractRunIdsFromTaskEvidence(text: string): string[] {
-	const seen = new Set<string>();
-	for (const match of text.matchAll(/\brun-[A-Za-z0-9][A-Za-z0-9_-]*\b/g)) {
-		const runId = match[0];
-		if (!seen.has(runId)) seen.add(runId);
-	}
-	return [...seen];
-}
-
-function formatTaskProofLines(board: TaskBoardSnapshot, width: number): string[] {
-	const theme = clioTheme();
-	return taskProofRefs(board).map((line) => {
-		const [label, ...rest] = line.split(" ");
-		return fitContentLine(`${dim(label ?? "")} ${theme.fg("muted", rest.join(" "))}`.trim(), width);
-	});
+// The one audit anchor for the board: `proof task-ledger:<token>`. The per-run
+// `dispatch:`/`evidence:` derivations were pure string echoes of the run id, so
+// the in-flight run ids render once, in their own header line, instead.
+function formatTaskProofLine(board: TaskBoardSnapshot, width: number): string {
+	return fitContentLine(`${dim("proof")} ${muted(taskLedgerProofRef(board))}`, width);
 }
 
 function taskRow(task: TaskBoardTask, width: number): string {
@@ -90,9 +70,9 @@ function taskRow(task: TaskBoardTask, width: number): string {
 function taskReceiptRow(task: TaskBoardTask, width: number): string | null {
 	const theme = clioTheme();
 	if (task.status === "completed" && task.evidence) {
-		const runRef = extractRunIdsFromTaskEvidence(task.evidence)[0];
-		const suffix = runRef ? ` ${dim(`evidence:${runRef}`)}` : "";
-		return fitContentLine(`       ${dim("evidence")} ${muted(task.evidence)}${suffix}`, width);
+		// The evidence prose already carries any run id it mentions, so no derived
+		// `evidence:<runId>` suffix is appended; it would repeat that id on one line.
+		return fitContentLine(`       ${dim("evidence")} ${muted(task.evidence)}`, width);
 	}
 	if (task.status === "blocked" && task.reason) {
 		return fitContentLine(`       ${dim("blocked")} ${theme.fg("warning", task.reason)}`, width);
@@ -127,17 +107,18 @@ export function formatTasksOverlayBodyLines(
 		fitContentLine(theme.fg("accent", board.title), width),
 		fitContentLine(chips.join(dim(" · ")), width),
 		rule(theme, width),
-		...formatTaskProofLines(board, width),
+		formatTaskProofLine(board, width),
 	];
+	// The in-flight run ids render once, right under the proof anchor: full ids
+	// in muted, fitted so overflow drops whole ids behind a dim ellipsis.
+	const activeRuns = board.activeRunIds.map((runId) => runId.trim()).filter((runId) => runId.length > 0);
+	if (activeRuns.length > 0) {
+		lines.push(fitUnits(theme, `${dim("in flight")} `, activeRuns.map(muted), width));
+	}
 	for (const task of board.tasks) {
 		lines.push(taskRow(task, width));
 		const receipt = taskReceiptRow(task, width);
 		if (receipt) lines.push(receipt);
-	}
-	if (board.activeRunIds.length > 0) {
-		lines.push("");
-		const runs = board.activeRunIds.map((runId) => runId.slice(0, 10)).join(", ");
-		lines.push(fitContentLine(`${dim("dispatched runs in flight")} ${muted(runs)}`, width));
 	}
 	return lines;
 }
