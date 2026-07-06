@@ -14,6 +14,7 @@ import {
 	contextQuadrant,
 	type SessionFacts,
 	type WorkspaceFacts,
+	zipColumns,
 } from "../../src/interactive/footer/widgets.js";
 import { buildSegmentedContextBar } from "../../src/interactive/footer-panel.js";
 import type { AgentStatus } from "../../src/interactive/status/types.js";
@@ -734,6 +735,24 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 			!joined.includes(theme.fgSequence("accentDeep")),
 			`accentDeep is a structure color and must not paint any value, got "${strip(joined)}"`,
 		);
+	});
+
+	it("marks a clipped quadrant cell with an ellipsis instead of an unmarked cut", () => {
+		const rows = zipColumns(
+			["fill tools 11.5k · sys 6.5k · proj 1.2k · msgs 40k"],
+			["state running tool: bash for a very long while"],
+			20,
+			18,
+			" | ",
+		);
+		const row = strip(rows[0] ?? "");
+		strictEqual(visibleWidth(row), 20 + 3 + 18, "cells stay padded to their exact column widths");
+		const [leftCell, rightCell] = row.split(" | ");
+		ok(leftCell?.includes("…"), `a clipped left cell carries the marker: ${JSON.stringify(row)}`);
+		ok(rightCell?.includes("…"), `a clipped right cell carries the marker: ${JSON.stringify(row)}`);
+
+		const short = strip(zipColumns(["fits"], ["also fits"], 20, 18, " | ")[0] ?? "");
+		ok(!short.includes("…"), `an unclipped cell carries no marker: ${JSON.stringify(short)}`);
 	});
 });
 
