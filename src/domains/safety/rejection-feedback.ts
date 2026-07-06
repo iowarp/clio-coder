@@ -57,3 +57,34 @@ export function formatRejection(ctx: RejectionContext): RejectionMessage {
 		hints: buildHints(ctx),
 	};
 }
+
+/**
+ * The model-facing text for a blocked tool call. The short label alone
+ * ("read blocked: read") tells the model nothing about why the call failed
+ * or how to recover, which is how blocked-call retry spirals start: the next
+ * turn re-tries the same target through another tool because nothing said
+ * the gate applies everywhere. Compose the verdict reason (which a loop
+ * guard may already have replaced with its own recovery feedback) with the
+ * rejection's detail and hints, deduplicated line by line, and close with
+ * the standing pivot instruction. Bounded output: every line is a short
+ * sentence authored by the policy engine or a guard.
+ */
+export function formatModelRejection(reason: string, rejection?: RejectionMessage): string {
+	const lines: string[] = [];
+	const seen = new Set<string>();
+	const push = (line: string): void => {
+		const trimmed = line.trim();
+		if (trimmed.length === 0) return;
+		const normalized = trimmed.replace(/^-\s+/, "");
+		if (seen.has(normalized)) return;
+		seen.add(normalized);
+		lines.push(trimmed);
+	};
+	push(reason);
+	if (rejection) {
+		for (const line of rejection.detail.split("\n")) push(line);
+		for (const hint of rejection.hints) push(hint);
+	}
+	push("Do not retry this action through another tool; pivot or report the blocker.");
+	return lines.join("\n");
+}
