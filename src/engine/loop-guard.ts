@@ -162,6 +162,19 @@ function synthesisBackstopReason(tool: string): string {
 	);
 }
 
+/**
+ * Recognizes the synthesis-backstop stop reason on surfaces without a bus.
+ * Workers watch blocked tool-finish events for this reason (the same seam as
+ * the lifetime cap) and abort the run: without it, the "stop" disposition is
+ * bus-only and a worker that ignores the lockout would keep burning calls
+ * until the lifetime cap. Measured on a live 35B coder worker: one identical
+ * code_nav loop consumed the full 50-call cap (46 blocked calls, ~345k
+ * tokens) before this abort path existed.
+ */
+export function isLoopGuardSynthesisBackstopReason(reason: string): boolean {
+	return /^loop guard: tool calls stayed disabled and .+ was called again instead of answering/.test(reason);
+}
+
 /** Worker lifetime tool-call cap: env > settings guardrails > default. */
 export function readWorkerToolCallCap(env: NodeJS.ProcessEnv = process.env): number {
 	return resolveGuardrail("workerToolCallCap", env);
@@ -201,14 +214,16 @@ export interface CreateLoopGuardRegistrationOptions {
 	 */
 	turnToolCallBudget?: OrchTurnToolCallBudget;
 	/**
-	 * Orchestrator only: when the per-turn loop-block budget is exhausted, lock
-	 * tool use for the rest of the turn instead of cancelling it outright. Every
-	 * further call is denied with a synthesize-now directive so the model
-	 * produces a final answer from what it already gathered; only a bounded
-	 * backstop of extra denials ({@link LOOP_SYNTHESIS_BACKSTOP_DENIALS}) falls
-	 * back to the hard stop. Absent for workers, which have no interactive turn
-	 * boundary and rely on the lifetime {@link toolCallCap}; leaving it off
-	 * preserves the immediate at-budget stop those surfaces expect.
+	 * When the per-turn loop-block budget is exhausted, lock tool use for the
+	 * rest of the turn instead of cancelling it outright. Every further call is
+	 * denied with a synthesize-now directive so the model produces a final
+	 * answer from what it already gathered; only a bounded backstop of extra
+	 * denials ({@link LOOP_SYNTHESIS_BACKSTOP_DENIALS}) falls back to the hard
+	 * stop. The orchestrator's stop rides the bus (LoopBlocked "stop" drives
+	 * chat.cancel); workers have no bus and instead watch blocked tool-finish
+	 * events for {@link isLoopGuardSynthesisBackstopReason} and abort the run,
+	 * so a looping worker returns a synthesized report after a bounded number
+	 * of denials rather than burning the lifetime {@link toolCallCap}.
 	 */
 	turnSynthesisLockout?: boolean;
 	now?: () => number;

@@ -16,6 +16,7 @@ import {
 	createLoopGuardRegistration,
 	DEFAULT_ORCH_TURN_TOOL_CALL_BUDGET,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
+	isLoopGuardSynthesisBackstopReason,
 	LOOP_GUARD_REGISTRATION_ID,
 	LOOP_SYNTHESIS_BACKSTOP_DENIALS,
 	ORCH_TURN_TOOL_CALL_HARD_MARGIN,
@@ -499,6 +500,70 @@ describe("synthesis lockout at the block budget", () => {
 		await driveToLockout(registry, call);
 		// A different turn starts clean and its below-threshold calls execute.
 		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "b.md" } }, { turnId: "t2" })).kind, "ok");
+	});
+});
+
+describe("worker synthesis lockout", () => {
+	function workerRegistry(cap: number): ReturnType<typeof createRegistry> {
+		// The worker shape: lifetime cap plus lockout, no bus. Measured on a live
+		// coder worker before the lockout: one identical code_nav loop consumed
+		// the entire cap (46 blocked calls) because per-call blocks never
+		// escalated and the bus-only "stop" had no subscriber.
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety, toolCallCap: cap, turnSynthesisLockout: true })],
+		});
+		return guardedRegistry({ safety, middleware: bundle.contract });
+	}
+
+	it("locks a looping worker to synthesis long before the lifetime cap", async () => {
+		const cap = 50;
+		const registry = workerRegistry(cap);
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		for (let i = 1; i < LOOP_THRESHOLD; i++) {
+			strictEqual((await registry.invoke(call)).kind, "ok");
+		}
+		const block1 = await registry.invoke(call);
+		ok(block1.kind === "blocked" && block1.reason.includes("loop detected"), "block #1 names the loop");
+		const block2 = await registry.invoke(call);
+		ok(block2.kind === "blocked" && block2.reason.includes("tool calls are now disabled"), "block #2 locks the run");
+	});
+
+	it("reaches the recognizable backstop reason after the bounded denials", async () => {
+		const registry = workerRegistry(50);
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+		for (let i = 1; i < LOOP_THRESHOLD; i++) await registry.invoke(call);
+		await registry.invoke(call); // block #1
+		await registry.invoke(call); // block #2: lockout
+		for (let i = 0; i < LOOP_SYNTHESIS_BACKSTOP_DENIALS; i++) {
+			const denied = await registry.invoke(call);
+			ok(
+				denied.kind === "blocked" && !isLoopGuardSynthesisBackstopReason(denied.reason),
+				`denial ${i + 1} is not yet the backstop`,
+			);
+		}
+		const stopped = await registry.invoke(call);
+		ok(stopped.kind === "blocked", "the backstop denies the call");
+		ok(
+			stopped.kind === "blocked" && isLoopGuardSynthesisBackstopReason(stopped.reason),
+			"the backstop reason is recognizable by the worker abort seam",
+		);
+	});
+
+	it("keeps the backstop predicate specific to the backstop reason", () => {
+		strictEqual(
+			isLoopGuardSynthesisBackstopReason(
+				"loop guard: tool calls stayed disabled and code_nav was called again instead of answering, so the turn is being stopped. Summarize what you found for the operator.",
+			),
+			true,
+		);
+		strictEqual(isLoopGuardSynthesisBackstopReason("workerToolCallCap reached (50); abort run"), false);
+		strictEqual(
+			isLoopGuardSynthesisBackstopReason(
+				"loop guard: this turn reached its tool-call limit after repeated identical calls, so tool calls are now disabled for the rest of this turn.",
+			),
+			false,
+		);
 	});
 });
 
