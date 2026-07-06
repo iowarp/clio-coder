@@ -10,6 +10,33 @@ still change interfaces.
 
 ## Unreleased
 
+- Dispatched workers now get the same loop-guard synthesis lockout as the
+  main agent: after the loop-block budget the worker is told to report from
+  what it already gathered, and a bounded backstop aborts a worker that
+  keeps calling tools anyway. Measured on a live 35B coder worker, one
+  identical repeated call previously burned the entire 50-call lifetime cap
+  (46 blocked calls, ~345k tokens) before failing; the same failure now
+  stops within a handful of denials and returns a report.
+- Successful edit results now end with a one-line validation nudge naming
+  the real validation path (rerun the failing test or verify). Measured
+  live, a worker that edited correctly then "validated" with navigation
+  tools until aborted now reruns the test after its edit.
+- ask_user is now gated at the descriptor: ask only when blocked on a
+  decision the request does not answer, and never re-ask what the operator
+  already stated. This closes the measured failure where "demo all your
+  tools read only" opened an interview asking which tools to demo.
+- code_nav path modes (deps, dependents, outline) given a symbol name now
+  redirect to mode=symbol or grep/read instead of a bare not-found, closing
+  a measured worker retry spiral.
+- The Qwopus3.6 Coder model knowledge-base entries now carry the upstream
+  presence-penalty 1.5 sampler default for non-thinking execution. Measured
+  on live dispatch, the same coder task went from 0-for-3 (repetition loop
+  into the guard abort) to 3-for-3 passes with edit-then-validate
+  trajectories. Explicit per-run sampler flags still override.
+- Headless run receipts now sum token usage across all agent segments of a
+  turn (middleware nudges and finish-contract reprompts start new
+  segments); previously only the last segment was counted, under-reporting
+  a measured ~205k-token run as ~24k.
 - Worker permission escalations now show the operator what the call will
   touch: the approval overlay's Target row (the command for bash, the path
   for file tools) appears for dispatched workers' asks, not just the main
