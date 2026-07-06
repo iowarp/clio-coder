@@ -126,6 +126,21 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	}
 }
 
+function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSummary {
+	return {
+		tokens: left.tokens + right.tokens,
+		costUsd: left.costUsd + right.costUsd,
+		input: left.input + right.input,
+		output: left.output + right.output,
+		cacheRead: left.cacheRead + right.cacheRead,
+		cacheWrite: left.cacheWrite + right.cacheWrite,
+		reasoning: left.reasoning + right.reasoning,
+		apiCalls: left.apiCalls + right.apiCalls,
+		hadReasoning: left.hadReasoning || right.hadReasoning,
+		hadUsage: true,
+	};
+}
+
 function sortedToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
 	return [...stats.values()].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
 }
@@ -296,9 +311,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		recordToolEnd(receiptStats, event);
 		if (event.type === "agent_end") {
 			// Notice-only agent_end events carry no usage; never let one clobber
-			// the real run's totals with zeros.
+			// the real run's totals with zeros. A headless turn can also span
+			// several agent segments (middleware nudges and finish-contract
+			// reprompts start new agent runs), and each agent_end carries only
+			// its own segment's messages, so segments accumulate: keeping only
+			// the last one recorded 23808 of a measured ~204640-token run.
 			const usageSummary = sumRunUsage(event.messages);
-			if (usageSummary.hadUsage) receiptStats.usage = usageSummary;
+			if (usageSummary.hadUsage) {
+				receiptStats.usage = receiptStats.usage === null ? usageSummary : addRunUsage(receiptStats.usage, usageSummary);
+			}
 		}
 		result = resultFromEvent(event, result);
 	});

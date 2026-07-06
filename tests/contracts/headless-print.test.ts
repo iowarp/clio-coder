@@ -1,4 +1,7 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import type { ChatLoop, ChatLoopEvent } from "../../src/interactive/chat-loop.js";
@@ -97,5 +100,55 @@ describe("contracts/headless-print", () => {
 		] as unknown as ChatLoopEvent[]);
 		const exitCode = await runHeadlessMainAgent(chat, { prompt: "read a file" });
 		strictEqual(exitCode, 1);
+	});
+
+	it("accumulates usage across agent segments in the run receipt", async () => {
+		// A headless turn can span several agent segments (middleware nudges and
+		// finish-contract reprompts start new agent runs); each agent_end
+		// carries only its own segment's messages. The receipt must sum the
+		// segments: keeping only the last one recorded 23808 of a measured
+		// ~204640-token live run.
+		const savedStateDir = process.env.CLIO_STATE_DIR;
+		process.env.CLIO_STATE_DIR = mkdtempSync(join(tmpdir(), "clio-headless-usage-"));
+		try {
+			const usageMessage = (tokens: number) => ({
+				role: "assistant",
+				content: [{ type: "text", text: "segment answer" }],
+				usage: { input: tokens - 10, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: tokens },
+			});
+			const chat = buildFakeChatLoop([
+				{ type: "agent_end", messages: [usageMessage(1000)] },
+				// Notice-only segment: no usage, must not clobber the total.
+				{ type: "agent_end", messages: [] },
+				{ type: "agent_end", messages: [usageMessage(200)] },
+				{ type: "message_end", message: usageMessage(0) },
+			] as unknown as ChatLoopEvent[]);
+			(chat as unknown as { lastRunSnapshot: () => unknown }).lastRunSnapshot = () => ({
+				runtimeKind: "http",
+				targetId: "test-target",
+				wireModelId: "test-model",
+				runtimeId: "llamacpp",
+				sessionId: "fake-session",
+				cwd: process.cwd(),
+				promptSignature: "sig",
+				toolSignature: "sig",
+				compiledPromptHash: "hash",
+				staticCompositionHash: "hash",
+			});
+			const exitCode = await runHeadlessMainAgent(chat, { prompt: "multi-segment" });
+			strictEqual(exitCode, 0);
+			const receiptsDir = join(process.env.CLIO_STATE_DIR ?? "", "receipts");
+			const files = readdirSync(receiptsDir).filter((name) => name.endsWith(".json"));
+			strictEqual(files.length, 1, "one receipt recorded");
+			const receipt = JSON.parse(readFileSync(join(receiptsDir, files[0] ?? ""), "utf8")) as {
+				tokenCount: number;
+				outputTokenCount: number;
+			};
+			strictEqual(receipt.tokenCount, 1200, "segments sum instead of last-segment-wins");
+			ok(receipt.outputTokenCount === 20, "per-field totals sum too");
+		} finally {
+			if (savedStateDir === undefined) delete process.env.CLIO_STATE_DIR;
+			else process.env.CLIO_STATE_DIR = savedStateDir;
+		}
 	});
 });
