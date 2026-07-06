@@ -432,6 +432,7 @@ describe("contracts/worker-steer", () => {
 				strictEqual(escalated.payload?.tool, "bash");
 				strictEqual(typeof escalated.payload?.summary, "string");
 				ok((escalated.payload?.summary as string).includes("bash"));
+				strictEqual(escalated.payload?.target, "printf worker-ok");
 				strictEqual(typeof escalated.payload?.decision, "object");
 				strictEqual(escalated.payload?.timeoutMs, 5_000);
 

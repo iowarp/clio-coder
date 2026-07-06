@@ -9,7 +9,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
-import { truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatUsd } from "./footer/widgets.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import {
@@ -243,19 +243,25 @@ function cardKvKey(theme: ClioTheme, key: string): string {
 	return theme.fg("dim", `${key.padEnd(CARD_KV_KEY_WIDTH)} `);
 }
 
-// A `proof` key-value row: the colored state marker, an optional failure reason,
-// then the dim `/view` filter an operator would type. A row that fits keeps its
-// dim middot join; an overflowing one is refit unit-by-unit so it closes on a
-// whole unit or a dim ellipsis instead of the frame leaving a dangling ` · `.
+// A card key-value row built from whole units. A row that fits keeps its dim
+// middot join; an overflowing one is refit unit-by-unit so it closes on a
+// whole unit or a dim ellipsis instead of a mid-token clip that reads as a
+// complete fact ("total 5" for 5.2k) or a dangling ` · `.
+function cardUnitsLine(theme: ClioTheme, key: string, units: ReadonlyArray<string>, contentWidth: number): string {
+	const prefix = cardKvKey(theme, key);
+	const full = `${prefix}${units.join(dotSep(theme))}`;
+	return visibleWidth(full) <= contentWidth ? full : fitUnits(theme, prefix, units, contentWidth);
+}
+
+// The `proof` row: the colored state marker, an optional failure reason, then
+// the dim `/view` filter an operator would type.
 function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, contentWidth: number): string | null {
 	const presentation = evidenceStatePresentation(evidence.state);
 	if (!presentation) return null;
-	const key = cardKvKey(theme, "proof");
 	const units = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word}`)];
 	if (evidence.state === "failed" && evidence.reason) units.push(theme.fg("muted", evidence.reason));
 	units.push(theme.fg("dim", evidence.viewFilter));
-	const full = `${key}${units.join(dotSep(theme))}`;
-	return visibleWidth(full) <= contentWidth ? full : fitUnits(theme, key, units, contentWidth);
+	return cardUnitsLine(theme, "proof", units, contentWidth);
 }
 
 export function renderDispatchCard(row: DispatchBoardRow, width: number, evidence?: RunEvidencePresentation): string[] {
@@ -265,7 +271,6 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	const elapsed = formatCompactMs(row.elapsedMs);
 	const cost = formatUsd(row.costUsd);
 	const detail = terminalDetail(row);
-	const dot = dotSep(theme);
 
 	const presentation = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
@@ -300,8 +305,17 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	const targetLine = truncateToWidth(`${cardKvKey(theme, "target")}${target}`, contentWidth, "…", false);
 	const bodyLines = [
 		targetLine,
-		`${cardKvKey(theme, "status")}${statusStr}${dot}${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}${dot}${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
-		`${cardKvKey(theme, "telemetry")}${up}${dot}${down}${dot}${total}`,
+		cardUnitsLine(
+			theme,
+			"status",
+			[
+				statusStr,
+				`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
+				`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
+			],
+			contentWidth,
+		),
+		cardUnitsLine(theme, "telemetry", [up, down, total], contentWidth),
 	];
 	// The proof row is present only when the observability projection knows an
 	// evidence state for this run; an unknown/none state adds no line, so cards
@@ -362,7 +376,7 @@ export function formatDispatchBoardLines(
 		const theme = clioTheme();
 		const lines = ["", "No active dispatches", "Delegated runs appear here with live status and telemetry.", ""];
 		return lines.map((line) => {
-			const padding = Math.max(0, Math.floor((width - 4 - visibleWidth(line)) / 2));
+			const padding = Math.max(0, Math.floor((width - visibleWidth(line)) / 2));
 			return theme.fg("dim", " ".repeat(padding) + line);
 		});
 	}
@@ -374,6 +388,26 @@ export function formatDispatchBoardLines(
 		body.push(...card);
 	}
 	return body;
+}
+
+/**
+ * Live dispatch-board component. Cards render at the width the TUI actually
+ * grants instead of a baked-in 76-column layout, so a narrow terminal no
+ * longer clips telemetry mid-token and a wide one no longer wastes the frame.
+ * Rendering is stateless: rows and the observability snapshot are read per
+ * render, and the overlay's ticker plus bus-driven requestRender calls drive
+ * repaints (running rows read the clock for spinner and elapsed time).
+ */
+export function createDispatchBoardView(
+	rows: () => ReadonlyArray<DispatchBoardRow>,
+	observability: () => ObservabilitySnapshot | undefined,
+): Component {
+	return {
+		render(width: number): string[] {
+			return formatDispatchBoardLines(rows(), Math.max(1, width), observability());
+		},
+		invalidate(): void {},
+	};
 }
 
 export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {

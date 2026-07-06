@@ -10,6 +10,27 @@ still change interfaces.
 
 ## Unreleased
 
+- Worker permission escalations now show the operator what the call will
+  touch: the approval overlay's Target row (the command for bash, the path
+  for file tools) appears for dispatched workers' asks, not just the main
+  agent's, so the operator no longer decides blind. The preview is sanitized
+  on both sides of the worker boundary; the call arguments themselves never
+  leave the worker.
+- Context meters now draw the autocompact reserve with its own medium-shade
+  glyph in the footer bars, the expanded dashboard, and the /context-view
+  overlay, so a window holding a large reserve no longer looks nearly full,
+  and the distinction survives without color. An unmeasured context window
+  reads `?%` everywhere; the old `--%` placeholder is gone.
+- The dispatch board overlay now renders at the width the terminal actually
+  grants instead of a fixed 76-column layout, sizing itself (up to 96
+  columns) on wide screens. Card status and telemetry rows that do not fit
+  now drop whole facts behind an ellipsis instead of clipping mid-number, so
+  a truncated token total can no longer read as a smaller complete value.
+- The expanded footer dashboard shares ultrawide terminals fairly: the
+  CONTEXT quadrant can now grow wide enough to show its fill and chat facts
+  unclipped, with a finer meter, and the category legend wraps by whole
+  entries instead of clipping mid-label. ACTIVITY absorbs only the width left
+  after every quadrant reaches its useful size.
 - clio eval run: a relative --clio-entry now resolves against the invoking
   directory instead of breaking inside temp-copy eval workspaces.
 - Blocked-call recovery now names the sanctioned pivots at the point of

@@ -34,6 +34,16 @@ export function formatCompactMs(value: number): string {
 		: `${Math.floor(seconds / 60)}m${Math.round(seconds % 60)}s`;
 }
 
+/**
+ * Context-window fill percentage with one shared unknown grammar. A window
+ * that has not been measured yet renders `?%` everywhere (compact footer,
+ * expanded quadrant, segmented bar, /context-view overlay): a placeholder for
+ * a number that has not arrived, never a value.
+ */
+export function formatContextPercent(percent: number | null | undefined): string {
+	return typeof percent === "number" && Number.isFinite(percent) ? `${percent.toFixed(1)}%` : "?%";
+}
+
 export function collapseHomePath(path: string): string {
 	const home = process.env.HOME;
 	if (!home || home.length === 0) return path;

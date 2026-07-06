@@ -7,6 +7,86 @@ change interfaces.
 
 ## Unreleased
 
+### Fixed
+
+- **Worker escalations carry the call's target to the approval overlay.**
+  The prior session's Target row (05c543f7) covered only main-agent asks: the
+  overlay derives the target from the parked call's args, and worker
+  escalations crossed the NDJSON stdout seam with no args, so the operator
+  approved or denied a worker's `bash`/`write` blind. The escalation payload
+  now carries a `target` string derived at the one place the args exist, the
+  worker's `onPermissionRequired` seam in `src/engine/worker-runtime.ts`,
+  capped at 200 chars to bound the NDJSON line. The description and
+  sanitization logic moved from `src/interactive/permission-overlay.ts` to a
+  shared `src/domains/safety/call-target.ts` (`describeCallTarget`, new
+  `sanitizeCallTargetText`); the overlay module re-exports both, so its
+  public surface is unchanged. The dispatch extension forwards the field into
+  the `PermissionRequested` bus payload, and the TUI re-sanitizes it at the
+  trust boundary before it reaches `ApprovalRequestView.target`, since a
+  hostile worker could otherwise style the overlay that approves it. Pinned
+  at all three seams: the worker emit (`worker-steer.test.ts`), the extension
+  republish (`dispatch.test.ts`), and the overlay render plus stdout-crossing
+  sanitization (`autonomy.test.ts`). Boundary check clean; the engine already
+  value-imports safety modules.
+
+- **The dispatch board renders live at its granted width.** The board was a
+  pre-rendered `Text` baked at 76 columns inside a fixed 80-column overlay.
+  pi-tui clamps overlays to the terminal, and `ClioOverlayFrame` pads child
+  lines with an empty-ellipsis clip, so on any terminal narrower than the
+  overlay the 76-column cards were cut mid-token with no marker: telemetry
+  and model ids read as complete data. New `createDispatchBoardView` in
+  `src/interactive/dispatch-board.ts` is a stateless component whose
+  `render(width)` formats the store's rows at the width the frame actually
+  grants, reading rows and the observability snapshot per paint.
+  `src/interactive/index.ts` drops the `renderDispatchBoard` re-bake path
+  entirely: the 250ms ticker and the dispatch bus handlers now just request a
+  repaint, and the overlay opens at `min(96, columns - 4)` (floor 44) so
+  narrow terminals get a near-full-width board and ultrawide ones keep
+  readable cards. The empty state centers across the true content width
+  (the old `- 4` predated the frame handing in content width). Exercising the
+  card at 44 columns exposed that the `status` and `telemetry` rows still
+  clipped without a marker ("total 5" for a 5.2k total; a value-less trailing
+  "cost"); both now refit by whole units through the same `fitUnits` grammar
+  the proof row uses, via a shared `cardUnitsLine`. Pinned by three contracts
+  in `tests/contracts/dispatch-board.test.ts` (width obedience at 44/60/76/96
+  with no cut escape sequences; rows and proof state read live after
+  construction; narrow rows close on a whole unit or ellipsis, never a
+  mid-number clip). Verified in the real TUI via tmux: the board opens at 96
+  columns on a 200-column terminal and re-renders cleanly at 80.
+
+- **Context meters portray the autocompact reserve and unknown windows
+  truthfully.** The proportional meter rendered reserve cells with the same
+  filled glyph as consumed context, only dimmed, so an 85%-used window with a
+  15% reserve was indistinguishable from a 97%-used one wherever color was
+  weak or absent. `contextCategoryGlyph` in `src/interactive/context-meter.ts`
+  now assigns the reserve its own `GLYPH.contextReserve` medium-shade block
+  (`filled / reserve / free` are three distinct glyphs), which flows through
+  the footer bar, the expanded quadrant, the /context-view overlay grid, and
+  every legend swatch from the one shared helper. The unknown-percent grammar
+  was also split across surfaces (`?%` in the compact footer, `--%` in the
+  expanded quadrant, segmented bar, and overlay); a shared
+  `formatContextPercent` in `src/interactive/theme/labels.ts` now renders `?%`
+  at all four sites, dim in the footers because it is scaffolding for a number
+  that has not arrived. Pinned by `tests/contracts/context-meter.test.ts`
+  (glyph distinctness, bar/grid/swatch alignment, grammar) and the updated
+  segmented-bar assertion in `tests/contracts/footer-redesign.test.ts`.
+
+- **Ultrawide expanded-footer quadrants share surplus width instead of
+  starving CONTEXT.** `expandedWideColumnWidths` capped the four columns at
+  30/34/36 and gave every remaining cell to ACTIVITY, so a 200-column
+  terminal rendered a 91-cell ACTIVITY column of mostly blank space while
+  CONTEXT clipped its fill chips, chat chips, and legend at 36. Caps are now
+  40 (WORKSPACE), 44 (SESSION), and 56 (CONTEXT) with the same
+  CONTEXT-first round-robin, so surplus spills into ACTIVITY only after every
+  quadrant reaches its useful size; the context meter grows to 24 cells in
+  quadrants at least 48 wide; and the ledger legend packs its category chips
+  into as many full rows as the quadrant needs (`ledgerLegendRows`) instead
+  of clipping tail categories behind an ellipsis. The helper is exported and
+  directly tested (exact allocations at 120/200/240, exact-fill property),
+  and the dashboard overflow contract now also runs at 200 and 240 columns.
+  Verified with a deterministic render harness at 80/120/200 using a real
+  262K ledger with a live reserve.
+
 ### Added
 
 - **v0.2.8 Documentation Alignment.** Conducted a thorough documentation pass aligning the entire markdown corpus with v0.2.8 reality. Introduced two new guides: `docs/worker-dispatch-mechanics.md` covering worker subprocess spawning, standard input/output NDJSON protocols, watchdog heartbeats, and permission escalations, and `docs/provider-adapter-cookbook.md` detailing the custom model runtime adapter interface, probing APIs, client factories, and reasoning formats. Corrected and updated all core tools, configs, and TUI design reference files.
