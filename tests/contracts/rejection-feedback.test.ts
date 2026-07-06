@@ -4,7 +4,8 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { formatModelRejection, formatRejection } from "../../src/domains/safety/rejection-feedback.js";
 import { createWorkerSafety, createWorkerToolRegistry, invokeWorkerTool } from "../../src/engine/worker-tools.js";
 
-const PIVOT_LINE = "Do not retry this action through another tool; pivot or report the blocker.";
+const PIVOT_LINE =
+	"Do not retry this action through another tool unless a hint above names one; pivot or report the blocker.";
 
 describe("formatModelRejection composes the model-facing blocked text", () => {
 	it("carries reason, detail lines, hints, and the standing pivot instruction", () => {

@@ -70,7 +70,8 @@ export function formatRejection(ctx: RejectionContext): RejectionMessage {
  * enforced-bounded: lines cap at 300 characters and the message at 16 lines,
  * because reason strings interpolate caller data (paths, commands) verbatim.
  */
-const MODEL_REJECTION_PIVOT = "Do not retry this action through another tool; pivot or report the blocker.";
+const MODEL_REJECTION_PIVOT =
+	"Do not retry this action through another tool unless a hint above names one; pivot or report the blocker.";
 const MODEL_REJECTION_MAX_LINES = 16;
 const MODEL_REJECTION_MAX_LINE_CHARS = 300;
 
