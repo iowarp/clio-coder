@@ -131,6 +131,7 @@ import {
 	type ApprovalRequestView,
 	askAxis,
 	createPermissionOverlayBody,
+	describeCallTarget,
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayTitle,
 } from "./permission-overlay.js";
@@ -2361,6 +2362,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
 				: { kind: "autonomy" as const, level: autonomy });
 		const queueDepth = deps.toolRegistry?.parkedCount();
+		const target = describeCallTarget(call.args);
 		return {
 			requestId: meta?.requestId ?? "permission-pending",
 			tool: call.tool,
@@ -2369,6 +2371,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			origin: { kind: "main" },
 			reason:
 				decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
+			...(target.length > 0 ? { target } : {}),
 			...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
 		};
 	};

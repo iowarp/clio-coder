@@ -29,6 +29,7 @@ import {
 	type ApprovalRequestView,
 	askAxis,
 	createPermissionOverlayBody,
+	describeCallTarget,
 } from "../../src/interactive/permission-overlay.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -387,16 +388,17 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			axis: { kind: "autonomy", level: "auto-edit" },
 			origin: { kind: "main" },
 			reason: "bash requires execute confirmation",
+			target: "git stash drop",
 			queueDepth: 2,
 		};
 		deepStrictEqual(createPermissionOverlayBody(mainView).render(80), [
 			"Tool: bash",
+			"Target: git stash drop",
 			"Action: execute",
 			"Asked by: autonomy level (auto-edit)",
-			"bash requires execute confirmation",
 			"1 of 2 parked",
 			"",
-			"Allow or deny applies to this call only.",
+			"Parked until you decide; allow or deny applies to this call only.",
 			"Hard-blocked actions remain blocked.",
 		]);
 
@@ -412,9 +414,8 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			"Tool: bash",
 			"Action: execute",
 			"Asked by: worker scout (run r-abc), safety-net rail bash-command-substitution",
-			"bash requires execute confirmation",
 			"",
-			"Allow or deny applies to this call only.",
+			"Parked until you decide; allow or deny applies to this call only.",
 			"Hard-blocked actions remain blocked.",
 		]);
 
@@ -430,11 +431,32 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			"Tool: write",
 			"Action: write",
 			"Asked by: worker coder (run r-def), autonomy level suggest",
-			"write requires write confirmation",
 			"",
-			"Allow or deny applies to this call only.",
+			"Parked until you decide; allow or deny applies to this call only.",
 			"Hard-blocked actions remain blocked.",
 		]);
+	});
+
+	it("permission overlay derives the call target from args and never renders the blocked wording", () => {
+		strictEqual(describeCallTarget({ command: "rm -rf build" }), "rm -rf build");
+		strictEqual(describeCallTarget({ path: "/tmp/probe.txt", content: "hello" }), "/tmp/probe.txt");
+		strictEqual(describeCallTarget({ name: ".env", source: "file" }), ".env");
+		strictEqual(describeCallTarget(undefined), "");
+		strictEqual(describeCallTarget({}), "");
+		strictEqual(describeCallTarget({ count: 3 }), '{"count":3}');
+
+		const view: ApprovalRequestView = {
+			requestId: "perm-target",
+			tool: "write",
+			actionClass: "system_modify",
+			axis: { kind: "net", ruleId: "system-modify-confirm" },
+			origin: { kind: "main" },
+			reason: "write blocked: system_modify",
+			target: describeCallTarget({ path: "/tmp/perm-probe-test.txt", content: "hello" }),
+		};
+		const body = createPermissionOverlayBody(view).render(80).join("\n");
+		ok(body.includes("Target: /tmp/perm-probe-test.txt"), body);
+		ok(!body.includes("blocked: system_modify"), `the ask overlay must not echo blocked wording: ${body}`);
 	});
 
 	it("worker escalation notices name net rails and autonomy levels", () => {

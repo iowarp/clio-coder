@@ -834,7 +834,9 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 		case "tool_blocked":
 			// Attention states hold a static glyph rather than spinning: the work
 			// has paused for a human, so the pill should not read as live progress.
-			return { glyph: GLYPH.phaseBlocked, label: "blocked", token: "warning", live: false };
+			// The phase fires only on PermissionRequested, so the pill names the
+			// wait for confirmation; "blocked" would contradict the ask overlay.
+			return { glyph: GLYPH.phaseBlocked, label: "confirm", token: "warning", live: false };
 		case "retrying": {
 			const attempt = status.retry?.attempt ?? 0;
 			const maxAttempts = status.retry?.maxAttempts ?? 0;

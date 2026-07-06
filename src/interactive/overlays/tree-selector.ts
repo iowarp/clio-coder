@@ -189,7 +189,9 @@ export class TreeOverlayView implements Component {
 		const theme = clioTheme();
 		const lines: string[] = [];
 		if (this.rows.length === 0) {
-			lines.push(theme.fg("muted", "(no sessions yet)"));
+			// The overlay navigates the CURRENT session's turn tree; an empty
+			// tree means no turns yet, not a missing session list.
+			lines.push(theme.fg("muted", "(no turns in this session yet)"));
 		} else {
 			const end = Math.min(this.rows.length, this.scrollTop + VISIBLE_ROWS);
 			for (let i = this.scrollTop; i < end; i++) {
