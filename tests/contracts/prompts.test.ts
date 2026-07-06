@@ -59,6 +59,13 @@ const TOOL_HINTS = {
 		tool: "dispatch",
 		hint: "Call dispatch with list:true to see the agent fleet.",
 	},
+	tasks: {
+		tool: "tasks",
+		hint:
+			'Before multi-step work, declare a task board: tasks action="plan" with a title and the task list. ' +
+			'Mark one task active with "start" before working it, close it with "done" plus an evidence note ' +
+			'(what proves it works), and use "block" with a reason instead of silently stalling.',
+	},
 } as const;
 
 function scratchProject(): string {
@@ -349,6 +356,7 @@ describe("contracts/prompts compiler logic", () => {
 		// Deliberately unsorted with a duplicate: compiled bytes depend only on
 		// the hint set, never on surface or registration order.
 		const result = compileWithHints([
+			TOOL_HINTS.tasks,
 			TOOL_HINTS.dispatch,
 			TOOL_HINTS.context,
 			TOOL_HINTS.ask_user,
@@ -360,11 +368,14 @@ describe("contracts/prompts compiler logic", () => {
 			"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 			'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
-			'For a multi-step task, list installed skills once with context (scope="skills"); if one matches the task, suggest the operator run /skill:<name> before proceeding, and never load a skill the operator did not request.',
+			"Routing order: orient with structured observe tools before bash; put multi-step work on the task board; dispatch only bounded parallel or delegated subwork and synthesize the receipts; validate with verify or git diff before final claims.",
+			'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
+			'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
 			TOOL_HINTS.ask_user.hint,
 			TOOL_HINTS.code_nav.hint,
 			TOOL_HINTS.context.hint,
 			TOOL_HINTS.dispatch.hint,
+			TOOL_HINTS.tasks.hint,
 		].join("\n");
 		ok(
 			result.systemPrompt.includes(expectedBlock),
@@ -376,9 +387,40 @@ describe("contracts/prompts compiler logic", () => {
 			TOOL_HINTS.code_nav,
 			TOOL_HINTS.context,
 			TOOL_HINTS.dispatch,
+			TOOL_HINTS.tasks,
 		]);
 		strictEqual(reordered.systemPrompt, result.systemPrompt);
 		strictEqual(reordered.systemPromptHash, result.systemPromptHash);
+	});
+
+	it("gates skill listing to skill-shaped tasks and teaches routing order plus failure recovery", () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: {
+				provider: "stub",
+				model: "stub-model",
+				providerSupportsTools: true,
+				toolPromptHints: [],
+			},
+		});
+		const prompt = result.systemPrompt;
+
+		// Ordinary multi-step coding never spends a skill-listing call; the old
+		// broad trigger must stay gone.
+		strictEqual(prompt.includes("For a multi-step task, list installed skills"), false);
+		ok(prompt.includes('List installed skills with context(scope="skills") only when the task is skill-shaped'));
+		ok(prompt.includes("never load a skill the operator did not request"));
+
+		// The deterministic routing order and failure recovery are static base
+		// lines, present regardless of which hinted tools are on the surface.
+		ok(prompt.includes("Routing order: orient with structured observe tools before bash"));
+		ok(prompt.includes("dispatch only bounded parallel or delegated subwork and synthesize the receipts"));
+		ok(prompt.includes("validate with verify or git diff before final claims"));
+		ok(prompt.includes("do not retry the same shape blindly"));
+		ok(prompt.includes('query context(scope="docs")'));
 	});
 
 	it("omits the catalog one-liners when context and dispatch are not in the session surface", () => {
