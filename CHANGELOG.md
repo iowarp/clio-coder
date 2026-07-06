@@ -13,10 +13,11 @@ still change interfaces.
 - Loop-guard synthesis lockouts are now enforced mechanically: once a turn
   locks, the remaining model rounds are sent with request-level tool_choice
   none, so the model's only possible output is the answer it was told to
-  write. The tool schema bytes and prompt prefix are untouched. Previously
-  the lockout was only a textual directive; measured local models ignored
-  it about half the time and the backstop stop threw the turn's gathered
-  evidence away.
+  write, and the lockout directive now says plainly that tool-call markup
+  will not run. The tool schema bytes and prompt prefix are untouched.
+  Previously the lockout was only a textual directive; measured local
+  models ignored it about half the time and the backstop stop threw the
+  turn's gathered evidence away.
 - Dispatched workers now get the same loop-guard synthesis lockout as the
   main agent: after the loop-block budget the worker is told to report from
   what it already gathered, and a bounded backstop aborts a worker that

@@ -150,7 +150,8 @@ function synthesisLockoutDirective(): string {
 	return (
 		"loop guard: this turn reached its tool-call limit after repeated identical calls, so tool calls are now " +
 		"disabled for the rest of this turn. Everything you retrieved is already in the conversation above. Answer " +
-		"the operator now, in plain text, from what you have gathered — do not call any more tools."
+		"the operator now, in plain prose, from what you have gathered. Do not write tool-call markup such as " +
+		"<tool_call> blocks; tool calls are disabled and will not run."
 	);
 }
 
