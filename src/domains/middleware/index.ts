@@ -83,6 +83,12 @@ export {
 } from "./skills-reminder.js";
 export { createMiddlewareContractFromSnapshot, createMiddlewareSnapshot } from "./snapshot.js";
 export {
+	countEnumeratedSteps,
+	createTaskBoardReminderRegistration,
+	TASK_BOARD_REMINDER_REGISTRATION_ID,
+	taskBoardReminderMessage,
+} from "./task-board-reminder.js";
+export {
 	buildOpenTasksMessage,
 	type CreateTaskNudgeRegistrationOptions,
 	createTaskNudgeRegistration,

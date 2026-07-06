@@ -47,6 +47,7 @@ import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memo
 import {
 	createHookReceiptLog,
 	createSkillsReminderRegistration,
+	createTaskBoardReminderRegistration,
 	createTaskNudgeRegistration,
 	type ExtensionHookRoot,
 	installUserHooks,
@@ -663,6 +664,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		);
 	}
+	// Task-board reminder: same user-message-visible channel, fired once per
+	// session when a request literally enumerates three or more steps. The
+	// static routing line and tasks hint ask for the same board; battery-tested
+	// local models only comply when the instruction rides the user message.
+	middleware.registerHook(createTaskBoardReminderRegistration());
 	if (contextDomain) {
 		middleware.registerHook(
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
