@@ -13,3 +13,28 @@ export function emitEvent(event: unknown): void {
 		process.stderr.write(`[worker] failed to emit event: ${msg}\n`);
 	}
 }
+
+/**
+ * Resolve once every previously queued stdout line has been handed to the OS,
+ * or after timeoutMs when the pipe is wedged (reader gone). Write callbacks
+ * are FIFO, so an empty write's callback fires only after all buffered lines
+ * flushed. A large single NDJSON line (a big tool result) can still be
+ * buffered when the run settles; process.exit would truncate it mid-line.
+ */
+export function drainStdout(timeoutMs = 2000): Promise<void> {
+	return new Promise((resolve) => {
+		let done = false;
+		const finish = (): void => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve();
+		};
+		const timer = setTimeout(finish, timeoutMs);
+		try {
+			process.stdout.write("", finish);
+		} catch {
+			finish();
+		}
+	});
+}

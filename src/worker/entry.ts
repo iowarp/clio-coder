@@ -14,7 +14,7 @@ import { setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
 import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
-import { emitEvent } from "./ndjson.js";
+import { drainStdout, emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
 import { validateRehydratedWorkerRuntime } from "./spec-contract.js";
 import { createWorkerStdinDemux } from "./stdin-demux.js";
@@ -114,10 +114,14 @@ async function main(): Promise<number> {
 }
 
 main().then(
-	(code) => process.exit(code),
-	(err) => {
+	async (code) => {
+		await drainStdout();
+		process.exit(code);
+	},
+	async (err) => {
 		const msg = err instanceof Error ? err.message : String(err);
 		process.stderr.write(`[worker] fatal: ${msg}\n`);
+		await drainStdout();
 		process.exit(2);
 	},
 );
