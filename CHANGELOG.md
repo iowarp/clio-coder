@@ -13,6 +13,13 @@ still change interfaces.
 - Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
   cancels active runs and closes Clio-owned overlays, permission prompts, and
   ask_user prompts.
+- Hardened the session's new surfaces after adversarial review: the approval
+  overlay's Target row strips terminal escape sequences and control bytes so a
+  hostile command cannot style the UI that approves it; the model-facing
+  blocked-call message is enforced-bounded (16 lines, 300 chars per line) with
+  the pivot instruction always last; and a late tool end event can upgrade
+  only a force-settled transcript line, never rewrite one that finished with
+  its own result.
 - The expanded footer dashboard (Alt+U) marks clipped quadrant cells with an
   ellipsis, so a cut value like `proj 1.` or a shortened legend or tool tally
   no longer reads as a complete fact.

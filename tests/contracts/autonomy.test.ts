@@ -454,6 +454,11 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 			reason: "write blocked: system_modify",
 			target: describeCallTarget({ path: "/tmp/perm-probe-test.txt", content: "hello" }),
 		};
+		strictEqual(
+			describeCallTarget({ command: "echo \u001b[31mspoof\u001b[0m \u0007 done" }),
+			"echo spoof done",
+			"escape sequences and control bytes never reach the approval overlay",
+		);
 		const body = createPermissionOverlayBody(view).render(80).join("\n");
 		ok(body.includes("Target: /tmp/perm-probe-test.txt"), body);
 		ok(!body.includes("blocked: system_modify"), `the ask overlay must not echo blocked wording: ${body}`);

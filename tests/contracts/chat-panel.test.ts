@@ -231,6 +231,45 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		strictEqual(errorGlyphs, 1, `exactly the stranded reused-id orphan settled, got: ${rendered}`);
 	});
 
+	it("upgrades a force-settled segment with a late true result but never rewrites a model-finished one", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "late1",
+			toolName: "read",
+			args: { path: "a.txt" },
+		} as ChatLoopEvent);
+		clock = 1500;
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		// The end event raced the settle and arrives after agent_end with the
+		// call's true outcome: the synthetic error line upgrades to the truth.
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "late1",
+			toolName: "read",
+			result: "real content",
+			isError: false,
+			durationMs: 400,
+		} as ChatLoopEvent);
+		let rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("✓"), `the late true result upgrades the synthetic settle, got: ${rendered}`);
+		ok(rendered.includes("400ms"), rendered);
+
+		// A duplicate end for the now model-finished segment must not rewrite it.
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "late1",
+			toolName: "read",
+			result: "spoofed overwrite",
+			isError: true,
+			durationMs: 9999,
+		} as ChatLoopEvent);
+		rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("400ms"), `a duplicate end must not rewrite the finished segment, got: ${rendered}`);
+		ok(!rendered.includes("9999"), rendered);
+	});
+
 	it("settles a prior same-id segment when the model reuses a tool-call id", () => {
 		let clock = 1000;
 		const panel = createChatPanel({ now: () => clock });

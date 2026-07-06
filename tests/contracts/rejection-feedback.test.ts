@@ -42,6 +42,35 @@ describe("formatModelRejection composes the model-facing blocked text", () => {
 		ok(text.endsWith(PIVOT_LINE));
 	});
 
+	it("bounds hostile reason content and always closes with the pivot line", () => {
+		const hugePath = "x".repeat(20_000);
+		const rejection = formatRejection({
+			tool: "read",
+			actionClass: "read",
+			reasons: [`path ${hugePath} is blocked`, "second\nthird\nfourth"],
+		});
+		const text = formatModelRejection(rejection.short, rejection);
+		const lines = text.split("\n");
+		ok(lines.length <= 16, `the message stays within the line cap, got ${lines.length}`);
+		for (const line of lines) {
+			ok(line.length <= 301, `every line stays within the char cap, got ${line.length}`);
+		}
+		strictEqual(lines[lines.length - 1], PIVOT_LINE, "the pivot closes the bounded message");
+	});
+
+	it("keeps the pivot line last and single even when the detail pre-seeds it", () => {
+		const rejection = formatRejection({
+			tool: "bash",
+			actionClass: "execute",
+			reasons: [PIVOT_LINE, "trailing detail"],
+		});
+		const text = formatModelRejection("bash blocked: execute", rejection);
+		const lines = text.split("\n");
+		strictEqual(lines[lines.length - 1], PIVOT_LINE, `the pivot stays last, got: ${text}`);
+		strictEqual(text.split(PIVOT_LINE).length - 1, 1, "the pivot renders exactly once");
+		ok(text.includes("trailing detail"), text);
+	});
+
 	it("degrades to reason plus pivot when no rejection is attached", () => {
 		const text = formatModelRejection("tool not registered: nope");
 		strictEqual(text, `tool not registered: nope\n${PIVOT_LINE}`);

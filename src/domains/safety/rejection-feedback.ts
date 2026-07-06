@@ -66,25 +66,36 @@ export function formatRejection(ctx: RejectionContext): RejectionMessage {
  * the gate applies everywhere. Compose the verdict reason (which a loop
  * guard may already have replaced with its own recovery feedback) with the
  * rejection's detail and hints, deduplicated line by line, and close with
- * the standing pivot instruction. Bounded output: every line is a short
- * sentence authored by the policy engine or a guard.
+ * the standing pivot instruction, which always closes the message. Output is
+ * enforced-bounded: lines cap at 300 characters and the message at 16 lines,
+ * because reason strings interpolate caller data (paths, commands) verbatim.
  */
+const MODEL_REJECTION_PIVOT = "Do not retry this action through another tool; pivot or report the blocker.";
+const MODEL_REJECTION_MAX_LINES = 16;
+const MODEL_REJECTION_MAX_LINE_CHARS = 300;
+
 export function formatModelRejection(reason: string, rejection?: RejectionMessage): string {
 	const lines: string[] = [];
 	const seen = new Set<string>();
 	const push = (line: string): void => {
-		const trimmed = line.trim();
+		const bounded =
+			line.length > MODEL_REJECTION_MAX_LINE_CHARS ? `${line.slice(0, MODEL_REJECTION_MAX_LINE_CHARS)}…` : line;
+		const trimmed = bounded.trim();
 		if (trimmed.length === 0) return;
 		const normalized = trimmed.replace(/^-\s+/, "");
-		if (seen.has(normalized)) return;
+		if (seen.has(normalized) || normalized === MODEL_REJECTION_PIVOT) return;
 		seen.add(normalized);
 		lines.push(trimmed);
 	};
-	push(reason);
+	for (const line of reason.split("\n")) push(line);
 	if (rejection) {
 		for (const line of rejection.detail.split("\n")) push(line);
 		for (const hint of rejection.hints) push(hint);
 	}
-	push("Do not retry this action through another tool; pivot or report the blocker.");
-	return lines.join("\n");
+	// Bound the body and close with the standing pivot instruction, always
+	// last: recovery guidance must be the final thing the model reads even
+	// when a policy author pre-seeds the same sentence into the detail.
+	const bodyBudget = MODEL_REJECTION_MAX_LINES - 1;
+	const body = lines.length > bodyBudget ? [...lines.slice(0, bodyBudget - 1), "(further detail elided)"] : lines;
+	return [...body, MODEL_REJECTION_PIVOT].join("\n");
 }
