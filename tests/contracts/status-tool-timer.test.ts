@@ -112,10 +112,7 @@ describe("status tool end settles overlays without resurrecting running-tool sta
 					1_000,
 				],
 				[{ type: "overlay_push", overlay: "tool_blocked" } as StatusInputEvent, 1_100],
-				[
-					{ type: "overlay_push", overlay: "dispatching", data: { agentName: "tester" } } as StatusInputEvent,
-					1_200,
-				],
+				[{ type: "overlay_push", overlay: "dispatching", data: { agentName: "tester" } } as StatusInputEvent, 1_200],
 				[
 					{
 						type: "tool_execution_end",
@@ -128,17 +125,11 @@ describe("status tool end settles overlays without resurrecting running-tool sta
 				],
 				...popOrder.map(
 					(overlay, index) =>
-						[{ type: "overlay_pop", overlay } as StatusInputEvent, 1_400 + index * 100] as [
-							StatusInputEvent,
-							number,
-						],
+						[{ type: "overlay_pop", overlay } as StatusInputEvent, 1_400 + index * 100] as [StatusInputEvent, number],
 				),
 			]);
 
-		for (const status of [
-			sequence(["dispatching", "tool_blocked"]),
-			sequence(["tool_blocked", "dispatching"]),
-		]) {
+		for (const status of [sequence(["dispatching", "tool_blocked"]), sequence(["tool_blocked", "dispatching"])]) {
 			strictEqual(status.phase, "preparing");
 			strictEqual(status.tool, undefined);
 			strictEqual(status.toolStartedAt, undefined);
@@ -152,7 +143,13 @@ describe("status tool end settles overlays without resurrecting running-tool sta
 			[{ type: "agent_start", messages: [] } as unknown as StatusInputEvent, 0],
 			[{ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: {} } as StatusInputEvent, 1_000],
 			[
-				{ type: "tool_execution_end", toolCallId: "c1", toolName: "read", result: "ok", isError: false } as StatusInputEvent,
+				{
+					type: "tool_execution_end",
+					toolCallId: "c1",
+					toolName: "read",
+					result: "ok",
+					isError: false,
+				} as StatusInputEvent,
 				1_100,
 			],
 		]);
@@ -165,7 +162,13 @@ describe("status tool end settles overlays without resurrecting running-tool sta
 			[{ type: "tool_execution_start", toolCallId: "c1", toolName: "bash", args: {} } as StatusInputEvent, 1_000],
 			[{ type: "watchdog_tick" } as StatusInputEvent, 181_000],
 			[
-				{ type: "tool_execution_end", toolCallId: "c1", toolName: "bash", result: "ok", isError: false } as StatusInputEvent,
+				{
+					type: "tool_execution_end",
+					toolCallId: "c1",
+					toolName: "bash",
+					result: "ok",
+					isError: false,
+				} as StatusInputEvent,
 				181_100,
 			],
 		]);

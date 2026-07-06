@@ -234,6 +234,34 @@ function isAssistantMessageEntry(entry: SessionEntry): entry is Extract<SessionE
 }
 
 describe("contracts/chat-loop compaction and terminal notices", () => {
+	it("emits an out-of-run notice as message_end without fabricating agent_end", async () => {
+		const events: ChatLoopEvent[] = [];
+		const unconfigured = settings();
+		unconfigured.orchestrator.target = "";
+		unconfigured.orchestrator.model = "";
+		const loop = createChatLoop({
+			getSettings: () => unconfigured,
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(),
+			readSessionEntries: () => [],
+			createAgent: createFakeAgentFactory(async () => {
+				throw new Error("agent factory should not run for an unconfigured notice");
+			}),
+		} as never);
+		loop.onEvent((event: ChatLoopEvent) => events.push(event));
+
+		await loop.submit("hello");
+
+		const notices = events.filter(
+			(event): event is Extract<ChatLoopEvent, { type: "message_end" }> =>
+				event.type === "message_end" &&
+				JSON.stringify((event as { message?: unknown }).message ?? {}).includes("orchestrator not configured"),
+		);
+		strictEqual(notices.length, 1, "the notice reaches consumers as a message_end");
+		strictEqual(events.filter((event) => event.type === "agent_end").length, 0, "notices never synthesize agent_end");
+	});
+
 	it("runs post-tool compaction guard before an oversized continuation", async () => {
 		const entries: SessionEntry[] = [];
 		let compactTrigger: string | undefined;

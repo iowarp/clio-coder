@@ -51,4 +51,44 @@ describe("contracts/status aborted runs keep usage and abort provenance", () => 
 		strictEqual(status.summary?.stopReason, "aborted");
 		ok(status.summary?.stopDetail?.includes("loop guard"), "abort provenance survives the rebuild");
 	});
+
+	it("a later notice message_end does not rebuild or wipe the ended usage summary", () => {
+		let status = { ...INITIAL_STATUS };
+		status = reduceStatus(status, { type: "agent_start", messages: [] } as unknown as StatusInputEvent, ctx(0));
+
+		const messages = [
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "done" }],
+				stopReason: "stop",
+				usage: { input: 12_345, output: 678, cacheRead: 90, cacheWrite: 0 },
+			},
+			{ role: "toolResult", isError: false, content: [] },
+		];
+		status = reduceStatus(status, { type: "agent_end", messages } as unknown as StatusInputEvent, ctx(2_000));
+		strictEqual(status.phase, "ended");
+		strictEqual(status.summary?.inputTokens, 12_345);
+		strictEqual(status.summary?.outputTokens, 678);
+		strictEqual(status.summary?.cacheReadTokens, 90);
+		strictEqual(status.summary?.toolCount, 1);
+
+		status = reduceStatus(
+			status,
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "[Clio Coder] notice after the run" }],
+					stopReason: "stop",
+				},
+			} as unknown as StatusInputEvent,
+			ctx(3_000),
+		);
+
+		strictEqual(status.phase, "ended");
+		strictEqual(status.summary?.inputTokens, 12_345);
+		strictEqual(status.summary?.outputTokens, 678);
+		strictEqual(status.summary?.cacheReadTokens, 90);
+		strictEqual(status.summary?.toolCount, 1);
+	});
 });

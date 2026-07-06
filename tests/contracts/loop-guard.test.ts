@@ -9,7 +9,7 @@ import { createMiddlewareBundle } from "../../src/domains/middleware/extension.j
 import type { MiddlewareContract } from "../../src/domains/middleware/index.js";
 import { createMiddlewareContractFromSnapshot } from "../../src/domains/middleware/snapshot.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { createLoopState, hashToolCall, observe } from "../../src/domains/safety/loop-detector.js";
+import { createLoopState, hashToolCall, type LoopVerdict, observe } from "../../src/domains/safety/loop-detector.js";
 import type { SafetyPolicyDecision } from "../../src/domains/safety/policy-engine.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import {
@@ -83,6 +83,52 @@ function guardedRegistry(input: {
 	return registry;
 }
 
+describe("loop detector retention", () => {
+	it("retains recent attempts by count so slow identical calls still trip", () => {
+		let state = createLoopState();
+		let verdict: LoopVerdict;
+		[state, verdict] = observe(state, "read:a", 0);
+		[state, verdict] = observe(state, "read:a", 40_000);
+		strictEqual(verdict.looping, false);
+
+		[state, verdict] = observe(state, "read:a", 80_000);
+		strictEqual(verdict.looping, true);
+		strictEqual(verdict.count, 3);
+	});
+
+	it("does not count identical attempts separated by four other old attempts", () => {
+		let state = createLoopState();
+		let verdict: LoopVerdict;
+		[state, verdict] = observe(state, "read:a", 0);
+		for (let i = 1; i <= 4; i += 1) {
+			[state, verdict] = observe(state, `read:other-${i}`, i * 40_000);
+		}
+		[state, verdict] = observe(state, "read:a", 200_000);
+		for (let i = 5; i <= 8; i += 1) {
+			[state, verdict] = observe(state, `read:other-${i}`, i * 40_000);
+		}
+		[state, verdict] = observe(state, "read:a", 400_000);
+
+		strictEqual(verdict.looping, false);
+		ok(verdict.count < LOOP_THRESHOLD, `separated attempts must not form a streak, got count ${verdict.count}`);
+	});
+
+	it("honors a custom keepLastAttempts value from createLoopState", () => {
+		const oldAttempts = [
+			{ key: "read:a", at: 0 },
+			{ key: "read:a", at: 40_000 },
+		];
+
+		const [, verdict] = observe({ ...createLoopState({ keepLastAttempts: 2 }), recent: oldAttempts }, "read:a", 80_000);
+		strictEqual(verdict.looping, false);
+		strictEqual(verdict.count, 2);
+
+		const [, defaultVerdict] = observe({ ...createLoopState(), recent: oldAttempts }, "read:a", 80_000);
+		strictEqual(defaultVerdict.looping, true);
+		strictEqual(defaultVerdict.count, 3);
+	});
+});
+
 describe("unified loop guard registration", () => {
 	it("pins the tuned defaults that bound a runaway local-model turn", () => {
 		// Identical-call loops on weak local models must trip fast: three verbatim
@@ -115,6 +161,42 @@ describe("unified loop guard registration", () => {
 		for (let i = 0; i < LOOP_THRESHOLD * 2; i++) {
 			const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path: `file-${i}.md` } }, { turnId: "t1" });
 			strictEqual(verdict.kind, "ok", `distinct call ${i} must execute`);
+		}
+	});
+
+	it("blocks slow identical calls within one turn but not identical calls across turns", async () => {
+		let now = 0;
+		const slowSafety = testSafety();
+		const slowBundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety: slowSafety, now: () => now })],
+		});
+		const slowRegistry = guardedRegistry({ safety: slowSafety, middleware: slowBundle.contract });
+		const call = { tool: ToolNames.Read, args: { path: "README.md" } };
+
+		for (const [index, at] of ([0, 40_000] as const).entries()) {
+			now = at;
+			const verdict = await slowRegistry.invoke(call, { turnId: "t1" });
+			strictEqual(verdict.kind, "ok", `slow same-turn call ${index + 1} below threshold must execute`);
+		}
+		now = 80_000;
+		const blocked = await slowRegistry.invoke(call, { turnId: "t1" });
+		strictEqual(blocked.kind, "blocked");
+		ok(blocked.kind === "blocked" && blocked.reason.includes("loop detected"), "third slow call is blocked");
+		ok(
+			blocked.kind === "blocked" && !blocked.reason.includes("within 30s"),
+			"reason no longer claims a fixed wall-clock window",
+		);
+
+		now = 0;
+		const turnSafety = testSafety();
+		const turnBundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety: turnSafety, now: () => now })],
+		});
+		const turnRegistry = guardedRegistry({ safety: turnSafety, middleware: turnBundle.contract });
+		for (const [index, turnId] of ["t1", "t2", "t3"].entries()) {
+			now = index * 40_000;
+			const verdict = await turnRegistry.invoke(call, { turnId });
+			strictEqual(verdict.kind, "ok", `same call in ${turnId} starts a fresh turn-scoped streak`);
 		}
 	});
 
