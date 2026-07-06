@@ -101,9 +101,15 @@ export const editTool: ToolSpec = {
 				const finalContent = bom + restoreLineEndings(applied.newContent, originalEnding);
 				writeFileSync(filePath, finalContent, "utf8");
 				const diff = generateDiffString(applied.baseContent, applied.newContent);
+				// The validation nudge is point-of-failure conditioning: measured on
+				// a live 35B coder worker, the model edited correctly and then spent
+				// its remaining calls "validating" with navigation tools (code_nav
+				// deps) until the loop guard aborted the run. Naming the real
+				// validation path on the mutation result is the deterministic channel
+				// every agent sees at exactly the moment it matters.
 				return {
 					kind: "ok",
-					output: `edited ${pathArg}: ${applied.replacements} replacement(s)`,
+					output: `edited ${pathArg}: ${applied.replacements} replacement(s). Validate now: rerun the failing test or verify; navigation tools do not validate edits.`,
 					details: { diff: diff.diff, firstChangedLine: diff.firstChangedLine, paths: [filePath] },
 				};
 			});
