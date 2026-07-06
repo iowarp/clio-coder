@@ -11,6 +11,13 @@ export interface LoopDetectorState {
 	recent: ReadonlyArray<{ key: string; at: number }>;
 	windowMs: number;
 	maxRepeats: number;
+	/**
+	 * Most recent attempts retained regardless of age. A purely time-based
+	 * window goes blind on slow local inference: at 15s+ per call only two
+	 * identical attempts ever coexist inside windowMs, so the third repeat
+	 * that should trip the detector keeps aging out.
+	 */
+	keepLastAttempts?: number;
 }
 
 export interface LoopVerdict {
@@ -26,11 +33,20 @@ const DEFAULT_WINDOW_MS = 30_000;
 // stops them before they burn a turn. Callers that need a different cadence
 // pass `maxRepeats` explicitly.
 const DEFAULT_MAX_REPEATS = 3;
+// Sized so a consecutive or single-interleaved verbatim spiral still counts
+// its third repeat at any call latency, while an identical check separated by
+// two or more other calls (a fix-verify loop) stays below the threshold.
+const DEFAULT_KEEP_LAST_ATTEMPTS = 4;
 
-export function createLoopState(opts?: { windowMs?: number; maxRepeats?: number }): LoopDetectorState {
+export function createLoopState(opts?: {
+	windowMs?: number;
+	maxRepeats?: number;
+	keepLastAttempts?: number;
+}): LoopDetectorState {
 	const windowMs = opts?.windowMs ?? DEFAULT_WINDOW_MS;
 	const maxRepeats = opts?.maxRepeats ?? DEFAULT_MAX_REPEATS;
-	return { recent: [], windowMs, maxRepeats };
+	const keepLastAttempts = opts?.keepLastAttempts ?? DEFAULT_KEEP_LAST_ATTEMPTS;
+	return { recent: [], windowMs, maxRepeats, keepLastAttempts };
 }
 
 /** Compute a stable fingerprint from a tool name plus its arguments. */
@@ -107,8 +123,12 @@ function canonicalSerialize(value: unknown, seen: WeakSet<object>): string {
 
 export function observe(state: LoopDetectorState, key: string, now: number): [LoopDetectorState, LoopVerdict] {
 	const cutoff = now - state.windowMs;
-	const trimmed = state.recent.filter((entry) => entry.at >= cutoff);
-	const next = [...trimmed, { key, at: now }];
+	const keepLast = state.keepLastAttempts ?? DEFAULT_KEEP_LAST_ATTEMPTS;
+	const appended = [...state.recent, { key, at: now }];
+	// Retain an entry when it is inside the time window OR among the most
+	// recent attempts, so slow inference cannot age a spiral out of view.
+	const floorStart = Math.max(0, appended.length - keepLast);
+	const next = appended.filter((entry, index) => index >= floorStart || entry.at >= cutoff);
 	let count = 0;
 	for (const entry of next) {
 		if (entry.key === key) count += 1;

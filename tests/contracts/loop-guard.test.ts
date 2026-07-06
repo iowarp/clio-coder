@@ -200,6 +200,9 @@ describe("unified loop guard registration", () => {
 		for (let i = 1; i < LOOP_THRESHOLD; i++) await registry.invoke(call, { turnId: "t1" });
 		await registry.invoke(call, { turnId: "t1" });
 		await registry.invoke(call, { turnId: "t1" });
+		// Detection is turn-scoped: a new turn starts a fresh repeat streak, so
+		// t2 must reach the threshold itself before its first block lands.
+		for (let i = 1; i < LOOP_THRESHOLD; i++) await registry.invoke(call, { turnId: "t2" });
 		await registry.invoke(call, { turnId: "t2" });
 		strictEqual(events.length, 3);
 		strictEqual(events[1]?.blocksThisTurn, 2);

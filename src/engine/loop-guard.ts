@@ -25,7 +25,7 @@ import { GUARDRAIL_DEFAULTS, resolveGuardrail, workerToolCallCapExceededReason }
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
-import { createLoopState, hashToolCall } from "../domains/safety/loop-detector.js";
+import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { AgentMessage } from "./types.js";
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
@@ -85,8 +85,6 @@ const SUCCEEDED_FINGERPRINT_LIMIT = 128;
 /** Bucket for calls arriving without a turn id (e.g. pre-session probes). */
 const NO_TURN_BUCKET = "no-turn";
 
-const LOOP_WINDOW_MS = createLoopState().windowMs;
-
 /**
  * Arguments that only change how much of the same answer comes back, never
  * which answer it is. Stripped from the stagnation fingerprint so a model
@@ -128,16 +126,15 @@ function stagnationBlockReason(tool: string, identicalResults: number): string {
  * than a generic "change strategy".
  */
 function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: number): string {
-	const windowSeconds = Math.round(LOOP_WINDOW_MS / 1000);
 	const evidence =
 		priorSuccesses > 0
 			? `This exact call already succeeded ${priorSuccesses} ${priorSuccesses === 1 ? "time" : "times"} this run; ` +
 				`its result is already in the conversation above — re-read that result before calling tools again. `
 			: "";
 	return (
-		`loop detected: ${tool} was called ${repeatCount} times with identical arguments within ${windowSeconds}s. ` +
-		`Repeating the exact call is blocked. ${evidence}Change strategy: vary the arguments, use a different tool, ` +
-		`or explain what new information you expect before retrying.`
+		`loop detected: ${tool} was called ${repeatCount} times with identical arguments among this turn's recent ` +
+		`tool calls. Repeating the exact call is blocked. ${evidence}Change strategy: vary the arguments, use a ` +
+		`different tool, or explain what new information you expect before retrying.`
 	);
 }
 
@@ -619,7 +616,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (typeof fingerprint !== "string" || fingerprint.length === 0) {
 				return evaluateTurnBudget(input, now) ?? [];
 			}
-			const verdict = options.safety.observeLoop(fingerprint, now);
+			// The detector key is turn-scoped: its state lives for the whole
+			// session, and the detector now retains the most recent attempts
+			// regardless of age, so an unscoped key would let one identical call
+			// per user turn (rerunning a build across turns) accumulate into a
+			// false loop.
+			const verdict = options.safety.observeLoop(`${turnKey}|${fingerprint}`, now);
 			if (verdict.looping) {
 				const tool = input.toolName ?? "unknown";
 				const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
