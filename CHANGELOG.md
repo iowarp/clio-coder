@@ -13,6 +13,10 @@ still change interfaces.
 - Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
   cancels active runs and closes Clio-owned overlays, permission prompts, and
   ask_user prompts.
+- Cleaned up the welcome banner's Wiki row: entry points now render as bare
+  paths instead of raw digest bullets (no more dangling `entry points: · -`
+  fragments), and the Wiki and Hint rows truncate by dropping whole facts with
+  a trailing ellipsis instead of cutting a path or phrase mid-word.
 - Fixed blocked and aborted tool calls staying rendered as running in the
   interactive transcript. A safety-net or approval notice arriving mid-turn
   stranded the tool's transcript segment, so the line kept a live spinner and
