@@ -14,6 +14,7 @@ import { resolve as resolvePath } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import { protectedResidencyModelIds } from "../../core/residency-protection.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
@@ -737,6 +738,8 @@ interface DispatchWorkerSpecInput {
 	dynamicHash: string | null;
 	apiKey: string | undefined;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
+	/** Effective settings view for residency protection; falls back to config.get(). */
+	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 }
 
 interface DispatchLifecycleStage {
@@ -976,6 +979,13 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	};
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
+	// Carry the operator's configured model ids so the worker subprocess (whose
+	// residency registry starts empty) never evicts another profile's model.
+	const settingsForProtection = input.settings ?? config?.get();
+	if (settingsForProtection) {
+		const protectedModels = protectedResidencyModelIds(settingsForProtection);
+		if (protectedModels.length > 0) spec.protectedModels = protectedModels;
+	}
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
 	if (input.req.skillPaths !== undefined) spec.skillPaths = input.req.skillPaths;
@@ -2504,6 +2514,7 @@ export function createDispatchBundle(
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
+		const effectiveSettings = options?.getSettings?.();
 		const spec = buildDispatchWorkerSpec(
 			{
 				req,
@@ -2517,6 +2528,7 @@ export function createDispatchBundle(
 				dynamicHash: lifecycle.dynamicHash,
 				middlewareSnapshot: middleware.snapshot(),
 				apiKey: lifecycle.apiKey,
+				...(effectiveSettings ? { settings: effectiveSettings } : {}),
 			},
 			config ?? undefined,
 		);

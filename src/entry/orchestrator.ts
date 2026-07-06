@@ -9,6 +9,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { configureGuardrails } from "../core/guardrails.js";
 import { rememberRecentModel } from "../core/recent-models.js";
+import { protectedResidencyModelIds } from "../core/residency-protection.js";
 import {
 	applyOverrides,
 	applyRoutingPatch,
@@ -100,6 +101,7 @@ import {
 	createStdioServerTransport,
 	type StdioServerTransportOptions,
 } from "../engine/acp/transport.js";
+import { setProtectedModelsProvider } from "../engine/apis/residency.js";
 import {
 	createLoopGuardRegistration,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
@@ -803,6 +805,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return applySessionRouting(applyOverrides(config?.get() ?? readSettings(), sessionOverrides), sessionRouting);
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
+	// Residency protection follows the live effective settings: the models the
+	// operator's config references (orchestrator, worker default/profiles,
+	// target defaults) may never be evicted by another Clio stream, and a
+	// routing change updates the set on the next read.
+	setProtectedModelsProvider(() => protectedResidencyModelIds(getCurrentSettings()));
 
 	const validatedKeybindings = validateKeybindings((config?.get() ?? readSettings()).keybindings ?? {});
 	const invalidBindings = validatedKeybindings.invalid;

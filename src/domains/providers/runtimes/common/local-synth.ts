@@ -13,7 +13,12 @@ export interface ClioLocalModelMetadata {
 	clio?: {
 		targetId: string;
 		runtimeId: string;
-		lifecycle: LocalModelLifecycle;
+		/**
+		 * Present only when settings set the target's lifecycle explicitly. An
+		 * explicit "user-managed" forces the residency layer to observe-only;
+		 * absent means the operator made no choice and Clio manages by default.
+		 */
+		lifecycle?: LocalModelLifecycle;
 		gateway?: boolean;
 		family?: string;
 		quirks?: LocalModelQuirks;
@@ -31,8 +36,9 @@ export interface LocalSynthesisInput {
 	baseUrlForTarget: (targetUrl: string) => string;
 }
 
-export function targetLifecycle(target: TargetDescriptor): LocalModelLifecycle {
-	return target.lifecycle ?? "user-managed";
+/** The target's explicit lifecycle choice; undefined when settings leave it unset. */
+export function targetLifecycle(target: TargetDescriptor): LocalModelLifecycle | undefined {
+	return target.lifecycle;
 }
 
 function openAIThinkingFormat(
@@ -100,7 +106,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 		clio: {
 			targetId: target.id,
 			runtimeId: target.runtime,
-			lifecycle: targetLifecycle(target),
+			...(target.lifecycle ? { lifecycle: target.lifecycle } : {}),
 			...(target.gateway === true ? { gateway: true } : {}),
 			...(kb?.entry.family ? { family: kb.entry.family } : {}),
 			...(quirks ? { quirks } : {}),

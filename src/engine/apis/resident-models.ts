@@ -23,18 +23,12 @@ export interface ResidentModelInfo {
 	aliasIds?: string[];
 	sizeVramBytes?: number;
 	sizeBytes?: number;
-}
-
-/**
- * Per-runtime resident-model lifecycle for runtimes addressed over HTTP by base
- * url (Ollama). `listResident` enumerates what is loaded; `unload` releases one
- * model. Both are best-effort: a slow or unreachable server must never block a
- * model swap. LM Studio drives its resident set through the SDK socket instead,
- * so it builds its reconciler adapter inline rather than implementing this.
- */
-export interface ResidentModelManager {
-	listResident(baseUrl: string, headers?: Record<string, string>): Promise<ResidentModelInfo[]>;
-	unload(baseUrl: string, modelId: string, headers?: Record<string, string>): Promise<void>;
+	/**
+	 * Runtime-reported tags for the resident model (the llama.cpp router's
+	 * per-model `tags` array). The reconciler treats `pinned:true` and
+	 * `role:scout` as operator pins that are never evicted.
+	 */
+	tags?: string[];
 }
 
 /**

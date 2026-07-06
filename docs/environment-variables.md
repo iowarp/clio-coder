@@ -23,7 +23,7 @@ Durable values live in the `guardrails:` section of settings.yaml (see [configur
 | Variable | Default | Controls |
 | --- | --- | --- |
 | `CLIO_RIGOR` | repo-derived | Finish-contract evidence bar, `normal` or `high`, layered over the repo-derived default (`src/domains/safety/rigor.ts`). |
-| `CLIO_RESIDENCY` | managed | `observe`/`off` stops Clio managing model residency on local servers (`src/engine/apis/residency.ts`). |
+| `CLIO_RESIDENCY` | managed | `observe`/`off` stops Clio managing model residency on every local runtime path, llama.cpp routers included; per-target opt-out via `lifecycle: user-managed` (`src/engine/apis/residency.ts`). |
 | `CLIO_TRUST_PROJECT_SKILLS` | off | `1` trusts project-local skills for execution (`src/domains/resources/skills/loader.ts`). |
 | `CLIO_ALLOW_EXTERNAL_FULL_ACCESS` | off | `1` lets full-auto pass through to external CLI runtimes with their own full access (`src/engine/claude/subprocess-runtime.ts`, `src/engine/antigravity/subprocess-runtime.ts`). |
 | `CLIO_FORCE_COMPACT` | off | `1` forces compaction on the next interactive turn (`src/interactive/chat-loop.ts`). |

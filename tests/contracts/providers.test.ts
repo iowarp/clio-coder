@@ -244,6 +244,68 @@ describe("contracts/providers", () => {
 		strictEqual(canonicalizeWireModelId(status, "llama-3.1"), "LLaMA-3.1");
 	});
 
+	it("warns when the requested model is in neither wireModels nor the live catalog", () => {
+		const status = fakeLiveStatus(["served-model"]);
+		const mockProviders: ProvidersContract = {
+			list: () => [status],
+			getTarget: (id: string) => (id === status.target.id ? status.target : null),
+			getRuntime: (id: string) => (id === status.runtime?.id ? status.runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		const resolution = resolveRuntimeTarget(mockProviders, {
+			targetId: status.target.id,
+			wireModelId: "typo-model",
+			requestedThinkingLevel: "off",
+		});
+
+		ok(resolution.ok, "an unknown id still resolves; local servers accept unlisted ids");
+		const warning = resolution.diagnostics.find((d) => d.code === "model-not-in-catalog");
+		ok(warning, "expected a model-not-in-catalog warning");
+		strictEqual(warning.severity, "warning");
+		ok(warning.message.includes("typo-model"));
+
+		// A model the live catalog serves resolves silently even when the
+		// configured wireModels list omits it (the dynamo workers.default case).
+		const known = resolveRuntimeTarget(mockProviders, {
+			targetId: status.target.id,
+			wireModelId: "served-model",
+			requestedThinkingLevel: "off",
+		});
+		ok(known.ok);
+		strictEqual(
+			known.diagnostics.some((d) => d.code === "model-not-in-catalog"),
+			false,
+		);
+	});
+
+	it("stays silent about unknown models when there is no catalog basis to judge", () => {
+		const status = fakeLiveStatus([], {
+			discoveredModelsSource: "none",
+			target: { id: "mini", runtime: "llamacpp" },
+		});
+		const mockProviders: ProvidersContract = {
+			list: () => [status],
+			getTarget: (id: string) => (id === status.target.id ? status.target : null),
+			getRuntime: (id: string) => (id === status.runtime?.id ? status.runtime : null),
+			getDetectedReasoning: () => null,
+			knowledgeBase: null,
+		} as never;
+
+		const resolution = resolveRuntimeTarget(mockProviders, {
+			targetId: "mini",
+			wireModelId: "anything-goes",
+			requestedThinkingLevel: "off",
+		});
+
+		ok(resolution.ok);
+		strictEqual(
+			resolution.diagnostics.some((d) => d.code === "model-not-in-catalog"),
+			false,
+		);
+	});
+
 	it("produces diagnostics when target is missing or runtime is not registered", () => {
 		const target: TargetDescriptor = {
 			id: "err-target",
@@ -597,6 +659,16 @@ describe("contracts/providers/runtime-cleanup", () => {
 		]) {
 			throws(() => parseWorkerSpec(minimalWorkerSpec(bad)), /onPermission|escalation|timeoutMs|fallback/);
 		}
+	});
+
+	it("carries residency-protected model ids through the worker spec contract", () => {
+		const parsed = parseWorkerSpec(
+			minimalWorkerSpec({ protectedModels: ["Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K", "MiniCPM5-1B-Q8_0-131K"] }),
+		);
+		deepStrictEqual(parsed.protectedModels, ["Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K", "MiniCPM5-1B-Q8_0-131K"]);
+
+		strictEqual(parseWorkerSpec(minimalWorkerSpec()).protectedModels, undefined);
+		throws(() => parseWorkerSpec(minimalWorkerSpec({ protectedModels: [42] })), /protectedModels/);
 	});
 
 	it("keeps removed legacy Claude Code SDK/CLI, native CLI auth, and generic subprocess paths absent", () => {

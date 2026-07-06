@@ -10,11 +10,28 @@ still change interfaces.
 
 ## Unreleased
 
-- llama.cpp router targets now make model picker changes real before
-  inference: when the selected model is not resident and router autoload is
-  off, Clio unloads the prior non-scout resident, preserves pinned/scout
-  models such as MiniCPM, loads the selected model through the router, and
-  waits for it before sending the chat request.
+- Local inference targets are now treated as multi-model servers with finite
+  VRAM instead of single-model slots. One shared residency reconciler drives
+  llama.cpp routers, LM Studio, and Ollama: llama.cpp reads the router's
+  `max_instances` and loads into a free slot without evicting anything (a
+  scout turn no longer evicts the co-resident coder and its prompt cache);
+  LM Studio attempts the co-resident JIT load first and swaps
+  only after a will-not-fit failure, so a fresh worker no longer unloads the
+  operator's model; Ollama releases only Clio's own stragglers. Protection
+  is symmetric: router models tagged `pinned:true`/`role:scout` and every
+  model referenced by settings (orchestrator, worker default/profiles,
+  target defaults) are never evicted by another Clio stream while an
+  unprotected candidate exists.
+- Residency opt-outs now work on every runtime path: `CLIO_RESIDENCY=observe`
+  and an explicit target `lifecycle: user-managed` both force observe-only,
+  including for llama.cpp routers, which previously ignored both.
+- Residency decisions are cached per (target, model) within a TTL, and
+  mutations against one server are serialized across the orchestrator and
+  worker processes through a state-dir lock file, so concurrent streams can
+  no longer interleave unload/load against the same router.
+- Resolving a model id that is in neither the target's configured
+  `wireModels` nor its live catalog now surfaces a `model-not-in-catalog`
+  warning instead of passing silently.
 - Blocked tool calls now settle in the TUI: when a call's end event lands
   while a permission prompt (or another overlay) is still visible, the
   status no longer resurrects a perpetual "running tool" line with a

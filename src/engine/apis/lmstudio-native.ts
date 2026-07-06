@@ -55,8 +55,9 @@ import {
 	type ResidencyAdapter,
 	type ResidencyPlan,
 	reconcileResidency,
-	residencyManaged,
+	residencyManagedFor,
 } from "./residency.js";
+import { withResidencyLock } from "./residency-lock.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 import { formatThinkingForReplay } from "./thinking-replay.js";
 
@@ -69,7 +70,8 @@ interface ClioRuntimeMetadata {
 	clio?: {
 		targetId: string;
 		runtimeId: string;
-		lifecycle: RuntimeLifecycle;
+		/** Present only when settings set the target lifecycle explicitly. */
+		lifecycle?: RuntimeLifecycle;
 		gateway?: boolean;
 		quirks?: LocalModelQuirks;
 	};
@@ -92,7 +94,9 @@ function normalizeHttpBaseUrl(url: string): string {
 }
 
 // One loaded model in LM Studio's resident set, as the SDK socket reports it.
-// The reconciler (residency.ts) drives load and evict through these entries.
+// The reconciler (residency.ts) lists residents through these entries, and a
+// post-failure fallback swap unloads through them; loads go through the SDK's
+// JIT model open.
 export interface ResidentModelEntry {
 	readonly modelKey: string;
 	unload(): Promise<void>;
@@ -146,6 +150,8 @@ export interface LmStudioRunDeps {
 	createClient(opts: ConstructorParameters<typeof LMStudioClient>[0]): LmStudioRunClient;
 	reconcile(adapter: ResidencyAdapter): Promise<ResidencyPlan>;
 	discoverLoadedContext(baseUrl: string, modelId: string, signal: AbortSignal): Promise<number | undefined>;
+	/** Cross-process residency-mutation serializer; defaults to the state-dir lock file. */
+	lock?<T>(targetKey: string, fn: () => Promise<T>): Promise<T>;
 }
 
 /**
@@ -215,6 +221,7 @@ const defaultRunDeps: LmStudioRunDeps = {
 		getOrCreateLmStudioClient(opts, (o) => new LMStudioClient({ ...(o ?? {}), logger: lmStudioQuietLogger })),
 	reconcile: reconcileResidency,
 	discoverLoadedContext: discoverLoadedContextLength,
+	lock: withResidencyLock,
 };
 
 function fileHandleToPart(handle: FileHandle): ChatMessagePartFileData {
@@ -565,7 +572,8 @@ async function discoverLoadedContextFromV0(
 interface ResolvedRuntimeMetadata {
 	targetId: string;
 	runtimeId: string;
-	lifecycle: RuntimeLifecycle;
+	/** Explicit target lifecycle from settings; absent means Clio manages by default. */
+	lifecycle?: RuntimeLifecycle;
 	gateway: boolean;
 }
 
@@ -574,7 +582,7 @@ function runtimeMetadata(model: Model<Api>): ResolvedRuntimeMetadata {
 	return {
 		targetId: metadata?.targetId ?? model.provider,
 		runtimeId: metadata?.runtimeId ?? model.provider,
-		lifecycle: metadata?.lifecycle ?? "user-managed",
+		...(metadata?.lifecycle ? { lifecycle: metadata.lifecycle } : {}),
 		gateway: metadata?.gateway ?? false,
 	};
 }
@@ -662,18 +670,21 @@ export function runStream(
 			const requestedMaxTokens = remainingContextMaxTokens(model, context, options, budgetLimits);
 			const loadConfig = loadModelConfig(model);
 			const requestedLoadContext = loadConfig.contextLength ?? model.contextWindow;
-			// One reconciler decides LM Studio load and evict for both the
-			// interactive and headless paths. It releases Clio-loaded stragglers,
-			// backs off to observe-only on a foreign-loaded model, and declines up
-			// front when it already knows the model will not fit. `loadedEntries`
-			// captures the SDK handles so eviction reuses one listLoaded round-trip.
+			// One reconciler decides LM Studio residency for both the interactive
+			// and headless paths. LM Studio loads just-in-time and fails an
+			// oversized load cleanly, so the plan never evicts up front: Clio
+			// attempts the co-resident load first and swaps the plan's ranked
+			// fallback candidates only after a will-not-fit failure. `loadedEntries`
+			// captures the SDK handles so a fallback swap reuses one listLoaded
+			// round-trip.
 			let loadedEntries: ReadonlyArray<ResidentModelEntry> = [];
 			const plan = await deps.reconcile({
 				targetKey: `lmstudio-native|${baseUrl}`,
 				targetId: metadata.targetId,
 				runtimeId: "lmstudio-native",
 				keepModelId: model.id,
-				managed: residencyManaged(),
+				managed: residencyManagedFor(metadata.lifecycle),
+				strategy: "jit",
 				contextLength: requestedLoadContext,
 				...(model.contextWindow > 0 ? { modelMaxContext: model.contextWindow } : {}),
 				listResident: async () => {
@@ -684,14 +695,6 @@ export function runStream(
 					await loadedEntries.find((entry) => entry.modelKey === id)?.unload();
 				},
 			});
-			if (plan.decision === "decline") {
-				// A known VRAM miss fails with the reconciler's notice content rather
-				// than a bare SDK error; the reconciler already emitted the notice.
-				const reason = plan.notices.find((n) => n.kind === "will-not-fit")?.message;
-				throw new Error(
-					reason ?? describeLoadFailure(baseUrl, model, loadConfig, requestedMaxTokens, "VRAM fit check failed"),
-				);
-			}
 			// Skip passing `config` to client.llm.model when the model is already
 			// resident, or when Clio is observing a foreign/opt-out server. LM Studio
 			// can report residency through listLoaded while the REST model metadata
@@ -707,10 +710,7 @@ export function runStream(
 				verbose,
 			};
 			if (modelOpenConfig !== undefined) modelOpenOpts.config = modelOpenConfig;
-			let llm: LmStudioPredictionHandle;
-			try {
-				llm = await client.llm.model(model.id, modelOpenOpts);
-			} catch (err) {
+			const failWillNotFit: (err: unknown) => never = (err) => {
 				const message = describeLoadFailure(baseUrl, model, modelOpenConfig, requestedMaxTokens, err);
 				// gpuStrictVramCap turns an oversized load into a failure; surface it
 				// as a will-not-fit notice so it reads like every other VRAM miss.
@@ -723,6 +723,39 @@ export function runStream(
 					message,
 				});
 				throw new Error(message);
+			};
+			let llm: LmStudioPredictionHandle;
+			try {
+				llm = await client.llm.model(model.id, modelOpenOpts);
+			} catch (err) {
+				if (observeOnly || plan.fallbackEvict.length === 0) failWillNotFit(err);
+				// The co-resident load did not fit. Swap the ranked candidates and
+				// retry once, serialized against other Clio processes mutating this
+				// server; a second failure is a genuine VRAM miss.
+				const lock = deps.lock ?? withResidencyLock;
+				try {
+					llm = await lock(`lmstudio-native|${baseUrl}`, async () => {
+						for (const entry of plan.fallbackEvict) {
+							emitResidencyNotice({
+								kind: "swap",
+								level: "warning",
+								targetId: metadata.targetId,
+								runtimeId: "lmstudio-native",
+								model: model.id,
+								message: `swapping resident '${entry.modelId}' for requested '${model.id}' on '${metadata.targetId}' after the co-resident load failed to fit.`,
+								detail: { swappedOut: entry.modelId },
+							});
+							try {
+								await loadedEntries.find((handle) => handle.modelKey === entry.modelId)?.unload();
+							} catch {
+								// Best-effort: the retry load reports the real fit verdict.
+							}
+						}
+						return client.llm.model(model.id, modelOpenOpts);
+					});
+				} catch (retryErr) {
+					failWillNotFit(retryErr);
+				}
 			}
 			stream.push({ type: "start", partial: output });
 			// Resolve once per request and make the resolved reasoning class
