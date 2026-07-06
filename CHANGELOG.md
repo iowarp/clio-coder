@@ -13,6 +13,9 @@ still change interfaces.
 - Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
   cancels active runs and closes Clio-owned overlays, permission prompts, and
   ask_user prompts.
+- The expanded footer dashboard (Alt+U) marks clipped quadrant cells with an
+  ellipsis, so a cut value like `proj 1.` or a shortened legend or tool tally
+  no longer reads as a complete fact.
 - Unified truncation grammar across the dispatch board, task island, and
   /tasks overlay: overflowing rows drop whole facts behind a dim ellipsis
   instead of clipping paths, model ids, or prose mid-word, and no row leaves a

@@ -94,13 +94,17 @@ export const EXPANDED_ULTRAWIDE = 120;
 const COMPACT_GIT_MIN_WIDTH = 72;
 
 export function fitDashboardLine(line: string, width: number): string {
-	return visibleWidth(line) > width ? truncateToWidth(line, width, "", true) : line;
+	return visibleWidth(line) > width ? truncateToWidth(line, width, "…", true) : line;
 }
 
-/** Pad or truncate an already styled string to an exact column width. */
+/**
+ * Pad or truncate an already styled string to an exact column width. A cut is
+ * marked with an ellipsis so a clipped value ("proj 1.", "read 14 · bash 9 ")
+ * never reads as a complete fact.
+ */
 function cell(text: string, width: number): string {
 	const safe = Math.max(0, width);
-	const clipped = truncateToWidth(text, safe, "", true);
+	const clipped = truncateToWidth(text, safe, "…", true);
 	return `${clipped}${" ".repeat(Math.max(0, safe - visibleWidth(clipped)))}`;
 }
 
@@ -111,7 +115,7 @@ export function joinColumns(left: string, right: string, width: number): string 
 	const rightWidth = visibleWidth(right);
 	if (rightWidth >= safe) return cell(right, safe);
 	const leftBudget = Math.max(0, safe - rightWidth - 1);
-	const fittedLeft = visibleWidth(left) > leftBudget ? truncateToWidth(left, leftBudget, "", true) : left;
+	const fittedLeft = visibleWidth(left) > leftBudget ? truncateToWidth(left, leftBudget, "…", true) : left;
 	const gap = Math.max(1, safe - visibleWidth(fittedLeft) - rightWidth);
 	return cell(`${fittedLeft}${" ".repeat(gap)}${right}`, safe);
 }
