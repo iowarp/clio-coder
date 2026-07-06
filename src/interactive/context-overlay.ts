@@ -4,7 +4,7 @@ import type { ContextLedger, ContextLedgerGroup } from "../domains/session/conte
 import { type OverlayHandle, Text, type TUI, visibleWidth } from "../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "./context-meter.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
-import { abbreviateModelId, type ClioToken, clioTheme } from "./theme/index.js";
+import { abbreviateModelId, type ClioToken, clioTheme, formatContextPercent } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 68;
 
@@ -12,10 +12,6 @@ export const CONTEXT_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
 function formatTokens(n: number): string {
 	return Math.round(Math.max(0, n)).toLocaleString("en-US");
-}
-
-function formatPercent(percent: number | null): string {
-	return percent === null ? "--%" : `${percent.toFixed(1)}%`;
 }
 
 function gridDimensions(ledger: ContextLedger, contentWidth: number): { cols: number; rows: number } {
@@ -28,7 +24,7 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	const theme = clioTheme();
 	const swatch = contextCategorySwatch(group.category, theme);
 	const tokens = formatTokens(group.tokens);
-	const percent = formatPercent(group.percent);
+	const percent = formatContextPercent(group.percent);
 	const right = `${tokens.padStart(9)}  ${percent.padStart(6)}`;
 	const labelToken: ClioToken = group.category === "free" || group.category === "reserve" ? "dim" : "muted";
 	const leftWidth = Math.max(0, contentWidth - visibleWidth(right) - 2);
@@ -53,7 +49,7 @@ export function renderContextLedgerLines(ledger: ContextLedger, contentWidth: nu
 
 	if (ledger.contextWindow > 0) {
 		const source = ledger.measured ? "measured" : "≈ estimated";
-		const summary = `${formatTokens(ledger.usedTokens)} / ${formatTokens(ledger.contextWindow)} tokens (${formatPercent(ledger.percent)})`;
+		const summary = `${formatTokens(ledger.usedTokens)} / ${formatTokens(ledger.contextWindow)} tokens (${formatContextPercent(ledger.percent)})`;
 		lines.push(`${theme.fg("title", summary)} ${theme.fg("dim", "·")} ${theme.fg("muted", source)}`);
 	} else {
 		lines.push(
