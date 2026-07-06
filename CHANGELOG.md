@@ -10,6 +10,14 @@ still change interfaces.
 
 ## Unreleased
 
+- Synthesis-locked turns now sanitize their final answer: dead tool-call
+  markup a model writes as plain text under the forced text-only round (for
+  example a literal `<tool_call>` block) is stripped before the message
+  reaches the transcript, the headless result, the session ledger, or a
+  dispatch report, and a reply that was nothing but markup is replaced with
+  a loop-guard closing message instead of garbage. Ordinary turns and user
+  text are never touched. Measured on a local 35B target, roughly one
+  locked turn in three answered with raw markup before this fix.
 - Loop-guard synthesis lockouts are now enforced mechanically: once a turn
   locks, the remaining model rounds are sent with request-level tool_choice
   none, so the model's only possible output is the answer it was told to

@@ -49,6 +49,7 @@ import {
 	createLoopGuardRegistration,
 	isLoopGuardSynthesisBackstopReason,
 	readWorkerToolCallCap,
+	sanitizeLockedSynthesisMessage,
 } from "./loop-guard.js";
 import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
@@ -356,6 +357,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const agent = new Agent(options);
 	abortWorkerForBound = () => agent.abort();
 	const unsubscribe = agent.subscribe(async (event) => {
+		// Synthesis-locked run: a model that ignores tool_choice none emits its
+		// chat template's tool-call syntax as plain text. Sanitize the finished
+		// message in place before it hits stdout; pi stores this same object in
+		// agent state, so the NDJSON event, the dispatch consumer's answer
+		// reconstruction, and any later provider round all see the same text.
+		if (synthesisToolLock && event.type === "message_end") {
+			sanitizeLockedSynthesisMessage(event.message);
+		}
 		emit(event);
 	});
 

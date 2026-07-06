@@ -572,12 +572,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * render pipes it through Markdown. When the message arrived fully formed
 	 * with no deltas (non-streaming test path, synthetic notices), a fresh
 	 * finalized text segment is appended after any tool segments that may
-	 * have landed in this turn already.
+	 * have landed in this turn already. `replaceTail` forces the overwrite for
+	 * messages the chat loop rewrote after streaming (locked-turn markup
+	 * sanitation): the streamed tail is dead text there, not a prefix.
 	 */
-	const canonicalizeMessageText = (entry: Extract<TranscriptEntry, { role: "assistant" }>, text: string): void => {
+	const canonicalizeMessageText = (
+		entry: Extract<TranscriptEntry, { role: "assistant" }>,
+		text: string,
+		replaceTail = false,
+	): void => {
 		if (text.length === 0) return;
 		const tail = entry.segments[entry.segments.length - 1];
-		if (tail?.kind === "text" && !tail.finalized && text.startsWith(tail.text)) {
+		if (tail?.kind === "text" && !tail.finalized && (replaceTail || text.startsWith(tail.text))) {
 			tail.text = text;
 			tail.finalized = true;
 			if (tail.md) tail.md.setText(text);
@@ -824,7 +830,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					assistant.thinking = thinking;
 					assistant.expandedThinking = thinkingExpanded;
 				}
-				if (text.length > 0) canonicalizeMessageText(assistant, text);
+				// The chat loop marks messages it sanitized after streaming (dead
+				// tool-call markup on a synthesis-locked turn); the streamed tail
+				// must be replaced, not kept alongside a duplicate segment.
+				const sanitized = (event as { lockedSynthesisSanitized?: unknown }).lockedSynthesisSanitized === true;
+				if (text.length > 0) canonicalizeMessageText(assistant, text, sanitized);
 				if (terminalError.length > 0) appendErrorSegment(assistant, terminalError);
 				markDirty();
 				return;

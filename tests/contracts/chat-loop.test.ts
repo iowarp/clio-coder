@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
-import { BusChannels } from "../../src/core/bus-events.js";
+import { BusChannels, type LoopBlockedPayload } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -18,6 +18,7 @@ import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../.
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { backendCacheVerdict } from "../../src/interactive/chat-loop-messages.js";
@@ -768,5 +769,205 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("contracts/chat-loop locked-turn markup sanitation", () => {
+	const MARKUP =
+		"<tool_call>\n<function=grep>\n<parameter=pattern>\nhttp|network\n</parameter>\n<parameter=mode>\nfiles\n</parameter>\n</function>\n</tool_call>";
+
+	function lockoutPayload(): LoopBlockedPayload {
+		return {
+			tool: "grep",
+			repeatCount: 4,
+			blocksThisTurn: 2,
+			budget: 2,
+			interrupted: false,
+			disposition: "lockout",
+			at: Date.now(),
+		};
+	}
+
+	function markupAgentFactory(bus: ReturnType<typeof createSafeEventBus> | null) {
+		return createFakeAgentFactory(async (agent, input) => {
+			agent.state.messages.push(...inputMessages(input));
+			// The guard locks the turn mid-run (bus event), then the forced
+			// text-only round streams dead markup and finishes.
+			if (bus) bus.emit(BusChannels.LoopBlocked, lockoutPayload());
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: MARKUP }],
+				stopReason: "stop",
+				usage: { input: 100, output: 40, cacheRead: 0, cacheWrite: 0, totalTokens: 140 },
+				timestamp: Date.now(),
+			} as unknown as AgentMessage;
+			agent.state.messages.push(message);
+			await agent.emit({ type: "agent_start", messages: [] } as never);
+			await agent.emit({ type: "message_start", message } as never);
+			await agent.emit({
+				type: "message_update",
+				message,
+				assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: MARKUP, partial: message },
+			} as never);
+			await agent.emit({ type: "message_end", message } as never);
+			await agent.emit({ type: "agent_end", messages: [message] } as never);
+		});
+	}
+
+	it("strips dead markup from the locked turn at one seam: event, ledger, panel, agent state", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const panel = createChatPanel();
+		const events: ChatLoopEvent[] = [];
+		let agentState: { messages: AgentMessage[] } | null = null;
+		const factory = markupAgentFactory(bus);
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: ((options: never) => {
+				const handle = (factory as (options: never) => { agent: never; state: () => never })(options);
+				agentState = (handle as { agent: { state: { messages: AgentMessage[] } } }).agent.state;
+				return handle;
+			}) as never,
+		} as never);
+		loop.onEvent((event: ChatLoopEvent) => {
+			events.push(event);
+			panel.applyEvent(event as never);
+		});
+
+		await loop.submit("does this repo have a network layer?");
+
+		const fallback = lockedSynthesisFallbackText();
+		// Emitted message_end carries the sanitized message plus the marker the
+		// panel uses to replace its streamed (markup) tail.
+		const messageEnd = events.find(
+			(event) => event.type === "message_end" && (event as { message?: AgentMessage }).message?.role === "assistant",
+		) as { message: AgentMessage; lockedSynthesisSanitized?: boolean } | undefined;
+		ok(messageEnd, "assistant message_end reached consumers");
+		const emittedBlocks = (messageEnd.message as { content?: Array<{ type: string; text?: string }> }).content ?? [];
+		const emittedText = emittedBlocks
+			.filter((block) => block.type === "text")
+			.map((block) => block.text ?? "")
+			.join("");
+		strictEqual(emittedText, fallback, "emitted message text is the fallback");
+		strictEqual(messageEnd.lockedSynthesisSanitized, true, "the event is marked sanitized");
+		// Session ledger persisted the sanitized text.
+		const assistant = entries.find(isAssistantMessageEntry);
+		ok(assistant, "assistant turn persisted");
+		const persistedText = (assistant.payload as { text?: string }).text ?? "";
+		strictEqual(persistedText, fallback, "ledger text is the fallback");
+		// The panel replaced its streamed markup tail with the sanitized text.
+		const rendered = panel.render(100).join("\n");
+		ok(!rendered.includes("<tool_call>"), "no markup survives in the rendered transcript");
+		ok(rendered.includes("loop guard:"), "the fallback renders in the transcript");
+		// Agent state holds the same sanitized object (next-round payloads, /tree).
+		const stateMessages = (agentState as unknown as { messages: AgentMessage[] } | null)?.messages ?? [];
+		const lastAssistant = stateMessages[stateMessages.length - 1] as { content: Array<{ text?: string }> };
+		strictEqual(lastAssistant.content[0]?.text, fallback, "agent state was mutated in place");
+	});
+
+	it("keeps prose around a dead block and does not fall back", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const prose = "The repository has no network layer.";
+		const factory = createFakeAgentFactory(async (agent, input) => {
+			agent.state.messages.push(...inputMessages(input));
+			bus.emit(BusChannels.LoopBlocked, lockoutPayload());
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: `${prose}\n\n${MARKUP}` }],
+				stopReason: "stop",
+				timestamp: Date.now(),
+			} as unknown as AgentMessage;
+			agent.state.messages.push(message);
+			await agent.emit({ type: "message_start", message } as never);
+			await agent.emit({ type: "message_end", message } as never);
+			await agent.emit({ type: "agent_end", messages: [message] } as never);
+		});
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: factory,
+		} as never);
+
+		await loop.submit("does this repo have a network layer?");
+
+		const assistant = entries.find(isAssistantMessageEntry);
+		ok(assistant, "assistant turn persisted");
+		strictEqual((assistant.payload as { text?: string }).text, prose, "prose survives, markup does not");
+	});
+
+	it("leaves ordinary turns untouched: same markup text without a lockout persists verbatim", async () => {
+		const entries: SessionEntry[] = [];
+		const events: ChatLoopEvent[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			createAgent: markupAgentFactory(null),
+		} as never);
+		loop.onEvent((event: ChatLoopEvent) => events.push(event));
+
+		await loop.submit("does this repo have a network layer?");
+
+		const assistant = entries.find(isAssistantMessageEntry);
+		ok(assistant, "assistant turn persisted");
+		strictEqual((assistant.payload as { text?: string }).text, MARKUP, "unlocked turns are never sanitized");
+		const messageEnd = events.find(
+			(event) => event.type === "message_end" && (event as { message?: AgentMessage }).message?.role === "assistant",
+		) as { lockedSynthesisSanitized?: boolean } | undefined;
+		strictEqual(messageEnd?.lockedSynthesisSanitized, undefined, "no sanitize marker on ordinary turns");
+	});
+
+	it("clears the lock at the next user turn so later turns stream markup untouched", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		let turn = 0;
+		const factory = createFakeAgentFactory(async (agent, input) => {
+			agent.state.messages.push(...inputMessages(input));
+			turn += 1;
+			if (turn === 1) bus.emit(BusChannels.LoopBlocked, lockoutPayload());
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: MARKUP }],
+				stopReason: "stop",
+				timestamp: Date.now(),
+			} as unknown as AgentMessage;
+			agent.state.messages.push(message);
+			await agent.emit({ type: "message_start", message } as never);
+			await agent.emit({ type: "message_end", message } as never);
+			await agent.emit({ type: "agent_end", messages: [message] } as never);
+		});
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: factory,
+		} as never);
+
+		await loop.submit("first turn: locked");
+		await loop.submit("second turn: ordinary");
+
+		const assistants = entries.filter(isAssistantMessageEntry);
+		strictEqual(assistants.length, 2, "both turns persisted");
+		strictEqual(
+			(assistants[0]?.payload as { text?: string }).text,
+			lockedSynthesisFallbackText(),
+			"locked turn sanitized",
+		);
+		strictEqual((assistants[1]?.payload as { text?: string }).text, MARKUP, "next turn is unlocked again");
 	});
 });

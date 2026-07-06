@@ -75,6 +75,7 @@ import {
 import { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
+import { sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
 import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import type { resolveAgentTools } from "../engine/worker-tools.js";
@@ -1292,6 +1293,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const runMessages = localRuntime.agent.state.messages.slice(runStartMessageCount);
 				if (runMessages.length > event.messages.length) {
 					enrichedEvent = { ...event, messages: runMessages } as typeof event;
+				}
+			} else if (event.type === "message_end" && synthesisToolLock) {
+				// Synthesis-locked turn: a model that ignores tool_choice none emits
+				// its chat template's tool-call syntax as plain text. Sanitize the
+				// message in place (pi stores this same object in agent state, so
+				// the emitted event, ledger persistence below, and later provider
+				// rounds all see the sanitized text) and mark the event so the
+				// panel replaces its streamed markup tail instead of appending.
+				if (sanitizeLockedSynthesisMessage(event.message)) {
+					enrichedEvent = { ...event, lockedSynthesisSanitized: true } as typeof event;
 				}
 			}
 			const publicEvent = enrichedEvent;
