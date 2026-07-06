@@ -216,6 +216,7 @@ Returns a JSON presence summary mapping containing:
 ```text
 credential_present(name="OPENAI_API_KEY")
 credential_present(name="MY_SECRET_KEY", source="file", file=".env")
+```
 
 ## dispatch: run bounded tasks on fleet agents
 

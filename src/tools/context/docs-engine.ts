@@ -445,11 +445,6 @@ function scoreSection(index: DocsIndex, section: IndexedSection, plan: QueryPlan
 	};
 }
 
-function lineHasNeedle(line: string, needles: ReadonlyArray<string>): boolean {
-	const normalized = normalizeText(line);
-	return needles.some((needle) => normalized.includes(needle));
-}
-
 function cleanSnippet(text: string): string {
 	return text
 		.replace(/^\s{0,3}#{1,6}\s+/gm, "")
@@ -463,7 +458,24 @@ function snippetFor(section: IndexedSection, plan: QueryPlan): { text: string; s
 	const needles = unique([...plan.phrases, ...plan.originalTokens, ...plan.expandedTerms.slice(0, 8)]).filter(
 		(needle) => needle.length > 0,
 	);
-	let hitLine = section.bodyLines.findIndex((line) => lineHasNeedle(line, needles));
+	// Anchor the snippet on the line matching the MOST query needles, not the
+	// first line matching any. A section often opens with prose that mentions
+	// one query term while the line that actually answers (a parameter list, an
+	// enum) sits deeper; snippeting the intro teases the model into re-querying
+	// the same section instead of reading the answer. Ties keep the earliest.
+	let hitLine = -1;
+	let bestNeedleCount = 0;
+	for (let i = 0; i < section.bodyLines.length; i += 1) {
+		const normalized = normalizeText(section.bodyLines[i] ?? "");
+		let needleCount = 0;
+		for (const needle of needles) {
+			if (normalized.includes(needle)) needleCount += 1;
+		}
+		if (needleCount > bestNeedleCount) {
+			bestNeedleCount = needleCount;
+			hitLine = i;
+		}
+	}
 	if (hitLine < 0) hitLine = section.bodyLines.findIndex((line) => line.trim().length > 0);
 	if (hitLine < 0) {
 		return {
@@ -524,7 +536,7 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 		results,
 		followUp:
 			results.length > 0
-				? "Use read with the cited file and line range when you need the full section."
+				? "Cited files are Clio's bundled docs, not workspace paths; never read or search for them as files. For more depth, run another context scope=docs query with more specific terms."
 				: "Try Clio vocabulary such as target, autonomy, dispatch, evidence, middleware, context, validation, install, or model catalog.",
 	};
 }
@@ -553,7 +565,7 @@ export function listDocsCorpus(): DocsCorpusOutcome {
 			excludes: ["docs/html/**"],
 		},
 		followUp:
-			"Pass query=<terms> to search these docs; each result cites the file and line range to read. " +
+			"Pass query=<terms> to search these bundled docs; they ship with Clio and are not workspace files. " +
 			"Try Clio vocabulary such as target, autonomy, dispatch, evidence, middleware, context, validation, install, or model catalog.",
 	};
 	return { ok: true, payload, fileCount: index.files.length };
