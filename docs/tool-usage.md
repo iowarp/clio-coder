@@ -59,7 +59,7 @@ Arguments:
 
 Matching runs a cascade: exact substring match first, then a fuzzy match that normalizes Unicode punctuation, non-breaking spaces, and trailing whitespace, then an indentation-relaxed match that compares lines with leading whitespace stripped and re-applies the file's actual indentation to `newText`. If `oldText` matches more than once the call errors and asks for more surrounding context; if it matches nowhere the call errors telling you the text must match exactly including whitespace and newlines; if the result would be byte-identical the call errors with "No changes made".
 
-The file's BOM and CRLF/LF line endings are preserved: content is normalized to LF for matching and the original ending restored on write. Same-file mutations from edit and write are serialized through a mutation queue. Success returns `edited <path>: N replacement(s)` with `details = {diff, firstChangedLine, paths}`.
+The file's BOM and CRLF/LF line endings are preserved: content is normalized to LF for matching and the original ending restored on write. Same-file mutations from edit and write are serialized through a mutation queue. Success returns `edited <path>: N replacement(s)` plus a one-line validation nudge (rerun the failing test or verify; navigation tools do not validate edits), with `details = {diff, firstChangedLine, paths}`.
 
 Argument tolerance: `edits` sent as a JSON string is parsed, and a legacy top-level `{oldText, newText}` pair is folded into `edits`.
 
@@ -480,6 +480,8 @@ Arguments:
 - `max_rounds` (optional number). Round limit for this interview (default 6, max 24).
 
 The tool manages a stateful operator interview. The UI presents choices (with an implicit "Other" option for custom text input). Once completed, the final decisions are persisted as standard configurations in the session ledger, allowing the agent to proceed with operators' inputs or defaults.
+
+Ask only when blocked on a decision the request does not answer. Never ask about anything the operator already stated: a request that names its own scope ("all tools", "read only") has answered the interview before it starts.
 
 ```text
 ask_user(action="ask", questions=[{question: "Which database should we use?", options: [{label: "SQLite", description: "Local database"}, {label: "PostgreSQL"}]}])
