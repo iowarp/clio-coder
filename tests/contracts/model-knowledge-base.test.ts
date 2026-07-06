@@ -196,6 +196,17 @@ describe("contracts/model knowledge base", () => {
 			strictEqual(quirks?.thinking?.mechanism, "none", `${wireId} mechanism`);
 		}
 
+		// Qwopus Coder-MTP families ship the upstream non-thinking sampler
+		// defaults including presence penalty 1.5: measured on live dispatch,
+		// without it a coder worker repeated one identical code_nav call into
+		// the loop-guard abort on 3 of 3 runs; with it the same task passed
+		// 3 of 3 with edit-then-validate trajectories.
+		for (const wireId of ["Qwopus3.6-35B-A3B-Coder-MTP-Q4_K_M-262K", "Qwopus3.6-27B-Coder-MTP-Q5_K_M-262K"] as const) {
+			const quirks = kb.lookup(wireId)?.entry.quirks as LocalModelQuirks | undefined;
+			strictEqual(quirks?.sampling?.instruct?.presencePenalty, 1.5, `${wireId} presencePenalty`);
+			strictEqual(quirks?.sampling?.instruct?.repeatPenalty, 1.05, `${wireId} repeatPenalty`);
+		}
+
 		// The 27B Coder-MTP id must not fall through to the reasoning-capable
 		// v1-preview family via its broader `qwopus3.6-27b` pattern.
 		strictEqual(kb.lookup("qwopus3.6-27b-v1-preview")?.entry.family, "qwopus3.6-27b-v1-preview");
