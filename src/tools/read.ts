@@ -4,6 +4,7 @@ import { GUARDRAIL_DEFAULTS, GUARDRAIL_ENV_VARS, resolveGuardrail } from "../cor
 import { ToolNames } from "../core/tool-names.js";
 import { finalizeObservation, observationBudgetExhausted, reserveObservation } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
+import { isSessionOffloadPath } from "./result-shaping.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import {
 	DEFAULT_MAX_LINES,
@@ -50,7 +51,14 @@ export const readTool: ToolSpec = {
 		const offset = typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 1;
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : null;
 		const tail = typeof args.tail === "number" && args.tail > 0 ? Math.floor(args.tail) : null;
-		const reservation = reserveObservation(readMaxBytes(), options);
+		// Reading the session's own offload files bypasses the shared turn pool
+		// (an optionless reservation is untracked): the "full: <path>" escape
+		// hatch appears exactly when the pool is exhausted, so charging these
+		// reads to it made the hatch a dead end. The per-call byte cap still
+		// bounds each slice.
+		const reservation = isSessionOffloadPath(filePath, options?.sessionId)
+			? reserveObservation(readMaxBytes())
+			: reserveObservation(readMaxBytes(), options);
 		try {
 			const stat = statSync(filePath);
 			if (!stat.isFile()) return { kind: "error", message: `read: not a file: ${filePath}` };

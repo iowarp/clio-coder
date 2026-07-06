@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { DEFAULT_MAX_BYTES } from "./truncate.js";
@@ -100,6 +100,19 @@ export function writeToolOffload(
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * True when filePath points inside this session's offload scratch directory
+ * (where {@link writeToolOffload} spills full results). Reads of the session's
+ * own offloaded output are exempt from the per-turn observation pool: the
+ * "full: <path>" escape hatch a truncation stub offers must stay readable
+ * exactly when that pool is exhausted, which is when the stub appears.
+ */
+export function isSessionOffloadPath(filePath: string, sessionId: string | undefined): boolean {
+	const dir = join(clioStateDir(), "scratch", safePathSegment(sessionId ?? "no-session"));
+	const rel = relative(dir, resolve(filePath));
+	return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 function bracketedHint(spec: ToolSpec, offloadPath: string | null): string {
