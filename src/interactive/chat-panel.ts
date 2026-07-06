@@ -71,6 +71,15 @@ type ToolSegment = {
 	result?: unknown;
 	/** True once `tool_execution_end` has landed (success or error). */
 	finished: boolean;
+	/**
+	 * True when the segment was force-settled without its own end event
+	 * (blocked at admission, aborted mid-batch, id reused). A late
+	 * `tool_execution_end` may upgrade such a segment with the call's true
+	 * result; a segment finished by its own end event is never overwritten.
+	 * The explicit `| undefined` allows the upgrade path to clear the flag
+	 * under `exactOptionalPropertyTypes: true`.
+	 */
+	settledWithoutResult?: boolean | undefined;
 	/** True when the finished result was an error. Meaningful only after `finished`. */
 	isError: boolean;
 	/** When true, render the full structured block instead of the collapsed subline. */
@@ -497,6 +506,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (seg.finished) return;
 		seg.finished = true;
 		seg.isError = true;
+		seg.settledWithoutResult = true;
 		if (seg.durationMs === undefined && seg.startedAtMs !== undefined) {
 			seg.durationMs = Math.max(1, now() - seg.startedAtMs);
 		}
@@ -510,10 +520,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * context-engine notice) splits the transcript, so an in-flight call's
 	 * segment can live in an earlier assistant entry than the tail. Unfinished
 	 * segments win over finished ones so an id the model reuses binds to the
-	 * live call, not the settled one.
+	 * live call, not the settled one. Among finished segments only a
+	 * force-settled one (no end event of its own) is returned: a late true
+	 * result may upgrade the synthetic settle, but a segment that finished
+	 * with its own result is never rewritten after the fact.
 	 */
 	const findToolSegment = (toolCallId: string): ToolSegment | undefined => {
-		let finishedMatch: ToolSegment | undefined;
+		let settledMatch: ToolSegment | undefined;
 		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
 			const entry = transcript[entryIndex];
 			if (entry?.role !== "assistant") continue;
@@ -521,10 +534,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const seg = entry.segments[segIndex];
 				if (seg?.kind !== "tool" || seg.id !== toolCallId) continue;
 				if (!seg.finished) return seg;
-				finishedMatch ??= seg;
+				if (seg.settledWithoutResult === true) settledMatch ??= seg;
 			}
 		}
-		return finishedMatch;
+		return settledMatch;
 	};
 
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
@@ -771,6 +784,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.result = event.result;
 					tool.isError = event.isError;
 					tool.finished = true;
+					// The true result replaces a synthetic settle; from here on the
+					// segment is model-finished and immutable to later end events.
+					tool.settledWithoutResult = undefined;
 					// The chat loop enriches tool_execution_end with durationMs and the
 					// persisted resultSummary (bytes, truncated, offloadPath,
 					// observation counts); carry both so the ledger line and replay

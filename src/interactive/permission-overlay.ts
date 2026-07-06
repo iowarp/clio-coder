@@ -42,6 +42,29 @@ function oneLine(value: string): string {
 	return value.replace(/\s+/g, " ").trim();
 }
 
+const ESC_CHAR = String.fromCharCode(27);
+const BEL_CHAR = String.fromCharCode(7);
+// Built through the constructor so no control character appears in a regex
+// literal. OSC sequences terminate on BEL, ST (ESC backslash), or end of
+// input; CSI sequences are parameter bytes then one final byte.
+const OSC_PATTERN = new RegExp(`${ESC_CHAR}\\][\\s\\S]*?(?:${BEL_CHAR}|${ESC_CHAR}\\\\|$)`, "g");
+const CSI_PATTERN = new RegExp(`${ESC_CHAR}\\[[0-9;?]*[0-9A-Za-z]`, "g");
+
+/**
+ * Neutralize terminal escape sequences and control bytes before a value from
+ * tool args reaches the approval overlay. A hostile command string could
+ * otherwise style or spoof the exact UI the operator uses to approve it.
+ */
+function sanitizeForDisplay(value: string): string {
+	const stripped = value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
+	let out = "";
+	for (const ch of stripped) {
+		const code = ch.codePointAt(0) ?? 0;
+		out += code < 0x20 || code === 0x7f ? " " : ch;
+	}
+	return out;
+}
+
 function axisLabel(axis: ApprovalRequestView["axis"], style: ApprovalRequestView["origin"]["kind"]): string {
 	if (axis.kind === "net") return `safety-net rail ${axis.ruleId}`;
 	return style === "worker" ? `autonomy level ${axis.level}` : `autonomy level (${axis.level})`;
@@ -67,12 +90,12 @@ export function permissionOverlayTitle(): string {
 export function describeCallTarget(args: Record<string, unknown> | undefined): string {
 	if (!args) return "";
 	const str = (value: unknown): string | null =>
-		typeof value === "string" && value.trim().length > 0 ? oneLine(value) : null;
+		typeof value === "string" && value.trim().length > 0 ? oneLine(sanitizeForDisplay(value)).trim() || null : null;
 	const candidate = str(args.command) ?? str(args.path) ?? str(args.file_path) ?? str(args.name) ?? str(args.pattern);
 	if (candidate) return candidate;
 	try {
 		const json = JSON.stringify(args);
-		return json === "{}" || json === undefined ? "" : oneLine(json).slice(0, 120);
+		return json === "{}" || json === undefined ? "" : oneLine(sanitizeForDisplay(json)).slice(0, 120);
 	} catch {
 		return "";
 	}
