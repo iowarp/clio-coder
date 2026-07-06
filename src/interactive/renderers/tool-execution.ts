@@ -427,8 +427,22 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
 	git: (args) => buildFieldSublineBody(args, "op", "git "),
 	verify: (args) => buildFieldSublineBody(args, "check", "verifying "),
-	code_nav: (args) => buildFieldSublineBody(args, "query", "navigating ", { wrapInBackticks: true }),
-	context: (args) => buildFieldSublineBody(args, "scope", "context "),
+	code_nav: (args) => {
+		const mode = readStringField(args, "mode");
+		const query = readStringField(args, "query")?.trim() ?? "";
+		const queryPart = query.length > 0 ? ` \`${truncate(query, ARG_PREVIEW_LIMIT)}\`` : "";
+		if (mode !== null && mode.length > 0) return `navigating ${mode}${queryPart}`;
+		return queryPart.length > 0 ? `navigating${queryPart}` : null;
+	},
+	context: (args) => {
+		const scope = readStringField(args, "scope");
+		if (scope === null || scope.length === 0) return null;
+		const query = readStringField(args, "query")?.trim() ?? "";
+		const name = readStringField(args, "name")?.trim() ?? "";
+		if (scope === "docs" && query.length > 0) return `context docs \`${truncate(query, ARG_PREVIEW_LIMIT)}\``;
+		if (scope === "skills" && name.length > 0) return `context skills ${truncate(name, ARG_PREVIEW_LIMIT)}`;
+		return `context ${scope}`;
+	},
 	artifact: (args) => buildFieldSublineBody(args, "kind", "writing "),
 	monitor: (args) => buildFieldSublineBody(args, "run_id", "monitoring "),
 	steer: (args) => buildFieldSublineBody(args, "run_id", "steering "),

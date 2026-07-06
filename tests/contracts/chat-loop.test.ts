@@ -462,7 +462,12 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 		strictEqual(closingEnds.length, 1, "the closing message is shown live exactly once");
 	});
 
-	it("keeps a bare operator cancel as an empty aborted turn", async () => {
+	it("closes a bare operator cancel with the cancellation notice, not aborted noise", async () => {
+		// Regression for the v0.2.8 demo session: a bare Esc cancel rendered
+		// "[Clio Coder] active response cancelled." immediately followed by
+		// "[aborted] Request was aborted" — the empty aborted turn the abort
+		// leaves behind. The cancel notice is the closing turn; the aborted
+		// noise must be suppressed in both the ledger and the live transcript.
 		const entries: SessionEntry[] = [];
 		const bus = createSafeEventBus();
 		const aborts: Array<{ source?: string }> = [];
@@ -470,6 +475,7 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 			aborts.push(payload as { source?: string });
 		});
 		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
+		const seen: ChatLoopEvent[] = [];
 		const loop = createChatLoop({
 			getSettings: () => settings(),
 			providers: providers(),
@@ -493,13 +499,81 @@ describe("contracts/chat-loop loop-guard interrupt", () => {
 			}),
 		} as never);
 		holder.loop = loop;
+		loop.onEvent((event: ChatLoopEvent) => seen.push(event));
 
 		await loop.submit("stop");
 
 		const assistantEntries = entries.filter(isAssistantMessageEntry);
-		strictEqual(assistantEntries.length, 1, "the empty aborted turn is preserved for a bare cancel");
-		strictEqual((assistantEntries[0]?.payload as { stopReason?: string }).stopReason, "aborted");
+		strictEqual(assistantEntries.length, 1, "exactly one assistant turn: the durable cancellation notice");
+		const payload = assistantEntries[0]?.payload as { text?: string; stopReason?: string };
+		strictEqual(payload.text, "[Clio Coder] active response cancelled.");
+		ok(payload.stopReason !== "aborted", "the empty aborted turn stays out of the ledger");
+		const abortedEnds = seen.filter(
+			(event) =>
+				event.type === "message_end" && (event as { message?: { stopReason?: string } }).message?.stopReason === "aborted",
+		);
+		strictEqual(abortedEnds.length, 0, "the aborted message never reaches the live transcript");
 		strictEqual(aborts.find((evt) => evt.source === "stream_cancel")?.source, "stream_cancel");
+	});
+
+	it("preserves the run's real usage when the abort path replaces agent_end messages", async () => {
+		// The engine's failure path emits agent_end with one synthetic zero-usage
+		// message; the loop must rebuild the run window from agent state so the
+		// footer summary, session totals, and cache records keep the real spend.
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		const holder: { loop?: ReturnType<typeof createChatLoop> } = {};
+		const seen: ChatLoopEvent[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				agent.state.messages.push(...inputMessages(input));
+				await agent.emit({ type: "agent_start" } as never);
+				const worked = {
+					role: "assistant",
+					content: [{ type: "text", text: "gathering" }],
+					stopReason: "toolUse",
+					usage: { input: 52_000, output: 900, cacheRead: 0, cacheWrite: 0 },
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(worked);
+				await agent.emit({ type: "message_end", message: worked });
+				holder.loop?.cancel({
+					reason: "[Clio Coder] loop guard stopped this turn: context repeated.",
+					source: "loop_guard",
+					auditReason: "loop: context repeated 4x",
+				});
+				const aborted = {
+					role: "assistant",
+					content: [],
+					stopReason: "aborted",
+					errorMessage: "Request was aborted",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(aborted);
+				await agent.emit({ type: "message_end", message: aborted });
+				// The failure path replaces the run window with the synthetic message.
+				await agent.emit({ type: "agent_end", messages: [aborted] });
+			}),
+		} as never);
+		holder.loop = loop;
+		loop.onEvent((event: ChatLoopEvent) => seen.push(event));
+
+		await loop.submit("audit the docs");
+
+		const end = seen.find((event) => event.type === "agent_end") as
+			| { messages?: Array<{ usage?: { input?: number; output?: number } }> }
+			| undefined;
+		ok(end, "agent_end reaches the public stream");
+		ok((end?.messages?.length ?? 0) >= 2, "the enriched agent_end carries the run window, not one synthetic message");
+		const inputTokens = (end?.messages ?? []).reduce((sum, message) => sum + (message.usage?.input ?? 0), 0);
+		strictEqual(inputTokens, 52_000, "the run's real input tokens survive the abort");
 	});
 });
 

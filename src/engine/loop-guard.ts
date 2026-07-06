@@ -226,11 +226,24 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		return next;
 	};
 
+	// A result whose observation envelope shows a truncated body with zero
+	// items is a cap stub or a budget-exhausted notice: the call technically
+	// returned "ok" but the model saw none of the payload. Counting it as a
+	// success would make the block reason claim "this exact call already
+	// succeeded; re-read that result" about a result that holds nothing.
+	const resultCarriesEvidence = (details: MiddlewareHookInput["toolResultDetails"]): boolean => {
+		const observation = details?.observation;
+		if (observation === null || typeof observation !== "object" || Array.isArray(observation)) return true;
+		const record = observation as { truncated?: unknown; shownCount?: unknown };
+		return !(record.truncated === true && record.shownCount === 0);
+	};
+
 	// after_tool touchpoint: a successful call (result kind "ok") records a
 	// success for its canonical fingerprint. Blocked calls never reach here
 	// (admission returns before execution), so only real results anchor.
 	const recordSuccessfulResult = (input: MiddlewareHookInput): void => {
 		if (input.metadata?.resultKind !== "ok") return;
+		if (!resultCarriesEvidence(input.toolResultDetails)) return;
 		const tool = input.toolName;
 		if (typeof tool !== "string" || tool.length === 0) return;
 		bumpBoundedCounter(succeededFingerprints, hashToolCall(tool, input.toolArgs ?? {}), SUCCEEDED_FINGERPRINT_LIMIT);

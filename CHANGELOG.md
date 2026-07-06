@@ -10,6 +10,33 @@ still change interfaces.
 
 ## Unreleased
 
+- Fixed the observation-budget retry trap: when the shared per-turn pool (not
+  the tool's own cap) bounds a JSON observation such as a docs search, the cap
+  stub now says the budget is nearly exhausted and directs the model to answer
+  from what it gathered or continue next turn, instead of a bare "result
+  exceeded" error that invited retries which could never fit. Stubbed results
+  also report zero items shown, so the ledger no longer renders "5/288
+  sections" with a success glyph for a zero-content result, and the loop
+  guard's "this call already succeeded, re-read that result" anchor no longer
+  counts stubs as evidence.
+- Docs-scope context payloads are emitted as compact JSON instead of
+  pretty-printed, roughly halving what each search charges against the shared
+  per-turn observation pool.
+- The read tool's past-end-of-file error now states that the file has no
+  further content and that earlier reads already returned everything, which
+  stops weak local models from walking the file tail in a re-read spiral.
+- Aborted turns keep their real token usage: the engine's abort path used to
+  replace the run's messages with one synthetic zero-usage message, so a
+  cancelled turn reported `up 0 down 0` and `tools none` in the footer and
+  undercounted session totals. The run's message window is now restored at
+  agent end, and the loop-guard/cancel provenance survives into the settled
+  turn summary.
+- A bare operator cancel (Esc) now closes the turn with the "active response
+  cancelled" notice alone; the redundant "[aborted] Request was aborted" turn
+  is suppressed in both the live transcript and the session ledger.
+- Tool ledger rows identify the actual call: context rows show the docs query
+  or skill name instead of just the scope, and code_nav rows fall back to the
+  mode instead of rendering an empty backtick pair.
 - Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
   cancels active runs and closes Clio-owned overlays, permission prompts, and
   ask_user prompts.

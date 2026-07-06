@@ -295,6 +295,47 @@ describe("block-reason evidence anchor", () => {
 		ok(blocked.kind === "blocked" && blocked.reason.includes("Change strategy"), "still asks for a strategy change");
 	});
 
+	it("does not anchor on cap stubs that showed the model nothing", async () => {
+		// A budget-stubbed observation returns kind "ok" but the model saw none of
+		// the payload. Telling it "this exact call already succeeded; re-read that
+		// result" about an empty stub is exactly the wrong directive.
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = createRegistry({ safety, middleware: bundle.contract });
+		registry.register({
+			name: ToolNames.Context,
+			description: "returns a JSON cap stub",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			run: async () => ({
+				kind: "ok",
+				output: '{"error":"result exceeded 2.9KB"}',
+				details: {
+					observation: {
+						tool: "context",
+						unit: "sections",
+						shownCount: 0,
+						totalCount: 288,
+						shownBytes: 33,
+						totalBytes: 7000,
+						truncated: true,
+						format: "json",
+					},
+				},
+			}),
+		});
+		const call = { tool: ToolNames.Context, args: { scope: "docs", query: "docs overview" } };
+		for (let i = 1; i < LOOP_THRESHOLD; i++) {
+			strictEqual((await registry.invoke(call, { turnId: "t1" })).kind, "ok");
+		}
+		const blocked = await registry.invoke(call, { turnId: "t1" });
+		ok(blocked.kind === "blocked" && blocked.reason.includes("loop detected"), "still reports the loop");
+		ok(
+			blocked.kind === "blocked" && !blocked.reason.includes("already succeeded"),
+			"a truncated zero-shown stub is not evidence the model can re-read",
+		);
+	});
+
 	it("omits the success anchor when the looped call never returned a successful result", async () => {
 		const safety = testSafety();
 		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });

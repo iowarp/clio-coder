@@ -375,19 +375,26 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			const truncated = prev.phase === "idle";
 			const start = prev.since > 0 ? prev.since : ctx.now;
 			const model = targetModel(ctx);
+			const summary = buildSummary({
+				startedAt: start,
+				endedAt: ctx.now,
+				modelId: model.modelId,
+				targetId: model.targetId,
+				messages: event.messages,
+				watchdogPeak: prev.watchdogPeak,
+				cancelled: false,
+				truncated,
+			});
+			// run_aborted may already have stamped this run's abort provenance
+			// (loop guard, dispatch drain, user cancel). The rebuild from the
+			// settled message window keeps that detail instead of dropping it.
+			if (prev.phase === "ended" && prev.summary?.stopDetail !== undefined && summary.stopDetail === undefined) {
+				summary.stopDetail = prev.summary.stopDetail;
+			}
 			return {
 				...refreshMeaningful(prev, ctx),
 				phase: "ended",
-				summary: buildSummary({
-					startedAt: start,
-					endedAt: ctx.now,
-					modelId: model.modelId,
-					targetId: model.targetId,
-					messages: event.messages,
-					watchdogPeak: prev.watchdogPeak,
-					cancelled: false,
-					truncated,
-				}),
+				summary,
 				resumePhase: undefined,
 				activePhases: undefined,
 				overlayStack: [],

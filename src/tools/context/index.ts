@@ -245,11 +245,14 @@ function runDocsScope(
 		// pick a search term, instead of an error that wastes a round.
 		const corpus = listDocsCorpus();
 		if (!corpus.ok) return { kind: "error", message: `context: ${corpus.message}` };
+		// Compact JSON: docs payloads charge the shared per-turn observation
+		// pool, and 2-space indentation roughly doubles the bytes for zero
+		// model-visible information.
 		return finalizeObservation({
 			tool: ToolNames.Context,
 			unit: "entries",
 			format: "json",
-			output: JSON.stringify(corpus.payload, null, 2),
+			output: JSON.stringify(corpus.payload),
 			shownCount: corpus.fileCount,
 			totalCount: corpus.fileCount,
 			truncated: false,
@@ -263,7 +266,7 @@ function runDocsScope(
 		tool: ToolNames.Context,
 		unit: "sections",
 		format: "json",
-		output: JSON.stringify(outcome.payload, null, 2),
+		output: JSON.stringify(outcome.payload),
 		shownCount: outcome.resultCount,
 		totalCount: outcome.rankedTotal,
 		truncated: outcome.resultCount < outcome.rankedTotal,
