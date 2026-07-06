@@ -7,6 +7,31 @@ function padAnsi(text: string, width: number): string {
 	return `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
 }
 
+/**
+ * Join `units` onto `prefix` with the ` · ` separator, fitting the result to
+ * `maxWidth` without cutting a unit mid-glyph. A unit that would overflow is
+ * dropped whole, along with every later unit, and the line closes with one
+ * space plus a dim ellipsis. Two columns are reserved for that marker while
+ * placing every unit except the last. When even the first unit cannot fit,
+ * `prefix + first unit` is hard-truncated with an ellipsis so a one-unit line
+ * still marks its cut. Width accounting is ANSI-aware via visibleWidth.
+ */
+export function fitUnits(theme: ClioTheme, prefix: string, units: readonly string[], maxWidth: number): string {
+	const sep = " · ";
+	let line = prefix;
+	for (let index = 0; index < units.length; index += 1) {
+		const candidate = index === 0 ? `${line}${units[index]}` : `${line}${sep}${units[index]}`;
+		// Reserve two columns for the ` …` marker unless this is the last unit.
+		const reserve = index < units.length - 1 ? 2 : 0;
+		if (visibleWidth(candidate) + reserve > maxWidth) {
+			if (index === 0) return truncateToWidth(candidate, Math.max(0, maxWidth), "…", false);
+			return `${line} ${theme.fg("dim", "…")}`;
+		}
+		line = candidate;
+	}
+	return line;
+}
+
 export interface RuleOptions {
 	left?: string;
 	right?: string;

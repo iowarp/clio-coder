@@ -105,7 +105,7 @@ describe("contracts/tasks-overlay", () => {
 		ok(body.includes("dropped superseded"), body);
 	});
 
-	it("renders dispatch and evidence proof references for each active run id", () => {
+	it("renders one in-flight header line with full run ids and no per-run template lines", () => {
 		const body = plainBody(
 			board({
 				activeRunIds: ["run-abc123456789", "run-def987654321"],
@@ -113,9 +113,14 @@ describe("contracts/tasks-overlay", () => {
 		);
 
 		ok(body.includes("proof task-ledger:run-abc123456789"), body);
-		ok(body.includes("run run-abc123456789 dispatch:run-abc123456789 evidence:run-abc123456789"), body);
-		ok(body.includes("run run-def987654321 dispatch:run-def987654321 evidence:run-def987654321"), body);
-		ok(body.includes("dispatched runs in flight run-abc123, run-def987"), body);
+		// One in-flight header line lists the full ids; the per-run dispatch:/
+		// evidence: template lines and the bottom in-flight block are retired.
+		ok(body.includes("in flight run-abc123456789 · run-def987654321"), body);
+		ok(!body.includes("dispatch:run-abc123456789"), body);
+		ok(!body.includes("evidence:run-abc123456789"), body);
+		ok(!body.includes("dispatched runs in flight"), body);
+		// Full ids, never the old 10-char slice.
+		ok(!body.includes("run-abc123,"), body);
 	});
 
 	it("keeps long titles and run ids within the requested width", () => {
@@ -131,14 +136,29 @@ describe("contracts/tasks-overlay", () => {
 		for (const line of lines) ok(visibleWidth(line) <= 34, `line overflowed: ${stripAnsi(line)}`);
 	});
 
-	it("adds a conservative evidence reference when a completed note contains a run id", () => {
+	it("marks a clipped row with an ellipsis instead of a hard cut", () => {
+		const clipped = plainBody(
+			board({
+				title: "Ship a feature with a title long enough to force truncation in the overlay body",
+			}),
+			40,
+		);
+		const titleRow = clipped.split("\n").find((line) => line.startsWith("Ship a feature"));
+		ok(titleRow, clipped);
+		ok(titleRow.includes("…"), `clipped title should carry an ellipsis, got: ${titleRow}`);
+	});
+
+	it("renders a completed evidence note verbatim without a derived run-id suffix", () => {
 		const body = plainBody(
 			board({
 				tasks: [{ id: "t1", title: "verify it", status: "completed", evidence: "verified with run-proof-123" }],
 			}),
 		);
 
-		ok(body.includes("evidence verified with run-proof-123 evidence:run-proof-123"), body);
+		ok(body.includes("evidence verified with run-proof-123"), body);
+		// The derived evidence:<runId> suffix is gone; the id it echoed survives
+		// only inside the evidence prose the agent wrote.
+		ok(!body.includes("evidence:run-proof-123"), body);
 	});
 
 	it("preserves Escape close behavior", () => {

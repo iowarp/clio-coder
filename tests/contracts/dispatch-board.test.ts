@@ -434,3 +434,46 @@ describe("dispatch board card proof line", () => {
 		strictEqual(withNone, baseline, "an unknown evidence state must not add a card line");
 	});
 });
+
+describe("dispatch board truncation grammar", () => {
+	// Strip the frame borders and trailing pad so an assertion sees the row's
+	// own last glyph rather than the card's right corner.
+	const rowContent = (line: string): string => stripSgr(line).replace(/^│ /, "").replace(/ │$/, "").replace(/\s+$/, "");
+
+	it("fits an overflowing proof row without a dangling separator at width 80", () => {
+		const snap = makeSnapshot({
+			notices: [evidenceNotice("run-1", "error", "sandbox denied: bench script wrote outside workspace")],
+		});
+		const lines = renderDispatchCard(makeRow({ status: "failed" }), 80, deriveRunEvidenceState(snap, "run-1"));
+		const proof = lines.find((line) => stripSgr(line).includes("proof") && stripSgr(line).includes("failed"));
+		ok(proof, lines.map(stripSgr).join("\n"));
+		const content = rowContent(proof);
+		ok(!content.endsWith("·"), `proof row must not end on a dangling separator: "${content}"`);
+		ok(content.endsWith("…"), `proof row should close on a whole unit or a dim ellipsis: "${content}"`);
+		for (const line of lines) strictEqual(visibleWidth(line), 80, `line "${line}" should span 80 columns`);
+	});
+
+	it("marks a clipped target model id with an ellipsis at width 80", () => {
+		const lines = renderDispatchCard(
+			makeRow({
+				targetId: "blade-llamacpp-server-primary-fallback",
+				wireModelId: "meta-llama-3.3-70b-instruct-q4_k_m-131072ctx",
+			}),
+			80,
+		);
+		const target = lines.map(stripSgr).find((line) => line.includes("target"));
+		ok(target, lines.map(stripSgr).join("\n"));
+		ok(target.includes("…"), `a clipped model id should carry an ellipsis, got: ${target}`);
+		ok(!target.includes("131072ctx"), `the full model id must not survive the clip, got: ${target}`);
+		for (const line of lines) strictEqual(visibleWidth(line), 80, `line "${line}" should span 80 columns`);
+	});
+
+	it("marks a clipped task-island agent label with an ellipsis and keeps its status", () => {
+		const rows = [makeRow({ agentId: "integration-benchmark-harness-with-a-very-long-agent-identifier" })];
+		const lines = formatTaskIslandLines(rows).map(stripSgr);
+		const labelRow = lines.find((line) => line.includes("integration-benchmark"));
+		ok(labelRow, lines.join("\n"));
+		ok(labelRow.includes("…"), `a clipped agent label should carry an ellipsis, got: ${labelRow}`);
+		ok(labelRow.includes("running"), `the status word should survive the label clip, got: ${labelRow}`);
+	});
+});
