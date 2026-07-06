@@ -322,6 +322,24 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			if (prev.phase === "stuck" && prev.resumePhase === "tool_running") {
 				return { ...next, phase: "preparing", resumePhase: undefined, tool: undefined, toolStartedAt: undefined };
 			}
+			// A blocked call's end can land while an overlay is still visible
+			// (permission prompt not yet resolved, retry or dispatch in front).
+			// Without scrubbing the stashed frames, the eventual overlay pop
+			// restores phase tool_running with this already-finished call's
+			// overlay, leaving a perpetual "running tool" display.
+			if (isOverlayPhase(prev.phase)) {
+				return {
+					...next,
+					resumePhase: prev.resumePhase === "tool_running" ? "preparing" : prev.resumePhase,
+					tool: undefined,
+					toolStartedAt: undefined,
+					overlayStack: (prev.overlayStack ?? []).map((frame) => ({
+						...frame,
+						tool: undefined,
+						resumePhase: frame.resumePhase === "tool_running" ? "preparing" : frame.resumePhase,
+					})),
+				};
+			}
 			return next;
 		}
 		case "thinking_delta": {
