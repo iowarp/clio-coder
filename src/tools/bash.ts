@@ -64,6 +64,37 @@ function withDetails(base: ToolResult, details: ToolResultDetails | undefined): 
 	return { ...base, details };
 }
 
+// A bash command whose first word is a plain file/dir observer has a
+// structured OBSERVE counterpart with paged, budget-aware results.
+const OBSERVE_COMMAND_PATTERN = /^\s*(?:cat|head|tail|ls|grep|rg|find)\b/;
+
+const OBSERVE_NUDGE_SESSION_LIMIT = 64;
+const observeNudgeSeenSessions = new Set<string>();
+
+/**
+ * One nudge per session, on the first successful observer-shaped bash call.
+ * Point-of-failure conditioning like the edit-result validation nudge:
+ * measured orientation runs opened with ten bash cat/ls calls while the
+ * structured observe tools sat unused in the surface; result-time text beats
+ * static prompt lines. Appending to the result keeps the per-session tool
+ * surface and prompt prefix byte-stable.
+ */
+function observeToolsNudge(command: string, sessionId: string | undefined): string {
+	if (!OBSERVE_COMMAND_PATTERN.test(command)) return "";
+	const key = sessionId ?? "no-session";
+	if (observeNudgeSeenSessions.has(key)) return "";
+	if (observeNudgeSeenSessions.size >= OBSERVE_NUDGE_SESSION_LIMIT) {
+		const oldest = observeNudgeSeenSessions.values().next().value;
+		if (oldest !== undefined) observeNudgeSeenSessions.delete(oldest);
+	}
+	observeNudgeSeenSessions.add(key);
+	return (
+		"\n\n[note: prefer the structured observe tools over shell file inspection: read pages files with " +
+		"offset/limit, ls lists directories, grep and find search, code_nav maps symbols. Their results are " +
+		"capped and continuable; keep bash for builds, git, and scripts.]"
+	);
+}
+
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
@@ -127,7 +158,11 @@ export const bashTool: ToolSpec = {
 				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
 				return withDetails({ kind: "error", message }, shaped.details);
 			}
-			return withDetails({ kind: "ok", output: shaped.text.length > 0 ? shaped.text : "(no output)" }, shaped.details);
+			const body = shaped.text.length > 0 ? shaped.text : "(no output)";
+			return withDetails(
+				{ kind: "ok", output: `${body}${observeToolsNudge(args.command, options?.sessionId)}` },
+				shaped.details,
+			);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { kind: "error", message: `bash: ${msg}` };
