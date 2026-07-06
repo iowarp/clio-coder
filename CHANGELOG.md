@@ -10,6 +10,16 @@ still change interfaces.
 
 ## Unreleased
 
+- Context meters now draw the autocompact reserve with its own medium-shade
+  glyph in the footer bars, the expanded dashboard, and the /context-view
+  overlay, so a window holding a large reserve no longer looks nearly full,
+  and the distinction survives without color. An unmeasured context window
+  reads `?%` everywhere; the old `--%` placeholder is gone.
+- The expanded footer dashboard shares ultrawide terminals fairly: the
+  CONTEXT quadrant can now grow wide enough to show its fill and chat facts
+  unclipped, with a finer meter, and the category legend wraps by whole
+  entries instead of clipping mid-label. ACTIVITY absorbs only the width left
+  after every quadrant reaches its useful size.
 - The system prompt's Tool Contract now teaches a deterministic routing order
   (structured observation before bash, task board for multi-step work, bounded
   dispatch with receipt synthesis, validation before final claims) and a

@@ -1,7 +1,7 @@
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
-import { type ClioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
+import { type ClioTheme, formatCompactMs, formatContextPercent, GLYPH } from "./theme/index.js";
 
 /**
  * Render a token count with a single-letter magnitude suffix so the footer
@@ -122,8 +122,7 @@ function contextBarGlyphs(): { filled: string; free: string } {
 }
 
 function contextPercentLabel(percent: number | null): string {
-	const text = percent === null ? "--%" : `${percent.toFixed(1)}%`;
-	return `  ${text.padEnd(CONTEXT_PERCENT_FIELD_WIDTH, " ")}`;
+	return `  ${formatContextPercent(percent).padEnd(CONTEXT_PERCENT_FIELD_WIDTH, " ")}`;
 }
 
 function largestRemainderCells(values: readonly [number, number, number], filled: number): [number, number, number] {

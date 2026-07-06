@@ -51,10 +51,10 @@ describe("IT1: Segmented context bar", () => {
 		strictEqual(stripped, "▰▰▱▱▱▱▱▱  30.0% ");
 	});
 
-	it("handles window <= 0 path gracefully", () => {
+	it("handles window <= 0 path gracefully with the unified ?% unknown grammar", () => {
 		const bar = buildSegmentedContextBar(theme, 10, 0, undefined);
 		const stripped = strip(bar);
-		strictEqual(stripped, "▱▱▱▱▱▱▱▱▱▱  --%   ");
+		strictEqual(stripped, "▱▱▱▱▱▱▱▱▱▱  ?%    ");
 	});
 
 	it("keeps percent label width stable and validates visibleWidth", () => {
@@ -588,7 +588,7 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 			agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
 			status: { ...status, phase: "idle" },
 		});
-		for (const w of [70, 80, 100, 119, 120, 134]) {
+		for (const w of [70, 80, 100, 119, 120, 134, 200, 240]) {
 			const lines = renderFooterStatusLines(state, w);
 			for (const line of lines) {
 				ok(visibleWidth(line) <= w, `width ${w} line "${strip(line)}" overflowed with ${visibleWidth(line)}`);

@@ -26,6 +26,10 @@ export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, Clio
 export function contextCategoryGlyph(category: ContextLedgerCategory): string {
 	const filled = visibleSingle(GLYPH.contextFull) ? GLYPH.contextFull : GLYPH.barFull;
 	const free = visibleSingle(GLYPH.contextFree) ? GLYPH.contextFree : GLYPH.barEmpty;
+	// The autocompact reserve is held-back headroom, not consumed context; it
+	// must stay glyph-distinct from both filled and free so a large reserve
+	// never makes 85% and 97% bars look identical when color is unavailable.
+	if (category === "reserve") return GLYPH.contextReserve;
 	return category === "free" ? free : filled;
 }
 
