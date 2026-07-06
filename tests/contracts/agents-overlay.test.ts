@@ -45,6 +45,14 @@ describe("contracts/agents-overlay", () => {
 						capabilityClass: "write",
 						skills: ["typescript"],
 					},
+					{
+						id: "scout",
+						description: "Fast reconnaissance",
+						audience: "shadow",
+						category: "research",
+						capabilityClass: "read-only",
+						skills: [],
+					},
 				],
 				listDelegationAgents: () => [
 					{
@@ -65,9 +73,10 @@ describe("contracts/agents-overlay", () => {
 		strictEqual(options.filterable, true);
 		deepStrictEqual(
 			options.items.map((item) => item.group),
-			["Fleet agents", "ACP delegation agents"],
+			["Fleet agents", "Fleet agents", "ACP delegation agents"],
 		);
 		ok(options.items[0]?.meta?.includes("base/build/write"));
-		ok(options.items[1]?.meta?.includes("governance=clio-policy"));
+		ok(options.items[1]?.meta?.includes("shadow/research/read-only"));
+		ok(options.items[2]?.meta?.includes("governance=clio-policy"));
 	});
 });

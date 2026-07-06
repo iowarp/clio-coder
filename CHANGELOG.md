@@ -10,6 +10,11 @@ still change interfaces.
 
 ## Unreleased
 
+- Fleet settings now expose native shadow-agent routing: `/agents` lists
+  shadow agents, Settings > Fleet points at worker profiles and bindings, and
+  `/fleet` lists bindable native agents, can bind shadow agents to a
+  target/model profile, and can change a bound profile's model from the
+  bindings tab.
 - Local inference targets are now treated as multi-model servers with finite
   VRAM instead of single-model slots. One shared residency reconciler drives
   llama.cpp routers, LM Studio, and Ollama: llama.cpp reads the router's
