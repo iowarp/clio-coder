@@ -287,6 +287,19 @@ describe("contracts/tools basic happy paths", () => {
 		ok(result.details?.diff);
 	});
 
+	it("editTool success output carries the validation nudge at the point of failure", async () => {
+		const root = scratchDir();
+		const filePath = join(root, "nudge.ts");
+		writeFileSync(filePath, "const n = 1;\n", "utf8");
+		const result = await editTool.run({ path: filePath, edits: [{ oldText: "const n = 1;", newText: "const n = 2;" }] });
+		strictEqual(result.kind, "ok");
+		ok(
+			result.kind === "ok" &&
+				result.output.includes("Validate now: rerun the failing test or verify; navigation tools do not validate edits."),
+			"the mutation result names the real validation path",
+		);
+	});
+
 	it("editTool accepts the legacy top-level {oldText,newText} shape", async () => {
 		const root = scratchDir();
 		const filePath = join(root, "legacy.ts");
@@ -1478,7 +1491,7 @@ describe("contracts/tools prompt hints", () => {
 		);
 		strictEqual(
 			hinted.get("ask_user"),
-			'Use ask_user for operator interviews, confirmations, and choices: one question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
+			'Use ask_user only when blocked on a decision the request does not answer; never ask about anything the operator already stated. One question per round in interview workflows, up to four tightly related questions otherwise, recommended option first. Finish with action="complete" and a compact decisions array before final prose. If cancelled, continue with defaults and do not ask again.',
 		);
 	});
 });
