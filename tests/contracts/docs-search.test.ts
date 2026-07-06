@@ -138,6 +138,19 @@ describe("contracts/context docs scope", () => {
 		}
 	});
 
+	it("tells the model cited files are bundled docs, never workspace paths", async () => {
+		const result = await contextTool.run({ scope: "docs", query: "autonomy" });
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		const payload = JSON.parse(result.output) as { followUp?: string };
+		// Docs hits cite corpus-relative files that do not exist in the user's
+		// workspace; the follow-up must route depth back through scope=docs so
+		// models never chase the citations with read/find.
+		ok(typeof payload.followUp === "string");
+		ok(payload.followUp.includes("not workspace paths"), payload.followUp);
+		ok(payload.followUp.includes("scope=docs"), payload.followUp);
+	});
+
 	it("lists the corpus instead of erroring when no query is given", async () => {
 		const result = await contextTool.run({ scope: "docs" });
 		strictEqual(result.kind, "ok", "an omitted query lists the corpus rather than returning an error");
