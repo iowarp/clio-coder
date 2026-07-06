@@ -1,6 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import { resetLlamaCppResidencyState } from "../../src/engine/apis/llamacpp-residency.js";
 import {
 	applyOpenAICompatReasoningEstimate,
 	openAICompletionsApiProvider,
@@ -29,6 +30,24 @@ function thinkingMessage(messageUsage: AssistantMessage["usage"]): AssistantMess
 		stopReason: "stop",
 		timestamp: 0,
 	};
+}
+
+function modelsPayload(entries: Array<{ id: string; state: string; tags?: string[] }>): unknown {
+	return {
+		data: entries.map((entry) => ({
+			id: entry.id,
+			object: "model",
+			status: { value: entry.state },
+			...(entry.tags ? { tags: entry.tags } : {}),
+		})),
+	};
+}
+
+function jsonResponse(payload: unknown): Response {
+	return new Response(JSON.stringify(payload), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
 }
 
 describe("openai-completions thinking preservation", () => {
@@ -318,5 +337,88 @@ describe("openai-completions thinking preservation", () => {
 		ok(captured, "onPayload should have captured the body");
 		strictEqual(captured.reasoning_effort, "medium");
 		strictEqual(Object.hasOwn(captured, "chat_template_kwargs"), false);
+	});
+
+	it("awaits llama.cpp router residency before constructing the chat payload", async () => {
+		resetLlamaCppResidencyState();
+		const originalFetch = globalThis.fetch;
+		const events: string[] = [];
+		let modelPolls = 0;
+		globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+			const href = String(url);
+			const method = init?.method ?? "GET";
+			events.push(`${method} ${href}`);
+			if (href === "http://mini.test/v1/models") {
+				modelPolls += 1;
+				return jsonResponse(
+					modelsPayload(
+						modelPolls === 1
+							? [
+									{ id: "MiniCPM5-1B-Q8_0-131K", state: "loaded", tags: ["role:scout", "pinned:true"] },
+									{ id: "old-code", state: "loaded", tags: ["role:code"] },
+									{ id: "new-code", state: "unloaded", tags: ["role:code"] },
+								]
+							: [
+									{ id: "MiniCPM5-1B-Q8_0-131K", state: "loaded", tags: ["role:scout", "pinned:true"] },
+									{ id: "new-code", state: "loaded", tags: ["role:code"] },
+								],
+					),
+				);
+			}
+			if (href === "http://mini.test/models/unload") return jsonResponse({ ok: true });
+			if (href === "http://mini.test/models/load") return jsonResponse({ ok: true });
+			return new Response("data: [DONE]\n\n", {
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+		}) as typeof fetch;
+		try {
+			const model = {
+				id: "new-code",
+				name: "new-code",
+				api: "openai-completions",
+				provider: "llamacpp",
+				baseUrl: "http://mini.test/v1",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 262144,
+				maxTokens: 4096,
+				clio: {
+					targetId: "mini",
+					runtimeId: "llamacpp",
+					lifecycle: "clio-managed",
+					quirks: { thinking: { mechanism: "none" } },
+				},
+			} as unknown as Model<"openai-completions">;
+			const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+			const controller = new AbortController();
+			const stream = openAICompletionsApiProvider.streamSimple(model, context, {
+				apiKey: "fake-key",
+				signal: controller.signal,
+				onPayload: () => {
+					events.push("payload");
+					controller.abort();
+					return undefined;
+				},
+			});
+			try {
+				for await (const _event of stream) {
+					// Drain; aborting inside onPayload can surface as a stream error.
+				}
+			} catch {
+				// Expected on some undici/AbortSignal paths after payload capture.
+			}
+
+			const unloadIndex = events.indexOf("POST http://mini.test/models/unload");
+			const loadIndex = events.indexOf("POST http://mini.test/models/load");
+			const payloadIndex = events.indexOf("payload");
+			ok(unloadIndex >= 0, events.join("\n"));
+			ok(loadIndex > unloadIndex, events.join("\n"));
+			ok(payloadIndex > loadIndex, events.join("\n"));
+		} finally {
+			globalThis.fetch = originalFetch;
+			resetLlamaCppResidencyState();
+		}
 	});
 });

@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { residentModelsSummary } from "../../src/cli/targets.js";
 import {
+	ensureLlamaCppResidency,
 	observeLlamaCppResidency,
 	parseLlamaCppResident,
 	parseLlamaCppResidentModels,
@@ -34,6 +35,13 @@ function fetchRoutes(routes: Record<string, unknown>, calls: string[]): typeof f
 		calls.push(key);
 		return { ok: true, json: async () => routes[key] ?? {} } as Response;
 	}) as typeof fetch;
+}
+
+function jsonResponse(payload: unknown): Response {
+	return new Response(JSON.stringify(payload), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
 }
 
 describe("contracts/llamacpp residency observer", () => {
@@ -167,6 +175,83 @@ describe("contracts/llamacpp residency observer", () => {
 			}) as typeof fetch,
 		});
 		strictEqual(notices.length, 0);
+	});
+
+	it("loads the selected model, unloads prior code residents, and restores the scout", async () => {
+		const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+		let modelPolls = 0;
+		const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+			const method = init?.method ?? "GET";
+			const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+			calls.push({ url: String(url), method, body });
+			if (String(url) === "http://mini:8080/v1/models") {
+				modelPolls += 1;
+				const entries =
+					modelPolls === 1
+						? [
+								{ id: "MiniCPM5-1B-Q8_0-131K", state: "loaded", tags: ["role:scout", "pinned:true"] },
+								{ id: "old-code", state: "loaded", tags: ["role:code"] },
+								{ id: "new-code", state: "unloaded", tags: ["role:code"] },
+							]
+						: modelPolls < 4
+							? [
+									{ id: "MiniCPM5-1B-Q8_0-131K", state: "unloaded", tags: ["role:scout", "pinned:true"] },
+									{ id: "new-code", state: "loaded", tags: ["role:code"] },
+								]
+							: [
+									{ id: "MiniCPM5-1B-Q8_0-131K", state: "loaded", tags: ["role:scout", "pinned:true"] },
+									{ id: "new-code", state: "loaded", tags: ["role:code"] },
+								];
+				return jsonResponse(modelsPayload(entries));
+			}
+			if (String(url) === "http://mini:8080/models/unload" || String(url) === "http://mini:8080/models/load") {
+				return jsonResponse({ ok: true });
+			}
+			throw new Error(`unexpected fetch ${method} ${String(url)}`);
+		}) as typeof fetch;
+
+		await ensureLlamaCppResidency({
+			baseUrl: "http://mini:8080/v1",
+			targetId: "mini",
+			runtimeId: "llamacpp",
+			keepModelId: "new-code",
+			fetchImpl,
+		});
+
+		deepStrictEqual(
+			calls.filter((call) => call.method === "POST").map((call) => [call.url, call.body]),
+			[
+				["http://mini:8080/models/unload", { model: "old-code" }],
+				["http://mini:8080/models/load", { model: "new-code" }],
+				["http://mini:8080/models/load", { model: "MiniCPM5-1B-Q8_0-131K" }],
+			],
+		);
+		ok(
+			!calls.some(
+				(call) => call.url === "http://mini:8080/models/unload" && JSON.stringify(call.body ?? {}).includes("MiniCPM5"),
+			),
+			"scout/pinned resident must never be unloaded",
+		);
+		strictEqual(notices[0]?.kind, "swap");
+		ok(notices[0]?.message.includes("old-code"));
+	});
+
+	it("does not manage non-router llama.cpp model payloads", async () => {
+		const calls: string[] = [];
+		const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+			calls.push(`${init?.method ?? "GET"} ${String(url)}`);
+			return jsonResponse({ data: [{ id: "new-code", object: "model", owned_by: "llamacpp" }] });
+		}) as typeof fetch;
+
+		await ensureLlamaCppResidency({
+			baseUrl: "http://plain-llama:8080/v1",
+			targetId: "plain-llama",
+			runtimeId: "llamacpp",
+			keepModelId: "new-code",
+			fetchImpl,
+		});
+
+		deepStrictEqual(calls, ["GET http://plain-llama:8080/v1/models"]);
 	});
 });
 

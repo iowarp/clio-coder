@@ -23,7 +23,7 @@ import type { ThinkingLevel } from "../../domains/providers/types/capability-fla
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
-import { observeLlamaCppResidency } from "./llamacpp-residency.js";
+import { ensureLlamaCppResidency } from "./llamacpp-residency.js";
 import { LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS, remainingContextMaxTokens } from "./output-budget.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 
@@ -367,6 +367,27 @@ function runtimeMetadata(model: Model<Api>): NonNullable<ClioRuntimeMetadata["cl
 	return (model as Model<Api> & ClioRuntimeMetadata).clio;
 }
 
+function emptyErrorMessage(model: Model<"openai-completions">, message: string): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "error",
+		errorMessage: message,
+		timestamp: Date.now(),
+	};
+}
+
 function malformedToolArgsMessage(
 	model: Model<"openai-completions">,
 	toolName: string,
@@ -585,24 +606,7 @@ function guardMalformedToolCalls(
 			guarded.end();
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			const error: AssistantMessage = {
-				role: "assistant",
-				content: [],
-				api: model.api,
-				provider: model.provider,
-				model: model.id,
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				stopReason: "error",
-				errorMessage: message,
-				timestamp: Date.now(),
-			};
+			const error = emptyErrorMessage(model, message);
 			guarded.push({ type: "error", reason: "error", error });
 			guarded.end(error);
 		}
@@ -617,17 +621,16 @@ function resolvedCapabilitiesForModel(
 	return resolveModelRuntimeCapabilitiesForModel(model, level);
 }
 
-/**
- * Fire-and-forget residency observation for llama.cpp router targets: record
- * a server-side model swap (or double residency) as a runtime notice instead
- * of letting it happen silently. TTL-cached inside the observer; never blocks
- * or fails the stream.
- */
-function observeResidencyForModel(model: Model<"openai-completions">): void {
+function isManagedLlamaCppModel(model: Model<"openai-completions">): boolean {
+	const metadata = runtimeMetadata(model);
+	return model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp" && typeof model.baseUrl === "string";
+}
+
+async function ensureResidencyForModel(model: Model<"openai-completions">): Promise<void> {
 	const metadata = runtimeMetadata(model);
 	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return;
 	if (typeof model.baseUrl !== "string" || model.baseUrl.length === 0) return;
-	void observeLlamaCppResidency({
+	await ensureLlamaCppResidency({
 		baseUrl: model.baseUrl,
 		targetId: metadata.targetId ?? model.provider,
 		runtimeId: metadata.runtimeId,
@@ -635,10 +638,32 @@ function observeResidencyForModel(model: Model<"openai-completions">): void {
 	});
 }
 
+function withLlamaCppResidency(
+	model: Model<"openai-completions">,
+	sourceFactory: () => ReturnType<typeof streamOpenAICompletions>,
+): ReturnType<typeof streamOpenAICompletions> {
+	if (!isManagedLlamaCppModel(model)) return sourceFactory();
+	const stream = createAssistantMessageEventStream();
+	(async () => {
+		try {
+			await ensureResidencyForModel(model);
+			for await (const event of sourceFactory()) {
+				stream.push(event as AssistantMessageEvent);
+			}
+			stream.end();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			const error = emptyErrorMessage(model, message);
+			stream.push({ type: "error", reason: "error", error });
+			stream.end(error);
+		}
+	})();
+	return stream;
+}
+
 export const openAICompletionsApiProvider: ApiProvider<"openai-completions", OpenAICompletionsOptions> = {
 	api: "openai-completions",
 	stream: (model, context, options) => {
-		observeResidencyForModel(model);
 		// Bare `stream` callers don't communicate thinking state; fall back to
 		// the model's reasoning capability so the catalog still applies.
 		const resolved = resolvedCapabilitiesForModel(model, model.reasoning === true ? "medium" : "off");
@@ -648,10 +673,12 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
-						streamOpenAICompletions(
-							model,
-							effectiveContext,
-							withRemainingContextBudget(model, effectiveContext, withSamplers),
+						withLlamaCppResidency(model, () =>
+							streamOpenAICompletions(
+								model,
+								effectiveContext,
+								withRemainingContextBudget(model, effectiveContext, withSamplers),
+							),
 						),
 						resolved,
 					),
@@ -663,7 +690,6 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 		);
 	},
 	streamSimple: (model, context, options?: SimpleStreamOptions) => {
-		observeResidencyForModel(model);
 		const resolved = resolvedCapabilitiesForModel(model, thinkingLevelFromSimple(options));
 		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
 		const withSamplers = withSamplingOverrides(model, options, resolved);
@@ -671,10 +697,12 @@ export const openAICompletionsApiProvider: ApiProvider<"openai-completions", Ope
 			withReasoningTokenEstimate(
 				stripSentinelsFromStream(
 					stripNeverReasoningFromStream(
-						streamSimpleOpenAICompletions(
-							model,
-							effectiveContext,
-							withRemainingContextBudget(model, effectiveContext, withSamplers),
+						withLlamaCppResidency(model, () =>
+							streamSimpleOpenAICompletions(
+								model,
+								effectiveContext,
+								withRemainingContextBudget(model, effectiveContext, withSamplers),
+							),
 						),
 						resolved,
 					),

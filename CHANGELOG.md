@@ -10,6 +10,11 @@ still change interfaces.
 
 ## Unreleased
 
+- llama.cpp router targets now make model picker changes real before
+  inference: when the selected model is not resident and router autoload is
+  off, Clio unloads the prior non-scout resident, preserves pinned/scout
+  models such as MiniCPM, loads the selected model through the router, and
+  waits for it before sending the chat request.
 - Blocked tool calls now settle in the TUI: when a call's end event lands
   while a permission prompt (or another overlay) is still visible, the
   status no longer resurrects a perpetual "running tool" line with a
