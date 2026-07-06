@@ -45,7 +45,11 @@ import { startAntigravityWorkerRun } from "./antigravity/subprocess-runtime.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
 import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
 import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
-import { createLoopGuardRegistration, readWorkerToolCallCap } from "./loop-guard.js";
+import {
+	createLoopGuardRegistration,
+	isLoopGuardSynthesisBackstopReason,
+	readWorkerToolCallCap,
+} from "./loop-guard.js";
 import { patchProviderThinkingPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
@@ -266,12 +270,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			...(input.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: input.trustProjectCompatRoots } : {}),
 		},
 		// Workers run unattended, so the loop guard carries the hard tool-call
-		// cap in addition to repetition blocking. The protected-artifacts guard
-		// starts empty (workers receive no orchestrator protection state) and
-		// has no persistence sink; it exists so protect_path effects from
-		// snapshot rules behave identically in workers.
+		// cap in addition to repetition blocking, plus the synthesis lockout:
+		// after the loop-block budget the worker is told to report from what it
+		// gathered instead of burning the lifetime cap on a retry spiral, and
+		// the bounded backstop reason is watched in telemetry.onFinish below to
+		// abort a worker that keeps calling tools anyway. The
+		// protected-artifacts guard starts empty (workers receive no
+		// orchestrator protection state) and has no persistence sink; it exists
+		// so protect_path effects from snapshot rules behave identically in
+		// workers.
 		[
-			createLoopGuardRegistration({ safety, toolCallCap: readWorkerToolCallCap() }),
+			createLoopGuardRegistration({ safety, toolCallCap: readWorkerToolCallCap(), turnSynthesisLockout: true }),
 			createProtectedArtifactsRegistration(),
 		],
 		input.autonomy,
@@ -288,7 +297,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				workerBoundFailure === null &&
 				event.outcome === "blocked" &&
 				typeof event.reason === "string" &&
-				isWorkerToolCallCapExceededReason(event.reason)
+				(isWorkerToolCallCapExceededReason(event.reason) || isLoopGuardSynthesisBackstopReason(event.reason))
 			) {
 				workerBoundFailure = event.reason;
 				process.stderr.write(`[worker] ${event.reason}\n`);
