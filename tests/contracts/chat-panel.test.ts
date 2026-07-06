@@ -137,6 +137,100 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		ok(/\b\d+ms\b|\b\d+(?:\.\d+)?s\b/.test(rendered), `the settled line shows its own duration, got: ${rendered}`);
 	});
 
+	it("finishes a blocked tool whose end arrives after a mid-turn notice split the transcript", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "b1",
+			toolName: "read",
+			args: { path: ".env" },
+		} as ChatLoopEvent);
+		clock = 1250;
+		// A safety-net bus notice lands mid-turn: the replay block splits the
+		// transcript, so the running segment no longer lives in the tail entry.
+		panel.appendReplayBlock(() => ["safety-net: read blocked"]);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "b1",
+			toolName: "read",
+			result: "read blocked: read",
+			isError: true,
+			durationMs: 250,
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const atEnd = strip(panel.render(100).join("\n"));
+		ok(atEnd.includes("✗"), `the blocked call settles to an error line, got: ${atEnd}`);
+		ok(atEnd.includes("250ms"), `the line carries the fixed event duration, got: ${atEnd}`);
+		// An hour later the settled transcript must render byte-identical: a
+		// leaked running line would keep counting now-relative elapsed.
+		clock = 3_601_000;
+		strictEqual(strip(panel.render(100).join("\n")), atEnd, "a settled transcript renders time-invariant");
+	});
+
+	it("settles an orphaned tool segment stranded in an earlier entry at agent_end", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "o1",
+			toolName: "grep",
+			args: { pattern: "x" },
+		} as ChatLoopEvent);
+		clock = 1400;
+		panel.appendReplayBlock(() => ["approval parked"]);
+		// The run ends with NO tool_execution_end for o1 (hard abort mid-batch).
+		clock = 2000;
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const atEnd = strip(panel.render(100).join("\n"));
+		ok(atEnd.includes("✗"), `the stranded orphan settles to an error line, got: ${atEnd}`);
+		clock = 100_000;
+		strictEqual(strip(panel.render(100).join("\n")), atEnd, "the settled line does not keep counting");
+	});
+
+	it("routes tool_execution_update to a segment stranded behind a notice entry", () => {
+		const clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "s1",
+			toolName: "bash",
+			args: { command: "sleep 5" },
+		} as ChatLoopEvent);
+		panel.appendReplayBlock(() => ["context-engine notice"]);
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "s1",
+			toolName: "bash",
+			partialResult: "streamed tail line",
+		} as ChatLoopEvent);
+		const rendered = strip(panel.render(100).join("\n"));
+		ok(rendered.includes("streamed tail line"), `the streamed body still renders after the split, got: ${rendered}`);
+	});
+
+	it("settles a reused-id orphan stranded in an earlier entry when the id restarts", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "dup2",
+			toolName: "grep",
+			args: { pattern: "a" },
+		} as ChatLoopEvent);
+		clock = 1400;
+		panel.appendReplayBlock(() => ["notice splits the entry"]);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "dup2",
+			toolName: "grep",
+			args: { pattern: "b" },
+		} as ChatLoopEvent);
+		clock = 1600;
+		const rendered = strip(panel.render(100).join("\n"));
+		const errorGlyphs = (rendered.match(/✗/g) ?? []).length;
+		strictEqual(errorGlyphs, 1, `exactly the stranded reused-id orphan settled, got: ${rendered}`);
+	});
+
 	it("settles a prior same-id segment when the model reuses a tool-call id", () => {
 		let clock = 1000;
 		const panel = createChatPanel({ now: () => clock });

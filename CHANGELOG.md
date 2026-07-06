@@ -13,6 +13,11 @@ still change interfaces.
 - Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
   cancels active runs and closes Clio-owned overlays, permission prompts, and
   ask_user prompts.
+- Fixed blocked and aborted tool calls staying rendered as running in the
+  interactive transcript. A safety-net or approval notice arriving mid-turn
+  stranded the tool's transcript segment, so the line kept a live spinner and
+  a growing elapsed timer; every tool line now settles at its end event or at
+  end of turn, and a blocked call reads as a fixed-duration error line.
 - Fixed quadratic worker stdout amplification. A dispatched worker subprocess no
   longer reserializes the full cumulative assistant message on every streaming
   delta: a worker-only event projection slims each `message_update` before NDJSON

@@ -504,6 +504,29 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		seg.partialOutput = undefined;
 	};
 
+	/**
+	 * Locate the most recent tool segment with this call id anywhere in the
+	 * transcript. A mid-turn notice entry (safety-net block, approval parked,
+	 * context-engine notice) splits the transcript, so an in-flight call's
+	 * segment can live in an earlier assistant entry than the tail. Unfinished
+	 * segments win over finished ones so an id the model reuses binds to the
+	 * live call, not the settled one.
+	 */
+	const findToolSegment = (toolCallId: string): ToolSegment | undefined => {
+		let finishedMatch: ToolSegment | undefined;
+		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
+			const entry = transcript[entryIndex];
+			if (entry?.role !== "assistant") continue;
+			for (let segIndex = entry.segments.length - 1; segIndex >= 0; segIndex -= 1) {
+				const seg = entry.segments[segIndex];
+				if (seg?.kind !== "tool" || seg.id !== toolCallId) continue;
+				if (!seg.finished) return seg;
+				finishedMatch ??= seg;
+			}
+		}
+		return finishedMatch;
+	};
+
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
 		const last = transcript[transcript.length - 1];
 		if (last && last.role === "assistant") return last;
@@ -698,14 +721,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_start") {
-				const assistant = ensureAssistant();
 				// A model that reuses a tool-call id across calls would leave the
 				// prior same-id segment unsettled (its end matches the first segment
-				// on lookup). Settle any such orphan now so it does not linger as a
-				// counting running line while this call runs.
-				for (const seg of assistant.segments) {
-					if (seg.kind === "tool" && seg.id === event.toolCallId && !seg.finished) settleUnfinishedToolSegment(seg);
+				// on lookup). Settle any such orphan now, wherever it lives, so it
+				// does not linger as a counting running line while this call runs.
+				for (const entry of transcript) {
+					if (entry.role !== "assistant") continue;
+					for (const seg of entry.segments) {
+						if (seg.kind === "tool" && seg.id === event.toolCallId && !seg.finished) settleUnfinishedToolSegment(seg);
+					}
 				}
+				const assistant = ensureAssistant();
 				// Compact resource reads (SKILL.md, CLIO.md, AGENTS.md, docs/) stay
 				// collapsed to one labeled line until explicitly expanded.
 				const expanded = assistant.pending === false && classifyResourceRead(event.toolName, event.args) === null;
@@ -731,15 +757,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// semantics are cumulative, so appending would double-print every
 				// snapshot. Render dispatch picks up the new buffer on the next
 				// frame via `renderToolSegmentLines`.
-				const assistant = transcript[transcript.length - 1];
-				if (assistant?.role !== "assistant") {
-					markDirty();
-					return;
-				}
-				const tool = assistant.segments.find(
-					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
-				);
-				if (tool) {
+				const tool = findToolSegment(event.toolCallId);
+				if (tool && !tool.finished) {
 					const unwrapped = unwrapResultEnvelope(event.partialResult);
 					tool.partialOutput = typeof unwrapped === "string" ? unwrapped : previewResult(unwrapped);
 				}
@@ -747,10 +766,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_end") {
-				const assistant = ensureAssistant();
-				const tool = assistant.segments.find(
-					(seg): seg is ToolSegment => seg.kind === "tool" && seg.id === event.toolCallId,
-				);
+				const tool = findToolSegment(event.toolCallId);
 				if (tool) {
 					tool.result = event.result;
 					tool.isError = event.isError;
@@ -808,21 +824,24 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "agent_end") {
-				const assistant = transcript[transcript.length - 1];
-				if (assistant && assistant.role === "assistant") {
-					// The run is over: no tool can still be executing. Settle any tool
-					// segment whose `tool_execution_end` never arrived (blocked at
-					// admission, or cut off by an abort) so the ledger never leaves a
-					// running line counting past the turn's end.
-					for (const seg of assistant.segments) {
+				// The run is over: no tool can still be executing anywhere in the
+				// transcript, not just in the tail entry (a mid-turn notice splits
+				// entries). Settle any tool segment whose `tool_execution_end` never
+				// arrived (blocked at admission, or cut off by an abort) so the
+				// ledger never leaves a running line counting past the turn's end,
+				// and clear `pending` everywhere so no earlier entry keeps rendering
+				// live thinking or status.
+				for (const entry of transcript) {
+					if (entry.role !== "assistant") continue;
+					for (const seg of entry.segments) {
 						if (seg.kind === "tool" && !seg.finished) settleUnfinishedToolSegment(seg);
 					}
-					if (assistant.pending) {
-						assistant.pending = false;
-						assistant.statusLine = null;
+					if (entry.pending) {
+						entry.pending = false;
+						entry.statusLine = null;
 					}
-					markDirty();
 				}
+				markDirty();
 			}
 		},
 		setStatusLine(line): void {
