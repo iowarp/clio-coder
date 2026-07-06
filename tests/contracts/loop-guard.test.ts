@@ -114,6 +114,40 @@ describe("unified loop guard registration", () => {
 		}
 	});
 
+	it("blocks the size-escalation cycle once results stagnate", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		// Same call shape with only the limit changing; the mock tool returns the
+		// same "contents" every time, so the size escalation buys nothing. The
+		// verbatim detector never sees a repeat (args differ each call), but the
+		// stagnation detector must block the third attempt.
+		const first = await registry.invoke({ tool: ToolNames.Read, args: { path: "a.md", limit: 100 } }, { turnId: "t1" });
+		strictEqual(first.kind, "ok");
+		const second = await registry.invoke({ tool: ToolNames.Read, args: { path: "a.md", limit: 200 } }, { turnId: "t1" });
+		strictEqual(second.kind, "ok");
+		const third = await registry.invoke({ tool: ToolNames.Read, args: { path: "a.md", limit: 500 } }, { turnId: "t1" });
+		strictEqual(third.kind, "blocked");
+		ok(third.kind === "blocked" && third.reason.includes("byte-identical results"), third.kind);
+		ok(third.kind === "blocked" && third.reason.includes(ToolNames.Read));
+	});
+
+	it("identical results do not count as stagnation when a non-size argument changes", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		// Honest exploration: the pattern changes each call even though the mock
+		// output is identical (e.g. repeated "No matches found"). A changed query
+		// is new information about a different question; never block it.
+		for (let i = 0; i < LOOP_THRESHOLD * 2; i++) {
+			const verdict = await registry.invoke(
+				{ tool: ToolNames.Read, args: { path: `probe-${i}.md`, limit: 100 } },
+				{ turnId: "t1" },
+			);
+			strictEqual(verdict.kind, "ok", `distinct-query call ${i} must execute`);
+		}
+	});
+
 	it("emits LoopBlocked on the bus per block and interrupts at the per-turn budget", async () => {
 		const safety = testSafety();
 		const bus = createSafeEventBus();

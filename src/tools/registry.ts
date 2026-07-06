@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { TSchema } from "typebox";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import {
@@ -857,6 +857,12 @@ function buildToolHookInput(
 		metadata.resultKind = result.kind;
 		if (result.kind === "error") metadata.errorMessage = result.message;
 		if (result.kind === "ok" && result.terminate === true) metadata.terminate = true;
+		// Result identity for the stagnation detector (engine/loop-guard.ts):
+		// consecutive same-shape calls whose outputs hash identically are not
+		// producing new information, whatever their size arguments say.
+		if (result.kind === "ok" && typeof result.output === "string") {
+			metadata.resultFingerprint = createHash("sha256").update(result.output).digest("hex");
+		}
 	}
 
 	const input: MiddlewareHookInput = {
