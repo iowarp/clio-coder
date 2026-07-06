@@ -19,7 +19,14 @@ import {
 } from "../domains/providers/index.js";
 import type { ContextUsageSnapshot } from "../domains/session/context-accounting.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import { type Component, getCapabilities, Image, type ImageTheme, truncateToWidth } from "../engine/tui.js";
+import {
+	type Component,
+	getCapabilities,
+	Image,
+	type ImageTheme,
+	truncateToWidth,
+	visibleWidth,
+} from "../engine/tui.js";
 import { abbreviateModelId, brandMark, type ClioTheme, clioTheme, frame } from "./theme/index.js";
 
 export interface WelcomeDashboardDeps {
@@ -127,16 +134,26 @@ function formatRelativeTime(mtimeMs: number, now = Date.now()): string {
 	return new Date(mtimeMs).toISOString().slice(0, 10);
 }
 
+/**
+ * Extract bare entry-point paths from the codewiki digest. The digest lists
+ * `- <path> (<lang>, <loc> loc): <summary>` bullets under an `entry points:`
+ * header; the one-line banner row has no room for bullets, loc counts, or
+ * summaries, so only the paths survive.
+ */
 function entryPointExcerpt(codewikiDigest: string): string[] {
 	const lines = codewikiDigest.split(/\r?\n/);
 	const start = lines.findIndex((line) => line.trim() === "entry points:");
 	if (start === -1) return [];
 	const out: string[] = [];
-	for (const line of lines.slice(start)) {
-		if (line.trim() === "key symbols:" || line.trim() === "dependencies:") break;
-		out.push(line.trim());
+	for (const line of lines.slice(start + 1)) {
+		const trimmed = line.trim();
+		if (trimmed === "key symbols:" || trimmed === "dependencies:") break;
+		if (!trimmed.startsWith("- ")) continue;
+		const item = trimmed.slice(2);
+		const parenIndex = item.indexOf(" (");
+		out.push(parenIndex === -1 ? item : item.slice(0, parenIndex));
 	}
-	return out.slice(0, 6);
+	return out.slice(0, 4);
 }
 
 export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): WelcomeDashboardStats {
@@ -312,21 +329,45 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 					stats.wikiStatus === "fresh" ? "success" : "warning",
 					stats.wikiStatus,
 				)}`;
-	const wikiExcerpt = stats.wikiDigestExcerpt.length > 0 ? stats.wikiDigestExcerpt.join(" · ") : "entry points: none";
+	const wikiUnits = [
+		wikiStateStr,
+		...(stats.wikiDigestExcerpt.length > 0
+			? stats.wikiDigestExcerpt.map((path, index) => theme.fg("muted", index === 0 ? `entry points: ${path}` : path))
+			: [theme.fg("muted", "entry points: none")]),
+	];
 
-	const hintStr = `Type ${theme.fg("accent", "/settings")} to edit · ${theme.fg("accent", "/context init")} to bootstrap · ${theme.fg("accent", "Alt+U")} to toggle dashboard`;
+	const hintUnits = [
+		`Type ${theme.fg("accent", "/settings")} to edit`,
+		`${theme.fg("accent", "/context init")} to bootstrap`,
+		`${theme.fg("accent", "Alt+U")} to toggle dashboard`,
+	];
 
-	// The hint row is the one line long enough to overflow; truncate it with a
-	// trailing ellipsis so it never cuts a word mid-glyph.
-	const fitHint = (line: string): string => truncateToWidth(line, Math.max(0, contentWidth), "…", false);
+	// The wiki and hint rows are the lines long enough to overflow. Drop whole
+	// ` · `-separated units and close with a dim ellipsis instead of cutting a
+	// path or phrase mid-glyph, so a truncated row still reads as complete facts.
+	const joinUnitsToWidth = (prefix: string, units: readonly string[], maxWidth: number): string => {
+		const sep = " · ";
+		let line = prefix;
+		for (let index = 0; index < units.length; index += 1) {
+			const candidate = index === 0 ? `${line}${units[index]}` : `${line}${sep}${units[index]}`;
+			// Reserve two columns for the ` …` marker unless this is the last unit.
+			const reserve = index < units.length - 1 ? 2 : 0;
+			if (visibleWidth(candidate) + reserve > maxWidth) {
+				if (index === 0) return truncateToWidth(candidate, Math.max(0, maxWidth), "…", false);
+				return `${line} ${theme.fg("dim", "…")}`;
+			}
+			line = candidate;
+		}
+		return line;
+	};
 
 	if (safeWidth >= WIDE_MIN) {
 		const healthStr = stats.targetHealthLabel ? ` · health: ${theme.fg("success", stats.targetHealthLabel)}` : "";
 		const targetLine = `  ${theme.fg("muted", "Target:")}   ${targetVal} · ${thinkVal}${healthStr}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = fitHint(`  ${theme.fg("muted", "Wiki:")}     ${wikiStateStr} · ${theme.fg("muted", wikiExcerpt)}`);
+		const wikiLine = joinUnitsToWidth(`  ${theme.fg("muted", "Wiki:")}     `, wikiUnits, contentWidth);
 		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${profileStr} · ${compactStr}`;
-		const hintLine = fitHint(`  ${theme.fg("muted", "Hint:")}     ${hintStr}`);
+		const hintLine = joinUnitsToWidth(`  ${theme.fg("muted", "Hint:")}     `, hintUnits, contentWidth);
 
 		return frame(
 			theme,
@@ -337,9 +378,9 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 	} else if (safeWidth >= MID_MIN) {
 		const targetLine = `  ${theme.fg("muted", "Target:")}  ${targetVal} · ${thinkVal}`;
 		const contextLine = `  ${theme.fg("muted", "Context:")} ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
-		const wikiLine = fitHint(`  ${theme.fg("muted", "Wiki:")}    ${wikiStateStr} · ${theme.fg("muted", wikiExcerpt)}`);
+		const wikiLine = joinUnitsToWidth(`  ${theme.fg("muted", "Wiki:")}    `, wikiUnits, contentWidth);
 		const configLine = `  ${theme.fg("muted", "Config:")}  ${safetyStr} · ${profileStr}`;
-		const hintLine = fitHint(`  ${theme.fg("muted", "Hint:")}    ${hintStr}`);
+		const hintLine = joinUnitsToWidth(`  ${theme.fg("muted", "Hint:")}    `, hintUnits, contentWidth);
 
 		return frame(
 			theme,
