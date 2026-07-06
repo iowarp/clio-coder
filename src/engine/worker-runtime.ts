@@ -30,6 +30,7 @@ import {
 } from "../domains/providers/types/knowledge-base.js";
 import type { ActionClass } from "../domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { describeCallTarget } from "../domains/safety/call-target.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import {
@@ -464,12 +465,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
 			timer.unref?.();
 			activeEscalation = { requestId, tool: call.tool, actionClass, timer };
+			// The operator decides on this exact call, so the escalation carries a
+			// sanitized preview of its object; the args stay inside the worker. The
+			// cap bounds the NDJSON line, and the overlay truncates further.
+			const target = describeCallTarget(call.args).slice(0, 200);
 			emit({
 				type: "clio_permission_escalated",
 				payload: {
 					requestId,
 					tool: call.tool,
 					summary: `${call.tool} requires ${actionClass} confirmation`,
+					...(target.length > 0 ? { target } : {}),
 					axis: meta.axis,
 					decision: {
 						actionClass,

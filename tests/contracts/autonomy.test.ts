@@ -30,6 +30,7 @@ import {
 	askAxis,
 	createPermissionOverlayBody,
 	describeCallTarget,
+	sanitizeCallTargetText,
 } from "../../src/interactive/permission-overlay.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
@@ -462,6 +463,25 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		const body = createPermissionOverlayBody(view).render(80).join("\n");
 		ok(body.includes("Target: /tmp/perm-probe-test.txt"), body);
 		ok(!body.includes("blocked: system_modify"), `the ask overlay must not echo blocked wording: ${body}`);
+	});
+
+	it("worker escalation views render the payload's target and re-sanitize it at the trust boundary", () => {
+		strictEqual(
+			sanitizeCallTargetText("printf \u001b]0;spoof\u0007 worker\n ok"),
+			"printf worker ok",
+			"a target that crossed worker stdout is neutralized before display",
+		);
+		const view: ApprovalRequestView = {
+			requestId: "perm-worker-target",
+			tool: "bash",
+			actionClass: "execute",
+			axis: { kind: "net", ruleId: "bash-command-substitution" },
+			origin: { kind: "worker", agentId: "coder", runId: "r-abc" },
+			reason: "bash requires execute confirmation",
+			target: sanitizeCallTargetText("printf worker-ok"),
+		};
+		const body = createPermissionOverlayBody(view).render(80).join("\n");
+		ok(body.includes("Target: printf worker-ok"), `a worker ask shows what the call touches: ${body}`);
 	});
 
 	it("worker escalation notices name net rails and autonomy levels", () => {
