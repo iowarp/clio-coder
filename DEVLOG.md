@@ -23,11 +23,16 @@ change interfaces.
   repaint, and the overlay opens at `min(96, columns - 4)` (floor 44) so
   narrow terminals get a near-full-width board and ultrawide ones keep
   readable cards. The empty state centers across the true content width
-  (the old `- 4` predated the frame handing in content width). Pinned by two
-  live-view contracts in `tests/contracts/dispatch-board.test.ts` (width
-  obedience at 44/60/76/96 with no cut escape sequences; rows and proof state
-  read live after construction). Verified in the real TUI via tmux: the board
-  opens at 96 columns on a 200-column terminal and re-renders cleanly at 80.
+  (the old `- 4` predated the frame handing in content width). Exercising the
+  card at 44 columns exposed that the `status` and `telemetry` rows still
+  clipped without a marker ("total 5" for a 5.2k total; a value-less trailing
+  "cost"); both now refit by whole units through the same `fitUnits` grammar
+  the proof row uses, via a shared `cardUnitsLine`. Pinned by three contracts
+  in `tests/contracts/dispatch-board.test.ts` (width obedience at 44/60/76/96
+  with no cut escape sequences; rows and proof state read live after
+  construction; narrow rows close on a whole unit or ellipsis, never a
+  mid-number clip). Verified in the real TUI via tmux: the board opens at 96
+  columns on a 200-column terminal and re-renders cleanly at 80.
 
 - **Context meters portray the autocompact reserve and unknown windows
   truthfully.** The proportional meter rendered reserve cells with the same

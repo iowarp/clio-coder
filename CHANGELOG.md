@@ -16,9 +16,10 @@ still change interfaces.
   and the distinction survives without color. An unmeasured context window
   reads `?%` everywhere; the old `--%` placeholder is gone.
 - The dispatch board overlay now renders at the width the terminal actually
-  grants instead of a fixed 76-column layout, so narrow terminals no longer
-  clip worker telemetry mid-token and the board sizes itself (up to 96
-  columns) on wide screens.
+  grants instead of a fixed 76-column layout, sizing itself (up to 96
+  columns) on wide screens. Card status and telemetry rows that do not fit
+  now drop whole facts behind an ellipsis instead of clipping mid-number, so
+  a truncated token total can no longer read as a smaller complete value.
 - The expanded footer dashboard shares ultrawide terminals fairly: the
   CONTEXT quadrant can now grow wide enough to show its fill and chat facts
   unclipped, with a finer meter, and the category legend wraps by whole

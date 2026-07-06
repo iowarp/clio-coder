@@ -477,6 +477,36 @@ describe("dispatch board truncation grammar", () => {
 		ok(labelRow.includes("…"), `a clipped agent label should carry an ellipsis, got: ${labelRow}`);
 		ok(labelRow.includes("running"), `the status word should survive the label clip, got: ${labelRow}`);
 	});
+
+	it("refits status and telemetry rows by whole units at narrow widths", () => {
+		const lines = renderDispatchCard(
+			makeRow({ inputTokens: 4_000, outputTokens: 1_200, tokenCount: 5_200, elapsedMs: 93_000, costUsd: 0.021 }),
+			44,
+		).map(stripSgr);
+		const status = lines.find((line) => line.includes("status"));
+		const telemetry = lines.find((line) => line.includes("telemetry"));
+		ok(status && telemetry, lines.join("\n"));
+		for (const row of [status, telemetry]) {
+			const content = row
+				.replace(/\s*│\s*$/, "")
+				.replace(/^│\s*/, "")
+				.trimEnd();
+			ok(!content.endsWith("·"), `row must not end on a dangling separator: "${content}"`);
+			ok(!/(cost|total)$/.test(content), `row must not end on a value-less key: "${content}"`);
+		}
+		ok(
+			!/total \d$/.test(telemetry.trimEnd().replace(/│$/, "").trimEnd()),
+			`a clipped total must not read as a complete number: "${telemetry}"`,
+		);
+		ok(
+			telemetry.includes("\u2026") || telemetry.includes("total 5.2k"),
+			`telemetry closes on a whole unit or ellipsis: "${telemetry}"`,
+		);
+		ok(
+			status.includes("\u2026") || status.includes("cost $0.02"),
+			`status closes on a whole unit or ellipsis: "${status}"`,
+		);
+	});
 });
 
 describe("dispatch board live view", () => {
