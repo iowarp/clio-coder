@@ -47,14 +47,14 @@ import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memo
 import {
 	createHookReceiptLog,
 	createSkillsReminderRegistration,
-	createTaskBoardReminderRegistration,
-	createTaskNudgeRegistration,
 	type ExtensionHookRoot,
 	installUserHooks,
 	type MiddlewareContract,
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
+import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
+import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
