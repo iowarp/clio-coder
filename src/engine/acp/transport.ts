@@ -125,11 +125,13 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 				reject,
 			};
 			if (timeoutMs !== undefined && timeoutMs > 0) {
+				// The timer must hold the event loop: its firing is the only
+				// thing that resolves a request the peer never answers. It is
+				// cleared on response and by failAll on close.
 				pending.timer = setTimeout(() => {
 					this.pending.delete(id);
 					reject(new AcpTimeoutError(`ACP request timed out after ${timeoutMs}ms: ${method}`));
 				}, timeoutMs);
-				pending.timer.unref?.();
 			}
 			this.pending.set(id, pending);
 		});
@@ -320,11 +322,13 @@ class StreamJsonRpcPeerTransport implements AcpJsonRpcPeerTransport {
 				reject,
 			};
 			if (timeoutMs !== undefined && timeoutMs > 0) {
+				// The timer must hold the event loop: its firing is the only
+				// thing that resolves a request the peer never answers. It is
+				// cleared on response and by failAll on close.
 				pending.timer = setTimeout(() => {
 					this.pending.delete(id);
 					reject(new AcpTimeoutError(`ACP request timed out after ${timeoutMs}ms: ${method}`));
 				}, timeoutMs);
-				pending.timer.unref?.();
 			}
 			this.pending.set(id, pending);
 		});

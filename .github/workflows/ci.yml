@@ -34,6 +34,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fd-find ripgrep
+      # The SciCode adapter contract runs benchmark grading through uv.
+      - name: Install uv
+        run: pipx install uv
       - run: npm ci --prefer-offline --no-audit --no-fund
       # The full release gate runs once, on the engines floor. Typecheck,
       # lint, the skills pin check, and the package audit are node-version

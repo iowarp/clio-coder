@@ -37,7 +37,8 @@ export function armInternalDispatchDeadline(
 			// The run may have finalized between the timer firing and the abort.
 		}
 	}, timeoutMs);
-	timer.unref?.();
+	// The timer must hold the event loop: its firing is what aborts a runaway
+	// run. Callers clear it in a finally block, so it never outlives the run.
 	return {
 		timedOut: () => fired,
 		clear: () => clearTimeout(timer),

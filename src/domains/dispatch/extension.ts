@@ -353,8 +353,9 @@ const DISPATCH_DRAIN_GRACE_MS = 2000;
 async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_GRACE_MS): Promise<void> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const grace = new Promise<void>((resolve) => {
+		// The timer must hold the event loop: it bounds the drain wait, and
+		// the finally below clears it.
 		timer = setTimeout(resolve, graceMs);
-		timer.unref?.();
 	});
 	try {
 		await Promise.race([drained, grace]);

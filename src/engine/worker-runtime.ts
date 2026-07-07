@@ -497,8 +497,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		if (escalationConfig) {
 			if (activeEscalation !== null) return;
 			const requestId = meta.requestId;
+			// The timer must hold the event loop: its firing is what denies an
+			// escalation the orchestrator never resolves. clearActiveEscalation
+			// clears it on every resolution path.
 			const timer = setTimeout(() => resolveEscalation(requestId, "deny", "timeout"), escalationConfig.timeoutMs);
-			timer.unref?.();
 			activeEscalation = { requestId, tool: call.tool, actionClass, timer };
 			// The operator decides on this exact call, so the escalation carries a
 			// sanitized preview of its object; the args stay inside the worker. The
