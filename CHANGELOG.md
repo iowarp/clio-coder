@@ -8,263 +8,7 @@ notes, lives in [DEVLOG.md](DEVLOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 still change interfaces.
 
-## Unreleased
-
-- Fleet settings now expose native shadow-agent routing: `/agents` lists
-  shadow agents, Settings > Fleet points at worker profiles and bindings, and
-  `/fleet` lists bindable native agents, can bind shadow agents to a
-  target/model profile, and can change a bound profile's model from the
-  bindings tab.
-- Local inference targets are now treated as multi-model servers with finite
-  VRAM instead of single-model slots. One shared residency reconciler drives
-  llama.cpp routers, LM Studio, and Ollama: llama.cpp reads the router's
-  `max_instances` and loads into a free slot without evicting anything (a
-  scout turn no longer evicts the co-resident coder and its prompt cache);
-  LM Studio attempts the co-resident JIT load first and swaps
-  only after a will-not-fit failure, so a fresh worker no longer unloads the
-  operator's model; Ollama releases only Clio's own stragglers. Protection
-  is symmetric: router models tagged `pinned:true`/`role:scout` and every
-  model referenced by settings (orchestrator, worker default/profiles,
-  target defaults) are never evicted by another Clio stream while an
-  unprotected candidate exists.
-- Residency opt-outs now work on every runtime path: `CLIO_RESIDENCY=observe`
-  and an explicit target `lifecycle: user-managed` both force observe-only,
-  including for llama.cpp routers, which previously ignored both.
-- Residency decisions are cached per (target, model) within a TTL, and
-  mutations against one server are serialized across the orchestrator and
-  worker processes through a state-dir lock file, so concurrent streams can
-  no longer interleave unload/load against the same router.
-- Resolving a model id that is in neither the target's configured
-  `wireModels` nor its live catalog now surfaces a `model-not-in-catalog`
-  warning instead of passing silently.
-- Blocked tool calls now settle in the TUI: when a call's end event lands
-  while a permission prompt (or another overlay) is still visible, the
-  status no longer resurrects a perpetual "running tool" line with a
-  growing timer after the overlay clears.
-- The verbatim loop detector no longer goes blind on slow local inference:
-  the most recent attempts are retained regardless of age, and detection is
-  scoped to the turn so rerunning the same command once per user turn is
-  never flagged as a loop.
-- The "full: <path>" escape hatch on truncated results now works when it is
-  offered: reads of the session's own offload files are exempt from the
-  per-turn observation budget.
-- Worker subprocesses drain stdout before exiting, so a large single tool
-  result can no longer be truncated mid-line in dispatch output.
-- Chat notices no longer fabricate a turn end: run summaries (token usage,
-  tool counts) survive error notices, and idle notices no longer flash a
-  spurious "done" status.
-- The first shell file-inspection command per session (cat/ls/grep and
-  friends) now gets a one-time pointer to the structured observe tools.
-- Synthesis-locked turns now sanitize their final answer: dead tool-call
-  markup a model writes as plain text under the forced text-only round (for
-  example a literal `<tool_call>` block) is stripped before the message
-  reaches the transcript, the headless result, the session ledger, or a
-  dispatch report, and a reply that was nothing but markup is replaced with
-  a loop-guard closing message instead of garbage. Ordinary turns and user
-  text are never touched. Measured on a local 35B target, roughly one
-  locked turn in three answered with raw markup before this fix.
-- Loop-guard synthesis lockouts are now enforced mechanically: once a turn
-  locks, the remaining model rounds are sent with request-level tool_choice
-  none, so the model's only possible output is the answer it was told to
-  write, and the lockout directive now says plainly that tool-call markup
-  will not run. The tool schema bytes and prompt prefix are untouched.
-  Previously the lockout was only a textual directive; measured local
-  models ignored it about half the time and the backstop stop threw the
-  turn's gathered evidence away.
-- Dispatched workers now get the same loop-guard synthesis lockout as the
-  main agent: after the loop-block budget the worker is told to report from
-  what it already gathered, and a bounded backstop aborts a worker that
-  keeps calling tools anyway. Measured on a live 35B coder worker, one
-  identical repeated call previously burned the entire 50-call lifetime cap
-  (46 blocked calls, ~345k tokens) before failing; the same failure now
-  stops within a handful of denials and returns a report.
-- Successful edit results now end with a one-line validation nudge naming
-  the real validation path (rerun the failing test or verify). Measured
-  live, a worker that edited correctly then "validated" with navigation
-  tools until aborted now reruns the test after its edit.
-- ask_user is now gated at the descriptor: ask only when blocked on a
-  decision the request does not answer, and never re-ask what the operator
-  already stated. This closes the measured failure where "demo all your
-  tools read only" opened an interview asking which tools to demo.
-- code_nav path modes (deps, dependents, outline) given a symbol name now
-  redirect to mode=symbol or grep/read instead of a bare not-found, closing
-  a measured worker retry spiral.
-- The Qwopus3.6 Coder model knowledge-base entries now carry the upstream
-  presence-penalty 1.5 sampler default for non-thinking execution. Measured
-  on live dispatch, the same coder task went from 0-for-3 (repetition loop
-  into the guard abort) to 3-for-3 passes with edit-then-validate
-  trajectories. Explicit per-run sampler flags still override.
-- Headless run receipts now sum token usage across all agent segments of a
-  turn (middleware nudges and finish-contract reprompts start new
-  segments); previously only the last segment was counted, under-reporting
-  a measured ~205k-token run as ~24k.
-- Worker permission escalations now show the operator what the call will
-  touch: the approval overlay's Target row (the command for bash, the path
-  for file tools) appears for dispatched workers' asks, not just the main
-  agent's, so the operator no longer decides blind. The preview is sanitized
-  on both sides of the worker boundary; the call arguments themselves never
-  leave the worker.
-- Context meters now draw the autocompact reserve with its own medium-shade
-  glyph in the footer bars, the expanded dashboard, and the /context-view
-  overlay, so a window holding a large reserve no longer looks nearly full,
-  and the distinction survives without color. An unmeasured context window
-  reads `?%` everywhere; the old `--%` placeholder is gone.
-- The dispatch board overlay now renders at the width the terminal actually
-  grants instead of a fixed 76-column layout, sizing itself (up to 96
-  columns) on wide screens. Card status and telemetry rows that do not fit
-  now drop whole facts behind an ellipsis instead of clipping mid-number, so
-  a truncated token total can no longer read as a smaller complete value.
-- The expanded footer dashboard shares ultrawide terminals fairly: the
-  CONTEXT quadrant can now grow wide enough to show its fill and chat facts
-  unclipped, with a finer meter, and the category legend wraps by whole
-  entries instead of clipping mid-label. ACTIVITY absorbs only the width left
-  after every quadrant reaches its useful size.
-- clio eval run: a relative --clio-entry now resolves against the invoking
-  directory instead of breaking inside temp-copy eval workspaces.
-- Blocked-call recovery now names the sanctioned pivots at the point of
-  failure: an execute approval denial tells the model that declared
-  package.json checks run through verify(check="<script>") and that ls,
-  read, grep, and find need no approval, which measured runs showed turns a
-  denied-bash retry spiral into verify-then-edit-then-verify.
-- The loop guard gained a result-stagnation detector: consecutive same-shape
-  calls that return byte-identical bytes while only limit/offset change are
-  blocked with targeted feedback, closing the escalation cycle
-  (limit 10000 -> 20000 -> 50000 -> repeat) that evaded the verbatim
-  detector.
-- Bundled-docs retrieval fixes measured from live traces: an unclosed code
-  fence in docs/tool-usage.md had swallowed every tool section after
-  credential_present (dispatch, verify, context, tasks, artifact) out of the
-  docs index; docs search snippets now anchor on the line matching the most
-  query terms instead of the first match, so parameter lists surface instead
-  of section intros; and docs follow-up text now says cited files are
-  bundled with Clio, not workspace paths, ending read/find chases after
-  citations.
-- A once-per-session task-board reminder now rides the user message when a
-  request literally enumerates three or more steps, the one channel
-  battery-tested local models reliably act on; the static routing line and
-  tasks hint alone measured 0-for-3 on board adoption at temperature 0.
-- The system prompt's Tool Contract now teaches a deterministic routing order
-  (structured observation before bash, task board for multi-step work, bounded
-  dispatch with receipt synthesis, validation before final claims) and a
-  failure-recovery rule that points a confused model at context(scope="docs")
-  instead of blind retries. Skill listing is gated to skill-shaped tasks or
-  explicit operator skill requests, so ordinary multi-step coding no longer
-  spends a skill-listing call. The artifact tool's metadata objective no
-  longer implies skills can be written as artifacts.
-- The Coder, Tester, Debugger, and Verifier built-in agents now declare
-  code_nav and prefer indexed navigation over broad reads when a codewiki
-  exists. Docs were realigned with the shipped surface: five tools carry
-  prompt hints (including tasks) and the built-in agent tool table matches
-  the recipes.
-- Fixed the observation-budget retry trap: when the shared per-turn pool (not
-  the tool's own cap) bounds a JSON observation such as a docs search, the cap
-  stub now says the budget is nearly exhausted and directs the model to answer
-  from what it gathered or continue next turn, instead of a bare "result
-  exceeded" error that invited retries which could never fit. Stubbed results
-  also report zero items shown, so the ledger no longer renders "5/288
-  sections" with a success glyph for a zero-content result, and the loop
-  guard's "this call already succeeded, re-read that result" anchor no longer
-  counts stubs as evidence.
-- Docs-scope context payloads are emitted as compact JSON instead of
-  pretty-printed, roughly halving what each search charges against the shared
-  per-turn observation pool.
-- The read tool's past-end-of-file error now states that the file has no
-  further content and that earlier reads already returned everything, which
-  stops weak local models from walking the file tail in a re-read spiral.
-- Aborted turns keep their real token usage: the engine's abort path used to
-  replace the run's messages with one synthetic zero-usage message, so a
-  cancelled turn reported `up 0 down 0` and `tools none` in the footer and
-  undercounted session totals. The run's message window is now restored at
-  agent end, and the loop-guard/cancel provenance survives into the settled
-  turn summary.
-- A bare operator cancel (Esc) now closes the turn with the "active response
-  cancelled" notice alone; the redundant "[aborted] Request was aborted" turn
-  is suppressed in both the live transcript and the session ledger.
-- Tool ledger rows identify the actual call: context rows show the docs query
-  or skill name instead of just the scope, and code_nav rows fall back to the
-  mode instead of rendering an empty backtick pair.
-- Fixed TUI Escape handling under CSI-u/Kitty keyboard encodings so Esc again
-  cancels active runs and closes Clio-owned overlays, permission prompts, and
-  ask_user prompts.
-- Hardened the session's new surfaces after adversarial review: the approval
-  overlay's Target row strips terminal escape sequences and control bytes so a
-  hostile command cannot style the UI that approves it; the model-facing
-  blocked-call message is enforced-bounded (16 lines, 300 chars per line) with
-  the pivot instruction always last; and a late tool end event can upgrade
-  only a force-settled transcript line, never rewrite one that finished with
-  its own result.
-- The expanded footer dashboard (Alt+U) marks clipped quadrant cells with an
-  ellipsis, so a cut value like `proj 1.` or a shortened legend or tool tally
-  no longer reads as a complete fact.
-- Unified truncation grammar across the dispatch board, task island, and
-  /tasks overlay: overflowing rows drop whole facts behind a dim ellipsis
-  instead of clipping paths, model ids, or prose mid-word, and no row leaves a
-  dangling separator. The /tasks overlay also drops its duplicated run-id
-  receipt lines: one proof anchor and one in-flight line render each run id
-  exactly once, and completed-task evidence no longer repeats a run id
-  extracted from its own prose.
-- The permission overlay now shows what it is approving: a Target row carries
-  the parked call's command or path. The misleading `<tool> blocked: <class>`
-  line is gone from the ask overlay (the call is parked, not blocked), and the
-  footer pill reads `confirm` instead of `blocked` while a confirmation waits.
-- Blocked tool calls now return recovery guidance to the model instead of a
-  bare label. The tool error carries the policy's reasons, the rule id, any
-  hints, and a standing instruction not to retry the action through another
-  tool, which shrinks blocked-call retry spirals on local models.
-- Cleaned up the welcome banner's Wiki row: entry points now render as bare
-  paths instead of raw digest bullets (no more dangling `entry points: · -`
-  fragments), and the Wiki and Hint rows truncate by dropping whole facts with
-  a trailing ellipsis instead of cutting a path or phrase mid-word.
-- Fixed blocked and aborted tool calls staying rendered as running in the
-  interactive transcript. A safety-net or approval notice arriving mid-turn
-  stranded the tool's transcript segment, so the line kept a live spinner and
-  a growing elapsed timer; every tool line now settles at its end event or at
-  end of turn, and a blocked call reads as a fixed-duration error line.
-- Fixed quadratic worker stdout amplification. A dispatched worker subprocess no
-  longer reserializes the full cumulative assistant message on every streaming
-  delta: a worker-only event projection slims each `message_update` before NDJSON
-  serialization, so a long worker response streams in linear stdout bytes instead
-  of quadratic. Dispatch consumer contracts are unchanged, so first-token
-  latency, the final answer, and token accounting all behave as before.
-- Bounded dispatched worker blocked-call spirals: `workerToolCallCap` now
-  counts blocked and guard-denied attempts, not just successful executions, and
-  a worker that keeps requesting denied tools terminates with
-  `workerToolCallCap reached (...)` recorded in receipt diagnostics.
-- `clio context wiki --update` now prints terse documenter progress while the
-  internal worker runs, including tool start/finish lines and elapsed time, so
-  long wiki updates no longer sit silent for minutes.
-- Added a wall-clock deadline for internal generator dispatches: `clio context
-  wiki --update` and `context-init` now abort the documenter or scout run
-  after `guardrails.internalDispatchTimeoutMs` (default fifteen minutes,
-  env `CLIO_INTERNAL_DISPATCH_TIMEOUT_MS`) instead of grinding indefinitely
-  when a slow or rambling model keeps streaming without finishing. The abort
-  records the timeout cause in the run receipt.
-- Fixed run receipts undercounting blocked safety decisions: a call that
-  passed policy admission but was stopped by a tool guard (loop guard,
-  protected artifacts, dispatch dedup) now records a blocked decision with
-  reason code `guard_block` instead of repeating the admission's allow, so
-  `safety.decisions.blocked` matches the blocked attempts in tool stats.
-- Fixed session branch replay to follow the active turn path: after a `/tree`
-  switch, resume, fork, and transcript replay no longer resurrect abandoned
-  sibling turns from the append-only session file.
-- Fixed `/fork` copying unanchored sidecar entries (such as task ledgers) and
-  compaction summaries written after the fork point into the forked session.
-- Fixed compaction summarizing abandoned sibling turns after a `/tree`
-  switch; summaries now cover only the active branch.
-- Fixed resume landing on an abandoned branch leaf when a turn switch and
-  re-append happened within the same millisecond.
-- Cleaned eval-domain source filenames and scrubbed developer-local target names and paths from the model catalog, benchmark examples, and HTML docs.
-- Aligned documentation corpus with v0.2.8 capabilities, resolving stale descriptions across the configuration, TUI, evals, and safety sections, and introduced new guides for worker dispatch mechanics and custom model runtime adapters.
-- Refreshed the clio docs visual viewer to align with v0.2.8, updating all HTML blueprints, adding 8 missing blueprints with interactive simulators, unifying style templates, and adding dashboard category search filters.
-- Fixed local model families that declare no reasoning support so Clio no
-  longer sends thinking fields, replays prior thinking blocks, surfaces thinking
-  stream events, or records reasoning-token usage for those models.
-- Improved llama.cpp router residency notices so multiple resident models within
-  the router's configured instance count are reported as capacity information,
-  not as automatic degradation, and documented the VRAM rule for co-resident
-  scout and code models.
-
-## 0.2.8 - 2026-07-04
+## 0.2.8 - 2026-07-07
 
 - Redesigned the tool surface into seven planes with consolidated observe,
   execute, orchestrate, retrieve, interact, mutate, and artifact tools.
@@ -283,6 +27,46 @@ still change interfaces.
 - Fixed safety and autonomy edge cases around approval denials, symlink path
   checks, loop-guard recovery, external worker tool profiles, reasoning-off
   models, and source-tree awareness in nested repositories.
+- Reworked local model residency: local inference targets are treated as
+  multi-model servers with finite VRAM, one shared reconciler drives llama.cpp
+  routers, LM Studio, and Ollama, co-resident models such as a scout beside
+  the main coder are protected symmetrically, residency mutations against one
+  server are serialized across processes, and the `CLIO_RESIDENCY=observe`
+  and `lifecycle: user-managed` opt-outs now work on every runtime path.
+- Added native shadow-agent fleet routing: `/agents` lists shadow agents and
+  `/fleet` binds native agents to target/model worker profiles, including
+  changing a bound profile's model from the bindings tab.
+- Enforced loop-guard synthesis lockouts mechanically for the main agent and
+  dispatched workers: locked turns can only answer (request-level
+  `tool_choice: none`), dead tool-call markup is sanitized out of locked
+  answers, and a result-stagnation detector blocks byte-identical retry
+  escalations that evaded the verbatim detector.
+- Conditioned the harness for local models with measured fixes: a
+  deterministic tool-routing order in the system prompt, task-board reminders
+  on enumerated multi-step requests, a validation nudge on successful edits,
+  recovery guidance with sanctioned pivots on blocked calls and denials,
+  ask_user gated to genuine decisions, bundled-docs retrieval repairs, and
+  observation-budget stubs that end retry traps.
+- Made the TUI truthful under pressure: context meters draw the autocompact
+  reserve with its own glyph, the dispatch board renders at the terminal's
+  real width, overflowing rows drop whole facts behind an ellipsis instead of
+  clipping mid-number, permission overlays show the parked call's target
+  (including worker escalations, sanitized at the trust boundary), and
+  blocked or aborted tool calls settle instead of spinning forever.
+- Fixed accounting: aborted turns keep their real token usage, headless run
+  receipts sum usage across all agent segments, guard blocks are recorded as
+  blocked safety decisions, and worker tool-call caps count blocked attempts.
+- Fixed session integrity across `/tree`, `/fork`, resume, and compaction so
+  abandoned sibling turns are never replayed, copied, or summarized.
+- Hardened worker IPC: subprocesses drain stdout before exit, streaming no
+  longer amplifies quadratically, and internal generator dispatches (wiki
+  update, context bootstrap) get a wall-clock deadline with progress output.
+- Updated the model catalog: the Qwopus3.6 Coder entries carry the upstream
+  presence-penalty sampler default, and reasoning-never model families no
+  longer receive or replay thinking fields.
+- Aligned the documentation corpus with v0.2.8, added worker-dispatch and
+  provider-adapter guides, and refreshed the HTML docs viewer with new
+  interactive blueprints.
 - Breaking: legacy tool names such as `glob`, `workspace_context`,
   `docs_search`, `run_task`, `validate_frontend`, `write_plan`,
   `write_review`, `create_skill`, and `dispatch_batch` were removed in favor of

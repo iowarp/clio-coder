@@ -5,9 +5,46 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
-## Unreleased
+## 0.2.8 - 2026-07-07
+
+The final 0.2.8 release. It ships everything in the 0.2.8-rc section below
+plus the post-rc battle-hardening sprint documented here: measured fixes from
+live local-model traces, the multi-model residency rework, and native
+shadow-agent fleet routing.
+
+### Added
+
+- **Shadow agents route through fleet profiles.** `/agents` lists shadow
+  agents, Settings > Fleet points at worker profiles and bindings, and
+  `/fleet` lists bindable native agents, binds a shadow agent to a
+  target/model worker profile, and changes a bound profile's model from the
+  bindings tab.
 
 ### Fixed
+
+- **Co-resident model residency with symmetric protection.** Local inference
+  targets are treated as multi-model servers with finite VRAM instead of
+  single-model slots. One shared residency reconciler drives llama.cpp
+  routers, LM Studio, and Ollama: llama.cpp reads the router's
+  `max_instances` and loads into a free slot without evicting anything (a
+  scout turn no longer evicts the co-resident coder and its prompt cache);
+  LM Studio attempts the co-resident JIT load first and swaps only after a
+  will-not-fit failure, so a fresh worker no longer unloads the operator's
+  model; Ollama releases only Clio's own stragglers. Protection is
+  symmetric: router models tagged `pinned:true`/`role:scout` and every model
+  referenced by settings (orchestrator, worker default/profiles, target
+  defaults) are never evicted by another Clio stream while an unprotected
+  candidate exists. Residency decisions are cached per (target, model)
+  within a TTL, and mutations against one server are serialized across the
+  orchestrator and worker processes through a state-dir lock file. The
+  `CLIO_RESIDENCY=observe` and target `lifecycle: user-managed` opt-outs now
+  force observe-only on every runtime path, including llama.cpp routers,
+  which previously ignored both.
+
+- **The llama.cpp runtime loads the selected router model.** Resolving a
+  model id that is in neither the target's configured `wireModels` nor its
+  live catalog now surfaces a `model-not-in-catalog` warning instead of
+  passing silently.
 
 - **Settle blocked tool display when end event lands under an overlay.**
   P2 root cause: the status reducer swallowed tool_execution_end while an
@@ -330,9 +367,9 @@ change interfaces.
   described in the Fixed section above; the backpressure/flush half (the
   truncated stdout line on abort) remains a smaller follow-up.
 
-## 0.2.8 - 2026-07-04
+## 0.2.8-rc - 2026-07-02
 
-The toolkit-rework release: the tool surface was redesigned into seven planes
+The toolkit-rework release candidate: the tool surface was redesigned into seven planes
 with 19 tools, every OBSERVE tool now closes through one observation envelope,
 and grep/find answer tree visibility from a single ignore policy. Two more
 workstreams land alongside it. The approvals plane gained one canonical

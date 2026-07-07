@@ -376,7 +376,7 @@ clio auth login anthropic-max
 
 # Configure orchestrator targets
 clio configure --id chatgpt-sub --runtime openai-codex --model your-codex-model --set-orchestrator
-clio configure --id claude-sub --runtime anthropic-max --model claude-3-5-sonnet-20241022 --set-orchestrator
+clio configure --id claude-sub --runtime anthropic-max --model claude-sonnet-5 --set-orchestrator
 ```
 
 Choose model ids from `clio configure --list` or from `clio models --target <id>` after login.
@@ -421,10 +421,10 @@ These runtimes drive your local `claude` installation to execute subagent tasks.
 claude auth login
 
 # 2. Configure the SDK worker target (enforced safety)
-clio configure --id claude-sdk-worker --runtime claude-sdk --model claude-3-5-sonnet-20241022 --set-fleet-default
+clio configure --id claude-sdk-worker --runtime claude-sdk --model sonnet --set-fleet-default
 
 # 3. Configure the subprocess worker target (advisory/permission-mode gating)
-clio configure --id claude-code-worker --runtime claude-code --model claude-3-5-sonnet-20241022
+clio configure --id claude-code-worker --runtime claude-code --model sonnet
 ```
 
 ### 4. Claude Code over ACP (Delegation-Only)
