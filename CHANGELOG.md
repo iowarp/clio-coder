@@ -61,6 +61,10 @@ still change interfaces.
 - Hardened worker IPC: subprocesses drain stdout before exit, streaming no
   longer amplifies quadratically, and internal generator dispatches (wiki
   update, context bootstrap) get a wall-clock deadline with progress output.
+- Fixed deadline timers that could silently never fire in a quiet process:
+  ACP request timeouts, dispatch and internal-generator deadlines, the
+  dispatch drain grace, and worker escalation timeouts now hold the event
+  loop until they fire or are cleared.
 - Updated the model catalog: the Qwopus3.6 Coder entries carry the upstream
   presence-penalty sampler default, and reasoning-never model families no
   longer receive or replay thinking fields.

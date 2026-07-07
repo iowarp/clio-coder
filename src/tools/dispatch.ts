@@ -519,7 +519,6 @@ async function runSequential(
 	};
 	const onSignalAbort = (): void => abortActive(true);
 	const timer = timeoutMs !== undefined ? setTimeout(() => abortActive(false), timeoutMs) : null;
-	timer?.unref?.();
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
 		for (const request of requests) {
@@ -587,7 +586,6 @@ async function runPipeline(
 	};
 	const onSignalAbort = (): void => abortActive(true);
 	const timer = timeoutMs !== undefined ? setTimeout(() => abortActive(false), timeoutMs) : null;
-	timer?.unref?.();
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
 		let previous: { runId: string; text: string } | null = null;
@@ -645,7 +643,6 @@ async function runBatch(
 	};
 	const onSignalAbort = (): void => abort(true);
 	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;
-	timer?.unref?.();
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
 		const summaries = await consumeBatchEvents(handle.batchId, handle.events, deps.bus);

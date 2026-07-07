@@ -46,6 +46,23 @@ shadow-agent fleet routing.
   live catalog now surfaces a `model-not-in-catalog` warning instead of
   passing silently.
 
+- **Deadline timers hold the event loop until they fire or are cleared.**
+  Found by the first full CI run of the post-rc sprint: node 22's test
+  runner drained the event loop before unref'd timers fired, so the ACP and
+  internal-dispatch-deadline contracts hung with "Promise resolution is
+  still pending but the event loop has already resolved" (node 24 happened
+  to keep the loop alive). The unref pattern was load-bearing in six spots
+  where the timer's firing is the only thing that unblocks pending work:
+  both ACP transport request timeouts (transport.ts), the internal
+  generator dispatch deadline (internal-dispatch.ts), the three dispatch
+  tool timeout timers (tools/dispatch.ts), the dispatch drain grace
+  (dispatch/extension.ts), and the worker escalation timeout
+  (worker-runtime.ts). Every one is bounded and cleared on all resolution
+  paths, so ref'ing them can never outlive the work they guard. Periodic
+  UI tickers and flush timers keep their unref. CI also gained a `pipx
+  install uv` step (ci.yml, release.yml) because the SciCode adapter
+  contract grades through uv since 1738c30e.
+
 - **Settle blocked tool display when end event lands under an overlay.**
   P2 root cause: the status reducer swallowed tool_execution_end while an
   overlay phase was visible, and popOverlay restored the stale tool overlay
