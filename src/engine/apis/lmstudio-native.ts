@@ -173,9 +173,9 @@ export interface RunStreamHints {
 // then logs `Received channelSend for unknown channel` warnings on the next
 // abort because the previous turn's controller fires after the SDK has already
 // torn the channel down. Reusing one client across turns avoids that race and
-// keeps the WebSocket warm for high-latency remote targets like the dynamo
-// node. The cache lives in the worker subprocess and dies with it; it is not
-// shared across worker processes.
+// keeps the WebSocket warm for high-latency remote LM Studio hosts. The
+// cache lives in the worker subprocess and dies with it; it is not shared
+// across worker processes.
 const lmStudioClientCache = new Map<string, LMStudioClient>();
 
 function lmStudioCacheKey(baseUrl: string, clientPasskey: string | undefined): string {

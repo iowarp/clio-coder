@@ -26,7 +26,7 @@ describe("lmStudioQuietLogger", () => {
 	it("swallows SDK log output by default so nothing tears the TUI", () => {
 		delete process.env.CLIO_DEBUG_LMSTUDIO;
 		const lines = captureStderr(() => {
-			lmStudioQuietLogger.error("WebSocket error:", new Error("connect ENETUNREACH 192.168.86.143:1234"));
+			lmStudioQuietLogger.error("WebSocket error:", new Error("connect ENETUNREACH 192.168.1.50:1234"));
 			lmStudioQuietLogger.warn("channel teardown");
 			lmStudioQuietLogger.info("connected");
 			lmStudioQuietLogger.debug("frame");
