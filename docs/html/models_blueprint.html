@@ -958,6 +958,7 @@
               <option value="bedrock">Amazon Bedrock (Cloud)</option>
               <option value="anthropic-max">Anthropic Max (Claude Pro Subscription)</option>
               <option value="openai-codex">OpenAI Codex (ChatGPT Subscription)</option>
+              <option value="claude-sdk">Claude SDK (Claude Code Subscription)</option>
             </select>
           </div>
 
@@ -1286,10 +1287,10 @@
 
           <div class="form-group">
             <label for="resolver-pattern">Model ID / Pattern</label>
-            <input type="text" id="resolver-pattern" class="form-control" value="openai/gpt-4o" oninput="runResolverSimulation()">
+            <input type="text" id="resolver-pattern" class="form-control" value="openai-codex/gpt-5.4" oninput="runResolverSimulation()">
             <div class="quick-examples">
-              <button type="button" class="example-btn" onclick="_applyResolverExample('openai/gpt-4o')">openai/gpt-4o</button>
-              <button type="button" class="example-btn" onclick="_applyResolverExample('gpt-4o-mini')">gpt-4o-mini</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('openai-codex/gpt-5.4')">openai-codex/gpt-5.4</button>
+              <button type="button" class="example-btn" onclick="_applyResolverExample('anthropic-max/claude-sonnet-5')">anthropic-max/claude-sonnet-5</button>
               <button type="button" class="example-btn" onclick="_applyResolverExample('ollama/deepseek-r1:medium')">ollama/deepseek-r1:medium</button>
               <button type="button" class="example-btn" onclick="_applyResolverExample('*gpt*')">*gpt*</button>
               <button type="button" class="example-btn" onclick="_applyResolverExample('claude*')">claude*</button>
@@ -1317,7 +1318,7 @@
           <div class="resolver-result-card" id="resolver-result-card">
             <span class="resolver-result-header">Routing Output</span>
             <span class="resolver-result-val" id="resolver-output">
-              openai/gpt-4o <span class="badge-mini">thinking: off</span>
+              openai-codex/gpt-5.4 <span class="badge-mini">thinking: off</span>
             </span>
           </div>
         </div>
@@ -1491,7 +1492,7 @@
               <!-- Step 1: Input -->
               <rect x="20" y="150" width="130" height="60" class="step-box" />
               <text x="35" y="175" class="step-title">User Pattern Input</text>
-              <text x="35" y="195" class="step-desc">e.g. gpt-4o:low</text>
+              <text x="35" y="195" class="step-desc">e.g. gpt-5.4:low</text>
 
               <path d="M 150 180 L 190 180" class="arrow-line" marker-end="url(#arrow-white)" />
 
@@ -1499,7 +1500,7 @@
               <rect x="190" y="140" width="140" height="80" class="step-box" />
               <text x="205" y="165" class="step-title">1. Suffix Parser</text>
               <text x="205" y="185" class="step-desc">Splits ':thinkingLevel'</text>
-              <text x="205" y="200" class="step-desc">pattern &rarr; gpt-4o</text>
+              <text x="205" y="200" class="step-desc">pattern &rarr; gpt-5.4</text>
 
               <path d="M 330 180 L 370 180" class="arrow-line" marker-end="url(#arrow-white)" />
 
@@ -1678,12 +1679,15 @@
         { id: "anthropic.claude-3-5-haiku-20241022-v1:0", name: "Claude 3.5 Haiku", chat: true, tools: true, reasoning: false, vision: false, context: 200000, format: "anthropic" }
       ],
       'anthropic-max': [
-        { id: "claude-3-5-sonnet-latest", name: "Claude 3.5 Sonnet (Subscription)", chat: true, tools: true, reasoning: true, vision: true, context: 200000, format: "anthropic" },
+        { id: "claude-sonnet-5", name: "Claude Sonnet 5 (Subscription)", chat: true, tools: true, reasoning: true, vision: true, context: 200000, format: "anthropic" },
         { id: "claude-3-5-haiku-latest", name: "Claude 3.5 Haiku", chat: true, tools: true, reasoning: false, vision: false, context: 200000, format: "anthropic" }
       ],
       'openai-codex': [
-        { id: "gpt-4o", name: "GPT-4o (ChatGPT Pro)", chat: true, tools: true, reasoning: false, vision: true, context: 272000, format: "openai" },
+        { id: "gpt-5.4", name: "GPT-5.4 (ChatGPT Pro)", chat: true, tools: true, reasoning: false, vision: true, context: 272000, format: "openai-codex" },
         { id: "o1-mini", name: "o1 Mini (ChatGPT Pro)", chat: true, tools: false, reasoning: true, vision: false, context: 272000, format: "harmony" }
+      ],
+      'claude-sdk': [
+        { id: "sonnet", name: "Claude Code Sonnet (Subscription)", chat: true, tools: true, reasoning: true, vision: true, context: 200000, format: "anthropic" }
       ]
     };
 
@@ -1726,6 +1730,11 @@
         authInput.disabled = false;
       } else if (target === 'openai-codex') {
         urlInput.value = "https://chatgpt.com/backend-api";
+        authInput.value = "••••••••••••••••";
+        authInput.placeholder = "OAuth Subscription Token (automatically managed)";
+        authInput.disabled = false;
+      } else if (target === 'claude-sdk') {
+        urlInput.value = "https://api.anthropic.com";
         authInput.value = "••••••••••••••••";
         authInput.placeholder = "OAuth Subscription Token (automatically managed)";
         authInput.disabled = false;
@@ -2035,6 +2044,9 @@
 
     // TAB 3: RESOLVER SIMULATION LOGIC
     const activeCandidates = [
+      { endpoint: "openai-codex", model: "gpt-5.4" },
+      { endpoint: "anthropic-max", model: "claude-sonnet-5" },
+      { endpoint: "claude-sdk", model: "sonnet" },
       { endpoint: "openai", model: "gpt-4o" },
       { endpoint: "openai", model: "gpt-4o-mini" },
       { endpoint: "openai", model: "o1-mini" },
@@ -2306,7 +2318,7 @@
         badge.style.background = "rgba(245, 158, 11, 0.1)";
 
         const payload = {
-          model: "claude-3-5-sonnet-latest",
+          model: "claude-sonnet-5",
           max_tokens: 8192,
           thinking: {
             type: "enabled",

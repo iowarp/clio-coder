@@ -269,7 +269,7 @@ unknown keys remains a validation error for the operator to edit deliberately.
 The routing keys in `settings.yaml` (`orchestrator.*`, `workers.default.*`, `scope`) are **defaults**, not a live control surface. Each interactive session seeds its routing from them at launch and owns it from then on:
 
 - Interactive changes (`/model`, Alt+L, `/settings`, Shift+Tab, `/thinking`, Alt+J / Alt+K, `/scoped-models`) apply to the current session immediately and are written back as the defaults for sessions launched later.
-- Writes from other processes — a second Clio session, `clio targets use`, `clio configure`, or a manual edit — update the defaults and the shared target catalog but never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.
+- Writes from other processes, such as a second Clio session, `clio targets use`, `clio configure`, or a manual edit, update the defaults and the shared target catalog. These writes never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.
 - Non-routing settings (theme, keybindings, autonomy level, retry, compaction, target catalog entries) still hot-reload into running sessions as before.
 - `/resume` and `/new` switch sessions, not routing: the terminal keeps its active target/model/thinking across session switches.
 

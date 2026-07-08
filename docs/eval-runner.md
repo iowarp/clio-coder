@@ -62,7 +62,7 @@ matrix:
     - id: "local-gemini"
       model: "gemini-3.5-flash"
     - id: "local-claude"
-      model: "claude-3-5-sonnet"
+      model: "claude-sonnet-5"
   repeats: 3
 tasks:
   - id: "fft-tolerance-check"

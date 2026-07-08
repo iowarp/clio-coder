@@ -1,7 +1,7 @@
 # Clio Skills Marketplace
 
 Curated, version-controlled skills that Clio Coder's authors have reviewed and
-approved. This folder is the **marketplace catalog** — a publishing shelf, not a
+approved. This folder is the **marketplace catalog**, which acts as a publishing shelf rather than a
 runtime store.
 
 ## Marketplace vs runtime
@@ -23,7 +23,7 @@ auto-loads. That gap is deliberate.
 | Location | a discovery root above | `skills/<name>/` in this repo |
 | Author | any user or harness | Clio authors, reviewed |
 | Provenance | none required | `registry-id` + `source-url` + `audit: pass` |
-| Auto-loaded | yes | no — must be installed |
+| Auto-loaded | yes | no, as it must be installed |
 
 "Approved" is visible in the frontmatter: a maintainer set `audit: pass` and a
 `version`. A skill a user wrote themselves carries none of those fields.

@@ -145,7 +145,7 @@ The Clio screen maintains a fixed structure: banner, transcript, editor rail, an
 |---|---|---|---|
 | idle | `◌ idle · tools none` (muted) | None; last-turn telemetry on line 2 | No |
 | preparing / waiting | spinner + `waiting` (info) | None | No |
-| thinking | spinner + `thinking` (reason) | Dim `Thinking (N tokens)…` marker | No |
+| thinking | spinner + `thinking` (reason) | Dim `Thinking (N tokens)...` marker | No |
 | writing | spinner + `writing` (accent) | Streaming markdown text | No |
 | tool running | spinner + `tool <name>` (accent) | `▸` tool execution ledger line | No |
 | blocked | `⏸ blocked` (warning) | Permission prompt surface | No |
@@ -164,7 +164,7 @@ The Clio screen maintains a fixed structure: banner, transcript, editor rail, an
 - **Agent**: `✦ text` with the agent glyph in `accent` (turning `error` red on failed turns, along with the text message).
 
 ### 6.2 Thinking Blocks
-Drawn as a folded dim marker (`Thinking (N tokens)…` or `Thinking...`), which expands into a body using the `reason` color vertical `│` rail. Cap of 12 lines.
+Drawn as a folded dim marker (`Thinking (N tokens)...` or `Thinking...`), which expands into a body using the `reason` color vertical `│` rail. Cap of 12 lines.
 
 ### 6.3 Tool Ledger
 Tool lines wrap as a single composed block:

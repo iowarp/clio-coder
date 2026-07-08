@@ -294,17 +294,32 @@ The README is the entry point; the full documentation set lives under
 
 | Topic | Guide |
 | --- | --- |
-| Commands, slash commands, keybindings, dispatch, troubleshooting | [commands-and-modes.md](docs/commands-and-modes.md) |
-| Runtime targets, local model configuration, fleet profiles, auth | [configuration-and-targets.md](docs/configuration-and-targets.md) |
-| Argonne ALCF Globus/Sophia/Metis target configuration, login, and discovery | [alcf-provider.md](docs/alcf-provider.md) |
-| Install, upgrade, reset, uninstall, state layout | [installation-and-lifecycle.md](docs/installation-and-lifecycle.md) |
-| Autonomy levels, approvals, the safety net, project policy | [safety-model.md](docs/safety-model.md) |
-| Context window resolution, compaction, token accounting | [context-engine.md](docs/context-engine.md) |
-| Built-in agent recipes and dispatch admission | [built-in-agents.md](docs/built-in-agents.md) |
-| Prompt envelope reuse, tool delivery, bounded tool results | [prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
-| Sessions, receipts, evidence, memory | [evidence-and-memory.md](docs/evidence-and-memory.md) |
-| Extension packages and share archives | [extensions-and-sharing.md](docs/extensions-and-sharing.md) |
-| Source layout and boundary invariants | [architecture.md](docs/architecture.md) |
+| Commands, slash commands, operating posture, keybindings, dispatch, verification, and troubleshooting | [commands-and-modes.md](docs/commands-and-modes.md) |
+| Context window resolution, per-model probe capabilities, token accounting, per-turn snapshots, compaction, and context priming | [context-engine.md](docs/context-engine.md) |
+| Runtime targets, local model configuration, fleet profiles, and auth | [configuration-and-targets.md](docs/configuration-and-targets.md) |
+| Every environment variable the runtime reads: guardrail overrides, directory layout, debug toggles, and internal plumbing | [environment-variables.md](docs/environment-variables.md) |
+| Argonne ALCF Sophia/Metis inference targets over Globus OAuth | [alcf-provider.md](docs/alcf-provider.md) |
+| Installation, upgrade, reset, uninstallation, configuration folders, and permissions | [installation-and-lifecycle.md](docs/installation-and-lifecycle.md) |
+| Safety posture, default-deny Bash, project policy, damage-control rules, and typed validation | [safety-model.md](docs/safety-model.md) |
+| Source layout, compile-time boundaries, domain loading, and runtime data flow | [architecture.md](docs/architecture.md) |
+| Prompt envelope reuse, provider tool delivery, and bounded tool results | [prompt-envelope-and-tools.md](docs/prompt-envelope-and-tools.md) |
+| In-depth reference for all 19 worker tools: parameters, typical payloads, and error examples | [tool-usage.md](docs/tool-usage.md) |
+| Developer guide to implementing custom model runtimes and inference server integrations | [provider-adapter-cookbook.md](docs/provider-adapter-cookbook.md) |
+| Built-in agent recipes, discovery roots, frontmatter schema, and dispatch admission | [built-in-agents.md](docs/built-in-agents.md) |
+| Artifact browsing, receipt verification, dispatch diagnostics, and observability routing | [observability.md](docs/observability.md) |
+| Evidence directory structures, findings, and operator-approved memory retrieval | [evidence-and-memory.md](docs/evidence-and-memory.md) |
+| Local YAML eval suites, reports, comparisons, and command evidence | [eval-runner.md](docs/eval-runner.md) |
+| Prompt and skill resources, extension manifests, and portable share archives | [extensions-and-sharing.md](docs/extensions-and-sharing.md) |
+| Skills Hub marketplace discovery, cache behavior, install actions, and publishing flow | [skills-marketplace.md](docs/skills-marketplace.md) |
+| Runtime model refresh, catalog sources, local/cloud model quirks, and benchmarking notes | [model-catalog.md](docs/model-catalog.md) |
+| Active component snapshots and the experimental middleware hook/effect contract | [middleware-and-components.md](docs/middleware-and-components.md) |
+| Advisory validation-contract patterns for scientific artifacts and HPC assumptions | [scientific-validation.md](docs/scientific-validation.md) |
+| Falsifiable Change Manifest JSON templates, auditability, and `clio evolve` | [evolution.md](docs/evolution.md) |
+| Source-first docs workflow, mapping matrix, and alpha wording guidance | [documentation-guide.md](docs/documentation-guide.md) |
+| Interface layout, colors palette, Unicode character vocabulary, and drawing choreography | [tui-design.md](docs/tui-design.md) |
+| NDJSON parent-child socket protocols, watchdog timers, and exit status mapping | [worker-dispatch-mechanics.md](docs/worker-dispatch-mechanics.md) |
+| Private context index determinism and target smoke matrices (Internal Reference) | [evals-internal.md](docs/evals-internal.md) |
+| Point-in-time inventory of legacy environment variables (Historical Appendix) | [config-knobs-audit.md](docs/config-knobs-audit.md) |
 
 
 ## Local Model Performance
@@ -396,7 +411,7 @@ Security reports go through the channels described in
 
 Clio Coder is an open-source orchestrator coding agent developed under the [IOWarp](https://iowarp.ai) project. It is created by the [Gnosis Research Center](https://grc.iit.edu) at the [Illinois Institute of Technology](https://www.iit.edu) in collaboration with the University of Utah.
 
-The development of the IOWarp platform and the CLIO (Context Layer for Input/Output) architecture is funded by the National Science Foundation (NSF) under [Award #2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318) for the 2024–2029 period. The project is led by Principal Investigator Dr. Xian-He Sun and Co-Principal Investigators Dr. Anthony Kougkas, Dr. Jake Hochhalter, and Dr. Vivek Srikumar.
+The development of the IOWarp platform and the CLIO (Context Layer for Input/Output) architecture is funded by the National Science Foundation (NSF) under [Award #2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318) for the 2024-2029 period. The project is led by Principal Investigator Dr. Xian-He Sun and Co-Principal Investigators Dr. Anthony Kougkas, Dr. Jake Hochhalter, and Dr. Vivek Srikumar.
 
 Clio Coder operates as the interactive coding orchestrator within the broader IOWarp ecosystem:
 - [clio-core](https://github.com/iowarp/clio-core): The foundational storage layer utilizing Chimaera-based tiered data and context storage.
