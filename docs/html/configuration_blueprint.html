@@ -572,8 +572,9 @@
                   <option value="openai-compat">openai-compat</option>
                   <option value="anthropic-compat">anthropic-compat</option>
                   <option value="google">google</option>
-                  <option value="openai">openai</option>
-                  <option value="anthropic">anthropic</option>
+                  <option value="openai-codex">openai-codex</option>
+                  <option value="anthropic-max">anthropic-max</option>
+                  <option value="claude-sdk">claude-sdk</option>
                 </select>
               </div>
             </div>
@@ -957,8 +958,9 @@ orchestrator:
       'vllm': { port: '8000', cLimit: 65536, tLimit: 2048, r: false, badges: ['chat', 'tools'] },
       'openai-compat': { port: '5000', cLimit: 8192, tLimit: 1024, r: false, badges: ['chat'] },
       'anthropic-compat': { port: '8000', cLimit: 16384, tLimit: 2048, r: false, badges: ['chat'] },
-      'openai': { port: '', cLimit: 128000, tLimit: 4096, r: true, badges: ['chat', 'tools', 'vision'] },
-      'anthropic': { port: '', cLimit: 200000, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] },
+      'openai-codex': { port: '', cLimit: 272000, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] },
+      'anthropic-max': { port: '', cLimit: 200000, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] },
+      'claude-sdk': { port: '', cLimit: 200000, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] },
       'google': { port: '', cLimit: 1048576, tLimit: 8192, r: true, badges: ['chat', 'tools', 'vision'] }
     };
 
@@ -972,13 +974,15 @@ orchestrator:
         if (spec.port) {
           urlInput.value = `http://localhost:${spec.port}`;
         } else {
-          urlInput.value = runtime === 'openai' ? 'https://api.openai.com/v1' : 
-                          runtime === 'anthropic' ? 'https://api.anthropic.com/v1' : 
+          urlInput.value = runtime === 'openai-codex' ? 'https://api.openai.com/v1' : 
+                          runtime === 'anthropic-max' ? 'https://api.anthropic.com/v1' : 
+                          runtime === 'claude-sdk' ? 'https://api.anthropic.com/v1' :
                           'https://api.gemini.google.com/v1';
         }
 
-        modelInput.value = runtime === 'openai' ? 'gpt-4o' : 
-                           runtime === 'anthropic' ? 'claude-3-5-sonnet-latest' :
+        modelInput.value = runtime === 'openai-codex' ? 'gpt-5.4' : 
+                           runtime === 'anthropic-max' ? 'claude-sonnet-5' :
+                           runtime === 'claude-sdk' ? 'sonnet' :
                            runtime === 'google' ? 'gemini-1.5-pro' :
                            'qwen2.5-coder:14b';
       }

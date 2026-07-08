@@ -46,9 +46,9 @@ npm run bench:tb -- --limit 3
 
 The benchmarks record context-window, thinking, sampling, weight quantization, and KV-cache settings so sweeps can be compared consistently.
 
-## What “sanctioned” means
+## What "sanctioned" means
 
-A model family is “sanctioned” only when we can say what was tested and under which runtime. It is not a blanket endorsement. For each family, capture:
+A model family is "sanctioned" only when we can say what was tested and under which runtime. It is not a blanket endorsement. For each family, capture:
 
 - exact model id / artifact / quantization;
 - provider or runtime surface (`lmstudio-native`, `ollama-native`, `llamacpp`, `openrouter`, `openai-codex`, etc.);
@@ -56,7 +56,7 @@ A model family is “sanctioned” only when we can say what was tested and unde
 - context window and max output actually exercised;
 - tool-use, reasoning, vision, embeddings/rerank/FIM behavior where relevant;
 - quirks needed by the engine (thinking mechanism, sampling, KV cache);
-- failures and “do not use this route yet” notes.
+- failures and "do not use this route yet" notes.
 
 Engine-visible quirks belong in catalog YAML entries under `quirks.kvCache`, `quirks.sampling`, and `quirks.thinking`. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts.
 

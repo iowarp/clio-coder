@@ -202,7 +202,7 @@
       if (type === 'spawn') {
         html = `<div class="stream-line"><span class="stream-dir dir-sys">[SYS]</span> node dist/worker/entry.js (pid 48123) spawned with scrubbed process.env</div>`;
       } else if (type === 'spec') {
-        html = `<div class="stream-line"><span class="stream-dir dir-in">stdin &gt;</span> <code>{"type":"spec","sessionId":"sess-9f2","autonomy":"suggest","model":"gpt-4o"}</code></div>`;
+        html = `<div class="stream-line"><span class="stream-dir dir-in">stdin &gt;</span> <code>{"type":"spec","sessionId":"sess-9f2","autonomy":"suggest","model":"gpt-5.4"}</code></div>`;
       } else if (type === 'heartbeat') {
         html = `<div class="stream-line"><span class="stream-dir dir-out">&lt; stdout</span> <code>{"type":"heartbeat","at":${stamp}}</code></div>`;
       } else if (type === 'escalate') {
