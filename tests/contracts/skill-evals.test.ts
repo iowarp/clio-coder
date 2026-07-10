@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { runSkillsCommand } from "../../src/cli/skills.js";
-import { extractBulletsObject, parseJudgeVerdicts } from "../../src/cli/skills-eval.js";
+import { extractBulletsObject, materializeSkillEvalWorkspaces, parseJudgeVerdicts } from "../../src/cli/skills-eval.js";
 import { parseSkillEvals } from "../../src/domains/resources/skills/evals.js";
 import {
 	closeServer,
@@ -293,7 +293,39 @@ describe("contracts/skill-evals CLI argument contract", () => {
 		ok(stderr.includes("--timeout"));
 	});
 
-	it("runs fixture commands in the scenario workspace before child runs", async () => {
+	it("materializes byte-equivalent disjoint arms and an empty judge workspace", async () => {
+		const seed = mkdtempSync(join(tmpdir(), "clio-skill-eval-seed-contract-"));
+		scratchRoots.push(seed);
+		mkdirSync(join(seed, "nested"));
+		writeFileSync(join(seed, "marker.txt"), "ready\n", "utf8");
+		writeFileSync(join(seed, "nested", "input.txt"), "input\n", "utf8");
+
+		const workspaces = await materializeSkillEvalWorkspaces(seed);
+		try {
+			ok(workspaces.baseline !== workspaces.treatment);
+			ok(workspaces.baseline !== workspaces.judge);
+			ok(workspaces.treatment !== workspaces.judge);
+			deepStrictEqual(readdirSync(workspaces.baseline, { recursive: true }), ["marker.txt", "nested", "nested/input.txt"]);
+			deepStrictEqual(readdirSync(workspaces.treatment, { recursive: true }), [
+				"marker.txt",
+				"nested",
+				"nested/input.txt",
+			]);
+			strictEqual(readFileSync(join(workspaces.baseline, "marker.txt"), "utf8"), "ready\n");
+			strictEqual(readFileSync(join(workspaces.treatment, "marker.txt"), "utf8"), "ready\n");
+			strictEqual(readFileSync(join(workspaces.baseline, "nested", "input.txt"), "utf8"), "input\n");
+			strictEqual(readFileSync(join(workspaces.treatment, "nested", "input.txt"), "utf8"), "input\n");
+			deepStrictEqual(readdirSync(workspaces.judge), []);
+
+			writeFileSync(join(workspaces.baseline, "baseline-only.txt"), "baseline\n", "utf8");
+			strictEqual(existsSync(join(workspaces.treatment, "baseline-only.txt")), false);
+			strictEqual(existsSync(join(seed, "baseline-only.txt")), false);
+		} finally {
+			await workspaces.cleanup();
+		}
+	});
+
+	it("runs fixture commands from an immutable workspace copy before child runs", async () => {
 		const scratch = makeScratchHome("clio-skill-eval-fixture-");
 		const fixture = await startOpenAICompatFixture(
 			'{"bullets":[{"index":1,"pass":true,"reason":"fixture marker observed"}]}',
@@ -337,6 +369,7 @@ describe("contracts/skill-evals CLI argument contract", () => {
 			);
 			const workspace = join(scratch.dir, "workspace");
 			mkdirSync(workspace);
+			writeFileSync(join(workspace, "source.txt"), "unchanged\n", "utf8");
 
 			// Fixtures are third-party shell: without the explicit opt-in they
 			// must not execute, and the scenario reports the refusal.
@@ -365,7 +398,9 @@ describe("contracts/skill-evals CLI argument contract", () => {
 				{ cwd: scratch.dir, env, timeoutMs: 90_000 },
 			);
 			strictEqual(result.code, 0, result.stderr);
-			strictEqual(readFileSync(join(workspace, "marker.txt"), "utf8"), "ready\n");
+			strictEqual(existsSync(join(workspace, "marker.txt")), false);
+			deepStrictEqual(readdirSync(workspace), ["source.txt"]);
+			strictEqual(readFileSync(join(workspace, "source.txt"), "utf8"), "unchanged\n");
 			const rows = result.stdout
 				.trim()
 				.split("\n")
