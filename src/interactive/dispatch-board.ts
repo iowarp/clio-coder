@@ -10,6 +10,7 @@ import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
 import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { formatWorkerContextMeter } from "./context-meter.js";
 import { formatUsd } from "./footer/widgets.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import {
@@ -47,15 +48,36 @@ export interface DispatchBoardRow {
 	outputTokens: number;
 	ttftMs: number | null;
 	outcomeDetail?: string | null;
+	/** Fleet node id; absent renders as the local node. */
+	node?: string;
+	/** Review/compete gate badge (role + cycle). */
+	gate?: { role: string; cycle: number };
+	/** Dead-node failover hops recorded on this run's chain. */
+	rerouteCount?: number;
+	/** Model context window for the per-worker context meter. */
+	contextWindow?: number;
+	/** Last assistant message's input+cacheRead+output: current context occupancy. */
+	lastContextTokens?: number;
+	/** Tool currently executing in the worker; null between calls. */
+	currentTool?: string | null;
+	/** Recently finished tools, newest first, bounded. */
+	recentTools?: ReadonlyArray<string>;
 }
 
-interface DispatchBoardEntry extends Omit<DispatchBoardRow, "elapsedMs"> {
+interface DispatchBoardEntry
+	extends Omit<DispatchBoardRow, "elapsedMs" | "recentTools" | "lastContextTokens" | "currentTool"> {
 	sequence: number;
 	enqueuedAtMs: number;
 	startedAtMs: number | null;
 	finishedAtMs: number | null;
 	durationMs: number | null;
+	lastContextTokens: number;
+	currentTool: string | null;
+	recentTools: string[];
 }
+
+/** Bound on the recent-tool trail rendered on a card. */
+const RECENT_TOOL_TRAIL_LIMIT = 4;
 
 interface WorkerEventShape {
 	type?: unknown;
@@ -303,20 +325,35 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
 	const targetLine = truncateToWidth(`${cardKvKey(theme, "target")}${target}`, contentWidth, "…", false);
+	// Fleet facts: node placement (absent means local), gate role badge, and
+	// reroute lineage. Whole units so overflow drops a fact, never clips one.
+	const statusUnits = [
+		statusStr,
+		theme.fg("muted", `node ${row.node ?? "local"}`),
+		...(row.gate !== undefined ? [theme.fg("info", `gate ${row.gate.role} c${row.gate.cycle}`)] : []),
+		...(row.rerouteCount !== undefined && row.rerouteCount > 0
+			? [theme.fg("warning", `rerouted x${row.rerouteCount}`)]
+			: []),
+		`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
+		`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
+	];
+	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
 	const bodyLines = [
 		targetLine,
-		cardUnitsLine(
-			theme,
-			"status",
-			[
-				statusStr,
-				`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
-				`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
-			],
-			contentWidth,
-		),
-		cardUnitsLine(theme, "telemetry", [up, down, total], contentWidth),
+		cardUnitsLine(theme, "status", statusUnits, contentWidth),
+		cardUnitsLine(theme, "telemetry", [up, down, total, ...(contextUnit !== null ? [contextUnit] : [])], contentWidth),
 	];
+	// Live tool activity: the executing tool (worker telemetry carries names,
+	// never arguments, across the stdout seam) and the recent-tool trail.
+	const currentTool = row.currentTool ?? null;
+	const recentTools = row.recentTools ?? [];
+	if (currentTool !== null || recentTools.length > 0) {
+		const toolUnits = [
+			currentTool !== null ? theme.fg("action", `${currentTool} running`) : theme.fg("dim", "idle"),
+			...(recentTools.length > 0 ? [theme.fg("muted", `recent ${recentTools.join(" ")}`)] : []),
+		];
+		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
+	}
 	// The proof row is present only when the observability projection knows an
 	// evidence state for this run; an unknown/none state adds no line, so cards
 	// without evidence keep their existing three-line body.
@@ -470,6 +507,22 @@ function parseFiniteNumber(value: unknown, fallback: number): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function parseNonEmptyString(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function parsePositiveInt(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+function parseGateBadge(value: unknown): { role: string; cycle: number } | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const record = value as { role?: unknown; cycle?: unknown };
+	if (typeof record.role !== "string" || record.role.length === 0) return undefined;
+	const cycle = parsePositiveInt(record.cycle) ?? 1;
+	return { role: record.role, cycle };
+}
+
 function parseFiniteNumberOrZero(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -549,6 +602,13 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		outputTokens: entry.outputTokens,
 		ttftMs: entry.ttftMs,
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
+		...(entry.node !== undefined ? { node: entry.node } : {}),
+		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
+		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
+		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
+		lastContextTokens: entry.lastContextTokens,
+		currentTool: entry.currentTool,
+		recentTools: [...entry.recentTools],
 	};
 }
 
@@ -594,6 +654,10 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		const previous = entries.get(runId);
 		const agentAudience = parseAgentAudience(raw.agentAudience, previous?.agentAudience);
 		const requestOrigin = parseRequestOrigin(raw.requestOrigin, previous?.requestOrigin);
+		const node = parseNonEmptyString(raw.node) ?? previous?.node;
+		const gate = parseGateBadge(raw.gate) ?? previous?.gate;
+		const rerouteCount = parsePositiveInt(raw.rerouteCount) ?? previous?.rerouteCount;
+		const contextWindow = parsePositiveInt(raw.contextWindow) ?? previous?.contextWindow;
 		const entry: DispatchBoardEntry = {
 			runId,
 			agentId: parseText(raw.agentId, previous?.agentId ?? "-"),
@@ -615,6 +679,13 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			outputTokens: previous?.outputTokens ?? 0,
 			ttftMs: previous?.ttftMs ?? null,
 			outcomeDetail: previous?.outcomeDetail ?? null,
+			...(node !== undefined ? { node } : {}),
+			...(gate !== undefined ? { gate } : {}),
+			...(rerouteCount !== undefined ? { rerouteCount } : {}),
+			...(contextWindow !== undefined ? { contextWindow } : {}),
+			lastContextTokens: previous?.lastContextTokens ?? 0,
+			currentTool: previous?.currentTool ?? null,
+			recentTools: previous?.recentTools ?? [],
 		};
 		entries.set(runId, entry);
 		pruneEntries(entries);
@@ -704,6 +775,20 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 					entry.ttftMs = Date.now() - entry.startedAtMs;
 				}
 			}
+			if (type === "clio_tool_start") {
+				const payload = (workerEvent as { payload?: { tool?: unknown } }).payload;
+				const tool = parseNonEmptyString(payload?.tool);
+				if (tool !== undefined) entry.currentTool = tool;
+			}
+			if (type === "clio_tool_finish") {
+				const payload = (workerEvent as { payload?: { tool?: unknown } }).payload;
+				const tool = parseNonEmptyString(payload?.tool);
+				entry.currentTool = null;
+				if (tool !== undefined) {
+					entry.recentTools.unshift(tool);
+					if (entry.recentTools.length > RECENT_TOOL_TRAIL_LIMIT) entry.recentTools.length = RECENT_TOOL_TRAIL_LIMIT;
+				}
+			}
 			if (isTerminalStatus(entry.status)) return;
 			if (type === "message_end" && workerEvent.message?.role === "assistant") {
 				const usage = workerEvent.message.usage;
@@ -712,6 +797,9 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 				entry.inputTokens += input;
 				entry.outputTokens += output;
 				entry.tokenCount += input + output + parseFiniteNumberOrZero(usage?.cacheWrite);
+				// The last assistant message's input+cacheRead+output approximates the
+				// worker's current context occupancy for the per-worker meter.
+				entry.lastContextTokens = input + output;
 			}
 			if (type === "agent_end") {
 				const status = resolveAgentEndStatus(workerEvent.messages);

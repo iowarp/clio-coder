@@ -160,3 +160,64 @@ export function renderContextMeterGrid(
 export function contextCategorySwatch(category: ContextLedgerCategory, theme: ClioTheme = clioTheme()): string {
 	return theme.fg(CONTEXT_CATEGORY_TOKEN[category], contextCategoryGlyph(category));
 }
+
+// ---------------------------------------------------------------------------
+// Per-worker context meter (fleet visibility)
+//
+// Workers report usage on their message_end events; the last assistant
+// message's input + cacheRead + output approximates the worker's current
+// context occupancy. Fleet surfaces (dispatch board cards, /fleet rows)
+// render it as a percentage of the model's context window with the shared
+// thresholds below, so "how full is that worker" reads identically to how
+// the footer portrays the main agent's window.
+// ---------------------------------------------------------------------------
+
+export type WorkerContextSeverity = "healthy" | "warn" | "critical";
+
+export const WORKER_CONTEXT_WARN_PCT = 80;
+export const WORKER_CONTEXT_CRITICAL_PCT = 95;
+
+export function workerContextSeverity(pct: number): WorkerContextSeverity {
+	if (pct >= WORKER_CONTEXT_CRITICAL_PCT) return "critical";
+	if (pct >= WORKER_CONTEXT_WARN_PCT) return "warn";
+	return "healthy";
+}
+
+export function workerContextToken(severity: WorkerContextSeverity): ClioToken {
+	if (severity === "critical") return "error";
+	if (severity === "warn") return "warning";
+	return "muted";
+}
+
+export interface WorkerContextView {
+	pct: number;
+	severity: WorkerContextSeverity;
+	usedTokens: number;
+	contextWindow: number;
+}
+
+/**
+ * Derive the worker context view, or null when the window is unknown or no
+ * usage has been observed yet. The percentage is capped at 100: a provider
+ * report past the window is a full window, not a >100% claim.
+ */
+export function workerContextView(
+	usedTokens: number,
+	contextWindow: number | undefined | null,
+): WorkerContextView | null {
+	if (contextWindow === undefined || contextWindow === null || contextWindow <= 0) return null;
+	if (!Number.isFinite(usedTokens) || usedTokens <= 0) return null;
+	const pct = Math.min(100, Math.round((usedTokens / contextWindow) * 100));
+	return { pct, severity: workerContextSeverity(pct), usedTokens, contextWindow };
+}
+
+/** Compact colored `ctx NN%` unit for board cards and /fleet rows; null when unknown. */
+export function formatWorkerContextMeter(
+	usedTokens: number,
+	contextWindow: number | undefined | null,
+	theme: ClioTheme = clioTheme(),
+): string | null {
+	const view = workerContextView(usedTokens, contextWindow);
+	if (view === null) return null;
+	return theme.fg(workerContextToken(view.severity), `ctx ${view.pct}%`);
+}

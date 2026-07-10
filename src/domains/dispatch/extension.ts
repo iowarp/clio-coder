@@ -3000,6 +3000,19 @@ export function createDispatchBundle(
 				.persist()
 				.catch((error) => reportDispatchDiagnostic(`persist running row for run ${envelope.id}`, error));
 
+			// Fleet-visibility facts for the board: node placement, gate role,
+			// reroute lineage depth, and the model context window for the
+			// per-worker meter. All optional so consumers degrade to local/plain.
+			const fleetIdentity = {
+				...(placement !== undefined && placement !== null ? { node: placement.node.id } : {}),
+				...(req.gate !== undefined ? { gate: { role: req.gate.role, cycle: req.gate.cycle } } : {}),
+				...(req.reroutes !== undefined && req.reroutes.length > 0 ? { rerouteCount: req.reroutes.length } : {}),
+				...(lifecycle.target.modelCapabilities !== undefined &&
+				lifecycle.target.modelCapabilities !== null &&
+				lifecycle.target.modelCapabilities.contextWindow > 0
+					? { contextWindow: lifecycle.target.modelCapabilities.contextWindow }
+					: {}),
+			};
 			context.bus.emit(BusChannels.DispatchEnqueued, {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -3009,6 +3022,7 @@ export function createDispatchBundle(
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
+				...fleetIdentity,
 			});
 			context.bus.emit(BusChannels.DispatchStarted, {
 				runId: envelope.id,
@@ -3020,6 +3034,7 @@ export function createDispatchBundle(
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
 				pid,
+				...fleetIdentity,
 			});
 		} catch (error) {
 			try {
@@ -3566,6 +3581,7 @@ export function createDispatchBundle(
 				elapsedMs,
 				tokens: { input: meter.inputTokens, output: meter.outputTokens, total: totalTokens },
 				costUsd,
+				node: run.node !== null ? { ...run.node } : null,
 			});
 			totals.inputTokens += meter.inputTokens;
 			totals.outputTokens += meter.outputTokens;

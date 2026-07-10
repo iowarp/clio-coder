@@ -85,6 +85,7 @@ import {
 	createProtectedArtifactsRegistration,
 	type ProtectedArtifactProtectEvent,
 } from "../domains/safety/protected-artifacts-registration.js";
+import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
@@ -1142,6 +1143,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		getSettings: getCurrentSettings,
+		getFleetNodes: () => result.getContract<SchedulingContract>("scheduling")?.fleet?.list() ?? [],
 		getWorkerDefault: () => {
 			const workerDefault = getCurrentSettings().workers.default;
 			const result: { target?: string; model?: string } = {};

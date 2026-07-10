@@ -1,5 +1,5 @@
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
-import type { RunEnvelope, RunLineage, RunReceipt, RunStatus } from "./types.js";
+import type { RunEnvelope, RunLineage, RunNodeIdentity, RunReceipt, RunStatus } from "./types.js";
 import type { JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
@@ -36,6 +36,8 @@ export interface DispatchSnapshot {
 		elapsedMs: number;
 		tokens: { input: number; output: number; total: number };
 		costUsd: number;
+		/** Fleet node this run was placed on; null means the local node. */
+		node: RunNodeIdentity | null;
 	}>;
 	retrying: Array<{ runId: string; agentId: string; attempt: number; dueAt: string; reason: string }>;
 	totals: {

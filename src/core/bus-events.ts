@@ -427,6 +427,14 @@ export interface DispatchRunIdentity {
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
+	/** Fleet node id the run was placed on; absent renders as the local node. */
+	node?: string | undefined;
+	/** Review/compete gate role and cycle, for fleet board badges. */
+	gate?: { role: string; cycle: number } | undefined;
+	/** Dead-node failover hops recorded on this run's chain so far. */
+	rerouteCount?: number | undefined;
+	/** Model context window in tokens, for the per-worker context meter. */
+	contextWindow?: number | undefined;
 }
 
 /** Published on {@link BusChannels.DispatchEnqueued} once the ledger row exists. */
