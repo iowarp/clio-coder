@@ -2,6 +2,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
@@ -41,6 +42,10 @@ export interface ToolBootstrapDeps {
 	taskBoard?: TaskBoardStore;
 	/** Agent fleet catalog renderer for the dispatch tool's list action. */
 	getAgentCatalog?: () => string;
+	/** Session-effective autonomy for dispatch plan provenance and compete winner handling. */
+	getAutonomy?: () => AutonomyLevel;
+	/** Scheduling cost ceiling recorded on dispatch plan provenance. */
+	getCostCeilingUsd?: () => number;
 	getSkillLoaderOptions?: () => Pick<
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
@@ -371,6 +376,8 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			dispatch: deps.dispatch,
 			...(deps.bus ? { bus: deps.bus } : {}),
 			...(deps.getAgentCatalog ? { getAgentCatalog: deps.getAgentCatalog } : {}),
+			...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
+			...(deps.getCostCeilingUsd ? { getCostCeilingUsd: deps.getCostCeilingUsd } : {}),
 		};
 		registry.register({
 			...builtin(createDispatchTool(dispatchToolDeps), {

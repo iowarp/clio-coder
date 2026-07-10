@@ -1092,9 +1092,24 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
 	// Workers inherit the session's autonomy level at admission time (sd-01
 	// §2.5); the worker registry applies the same mapping the orchestrator's
-	// does, with asks resolving through onPermission above.
-	spec.autonomy = settings?.autonomy ?? "auto-edit";
+	// does, with asks resolving through onPermission above. A request-level
+	// autonomy can only narrow (reviewer/judge runs pin read-only); a worker
+	// never exceeds the orchestrator's authority.
+	spec.autonomy = clampWorkerAutonomy(settings?.autonomy ?? "auto-edit", input.req.autonomy);
 	return spec;
+}
+
+const AUTONOMY_ORDER: Record<AutonomyLevel, number> = {
+	"read-only": 0,
+	suggest: 1,
+	"auto-edit": 2,
+	"full-auto": 3,
+};
+
+/** Lower of the session level and the request's narrowing; requests cannot widen. */
+export function clampWorkerAutonomy(session: AutonomyLevel, requested: AutonomyLevel | undefined): AutonomyLevel {
+	if (requested === undefined) return session;
+	return AUTONOMY_ORDER[requested] < AUTONOMY_ORDER[session] ? requested : session;
 }
 
 function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyEnforcement {
@@ -2267,6 +2282,8 @@ export function createDispatchBundle(
 				lineage,
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 			});
 			// One durable write at start so sibling processes (clio fleet status)
@@ -2376,6 +2393,8 @@ export function createDispatchBundle(
 				lineage,
 				identity,
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
 				startedAt,
@@ -2970,6 +2989,8 @@ export function createDispatchBundle(
 					? { reroutes: [...placement.reroutes] }
 					: {}),
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
 			});
@@ -3099,6 +3120,8 @@ export function createDispatchBundle(
 					? { reroutes: [...placement.reroutes] }
 					: {}),
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
+				...(req.gate !== undefined ? { gate: req.gate } : {}),
+				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
 				startedAt,
