@@ -304,6 +304,61 @@ async function consumeBatchEvents(
 }
 
 /**
+ * Fan out without waiting: admit and spawn every task, persist the durable
+ * batch record, then hand the merged event stream to a background drain so
+ * token metering, run tails (monitor peek), and bus progress keep flowing
+ * while the orchestrator's turn continues. The tool result carries only the
+ * batch id and run ids; results are gathered later through monitor
+ * mode="wait"/"collect", in this session or after a resume.
+ */
+async function runDetached(
+	deps: DispatchToolDeps,
+	requests: ReadonlyArray<DispatchRequest>,
+	sessionId: string | null,
+): Promise<ToolResult> {
+	const detached = deps.dispatch.detached;
+	if (!detached) {
+		return { kind: "error", message: "dispatch: detach is not supported in this context" };
+	}
+	const handle = await deps.dispatch.dispatchBatch(requests);
+	// dispatchBatch admits requests in order, so runIds[i] belongs to requests[i].
+	const runs = handle.runIds.map((runId, index) => ({
+		runId,
+		agentId: requests[index]?.agentId ?? "unknown",
+	}));
+	void consumeBatchEvents(handle.batchId, handle.events, deps.bus).catch(() => {});
+	handle.finalPromise.catch(() => {});
+	try {
+		await detached.register({ batchId: handle.batchId, runs, sessionId });
+	} catch (err) {
+		// The runs are already live; report the durability gap instead of
+		// pretending the batch does not exist.
+		const message = err instanceof Error ? err.message : String(err);
+		return {
+			kind: "error",
+			message: `dispatch: detached runs started (batch=${handle.batchId}, runs=${handle.runIds.join(", ")}) but the durable batch record failed: ${message}`,
+			details: { mode: "detached", batchId: handle.batchId, runIds: [...handle.runIds] },
+		};
+	}
+	const lines = [
+		`dispatch (detached) batch=${handle.batchId} started ${runs.length} run(s)`,
+		...runs.map((run) => `- ${run.runId} agent=${run.agentId}`),
+		"",
+		`Runs continue in the background. Collect results with monitor(mode="collect", batch_id="${handle.batchId}"); block on one run with monitor(mode="wait", run_id=<id>).`,
+	];
+	return {
+		kind: "ok",
+		output: lines.join("\n"),
+		details: {
+			mode: "detached",
+			batchId: handle.batchId,
+			runIds: [...handle.runIds],
+			runs: runs.map((run) => ({ runId: run.runId, agentId: run.agentId })),
+		},
+	};
+}
+
+/**
  * Surfaces a succeeded run's outcomeDetail to the calling model. Today that
  * detail is only set for runs that finished without a successful tool call;
  * the dispatch summary must not flatter such a run as plainly "completed".
@@ -390,7 +445,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. Call with list:true to see available agents. Use the returned receipts/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. detach:true returns immediately with a batch id while the runs continue in the background; gather them later with monitor mode=wait/collect. Call with list:true to see available agents. Use the returned receipts/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
 			tasks: Type.Optional(
@@ -421,6 +476,12 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 					["parallel", "sequential", "pipeline"],
 					"Run tasks concurrently (default), one at a time, or as a pipeline where each task receives the previous task's output as input data.",
 				),
+			),
+			detach: Type.Optional(
+				Type.Boolean({
+					description:
+						"Return immediately after admission with a batch id and run ids; runs continue in the background. Collect later with the monitor tool. Parallel mode only.",
+				}),
 			),
 			agent: Type.Optional(Type.String({ description: "Default agent recipe for string tasks (default coder)." })),
 			persona: Type.Optional(
@@ -463,6 +524,24 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 			if (options?.signal?.aborted) return { kind: "error", message: "dispatch: aborted" };
 			const maxOutputBytes = maxOutputBytesArg(args);
 			const timeoutMs = timeoutMsArg(args);
+
+			if (args.detach === true) {
+				if (mode !== "parallel") {
+					return { kind: "error", message: `dispatch: detach only supports parallel mode; got '${mode}'` };
+				}
+				if (timeoutMs !== undefined) {
+					return {
+						kind: "error",
+						message:
+							'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; use monitor(mode="wait") with a timeout instead',
+					};
+				}
+				try {
+					return await runDetached(deps, parsed.requests, options?.sessionId ?? null);
+				} catch (err) {
+					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+				}
+			}
 
 			try {
 				let runs: CompletedRun[];

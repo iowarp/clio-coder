@@ -46,6 +46,10 @@ import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/ind
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
 import {
+	createDetachedDispatchNudgeRegistration,
+	openDetachedBatchViews,
+} from "../domains/middleware/dispatch-nudge.js";
+import {
 	createHookReceiptLog,
 	createSkillsReminderRegistration,
 	type ExtensionHookRoot,
@@ -936,6 +940,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
+	middleware.registerHook(
+		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
+	);
 	if (session) {
 		middleware.registerHook(
 			createFinishContractRegistration({
