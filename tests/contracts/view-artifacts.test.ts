@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -282,6 +282,21 @@ describe("contracts/view-artifacts", () => {
 		const loaded = await artifacts[0]?.load();
 		strictEqual(loaded?.format, "json");
 		ok(loaded?.lines.includes(`  "runId": "${envelope.id}",`));
+	});
+
+	it("fails verification for a receipt sealed under a retired integrity version", async () => {
+		const stateDir = await scratchDir();
+		const envelope = await writeReceiptFixture(stateDir);
+		const receiptPath = receiptFilePath(stateDir, envelope.id);
+		const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+			integrity: { version: number };
+		};
+		receipt.integrity.version = 3;
+		await writeFile(receiptPath, JSON.stringify(receipt, null, 2));
+
+		deepStrictEqual(verifyReceiptFile(stateDir, envelope.id), { ok: false, reason: "integrity invalid" });
+		const artifact = (await new ReceiptArtifactProvider({ stateDir }).list())[0];
+		deepStrictEqual(await artifact?.verify?.(), { ok: false, detail: "integrity invalid" });
 	});
 
 	it("lists receipts written to disk by another process after provider construction", async () => {

@@ -21,7 +21,7 @@ import type { DispatchRequest } from "./contract.js";
 import type { DispatchNodePlacement } from "./extension.js";
 import { fleetPreflightVerdict, readFleetPreflightRecords } from "./fleet-preflight.js";
 import { createSshWorkerTransport, LOCAL_NODE_ID, localNodeIdentity, type WorkerTransport } from "./transport.js";
-import type { RunNodeReroute } from "./types.js";
+import type { RunNodeIdentity, RunNodeReroute } from "./types.js";
 
 export interface FleetPlacementDeps {
 	getSettings: () => Readonly<ClioSettings> | undefined;
@@ -30,6 +30,11 @@ export interface FleetPlacementDeps {
 	transportForNode?: (node: FleetNodeSettings) => WorkerTransport;
 	/** Preflight seam; defaults to the durable doctor store. */
 	preflightVerdict?: typeof fleetPreflightVerdict;
+}
+
+/** Side-effect-free placement used to build an immutable approval plan. */
+export interface FleetPlacementPreview {
+	node: RunNodeIdentity;
 }
 
 function admissionError(reason: string): Error {
@@ -132,5 +137,62 @@ export function createFleetPlacementResolver(
 			}
 		}
 		return localPlacement();
+	};
+}
+
+/**
+ * Resolve the node that the normal placement policy would choose without
+ * acquiring capacity. The approved request is subsequently pinned to this
+ * node, so a capacity/state change fails launch instead of silently drifting
+ * to a different node after approval.
+ */
+export function createFleetPlacementPreviewResolver(
+	deps: FleetPlacementDeps,
+): (req: DispatchRequest) => FleetPlacementPreview {
+	const verdictFor = deps.preflightVerdict ?? fleetPreflightVerdict;
+	return (req: DispatchRequest): FleetPlacementPreview => {
+		const settings = deps.getSettings();
+		const nodes = settings?.fleet?.nodes ?? [];
+		const requested = requestedNodeId(req, settings);
+		const fleet = deps.fleet;
+		const local = (): FleetPlacementPreview => ({ node: localNodeIdentity() });
+		const remote = (node: FleetNodeSettings): FleetPlacementPreview => ({
+			node: { id: node.id, kind: "ssh", host: node.host },
+		});
+		const projectRoot = req.cwd ?? process.cwd();
+
+		if (requested !== null) {
+			if (requested === LOCAL_NODE_ID) return local();
+			const node = nodes.find((entry) => entry.id === requested);
+			if (!node) throw admissionError(`unknown fleet node '${requested}'`);
+			if (fleet === undefined) throw admissionError(`fleet registry unavailable; cannot place on node '${requested}'`);
+			const snapshot = fleet.get(node.id);
+			if (snapshot && snapshot.state !== "online") {
+				throw admissionError(
+					`fleet node '${node.id}' is ${snapshot.state}${snapshot.stateReason ? ` (${snapshot.stateReason})` : ""}`,
+				);
+			}
+			const preflight = verdictFor(node, projectRoot);
+			if (!preflight.ok) throw admissionError(preflight.reason ?? `node '${node.id}' is not preflighted`);
+			if ((snapshot?.activeWorkers ?? 0) >= node.maxWorkers) {
+				throw admissionError(
+					`fleet node '${node.id}' is at capacity (${snapshot?.activeWorkers ?? "?"}/${node.maxWorkers} workers)`,
+				);
+			}
+			return remote(node);
+		}
+
+		if (fleet !== undefined && nodes.length > 0) {
+			const preflightRecords = readFleetPreflightRecords();
+			const eligible = nodes
+				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
+				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
+				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
+				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
+				.sort((a, b) => (a.snapshot?.activeWorkers ?? 0) - (b.snapshot?.activeWorkers ?? 0) || a.order - b.order);
+			const selected = eligible[0]?.node;
+			if (selected !== undefined) return remote(selected);
+		}
+		return local();
 	};
 }

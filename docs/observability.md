@@ -96,14 +96,14 @@ The TUI lists the top failure causes sorted by frequency (descending), then by t
 
 ---
 
-## Receipt v3 Verification
+## Receipt Integrity Verification
 
 Pressing `v` on a selected receipt or running `/view verify <runId>` performs cryptographic signature checks:
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
-3. **Verify Integrity**: Recomputes the SHA256 digest using the version 3 fields. The v3 digest covers the `findingsSummary` field (containing tags, firstPassSuccess, and findingCount) and the `autonomyEnforcement` field to prevent tampering.
-4. **Report Result**: The viewer reports success or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
+3. **Verify Integrity**: Recomputes the SHA256 digest over every `RunReceiptDraft` field and the reconstructible ledger fields. A receipt declaring any integrity version other than the current one fails verification.
+4. **Report Result**: The viewer reports `ok` or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 

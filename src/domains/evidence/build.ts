@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "../dispatch/index.js";
-import { verifyReceiptIntegrity } from "../dispatch/index.js";
+import { readGateDecisionArtifactsForRunIds, verifyReceiptIntegrity } from "../dispatch/index.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import {
 	type AuditJsonRow,
@@ -24,6 +24,7 @@ import {
 	type EvidenceBuildResult,
 	type EvidenceCleanTraceRow,
 	type EvidenceFinding,
+	type EvidenceGateDecisionsFile,
 	type EvidenceLinkConfidence,
 	type EvidenceOverview,
 	type EvidenceProtectedArtifactsFile,
@@ -98,6 +99,14 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 
 	const evidenceId =
 		source.kind === "run" ? `run-${sanitizeEvidenceId(source.runId)}` : `session-${sanitizeEvidenceId(source.sessionId)}`;
+	const gateDecisions: EvidenceGateDecisionsFile = {
+		version: EVIDENCE_VERSION,
+		evidenceId,
+		decisions: readGateDecisionArtifactsForRunIds(
+			new Set(runSources.map((item) => item.envelope.id)),
+			options.stateDir,
+		).map((entry) => entry.artifact),
+	};
 	const directory = evidenceDirectory(options.dataDir, evidenceId);
 	const sessionLinks = await linkSessionEntries(options.stateDir, source, runSources);
 	const auditLinks = await linkAuditRows(options.stateDir, source, runSources, sessionLinks);
@@ -146,6 +155,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		sessionLinks,
 		redactedAuditLinks,
 		redactedToolEvents,
+		gateDecisions,
 		protectedArtifacts,
 		transcript,
 	);
@@ -497,6 +507,7 @@ async function writeEvidenceFiles(
 	sessionLinks: SessionLinkResult,
 	auditLinks: AuditLinkResult,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
+	gateDecisions: EvidenceGateDecisionsFile,
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
 	transcript?: string,
 ): Promise<void> {
@@ -512,6 +523,7 @@ async function writeEvidenceFiles(
 	await writeJsonl(join(directory, "tool-events.jsonl"), toolEventRows);
 	await writeJsonl(join(directory, "audit-linked.jsonl"), auditLinks.rows);
 	await writeJson(join(directory, "receipt.json"), receiptsFile(runSources));
+	await writeJson(join(directory, "gate-decisions.json"), gateDecisions);
 	await writeJson(join(directory, "protected-artifacts.json"), protectedArtifacts);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
 	await writeFile(join(directory, "findings.md"), renderFindings(findings), "utf8");
@@ -1210,20 +1222,28 @@ async function readRunLedger(stateDir: string): Promise<RunEnvelope[]> {
 async function readReceipt(
 	stateDir: string,
 	envelope: RunEnvelope,
-): Promise<{ receipt: RunReceipt | null; error: string | null; integrityFailed: boolean }> {
+): Promise<{
+	receipt: RunReceipt | null;
+	error: string | null;
+	integrityFailed: boolean;
+}> {
 	const receiptPath = envelope.receiptPath ?? join(stateDir, "receipts", `${envelope.id}.json`);
 	let raw: string;
 	try {
 		raw = await readFile(receiptPath, "utf8");
 	} catch (error) {
 		const err = error as NodeJS.ErrnoException;
-		if (err.code === "ENOENT") return { receipt: null, error: "receipt file not found", integrityFailed: false };
+		if (err.code === "ENOENT") {
+			return { receipt: null, error: "receipt file not found", integrityFailed: false };
+		}
 		return { receipt: null, error: `receipt read error: ${err.message ?? String(err)}`, integrityFailed: false };
 	}
 	const parsed = parseJson(raw, receiptPath);
 	const receipt = parseRunReceipt(parsed, receiptPath);
 	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	if (!integrity.ok) return { receipt, error: `receipt integrity: ${integrity.reason}`, integrityFailed: true };
+	if (!integrity.ok) {
+		return { receipt, error: `receipt integrity: ${integrity.reason}`, integrityFailed: true };
+	}
 	return { receipt, error: null, integrityFailed: false };
 }
 
@@ -1294,7 +1314,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		toolStats: readToolStats(value, source, "toolStats"),
 		sessionId: readNullableString(value, source, "sessionId"),
 		integrity: {
-			version: readNumber(integrity, `${source}.integrity`, "version") as 1,
+			version: readNumber(integrity, `${source}.integrity`, "version") as 4,
 			algorithm: readString(integrity, `${source}.integrity`, "algorithm") as "sha256",
 			digest: readString(integrity, `${source}.integrity`, "digest"),
 		},

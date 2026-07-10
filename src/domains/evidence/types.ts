@@ -1,4 +1,4 @@
-import type { RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
+import type { GateDecisionArtifact, RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
 import type { RunPersonaOverride, RunPipelineProvenance, RunReceiptAutonomyEnforcement } from "../dispatch/types.js";
 import type { EvalCommandPhase, EvalFailureClass, EvalRunRecord } from "../eval/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
@@ -118,6 +118,12 @@ export interface EvidenceFindingsFile {
 	version: 1;
 	evidenceId: string;
 	findings: EvidenceFinding[];
+}
+
+export interface EvidenceGateDecisionsFile {
+	version: 1;
+	evidenceId: string;
+	decisions: GateDecisionArtifact[];
 }
 
 export interface EvidenceBuildResult {

@@ -82,6 +82,14 @@ async function main(): Promise<number> {
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
 		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
+		...(spec.protectedArtifactState !== undefined
+			? {
+					protectedArtifactState: {
+						version: spec.protectedArtifactState.version,
+						artifacts: structuredClone(spec.protectedArtifactState.artifacts),
+					},
+				}
+			: {}),
 		...(spec.responseSchema !== undefined ? { responseSchema: spec.responseSchema } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;

@@ -18,12 +18,37 @@ interface PendingRequest {
 export interface AcpJsonRpcTransport {
 	readonly closed: boolean;
 	readonly pid: number | null;
+	/**
+	 * Scope owned by this transport's force-termination path. POSIX transports
+	 * own a dedicated process group and cover descendants that remain in that
+	 * group. Descendants that create a new session/process group are outside the
+	 * owned scope. Windows can signal only the direct child.
+	 */
+	readonly terminationScope: AcpTerminationScope;
 	request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
 	notify(method: string, params?: unknown): void;
 	onNotification(method: string, handler: NotificationHandler): () => void;
 	onRequest(method: string, handler: RequestHandler): () => void;
 	onStderr(handler: StderrHandler): () => void;
+	/** Close the JSON-RPC channel cooperatively by ending stdin. Sends no signal. */
 	close(): void;
+	/** Observe owned process/stdio closure for a bounded interval without signalling. */
+	waitForExit(timeoutMs: number): Promise<boolean>;
+	/** End the channel and send one SIGTERM without waiting or escalating. */
+	terminate(): void;
+	/** SIGTERM, bounded grace, SIGKILL fallback, then a bounded exit observation. */
+	forceTerminate(): Promise<AcpForceTerminationResult>;
+}
+
+export type AcpTerminationScope = "process-group" | "child";
+
+export interface AcpForceTerminationResult {
+	/** True only when the owned process scope and the direct child's stdio handles were observed closed. */
+	exited: boolean;
+	/** True when the SIGTERM grace expired and SIGKILL was sent. */
+	escalated: boolean;
+	/** Exact scope the implementation was able to signal. */
+	scope: AcpTerminationScope;
 }
 
 export interface AcpJsonRpcPeerTransport {
@@ -39,6 +64,10 @@ export interface AcpJsonRpcPeerTransport {
 export interface StdioTransportOptions {
 	cwd?: string;
 	env?: Record<string, string>;
+	/** SIGTERM grace before SIGKILL. Defaults to 500ms. */
+	terminationGraceMs?: number;
+	/** Maximum post-SIGKILL wait for process/handle closure. Defaults to 2s. */
+	terminationWaitMs?: number;
 }
 
 export interface StdioServerTransportOptions {
@@ -63,6 +92,14 @@ function errorMessage(value: unknown): string {
 	return value instanceof Error ? value.message : String(value);
 }
 
+function errorCode(value: unknown): string | undefined {
+	return isRecord(value) && typeof value.code === "string" ? value.code : undefined;
+}
+
+function boundedMilliseconds(value: number | undefined, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 function jsonRpcError(id: string | number | null, code: number, message: string, data?: unknown): AcpJsonRpcFailure {
 	return {
 		jsonrpc: "2.0",
@@ -73,19 +110,37 @@ function jsonRpcError(id: string | number | null, code: number, message: string,
 
 class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 	readonly child: ChildProcessWithoutNullStreams;
+	readonly terminationScope: AcpTerminationScope = process.platform === "win32" ? "child" : "process-group";
 	private nextId = 1;
 	private buffer = "";
 	private isClosed = false;
+	private inputEnded = false;
+	private childHandlesClosed = false;
+	private forceTermination: Promise<AcpForceTerminationResult> | null = null;
+	private readonly terminationGraceMs: number;
+	private readonly terminationWaitMs: number;
+	private readonly childClosePromise: Promise<void>;
+	private resolveChildClose: (() => void) | null = null;
 	private readonly pending = new Map<string | number, PendingRequest>();
 	private readonly notificationHandlers = new Map<string, Set<NotificationHandler>>();
 	private readonly requestHandlers = new Map<string, RequestHandler>();
 	private readonly stderrHandlers = new Set<StderrHandler>();
 
 	constructor(command: string, args: string[], options: StdioTransportOptions = {}) {
+		this.terminationGraceMs = boundedMilliseconds(options.terminationGraceMs, 500);
+		this.terminationWaitMs = boundedMilliseconds(options.terminationWaitMs, 2_000);
+		this.childClosePromise = new Promise((resolve) => {
+			this.resolveChildClose = resolve;
+		});
 		this.child = spawn(command, args, {
 			cwd: options.cwd,
 			env: options.env ? { ...process.env, ...options.env } : process.env,
 			stdio: ["pipe", "pipe", "pipe"],
+			// POSIX detached children lead a new session/process group whose id is
+			// the child pid. That makes negative-pid signaling safe for this owned
+			// group. Windows detached semantics do not provide an equivalent
+			// killable tree, so the explicit fallback there is the direct child.
+			detached: process.platform !== "win32",
 		});
 		this.child.stdout.setEncoding("utf8");
 		this.child.stderr.setEncoding("utf8");
@@ -94,7 +149,7 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 			for (const handler of this.stderrHandlers) handler(chunk);
 		});
 		this.child.on("error", (err) => {
-			this.failAll(new AcpProcessError(`ACP process error: ${errorMessage(err)}`));
+			this.closeChannel(new AcpProcessError(`ACP process error: ${errorMessage(err)}`));
 		});
 		this.child.on("exit", (code, signal) => {
 			this.isClosed = true;
@@ -103,6 +158,17 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 				`ACP process exited before replying (code=${code ?? "null"}, signal=${signal ?? "null"})`,
 			);
 			this.failAll(reason);
+		});
+		this.child.on("close", () => {
+			this.childHandlesClosed = true;
+			this.isClosed = true;
+			this.resolveChildClose?.();
+			this.resolveChildClose = null;
+		});
+		// Closing stdin during termination can race a peer exit. Consume the
+		// resulting EPIPE instead of letting an unhandled stream error escape.
+		this.child.stdin.on("error", (err) => {
+			if (!this.isClosed) this.closeChannel(new AcpProcessError(`ACP stdin error: ${errorMessage(err)}`));
 		});
 	}
 
@@ -168,21 +234,31 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 	}
 
 	close(): void {
-		if (this.isClosed) return;
-		this.isClosed = true;
-		this.failAll(new AcpProcessError("ACP transport closed"));
-		try {
-			this.child.stdin.end();
-		} catch {
-			// ignore
-		}
-		if (this.child.exitCode === null && this.child.signalCode === null) {
-			this.child.kill("SIGTERM");
-		}
+		this.closeChannel(new AcpProcessError("ACP transport closed"));
+	}
+
+	terminate(): void {
+		this.closeChannel(new AcpProcessError("ACP transport terminated"));
+		this.signalOwnedScope("SIGTERM");
+	}
+
+	forceTerminate(): Promise<AcpForceTerminationResult> {
+		if (this.forceTermination !== null) return this.forceTermination;
+		this.forceTermination = this.runForceTermination();
+		return this.forceTermination;
+	}
+
+	waitForExit(timeoutMs: number): Promise<boolean> {
+		return this.waitForTermination(boundedMilliseconds(timeoutMs, 0));
 	}
 
 	private write(message: AcpJsonRpcMessage): void {
-		this.child.stdin.write(`${JSON.stringify(message)}\n`);
+		if (this.closed || !this.child.stdin.writable || this.child.stdin.destroyed) return;
+		try {
+			this.child.stdin.write(`${JSON.stringify(message)}\n`);
+		} catch (err) {
+			this.closeChannel(new AcpProcessError(`ACP stdin write failed: ${errorMessage(err)}`));
+		}
 	}
 
 	private consumeStdout(chunk: string): void {
@@ -262,6 +338,96 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 				error: { code: -32000, message: errorMessage(err), data: err instanceof Error ? err.stack : undefined },
 			});
 		}
+	}
+
+	private closeChannel(reason: unknown): void {
+		if (!this.isClosed) {
+			this.isClosed = true;
+			this.failAll(reason);
+		}
+		if (this.inputEnded) return;
+		this.inputEnded = true;
+		try {
+			this.child.stdin.end();
+		} catch {
+			// The peer may have closed stdin concurrently.
+		}
+	}
+
+	private directChildAlive(): boolean {
+		return !this.childHandlesClosed && this.child.exitCode === null && this.child.signalCode === null;
+	}
+
+	private processGroupAlive(): boolean {
+		if (this.terminationScope !== "process-group") return this.directChildAlive();
+		const pid = this.pid;
+		if (pid === null) return this.directChildAlive();
+		try {
+			process.kill(-pid, 0);
+			return true;
+		} catch (err) {
+			const code = errorCode(err);
+			if (code === "ESRCH") return false;
+			// EPERM means the scope exists but cannot be signalled. Unknown errors
+			// are also treated as alive so force termination never reports success
+			// without observing disappearance.
+			return true;
+		}
+	}
+
+	private terminationObserved(): boolean {
+		return this.childHandlesClosed && !this.processGroupAlive();
+	}
+
+	private signalOwnedScope(signal: NodeJS.Signals): boolean {
+		const pid = this.pid;
+		if (this.terminationScope === "process-group" && pid !== null) {
+			try {
+				process.kill(-pid, signal);
+				return true;
+			} catch {
+				// Fall through to direct-child signaling. This cannot cover the
+				// group, but it is still safer than abandoning a live leader.
+			}
+		}
+		if (!this.directChildAlive()) return false;
+		try {
+			return this.child.kill(signal);
+		} catch {
+			// The child may exit between the liveness check and signal.
+			return false;
+		}
+	}
+
+	private async waitForTermination(timeoutMs: number): Promise<boolean> {
+		const deadline = Date.now() + timeoutMs;
+		while (!this.terminationObserved()) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) return this.terminationObserved();
+			const interval = Math.min(10, remaining);
+			if (this.childHandlesClosed) {
+				await new Promise<void>((resolve) => setTimeout(resolve, interval));
+			} else {
+				await Promise.race([this.childClosePromise, new Promise<void>((resolve) => setTimeout(resolve, interval))]);
+			}
+		}
+		return true;
+	}
+
+	private async runForceTermination(): Promise<AcpForceTerminationResult> {
+		this.closeChannel(new AcpProcessError("ACP transport force-terminated"));
+		if (this.terminationObserved()) {
+			return { exited: true, escalated: false, scope: this.terminationScope };
+		}
+
+		this.signalOwnedScope("SIGTERM");
+		if (await this.waitForExit(this.terminationGraceMs)) {
+			return { exited: true, escalated: false, scope: this.terminationScope };
+		}
+
+		const escalated = this.signalOwnedScope("SIGKILL");
+		const exited = await this.waitForExit(this.terminationWaitMs);
+		return { exited, escalated, scope: this.terminationScope };
 	}
 
 	private failAll(reason: unknown): void {

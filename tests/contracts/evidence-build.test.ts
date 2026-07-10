@@ -11,6 +11,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runEvidenceCommand } from "../../src/cli/evidence.js";
+import { writeGateDecisionArtifact } from "../../src/domains/dispatch/gate-decisions.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type {
 	RunKind,
@@ -19,7 +20,7 @@ import type {
 	RunReceiptAutonomyEnforcement,
 	RunReceiptSafetySummary,
 } from "../../src/domains/dispatch/types.js";
-import { buildEvidence } from "../../src/domains/evidence/index.js";
+import { buildEvidence, loadEvidenceGateDecisions } from "../../src/domains/evidence/index.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promise<T> {
@@ -158,7 +159,7 @@ async function sealRun(
 	await ledger.persist();
 	const receiptPath = ledger.get(envelope.id)?.receiptPath;
 	if (!receiptPath) throw new Error("fixture receipt path missing");
-	strictEqual(receipt.integrity.version, 3);
+	strictEqual(receipt.integrity.version, 4);
 	return { runId: envelope.id, receiptPath };
 }
 
@@ -203,6 +204,59 @@ describe("contracts/evidence-build", () => {
 			const clean = await captureStderr(() => runEvidenceCommand(["build", "--run", runId]));
 			strictEqual(clean.result, 0, `acp-delegation build failed: ${clean.stderr}`);
 			ok(!clean.stderr.includes("receipt integrity"), clean.stderr);
+		});
+	});
+
+	it("reports a receipt sealed under a retired integrity version as an integrity failure", async () => {
+		await withIsolatedClioHome(async () => {
+			const { runId, receiptPath } = await sealRun();
+
+			const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
+				integrity: { version: number };
+			};
+			receipt.integrity.version = 3;
+			writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
+
+			const corrupted = await captureStderr(() => runEvidenceCommand(["build", "--run", runId]));
+			strictEqual(corrupted.result, 1);
+			ok(corrupted.stderr.includes("receipt integrity"), corrupted.stderr);
+			ok(corrupted.stderr.includes(runId), corrupted.stderr);
+		});
+	});
+
+	it("discovers integrity-valid gate decisions from receipt ids and omits tampered coordinator evidence", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const builder = await sealRun();
+			const reviewer = await sealRun();
+			const builderReceipt = JSON.parse(readFileSync(builder.receiptPath, "utf8")) as {
+				runId: string;
+				integrity: { digest: string };
+			};
+			const reviewerReceipt = JSON.parse(readFileSync(reviewer.receiptPath, "utf8")) as {
+				runId: string;
+				integrity: { digest: string };
+			};
+			const decision = writeGateDecisionArtifact({
+				group: "evidence-review",
+				topology: "review",
+				cycle: 1,
+				outcome: "pass",
+				subjects: [{ runId: builderReceipt.runId, digest: builderReceipt.integrity.digest }],
+				decider: { runId: reviewerReceipt.runId, digest: reviewerReceipt.integrity.digest },
+			});
+			const dataDir = join(scratch, "data");
+			const stateDir = join(scratch, "state");
+			const built = await buildEvidence({ dataDir, stateDir, runId: builder.runId });
+			const linked = await loadEvidenceGateDecisions(dataDir, built.evidenceId);
+			strictEqual(linked.length, 1);
+			strictEqual(linked[0]?.outcome, "pass");
+			strictEqual(linked[0]?.subjects[0]?.runId, builder.runId);
+
+			const tampered = JSON.parse(readFileSync(decision.path, "utf8")) as Record<string, unknown>;
+			tampered.outcome = "fail";
+			writeFileSync(decision.path, JSON.stringify(tampered, null, 2));
+			await buildEvidence({ dataDir, stateDir, runId: builder.runId });
+			deepStrictEqual(await loadEvidenceGateDecisions(dataDir, built.evidenceId), []);
 		});
 	});
 
@@ -454,7 +508,7 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
-	it("renders a legacy receipt without provenance byte-identically (fields absent, not empty)", async () => {
+	it("renders a receipt without provenance byte-identically (fields absent, not empty)", async () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const { runId } = await sealRun();
 			const dataDir = join(scratch, "data");
@@ -471,10 +525,10 @@ describe("contracts/evidence-build", () => {
 			const cleaned = readJsonl(join(result.directory, "trace.cleaned.jsonl")) as Array<Record<string, unknown>>;
 			const runRow = cleaned.find((row) => row.kind === "run");
 			ok(runRow, "cleaned trace missing run row");
-			ok(!("pipeline" in (runRow ?? {})), "legacy run row must omit pipeline");
-			ok(!("personaOverride" in (runRow ?? {})), "legacy run row must omit personaOverride");
-			ok(!("escalation" in (runRow ?? {})), "legacy run row must omit escalation");
-			ok(!("autonomyEnforcement" in (runRow ?? {})), "legacy run row must omit autonomyEnforcement");
+			ok(!("pipeline" in (runRow ?? {})), "run row must omit pipeline");
+			ok(!("personaOverride" in (runRow ?? {})), "run row must omit personaOverride");
+			ok(!("escalation" in (runRow ?? {})), "run row must omit escalation");
+			ok(!("autonomyEnforcement" in (runRow ?? {})), "run row must omit autonomyEnforcement");
 
 			strictEqual(
 				result.findings.some((finding) => finding.tag === "escalation"),
@@ -489,7 +543,7 @@ describe("contracts/evidence-build", () => {
 				false,
 			);
 
-			// The CLI inspect path prints no provenance block for a legacy bundle.
+			// The CLI inspect path prints no provenance block for a bundle without provenance.
 			const inspected = await captureStdout(() => runEvidenceCommand(["inspect", result.evidenceId]));
 			strictEqual(inspected.result, 0, inspected.stdout);
 			ok(!inspected.stdout.includes("provenance "), inspected.stdout);

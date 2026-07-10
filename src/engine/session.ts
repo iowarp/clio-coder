@@ -109,6 +109,8 @@ export interface ClioSessionWriter {
 	/** Atomically replace current.jsonl entries while preserving the session header. */
 	replaceEntries(entries: ReadonlyArray<unknown>): void;
 	persistTree(): Promise<void>;
+	/** Synchronously fsync append-only transcript bytes without rewriting tree/meta. */
+	flushAppends(): void;
 	close(): Promise<void>;
 }
 
@@ -709,6 +711,9 @@ function createWriter(
 			// Checkpoint: make appended lines durable alongside the tree.
 			if (appendFd !== null) fsyncSync(appendFd);
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+		},
+		flushAppends(): void {
+			if (appendFd !== null) fsyncSync(appendFd);
 		},
 		async close(): Promise<void> {
 			if (closed) return;

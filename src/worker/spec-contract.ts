@@ -12,10 +12,12 @@ import type {
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 
 export const WORKER_SPEC_VERSION = 1;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
+export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
 /**
  * Exit code a native worker uses to report that the run ended because a tool
@@ -30,6 +32,12 @@ export interface SerializedWorkerRuntimeDescriptor {
 	kind: RuntimeKind;
 	apiFamily: RuntimeApiFamily;
 	auth: RuntimeAuth;
+}
+
+/** Immutable, admission-time snapshot of the parent session's hard blocks. */
+export interface WorkerProtectedArtifactState {
+	version: typeof WORKER_PROTECTED_ARTIFACT_STATE_VERSION;
+	artifacts: ReadonlyArray<ProtectedArtifact>;
 }
 
 export interface WorkerSpec {
@@ -56,6 +64,8 @@ export interface WorkerSpec {
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
 	middlewareSnapshot?: MiddlewareSnapshot;
+	/** Parent-session protections frozen before placement and worker launch. */
+	protectedArtifactState?: WorkerProtectedArtifactState;
 	/**
 	 * Wire model ids the operator's configuration references (orchestrator
 	 * model, worker default/profile models, target default models). The worker
@@ -397,6 +407,29 @@ function validateMiddlewareSnapshot(value: unknown): void {
 	}
 }
 
+function validateProtectedArtifactState(value: unknown): void {
+	const state = readRecord(value, "WorkerSpec.protectedArtifactState");
+	if (state.version !== WORKER_PROTECTED_ARTIFACT_STATE_VERSION) {
+		throw new Error(
+			`WorkerSpec.protectedArtifactState version ${String(state.version)} is unsupported; expected ${WORKER_PROTECTED_ARTIFACT_STATE_VERSION}`,
+		);
+	}
+	if (!Array.isArray(state.artifacts)) {
+		throw new Error("WorkerSpec.protectedArtifactState.artifacts must be an array");
+	}
+	const sources = ["validation", "middleware", "user", "session"] as const;
+	for (let index = 0; index < state.artifacts.length; index += 1) {
+		const source = `WorkerSpec.protectedArtifactState.artifacts[${index}]`;
+		const artifact = readRecord(state.artifacts[index], source);
+		readString(artifact.path, `${source}.path`);
+		readString(artifact.protectedAt, `${source}.protectedAt`);
+		readString(artifact.reason, `${source}.reason`);
+		readEnum(artifact.source, `${source}.source`, sources);
+		readOptionalString(artifact, "validationCommand", source);
+		readOptionalNumber(artifact, "validationExitCode", source);
+	}
+}
+
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
 	if (spec.specVersion !== WORKER_SPEC_VERSION) {
@@ -447,6 +480,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalStringArray(spec, "protectedModels", "WorkerSpec");
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);
+	if (spec.protectedArtifactState !== undefined) validateProtectedArtifactState(spec.protectedArtifactState);
 	if (spec.noSkills !== undefined && typeof spec.noSkills !== "boolean") {
 		throw new Error("WorkerSpec.noSkills must be a boolean");
 	}

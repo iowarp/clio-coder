@@ -32,6 +32,10 @@ import {
 	observe as observeLoopState,
 } from "../domains/safety/loop-detector.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
+import {
+	type ProtectedArtifactState,
+	protectedArtifactMutationBlockReason,
+} from "../domains/safety/protected-artifacts.js";
 import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
@@ -254,12 +258,48 @@ function toAgentTool(
  * workers do not share counts. The detector matches the orchestrator's
  * behaviour but skips audit-record bookkeeping which the worker does not own.
  */
-export function createWorkerSafety(options: { cwd?: string; writeRoots?: ReadonlyArray<string> } = {}): SafetyContract {
+export interface WorkerSafetyOptions {
+	cwd?: string;
+	writeRoots?: ReadonlyArray<string>;
+	protectedArtifactState?: ProtectedArtifactState;
+}
+
+export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyContract {
 	let loopState: LoopDetectorState = createLoopState();
-	const policyEngine = createSafetyPolicyEngine(options);
+	const policyEngine = createSafetyPolicyEngine({
+		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+		...(options.writeRoots !== undefined ? { writeRoots: options.writeRoots } : {}),
+	});
+	const protectedArtifactState: ProtectedArtifactState = {
+		artifacts: structuredClone(options.protectedArtifactState?.artifacts ?? []),
+	};
 	return {
 		classify: (call) => classifyAction(call),
 		evaluate(call, posture) {
+			const protectedReason = protectedArtifactMutationBlockReason(protectedArtifactState, call.tool, call.args);
+			if (protectedReason !== null) {
+				const classification = classifyAction(call);
+				const rejection = {
+					short: "protected artifact blocked",
+					detail: protectedReason,
+					hints: [],
+				};
+				const metadata = policyEngine.metadata(posture);
+				const policy = {
+					kind: "block" as const,
+					classification,
+					tool: call.tool,
+					actionClass: classification.actionClass,
+					reasons: [...classification.reasons, protectedReason],
+					ruleId: "protected-artifact",
+					reasonCode: "protected-artifact",
+					cwd: metadata.cwd,
+					policySource: "builtin-classifier" as const,
+					rejection,
+					...(posture !== undefined ? { posture } : {}),
+				};
+				return { kind: "block", classification, rejection, policy };
+			}
 			const policy = policyEngine.evaluate(call, posture);
 			const classification = policy.classification;
 			if (policy.kind === "block") {

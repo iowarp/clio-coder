@@ -98,6 +98,8 @@ export interface SessionContract {
 	recordSkillActivation(activation: SkillActivation): SkillActivation;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */
 	checkpoint(reason?: string): Promise<void>;
+	/** Synchronously make current.jsonl appends durable; used by write-ahead safety journals. */
+	flushAppends?(): void;
 	/** Load an existing session and make it current. */
 	resume(sessionId: string): SessionMeta;
 	/** Fork from a parent turn, producing a new session with parentId pointer. */

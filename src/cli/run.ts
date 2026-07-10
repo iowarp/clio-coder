@@ -11,7 +11,11 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
-import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
+import {
+	buildMemoryPromptSection,
+	canonicalMemoryRepositoryIdentity,
+	loadMemoryRecordsSync,
+} from "../domains/memory/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
@@ -352,7 +356,9 @@ async function runDispatch(
 	let memorySection = "";
 	try {
 		const records = loadMemoryRecordsSync(clioDataDir());
-		memorySection = buildMemoryPromptSection(records).section;
+		memorySection = buildMemoryPromptSection(records, {
+			activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
+		}).section;
 	} catch (err) {
 		process.stderr.write(
 			`clio run: memory load failed: ${err instanceof Error ? err.message : String(err)}; continuing without memory\n`,

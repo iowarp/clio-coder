@@ -1,7 +1,7 @@
-import { ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
@@ -11,6 +11,7 @@ import {
 	type PermissionResolvedPayload,
 } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { canonicalizeExistingPath } from "../../src/core/path-canonical.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
@@ -20,7 +21,7 @@ import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
-import { createStdioServerTransport } from "../../src/engine/acp/transport.js";
+import { createStdioServerTransport, createStdioTransport } from "../../src/engine/acp/transport.js";
 import { createRegistry, type ToolRegistry, type ToolSpec } from "../../src/tools/registry.js";
 
 interface RpcClient {
@@ -33,6 +34,56 @@ interface RpcClient {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function pidIsAlive(pid: number | null): boolean {
+	if (pid === null) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function forceCleanupPid(pid: number | null): void {
+	if (pid === null) return;
+	try {
+		process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL");
+	} catch {
+		// Already gone, which is the expected path.
+	}
+}
+
+function forceCleanupDirectPid(pid: number | null): void {
+	if (pid === null) return;
+	try {
+		process.kill(pid, "SIGKILL");
+	} catch {
+		// Already gone, which is the expected path.
+	}
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMs: number, message: string): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() >= deadline) throw new Error(message);
+		await new Promise<void>((resolve) => setTimeout(resolve, 10));
+	}
+}
+
+async function within<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<T>((_resolve, reject) => {
+				timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timer !== null) clearTimeout(timer);
+	}
 }
 
 // ACP v1 (schema 0.4.5) closed enums. Anything a Clio ACP server emits must stay
@@ -418,6 +469,32 @@ const allowWriteSafety: SafetyContract = {
 	audit: { recordCount: () => 0 },
 };
 
+interface EvaluatedSafetyCall {
+	tool: string;
+	args: Record<string, unknown>;
+}
+
+function targetRecordingSafety(
+	calls: EvaluatedSafetyCall[],
+	blockedPaths: ReadonlySet<string> = new Set(),
+): SafetyContract {
+	return {
+		...allowWriteSafety,
+		evaluate(call) {
+			const args = { ...(call.args ?? {}) };
+			calls.push({ tool: call.tool, args });
+			if (typeof args.path === "string" && blockedPaths.has(args.path)) {
+				return {
+					kind: "block",
+					classification: { actionClass: "write", reasons: ["blocked test target"] },
+					rejection: { short: "blocked test target", detail: "blocked test target", hints: [] },
+				};
+			}
+			return { kind: "allow", classification: { actionClass: "write", reasons: ["test"] } };
+		},
+	};
+}
+
 function permissionSpec(name: string, baseActionClass: ActionClass): ToolSpec {
 	return {
 		name: name as ToolName,
@@ -753,6 +830,220 @@ describe("contracts/acp", () => {
 		strictEqual(snapshot.toolCallLog[0]?.tool, "read");
 	});
 
+	it("authorizes canonical ACP mutation locations, never the display title", async () => {
+		const options = [
+			{ optionId: "allow-once", name: "Allow", kind: "allow_once" },
+			{ optionId: "reject-once", name: "Reject", kind: "reject_once" },
+		];
+		for (const target of [".env", "/etc/shadow", "PLAN.md"]) {
+			const canonical = canonicalizeExistingPath(resolve(process.cwd(), target));
+			const calls: EvaluatedSafetyCall[] = [];
+			const mediator = new AcpToolMediator({
+				safety: targetRecordingSafety(calls, new Set([canonical])),
+				cwd: process.cwd(),
+				toolGovernance: "clio-policy",
+			});
+			const result = await mediator.handle({
+				sessionId: "s",
+				toolCall: {
+					toolCallId: `location-${target}`,
+					kind: "edit",
+					title: "Edit harmless-package.json",
+					locations: [{ path: target }],
+				},
+				options,
+			});
+
+			strictEqual(result.outcome.outcome, "selected");
+			if (result.outcome.outcome === "selected") strictEqual(result.outcome.optionId, "reject-once");
+			deepStrictEqual(calls, [{ tool: ToolNames.Edit, args: { path: canonical } }]);
+			deepStrictEqual(mediator.snapshot().toolCallLog[0]?.arguments, { path: canonical });
+			strictEqual(mediator.snapshot().toolCallLog[0]?.decision, "denied");
+		}
+	});
+
+	it("evaluates standardized locations for reads and fails closed without a proven target", async () => {
+		const options = [
+			{ optionId: "allow-once", kind: "allow_once" },
+			{ optionId: "reject-once", kind: "reject_once" },
+		];
+		for (const target of [".env", "/etc/shadow"]) {
+			const canonical = canonicalizeExistingPath(resolve(process.cwd(), target));
+			const calls: EvaluatedSafetyCall[] = [];
+			const mediator = new AcpToolMediator({
+				safety: targetRecordingSafety(calls, new Set([canonical])),
+				cwd: process.cwd(),
+				toolGovernance: "clio-policy",
+			});
+			const result = await mediator.handle({
+				sessionId: "s",
+				toolCall: { toolCallId: `read-${target}`, kind: "read", title: "Read package.json", locations: [{ path: target }] },
+				options,
+			});
+			strictEqual(result.outcome.outcome, "selected");
+			if (result.outcome.outcome === "selected") strictEqual(result.outcome.optionId, "reject-once");
+			deepStrictEqual(calls, [{ tool: ToolNames.Read, args: { path: canonical } }]);
+			deepStrictEqual(mediator.snapshot().toolCallLog[0]?.arguments, { path: canonical });
+		}
+
+		const missing = new AcpToolMediator({ safety, cwd: process.cwd(), toolGovernance: "clio-policy" });
+		const missingResult = await missing.handle({
+			sessionId: "s",
+			toolCall: { toolCallId: "read-missing", kind: "read", title: "Read package.json" },
+			options,
+		});
+		strictEqual(missingResult.outcome.outcome, "selected");
+		if (missingResult.outcome.outcome === "selected") strictEqual(missingResult.outcome.optionId, "reject-once");
+		match(missing.snapshot().toolCallLog[0]?.reason ?? "", /path target is missing/);
+	});
+
+	it("fails closed when raw mutation targets conflict with standardized locations", async () => {
+		const calls: EvaluatedSafetyCall[] = [];
+		const mediator = new AcpToolMediator({
+			safety: targetRecordingSafety(calls),
+			cwd: process.cwd(),
+			toolGovernance: "clio-policy",
+		});
+		const result = await mediator.handle({
+			sessionId: "s",
+			toolCall: {
+				toolCallId: "conflicting-edit",
+				kind: "edit",
+				title: "Edit package.json",
+				locations: [{ path: ".env" }],
+				rawInput: { path: "package.json" },
+			},
+			options: [
+				{ optionId: "allow-once", kind: "allow_once" },
+				{ optionId: "reject-once", kind: "reject_once" },
+			],
+		});
+
+		const envPath = canonicalizeExistingPath(join(process.cwd(), ".env"));
+		const packagePath = canonicalizeExistingPath(join(process.cwd(), "package.json"));
+		strictEqual(result.outcome.outcome, "selected");
+		if (result.outcome.outcome === "selected") strictEqual(result.outcome.optionId, "reject-once");
+		deepStrictEqual(calls, [
+			{ tool: ToolNames.Edit, args: { path: envPath } },
+			{ tool: ToolNames.Edit, args: { path: packagePath } },
+		]);
+		const log = mediator.snapshot().toolCallLog[0];
+		deepStrictEqual(log?.arguments, { paths: [envPath, packagePath] });
+		ok(log?.reason?.includes("conflicting mutation targets"), log?.reason);
+	});
+
+	it("fails closed when benign ACP metadata contradicts dangerous raw shapes", async () => {
+		const options = [
+			{ optionId: "allow-once", kind: "allow_once" },
+			{ optionId: "reject-once", kind: "reject_once" },
+		];
+		const mutationCalls: EvaluatedSafetyCall[] = [];
+		const mutation = new AcpToolMediator({
+			safety: targetRecordingSafety(mutationCalls),
+			cwd: process.cwd(),
+			toolGovernance: "clio-policy",
+		});
+		const mutationResult = await mutation.handle({
+			sessionId: "s",
+			toolCall: {
+				toolCallId: "contradictory-read-edit",
+				kind: "read",
+				locations: [{ path: ".env" }],
+				rawInput: { path: ".env", content: "secret" },
+			},
+			options,
+		});
+		const envPath = canonicalizeExistingPath(join(process.cwd(), ".env"));
+		strictEqual(mutationResult.outcome.outcome, "selected");
+		if (mutationResult.outcome.outcome === "selected") strictEqual(mutationResult.outcome.optionId, "reject-once");
+		deepStrictEqual(mutationCalls, [{ tool: ToolNames.Edit, args: { path: envPath } }]);
+		match(mutation.snapshot().toolCallLog[0]?.reason ?? "", /mutation shape conflicts with ACP kind read/);
+
+		const commandCalls: EvaluatedSafetyCall[] = [];
+		const command = new AcpToolMediator({
+			safety: targetRecordingSafety(commandCalls),
+			cwd: process.cwd(),
+			toolGovernance: "clio-policy",
+		});
+		const commandResult = await command.handle({
+			sessionId: "s",
+			toolCall: {
+				toolCallId: "contradictory-read-command",
+				kind: "read",
+				rawInput: { path: "package.json", command: "rm -rf ." },
+			},
+			options,
+		});
+		strictEqual(commandResult.outcome.outcome, "selected");
+		if (commandResult.outcome.outcome === "selected") strictEqual(commandResult.outcome.optionId, "reject-once");
+		deepStrictEqual(commandCalls, [{ tool: ToolNames.Bash, args: { command: "rm -rf .", cwd: process.cwd() } }]);
+		match(command.snapshot().toolCallLog[0]?.reason ?? "", /command shape conflicts with ACP kind read/);
+	});
+
+	it("evaluates every canonical location in a multi-target move", async () => {
+		const source = canonicalizeExistingPath(join(process.cwd(), "src/old-name.ts"));
+		const protectedDestination = canonicalizeExistingPath(join(process.cwd(), "PLAN.md"));
+		const calls: EvaluatedSafetyCall[] = [];
+		const mediator = new AcpToolMediator({
+			safety: targetRecordingSafety(calls, new Set([protectedDestination])),
+			cwd: process.cwd(),
+			toolGovernance: "clio-policy",
+		});
+		const result = await mediator.handle({
+			sessionId: "s",
+			toolCall: {
+				toolCallId: "move-protected",
+				kind: "move",
+				title: "Rename a harmless file",
+				locations: [{ path: "src/old-name.ts" }, { path: "PLAN.md" }],
+			},
+			options: [
+				{ optionId: "allow-once", kind: "allow_once" },
+				{ optionId: "reject-once", kind: "reject_once" },
+			],
+		});
+
+		strictEqual(result.outcome.outcome, "selected");
+		if (result.outcome.outcome === "selected") strictEqual(result.outcome.optionId, "reject-once");
+		deepStrictEqual(calls, [
+			{ tool: ToolNames.Edit, args: { path: source } },
+			{ tool: ToolNames.Edit, args: { path: protectedDestination } },
+		]);
+		deepStrictEqual(mediator.snapshot().toolCallLog[0]?.arguments, { paths: [source, protectedDestination] });
+	});
+
+	it("fails closed for missing and malformed ACP mutation locations", async () => {
+		const cases: Array<Record<string, unknown>> = [
+			{ kind: "edit", title: "package.json" },
+			{ kind: "edit", title: "package.json", locations: [] },
+			{ kind: "edit", title: "package.json", locations: [{ path: 42 }] },
+			{ kind: "edit", title: "package.json", locations: [{ path: "src/index.ts", line: -1 }] },
+			{ kind: "move", title: "Rename package.json", locations: [{ path: "package.json" }] },
+		];
+		for (const [index, toolCall] of cases.entries()) {
+			const calls: EvaluatedSafetyCall[] = [];
+			const mediator = new AcpToolMediator({
+				safety: targetRecordingSafety(calls),
+				cwd: process.cwd(),
+				toolGovernance: "clio-policy",
+			});
+			const result = await mediator.handle({
+				sessionId: "s",
+				toolCall: { toolCallId: `malformed-${index}`, ...toolCall },
+				options: [
+					{ optionId: "allow-once", kind: "allow_once" },
+					{ optionId: "reject-once", kind: "reject_once" },
+				],
+			});
+			strictEqual(result.outcome.outcome, "selected");
+			if (result.outcome.outcome === "selected") strictEqual(result.outcome.optionId, "reject-once");
+			const log = mediator.snapshot().toolCallLog[0];
+			strictEqual(log?.decision, "denied");
+			ok(log?.reason?.startsWith("invalid ACP mutation targets:"), log?.reason);
+			ok(!JSON.stringify(log?.arguments).includes("package.json") || index === cases.length - 1);
+		}
+	});
+
 	it("classifies kind-less permission requests (claude-code-acp) from the rawInput shape", async () => {
 		// @zed-industries/claude-code-acp sends requestPermission with only
 		// rawInput + title and omits `kind`/tool name. The mediator must still map
@@ -842,6 +1133,195 @@ rl.on("line", (line) => {
 					(event) => typeof event === "object" && event !== null && (event as { type?: string }).type === "message_end",
 				),
 			);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("bounds a successful ACP peer that ignores cooperative EOF", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-acp-success-resistant-"));
+		const script = join(scratch, "success-resistant.cjs");
+		writeFileSync(
+			script,
+			`
+const readline = require("node:readline");
+process.on("SIGTERM", () => {});
+const rl = readline.createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: false } } });
+  } else if (msg.method === "session/new") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "success-resistant" } });
+  } else if (msg.method === "session/prompt") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+  }
+});
+setInterval(() => {}, 1000);
+`,
+		);
+		let pid: number | null = null;
+		try {
+			const handle = startAcpDelegationRun({
+				agent: {
+					id: "success-resistant",
+					command: process.execPath,
+					args: [script],
+					connectTimeoutMs: 1_000,
+					turnTimeoutMs: 1_000,
+					permissionTimeoutMs: 1_000,
+					toolGovernance: "clio-policy",
+				},
+				task: "finish but stay alive",
+				cwd: scratch,
+				safety,
+				cancelGraceMs: 25,
+				terminationGraceMs: 25,
+				terminationWaitMs: 1_000,
+			});
+			pid = handle.pid;
+			const result = await within(handle.promise, 2_000, "successful resistant ACP peer exceeded teardown bound");
+			strictEqual(result.exitCode, 0);
+			strictEqual(pidIsAlive(pid), false, "successful ACP teardown returned while its process remained alive");
+		} finally {
+			forceCleanupPid(pid);
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps cooperative close signal-free and force-kills a resistant owned process scope", async () => {
+		const resistantCode = `
+const { spawn } = require("node:child_process");
+process.on("SIGTERM", () => {});
+const descendant = process.platform === "win32"
+  ? null
+  : spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+function announce() {
+  process.stderr.write(JSON.stringify({ descendantPid: descendant ? descendant.pid : null }) + "\\n");
+}
+if (descendant) descendant.once("spawn", announce);
+else announce();
+setInterval(() => {}, 1000);
+`;
+		const transport = createStdioTransport(process.execPath, ["-e", resistantCode], {
+			terminationGraceMs: 30,
+			terminationWaitMs: 1_000,
+		});
+		const pid = transport.pid;
+		let descendantPid: number | null = null;
+		let stderr = "";
+		const ready = new Promise<void>((resolveReady) => {
+			const unregister = transport.onStderr((chunk) => {
+				stderr += chunk;
+				const newline = stderr.indexOf("\n");
+				if (newline === -1) return;
+				const parsed = JSON.parse(stderr.slice(0, newline)) as { descendantPid?: unknown };
+				descendantPid = typeof parsed.descendantPid === "number" ? parsed.descendantPid : null;
+				unregister();
+				resolveReady();
+			});
+		});
+
+		try {
+			await within(ready, 1_000, "resistant ACP transport did not become ready");
+			const pending = transport.request("never-replies");
+			transport.close();
+			await rejects(pending, /ACP transport closed/);
+			await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 30));
+			ok(pidIsAlive(pid), "cooperative close must not send a process signal");
+
+			const terminated = await within(
+				transport.forceTerminate(),
+				2_000,
+				"resistant ACP process exceeded the force-termination deadline",
+			);
+			strictEqual(terminated.exited, true);
+			strictEqual(terminated.scope, process.platform === "win32" ? "child" : "process-group");
+			strictEqual(pidIsAlive(pid), false, "direct ACP child must be reaped before forceTerminate resolves");
+			if (process.platform !== "win32") {
+				strictEqual(terminated.escalated, true, "SIGTERM-resistant POSIX peer must reach SIGKILL");
+				ok(descendantPid !== null, "POSIX resistant-child fixture did not spawn its descendant");
+				strictEqual(pidIsAlive(descendantPid), false, "owned POSIX process-group descendant survived SIGKILL");
+			}
+		} finally {
+			forceCleanupPid(pid);
+			forceCleanupDirectPid(descendantPid);
+		}
+	});
+
+	it("ActiveRun kill and abort both bound a SIGTERM-resistant ACP peer lifetime", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-acp-resistant-"));
+		const script = join(scratch, "resistant-acp.cjs");
+		writeFileSync(
+			script,
+			`
+const fs = require("node:fs");
+const readline = require("node:readline");
+const readyPath = process.argv[2];
+const termPath = process.argv[3];
+const cancelPath = process.argv[4];
+process.on("SIGTERM", () => fs.writeFileSync(termPath, "SIGTERM\\n"));
+const rl = readline.createInterface({ input: process.stdin });
+function send(value) { process.stdout.write(JSON.stringify(value) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "initialize") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: false } } });
+  } else if (msg.method === "session/new") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "resistant-session" } });
+  } else if (msg.method === "session/prompt") {
+    fs.writeFileSync(readyPath, "ready\\n");
+  } else if (msg.method === "session/cancel") {
+    fs.writeFileSync(cancelPath, "cancel\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+		);
+
+		try {
+			for (const action of ["kill", "abort"] as const) {
+				const readyPath = join(scratch, `${action}-ready`);
+				const termPath = join(scratch, `${action}-term`);
+				const cancelPath = join(scratch, `${action}-cancel`);
+				const handle = startAcpDelegationRun({
+					agent: {
+						id: `resistant-${action}`,
+						command: process.execPath,
+						args: [script, readyPath, termPath, cancelPath],
+						connectTimeoutMs: 1_000,
+						turnTimeoutMs: 60_000,
+						permissionTimeoutMs: 1_000,
+						toolGovernance: "clio-policy",
+					},
+					task: `exercise ${action}`,
+					cwd: scratch,
+					safety,
+					terminationGraceMs: 30,
+					terminationWaitMs: 1_000,
+					cancelGraceMs: 100,
+				});
+				const pid = handle.pid;
+				try {
+					await waitForCondition(() => existsSync(readyPath), 1_000, `${action} ACP peer never reached prompt`);
+					if (action === "kill") handle.kill();
+					else handle.abort();
+					const result = await within(handle.promise, 2_000, `${action} did not settle the resistant ACP run`);
+					strictEqual(result.exitCode, 1);
+					strictEqual(result.stopReason, "cancelled");
+					strictEqual(pidIsAlive(pid), false, `${action} left the resistant ACP pid alive`);
+					if (process.platform !== "win32") {
+						ok(existsSync(termPath), `${action} skipped the SIGTERM phase before escalation`);
+						strictEqual(readFileSync(termPath, "utf8"), "SIGTERM\n");
+					}
+					if (action === "abort") {
+						ok(existsSync(cancelPath), "abort did not first send cooperative session/cancel");
+					}
+				} finally {
+					forceCleanupPid(pid);
+				}
+			}
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}

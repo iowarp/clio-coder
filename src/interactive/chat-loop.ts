@@ -300,8 +300,9 @@ export interface CreateChatLoopDeps {
 	/**
 	 * Run the compaction flow end-to-end (read entries, resolve model,
 	 * summarize, persist a compactionSummary entry) and return the result,
-	 * or null when the flow is a no-op (no entries, no cut crossed, no model
-	 * configured). Chat-loop invokes this from two sites:
+	 * or null when the flow is a legitimate no-op (no entries or no cut
+	 * crossed). Configuration, provider, read, and persistence failures reject
+	 * so the activity path can report them as failures. Chat-loop invokes this from two sites:
 	 *   1. Before every agent.prompt when the threshold is crossed or
 	 *      CLIO_FORCE_COMPACT=1 is set.
 	 *   2. After catching a ContextOverflowError, as the first half of the
@@ -332,7 +333,10 @@ export interface CreateChatLoopDeps {
 	 * registration at the composition root. The chat-loop replaces the state
 	 * wholesale on session switch so protections follow the active session.
 	 */
-	protectedArtifacts?: { replace(state: ProtectedArtifactState): void };
+	protectedArtifacts?: {
+		replace(state: ProtectedArtifactState): void;
+		markDegraded(reason: string): void;
+	};
 	/**
 	 * Shared event bus. When wired, `cancel()` fans a `BusChannels.RunAborted`
 	 * payload with `source: "stream_cancel"` so the safety audit subscriber
@@ -351,6 +355,20 @@ export interface CreateChatLoopDeps {
 	getMemorySection?: () => string;
 	/** True when an interactive TUI can handle Esc cancellation notices. */
 	interactiveTui?: boolean;
+}
+
+export function reloadProtectedArtifactsForSession(
+	protectedArtifacts: NonNullable<CreateChatLoopDeps["protectedArtifacts"]>,
+	readSessionEntries: (() => ReadonlyArray<SessionEntry>) | undefined,
+): void {
+	try {
+		const entries = readSessionEntries ? readSessionEntries() : [];
+		protectedArtifacts.replace(protectedArtifactStateFromSessionEntries(entries));
+	} catch (error) {
+		protectedArtifacts.markDegraded(
+			`session protection history could not be read: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 interface ChatLoopTarget {
@@ -1785,6 +1803,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			at: Date.now(),
 		});
 	};
+	const compactionFailureMessage = (error: unknown): string =>
+		`compaction failed: ${error instanceof Error ? error.message : String(error)}`;
 
 	/**
 	 * Two-mechanism context protection. When pressure crosses the single
@@ -1824,7 +1844,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// CompactionBegin/End subscription explains the next cold turn.
 			if (deps.session?.current()) {
 				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
-				const masked = maskStaleObservations(deps.readSessionEntries() ?? [], cfg?.excludeLastTurns ?? 6);
+				let masked: ReturnType<typeof maskStaleObservations>;
+				try {
+					masked = maskStaleObservations(deps.readSessionEntries() ?? [], cfg?.excludeLastTurns ?? 6);
+				} catch (error) {
+					fireCompactionHook("mask_observations", trigger, estimate.tokens);
+					deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
+					emitCompactionActivity("started", "compacting context (mask stage)");
+					emitCompactionActivity("failed", compactionFailureMessage(error));
+					deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
+					throw error;
+				}
 				if (masked.changed) {
 					fireCompactionHook("mask_observations", trigger, estimate.tokens);
 					deps.bus?.emit(BusChannels.CompactionBegin, { trigger, at: Date.now() });
@@ -1883,9 +1913,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
 		try {
 			result = await compactionTrigger.fire(() => (deps.autoCompact ?? (async () => null))(instructions, trigger));
-		} catch (err) {
-			emitCompactionActivity("failed", "compaction failed");
-			throw err;
+		} catch (error) {
+			emitCompactionActivity("failed", compactionFailureMessage(error));
+			throw error;
 		} finally {
 			deps.bus?.emit(BusChannels.CompactionEnd, { trigger, at: Date.now() });
 		}
@@ -2145,7 +2175,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				await runAutoCompact(agentRuntime, forceNow, undefined, undefined, submittedText);
 			} catch (err) {
-				emitNotice(`[Clio Coder] auto-compaction skipped: ${err instanceof Error ? err.message : String(err)}`);
+				emitNotice(`[Clio Coder] auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
 			// 3. Ensure the session prompt (compiles only on explicit events)
@@ -2474,12 +2504,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtime.agent.state.messages = [...replayedContextMessages];
 			}
 			if (deps.protectedArtifacts) {
-				try {
-					const entries = deps.readSessionEntries ? deps.readSessionEntries() : [];
-					deps.protectedArtifacts.replace(protectedArtifactStateFromSessionEntries(entries));
-				} catch {
-					deps.protectedArtifacts.replace({ artifacts: [] });
-				}
+				reloadProtectedArtifactsForSession(deps.protectedArtifacts, deps.readSessionEntries);
 			}
 		},
 		dispose(): void {

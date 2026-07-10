@@ -70,6 +70,32 @@ export function toolMutationPaths(toolName: string, args: Record<string, unknown
 	return [];
 }
 
+/**
+ * Shared protected-artifact decision used by both the orchestrator middleware
+ * guard and mediated worker runtimes. Keeping target extraction and bash
+ * classification in one function prevents a dispatched worker from applying
+ * a weaker interpretation of the same frozen protection state.
+ */
+export function protectedArtifactMutationBlockReason(
+	state: ProtectedArtifactState,
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+): string | null {
+	if (state.artifacts.length === 0) return null;
+	for (const candidate of toolMutationPaths(toolName, args)) {
+		if (isProtectedPath(state, candidate)) {
+			return `protected artifact blocked: ${toolName} would modify protected path ${candidate}`;
+		}
+	}
+	if (toolName !== ToolNames.Bash) return null;
+	const command = typeof args?.command === "string" && args.command.length > 0 ? args.command : null;
+	if (command === null) return null;
+	const classification = classifyDestructiveCommand(command, state.artifacts);
+	if (classification.kind === "benign") return null;
+	const affected = classification.matches.map((match) => match.artifactPath).join(", ");
+	return `protected artifact blocked: ${classification.operation} would affect ${affected}`;
+}
+
 function artifactDefaultPath(args: Record<string, unknown> | undefined): string {
 	if (args?.kind === "review") return "REVIEW.md";
 	if (args?.kind === "report") return "REPORT.md";

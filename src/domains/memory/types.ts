@@ -4,6 +4,20 @@ export const MEMORY_SCOPES = ["global", "repo", "language", "runtime", "agent", 
 
 export type MemoryScope = (typeof MEMORY_SCOPES)[number];
 
+/**
+ * Stable repository identity used to gate repository-scoped memory.
+ *
+ * `canonical-path` is deliberately conservative: callers must construct it
+ * from the active repository root with `canonicalMemoryRepositoryIdentity`.
+ * Symlink aliases collapse to the same key, while moved repositories and Git
+ * worktrees remain distinct until a stronger, durable repository identifier
+ * is introduced. The path scheme also works for non-Git repositories.
+ */
+export interface MemoryRepositoryIdentity {
+	kind: "canonical-path";
+	key: string;
+}
+
 export interface MemoryRecord {
 	id: string;
 	scope: MemoryScope;
@@ -18,6 +32,8 @@ export interface MemoryRecord {
 	regressions?: string[];
 	approved: boolean;
 	rejectedAt?: string;
+	/** Preferred repository applicability for `repo` records. */
+	repository?: MemoryRepositoryIdentity;
 }
 
 export interface MemoryStoreFile {
@@ -53,4 +69,6 @@ export interface MemoryPruneResult {
 export interface MemoryRetrievalOptions {
 	scopes?: ReadonlyArray<MemoryScope>;
 	tokenBudget: number;
+	/** Missing or unknown identity excludes every repository-scoped record. */
+	activeRepository?: MemoryRepositoryIdentity | null;
 }

@@ -1,15 +1,16 @@
 import { estimateMemoryTokens, selectApprovedMemory } from "./operations.js";
-import type { MemoryRecord, MemoryScope } from "./types.js";
+import type { MemoryRecord, MemoryRepositoryIdentity, MemoryScope } from "./types.js";
 
 export const MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET = 400;
 export const MEMORY_PROMPT_DEFAULT_MAX_ITEMS = 5;
 
 /**
  * Default scopes considered for chat-loop memory injection. We deliberately
- * keep this conservative: `global` and `repo` records are always relevant in
- * a repository chat session, while `language`, `runtime`, `agent`,
- * `task-family`, and `hpc-domain` need richer context that the chat-loop does
- * not have at submit-time. Future slices can broaden this list per call site.
+ * keep this conservative: `global` records are generally relevant and `repo`
+ * records are considered only when they exactly match the active repository
+ * identity. `language`, `runtime`, `agent`, `task-family`, and `hpc-domain`
+ * need richer context that the chat-loop does not have at submit-time. Future
+ * slices can broaden this list per call site.
  */
 export const MEMORY_PROMPT_DEFAULT_SCOPES: ReadonlyArray<MemoryScope> = ["global", "repo"];
 
@@ -17,12 +18,15 @@ export interface MemoryPromptOptions {
 	scopes?: ReadonlyArray<MemoryScope>;
 	tokenBudget?: number;
 	maxItems?: number;
+	/** Missing or unknown identity leaves global memory eligible but excludes repo memory. */
+	activeRepository?: MemoryRepositoryIdentity | null;
 }
 
 /**
  * Filter approved, non-regressed, evidence-linked memory and cap by scope,
- * deterministic token budget, and item count. Pure function. Determinism is
- * guaranteed by `selectApprovedMemory`'s inner sort and the fixed scope list.
+ * deterministic token budget, repository identity, and item count. Stable
+ * ordering is guaranteed by `selectApprovedMemory`'s inner sort and the fixed
+ * scope list. Repository identities match on exact canonical keys only.
  */
 export function selectMemoryForPrompt(
 	records: ReadonlyArray<MemoryRecord>,
@@ -32,7 +36,11 @@ export function selectMemoryForPrompt(
 	const tokenBudget = options.tokenBudget ?? MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET;
 	const maxItems = options.maxItems ?? MEMORY_PROMPT_DEFAULT_MAX_ITEMS;
 	if (tokenBudget <= 0 || maxItems <= 0) return [];
-	const selected = selectApprovedMemory(records, { scopes, tokenBudget });
+	const selected = selectApprovedMemory(records, {
+		scopes,
+		tokenBudget,
+		activeRepository: options.activeRepository ?? null,
+	});
 	return selected.slice(0, maxItems);
 }
 
@@ -53,9 +61,17 @@ export function renderMemoryPromptSection(records: ReadonlyArray<MemoryRecord>):
 	for (const record of records) {
 		const lesson = record.lesson.replace(/\s+/g, " ").trim();
 		const evidence = record.evidenceRefs.join(", ");
-		lines.push(`- [${record.id}] (scope=${record.scope}) ${lesson} Evidence: ${evidence}.`);
+		lines.push(`- [${record.id}] (${renderApplicability(record)}) ${lesson} Evidence: ${evidence}.`);
 	}
 	return lines.join("\n");
+}
+
+function renderApplicability(record: MemoryRecord): string {
+	if (record.scope !== "repo") return `scope=${record.scope}`;
+	if (record.repository !== undefined) {
+		return `scope=repo, repository=${JSON.stringify(`${record.repository.kind}:${record.repository.key}`)}`;
+	}
+	return "scope=repo, repository=unknown";
 }
 
 /** Convenience for callers that want a single end-to-end build step. */

@@ -38,6 +38,8 @@ export const COMPACTION_SYSTEM_PROMPT = [
 
 export const COMPACTION_USER_PROMPT_TEMPLATE = `The messages above are a conversation to summarize. Create a structured context checkpoint another LLM will use to continue the work.
 
+When a <previous-context> block is present, it is the canonical checkpoint and retained suffix from an earlier compaction. Produce one cumulative replacement checkpoint: preserve every still-relevant constraint, decision, active skill, unresolved task, exact identifier, and file-state detail from that block while incorporating the newer conversation.
+
 Use this EXACT format:
 
 ## Goal
@@ -71,7 +73,9 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 
 export const COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE = `The messages above are the beginning of the currently active user turn. They will be removed from the live context because the retained suffix starts in the middle of that turn.
 
-Summarize ONLY the active-turn details needed for another LLM to continue the same request:
+When a <previous-context> block is present, it is canonical context from an earlier compaction. Carry its still-relevant constraints, decisions, active skills, unresolved work, exact identifiers, and file state into this checkpoint in addition to the active-turn details below. Do not discard it as unrelated older history.
+
+In addition to that carried-forward context, summarize ONLY the active-turn details needed for another LLM to continue the same request:
 
 - the user's active request
 - tool calls already made in this turn
@@ -110,7 +114,7 @@ export interface CompactResult {
 	firstKeptTurnId: string | null;
 	/** Estimated total context tokens before compaction. */
 	tokensBefore: number;
-	/** Number of entries that fed the summarization prompt. */
+	/** Number of newly compacted entries (excluding a carried-forward prior checkpoint and retained suffix). */
 	messagesSummarized: number;
 	/** True when the cut split a turn (caller may want to show a banner). */
 	isSplitTurn: boolean;
@@ -168,16 +172,49 @@ function findTurnStartForProtection(
 	return -1;
 }
 
-function buildUserText(conversationText: string, instructions?: string): string {
-	const focus = instructions?.trim();
-	const suffix = focus ? `\n\nAdditional focus: ${focus}` : "";
-	return `<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${suffix}`;
+function buildPreviousContextPrefix(previousContextText: string): string {
+	const trimmed = previousContextText.trim();
+	return trimmed.length > 0 ? `<previous-context>\n${trimmed}\n</previous-context>\n\n` : "";
 }
 
-function buildTurnPrefixUserText(conversationText: string, instructions?: string): string {
+function buildUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
 	const focus = instructions?.trim();
 	const suffix = focus ? `\n\nAdditional focus: ${focus}` : "";
-	return `<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${suffix}`;
+	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${suffix}`;
+}
+
+function buildTurnPrefixUserText(conversationText: string, instructions?: string, previousContextText = ""): string {
+	const focus = instructions?.trim();
+	const suffix = focus ? `\n\nAdditional focus: ${focus}` : "";
+	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${suffix}`;
+}
+
+/**
+ * Recover the context that the latest compaction left live. A compaction
+ * summary is appended after the retained suffix, so on the next pass that
+ * suffix sits immediately before the summary entry and is otherwise outside
+ * `boundaryStart`. Replay drops both the older summary and that suffix once a
+ * newer summary is appended; feeding them to every applicable prompt branch
+ * lets the model produce a genuinely cumulative replacement checkpoint.
+ */
+function priorCompactionContextEntries(entries: ReadonlyArray<SessionEntry>, compactionIndex: number): SessionEntry[] {
+	const compaction = entries[compactionIndex];
+	if (compaction?.kind !== "compactionSummary") return [];
+
+	let firstKeptIndex = -1;
+	if (compaction.firstKeptTurnId.length > 0) {
+		for (let index = 0; index < compactionIndex; index++) {
+			if (entries[index]?.turnId === compaction.firstKeptTurnId) {
+				firstKeptIndex = index;
+				break;
+			}
+		}
+	}
+
+	const retainedSuffix = firstKeptIndex >= 0 ? entries.slice(firstKeptIndex, compactionIndex) : [];
+	// Put the summary first: semantically it precedes the retained suffix even
+	// though append-only session order stores the summary after that suffix.
+	return [compaction, ...retainedSuffix];
 }
 
 function createFileOps(): FileOperations {
@@ -311,9 +348,10 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const reserveTokens = input.reserveTokens ?? DEFAULT_RESERVE_TOKENS;
 	const keepRecentTokens = input.keepRecentTokens ?? DEFAULT_KEEP_RECENT_TOKENS;
 	// Iterative compaction: when a prior `compactionSummary` exists, the
-	// summary is canonical history. Restrict the cut search and the pre-slice
-	// to entries strictly after that boundary so the next summary builds on
-	// the previous one instead of re-summarizing it. Mirrors pi-coding-agent's
+	// summary is canonical history. Restrict the cut search and the new-history
+	// slice to entries strictly after that boundary; the canonical summary and
+	// its retained suffix are recovered below and prepended explicitly rather
+	// than rediscovering already-compacted raw history. Mirrors pi-coding-agent's
 	// `boundaryStart = prevCompactionIndex + 1` and `usageStart = prevCompactionIndex`
 	// in compaction.ts:619-628.
 	const prevCompactionIndex = findLatestCompactionIndex(input.entries);
@@ -333,8 +371,9 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const turnPrefix = cut.isSplitTurn
 		? input.entries.slice(Math.max(boundaryStart, cut.turnStartIndex), cut.firstKeptEntryIndex)
 		: [];
-	const priorSummary = prevCompactionIndex >= 0 ? input.entries[prevCompactionIndex] : undefined;
-	const fileOps = extractFileOps([...(priorSummary ? [priorSummary] : []), ...pre, ...turnPrefix]);
+	const previousContextEntries = priorCompactionContextEntries(input.entries, prevCompactionIndex);
+	const previousContextText = serializeConversation(previousContextEntries);
+	const fileOps = extractFileOps([...previousContextEntries, ...pre, ...turnPrefix]);
 	const firstKept = input.entries[cut.firstKeptEntryIndex] ?? null;
 
 	if (pre.length === 0 && turnPrefix.length === 0) {
@@ -353,13 +392,13 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const summaryParts: string[] = [];
 	if (pre.length > 0) {
 		const conversationText = serializeConversation(pre);
-		const userText = buildUserText(conversationText, input.instructions);
+		const userText = buildUserText(conversationText, input.instructions, previousContextText);
 		const historySummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		if (historySummary.length > 0) summaryParts.push(historySummary);
 	}
 	if (turnPrefix.length > 0) {
 		const conversationText = serializeConversation(turnPrefix);
-		const userText = buildTurnPrefixUserText(conversationText, input.instructions);
+		const userText = buildTurnPrefixUserText(conversationText, input.instructions, previousContextText);
 		const prefixSummary = await runSummaryStream(input, userText, systemPrompt, maxTokens);
 		if (prefixSummary.length > 0) {
 			summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary}`);

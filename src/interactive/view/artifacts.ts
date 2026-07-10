@@ -2,7 +2,11 @@ import { createReadStream, readFileSync, statSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
-import { isReceiptIntegrity, verifyReceiptIntegrity } from "../../domains/dispatch/receipt-integrity.js";
+import {
+	isReceiptIntegrity,
+	type ReceiptIntegrityResult,
+	verifyReceiptIntegrity,
+} from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../../domains/evidence/store.js";
 import type { EvidenceFinding, EvidenceOverview, EvidenceSource } from "../../domains/evidence/types.js";
@@ -92,7 +96,7 @@ const ACCOUNTABILITY_TOP_CAUSES = 8;
 export const VIEW_ARTIFACT_LINE_CAP = 50_000;
 const JSON_PRETTY_MAX_BYTES = 10 * 1024 * 1024;
 
-export type ReceiptVerifyResult = { ok: true } | { ok: false; reason: string };
+export type ReceiptVerifyResult = ReceiptIntegrityResult;
 
 const RECEIPT_REQUIRED_KEYS = [
 	"runId",
@@ -661,7 +665,8 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 					load: () => loadJsonFileLines(path),
 					verify: async () => {
 						const result = verifyReceiptFile(this.deps.stateDir, env.id);
-						return result.ok ? { ok: true, detail: "integrity verified" } : { ok: false, detail: result.reason };
+						if (!result.ok) return { ok: false, detail: result.reason };
+						return { ok: true, detail: "integrity verified" };
 					},
 				};
 			});

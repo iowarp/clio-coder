@@ -8,6 +8,15 @@ notes, lives in [DEVLOG.md](DEVLOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 still change interfaces.
 
+## Unreleased
+
+- Hardened dispatch authority and provenance: approval now uses one immutable resolved plan (effective agent, target, model, node id/kind/host, every bounded gate role, and cost ceiling), execution fails closed on route or ceiling drift, forged plan fields are ignored, and receipts identify the actual one-shot approval or full-auto decision.
+- Added write-ahead, integrity-covered coordinator evidence for review verdicts, compete winners, and supervised/full-auto winner application; reviewer/judge output is staged before receipt settlement and reconstructed only from a verified receipt after restart, evidence bundles now include `gate-decisions.json`, and the single receipt integrity version authenticates the complete provenance surface while receipts sealed under retired versions fail verification outright.
+- Closed external-agent policy gaps by canonicalizing standardized ACP locations for path-bearing reads and mutations, rejecting contradictory tool metadata, unenforceable profiles, and authority narrowing before launch, representing external tool inventory as unknown, supporting bounded read-only ACP reviewer/judge roles, and bounding resistant ACP process groups on abort, stall, failure, and successful teardown.
+- Made protected-artifact boundaries durable across session append, synchronous flush, reload, reset, restart, local/shared-filesystem dispatch, and compete worktrees with a write-ahead recovery journal, merge-time protected-diff check, and fail-closed degraded mode.
+- Made iterative compaction cumulative, surfaced compaction failures distinctly from legitimate no-ops, and isolated repository-scoped memory by canonical repository identity in interactive and headless agent prompts.
+- Made compete worktree ownership transactional and segment-safe, with all admitted workers settled before cleanup, durable coordinator/worker process leases, PID-reuse-resistant termination of hard-crash orphans at orchestrator startup, and restart preservation of a pending or recovered winner while losers are removed.
+
 ## 0.2.8 - 2026-07-07
 
 - Redesigned the tool surface into seven planes with consolidated observe,

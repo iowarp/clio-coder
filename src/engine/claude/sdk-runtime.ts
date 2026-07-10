@@ -399,6 +399,9 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	const safety = createWorkerSafety({
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
+		...(input.protectedArtifactState !== undefined
+			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
+			: {}),
 	});
 	// Escalation needs the native registry park loop and an operator on the
 	// worker's stdin; the Claude SDK path has neither, so it collapses the

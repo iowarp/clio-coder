@@ -1,6 +1,8 @@
+import { isAbsolute } from "node:path";
+import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { ceilChars } from "../session/context-accounting.js";
 import { loadMemoryRecords, pruneStaleMemoryRecords, sortMemoryRecords, updateMemoryRecord } from "./store.js";
-import type { MemoryRecord, MemoryRetrievalOptions } from "./types.js";
+import type { MemoryRecord, MemoryRepositoryIdentity, MemoryRetrievalOptions } from "./types.js";
 
 export async function approveMemoryRecord(
 	dataDir: string,
@@ -35,11 +37,13 @@ export function selectApprovedMemory(
 ): MemoryRecord[] {
 	if (options.tokenBudget <= 0) return [];
 	const allowedScopes = options.scopes === undefined ? null : new Set(options.scopes);
+	const activeRepository = canonicalActiveRepository(options.activeRepository);
 	const candidates = sortMemoryRecords(records)
 		.filter((record) => record.approved)
 		.filter((record) => record.evidenceRefs.length > 0)
 		.filter((record) => record.regressions === undefined || record.regressions.length === 0)
 		.filter((record) => allowedScopes === null || allowedScopes.has(record.scope))
+		.filter((record) => repositoryApplies(record, activeRepository))
 		.sort(compareRetrievalPriority);
 	const selected: MemoryRecord[] = [];
 	let spent = 0;
@@ -57,6 +61,7 @@ export function estimateMemoryTokens(record: MemoryRecord): number {
 		record.scope,
 		record.key,
 		record.lesson,
+		...(record.repository === undefined ? [] : [record.repository.kind, record.repository.key]),
 		...record.evidenceRefs,
 		...record.appliesWhen,
 		...record.avoidWhen,
@@ -81,7 +86,44 @@ function cloneRecord(record: MemoryRecord): MemoryRecord {
 	if (record.lastVerifiedAt !== undefined) next.lastVerifiedAt = record.lastVerifiedAt;
 	if (record.regressions !== undefined) next.regressions = [...record.regressions];
 	if (record.rejectedAt !== undefined) next.rejectedAt = record.rejectedAt;
+	if (record.repository !== undefined) next.repository = { ...record.repository };
 	return next;
+}
+
+/**
+ * Build the path identity expected by memory selection. The input must be an
+ * absolute active repository root. Existing symlinks are resolved; non-Git
+ * directories are valid identities too. Missing/moved paths stay distinct
+ * from their former location and therefore fail closed against old records.
+ */
+export function canonicalMemoryRepositoryIdentity(repositoryPath: string): MemoryRepositoryIdentity | null {
+	if (!isUsableAbsoluteRepositoryPath(repositoryPath)) return null;
+	const key = canonicalizeExistingPath(repositoryPath);
+	if (!isUsableAbsoluteRepositoryPath(key)) return null;
+	return { kind: "canonical-path", key };
+}
+
+function canonicalActiveRepository(
+	identity: MemoryRepositoryIdentity | null | undefined,
+): MemoryRepositoryIdentity | null {
+	if (identity === null || identity === undefined || identity.kind !== "canonical-path") return null;
+	const canonical = canonicalMemoryRepositoryIdentity(identity.key);
+	if (canonical === null || canonical.key !== identity.key) return null;
+	return canonical;
+}
+
+function repositoryApplies(record: MemoryRecord, activeRepository: MemoryRepositoryIdentity | null): boolean {
+	if (record.scope !== "repo") return true;
+	if (activeRepository === null) return false;
+
+	// The structured field is the only applicability mechanism: a repo-scoped
+	// record without it never enters any repository prompt.
+	if (record.repository === undefined) return false;
+	return record.repository.kind === activeRepository.kind && record.repository.key === activeRepository.key;
+}
+
+function isUsableAbsoluteRepositoryPath(value: string): boolean {
+	return value.length > 0 && !/[\0\r\n]/u.test(value) && isAbsolute(value);
 }
 
 function approveRecord(record: MemoryRecord, now: Date): MemoryRecord {

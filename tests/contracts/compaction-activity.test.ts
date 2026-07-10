@@ -3,16 +3,23 @@ import { describe, it } from "node:test";
 import { BusChannels, type ContextActivityPayload } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { CompactResult } from "../../src/domains/session/compaction/compact.js";
+import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
-import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
-import { createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
+import { openSession } from "../../src/engine/session.js";
+import type { AgentEvent, AgentMessage, Model } from "../../src/engine/types.js";
+import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
+import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // --- Minimal chat-loop harness (mirrors tests/contracts/chat-loop.test.ts). ---
 
@@ -32,7 +39,7 @@ function settings(overrides: Partial<ClioSettings["compaction"]> = {}): ClioSett
 	return value;
 }
 
-function providers(): ProvidersContract {
+function providers(modelOverride?: Model<never>): ProvidersContract {
 	const target: TargetDescriptor = {
 		id: "test-target",
 		runtime: "fake-runtime",
@@ -47,6 +54,7 @@ function providers(): ProvidersContract {
 		auth: "none",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 1000, maxTokens: 256 },
 		synthesizeModel: () =>
+			modelOverride ??
 			({
 				id: "model",
 				name: "model",
@@ -57,7 +65,7 @@ function providers(): ProvidersContract {
 				reasoning: false,
 				input: [],
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			}) as never,
+			} as never),
 	};
 	const status: TargetStatus = {
 		target,
@@ -235,6 +243,129 @@ function summaryEntry(entries: SessionEntry[]): void {
 		firstKeptTurnId: "summary-1",
 		trigger: "force",
 	} as SessionEntry);
+}
+
+type ProductionFailure = "provider-stream" | "session-read" | "summary-append";
+type CompactionMode = "forced" | "automatic";
+
+const PRODUCTION_FAILURE_CAUSES: Record<ProductionFailure, string> = {
+	"provider-stream": "provider stream exploded",
+	"session-read": "session not found",
+	"summary-append": "summary append exploded",
+};
+
+function persistentSession(bus: ReturnType<typeof createSafeEventBus>): SessionContract {
+	const context = {
+		bus,
+		getContract: () => undefined,
+	} as unknown as DomainContext;
+	return createSessionBundle(context).contract;
+}
+
+function seedPersistentCompactionHistory(session: SessionContract): void {
+	const firstUser = session.append({ parentId: null, kind: "user", payload: { text: "old request to summarize" } });
+	const firstAssistant = session.append({
+		parentId: firstUser.id,
+		kind: "assistant",
+		payload: { text: "old response to summarize" },
+	});
+	const recentUser = session.append({
+		parentId: firstAssistant.id,
+		kind: "user",
+		payload: { text: "recent request to retain" },
+	});
+	session.append({ parentId: recentUser.id, kind: "assistant", payload: { text: "recent response to retain" } });
+}
+
+function persistedEntries(session: SessionContract): SessionEntry[] {
+	const meta = session.current();
+	if (!meta) return [];
+	return collectSessionEntries(openSession(meta.id).turns());
+}
+
+function sessionWithProductionFailure(base: SessionContract, failure: ProductionFailure): SessionContract {
+	if (failure === "session-read") {
+		const current = base.current();
+		if (!current) throw new Error("test setup requires a current session");
+		return {
+			...base,
+			current: () => ({ ...current, id: "missing-compaction-session" }),
+		};
+	}
+	if (failure === "summary-append") {
+		return {
+			...base,
+			appendEntry(entry) {
+				if (entry.kind === "compactionSummary") throw new Error(PRODUCTION_FAILURE_CAUSES[failure]);
+				return base.appendEntry(entry);
+			},
+		};
+	}
+	return base;
+}
+
+async function runProductionFailureScenario(
+	failure: ProductionFailure,
+	mode: CompactionMode,
+): Promise<{ activities: ContextActivityPayload[]; visible: string }> {
+	const isolated = isolateClioEnv(`clio-compaction-${failure}-${mode}-`);
+	const bus = createSafeEventBus();
+	const activities = compactionActivities(bus);
+	const events: ChatLoopEvent[] = [];
+	const faux = registerFauxProvider({
+		provider: `production-compaction-${failure}-${mode}`,
+		models: [{ id: "model" }],
+		tokensPerSecond: 0,
+	});
+	const baseSession = persistentSession(bus);
+
+	try {
+		baseSession.create({ cwd: isolated.dir, model: "model", target: "test-target" });
+		seedPersistentCompactionHistory(baseSession);
+		const session = sessionWithProductionFailure(baseSession, failure);
+		faux.setResponses([
+			failure === "provider-stream"
+				? fauxAssistantMessage("", {
+						stopReason: "error",
+						errorMessage: PRODUCTION_FAILURE_CAUSES[failure],
+					})
+				: fauxAssistantMessage("## Goal\nPersist the production summary."),
+		]);
+		const model = faux.getModel("model") as unknown as Model<never>;
+		const productionProviders = providers(model);
+		const currentSettings = settings({ threshold: 0.2 });
+		const loop = createChatLoop({
+			getSettings: () => currentSettings,
+			providers: productionProviders,
+			knownTargets: () => new Set(["test-target"]),
+			session,
+			readSessionEntries: () => persistedEntries(session),
+			autoCompact: createProductionAutoCompact(session, () => currentSettings, productionProviders),
+			bus,
+			createAgent: createFakeAgentFactory(
+				async () => {},
+				mode === "automatic"
+					? () => [
+							{
+								role: "user",
+								content: [{ type: "text", text: "x".repeat(1200) }],
+								timestamp: Date.now(),
+							} as AgentMessage,
+						]
+					: undefined,
+			),
+		} as never);
+		loop.onEvent((event) => events.push(event));
+
+		if (mode === "forced") await loop.compact();
+		else await loop.submit("continue after automatic compaction");
+
+		return { activities, visible: JSON.stringify(events) };
+	} finally {
+		await baseSession.close();
+		faux.unregister();
+		isolated.restore();
+	}
 }
 
 describe("contracts/compaction context-island activity (S3 Part A)", () => {
@@ -416,5 +547,78 @@ describe("contracts/compaction context-island activity (S3 Part A)", () => {
 		ok(started, "the mask stage emits a started activity");
 		const completed = activities.find((a) => a.status === "completed" && a.message.includes("masked"));
 		ok(completed, "the mask stage emits a completed activity naming the masked observations");
+	});
+});
+
+describe("contracts/production compaction failure wiring", () => {
+	for (const mode of ["forced", "automatic"] as const) {
+		for (const failure of ["provider-stream", "session-read", "summary-append"] as const) {
+			it(`${mode} ${failure} failures stay distinct from a legitimate no-op`, async () => {
+				const { activities, visible } = await runProductionFailureScenario(failure, mode);
+				const cause = PRODUCTION_FAILURE_CAUSES[failure];
+				const failed = activities.find((activity) => activity.status === "failed");
+
+				ok(failed, `expected a failed activity for ${mode} ${failure}`);
+				ok(failed?.message.includes(cause), `failed activity should expose ${JSON.stringify(cause)}`);
+				strictEqual(
+					activities.some((activity) => activity.status === "completed"),
+					false,
+					"a production failure must never emit a completed compaction activity",
+				);
+				ok(visible.includes(cause), `operator-visible notice should expose ${JSON.stringify(cause)}`);
+				ok(
+					visible.includes(mode === "forced" ? "[/compact]" : "auto-compaction failed"),
+					"operator-visible wording should identify the failed compaction path",
+				);
+				ok(!visible.includes("nothing to compact"), "a production failure must not render the no-op notice");
+			});
+		}
+	}
+
+	it("preserves an empty production session as a legitimate no-op", async () => {
+		const isolated = isolateClioEnv("clio-compaction-no-op-");
+		const bus = createSafeEventBus();
+		const activities = compactionActivities(bus);
+		const events: ChatLoopEvent[] = [];
+		const faux = registerFauxProvider({
+			provider: "production-compaction-no-op",
+			models: [{ id: "model" }],
+			tokensPerSecond: 0,
+		});
+		const session = persistentSession(bus);
+
+		try {
+			session.create({ cwd: isolated.dir, model: "model", target: "test-target" });
+			const model = faux.getModel("model") as unknown as Model<never>;
+			const productionProviders = providers(model);
+			const currentSettings = settings();
+			const loop = createChatLoop({
+				getSettings: () => currentSettings,
+				providers: productionProviders,
+				knownTargets: () => new Set(["test-target"]),
+				session,
+				readSessionEntries: () => persistedEntries(session),
+				autoCompact: createProductionAutoCompact(session, () => currentSettings, productionProviders),
+				bus,
+				createAgent: createFakeAgentFactory(async () => {}),
+			} as never);
+			loop.onEvent((event) => events.push(event));
+
+			await loop.compact();
+
+			strictEqual(
+				activities.some((activity) => activity.status === "failed"),
+				false,
+			);
+			ok(
+				activities.some((activity) => activity.status === "completed" && activity.message.includes("nothing to compact")),
+				"the production wrapper keeps an empty session as a completed no-op",
+			);
+			ok(JSON.stringify(events).includes("nothing to compact"));
+		} finally {
+			await session.close();
+			faux.unregister();
+			isolated.restore();
+		}
 	});
 });

@@ -151,7 +151,7 @@ function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> 
 		toolStats: [],
 		sessionId: null,
 		integrity: {
-			version: 1,
+			version: 4,
 			algorithm: "sha256",
 			digest: "0".repeat(64),
 		},
@@ -236,6 +236,10 @@ function fakeSequentialDispatch(
 		drain: async () => {},
 	};
 }
+
+const approvedDispatch = {
+	approval: { requestId: "test-dispatch-approval", requestedBy: "test-operator", actionClass: "dispatch" as const },
+};
 
 describe("contracts/tools basic happy paths", () => {
 	it("writeTool writes file and creates parent folders", async () => {
@@ -1133,12 +1137,15 @@ describe("contracts/tools dispatch run paths", () => {
 		};
 
 		const tool = createDispatchTool({ dispatch: mockDispatch });
-		const result = await tool.run({
-			tasks: [
-				{ task: "task 1", agent_id: "coder" },
-				{ task: "task 2", agent_id: "coder" },
-			],
-		});
+		const result = await tool.run(
+			{
+				tasks: [
+					{ task: "task 1", agent_id: "coder" },
+					{ task: "task 2", agent_id: "coder" },
+				],
+			},
+			approvedDispatch,
+		);
 
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
@@ -1162,14 +1169,17 @@ describe("contracts/tools dispatch run paths", () => {
 			),
 		});
 
-		const result = await tool.run({
-			mode: "pipeline",
-			tasks: [
-				{ task: "step 1", agent_id: "coder" },
-				{ task: "step 2", agent_id: "coder" },
-				{ task: "step 3", agent_id: "coder" },
-			],
-		});
+		const result = await tool.run(
+			{
+				mode: "pipeline",
+				tasks: [
+					{ task: "step 1", agent_id: "coder" },
+					{ task: "step 2", agent_id: "coder" },
+					{ task: "step 3", agent_id: "coder" },
+				],
+			},
+			approvedDispatch,
+		);
 
 		strictEqual(result.kind, "ok");
 		strictEqual(capturedRequests.length, 3);
@@ -1201,23 +1211,26 @@ describe("contracts/tools dispatch run paths", () => {
 			),
 		});
 
-		const result = await tool.run({
-			mode: "pipeline",
-			tasks: [
-				{
-					task: "summarize interface",
-					agent_id: "coder",
-					persona: "# Interface Specialist\nSummarize the public contract.",
-					tool_profile: "minimal-local",
-				},
-				{
-					task: "check implications",
-					agent_id: "coder",
-					persona: "# Risk Specialist\nIdentify integration risks.",
-					tool_profile: "science-local",
-				},
-			],
-		});
+		const result = await tool.run(
+			{
+				mode: "pipeline",
+				tasks: [
+					{
+						task: "summarize interface",
+						agent_id: "coder",
+						persona: "# Interface Specialist\nSummarize the public contract.",
+						tool_profile: "minimal-local",
+					},
+					{
+						task: "check implications",
+						agent_id: "coder",
+						persona: "# Risk Specialist\nIdentify integration risks.",
+						tool_profile: "science-local",
+					},
+				],
+			},
+			approvedDispatch,
+		);
 
 		strictEqual(result.kind, "ok");
 		strictEqual(capturedRequests.length, 2);
@@ -1256,14 +1269,17 @@ describe("contracts/tools dispatch run paths", () => {
 			),
 		});
 
-		const result = await tool.run({
-			mode: "pipeline",
-			tasks: [
-				{ task: "step 1", agent_id: "coder" },
-				{ task: "step 2", agent_id: "coder" },
-				{ task: "step 3", agent_id: "coder" },
-			],
-		});
+		const result = await tool.run(
+			{
+				mode: "pipeline",
+				tasks: [
+					{ task: "step 1", agent_id: "coder" },
+					{ task: "step 2", agent_id: "coder" },
+					{ task: "step 3", agent_id: "coder" },
+				],
+			},
+			approvedDispatch,
+		);
 
 		strictEqual(result.kind, "error");
 		strictEqual(capturedRequests.length, 2);
@@ -1346,13 +1362,16 @@ describe("contracts/tools dispatch run paths", () => {
 			),
 		});
 
-		const result = await tool.run({
-			mode: "pipeline",
-			tasks: [
-				{ task: "step 1", agent_id: "coder" },
-				{ task: "step 2", agent_id: "coder" },
-			],
-		});
+		const result = await tool.run(
+			{
+				mode: "pipeline",
+				tasks: [
+					{ task: "step 1", agent_id: "coder" },
+					{ task: "step 2", agent_id: "coder" },
+				],
+			},
+			approvedDispatch,
+		);
 
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {

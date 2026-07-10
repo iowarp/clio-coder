@@ -75,6 +75,10 @@ type ToolRunResult =
 	| { kind: "ok"; output: string; details?: Record<string, unknown> }
 	| { kind: "error"; message: string; details?: Record<string, unknown> };
 
+const approvedDispatch = {
+	approval: { requestId: "test-dispatch-approval", requestedBy: "test-operator", actionClass: "dispatch" as const },
+};
+
 describe("detached dispatch + collect", () => {
 	beforeEach(() => {
 		isolateDispatchState();
@@ -106,7 +110,7 @@ describe("detached dispatch + collect", () => {
 			const tool = createDispatchTool({ dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ tasks: ["task one", "task two"], detach: true },
-				{ sessionId: "session-detach" },
+				{ sessionId: "session-detach", ...approvedDispatch },
 			)) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			ok(result.kind === "ok");
@@ -157,7 +161,7 @@ describe("detached dispatch + collect", () => {
 		try {
 			const tool = createDispatchTool({ dispatch: bundle.contract });
 			const monitor = createMonitorTool({ dispatch: bundle.contract });
-			const result = (await tool.run({ tasks: ["quick", "slow"], detach: true }, {})) as ToolRunResult;
+			const result = (await tool.run({ tasks: ["quick", "slow"], detach: true }, approvedDispatch)) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			const batchId = result.details?.batchId as string;
 			const runIds = result.details?.runIds as string[];

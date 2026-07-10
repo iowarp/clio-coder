@@ -16,6 +16,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { routingChangeNotices } from "../core/session-routing.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { ToolNames } from "../core/tool-names.js";
 import { clioConfigDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
@@ -2362,6 +2363,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			origin: { kind: "main" },
 			reason:
 				decision.kind === "ask" ? decision.rejection.short : `${call.tool} requests ${decision.classification.actionClass}`,
+			...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
+				? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
+				: {}),
 			...(target.length > 0 ? { target } : {}),
 			...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
 		};

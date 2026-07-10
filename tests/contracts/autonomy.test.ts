@@ -439,6 +439,31 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		]);
 	});
 
+	it("permission overlay renders every line of a resolved dispatch plan", () => {
+		const view: ApprovalRequestView = {
+			requestId: "perm-plan",
+			tool: "dispatch",
+			actionClass: "dispatch",
+			axis: { kind: "autonomy", level: "auto-edit" },
+			origin: { kind: "main" },
+			reason: "dispatch plan needs approval",
+			artifact: {
+				kind: "dispatch-plan",
+				text: [
+					"dispatch plan: topology=parallel tasks=2",
+					"cost ceiling: $5.0000",
+					"  1. agent=coder model=model-a node=blade-a",
+					"  2. agent=reviewer model=model-b node=blade-b",
+				].join("\n"),
+			},
+		};
+		const body = createPermissionOverlayBody(view).render(80).join("\n");
+		ok(body.includes("Resolved dispatch plan:"), body);
+		ok(body.includes("cost ceiling: $5.0000"), body);
+		ok(body.includes("1. agent=coder model=model-a node=blade-a"), body);
+		ok(body.includes("2. agent=reviewer model=model-b node=blade-b"), body);
+	});
+
 	it("permission overlay derives the call target from args and never renders the blocked wording", () => {
 		strictEqual(describeCallTarget({ command: "rm -rf build" }), "rm -rf build");
 		strictEqual(describeCallTarget({ path: "/tmp/probe.txt", content: "hello" }), "/tmp/probe.txt");

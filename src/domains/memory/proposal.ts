@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { EvidenceFinding, EvidenceOverview, EvidenceTag } from "../evidence/index.js";
 import { inspectEvidence } from "../evidence/index.js";
+import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { loadMemoryRecords, upsertMemoryRecord } from "./store.js";
-import type { MemoryProposalResult, MemoryRecord, MemoryScope } from "./types.js";
+import type { MemoryProposalResult, MemoryRecord, MemoryRepositoryIdentity, MemoryScope } from "./types.js";
 
 const LESSON_MAX_CHARS = 240;
 const APPLY_MAX_CHARS = 160;
@@ -43,7 +44,8 @@ export function memoryRecordFromEvidence(
 ): MemoryRecord {
 	const tags = overview.tags;
 	const primaryTag = primaryEvidenceTag(tags);
-	const scope = inferScope(overview);
+	const repository = inferRepository(overview);
+	const scope = inferScope(overview, repository);
 	const record: MemoryRecord = {
 		id: memoryIdFromEvidence(overview.evidenceId),
 		scope,
@@ -56,12 +58,24 @@ export function memoryRecordFromEvidence(
 		createdAt: overview.generatedAt,
 		approved: false,
 	};
+	if (scope === "repo" && repository !== null) record.repository = repository;
 	return record;
 }
 
-function inferScope(overview: EvidenceOverview): MemoryScope {
+/**
+ * Repo scope requires exactly one evidence cwd that canonicalizes to a usable
+ * repository identity; anything else is ambiguous and falls through to the
+ * next scope.
+ */
+function inferRepository(overview: EvidenceOverview): MemoryRepositoryIdentity | null {
+	const cwds = [...new Set(overview.cwds)];
+	if (cwds.length !== 1 || cwds[0] === undefined) return null;
+	return canonicalMemoryRepositoryIdentity(cwds[0]);
+}
+
+function inferScope(overview: EvidenceOverview, repository: MemoryRepositoryIdentity | null): MemoryScope {
 	if (overview.source.kind === "eval") return "task-family";
-	if (overview.cwds.length > 0) return "repo";
+	if (repository !== null) return "repo";
 	if (overview.runtimeIds.length > 0) return "runtime";
 	if (overview.agentIds.length > 0) return "agent";
 	return "global";

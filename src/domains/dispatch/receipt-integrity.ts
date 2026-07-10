@@ -2,18 +2,15 @@ import { createHash } from "node:crypto";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } from "./types.js";
 
 /**
- * Integrity versions. v1 predates the outcome/lineage/identity blocks; v2
- * folds them into the digest; v3 additionally folds the durable
- * findingsSummary and autonomy-enforcement block. Verification
- * branches strictly on the version recorded in the receipt's integrity block,
- * never on field-presence heuristics, so a v2 receipt verifies via the
- * retained v2 branch and a v3 receipt via the v3 branch. Receipts written
- * before the endpointId -> targetId rename are stale dev state and no longer
- * verify; per the no-migrations mandate they are wiped, not read.
+ * Single supported integrity version. The digest authenticates every field on
+ * the receipt draft and every stable ledger field that can be reconstructed
+ * from that receipt. There is no legacy tier: a receipt sealed under any other
+ * version is stale dev state and fails verification. Per the no-migrations
+ * mandate such receipts are wiped, not read.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION = 3;
-export type ReceiptIntegrityVersion = 1 | 2 | 3;
-const KNOWN_INTEGRITY_VERSIONS: ReadonlySet<number> = new Set([1, 2, 3]);
+export const RUN_RECEIPT_INTEGRITY_VERSION = 4;
+export type ReceiptIntegrityVersion = typeof RUN_RECEIPT_INTEGRITY_VERSION;
+export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
 export type ReceiptIntegrityResult = { ok: true } | { ok: false; reason: string };
@@ -65,123 +62,81 @@ function serializeCanonical(value: unknown): string {
 	throw new Error(`receipt integrity: unsupported value of type ${typeof value}`);
 }
 
-function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: ReceiptIntegrityVersion): RunReceiptDraft {
-	const draft: RunReceiptDraft = {
-		runId: receipt.runId,
-		agentId: receipt.agentId,
-		task: receipt.task,
-		targetId: receipt.targetId,
-		wireModelId: receipt.wireModelId,
-		runtimeId: receipt.runtimeId,
-		runtimeKind: receipt.runtimeKind,
-		startedAt: receipt.startedAt,
-		endedAt: receipt.endedAt,
-		exitCode: receipt.exitCode,
-		tokenCount: receipt.tokenCount,
-		costUsd: receipt.costUsd,
-		compiledPromptHash: receipt.compiledPromptHash,
-		staticCompositionHash: receipt.staticCompositionHash,
-		clioVersion: receipt.clioVersion,
-		piMonoVersion: receipt.piMonoVersion,
-		platform: receipt.platform,
-		nodeVersion: receipt.nodeVersion,
-		toolCalls: receipt.toolCalls,
-		toolStats: receipt.toolStats,
-		sessionId: receipt.sessionId,
-	};
-	if (receipt.agentAudience !== undefined) {
-		draft.agentAudience = receipt.agentAudience;
+/**
+ * Every public draft field enters the digest. This map is deliberately
+ * exhaustive: adding a receipt field without registering it here is a compile
+ * error, so a new field can never ship outside integrity coverage.
+ */
+export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
+	runId: true,
+	agentId: true,
+	agentAudience: true,
+	requestOrigin: true,
+	task: true,
+	targetId: true,
+	wireModelId: true,
+	runtimeId: true,
+	runtimeKind: true,
+	startedAt: true,
+	endedAt: true,
+	outcome: true,
+	outcomeDetail: true,
+	lineage: true,
+	identity: true,
+	node: true,
+	reroutes: true,
+	pipeline: true,
+	gate: true,
+	plan: true,
+	personaOverride: true,
+	projectContext: true,
+	exitCode: true,
+	failureMessage: true,
+	tokenCount: true,
+	inputTokenCount: true,
+	outputTokenCount: true,
+	cacheReadTokenCount: true,
+	cacheWriteTokenCount: true,
+	reasoningTokenCount: true,
+	upstreamResponses: true,
+	costUsd: true,
+	compiledPromptHash: true,
+	staticCompositionHash: true,
+	staticShellHash: true,
+	sessionShellHash: true,
+	dynamicHash: true,
+	promptSignature: true,
+	toolSignature: true,
+	clioVersion: true,
+	piMonoVersion: true,
+	platform: true,
+	nodeVersion: true,
+	toolCalls: true,
+	toolStats: true,
+	toolActivity: true,
+	skillActivations: true,
+	autonomyEnforcement: true,
+	safety: true,
+	reproducibility: true,
+	runtimeResolution: true,
+	delegation: true,
+	findingsSummary: true,
+	sessionId: true,
+} as const satisfies Record<ReceiptIntegrityField, true>;
+
+const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];
+
+function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): RunReceiptDraft {
+	const source = receipt as unknown as Record<string, unknown>;
+	const result: Record<string, unknown> = {};
+	for (const field of RECEIPT_FIELDS) {
+		const value = source[field];
+		if (value !== undefined) result[field] = value;
 	}
-	if (receipt.requestOrigin !== undefined) {
-		draft.requestOrigin = receipt.requestOrigin;
-	}
-	if (receipt.failureMessage !== undefined) {
-		draft.failureMessage = receipt.failureMessage;
-	}
-	if (receipt.inputTokenCount !== undefined) {
-		draft.inputTokenCount = receipt.inputTokenCount;
-	}
-	if (receipt.outputTokenCount !== undefined) {
-		draft.outputTokenCount = receipt.outputTokenCount;
-	}
-	if (receipt.cacheReadTokenCount !== undefined) {
-		draft.cacheReadTokenCount = receipt.cacheReadTokenCount;
-	}
-	if (receipt.cacheWriteTokenCount !== undefined) {
-		draft.cacheWriteTokenCount = receipt.cacheWriteTokenCount;
-	}
-	if (receipt.reasoningTokenCount !== undefined) {
-		draft.reasoningTokenCount = receipt.reasoningTokenCount;
-	}
-	if (receipt.staticShellHash !== undefined) {
-		draft.staticShellHash = receipt.staticShellHash;
-	}
-	if (receipt.sessionShellHash !== undefined) {
-		draft.sessionShellHash = receipt.sessionShellHash;
-	}
-	if (receipt.dynamicHash !== undefined) {
-		draft.dynamicHash = receipt.dynamicHash;
-	}
-	if (receipt.upstreamResponses !== undefined) {
-		draft.upstreamResponses = receipt.upstreamResponses;
-	}
-	if (receipt.toolActivity !== undefined) {
-		draft.toolActivity = receipt.toolActivity;
-	}
-	if (receipt.skillActivations !== undefined) {
-		draft.skillActivations = receipt.skillActivations;
-	}
-	if (receipt.safety !== undefined) {
-		draft.safety = receipt.safety;
-	}
-	if (receipt.reproducibility !== undefined) {
-		draft.reproducibility = receipt.reproducibility;
-	}
-	if (receipt.runtimeResolution !== undefined) {
-		draft.runtimeResolution = receipt.runtimeResolution;
-	}
-	if (version >= 2) {
-		if (receipt.outcome !== undefined) draft.outcome = receipt.outcome;
-		if (receipt.outcomeDetail !== undefined) draft.outcomeDetail = receipt.outcomeDetail;
-		if (receipt.lineage !== undefined) draft.lineage = receipt.lineage;
-		if (receipt.identity !== undefined) draft.identity = receipt.identity;
-	}
-	if (version >= 3) {
-		if (receipt.autonomyEnforcement !== undefined) draft.autonomyEnforcement = receipt.autonomyEnforcement;
-		if (receipt.findingsSummary !== undefined) draft.findingsSummary = receipt.findingsSummary;
-		// Fleet placement facts are presence-gated so every v3 receipt sealed
-		// before fleet dispatch landed still recomputes to its stored digest.
-		if (receipt.node !== undefined) draft.node = receipt.node;
-		if (receipt.reroutes !== undefined) draft.reroutes = receipt.reroutes;
-		// Gate and plan provenance follow the same presence gate: receipts
-		// sealed before review topologies landed keep verifying unchanged.
-		if (receipt.gate !== undefined) draft.gate = receipt.gate;
-		if (receipt.plan !== undefined) draft.plan = receipt.plan;
-	}
-	return draft;
+	return result as unknown as RunReceiptDraft;
 }
 
-function ledgerDigestFields(envelope: RunEnvelope, version: ReceiptIntegrityVersion): Record<string, unknown> {
-	if (version >= 2) {
-		return {
-			...ledgerDigestFieldsV1(envelope),
-			outcome: envelope.outcome ?? null,
-			outcomeDetail: envelope.outcomeDetail ?? null,
-			lineage: envelope.lineage ?? null,
-			identity: envelope.identity ?? null,
-			// Presence-gated (never `?? null`): folding an always-present key
-			// would break verification of every receipt sealed before fleet
-			// placement landed.
-			...(envelope.node !== undefined ? { node: envelope.node } : {}),
-			...(envelope.reroutes !== undefined ? { reroutes: envelope.reroutes } : {}),
-			...(envelope.gate !== undefined ? { gate: envelope.gate } : {}),
-			...(envelope.plan !== undefined ? { plan: envelope.plan } : {}),
-		};
-	}
-	return ledgerDigestFieldsV1(envelope);
-}
-
-function ledgerDigestFieldsV1(envelope: RunEnvelope): Record<string, unknown> {
+function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		id: envelope.id,
 		agentId: envelope.agentId,
@@ -204,32 +159,43 @@ function ledgerDigestFieldsV1(envelope: RunEnvelope): Record<string, unknown> {
 		sessionShellHash: envelope.sessionShellHash,
 		dynamicHash: envelope.dynamicHash,
 		costUsd: envelope.costUsd,
+		agentAudience: envelope.agentAudience ?? null,
+		requestOrigin: envelope.requestOrigin ?? null,
+		outcome: envelope.outcome ?? null,
+		outcomeDetail: envelope.outcomeDetail ?? null,
+		lineage: envelope.lineage ?? null,
+		identity: envelope.identity ?? null,
+		node: envelope.node ?? null,
+		reroutes: envelope.reroutes ?? null,
+		pipeline: envelope.pipeline ?? null,
+		gate: envelope.gate ?? null,
+		plan: envelope.plan ?? null,
+		personaOverride: envelope.personaOverride ?? null,
+		inputTokenCount: envelope.inputTokenCount ?? 0,
+		outputTokenCount: envelope.outputTokenCount ?? 0,
+		promptSignature: envelope.promptSignature ?? null,
+		toolSignature: envelope.toolSignature ?? null,
 	};
 }
 
-function integrityPayload(
-	receipt: RunReceipt | RunReceiptDraft,
-	envelope: RunEnvelope,
-	version: ReceiptIntegrityVersion,
-): Record<string, unknown> {
+function integrityPayload(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		contract: "clio.runReceipt.integrity",
-		version,
+		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		sources: ["receipt", "run-ledger"],
-		receipt: receiptDigestFields(receipt, version),
-		ledger: ledgerDigestFields(envelope, version),
+		receipt: receiptDigestFields(receipt),
+		ledger: ledgerDigestFields(envelope),
 	};
 }
 
 export function computeReceiptIntegrity(
 	receipt: RunReceipt | RunReceiptDraft,
 	envelope: RunEnvelope,
-	version: ReceiptIntegrityVersion = RUN_RECEIPT_INTEGRITY_VERSION,
 ): RunReceiptIntegrity {
 	return {
-		version,
+		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayload(receipt, envelope, version))),
+		digest: sha256(canonicalJson(integrityPayload(receipt, envelope))),
 	};
 }
 
@@ -244,8 +210,7 @@ export function isReceiptIntegrity(value: unknown): value is RunReceiptIntegrity
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
 	return (
-		typeof candidate.version === "number" &&
-		KNOWN_INTEGRITY_VERSIONS.has(candidate.version) &&
+		candidate.version === RUN_RECEIPT_INTEGRITY_VERSION &&
 		candidate.algorithm === RUN_RECEIPT_INTEGRITY_ALGORITHM &&
 		typeof candidate.digest === "string" &&
 		/^[0-9a-f]{64}$/.test(candidate.digest)
@@ -275,8 +240,6 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		["dynamicHash", receipt.dynamicHash ?? null, envelope.dynamicHash ?? null],
 		["costUsd", receipt.costUsd, envelope.costUsd],
 		["sessionId", receipt.sessionId, envelope.sessionId],
-		// Lineage/identity are structural and covered by the digest; outcome is
-		// scalar and cross-checked here for a precise mismatch reason.
 		["outcome", receipt.outcome ?? null, envelope.outcome ?? null],
 		["outcomeDetail", receipt.outcomeDetail ?? null, envelope.outcomeDetail ?? null],
 		["nodeId", receipt.node?.id ?? null, envelope.node?.id ?? null],
@@ -291,17 +254,11 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 	if (!isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
-	if (receipt.integrity.version < 3 && receipt.findingsSummary !== undefined) {
-		return { ok: false, reason: "v3 findings summary on v2 receipt" };
-	}
-	if (receipt.integrity.version < 3 && receipt.autonomyEnforcement !== undefined) {
-		return { ok: false, reason: "v3 autonomy enforcement on v2 receipt" };
-	}
 	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };
 	}
-	const expected = computeReceiptIntegrity(receipt, envelope, receipt.integrity.version);
+	const expected = computeReceiptIntegrity(receipt, envelope);
 	if (expected.digest !== receipt.integrity.digest) {
 		return { ok: false, reason: "integrity mismatch" };
 	}
