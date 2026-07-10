@@ -258,6 +258,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		toolCalls: countToolStats(input.stats.toolStats),
 		toolStats,
 		skillActivations: input.stats.skillActivations,
+		autonomyEnforcement: { grade: "mediated", autonomy: snapshot.autonomy },
 		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
 		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
 	};

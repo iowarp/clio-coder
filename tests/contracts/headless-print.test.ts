@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -128,6 +128,7 @@ describe("contracts/headless-print", () => {
 				targetId: "test-target",
 				wireModelId: "test-model",
 				runtimeId: "llamacpp",
+				autonomy: "read-only",
 				sessionId: "fake-session",
 				cwd: process.cwd(),
 				promptSignature: "sig",
@@ -143,9 +144,11 @@ describe("contracts/headless-print", () => {
 			const receipt = JSON.parse(readFileSync(join(receiptsDir, files[0] ?? ""), "utf8")) as {
 				tokenCount: number;
 				outputTokenCount: number;
+				autonomyEnforcement?: unknown;
 			};
 			strictEqual(receipt.tokenCount, 1200, "segments sum instead of last-segment-wins");
 			ok(receipt.outputTokenCount === 20, "per-field totals sum too");
+			deepStrictEqual(receipt.autonomyEnforcement, { grade: "mediated", autonomy: "read-only" });
 		} finally {
 			if (savedStateDir === undefined) delete process.env.CLIO_STATE_DIR;
 			else process.env.CLIO_STATE_DIR = savedStateDir;

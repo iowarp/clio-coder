@@ -12,6 +12,7 @@
 import { createHash } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
+import type { DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { protectedResidencyModelIds } from "../../core/residency-protection.js";
@@ -63,6 +64,7 @@ import {
 	targetRequiresAuth,
 } from "../providers/index.js";
 import type { ActionClass } from "../safety/action-classifier.js";
+import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
@@ -177,13 +179,15 @@ export interface DispatchBundleOptions {
 	resilienceCooldownMs?: number;
 	now?: () => number;
 	/**
-	 * Session-effective settings view for worker target resolution. The
-	 * interactive orchestrator injects this so /run and agent dispatches use
-	 * the fleet routing the running session sees, not whatever another process
-	 * last wrote to settings.yaml. Falls back to the shared config snapshot
-	 * when absent (headless boots, tests).
+	 * Session-effective settings view for dispatch admission and worker launch.
+	 * The interactive orchestrator injects this so target routing, autonomy,
+	 * permission posture, and related worker settings match the running session,
+	 * not whatever another process last wrote to settings.yaml. Falls back to
+	 * the shared config snapshot when absent (headless boots, tests).
 	 */
 	getSettings?: () => Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+	/** True only when this invocation supplied an explicit one-run autonomy override. */
+	autonomyOverride?: boolean;
 	/**
 	 * Reproducibility collector seam. Defaults to the real git-backed collector,
 	 * which shells out to three synchronous `git` subprocesses per receipt.
@@ -740,7 +744,7 @@ interface DispatchWorkerSpecInput {
 	dynamicHash: string | null;
 	apiKey: string | undefined;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
-	/** Effective settings view for residency protection; falls back to config.get(). */
+	/** Effective settings snapshot for this run; falls back to config.get(). */
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 }
 
@@ -765,6 +769,7 @@ interface DispatchLifecycleStage {
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 }
 
 interface AcpDelegationLifecycleStage {
@@ -784,6 +789,7 @@ interface AcpDelegationLifecycleStage {
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	autonomy: AutonomyLevel;
 }
 
 function capabilityInfoForTarget(providers: ProvidersContract, targetId: string): CapabilityFlags | null {
@@ -1003,9 +1009,9 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	// Carry the operator's configured model ids so the worker subprocess (whose
 	// residency registry starts empty) never evicts another profile's model.
-	const settingsForProtection = input.settings ?? config?.get();
-	if (settingsForProtection) {
-		const protectedModels = protectedResidencyModelIds(settingsForProtection);
+	const settings = input.settings ?? config?.get();
+	if (settings) {
+		const protectedModels = protectedResidencyModelIds(settings);
 		if (protectedModels.length > 0) spec.protectedModels = protectedModels;
 	}
 	if (input.apiKey) spec.apiKey = input.apiKey;
@@ -1024,17 +1030,17 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	}
 	if (input.req.trustProjectCompatRoots !== undefined) {
 		spec.trustProjectCompatRoots = input.req.trustProjectCompatRoots;
-	} else if (config) {
-		spec.trustProjectCompatRoots = config.get().skills.trustProjectCompatRoots === true;
+	} else if (settings) {
+		spec.trustProjectCompatRoots = settings.skills.trustProjectCompatRoots === true;
 	}
 	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator
 	// to answer a permission prompt by default, so the resolution policy ships
 	// with the spec and the worker enforces it within bounded time. Under the
 	// escalate posture the configured timeout/fallback bounds ride along so the
 	// worker still cannot hang when no operator resolves the ask.
-	spec.onPermission = config?.get().workers.onPermission ?? "deny";
+	spec.onPermission = settings?.workers.onPermission ?? "deny";
 	if (spec.onPermission === "escalate") {
-		const escalation = config?.get().workers.escalation;
+		const escalation = settings?.workers.escalation;
 		if (escalation) spec.escalation = { timeoutMs: escalation.timeoutMs, fallback: escalation.fallback };
 	}
 	assertRuntimeCanHonorWorkerPermissionMode(input.target.runtime, spec.onPermission);
@@ -1053,7 +1059,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	// Workers inherit the session's autonomy level at admission time (sd-01
 	// §2.5); the worker registry applies the same mapping the orchestrator's
 	// does, with asks resolving through onPermission above.
-	spec.autonomy = config?.get().autonomy ?? "auto-edit";
+	spec.autonomy = settings?.autonomy ?? "auto-edit";
 	return spec;
 }
 
@@ -1086,6 +1092,24 @@ function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyE
 		}
 	}
 	return { grade: "mediated", autonomy };
+}
+
+function autonomyEnforcementForAcpDelegation(
+	autonomy: AutonomyLevel,
+	toolGovernance: DelegationToolGovernance,
+): RunReceiptAutonomyEnforcement {
+	if (toolGovernance === "agent-managed") {
+		return {
+			grade: "bypassed",
+			autonomy,
+			externalMode: toolGovernance,
+			dangerousBypass: true,
+		};
+	}
+	// clio-policy applies the exact autonomy mapping to every permission
+	// request. deny-all is stricter than every autonomy level, but is still a
+	// Clio-mediated upper bound rather than an external approximation.
+	return { grade: "mediated", autonomy, externalMode: toolGovernance };
 }
 
 function pickCapabilityMatchedWorker(
@@ -1462,6 +1486,8 @@ export function createDispatchBundle(
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const scheduling: SchedulingContract = maybeScheduling;
 	const config = context.getContract<ConfigContract>("config");
+	const getEffectiveSettings = (): Readonly<ReturnType<ConfigContract["get"]>> | undefined =>
+		options?.getSettings?.() ?? config?.get();
 	// Optional: absent in minimal test bundles. Workers just get no project
 	// message when the context domain is not loaded.
 	const projectContext = context.getContract<ContextContract>("context");
@@ -1472,7 +1498,7 @@ export function createDispatchBundle(
 	const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
 	const getResilienceCooldownMs = (): number => {
 		if (options?.resilienceCooldownMs !== undefined) return options.resilienceCooldownMs;
-		const settingsVal = config?.get().workers?.resilienceCooldownMs;
+		const settingsVal = getEffectiveSettings()?.workers?.resilienceCooldownMs;
 		if (settingsVal !== undefined && settingsVal >= 0) return settingsVal;
 		return DEFAULT_RESILIENCE_COOLDOWN_MS;
 	};
@@ -1522,7 +1548,7 @@ export function createDispatchBundle(
 	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
 
 	function workersMaxRetries(): number {
-		const value = config?.get().workers?.maxRetries;
+		const value = getEffectiveSettings()?.workers?.maxRetries;
 		return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 2;
 	}
 
@@ -1774,7 +1800,10 @@ export function createDispatchBundle(
 		targetCooldowns.set(key, { until: now() + cooldownMs, reason: status });
 	}
 
-	async function resolveLifecycle(req: DispatchRequest): Promise<DispatchLifecycleStage> {
+	async function resolveLifecycle(
+		req: DispatchRequest,
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): Promise<DispatchLifecycleStage> {
 		const recipe = agents.get(req.agentId);
 		if (!recipe) {
 			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
@@ -1789,7 +1818,7 @@ export function createDispatchBundle(
 			throw new Error(`dispatch: persona overrides are not allowed for ${spec.audience} agent '${req.agentId}'`);
 		}
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
-		const targets = readWorkerTargets(options?.getSettings?.() ?? config?.get());
+		const targets = readWorkerTargets(settings);
 		const target = resolveDispatchTarget(
 			req,
 			recipe,
@@ -1800,7 +1829,7 @@ export function createDispatchBundle(
 			providers,
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
-		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, config?.get().workers.onPermission ?? "deny");
+		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
 
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, recipe);
@@ -1812,7 +1841,7 @@ export function createDispatchBundle(
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			capabilityClass: spec.capabilityClass,
 			projectContextTier: tier,
-			autonomy: config?.get().autonomy ?? "auto-edit",
+			autonomy: settings?.autonomy ?? "auto-edit",
 			project,
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
@@ -1855,10 +1884,14 @@ export function createDispatchBundle(
 			pipeline: pipelineProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			...(settings ? { settings } : {}),
 		};
 	}
 
-	function resolveAcpDelegationLifecycle(req: DispatchRequest): AcpDelegationLifecycleStage {
+	function resolveAcpDelegationLifecycle(
+		req: DispatchRequest,
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): AcpDelegationLifecycleStage {
 		const agentId = req.delegationAgentId;
 		if (!agentId) throw new Error("dispatch: missing delegationAgentId");
 		if (hasPersonaOverride(req)) {
@@ -1872,10 +1905,15 @@ export function createDispatchBundle(
 				);
 			}
 		}
-		const settings = config?.get();
-		if (!settings) throw new Error("dispatch: config domain required for ACP delegation");
+		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
 		const configured = settings.delegation.agents.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
+		const toolGovernance = configured.toolGovernance ?? "clio-policy";
+		if (options?.autonomyOverride === true && toolGovernance === "agent-managed") {
+			throw new Error(
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', which cannot enforce an explicit one-run autonomy override; choose clio-policy or deny-all governance, or omit --autonomy`,
+			);
+		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, null);
@@ -1888,7 +1926,7 @@ export function createDispatchBundle(
 		const project = projectContext && tier === "bounded" ? projectContext.projectStructuredContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			projectContextTier: tier,
-			autonomy: config?.get().autonomy ?? "auto-edit",
+			autonomy: settings.autonomy ?? "auto-edit",
 			project,
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
@@ -1916,15 +1954,19 @@ export function createDispatchBundle(
 			pipeline: pipelineProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			autonomy: settings.autonomy ?? "auto-edit",
 		};
 	}
 
-	async function dispatchAcpDelegation(req: DispatchRequest): Promise<{
+	async function dispatchAcpDelegation(
+		req: DispatchRequest,
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
-		const lifecycle = resolveAcpDelegationLifecycle(req);
+		const lifecycle = resolveAcpDelegationLifecycle(req, settings);
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = lifecycle.agentConfig.id;
@@ -1965,7 +2007,7 @@ export function createDispatchBundle(
 				dynamicPromptMessages: lifecycle.dynamicPromptMessages,
 				cwd: lifecycle.cwd,
 				safety,
-				autonomy: config?.get().autonomy ?? "auto-edit",
+				autonomy: lifecycle.autonomy,
 				clientVersion: readClioVersion(),
 			});
 		} catch (error) {
@@ -2265,6 +2307,10 @@ export function createDispatchBundle(
 				// Clio-observed telemetry only: an external ACP agent executes its
 				// own tools, so no zero-activity note is derived from this record.
 				toolActivity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
+				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
+					lifecycle.autonomy,
+					lifecycle.agentConfig.toolGovernance ?? "clio-policy",
+				),
 				safety: {
 					decisions: safetyDecisionCounts,
 					blockedAttempts,
@@ -2473,7 +2519,7 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
-		const settings = config?.get();
+		const settings = getEffectiveSettings();
 		const isAcpAgent = settings?.delegation?.agents?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) {
 			req.delegationAgentId = req.agentId;
@@ -2502,10 +2548,10 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			return dispatchAcpDelegation(req);
+			return dispatchAcpDelegation(req, settings);
 		}
 
-		const lifecycle = await resolveLifecycle(req);
+		const lifecycle = await resolveLifecycle(req, settings);
 		assertResponseSchemaEnforceable(lifecycle.target.runtime, lifecycle.target.modelCapabilities, req.responseSchema);
 		assertTargetNotCoolingDown(lifecycle.target.target.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
 
@@ -2540,7 +2586,6 @@ export function createDispatchBundle(
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
-		const effectiveSettings = options?.getSettings?.();
 		const spec = buildDispatchWorkerSpec(
 			{
 				req,
@@ -2554,7 +2599,7 @@ export function createDispatchBundle(
 				dynamicHash: lifecycle.dynamicHash,
 				middlewareSnapshot: middleware.snapshot(),
 				apiKey: lifecycle.apiKey,
-				...(effectiveSettings ? { settings: effectiveSettings } : {}),
+				...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 			},
 			config ?? undefined,
 		);

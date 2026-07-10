@@ -257,6 +257,7 @@ export interface ChatLoopRunSnapshot {
 	runtimeId: string;
 	runtimeKind: RuntimeDescriptor["kind"];
 	wireModelId: string;
+	autonomy: ClioSettings["autonomy"];
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	promptSignature: string | null;
@@ -2215,6 +2216,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtimeId: agentRuntime.runtimeId,
 				runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
 				wireModelId: agentRuntime.wireModelId,
+				autonomy: deps.getSettings().autonomy,
 				compiledPromptHash: promptHash,
 				staticCompositionHash: promptHash,
 				promptSignature: promptHash,

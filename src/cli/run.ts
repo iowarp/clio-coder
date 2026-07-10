@@ -1,13 +1,14 @@
-import { readSettings } from "../core/config.js";
+import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { clioDataDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
+import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { createContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
-import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
@@ -30,7 +31,7 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--json] [--json-events full|terminal] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio run [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio run [flags] "<task>"
 
@@ -40,6 +41,7 @@ Flags:
   --target <id>             one-run main-agent or dispatch target override
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh
+  --autonomy <level>        one-run autonomy: read-only|suggest|auto-edit|full-auto
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
   --top-p <N>               one-run nucleus sampling override (0..1)
   --top-k <N>               one-run top-k override
@@ -213,6 +215,7 @@ export async function runClioRun(
 							...(parsed.target !== undefined ? { target: parsed.target } : {}),
 							...(parsed.model !== undefined ? { model: parsed.model } : {}),
 							...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
+							...(parsed.autonomy !== undefined ? { autonomy: parsed.autonomy } : {}),
 							...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 							...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 						},
@@ -255,6 +258,7 @@ async function runDispatch(
 	}
 
 	ensureClioState();
+	let effectiveSettings: Readonly<ClioSettings> | undefined;
 	const loaded = await loadDomains([
 		ConfigDomainModule,
 		ResourcesDomainModule,
@@ -271,9 +275,16 @@ async function runDispatch(
 		// loaded above.
 		ObservabilityDomainModule,
 		SchedulingDomainModule,
-		DispatchDomainModule,
+		createDispatchDomainModule({
+			getSettings: () => effectiveSettings,
+			autonomyOverride: parsed.autonomy !== undefined,
+		}),
 		LifecycleDomainModule,
 	]);
+	const config = loaded.getContract<ConfigContract>("config");
+	const baseSettings = config?.get() ?? readSettings();
+	effectiveSettings =
+		parsed.autonomy === undefined ? baseSettings : { ...structuredClone(baseSettings), autonomy: parsed.autonomy };
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
 		process.stderr.write("dispatch domain unavailable\n");
@@ -288,7 +299,7 @@ async function runDispatch(
 			await loaded.stop();
 			return 1;
 		}
-		const settings = readSettings();
+		const settings = effectiveSettings;
 		const profileTargetId = parsed.agentProfile ? settings.workers?.profiles?.[parsed.agentProfile]?.target : undefined;
 		const runtimeByTarget = new Map(settings.targets.map((target) => [target.id, target.runtime] as const));
 		const runtimeTargetId = parsed.agentRuntime
@@ -330,7 +341,7 @@ async function runDispatch(
 	if (noSkills) dispatchReq.noSkills = true;
 	if (skillPaths.length > 0) dispatchReq.skillPaths = skillPaths;
 	try {
-		const settings = readSettings();
+		const settings = effectiveSettings;
 		if (settings.skills?.trustProjectCompatRoots) {
 			dispatchReq.trustProjectCompatRoots = true;
 		}
