@@ -158,6 +158,7 @@ export interface BootOptions {
 		target?: string;
 		model?: string;
 		thinking?: ThinkingLevel;
+		autonomy?: AutonomyLevel;
 		sampling?: HeadlessSamplingOverrides;
 		noSkills?: boolean;
 		skillPaths?: ReadonlyArray<string>;
@@ -208,6 +209,7 @@ function applyHeadlessSettingsOverlay(
 	}
 	if (overrides.model !== undefined) next.orchestrator.model = overrides.model;
 	if (overrides.thinking !== undefined) next.orchestrator.thinkingLevel = overrides.thinking;
+	if (overrides.autonomy !== undefined) next.autonomy = overrides.autonomy;
 	return next;
 }
 
@@ -501,7 +503,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Dispatch resolves worker targets through the session's effective
 		// settings view once it exists (assigned below, after the config
 		// contract loads); until then it falls back to the shared snapshot.
-		createDispatchDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
+		createDispatchDomainModule({
+			getSettings: () => effectiveSettingsForDispatch?.(),
+			autonomyOverride: options.headless?.autonomy !== undefined,
+		}),
 		LifecycleDomainModule,
 	]);
 	timer.mark(`domains loaded (${result.loaded.length})`);
@@ -706,7 +711,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
-		autonomy: () => activeAcpSessionAutonomy ?? (config?.get() ?? readSettings()).autonomy ?? "auto-edit",
+		autonomy: () =>
+			activeAcpSessionAutonomy ??
+			effectiveSettingsForDispatch?.().autonomy ??
+			options.headless?.autonomy ??
+			(config?.get() ?? readSettings()).autonomy ??
+			"auto-edit",
 	});
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {
@@ -796,7 +806,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// view, so the live session reflects them immediately while settings.yaml
 	// (the global default for new sessions) stays untouched until the operator
 	// chooses to save globally.
-	const sessionOverrides: SessionOverrides = new Map();
+	const sessionOverrides: SessionOverrides = new Map(
+		options.headless?.autonomy === undefined ? [] : [["autonomy", options.headless.autonomy]],
+	);
 	const getCurrentSettings = (): ClioSettings => {
 		// Recents live in the data dir (core/recent-models.ts), never in
 		// settings.yaml; consumers that need them call listRecentModels

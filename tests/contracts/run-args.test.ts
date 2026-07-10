@@ -45,6 +45,29 @@ describe("contracts/run CLI args", () => {
 		deepStrictEqual(parsed.diagnostics, []);
 	});
 
+	it("parses only the four explicit one-run autonomy levels", () => {
+		for (const level of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
+			const parsed = parseRunCliArgs(["--autonomy", level, "do work"]);
+			strictEqual(parsed.autonomy, level);
+			deepStrictEqual(parsed.messages, ["do work"]);
+			deepStrictEqual(parsed.diagnostics, []);
+		}
+
+		const invalid = parseRunCliArgs(["--autonomy", "unrestricted", "do work"]);
+		strictEqual(invalid.autonomy, undefined);
+		ok(
+			invalid.diagnostics.some(
+				(diagnostic) =>
+					diagnostic.type === "error" &&
+					diagnostic.message === "--autonomy must be one of: read-only|suggest|auto-edit|full-auto",
+			),
+		);
+		const missing = parseRunCliArgs(["--autonomy", "--target", "local", "do work"]);
+		strictEqual(missing.autonomy, undefined);
+		strictEqual(missing.target, "local");
+		ok(missing.diagnostics.some((diagnostic) => diagnostic.message === "--autonomy requires a value"));
+	});
+
 	it("rejects unknown JSON event modes", () => {
 		const parsed = parseRunCliArgs(["--json-events", "deltas", "do work"]);
 		strictEqual(parsed.json, true);
@@ -99,6 +122,7 @@ describe("contracts/run CLI args", () => {
 			ok(stdout.includes("--kv-cache-mode <mode>"));
 			ok(stdout.includes("--steer-channel <path>"));
 			ok(stdout.includes("--json-events <mode>"));
+			ok(stdout.includes("--autonomy <level>"));
 			deepStrictEqual(runOverrides(), { maxContextTokens: 111, kvCacheMode: "q4_0" });
 		} finally {
 			if (previous === undefined) delete process.env[RUN_OVERRIDES_ENV];

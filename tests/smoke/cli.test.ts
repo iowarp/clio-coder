@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
@@ -690,6 +690,39 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 				(event) => event.type === "message_end" && JSON.stringify(event).includes("assistant"),
 			);
 			ok(JSON.stringify(messageEnd).includes("terminal mock reply"), `stdout=${result.stdout}`);
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("applies one-run autonomy without rewriting settings and seals it in the main receipt", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const fixture = await startOpenAICompatFixture("autonomy mock reply");
+		try {
+			const configDir = join(scratch.dir, "config");
+			seedOpenAICompatOrchestrator(configDir, fixture.url);
+			const settingsPath = join(configDir, "settings.yaml");
+			const fullAuto = readFileSync(settingsPath, "utf8").replace(/^autonomy: auto-edit$/m, "autonomy: full-auto");
+			writeFileSync(settingsPath, fullAuto, "utf8");
+			const before = readFileSync(settingsPath, "utf8");
+
+			const result = await runCli(
+				["--no-context-files", "--no-skills", "run", "--autonomy", "read-only", "report the autonomy level"],
+				{
+					env: { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" },
+					timeoutMs: 20_000,
+				},
+			);
+			strictEqual(result.code, 0, `stderr=${result.stderr}`);
+			strictEqual(readFileSync(settingsPath, "utf8"), before, "one-run override must not persist");
+			ok(JSON.stringify(fixture.requests).includes("read-only"), "effective posture reaches the model prompt");
+
+			const receiptFiles = readdirSync(join(scratch.dir, "state", "receipts")).filter((name) => name.endsWith(".json"));
+			strictEqual(receiptFiles.length, 1);
+			const receipt = JSON.parse(
+				readFileSync(join(scratch.dir, "state", "receipts", receiptFiles[0] ?? ""), "utf8"),
+			) as Record<string, unknown>;
+			deepStrictEqual(receipt.autonomyEnforcement, { grade: "mediated", autonomy: "read-only" });
 		} finally {
 			await closeServer(fixture.server);
 		}

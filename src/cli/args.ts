@@ -1,4 +1,5 @@
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
+import { AUTONOMY_LEVELS, type AutonomyLevel } from "../domains/safety/autonomy.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
@@ -24,6 +25,7 @@ export interface RunCliArgs {
 	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
+	autonomy?: AutonomyLevel;
 	sampling?: RunSamplingArgs;
 	agentId?: string;
 	agentProfile?: string;
@@ -101,6 +103,18 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 					parsed.diagnostics.push({
 						type: "error",
 						message: "--thinking must be one of: off|minimal|low|medium|high|xhigh",
+					});
+			}
+			continue;
+		}
+		if (arg === "--autonomy") {
+			const value = need(arg);
+			if (value !== null) {
+				if (AUTONOMY_LEVELS.includes(value as AutonomyLevel)) parsed.autonomy = value as AutonomyLevel;
+				else
+					parsed.diagnostics.push({
+						type: "error",
+						message: "--autonomy must be one of: read-only|suggest|auto-edit|full-auto",
 					});
 			}
 			continue;

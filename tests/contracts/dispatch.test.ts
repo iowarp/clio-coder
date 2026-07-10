@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
+import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -67,6 +68,36 @@ function deferred<T>(): Deferred<T> {
 
 function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
+}
+
+function successfulAcpHandle(): AcpDelegationRunHandle {
+	return {
+		pid: 4242,
+		heartbeatAt: { current: Date.now() },
+		abort: () => {},
+		kill: () => {},
+		toolCallLog: () => [],
+		events: emptyEvents() as AcpDelegationRunHandle["events"],
+		promise: Promise.resolve({
+			messages: [],
+			exitCode: 0,
+			stopReason: "end_turn",
+			usage: {
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				reasoningTokens: 0,
+			},
+			delegation: {
+				acpSessionId: "sess-governance",
+				initialize: null,
+				toolCallsRequested: 0,
+				toolCallsApproved: 0,
+				toolCallsDenied: 0,
+			},
+		}),
+	};
 }
 
 type WorkerPermissionDecision = "approve" | "deny";
@@ -502,6 +533,65 @@ describe("contracts/dispatch", () => {
 			strictEqual((capturedSpec as WorkerSpec | null)?.wireModelId, "session-model");
 			exit.resolve({ exitCode: 0, signal: null });
 			await handle.finalPromise;
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("captures injected session safety settings in the native worker prompt, spec, and receipt", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (!configContract) throw new Error("test requires config contract");
+		const persistentSettings = configContract.get() as ClioSettings;
+		persistentSettings.autonomy = "full-auto";
+		persistentSettings.workers.onPermission = "deny";
+		persistentSettings.workers.escalation = { timeoutMs: 120_000, fallback: "deny" };
+		persistentSettings.skills.trustProjectCompatRoots = false;
+
+		const sessionView = structuredClone(persistentSettings);
+		sessionView.autonomy = "read-only";
+		sessionView.workers.onPermission = "escalate";
+		sessionView.workers.escalation = { timeoutMs: 4_321, fallback: "fail" };
+		sessionView.skills.trustProjectCompatRoots = true;
+
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = makeDispatchBundle(context, {
+			getSettings: () => sessionView,
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 9998,
+					promise: exit.promise,
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "session safety dispatch" });
+			const spec = capturedSpec as WorkerSpec | null;
+			ok(spec);
+			strictEqual(spec.autonomy, "read-only");
+			strictEqual(spec.onPermission, "escalate");
+			deepStrictEqual(spec.escalation, { timeoutMs: 4_321, fallback: "fail" });
+			strictEqual(spec.trustProjectCompatRoots, true);
+			strictEqual(
+				spec.dynamicPromptMessages?.find((message) => message.id === "dispatch-safety-posture")?.body,
+				`Safety posture: autonomy read-only. ${safetyOneLiner("read-only")}`,
+			);
+
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			deepStrictEqual(receipt.autonomyEnforcement, { grade: "mediated", autonomy: "read-only" });
+
+			// A per-session view must not rewrite or leak back into persistent settings.
+			strictEqual(persistentSettings.autonomy, "full-auto");
+			strictEqual(persistentSettings.workers.onPermission, "deny");
+			strictEqual(persistentSettings.skills.trustProjectCompatRoots, false);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -1644,33 +1734,42 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
-	it("dispatches configured ACP delegation agents with delegation receipt metadata", async () => {
+	it("dispatches configured ACP delegation agents with effective session autonomy and receipt metadata", async () => {
 		const context = stubContext();
 		const terminalEvents: unknown[] = [];
 		const unsubscribeTerminal = context.bus.on(BusChannels.DispatchCompleted, (payload) => {
 			terminalEvents.push(payload);
 		});
 		const configContract = context.getContract<ConfigContract>("config");
-		if (configContract) {
-			configContract.get().delegation.agents = [
-				{
-					id: "opencode",
-					command: "opencode",
-					args: ["acp"],
-					connectTimeoutMs: 5,
-					turnTimeoutMs: 10,
-					permissionTimeoutMs: 15,
-					toolGovernance: "clio-policy",
-				},
-			];
-		}
+		if (!configContract) throw new Error("test requires config contract");
+		const persistentSettings = configContract.get() as ClioSettings;
+		persistentSettings.autonomy = "full-auto";
+		persistentSettings.delegation.agents = [
+			{
+				id: "opencode",
+				command: "opencode",
+				args: ["acp"],
+				connectTimeoutMs: 5,
+				turnTimeoutMs: 10,
+				permissionTimeoutMs: 15,
+				toolGovernance: "clio-policy",
+			},
+		];
+		const sessionView = structuredClone(persistentSettings);
+		sessionView.autonomy = "read-only";
 		let capturedTask = "";
 		let capturedCommand = "";
+		let capturedAutonomy: string | undefined;
+		let capturedSafetyPosture = "";
 
 		const bundle = makeDispatchBundle(context, {
+			getSettings: () => sessionView,
 			startAcpDelegationRun: (input) => {
 				capturedTask = input.task;
 				capturedCommand = input.agent.command;
+				capturedAutonomy = input.autonomy;
+				capturedSafetyPosture =
+					input.dynamicPromptMessages?.find((message) => message.body.startsWith("Safety posture:"))?.body ?? "";
 				return {
 					pid: 4242,
 					heartbeatAt: { current: Date.now() },
@@ -1738,7 +1837,15 @@ describe("contracts/dispatch", () => {
 
 			strictEqual(capturedTask, "delegate this");
 			strictEqual(capturedCommand, "opencode");
+			strictEqual(capturedAutonomy, "read-only");
+			strictEqual(capturedSafetyPosture, `Safety posture: autonomy read-only. ${safetyOneLiner("read-only")}`);
+			strictEqual(persistentSettings.autonomy, "full-auto");
 			strictEqual(receipt.runtimeKind, "acp-delegation");
+			deepStrictEqual(receipt.autonomyEnforcement, {
+				grade: "mediated",
+				autonomy: "read-only",
+				externalMode: "clio-policy",
+			});
 			strictEqual(receipt.targetId, "delegation:opencode");
 			strictEqual(receipt.sessionId, "sess-1");
 			strictEqual(receipt.tokenCount, 3);
@@ -1761,6 +1868,96 @@ describe("contracts/dispatch", () => {
 		} finally {
 			unsubscribeTerminal();
 			await bundle.extension.stop?.();
+		}
+	});
+
+	it("rejects an explicit autonomy override for agent-managed ACP before launch", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (!configContract) throw new Error("test requires config contract");
+		const persistentSettings = configContract.get() as ClioSettings;
+		persistentSettings.autonomy = "full-auto";
+		persistentSettings.delegation.agents = [
+			{
+				id: "unmediated",
+				command: "unmediated-acp",
+				args: [],
+				toolGovernance: "agent-managed",
+			},
+		];
+		const sessionView = structuredClone(persistentSettings);
+		sessionView.autonomy = "read-only";
+		let started = false;
+		const bundle = makeDispatchBundle(context, {
+			getSettings: () => sessionView,
+			autonomyOverride: true,
+			startAcpDelegationRun: () => {
+				started = true;
+				return successfulAcpHandle();
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "unmediated",
+					delegationAgentId: "unmediated",
+					task: "must remain read-only",
+				}),
+				/agent-managed.*cannot enforce an explicit one-run autonomy override.*clio-policy or deny-all/i,
+			);
+			strictEqual(started, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("records mediated deny-all and bypassed agent-managed ACP autonomy grades", async () => {
+		const cases = [
+			{
+				governance: "deny-all",
+				expected: { grade: "mediated", autonomy: "suggest", externalMode: "deny-all" },
+			},
+			{
+				governance: "agent-managed",
+				expected: {
+					grade: "bypassed",
+					autonomy: "suggest",
+					externalMode: "agent-managed",
+					dangerousBypass: true,
+				},
+			},
+		] as const;
+
+		for (const item of cases) {
+			const context = stubContext();
+			const configContract = context.getContract<ConfigContract>("config");
+			if (!configContract) throw new Error("test requires config contract");
+			const settings = configContract.get() as ClioSettings;
+			settings.autonomy = "suggest";
+			settings.delegation.agents = [
+				{
+					id: `governance-${item.governance}`,
+					command: "mock-acp",
+					args: [],
+					toolGovernance: item.governance,
+				},
+			];
+			const bundle = makeDispatchBundle(context, { startAcpDelegationRun: successfulAcpHandle });
+
+			await bundle.extension.start();
+			try {
+				const handle = await bundle.contract.dispatch({
+					agentId: `governance-${item.governance}`,
+					delegationAgentId: `governance-${item.governance}`,
+					task: `record ${item.governance} governance`,
+				});
+				const receipt = await handle.finalPromise;
+				deepStrictEqual(receipt.autonomyEnforcement, item.expected);
+			} finally {
+				await bundle.extension.stop?.();
+			}
 		}
 	});
 

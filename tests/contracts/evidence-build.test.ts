@@ -395,6 +395,33 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 
+	it("reports agent-managed ACP governance without claiming a subprocess environment bypass", async () => {
+		await withIsolatedClioHome(async (scratch) => {
+			const autonomyEnforcement: RunReceiptAutonomyEnforcement = {
+				grade: "bypassed",
+				autonomy: "read-only",
+				externalMode: "agent-managed",
+				dangerousBypass: true,
+			};
+			const { runId } = await sealRun({ runtimeId: "acp", runtimeKind: "acp-delegation" }, { autonomyEnforcement });
+			const result = await buildEvidence({
+				dataDir: join(scratch, "data"),
+				stateDir: join(scratch, "state"),
+				runId,
+			});
+
+			const bypassFinding = result.findings.find((finding) => finding.tag === "external-bypass");
+			ok(bypassFinding, "expected an agent-managed bypass finding");
+			strictEqual(bypassFinding?.severity, "warn");
+			strictEqual(bypassFinding?.runId, runId);
+			strictEqual(
+				bypassFinding?.message,
+				"run used external agent-managed governance; Clio safety blocks were not enforced",
+			);
+			ok(!bypassFinding?.message.includes("CLIO_ALLOW_EXTERNAL_FULL_ACCESS"), bypassFinding?.message);
+		});
+	});
+
 	it("reports approximated external enforcement without a bypass finding", async () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const autonomyEnforcement: RunReceiptAutonomyEnforcement = {

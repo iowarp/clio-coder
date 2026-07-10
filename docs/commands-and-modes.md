@@ -71,6 +71,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `--autonomy <level>` | One-run autonomy override: `read-only`, `suggest`, `auto-edit`, or `full-auto`; it does not change saved settings. |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
