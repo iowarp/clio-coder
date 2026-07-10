@@ -23,6 +23,14 @@ export {
 	resolveHookBudgetTunablesFromEnv,
 } from "./budget.js";
 export type { MiddlewareContract } from "./contract.js";
+export {
+	buildDetachedBatchesMessage,
+	type CreateDetachedDispatchNudgeRegistrationOptions,
+	createDetachedDispatchNudgeRegistration,
+	DETACHED_DISPATCH_NUDGE_REGISTRATION_ID,
+	type DetachedBatchNudgeView,
+	openDetachedBatchViews,
+} from "./dispatch-nudge.js";
 export type { MiddlewareBundleOptions } from "./extension.js";
 export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.js";
 export { createHookReceiptLog, HOOK_RECEIPT_LOG_CAPACITY, type HookReceiptLog } from "./hook-receipts.js";

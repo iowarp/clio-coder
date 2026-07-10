@@ -33,6 +33,17 @@ export type RunOutcome =
 export const RETRYABLE_OUTCOMES: ReadonlySet<RunOutcome> = new Set(["failed", "timed_out", "stalled", "spawn_failed"]);
 
 /**
+ * A ledger row is terminal once finalization stamped its end, or once its
+ * status left the live pair (covers adopted orphans and dead-marked rows
+ * whose endedAt was never written). Shared by monitor wait/collect and the
+ * detached-batch nudge so "done" means the same thing everywhere.
+ */
+export function isTerminalRunEnvelope(run: RunEnvelope): boolean {
+	if (run.endedAt !== null) return true;
+	return run.status !== "queued" && run.status !== "running";
+}
+
+/**
  * Proof-of-work lineage. Retries inherit rootRunId, increment attempt, keep
  * depth. Nested dispatch (a fleet step, a worker that dispatches) increments
  * depth, resets attempt, and points parentRunId at the dispatching run.

@@ -1,3 +1,4 @@
+import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { RunEnvelope, RunLineage, RunReceipt, RunStatus } from "./types.js";
 import type { JobSpec } from "./validation.js";
 
@@ -56,6 +57,20 @@ export interface AbortReason {
 	detail: string;
 }
 
+/**
+ * Durable detached-batch surface. A detached dispatch's grouping and
+ * collection state persist under the state dir (`batches.json`) so a barrier
+ * collect works after session exit and completion nudges stay suppressed once
+ * a batch is collected. Optional so lightweight contract fakes need not
+ * implement it; the real dispatch extension always does.
+ */
+export interface DetachedBatchesContract {
+	register(input: RegisterDetachedBatchInput): Promise<DetachedBatchRecord>;
+	get(batchId: string): DetachedBatchRecord | null;
+	list(opts?: { includeCollected?: boolean }): ReadonlyArray<DetachedBatchRecord>;
+	markCollected(batchId: string): Promise<DetachedBatchRecord | null>;
+}
+
 export interface DispatchContract {
 	/** Validate + admit + spawn a native worker. Returns run id + promise. */
 	dispatch(req: DispatchRequest): Promise<{
@@ -111,6 +126,9 @@ export interface DispatchContract {
 	 * fakes need not implement it; the real dispatch extension always does.
 	 */
 	resolveWorkerPermission?(runId: string, requestId: string, decision: "approve" | "deny"): void;
+
+	/** Durable detached-batch records for async fan-out + collect. */
+	detached?: DetachedBatchesContract;
 
 	/** Read-only runtime snapshot for operator surfaces. */
 	snapshot(): DispatchSnapshot;

@@ -72,6 +72,12 @@ import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
 import { type BackoffState, createBackoff, isDeterministicWorkerFailure, nextDelay } from "./backoff.js";
+import {
+	getDetachedBatch,
+	listDetachedBatches,
+	markDetachedBatchCollected,
+	registerDetachedBatch,
+} from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
 import {
 	DispatchConcurrencyError,
@@ -3645,6 +3651,12 @@ export function createDispatchBundle(
 					`resolveWorkerPermission: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`,
 				);
 			}
+		},
+		detached: {
+			register: registerDetachedBatch,
+			get: getDetachedBatch,
+			list: listDetachedBatches,
+			markCollected: markDetachedBatchCollected,
 		},
 		snapshot,
 		drain,
