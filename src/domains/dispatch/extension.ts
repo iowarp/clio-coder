@@ -98,6 +98,8 @@ import {
 	type RunEnvelope,
 	type RunKind,
 	type RunLineage,
+	type RunNodeIdentity,
+	type RunNodeReroute,
 	type RunOutcome,
 	type RunPersonaOverride,
 	type RunPipelineProvenance,
@@ -151,6 +153,8 @@ interface ActiveRun {
 	agentId: string;
 	task: string;
 	cwd: string;
+	/** Fleet node this run was placed on; null when no placement resolved it. */
+	node: RunNodeIdentity | null;
 	aborted: boolean;
 	/** Non-operator abort cause (e.g. a dispatch timeout); null for operator cancels. */
 	abortDetail: string | null;
@@ -171,8 +175,30 @@ interface DispatchFinishContractSnapshot {
 	rigor: Rigor;
 }
 
+/** One resolved fleet placement: where the worker runs and how to launch it there. */
+export interface DispatchNodePlacement {
+	node: RunNodeIdentity;
+	spawn: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+	/** Returns the node's capacity slot; invoked exactly once at finalization. */
+	release?: () => void;
+	/** Failover hops that preceded this placement, oldest first. */
+	reroutes?: ReadonlyArray<RunNodeReroute>;
+}
+
 export interface DispatchBundleOptions {
 	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+	/**
+	 * Fleet placement seam. When set, every native dispatch resolves a node
+	 * before it takes a concurrency slot; the returned spawn is the node's
+	 * transport (local subprocess or SSH), the node identity is recorded on
+	 * the ledger row and folded into the receipt digest, and `release` returns
+	 * the node's capacity when the run finalizes. Throwing here is an
+	 * admission failure (e.g. a node that has not passed the doctor path-parity
+	 * preflight). Absent (headless boots, minimal test bundles) every run is
+	 * local and no node identity is recorded, preserving pre-fleet receipts
+	 * byte for byte.
+	 */
+	resolveNode?: (req: DispatchRequest) => DispatchNodePlacement | null;
 	startAcpDelegationRun?: (input: AcpDelegationRunInput) => AcpDelegationRunHandle;
 	heartbeatSpec?: HeartbeatSpec;
 	heartbeatIntervalMs?: number;
@@ -2222,6 +2248,7 @@ export function createDispatchBundle(
 			agentId: req.agentId,
 			task: req.task,
 			cwd: lifecycle.cwd,
+			node: null,
 			aborted: false,
 			abortDetail: null,
 			stallKilled: false,
@@ -2560,6 +2587,22 @@ export function createDispatchBundle(
 			denyDispatchForBudget(preflight, req.agentId);
 		}
 
+		// Fleet placement resolves before the global slot so a node-admission
+		// failure (dead node, unpreflighted path parity, per-node cap) is a
+		// clean rejection that never holds a concurrency slot. The placement's
+		// own capacity is released on every exit path below.
+		const placement = options?.resolveNode?.(req) ?? null;
+		let nodeSlotHeld = placement?.release !== undefined;
+		const releaseNodeSlot = (): void => {
+			if (!nodeSlotHeld) return;
+			nodeSlotHeld = false;
+			try {
+				placement?.release?.();
+			} catch (error) {
+				reportDispatchDiagnostic("release fleet node slot", error);
+			}
+		};
+
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {
 			if (!workerSlotHeld) return;
@@ -2569,6 +2612,7 @@ export function createDispatchBundle(
 
 		workerSlotHeld = scheduling.tryAcquireWorker();
 		if (!workerSlotHeld) {
+			releaseNodeSlot();
 			throw new DispatchConcurrencyError(scheduling.activeWorkers());
 		}
 
@@ -2579,6 +2623,7 @@ export function createDispatchBundle(
 				return requireLedger();
 			} catch (error) {
 				releaseWorkerSlot();
+				releaseNodeSlot();
 				throw error;
 			}
 		})();
@@ -2605,9 +2650,10 @@ export function createDispatchBundle(
 		);
 		let worker: SpawnedWorker;
 		try {
-			worker = spawnWorker(spec, { cwd: lifecycle.cwd });
+			worker = (placement?.spawn ?? spawnWorker)(spec, { cwd: lifecycle.cwd });
 		} catch (error) {
 			releaseWorkerSlot();
+			releaseNodeSlot();
 			throw error;
 		}
 		const pid = worker.pid;
@@ -2838,6 +2884,10 @@ export function createDispatchBundle(
 				pid,
 				lineage,
 				identity,
+				...(placement ? { node: placement.node } : {}),
+				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
+					? { reroutes: [...placement.reroutes] }
+					: {}),
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
@@ -2876,6 +2926,7 @@ export function createDispatchBundle(
 				reportDispatchDiagnostic("abort orphaned worker after ledger failure", abortError);
 			}
 			releaseWorkerSlot();
+			releaseNodeSlot();
 			throw error;
 		}
 
@@ -2903,6 +2954,7 @@ export function createDispatchBundle(
 			agentId: req.agentId,
 			task: req.task,
 			cwd: lifecycle.cwd,
+			node: placement?.node ?? null,
 			aborted: false,
 			abortDetail: null,
 			stallKilled: false,
@@ -2961,6 +3013,10 @@ export function createDispatchBundle(
 				outcome,
 				lineage,
 				identity,
+				...(placement ? { node: placement.node } : {}),
+				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
+					? { reroutes: [...placement.reroutes] }
+					: {}),
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				projectContext: lifecycle.projectContext,
@@ -3197,6 +3253,7 @@ export function createDispatchBundle(
 				throw error;
 			} finally {
 				releaseWorkerSlot();
+				releaseNodeSlot();
 			}
 		})();
 

@@ -99,6 +99,31 @@ export interface RunIdentity {
 }
 
 /**
+ * Fleet node the worker process ran on, recorded at dispatch time from the
+ * placement decision. Absent on runs dispatched before fleet placement landed
+ * and on bundles with no fleet configured; renderers treat absence as the
+ * local node. `host` is the configured node address for ssh transports;
+ * `identity.host` (detected orchestrator-side) still names the orchestrator.
+ */
+export interface RunNodeIdentity {
+	id: string;
+	kind: "local" | "ssh";
+	host?: string;
+}
+
+/**
+ * One dead-node failover hop. Appended when an in-flight or queued dispatch
+ * is requeued from a node classified dead onto an eligible survivor, so the
+ * receipt chain records the full placement lineage, not just the final node.
+ */
+export interface RunNodeReroute {
+	attempt: number;
+	fromNode: string;
+	toNode: string;
+	reason: string;
+}
+
+/**
  * Runtime kind recorded on a run envelope/receipt. "http" covers Clio-owned
  * pi-agent model runtimes; "sdk" and "subprocess" cover sanctioned worker
  * runtimes with dedicated worker runners; "acp-delegation" covers external
@@ -148,6 +173,10 @@ export interface RunEnvelope {
 	outcomeDetail?: string | null;
 	lineage?: RunLineage;
 	identity?: RunIdentity;
+	/** Fleet node placement; absent when no fleet placement resolved this run. */
+	node?: RunNodeIdentity;
+	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */
+	reroutes?: RunNodeReroute[];
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */
 	pipeline?: RunPipelineProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
@@ -331,6 +360,10 @@ export interface RunReceipt {
 	outcomeDetail?: string | null;
 	lineage?: RunLineage;
 	identity?: RunIdentity;
+	/** Fleet node placement; absent when no fleet placement resolved this run. */
+	node?: RunNodeIdentity;
+	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */
+	reroutes?: RunNodeReroute[];
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */
 	pipeline?: RunPipelineProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */

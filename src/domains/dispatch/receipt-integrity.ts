@@ -149,6 +149,10 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: Rec
 	if (version >= 3) {
 		if (receipt.autonomyEnforcement !== undefined) draft.autonomyEnforcement = receipt.autonomyEnforcement;
 		if (receipt.findingsSummary !== undefined) draft.findingsSummary = receipt.findingsSummary;
+		// Fleet placement facts are presence-gated so every v3 receipt sealed
+		// before fleet dispatch landed still recomputes to its stored digest.
+		if (receipt.node !== undefined) draft.node = receipt.node;
+		if (receipt.reroutes !== undefined) draft.reroutes = receipt.reroutes;
 	}
 	return draft;
 }
@@ -161,6 +165,11 @@ function ledgerDigestFields(envelope: RunEnvelope, version: ReceiptIntegrityVers
 			outcomeDetail: envelope.outcomeDetail ?? null,
 			lineage: envelope.lineage ?? null,
 			identity: envelope.identity ?? null,
+			// Presence-gated (never `?? null`): folding an always-present key
+			// would break verification of every receipt sealed before fleet
+			// placement landed.
+			...(envelope.node !== undefined ? { node: envelope.node } : {}),
+			...(envelope.reroutes !== undefined ? { reroutes: envelope.reroutes } : {}),
 		};
 	}
 	return ledgerDigestFieldsV1(envelope);
@@ -264,6 +273,7 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		// scalar and cross-checked here for a precise mismatch reason.
 		["outcome", receipt.outcome ?? null, envelope.outcome ?? null],
 		["outcomeDetail", receipt.outcomeDetail ?? null, envelope.outcomeDetail ?? null],
+		["nodeId", receipt.node?.id ?? null, envelope.node?.id ?? null],
 	];
 	for (const [field, receiptValue, ledgerValue] of sharedFields) {
 		if (!Object.is(receiptValue, ledgerValue)) return field;

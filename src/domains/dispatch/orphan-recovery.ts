@@ -14,6 +14,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { runStatusForOutcome } from "./outcome.js";
@@ -81,6 +82,8 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	}
 	if (receipt.lineage !== undefined) envelope.lineage = receipt.lineage;
 	if (receipt.identity !== undefined) envelope.identity = receipt.identity;
+	if (receipt.node !== undefined) envelope.node = receipt.node;
+	if (receipt.reroutes !== undefined) envelope.reroutes = receipt.reroutes;
 	return envelope;
 }
 
@@ -124,8 +127,16 @@ const NON_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["queued", "running",
  */
 function closeAbandonedRows(ledger: Ledger): number {
 	let closed = 0;
+	const localHost = hostname();
 	for (const row of ledger.list()) {
 		if (row.endedAt !== null || !NON_TERMINAL_STATUSES.has(row.status)) continue;
+		// Transport-scoped liveness: the recorded pid is always a process on
+		// the orchestrator host that created the row (for ssh runs it is the
+		// local ssh client, i.e. the channel itself). On a shared filesystem
+		// the ledger is visible from other hosts, where a local pid probe would
+		// adjudicate the wrong process; rows created by another host are left
+		// for that host's own recovery pass.
+		if (row.identity !== undefined && row.identity.host !== localHost) continue;
 		if (isProcessAlive(row.pid)) continue;
 		ledger.update(row.id, {
 			status: "dead",
