@@ -5,6 +5,80 @@ Coder. For public-facing release notes, see [CHANGELOG.md](CHANGELOG.md).
 Versions follow semantic versioning for a pre-1.0 project: minor versions may
 change interfaces.
 
+## 0.2.9 (in progress)
+
+Dispatch Primitives v2: the dispatch domain graduates from single-host
+workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
+
+### Added
+
+- **Worker transport seam with an SSH tier.** Worker spawning is
+  transport-neutral: the WorkerSpec/stdin + NDJSON/stdout protocol crosses
+  the wire unchanged through `ssh -T` with a whitelisted environment
+  (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_ANNOUNCE=1`); the orchestrator's
+  environment never crosses. Workers announce pid/host for a remote kill
+  fallback, and a stdin-EOF monitor aborts and force-exits an orphaned
+  remote worker so no process is ever stranded. Internal `clio worker`
+  subcommand is the default remote invocation.
+
+- **Deterministic node registry, placement, failover, and doctor
+  preflight.** `fleet.nodes` in settings declares SSH nodes; a registry
+  tracks online/offline/draining state and per-node capacity. Placement is a
+  fixed priority order (explicit pin, profile/binding pin, least-loaded
+  eligible remote, local) that resolves before the global concurrency slot.
+  Two consecutive channel failures classify a node dead; in-flight runs are
+  reaped and their bounded retries reroute with the full hop lineage
+  recorded on ledger rows and receipts (`node`, `reroutes`, presence-gated
+  in v3 integrity). `clio doctor` runs a durable per-node preflight
+  (reachability, version match, project-root path parity, writable state
+  dir); admission fails closed on missing or stale records.
+
+- **Detached fan-out with a durable collect barrier.** `dispatch`
+  `detach:true` admits and spawns every task, then returns the batch id and
+  run ids while a background drain keeps metering, run tails, and board
+  progress flowing. Batches persist in `batches.json` beside the run ledger,
+  so a resumed session collects from ledger rows alone. The monitor tool
+  gains `mode=wait` (single-run block with a monotonic-clock timeout) and
+  `mode=collect` (batch barrier: pending snapshot in flight, full results
+  once terminal, batch marked collected). A turn-end nudge surfaces
+  completed uncollected batches and goes silent after collection.
+
+- **Review gate, compete topology, and plan approval.** `review:{reviewer?,
+  max_cycles?}` runs a builder, then a reviewer pinned read-only through a
+  new request-level autonomy narrowing (admission clamps to the lower of the
+  request and the session, so workers never exceed the orchestrator's
+  authority); revise verdicts re-run the builder with findings threaded as
+  input data, and exhaustion or failure surfaces as an explicit operator
+  decision. `mode:"compete"` builds N candidates (2..4) in scratch git
+  worktrees on `clio/compete/<group>/<n>` branches, a read-only judge ranks
+  them, full-auto merges the winner, supervised levels preserve exactly the
+  winner for the `apply_winner` confirmation, and losers are cleaned on
+  every path. Plan-scale dispatch calls (multi-task, compete, remote pin,
+  apply_winner) map to one approval ask at supervised autonomy levels with
+  the rendered plan artifact as the prompt; full-auto logs the plan hash
+  into every receipt instead. Receipts chain the topology through new
+  optional `gate` and `plan` blocks, presence-gated in v3 integrity.
+
+- **Fleet visibility across every operator surface.** Dispatch lifecycle bus
+  events carry node id, gate role/cycle, reroute count, and the model
+  context window; board cards show node, gate and reroute badges, live tool
+  names (arguments never cross the worker stdout seam), and a per-worker
+  context meter (warn 80%, critical 95%) extending context-meter.ts. The
+  `/fleet` overlay gains a nodes view over the registry and the profile
+  node-pin editor; monitor and `clio fleet status` name the node per run.
+
+- **Shadow-mode speculation observer.** The awoc pipeline's intent detector,
+  rule solver, and learner semantics observe every dispatch, compute the
+  would-be plan on a synchronous rule path (no model calls), and record
+  plan-versus-actual accuracy into a bounded rotating JSONL under
+  `<state>/speculation/`. Observer-only: disabling it changes nothing.
+
+- **Docs.** `docs/fleet-dispatch.md` (architecture, node setup, preflight,
+  placement, topologies, failure semantics, residency-observe default) and
+  `docs/fleet-demo-runbook.md` (executable zbook/blade/mini/dragon demo with
+  a reviewer-gated CMake/C++ fix and a receipts-only provenance
+  walkthrough).
+
 ## 0.2.8 - 2026-07-07
 
 The final 0.2.8 release. It ships everything in the 0.2.8-rc section below

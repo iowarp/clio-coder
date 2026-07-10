@@ -1,0 +1,174 @@
+# Fleet Demo Runbook
+
+A repeatable multi-node demonstration: one orchestrator drives a real
+CMake/C++ fix through a reviewer-gated dispatch across SSH nodes, and every
+worker's receipt (including the remote ones) verifies afterward. The steps
+are executable in order; this document doubles as the recording script.
+Background and reference: [fleet-dispatch.md](fleet-dispatch.md).
+
+## Reference fabric
+
+| Role | Machine | Notes |
+| --- | --- | --- |
+| Orchestrator | `zbook` | Runs the interactive Clio session. |
+| SSH node | `blade` | General worker capacity. |
+| SSH node | `mini` | Serves the operator's resident models on its GPU; residency stays observe. |
+| SSH node | `dragon` | General worker capacity. |
+
+All four machines share the filesystem, so the project root resolves to the
+same absolute path everywhere. The demo project is any CMake/C++ repository
+with a known failing build or test; a one-line compile error in a `.cpp` file
+works well on camera.
+
+## 1. Declare the fleet (zbook)
+
+Add the nodes to `settings.yaml` (see `clio paths` for its location):
+
+```yaml
+fleet:
+  nodes:
+    - id: blade
+      host: blade
+      maxWorkers: 2
+    - id: mini
+      host: mini
+      maxWorkers: 1
+      residency: observe
+    - id: dragon
+      host: dragon
+      maxWorkers: 2
+```
+
+The implicit `local` node (zbook itself) is never declared. `residency:
+observe` is the default and is written here only to make the demo point
+explicit: workers on mini must never evict its resident models.
+
+## 2. Preflight the nodes
+
+```
+clio doctor
+```
+
+Doctor probes each node over its real SSH channel: reachability, a
+version-matched `clio` on the remote path, path parity for the project root,
+and a writable remote state dir. Passing nodes become dispatch-eligible;
+failures are warnings that name the fix. Re-run doctor after any host,
+project, or version change; admission fails closed on a stale preflight.
+
+Confirm the durable view:
+
+```
+clio fleet status
+```
+
+## 3. Open the session and the fleet views
+
+```
+clio
+```
+
+In the session:
+
+- `/fleet` opens the fleet overlay; Tab cycles status, nodes, profiles, and
+  bindings. The nodes tab shows blade, mini, and dragon online with their
+  capacity.
+- Alt+W toggles the dispatch board, which will fill with per-run cards once
+  work starts.
+
+## 4. Dispatch the gated fix across nodes
+
+Give the orchestrator a concrete instruction that names the topology and the
+placement. Example prompt for the chat input:
+
+```
+Dispatch the fix for the failing CMake build as a reviewed task: builder on
+node blade, reviewer on node dragon, at most 2 review cycles. The task is:
+"Fix the compile error in src/mesh/loader.cpp so `cmake --build build` and
+`ctest --test-dir build` both pass. Keep the change minimal."
+```
+
+The model calls the dispatch tool with `review: {max_cycles: 2, node:
+"dragon"}` and `node: "blade"` on the task. Because a remote placement is
+plan-scale, supervised autonomy parks the call and shows the plan artifact
+(topology, per-task agent, model, node); one approval launches the whole
+plan. Full-auto skips the stop and seals the plan hash into the receipts
+instead.
+
+What to watch:
+
+- The board card for the builder shows `node blade`, live tool activity, and
+  the per-worker context meter.
+- The reviewer card shows `node dragon` and `gate reviewer c1`; the reviewer
+  runs read-only and ends with a `VERDICT:` line.
+- On a revise verdict, a second builder card appears with `gate builder c2`;
+  the reviewer's findings were threaded to it as input data.
+- `/fleet` status rows carry the node column for both runs.
+
+If a node dies mid-run (for the demo: stop sshd on blade), the run finalizes
+as stalled, the node is classified dead after consecutive channel failures,
+and the bounded retry reroutes to a survivor with the hop recorded on the new
+receipt.
+
+## 5. Collect the results
+
+The dispatch tool returns the gate verdict, the run ids, and the receipt
+paths. The monitor tool answers follow-ups inside the session (`mode=list`,
+`mode=status`, `mode=receipt`). For asynchronous work the same flow applies
+with `detach: true` plus `monitor mode="collect"`; the demo keeps the gate
+attached so the verdict lands in one message.
+
+Verify the fix like any local change:
+
+```
+cmake --build build && ctest --test-dir build
+```
+
+## 6. Verify every receipt, including the remote ones
+
+```
+clio fleet status --json
+clio evidence build --run <builderRunId>
+clio evidence build --run <reviewerRunId>
+clio evidence list
+clio evidence inspect <evidenceId>
+```
+
+`clio evidence build` recomputes the receipt's integrity digest against the
+run ledger; a tampered or mismatched receipt fails the build with the field
+that diverged. The receipts of the remote runs verify on zbook because the
+ledger and receipts live on the shared filesystem.
+
+## Provenance walkthrough: what a PI can verify from receipts alone
+
+Each run's receipt is a JSON file under `<state>/receipts/<runId>.json`
+(`clio paths` shows the state dir; the monitor tool prints the exact path per
+run). From the receipts alone, with no session transcript, a PI can
+reconstruct:
+
+1. What ran and where. `agentId`, `task`, `targetId`, `wireModelId`,
+   `runtimeKind`, and `node` name the agent, model, and machine. `identity`
+   anchors the host, user, and any HPC scheduler allocation. `reroutes` lists
+   every dead-node failover hop the run survived.
+2. Against which code. `reproducibility.git` records branch, commit, dirty
+   state, and a status hash of the working tree at run start; `cwd` is the
+   workspace.
+3. Under which authority. `autonomyEnforcement` seals the autonomy level and
+   how the runtime enforced it. `safety` counts allowed, blocked, and
+   permission-requested tool calls and lists blocked attempts.
+   `plan` proves the dispatch was operator-approved (or full-auto logged)
+   and hashes the exact plan artifact.
+4. Through which gate. `gate` on the reviewer receipt references the builder
+   run id and its receipt digest; a revise builder references the reviewer
+   that sent it back, with the verdict. Following `gate.subjects` digests
+   backward reconstructs the whole review chain, and any edit to an earlier
+   receipt breaks the digest the later one recorded.
+5. That nothing was altered. `integrity` is a sha256 over the canonical
+   receipt and its ledger row. `clio evidence build --run <id>` recomputes
+   and cross-checks it; `verifyReceiptIntegrity` in
+   `src/domains/dispatch/receipt-integrity.ts` is the reference
+   implementation.
+
+The walkthrough for an audience is three commands: `clio evidence build
+--run <id>` (it verifies), open the receipt JSON (read `node`, `gate`,
+`plan`, `reproducibility.git`), and `clio evidence build` again after
+hand-editing one byte of the receipt (it refuses, naming the mismatch).
