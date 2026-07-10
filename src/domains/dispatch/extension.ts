@@ -91,6 +91,7 @@ import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } f
 import { createFleetPlacementResolver } from "./placement.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import { detectRunIdentity } from "./run-identity.js";
+import { createSpeculationObserver, type SpeculationObserver } from "./speculation.js";
 import { type Ledger, openLedger } from "./state.js";
 import {
 	countToolCalls,
@@ -228,6 +229,12 @@ export interface DispatchBundleOptions {
 	 * Tests inject a fixed stub to keep the receipt path off the process spawner.
 	 */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
+	/**
+	 * Shadow-mode speculation observer toggle (default on). Observer-only:
+	 * disabling it changes no dispatch behavior; it only stops the bounded
+	 * plan-versus-actual JSONL under the state dir from being written.
+	 */
+	speculation?: boolean;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -1557,6 +1564,22 @@ export function createDispatchBundle(
 		return DEFAULT_RESILIENCE_COOLDOWN_MS;
 	};
 	const now = options?.now ?? (() => Date.now());
+	// Shadow-mode speculation observer: computes the plan the rule pipeline
+	// would have chosen for every dispatch and records plan-versus-actual into
+	// a bounded JSONL under the state dir. Observer-only: it never influences
+	// admission, placement, or execution, and every call is failure-isolated.
+	const speculationObserver: SpeculationObserver | null =
+		options?.speculation === false
+			? null
+			: createSpeculationObserver({
+					getAgents: () => {
+						try {
+							return agents.listSpecs().map((spec) => ({ id: spec.id, description: spec.description ?? "" }));
+						} catch {
+							return [];
+						}
+					},
+				});
 
 	let ledger: Ledger | null = null;
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -2655,6 +2678,29 @@ export function createDispatchBundle(
 		// particular, responseSchema must not retain a caller-owned reference across
 		// the asynchronous target-resolution window below.
 		req = { ...req, ...validated.spec };
+
+		// Shadow observation: the rule pipeline computes its would-be plan
+		// synchronously; the outcome is recorded when the run's receipt seals.
+		// Failure-isolated on both ends; a null id means no observation exists.
+		const speculationId =
+			speculationObserver !== null ? speculationObserver.observe({ task: req.task, requestedAgentId: req.agentId }) : null;
+		const attachSpeculation = <T extends { finalPromise: Promise<RunReceipt> }>(handle: T): T => {
+			if (speculationId === null) return handle;
+			handle.finalPromise
+				.then((receipt) => {
+					const startedMs = Date.parse(receipt.startedAt);
+					const endedMs = Date.parse(receipt.endedAt);
+					const latencyMs = Number.isFinite(startedMs) && Number.isFinite(endedMs) ? Math.max(0, endedMs - startedMs) : 0;
+					speculationObserver?.recordOutcome(speculationId, {
+						agentId: receipt.agentId,
+						outcome: receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed"),
+						latencyMs,
+						tokens: receipt.tokenCount,
+					});
+				})
+				.catch(() => {});
+			return handle;
+		};
 		if (req.delegationAgentId) {
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
@@ -2669,7 +2715,7 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			return dispatchAcpDelegation(req, settings);
+			return attachSpeculation(await dispatchAcpDelegation(req, settings));
 		}
 
 		const lifecycle = await resolveLifecycle(req, settings);
@@ -3380,11 +3426,11 @@ export function createDispatchBundle(
 		activeRun.finalPromise = finalPromise;
 		active.set(envelope.id, activeRun);
 
-		return {
+		return attachSpeculation({
 			runId: envelope.id,
 			events: enrichedEvents,
 			finalPromise,
-		};
+		});
 	}
 
 	function mergeBatchEvents(
