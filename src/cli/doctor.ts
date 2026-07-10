@@ -1,4 +1,9 @@
-import { formatDoctorReport, runDoctor, runDoctorRuntimeChecks } from "../domains/lifecycle/doctor.js";
+import {
+	formatDoctorReport,
+	runDoctor,
+	runDoctorFleetChecks,
+	runDoctorRuntimeChecks,
+} from "../domains/lifecycle/doctor.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio doctor [--fix] [--json]
@@ -26,7 +31,10 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	}
 	const findings = runDoctor({ fix });
 	const runtimeChecks = await runDoctorRuntimeChecks();
-	const all = [...findings, ...runtimeChecks];
+	// Fleet preflight probes each configured node over SSH and persists the
+	// per-node eligibility verdicts dispatch placement enforces.
+	const fleetChecks = await runDoctorFleetChecks();
+	const all = [...findings, ...runtimeChecks, ...fleetChecks];
 	const ok = all.every((f) => f.ok);
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ ok, fix, findings: all }, null, 2)}\n`);

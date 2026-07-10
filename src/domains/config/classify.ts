@@ -36,6 +36,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"workers.agentBindings",
 	"workers.maxRetries",
 	"workers.onPermission",
+	"fleet",
 	"scope",
 	"budget.sessionCeilingUsd",
 	"defaults",

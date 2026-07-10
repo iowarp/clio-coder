@@ -137,6 +137,8 @@ function dispatchRequestFromArgs(
 	if (target) request.target = target;
 	const model = stringArg(args, "model");
 	if (model) request.model = model;
+	const node = stringArg(args, "node");
+	if (node) request.node = node;
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
 
@@ -407,6 +409,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 							tool_profile: Type.Optional(stringEnum(TOOL_PROFILE_NAMES, "Narrow this worker's available tools.")),
 							target: Type.Optional(Type.String()),
 							model: Type.Optional(Type.String()),
+							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
 							cwd: Type.Optional(Type.String()),
 						}),
 					]),
@@ -428,6 +431,9 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 			tool_profile: Type.Optional(stringEnum(TOOL_PROFILE_NAMES, "Default worker tool profile.")),
 			target: Type.Optional(Type.String({ description: "Default configured target id (omit for fleet default)." })),
 			model: Type.Optional(Type.String({ description: "Default model override." })),
+			node: Type.Optional(
+				Type.String({ description: "Default fleet node pin: local or a fleet.nodes id (omit for automatic placement)." }),
+			),
 			thinking_level: Type.Optional(stringEnum(THINKING_LEVELS)),
 			cwd: Type.Optional(Type.String({ description: "Default agent working directory." })),
 			timeout_ms: Type.Optional(Type.Number({ description: "Abort the dispatch after this many ms." })),

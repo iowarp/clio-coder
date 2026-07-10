@@ -148,6 +148,40 @@ export function formatDoctorReport(findings: DoctorFinding[]): string {
  * therefore not part of the synchronous `runDoctor()` core; CI calls the core,
  * the CLI optionally invokes this on top.
  */
+/**
+ * Fleet preflight sweep: probes every configured fleet node over its real
+ * SSH channel (reachability, version-matched clio, path parity for the
+ * current project root, writable remote state dir) and persists the verdicts
+ * to the durable preflight store that dispatch placement consults. A failing
+ * node is a WARN (ineligible for placement), never fatal.
+ */
+export async function runDoctorFleetChecks(projectRoot: string = process.cwd()): Promise<DoctorFinding[]> {
+	let settings: ReturnType<typeof readSettings>;
+	try {
+		settings = readSettings();
+	} catch {
+		return [];
+	}
+	const nodes = settings.fleet?.nodes ?? [];
+	if (nodes.length === 0) return [];
+	const { recordFleetPreflight, runFleetNodePreflight } = await import("../dispatch/fleet-preflight.js");
+	const records = await Promise.all(nodes.map((node) => runFleetNodePreflight(node, projectRoot)));
+	try {
+		recordFleetPreflight(records);
+	} catch {
+		// The findings below still tell the operator what happened; a store
+		// write failure just means placement will keep denying these nodes.
+	}
+	return records.map((record) => ({
+		ok: true,
+		level: record.ok ? "ok" : "warn",
+		name: `fleet node ${record.nodeId}`,
+		detail: record.ok
+			? `eligible: ${record.host} clio ${record.remoteVersion ?? "(custom entry)"}, path parity for ${record.projectRoot}`
+			: `ineligible: ${record.detail ?? "preflight failed"}`,
+	}));
+}
+
 export async function runDoctorRuntimeChecks(): Promise<DoctorFinding[]> {
 	let settings: ReturnType<typeof readSettings>;
 	try {

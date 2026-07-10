@@ -82,6 +82,7 @@ import {
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
+import { createFleetPlacementResolver } from "./placement.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, openLedger } from "./state.js";
@@ -178,7 +179,8 @@ interface DispatchFinishContractSnapshot {
 /** One resolved fleet placement: where the worker runs and how to launch it there. */
 export interface DispatchNodePlacement {
 	node: RunNodeIdentity;
-	spawn: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
+	/** Transport launch; absent for local placements, which use the bundle's spawnWorker. */
+	spawn?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
 	/** Returns the node's capacity slot; invoked exactly once at finalization. */
 	release?: () => void;
 	/** Failover hops that preceded this placement, oldest first. */
@@ -1518,6 +1520,11 @@ export function createDispatchBundle(
 	// message when the context domain is not loaded.
 	const projectContext = context.getContract<ContextContract>("context");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
+	// Fleet placement: injected seam first (tests), then the real resolver
+	// over the scheduling registry and durable doctor preflight.
+	const fleetRegistry = scheduling.fleet;
+	const resolveNode =
+		options?.resolveNode ?? createFleetPlacementResolver({ getSettings: getEffectiveSettings, fleet: fleetRegistry });
 	const startAcpRun = options?.startAcpDelegationRun ?? startAcpDelegationRun;
 	const collectReproducibility = options?.collectReproducibility ?? collectReproducibilityMetadata;
 	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;
@@ -1637,7 +1644,7 @@ export function createDispatchBundle(
 		const reason = detail !== null ? `${outcome}: ${detail}` : outcome;
 		const timer = setTimeout(() => {
 			retryQueue.delete(run.runId);
-			void executeRetry(run, attempt);
+			void executeRetry(run, attempt, reason);
 		}, delayMs);
 		timer.unref?.();
 		retryQueue.set(run.runId, {
@@ -1653,12 +1660,20 @@ export function createDispatchBundle(
 	/**
 	 * A retry is a brand-new run with a new runId, re-validated through the
 	 * full admission chain. If admission rejects it the chain ends as
-	 * denied_by_policy; there is no requeue.
+	 * denied_by_policy; there is no requeue. A retry of a run that was placed
+	 * on a remote node threads an open reroute hop (fromNode known now,
+	 * toNode filled by placement) so the receipt chain records the full
+	 * failover lineage.
 	 */
-	async function executeRetry(run: ActiveRun, attempt: number): Promise<void> {
+	async function executeRetry(run: ActiveRun, attempt: number, reason = "retry"): Promise<void> {
 		if (draining) return;
+		const rerouteHops =
+			run.node !== null && run.node.kind === "ssh"
+				? [...(run.req.reroutes ?? []), { attempt, fromNode: run.node.id, toNode: "", reason }]
+				: run.req.reroutes;
 		const retryReq: DispatchRequest = {
 			...run.req,
+			...(rerouteHops !== undefined ? { reroutes: rerouteHops } : {}),
 			requestOrigin: "internal",
 			lineage: {
 				parentRunId: run.runId,
@@ -1699,6 +1714,56 @@ export function createDispatchBundle(
 	function requireLedger(): Ledger {
 		if (!ledger) throw new Error("dispatch: ledger not initialised");
 		return ledger;
+	}
+
+	/** SSH exits 255 when the connection itself failed; the worker never ran. */
+	function isChannelFailure(outcome: RunOutcome, result: SpawnedWorkerResult): boolean {
+		if (outcome === "stalled" || outcome === "spawn_failed") return true;
+		return result.exitCode === 255;
+	}
+
+	/**
+	 * Dead-node failover: every in-flight run on the node classified dead is
+	 * reaped through the stall path, so it finalizes as `stalled` (retryable)
+	 * and its retry re-enters placement, which routes it to an eligible
+	 * survivor with the reroute hop recorded on the new receipt.
+	 */
+	function reapRunsOnDeadNode(nodeId: string, excludeRunId: string): void {
+		for (const other of active.values()) {
+			if (other.runId === excludeRunId) continue;
+			if (other.node?.id !== nodeId || other.aborted || other.stallKilled) continue;
+			other.stallKilled = true;
+			other.heartbeatStatus = "dead";
+			emitHeartbeatStatus(other, "dead");
+			try {
+				other.kill();
+			} catch {
+				// channel may already be gone; the finalizer still settles the run
+			}
+		}
+	}
+
+	/**
+	 * Per-run channel verdict feeding node classification. Completing the
+	 * protocol (even with a failing exit code) proves the channel; stalls,
+	 * spawn failures, and ssh exit 255 count against it. Operator cancels and
+	 * policy denials are neutral.
+	 */
+	function recordNodeChannelOutcome(
+		run: ActiveRun,
+		outcome: RunOutcome,
+		result: SpawnedWorkerResult,
+		detail: string | null,
+	): void {
+		if (!fleetRegistry || run.node === null || run.node.kind !== "ssh") return;
+		if (isChannelFailure(outcome, result)) {
+			const state = fleetRegistry.recordChannelFailure(run.node.id, detail ?? outcome);
+			if (state === "offline") reapRunsOnDeadNode(run.node.id, run.runId);
+			return;
+		}
+		if (outcome === "succeeded" || outcome === "failed") {
+			fleetRegistry.recordChannelSuccess(run.node.id);
+		}
 	}
 
 	function heartbeatIso(heartbeatMs: number): string {
@@ -1766,6 +1831,10 @@ export function createDispatchBundle(
 				heartbeatAt: heartbeatIso(heartbeatMs),
 			};
 			ledger.update(run.runId, patch);
+			// Node staleness display feeds off the freshest worker heartbeat.
+			if (status === "alive" && run.node !== null && run.node.kind === "ssh") {
+				fleetRegistry?.seen(run.node.id);
+			}
 			if (status === run.heartbeatStatus) continue;
 			run.heartbeatStatus = status;
 			emitHeartbeatStatus(run, status);
@@ -2591,7 +2660,13 @@ export function createDispatchBundle(
 		// failure (dead node, unpreflighted path parity, per-node cap) is a
 		// clean rejection that never holds a concurrency slot. The placement's
 		// own capacity is released on every exit path below.
-		const placement = options?.resolveNode?.(req) ?? null;
+		const placement = resolveNode(req) ?? null;
+		// Fold the placement-completed reroute hops back onto the effective
+		// request: a later retry of this run must extend the filled lineage,
+		// not re-open hops placement already resolved.
+		if (placement?.reroutes !== undefined && placement.reroutes.length > 0) {
+			req = { ...req, reroutes: [...placement.reroutes] };
+		}
 		let nodeSlotHeld = placement?.release !== undefined;
 		const releaseNodeSlot = (): void => {
 			if (!nodeSlotHeld) return;
@@ -3203,6 +3278,7 @@ export function createDispatchBundle(
 					status,
 					receipt.exitCode,
 				);
+				recordNodeChannelOutcome(activeRun, finalOutcome, result, finalDetail);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
 				maybeScheduleRetry(activeRun, finalOutcome, finalDetail, failureMessage);

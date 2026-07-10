@@ -360,13 +360,19 @@ function validateWorkerTarget(
 	value: unknown,
 	defaults: ClioSettings["orchestrator"],
 	targets: ReadonlyArray<ClioSettings["targets"][number]>,
-): ClioSettings["orchestrator"] {
-	const out = cloneValue(defaults);
+	options?: { nodeIds?: ReadonlySet<string> },
+): ClioSettings["orchestrator"] & { node?: string } {
+	const out: ClioSettings["orchestrator"] & { node?: string } = cloneValue(defaults);
 	if (!isPlainObject(value)) {
 		issues.add(path, `expected a map, got ${describe(value)}`);
 		return out;
 	}
-	issues.unknownKeys(path, value, ["target", "model", "thinkingLevel"]);
+	const allowNode = options?.nodeIds !== undefined;
+	issues.unknownKeys(
+		path,
+		value,
+		allowNode ? ["target", "model", "thinkingLevel", "node"] : ["target", "model", "thinkingLevel"],
+	);
 	if ("target" in value && value.target !== null) {
 		const v = expectString(issues, `${path}.target`, value.target);
 		if (v !== undefined) out.target = targets.some((entry) => entry.id === v) ? v : null;
@@ -378,6 +384,15 @@ function validateWorkerTarget(
 	if ("model" in value && value.model !== null) {
 		const v = expectString(issues, `${path}.model`, value.model);
 		if (v !== undefined) out.model = v;
+	}
+	// Node pins follow the target idiom: a pin naming a node that is not
+	// configured (and is not the implicit local node) is dropped, not fatal.
+	if (allowNode && "node" in value && value.node !== null) {
+		const v = expectString(issues, `${path}.node`, value.node);
+		if (v !== undefined) {
+			const id = v.trim();
+			if (id.length > 0 && (id === "local" || options?.nodeIds?.has(id) === true)) out.node = id;
+		}
 	}
 	if (!out.target) {
 		out.model = null;
@@ -543,6 +558,95 @@ function validateDelegation(issues: Issues, value: unknown): ClioSettings["deleg
 	return out;
 }
 
+type FleetNodeConfig = ClioSettings["fleet"]["nodes"][number];
+
+function validateFleetNode(issues: Issues, path: string, value: unknown, seen: Set<string>): FleetNodeConfig | null {
+	if (!isPlainObject(value)) {
+		issues.add(path, `expected a map, got ${describe(value)}`);
+		return null;
+	}
+	issues.unknownKeys(path, value, [
+		"id",
+		"host",
+		"user",
+		"port",
+		"identityFile",
+		"clioEntry",
+		"labels",
+		"maxWorkers",
+		"residency",
+	]);
+	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
+	const host = "host" in value ? expectString(issues, `${path}.host`, value.host) : undefined;
+	if (!("id" in value)) issues.add(`${path}.id`, "required");
+	if (!("host" in value)) issues.add(`${path}.host`, "required");
+	if (id === undefined || host === undefined) return null;
+	const trimmedId = id.trim();
+	if (trimmedId.length === 0) {
+		issues.add(`${path}.id`, "must not be blank");
+		return null;
+	}
+	if (trimmedId === "local") {
+		issues.add(`${path}.id`, "'local' is reserved for the implicit local node");
+		return null;
+	}
+	if (seen.has(trimmedId)) {
+		issues.add(`${path}.id`, `duplicate fleet node id '${trimmedId}'`);
+		return null;
+	}
+	seen.add(trimmedId);
+	const node: FleetNodeConfig = { id: trimmedId, host, maxWorkers: 2 };
+	if ("user" in value) {
+		const v = expectString(issues, `${path}.user`, value.user);
+		if (v !== undefined) node.user = v;
+	}
+	if ("port" in value) {
+		const v = expectInteger(issues, `${path}.port`, value.port, { min: 1 });
+		if (v !== undefined) node.port = v;
+	}
+	if ("identityFile" in value) {
+		const v = expectString(issues, `${path}.identityFile`, value.identityFile);
+		if (v !== undefined) node.identityFile = v;
+	}
+	if ("clioEntry" in value) {
+		const v = expectString(issues, `${path}.clioEntry`, value.clioEntry);
+		if (v !== undefined) node.clioEntry = v;
+	}
+	if ("labels" in value) {
+		const v = expectStringArray(issues, `${path}.labels`, value.labels);
+		if (v !== undefined) node.labels = v;
+	}
+	if ("maxWorkers" in value) {
+		const v = expectInteger(issues, `${path}.maxWorkers`, value.maxWorkers, { min: 1 });
+		if (v !== undefined) node.maxWorkers = v;
+	}
+	if ("residency" in value) {
+		const v = expectEnum(issues, `${path}.residency`, value.residency, ["observe", "manage"] as const);
+		if (v !== undefined) node.residency = v;
+	}
+	return node;
+}
+
+function validateFleet(issues: Issues, value: unknown): ClioSettings["fleet"] {
+	const out = cloneValue(DEFAULT_SETTINGS.fleet);
+	if (!isPlainObject(value)) {
+		issues.add("fleet", `expected a map, got ${describe(value)}`);
+		return out;
+	}
+	issues.unknownKeys("fleet", value, ["nodes"]);
+	if ("nodes" in value) {
+		if (!Array.isArray(value.nodes)) {
+			issues.add("fleet.nodes", `expected a list, got ${describe(value.nodes)}`);
+		} else {
+			const seen = new Set<string>();
+			out.nodes = value.nodes
+				.map((entry, i) => validateFleetNode(issues, `fleet.nodes[${i}]`, entry, seen))
+				.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+		}
+	}
+	return out;
+}
+
 function validateKeybindings(issues: Issues, value: unknown): ClioSettings["keybindings"] {
 	if (!isPlainObject(value)) {
 		issues.add("keybindings", `expected a map, got ${describe(value)}`);
@@ -578,6 +682,7 @@ const TOP_LEVEL_KEYS = [
 	"runtimePlugins",
 	"orchestrator",
 	"workers",
+	"fleet",
 	"scope",
 	"modelSelector",
 	"budget",
@@ -664,6 +769,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		);
 	}
 
+	// Fleet nodes validate before workers so profile node pins can be checked
+	// against the configured node ids.
+	if ("fleet" in raw) {
+		settings.fleet = validateFleet(issues, raw.fleet);
+	}
+	const fleetNodeIds = new Set(settings.fleet.nodes.map((node) => node.id));
+
 	if ("workers" in raw) {
 		if (!isPlainObject(raw.workers)) {
 			issues.add("workers", `expected a map, got ${describe(raw.workers)}`);
@@ -684,6 +796,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					raw.workers.default,
 					settings.workers.default,
 					settings.targets,
+					{ nodeIds: fleetNodeIds },
 				);
 			}
 			if ("profiles" in raw.workers) {
@@ -703,6 +816,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							rawProfile,
 							DEFAULT_SETTINGS.workers.default,
 							settings.targets,
+							{ nodeIds: fleetNodeIds },
 						);
 						if (!profile.target) continue;
 						profiles[name] = profile;
