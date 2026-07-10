@@ -17,6 +17,8 @@ export interface WorkerTarget {
 	target: string | null;
 	model: string | null;
 	thinkingLevel: ThinkingLevel;
+	/** Optional fleet node pin: workers routed through this profile run on that node. */
+	node?: string;
 }
 
 export type WorkerProfiles = Record<string, WorkerTarget>;
@@ -149,6 +151,40 @@ export interface DelegationSettings {
 	defaults: DelegationDefaults;
 }
 
+/**
+ * Residency posture a remote worker launches with. "observe" (the default)
+ * forbids the worker from evicting or swapping any model resident on its
+ * node; "manage" is an explicit per-node opt-in to the normal reconciler.
+ */
+export type FleetNodeResidency = "observe" | "manage";
+
+/**
+ * One SSH-reachable worker node. The implicit `local` node always exists and
+ * is never declared here. Nodes become dispatch-eligible only after the
+ * doctor fleet preflight verifies reachability, a version-matched clio, and
+ * path parity for the project root (shared-filesystem assumption).
+ */
+export interface FleetNodeSettings {
+	/** Stable node id used in placement, receipts, and operator surfaces. */
+	id: string;
+	/** SSH destination host (name or address). */
+	host: string;
+	user?: string;
+	port?: number;
+	identityFile?: string;
+	/** Remote worker-entry invocation; defaults to `clio worker` on the remote PATH. */
+	clioEntry?: string;
+	/** Advisory routing labels (e.g. gpu, high-memory). */
+	labels?: string[];
+	/** Per-node concurrent worker cap. */
+	maxWorkers: number;
+	residency?: FleetNodeResidency;
+}
+
+export interface FleetSettings {
+	nodes: FleetNodeSettings[];
+}
+
 export const DEFAULT_SETTINGS = {
 	version: 1 as const,
 	identity: "clio",
@@ -173,6 +209,9 @@ export const DEFAULT_SETTINGS = {
 		escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		resilienceCooldownMs: 15000,
 	} as WorkersSettings,
+	fleet: {
+		nodes: [] as FleetNodeSettings[],
+	} as FleetSettings,
 	scope: [] as string[],
 	modelSelector: {
 		favorites: [] as string[],
@@ -329,6 +368,25 @@ workers:
     timeoutMs: 120000
     fallback: deny
   resilienceCooldownMs: 15000
+
+# Fleet worker nodes reachable over SSH. The implicit \`local\` node always
+# exists and is never declared. A node becomes dispatch-eligible only after
+# \`clio doctor\` verifies SSH reachability, a version-matched clio, path
+# parity for the project root (shared filesystem), and a writable state dir.
+# residency defaults to observe: remote workers never evict models resident
+# on their node (set manage per node to opt into the reconciler).
+fleet:
+  nodes: []
+  # - id: node-a
+  #   host: node-a.example.net
+  #   user: me
+  #   identityFile: ~/.ssh/id_fleet
+  #   labels: [cpu]
+  #   maxWorkers: 2
+  # - id: node-b
+  #   host: node-b.example.net
+  #   maxWorkers: 1
+  #   residency: observe
 
 # Alt+J / Alt+K cycling order: plain target ids or "target/model" refs.
 scope: []

@@ -1,5 +1,5 @@
 import type { BudgetVerdict } from "./budget.js";
-import type { ClusterNode } from "./cluster.js";
+import type { ClusterNode, FleetRegistry } from "./cluster.js";
 
 export interface BudgetPreflight {
 	verdict: BudgetVerdict;
@@ -22,4 +22,11 @@ export interface SchedulingContract {
 	tryAcquireWorker(): boolean;
 	releaseWorker(): void;
 	listNodes(): ReadonlyArray<ClusterNode>;
+	/**
+	 * Fleet node registry backing multi-node placement: per-node states,
+	 * capacity accounting, and channel-failure classification. Optional so
+	 * minimal scheduling stubs remain valid; dispatch treats absence as a
+	 * local-only fleet.
+	 */
+	fleet?: FleetRegistry;
 }

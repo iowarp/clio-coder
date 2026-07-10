@@ -11,7 +11,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
 import { createBudgetState } from "./budget.js";
-import { listNodes } from "./cluster.js";
+import { createFleetRegistry, legacyClusterNodes } from "./cluster.js";
 import { createConcurrencyGate } from "./concurrency.js";
 import type { SchedulingContract } from "./contract.js";
 
@@ -31,6 +31,9 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 	const settings = config.get();
 	let budget = createBudgetState(settings.budget.sessionCeilingUsd);
 	const gate = createConcurrencyGate(resolveMaxWorkers(settings.budget.concurrency));
+	const fleet = createFleetRegistry(() => config.get().fleet?.nodes ?? [], {
+		localMaxWorkers: () => resolveMaxWorkers(config.get().budget.concurrency),
+	});
 	const unsubscribes: Array<() => void> = [];
 
 	function syncBudget(): void {
@@ -85,7 +88,8 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 		activeWorkers: () => gate.activeWorkers(),
 		tryAcquireWorker: () => gate.tryAcquire(),
 		releaseWorker: () => gate.release(),
-		listNodes: () => listNodes(),
+		listNodes: () => legacyClusterNodes(fleet),
+		fleet,
 	};
 
 	return { extension, contract };

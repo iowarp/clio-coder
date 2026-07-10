@@ -8,7 +8,7 @@
 import path from "node:path";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
-import type { DispatchRequestOrigin, RunLineage } from "./types.js";
+import type { DispatchRequestOrigin, RunLineage, RunNodeReroute } from "./types.js";
 
 export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -34,6 +34,14 @@ export interface JobSpec {
 	target?: string;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
+	/** Explicit fleet node pin; `local` or a configured fleet.nodes id. */
+	node?: string;
+	/**
+	 * Failover lineage threaded by the internal retry path when a node was
+	 * classified dead. Hops arrive with an empty toNode; placement fills it
+	 * when the rerouted run lands. Never set by external callers.
+	 */
+	reroutes?: RunNodeReroute[];
 	requiredCapabilities?: ReadonlyArray<string>;
 	toolProfile?: ToolProfileName;
 	cwd?: string;
@@ -77,6 +85,8 @@ const KNOWN_KEYS = new Set([
 	"target",
 	"model",
 	"thinkingLevel",
+	"node",
+	"reroutes",
 	"requiredCapabilities",
 	"toolProfile",
 	"cwd",
@@ -147,6 +157,18 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("model" in spec && spec.model !== undefined) {
 		if (typeof spec.model !== "string" || spec.model.length === 0) {
 			errors.push("model must be a non-empty string");
+		}
+	}
+
+	if ("node" in spec && spec.node !== undefined) {
+		if (typeof spec.node !== "string" || spec.node.trim().length === 0) {
+			errors.push("node must be a non-empty string");
+		}
+	}
+
+	if ("reroutes" in spec && spec.reroutes !== undefined) {
+		if (!Array.isArray(spec.reroutes) || spec.reroutes.some((hop) => !isValidReroute(hop))) {
+			errors.push("reroutes must be an array of {attempt >= 1, fromNode (non-empty), toNode (string), reason (string)}");
 		}
 	}
 
@@ -248,6 +270,10 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.delegationAgentId === "string") out.delegationAgentId = spec.delegationAgentId;
 	if (typeof spec.target === "string") out.target = spec.target;
 	if (typeof spec.model === "string") out.model = spec.model;
+	if (typeof spec.node === "string") out.node = spec.node.trim();
+	if (Array.isArray(spec.reroutes) && spec.reroutes.every((hop) => isValidReroute(hop))) {
+		out.reroutes = spec.reroutes.map((hop) => ({ ...hop }));
+	}
 	if (typeof spec.thinkingLevel === "string") out.thinkingLevel = spec.thinkingLevel as JobThinkingLevel;
 	if (Array.isArray(spec.requiredCapabilities)) {
 		out.requiredCapabilities = spec.requiredCapabilities.map((c) => String(c));
@@ -281,6 +307,15 @@ function isValidPipelineInput(value: unknown): value is PipelineInput {
 	const positionOk = typeof value.position === "number" && Number.isInteger(value.position) && value.position >= 1;
 	const textOk = typeof value.text === "string";
 	return fromRunOk && positionOk && textOk;
+}
+
+function isValidReroute(value: unknown): value is RunNodeReroute {
+	if (!isPlainObject(value)) return false;
+	const attemptOk = typeof value.attempt === "number" && Number.isInteger(value.attempt) && value.attempt >= 1;
+	const fromOk = typeof value.fromNode === "string" && value.fromNode.length > 0;
+	const toOk = typeof value.toNode === "string";
+	const reasonOk = typeof value.reason === "string";
+	return attemptOk && fromOk && toOk && reasonOk;
 }
 
 function isValidLineage(value: unknown): value is RunLineage {
