@@ -31,7 +31,7 @@ export default defineConfig({
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-tui",
 		"@silvia-odwyer/photon-node",
+		"@vscode/tree-sitter-wasm",
 		"tree-sitter-wasms",
-		"web-tree-sitter",
 	],
 });

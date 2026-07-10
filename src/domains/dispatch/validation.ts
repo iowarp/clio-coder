@@ -6,6 +6,7 @@
  */
 
 import path from "node:path";
+import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import type { DispatchRequestOrigin, RunLineage } from "./types.js";
 
@@ -40,6 +41,8 @@ export interface JobSpec {
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
 	trustProjectCompatRoots?: boolean;
+	/** JSON Schema enforced by a supported native worker runtime for the final response. */
+	responseSchema?: Record<string, unknown>;
 	/**
 	 * Absolute directories write-class tool calls are confined to for this run.
 	 * Resolved against the job cwd at validation time. Enforced at the worker
@@ -81,6 +84,7 @@ const KNOWN_KEYS = new Set([
 	"noSkills",
 	"skillPaths",
 	"trustProjectCompatRoots",
+	"responseSchema",
 	"writeRoots",
 	"requestOrigin",
 	"pipelineInput",
@@ -194,6 +198,15 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	let responseSchema: Record<string, unknown> | undefined;
+	if ("responseSchema" in spec && spec.responseSchema !== undefined) {
+		try {
+			responseSchema = cloneValidatedResponseSchema(spec.responseSchema);
+		} catch (error) {
+			errors.push(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	if ("writeRoots" in spec && spec.writeRoots !== undefined) {
 		if (
 			!Array.isArray(spec.writeRoots) ||
@@ -245,6 +258,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.noSkills === "boolean") out.noSkills = spec.noSkills;
 	if (Array.isArray(spec.skillPaths)) out.skillPaths = spec.skillPaths.map((p) => String(p));
 	if (typeof spec.trustProjectCompatRoots === "boolean") out.trustProjectCompatRoots = spec.trustProjectCompatRoots;
+	if (responseSchema) out.responseSchema = responseSchema;
 	if (
 		Array.isArray(spec.writeRoots) &&
 		spec.writeRoots.length > 0 &&

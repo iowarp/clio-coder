@@ -18,6 +18,7 @@ import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
 import { assistantTextFromEvent } from "../tools/dispatch.js";
@@ -263,13 +264,14 @@ async function runDispatch(
 		createPromptsDomainModule({ noContextFiles: options.noContextFiles === true }),
 		AgentsDomainModule,
 		MiddlewareDomainModule,
-		DispatchDomainModule,
 		SessionDomainModule,
 		// Observability subscribes to the dispatch terminal events so a headless
 		// run auto-builds its forensic evidence bundle and sidecar index, the same
 		// as an interactive session. It depends only on providers + session, both
 		// loaded above.
 		ObservabilityDomainModule,
+		SchedulingDomainModule,
+		DispatchDomainModule,
 		LifecycleDomainModule,
 	]);
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");

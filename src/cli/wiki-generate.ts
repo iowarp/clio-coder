@@ -7,10 +7,13 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
+import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { SchedulingDomainModule } from "../domains/scheduling/index.js";
+import { SessionDomainModule } from "../domains/session/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
 /**
@@ -136,6 +139,9 @@ async function loadWikiDispatch(): Promise<{ dispatch: DispatchContract; loaded:
 		createPromptsDomainModule({ noContextFiles: true }),
 		AgentsDomainModule,
 		MiddlewareDomainModule,
+		SessionDomainModule,
+		ObservabilityDomainModule,
+		SchedulingDomainModule,
 		DispatchDomainModule,
 	]);
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");

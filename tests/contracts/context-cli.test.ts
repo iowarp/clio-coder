@@ -1,4 +1,4 @@
-import { match, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,7 +60,7 @@ describe("contracts/context cli router", () => {
 		match(result.stdout, /^adoption: 0 sources, up to date$/m);
 	});
 
-	it("routes clio context init through the same handler as context-init", () => {
+	it("routes clio context init through the shared init handler", () => {
 		const args = ["--preview", "--heuristic", "--yes"];
 		const direct = runHandler(scratch, "init", args);
 		const routed = runHandler(scratch, "context", ["init", ...args]);
@@ -69,6 +69,34 @@ describe("contracts/context cli router", () => {
 		strictEqual(routed.status, 0);
 		strictEqual(routed.stdout, direct.stdout);
 		strictEqual(routed.stderr, direct.stderr);
+	});
+
+	it("shows the last context generation mode and measurements", () => {
+		const initialized = runHandler(scratch, "init", ["--heuristic", "--yes"]);
+		strictEqual(initialized.status, 0, initialized.stderr);
+
+		const status = runHandler(scratch, "context", []);
+		strictEqual(status.status, 0);
+		match(status.stdout, /^generation: heuristic \(parser not-run\)$/m);
+	});
+
+	it("emits a clean machine-readable init result", () => {
+		const result = runHandler(scratch, "context", ["init", "--preview", "--heuristic", "--yes", "--json"]);
+
+		strictEqual(result.status, 0);
+		strictEqual(result.stderr, "");
+		const payload = JSON.parse(result.stdout) as {
+			version: number;
+			action: string;
+			generation: { mode: string; parserOutcome: string };
+			timings: { wallMs: number; codewikiMs: number; generationMs: number };
+		};
+		strictEqual(payload.version, 1);
+		strictEqual(payload.action, "previewed");
+		strictEqual(payload.generation.mode, "heuristic");
+		strictEqual(payload.generation.parserOutcome, "not-run");
+		ok(payload.timings.wallMs >= payload.timings.codewikiMs);
+		ok(payload.timings.wallMs >= payload.timings.generationMs);
 	});
 
 	it("rejects unknown context verbs and refresh flags with usage", () => {

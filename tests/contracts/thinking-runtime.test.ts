@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	applyThinkingMechanism,
@@ -10,7 +10,11 @@ import type { CapabilityFlags } from "../../src/domains/providers/types/capabili
 import { availableThinkingLevels, EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { createEngineAi } from "../../src/engine/ai.js";
-import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "../../src/engine/provider-payload.js";
+import {
+	patchProviderThinkingPayload,
+	patchToolChoiceNonePayload,
+	patchWorkerRequestPayload,
+} from "../../src/engine/provider-payload.js";
 
 const engineAi = createEngineAi();
 
@@ -126,6 +130,52 @@ describe("contracts/tool-choice lockout payload patch", () => {
 		const model = { api: "openai-completions" } as Parameters<typeof patchToolChoiceNonePayload>[1];
 		strictEqual(patchToolChoiceNonePayload({ model: "m" }, model), undefined);
 		strictEqual(patchToolChoiceNonePayload("not-a-record", model), undefined);
+	});
+});
+
+describe("contracts/llama.cpp response-schema payload patch", () => {
+	it("composes JSON schema, thinking, and tool lockout without dropping tools", () => {
+		const model = { api: "openai-responses" } as Parameters<typeof patchWorkerRequestPayload>[1];
+		const responseSchema = {
+			type: "object",
+			properties: { summary: { type: "string" } },
+			required: ["summary"],
+		};
+		const tools = [{ type: "function", function: { name: "read", parameters: { type: "object" } } }];
+		const patched = patchWorkerRequestPayload(
+			{
+				model: "scout-model",
+				messages: [],
+				reasoning: { effort: "high" },
+				chat_template_kwargs: { enable_thinking: true },
+				tools,
+			},
+			model,
+			{
+				runtimeId: "llamacpp",
+				thinkingLevel: "high",
+				responseSchema,
+				toolChoiceNone: true,
+			},
+		) as Record<string, unknown>;
+
+		deepStrictEqual(patched.reasoning, { effort: "high", summary: "detailed" });
+		deepStrictEqual(patched.chat_template_kwargs, { enable_thinking: true });
+		strictEqual(patched.tools, tools);
+		strictEqual(patched.tool_choice, "none");
+		deepStrictEqual(patched.response_format, { type: "json_object", schema: responseSchema });
+	});
+
+	it("refuses to silently apply responseSchema to another runtime", () => {
+		const model = { api: "openai-completions" } as Parameters<typeof patchWorkerRequestPayload>[1];
+		throws(
+			() =>
+				patchWorkerRequestPayload({ model: "m" }, model, {
+					runtimeId: "openai",
+					responseSchema: { type: "object" },
+				}),
+			/responseSchema requires the native llamacpp runtime/,
+		);
 	});
 });
 

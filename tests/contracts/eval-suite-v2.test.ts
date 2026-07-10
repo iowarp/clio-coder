@@ -141,6 +141,18 @@ describe("contracts/eval suite v2", { concurrency: false }, () => {
 			const indexedFiles = artifact.results[0]?.metrics["context.indexedFiles"];
 			if (typeof indexedFiles !== "number") throw new Error("context.indexedFiles metric missing");
 			ok(indexedFiles > 0);
+			const runnerOutput = artifact.results[0]?.artifacts.stdout;
+			if (typeof runnerOutput !== "string") throw new Error("context-index stdout artifact missing");
+			const runnerMetrics = JSON.parse(runnerOutput) as {
+				indexedSourceFiles?: unknown;
+				coverage?: unknown;
+				structuralHash?: unknown;
+			};
+			strictEqual(indexedFiles, runnerMetrics.indexedSourceFiles);
+			strictEqual(artifact.results[0]?.metrics["context.coverage"], runnerMetrics.coverage);
+			strictEqual(artifact.results[0]?.metrics["context.structuralHash"], runnerMetrics.structuralHash);
+			const digestTokens = artifact.results[0]?.metrics["context.digestTokens"];
+			ok(typeof digestTokens === "number" && digestTokens > 0);
 		} finally {
 			scratch.cleanup();
 		}

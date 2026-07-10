@@ -162,9 +162,9 @@ describe("contracts/context-index", () => {
 		);
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "python");
-		strictEqual(state?.codewikiVersion, 4);
+		strictEqual(state?.codewikiVersion, 5);
 		strictEqual(typeof state?.lastIndexedAt, "string");
-		ok(readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8").includes('"version":4'));
+		ok(readFileSync(join(scratch, ".clio", "codewiki.json"), "utf8").includes('"version":5'));
 	});
 
 	it("loads legacy state without codewikiVersion", () => {

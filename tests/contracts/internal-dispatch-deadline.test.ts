@@ -141,4 +141,20 @@ describe("internal generator dispatch deadline", () => {
 			configureGuardrails(undefined);
 		}
 	});
+
+	it("lets latency-sensitive callers cap a larger configured deadline", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		try {
+			const { dispatch, abortCalls } = fakeDispatch({ exitCode: 1 });
+			const deadline = armInternalDispatchDeadline(dispatch, "run-deadline-1", "bootstrap scout", process.env, 10);
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			strictEqual(deadline.timedOut(), true);
+			strictEqual(abortCalls.length, 1);
+			strictEqual(abortCalls[0]?.reason?.cause, "timeout");
+			match(deadline.message(), /latency ceiling/);
+			deadline.clear();
+		} finally {
+			configureGuardrails(undefined);
+		}
+	});
 });

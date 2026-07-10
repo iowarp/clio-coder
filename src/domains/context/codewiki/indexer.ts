@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
+import { enumerateWorkspaceFiles, filterWorkspaceFileCandidates } from "../../../core/workspace-files.js";
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { createTreeSitterExtractor, type TreeSitterExtractor } from "./tree-sitter.js";
@@ -42,8 +44,10 @@ export interface CodewikiExternalEdge {
 
 export type CodewikiEdge = CodewikiInternalEdge | CodewikiExternalEdge;
 
+export const CODEWIKI_VERSION = 5 as const;
+
 export interface Codewiki {
-	version: 4;
+	version: typeof CODEWIKI_VERSION;
 	language: ProjectType;
 	files: CodewikiFile[];
 	symbols: CodewikiSymbol[];
@@ -116,6 +120,8 @@ const SOURCE_EXTENSIONS = new Map<string, SourceProjectType>([
 	[".hpp", "c++"],
 	[".hh", "c++"],
 	[".hxx", "c++"],
+	[".cu", "c++"],
+	[".cuh", "c++"],
 	[".java", "java"],
 	[".rb", "ruby"],
 	[".cs", "c#"],
@@ -153,6 +159,8 @@ const RESOLUTION_EXTENSIONS = [
 	".hpp",
 	".hh",
 	".hxx",
+	".cu",
+	".cuh",
 	".java",
 	".rb",
 	".cs",
@@ -206,26 +214,6 @@ function languageForPath(relPath: string): CodewikiLanguage | null {
 export function isIndexablePath(relPath: string): boolean {
 	if (relPath.split("/").some((segment) => EXCLUDED_DIRS.has(segment))) return false;
 	return languageForPath(relPath) !== null;
-}
-
-function walkFiles(cwd: string, dir: string, out: string[]): void {
-	let entries: import("node:fs").Dirent[];
-	try {
-		entries = readdirSync(dir, { withFileTypes: true });
-	} catch {
-		return;
-	}
-	for (const entry of entries) {
-		const absPath = join(dir, entry.name);
-		if (entry.isDirectory()) {
-			if (EXCLUDED_DIRS.has(entry.name)) continue;
-			walkFiles(cwd, absPath, out);
-			continue;
-		}
-		if (!entry.isFile()) continue;
-		const relPath = normalizeRel(cwd, absPath);
-		if (isIndexablePath(relPath)) out.push(relPath);
-	}
 }
 
 function lineCount(text: string): number {
@@ -447,7 +435,8 @@ const cFamilyExtractor: LanguageExtractor = {
 			{ regex: /^\s*(?:class|struct)\s+([A-Za-z_]\w*)\b/, kind: "class" },
 			{ regex: /^\s*(?:typedef\s+)?(?:struct|enum)\s+([A-Za-z_]\w*)\b/, kind: "type" },
 			{
-				regex: /^\s*(?:template\s*<[^>]+>\s*)?(?:[A-Za-z_][\w:<>,*&\s]+\s+)+([A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?\{?$/,
+				regex:
+					/^\s*(?:template\s*<[^>]+>\s*)?(?:[A-Za-z_][\w:<>,*&\s]+\s+)+(?:(?:[A-Za-z_]\w*)::)*([~A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:;|\{)?$/,
 				kind: "func",
 			},
 			{ regex: /^(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
@@ -632,8 +621,8 @@ function buildFile(
 	treeSitterExtractor: LanguageExtractor,
 	readFile: CodewikiReadFile,
 ): BuiltFile | null {
-	const language = languageForPath(relPath);
-	if (!language) return null;
+	const pathLanguage = languageForPath(relPath);
+	if (!pathLanguage) return null;
 	let text: string | null;
 	try {
 		text = readFile(join(cwd, relPath));
@@ -641,6 +630,9 @@ function buildFile(
 		return null;
 	}
 	if (text === null) return null;
+	// Ambiguous `.h` headers classify from content so both full builds and
+	// incremental updates land on the same C/C++ decision.
+	const language = pathLanguage === "c" && isAmbiguousHeaderPath(relPath) ? classifyCHeaderLanguage(text) : pathLanguage;
 	const file: CodewikiFile = {
 		id: stableFileId(relPath),
 		path: relPath,
@@ -773,7 +765,7 @@ function codewikiFromBuiltFiles(cwd: string, language: ProjectType, builtFiles: 
 	});
 	const normalizedFiles = normalizedBuilt.map((item) => item.file).sort(compareFiles);
 	return {
-		version: 4,
+		version: CODEWIKI_VERSION,
 		language,
 		files: normalizedFiles,
 		symbols: normalizedBuilt.flatMap((item) => item.symbols).sort(compareCodewikiSymbols),
@@ -800,8 +792,7 @@ async function buildFromPaths(
 }
 
 export async function buildCodewiki(input: BuildCodewikiInput, options: CodewikiBuildOptions = {}): Promise<Codewiki> {
-	const files: string[] = [];
-	walkFiles(input.cwd, input.cwd, files);
+	const files = enumerateWorkspaceFiles(input.cwd, EXCLUDED_DIRS).filter(isIndexablePath);
 	return buildFromPaths(input.cwd, input.language, files, options);
 }
 
@@ -820,21 +811,30 @@ export async function updateCodewikiPaths(
 		paths.map(normalizeInputPath).filter((path) => path.length > 0 && !path.startsWith("..")),
 	);
 	if (normalizedPaths.length === 0) return codewiki;
+	if (
+		normalizedPaths.some(
+			(path) =>
+				path === ".gitignore" ||
+				path.endsWith("/.gitignore") ||
+				path === ".git/info/exclude" ||
+				path === ".git/index" ||
+				path === ".gitmodules",
+		)
+	) {
+		// Ignore and index metadata can add or remove paths that are not present in
+		// the mutation batch itself. Re-enumerate once so incremental visibility
+		// remains byte-equivalent to a full build.
+		return buildCodewiki({ cwd, language: codewiki.language }, options);
+	}
 	const existingPaths = new Set(codewiki.files.map((file) => file.path));
+	const visiblePaths = new Set(filterWorkspaceFileCandidates(cwd, normalizedPaths, EXCLUDED_DIRS));
 	const readFile = options.readFile ?? defaultReadFile;
 	const changedPathSet = new Set(normalizedPaths);
 	const rebuildPaths: string[] = [];
 	let hasIndexChange = false;
 	for (const relPath of normalizedPaths) {
 		const wasIndexed = existingPaths.has(relPath);
-		let isCurrentIndexableFile = false;
-		if (isIndexablePath(relPath)) {
-			try {
-				isCurrentIndexableFile = statSync(join(cwd, relPath)).isFile();
-			} catch {
-				isCurrentIndexableFile = false;
-			}
-		}
+		const isCurrentIndexableFile = isIndexablePath(relPath) && visiblePaths.has(relPath);
 		if (!wasIndexed && !isCurrentIndexableFile) continue;
 		hasIndexChange = true;
 		if (isCurrentIndexableFile) rebuildPaths.push(relPath);
@@ -982,7 +982,7 @@ function normalizeCodewikiSymbol(symbol: CodewikiSymbol): CodewikiSymbol {
 
 function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 	return {
-		version: 4,
+		version: CODEWIKI_VERSION,
 		language: codewiki.language,
 		files: codewiki.files.map(normalizeCodewikiFile).sort(compareFiles),
 		symbols: codewiki.symbols.map(normalizeCodewikiSymbol).sort(compareCodewikiSymbols),
@@ -991,7 +991,8 @@ function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 }
 
 function upgradeCodewiki(value: unknown): Codewiki | null {
-	if (isCodewikiV4(value)) return normalizeCodewiki(value);
+	if (isCodewikiV5(value)) return normalizeCodewiki(value);
+	if (isCodewikiV4(value)) return upgradeV4Codewiki(value);
 	if (isCodewikiV3(value)) return upgradeV3Codewiki(value);
 	if (isCodewikiV2(value)) return upgradeV2Codewiki(value);
 	return null;
@@ -1013,6 +1014,14 @@ interface CodewikiV3 {
 	edges: CodewikiEdge[];
 }
 
+interface CodewikiV4 {
+	version: 4;
+	language: ProjectType;
+	files: CodewikiFile[];
+	symbols: CodewikiSymbol[];
+	edges: CodewikiEdge[];
+}
+
 interface CodewikiV2 {
 	version: 2;
 	generatedAt: string;
@@ -1022,13 +1031,26 @@ interface CodewikiV2 {
 
 function upgradeV3Codewiki(value: CodewikiV3): Codewiki {
 	return normalizeCodewiki({
-		version: 4,
+		version: CODEWIKI_VERSION,
 		language: value.language,
 		files: value.files.map((file) => ({
 			...file,
 			hash: "",
 			imports: [],
 		})),
+		symbols: value.symbols,
+		edges: value.edges,
+	});
+}
+
+function upgradeV4Codewiki(value: CodewikiV4): Codewiki {
+	return normalizeCodewiki({
+		version: CODEWIKI_VERSION,
+		language: value.language,
+		// v5 changes C-family extraction and adds CUDA paths. Blank hashes force
+		// one complete rebuild instead of treating a structurally obsolete v4
+		// artifact as fresh.
+		files: value.files.map((file) => ({ ...file, hash: "" })),
 		symbols: value.symbols,
 		edges: value.edges,
 	});
@@ -1074,7 +1096,15 @@ function upgradeV2Codewiki(value: CodewikiV2): Codewiki {
 	});
 }
 
-function isCodewikiV4(value: unknown): value is Codewiki {
+function isCodewikiV5(value: unknown): value is Codewiki {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const obj = value as Record<string, unknown>;
+	if (obj.version !== CODEWIKI_VERSION || typeof obj.language !== "string") return false;
+	if (!Array.isArray(obj.files) || !Array.isArray(obj.symbols) || !Array.isArray(obj.edges)) return false;
+	return obj.files.every(isCodewikiFile) && obj.symbols.every(isCodewikiSymbol) && obj.edges.every(isCodewikiEdge);
+}
+
+function isCodewikiV4(value: unknown): value is CodewikiV4 {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
 	if (obj.version !== 4 || typeof obj.language !== "string") return false;

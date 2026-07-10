@@ -96,6 +96,7 @@ async function loadOrBuildCodewiki(cwd: string): Promise<Codewiki> {
 		codewikiVersion: rebuilt.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
 		lastSessionAt: prev?.lastSessionAt ?? generatedAt,
 		lastIndexedAt: generatedAt,

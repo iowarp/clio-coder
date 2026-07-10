@@ -47,6 +47,19 @@ describe("context activity island", () => {
 		ok(rendered.includes("Context Refresh"), rendered);
 	});
 
+	it("labels the generation phase neutrally for Scout and heuristic drafts", () => {
+		const rendered = stripAnsi(
+			formatContextActivityIslandLines(
+				makeActivity({ phase: "generate", message: "drafting CLIO.md with heuristic" }),
+				CONTEXT_ISLAND_WIDTH,
+				2000,
+				1,
+			).join("\n"),
+		);
+		ok(rendered.includes("draft"), rendered);
+		strictEqual(rendered.includes("scout"), false);
+	});
+
 	it("tracks context progress events and retains terminal state briefly", () => {
 		const bus = createSafeEventBus();
 		const store = createContextActivityStore(bus);

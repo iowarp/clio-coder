@@ -72,6 +72,7 @@ async function main(): Promise<number> {
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.autonomy !== undefined ? { autonomy: spec.autonomy } : {}),
 		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
+		...(spec.responseSchema !== undefined ? { responseSchema: spec.responseSchema } : {}),
 	};
 	if (spec.modelCapabilities) input.modelCapabilities = spec.modelCapabilities;
 	if (spec.sessionId) input.sessionId = spec.sessionId;

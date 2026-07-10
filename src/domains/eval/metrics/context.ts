@@ -1,22 +1,31 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
+import { renderCodewikiDigest } from "../../context/codewiki/digest.js";
+import { readCodewiki, structuralCodewikiHash } from "../../context/codewiki/indexer.js";
+import { detectProjectProfile } from "../../session/workspace/project-type.js";
 
 export function collectContextMetrics(cwd: string): Record<string, number | string | null> {
 	try {
-		const raw = readFileSync(join(cwd, ".clio", "codewiki.json"), "utf8");
-		const parsed = JSON.parse(raw) as { files?: unknown[]; digestTokens?: unknown; structuralHash?: unknown };
-		const indexedFiles = Array.isArray(parsed.files) ? parsed.files.length : 0;
+		const codewiki = readCodewiki(cwd);
+		if (!codewiki) throw new Error("codewiki unavailable");
+		const visiblePaths = new Set(enumerateWorkspaceFiles(cwd));
+		const artifactSourceFiles = codewiki.files.filter((file) => file.lang !== "config");
+		const indexedFiles = artifactSourceFiles.filter((file) => visiblePaths.has(file.path)).length;
+		const staleFiles = artifactSourceFiles.length - indexedFiles;
+		const sourceFiles = detectProjectProfile(cwd).sourceFiles;
+		const digest = renderCodewikiDigest(codewiki);
 		return {
 			"context.indexedFiles": indexedFiles,
-			"context.coverage": indexedFiles > 0 ? 1 : 0,
-			"context.structuralHash":
-				typeof parsed.structuralHash === "string" ? parsed.structuralHash : createHash("sha256").update(raw).digest("hex"),
-			"context.digestTokens": typeof parsed.digestTokens === "number" ? parsed.digestTokens : 0,
+			"context.artifactFiles": artifactSourceFiles.length,
+			"context.staleFiles": staleFiles,
+			"context.coverage": sourceFiles === 0 ? (artifactSourceFiles.length === 0 ? 1 : 0) : indexedFiles / sourceFiles,
+			"context.structuralHash": structuralCodewikiHash(codewiki),
+			"context.digestTokens": Math.ceil(digest.length / 4),
 		};
 	} catch {
 		return {
 			"context.indexedFiles": 0,
+			"context.artifactFiles": 0,
+			"context.staleFiles": 0,
 			"context.coverage": 0,
 			"context.structuralHash": null,
 			"context.digestTokens": 0,

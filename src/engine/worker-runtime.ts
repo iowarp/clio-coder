@@ -51,7 +51,7 @@ import {
 	readWorkerToolCallCap,
 	sanitizeLockedSynthesisMessage,
 } from "./loop-guard.js";
-import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "./provider-payload.js";
+import { patchWorkerRequestPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
@@ -68,6 +68,8 @@ export interface WorkerRunInput {
 	modelCapabilities?: Partial<CapabilityFlags>;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;
+	/** JSON Schema enforced by the native llama.cpp request payload. */
+	responseSchema?: Record<string, unknown>;
 	/** Orchestrator-resolved runtime decision carried on the WorkerSpec. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	/** Tool ids the worker is allowed to expose for this run. */
@@ -204,6 +206,21 @@ function workerProviderSupportsTools(input: WorkerRunInput): boolean {
 	return input.runtime.defaultCapabilities.tools === true;
 }
 
+function assertResponseSchemaRuntime(input: WorkerRunInput): void {
+	if (input.responseSchema === undefined) return;
+	if (
+		input.runtime.id === "llamacpp" &&
+		input.runtime.kind === "http" &&
+		input.runtime.apiFamily === "openai-completions" &&
+		input.modelCapabilities?.structuredOutputs === "json-schema"
+	) {
+		return;
+	}
+	throw new Error(
+		`responseSchema requires a native llamacpp runtime with resolved JSON-schema support; received '${input.runtime.id}'`,
+	);
+}
+
 /**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
@@ -211,6 +228,7 @@ function workerProviderSupportsTools(input: WorkerRunInput): boolean {
  * function; the promise resolves when `agent.waitForIdle()` returns.
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
+	assertResponseSchemaRuntime(input);
 	if (input.runtime.id === "claude-sdk") {
 		return startClaudeSdkWorkerRun(input, emit);
 	}
@@ -346,9 +364,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			messages: [],
 		},
 		onPayload: async (payload, currentModel) => {
-			const thinkingPatched = patchProviderThinkingPayload(payload, currentModel as Model<never>, effectiveThinkingLevel);
-			if (!synthesisToolLock) return thinkingPatched;
-			return patchToolChoiceNonePayload(thinkingPatched ?? payload, currentModel as Model<never>) ?? thinkingPatched;
+			return patchWorkerRequestPayload(payload, currentModel as Model<never>, {
+				runtimeId: input.runtime.id,
+				thinkingLevel: effectiveThinkingLevel,
+				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
+				toolChoiceNone: synthesisToolLock,
+			});
 		},
 		getApiKey: async () => input.apiKey,
 	};

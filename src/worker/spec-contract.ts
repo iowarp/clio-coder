@@ -1,3 +1,4 @@
+import { assertValidResponseSchema } from "../core/response-schema.js";
 import type { ToolName } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
@@ -49,6 +50,8 @@ export interface WorkerSpec {
 	sessionId?: string;
 	apiKey?: string;
 	thinkingLevel?: ThinkingLevel;
+	/** JSON Schema enforced on the llama.cpp chat-completions request. */
+	responseSchema?: Record<string, unknown>;
 	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;
@@ -425,11 +428,24 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	readOptionalString(spec, "sessionId", "WorkerSpec");
 	readOptionalString(spec, "apiKey", "WorkerSpec");
 	readOptionalEnum(spec, "thinkingLevel", "WorkerSpec", THINKING_LEVELS);
+	if (spec.modelCapabilities !== undefined)
+		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
+	if (spec.responseSchema !== undefined) {
+		assertValidResponseSchema(spec.responseSchema, "WorkerSpec.responseSchema");
+		if (runtimeId !== "llamacpp" || runtime.kind !== "http" || runtime.apiFamily !== "openai-completions") {
+			throw new Error("WorkerSpec.responseSchema is supported only by the native llamacpp runtime");
+		}
+		const structuredOutputs =
+			spec.modelCapabilities === undefined
+				? undefined
+				: readRecord(spec.modelCapabilities, "WorkerSpec.modelCapabilities").structuredOutputs;
+		if (structuredOutputs !== "json-schema") {
+			throw new Error("WorkerSpec.responseSchema requires resolved JSON-schema model capability");
+		}
+	}
 	validateAllowedTools(spec.allowedTools);
 	readOptionalStringArray(spec, "protectedModels", "WorkerSpec");
 	validateRuntimeResolution(spec.runtimeResolution);
-	if (spec.modelCapabilities !== undefined)
-		validateCapabilityPatch(spec.modelCapabilities, "WorkerSpec.modelCapabilities");
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);
 	if (spec.noSkills !== undefined && typeof spec.noSkills !== "boolean") {
 		throw new Error("WorkerSpec.noSkills must be a boolean");

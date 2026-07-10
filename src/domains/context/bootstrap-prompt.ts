@@ -10,32 +10,24 @@ export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your jo
 You are being dispatched through Clio's internal Scout shadow agent. Use Scout's read-only tools only when the structured <bootstrap-input> is insufficient. Do not write files, run tests, or use external sources. For this bootstrap task, the JSON-only response contract below overrides Scout's normal evidence-report format.
 
 You will be given:
+- The repository-derived project name. Return it exactly as projectName; do not substitute a path or invent a brand.
 - The detected project type.
-- The existing CLIO.md when one is present. Treat it as the primary source of truth for project-specific guidance. Preserve useful manual sections unless they are clearly obsolete from inspected evidence.
-- A structural digest from the codewiki index: module count, entry points, and top directories. Ground the identity and any architecture sections in this real structure; do not invent files.
+- The existing CLIO.md when one is present. Treat it as evidence; Clio preserves its human-owned fields outside your response.
+- A structural digest from the codewiki index: module count, entry points, and top directories. Ground architecture sections in this real structure; do not invent files.
 - A sanitized adoption scan of project-local agent configs, including Claude Code context files and skills (CLAUDE.md, .claude/CLAUDE.md, project settings/commands/agents/skills), Codex (AGENTS.md, CODEX.md, .codex/AGENTS.md, .codex/skills), Gemini (GEMINI.md, .gemini/GEMINI.md, .gemini config/rules), Cursor (.cursor/rules/*.mdc and *.md), OpenCode (.opencode/skills), and GitHub Copilot (.github/copilot-instructions.md, .github/skills).
 - Global user preferences only when the user explicitly opted in.
 
-Produce a proposed CLIO.md draft with these possible sections:
+Clio's deterministic evidence layer owns the final project name, identity, conventions, hard invariants, navigation section, repository shape, agent-context provenance, verification policy, and artifact policy. Set projectName to the supplied expectedProjectName, keep identity to one short sentence, and return empty conventions and invariants arrays. Your only enrichment is one or two extractive custom H2 sections. When adoption.sourceCount is greater than zero, always return an "Architecture evidence" section whose body contains two to five exact, high-value source lines copied from siblingFiles, without their Markdown headings. An optional "Workflow evidence" section may contain exact lines about traps or failure modes. When no suitable source lines exist, sections may be empty. Do not synthesize connecting prose: every retained line must occur verbatim in the supplied evidence.
 
-1. Identity. One paragraph, at most four sentences and at most 600 characters. The project name as H1, then a paragraph naming the stack, role, and what the project is. Do not list project files. Do not state language-generic conventions. Do not include build commands.
+Copy commands, file paths, symbols, and version constraints exactly from supplied evidence. Never repair, combine, or paraphrase a shell command. Never invent API endpoints or examples. Do not use fenced code blocks. Keep the complete custom-section payload between 300 and 1200 bytes.
 
-2. Conventions. Zero to six bullet points, each at most 200 characters. Project-specific verifiable rules only. If sibling agent-context files contain such rules, distill them. If they do not, omit the section.
+When the input is insufficient, query the existing index with code_nav modes symbol, path, entries, outline, deps, dependents, or wiki before using broader read-only tools.
 
-3. Hard invariants. Zero to three numbered rules, each at most 280 characters. Only include rules the project enforces at build time. If the project has none, omit the section.
-
-4. Custom H2 sections. Prefer four to eight sections when the repository structure supports them, each with a title and markdown body. Use these for repository-specific architecture boundaries, ownership boundaries, context-retrieval strategy, generated/local artifact policy, workflow traps, failure modes, and verification expectations that are not obvious from the language. Keep each section dense and actionable for a coding agent. Do not add generic "how to build/test" guidance. If an existing CLIO.md is supplied, preserve its useful custom sections instead of replacing them with generic architecture prose.
-If you include context-retrieval or navigation guidance, reference the code_nav tool with modes symbol, path, entries, outline, deps, dependents, and wiki. Never invent or assume other navigation tool names.
-
-5. Imported agent context. Only when adoption mode is requested. Use the scanner-provided provenance, conflict policy, adopted rules, conflicts, and rejected source summaries.
-
-Total CLIO.md size target: 2500-8000 bytes without adoption, or compact and provenance-rich with adoption.
-
-CLIO.md is a versioned, human-owned project handbook equivalent to CLAUDE.md, AGENTS.md, and GEMINI.md. It may be generated or updated by context-init, but it is not an ignored transient artifact. Do not tell agents to avoid committing CLIO.md, do not call CLIO.md disposable, and do not describe it as generated state. The generated/local artifact policy applies to .clio/* state, proposals, codewiki data, caches, and handoff files unless the repository explicitly says otherwise. If you include an artifact policy section, state that CLIO.md is versioned and .clio/* is ignored local state unless explicitly force-added.
+CLIO.md is a versioned, human-owned handbook. Do not call it disposable or generated state. Do not emit an artifact-policy section; Clio appends the canonical one.
 
 Do not invent ownership teams, review requirements, release processes, module export conventions, migration requirements, or file counts unless they are present in the input or verified by Scout tools.
 
-Do not include a project map, file tree, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, generated state, or fingerprint metadata. Build/test commands are appropriate only when they are project-specific verification expectations an agent should actually run. If adoption mode is requested, add only the sanitized provenance section supplied by the scanner rather than concatenating raw source files.
+Do not include a project map, file tree, dependency inventory, language-idiom list, preferences, communication style content, secrets, credentials, auth tokens, caches, histories, generated state, fingerprint metadata, or imported-context provenance. Clio adds those deterministic surfaces after parsing.
 
 Return one assistant message containing only compact JSON with this exact shape. Do not include markdown fences, prose, explanation, or commentary:
 {
@@ -46,8 +38,42 @@ Return one assistant message containing only compact JSON with this exact shape.
   "sections": [{ "title": "string", "body": "markdown string" }]
 }`;
 
+/** Provider-enforced counterpart to the JSON contract in BOOTSTRAP_PROMPT. */
+export const BOOTSTRAP_OUTPUT_JSON_SCHEMA = {
+	type: "object",
+	additionalProperties: false,
+	required: ["projectName", "identity", "conventions", "invariants", "sections"],
+	properties: {
+		// Keep the provider schema to llama.cpp's portable grammar subset.
+		// parseBootstrapModelOutput enforces all string and array bounds below.
+		projectName: { type: "string" },
+		identity: { type: "string" },
+		conventions: {
+			type: "array",
+			items: { type: "string" },
+		},
+		invariants: {
+			type: "array",
+			items: { type: "string" },
+		},
+		sections: {
+			type: "array",
+			items: {
+				type: "object",
+				additionalProperties: false,
+				required: ["title", "body"],
+				properties: {
+					title: { type: "string" },
+					body: { type: "string" },
+				},
+			},
+		},
+	},
+} satisfies Record<string, unknown>;
+
 export interface BootstrapPromptInput {
 	cwd: string;
+	expectedProjectName?: string;
 	projectType: ProjectType;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	adoption: AdoptionScanResult;
@@ -56,33 +82,118 @@ export interface BootstrapPromptInput {
 }
 
 function truncate(value: string, max: number): string {
-	return value.length <= max ? value : `${value.slice(0, max)}\n[truncated]`;
+	if (value.length <= max) return value;
+	const marker = "\n[truncated]";
+	if (max <= marker.length) return value.slice(0, max);
+	return `${value.slice(0, max - marker.length)}${marker}`;
 }
 
-function sourceSummary(file: SiblingContextFile): Record<string, unknown> {
-	return {
+export const BOOTSTRAP_INPUT_MAX_CHARS = 48_000;
+export const BOOTSTRAP_SIBLING_MAX_FILES = 12;
+export const BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS = 12_000;
+
+function sourceSummaries(
+	files: ReadonlyArray<SiblingContextFile>,
+	adoption: AdoptionScanResult,
+): Array<Record<string, unknown>> {
+	const selected = files.slice(0, BOOTSTRAP_SIBLING_MAX_FILES);
+	const perFileLimit = Math.min(
+		3000,
+		Math.max(1, Math.floor(BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS / Math.max(1, selected.length))),
+	);
+	const displayPath = new Map(adoption.sources.map((source) => [source.path, source.displayPath] as const));
+	return selected.map((file) => ({
 		scope: file.source,
-		path: file.path,
-		content: truncate(file.content, 4000),
-	};
+		path: truncate(displayPath.get(file.path) ?? file.path, 240),
+		content: truncate(file.content, perFileLimit),
+	}));
+}
+
+function compactImportedRules(adoption: AdoptionScanResult): Array<Record<string, unknown>> {
+	return adoption.importedRules.slice(0, 12).map((rule) => ({
+		text: truncate(rule.text, 240),
+		sources: rule.sources.slice(0, 2).map((source) => truncate(source, 160)),
+		providers: rule.providers.slice(0, 2).map((provider) => truncate(provider, 80)),
+		...(rule.conflictKey ? { conflictKey: truncate(rule.conflictKey, 80) } : {}),
+	}));
+}
+
+function compactConflicts(adoption: AdoptionScanResult): Array<Record<string, unknown>> {
+	return adoption.conflicts.slice(0, 6).map((conflict) => ({
+		key: truncate(conflict.key, 80),
+		kept: truncate(conflict.kept, 240),
+		keptSources: conflict.keptSources.slice(0, 2).map((source) => truncate(source, 160)),
+		skipped: conflict.skipped.slice(0, 1).map((skipped) => ({
+			text: truncate(skipped.text, 240),
+			source: truncate(skipped.source, 160),
+			provider: truncate(skipped.provider, 80),
+		})),
+	}));
+}
+
+function compactRejected(adoption: AdoptionScanResult): Array<Record<string, unknown>> {
+	return adoption.rejected.slice(0, 8).map((rejected) => ({
+		path: truncate(rejected.displayPath, 240),
+		scope: rejected.scope,
+		...(rejected.provider ? { provider: rejected.provider } : {}),
+		reason: truncate(rejected.reason, 160),
+	}));
 }
 
 export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
+	const siblingFiles = sourceSummaries(input.siblingFiles, input.adoption);
+	const importedRules = compactImportedRules(input.adoption);
+	const conflicts = compactConflicts(input.adoption);
+	const rejected = compactRejected(input.adoption);
+	const adoption = {
+		includeGlobal: input.adoption.includeGlobal,
+		sourceCount: input.adoption.sources.length,
+		presentedSourceCount: siblingFiles.length,
+		importedRuleCount: input.adoption.importedRules.length,
+		conflictCount: input.adoption.conflicts.length,
+		rejectedCount: input.adoption.rejected.length,
+		importedRules,
+		conflicts,
+		rejected,
+	};
 	const payload = {
-		cwd: input.cwd,
+		projectRoot: ".",
+		expectedProjectName: truncate(input.expectedProjectName ?? "Project", 80),
 		projectType: input.projectType,
 		...(input.existingClioMdText ? { existingClioMd: truncate(input.existingClioMdText, 8000) } : {}),
 		...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
-		siblingFiles: input.siblingFiles.map(sourceSummary),
-		adoption: {
-			includeGlobal: input.adoption.includeGlobal,
-			sourceCount: input.adoption.sources.length,
-			importedRules: input.adoption.importedRules,
-			conflicts: input.adoption.conflicts,
-			rejected: input.adoption.rejected,
-		},
+		siblingFiles,
+		adoption,
 	};
-	return `${BOOTSTRAP_PROMPT}\n\n<bootstrap-input>\n${JSON.stringify(payload, null, 2)}\n</bootstrap-input>`;
+	let serialized = JSON.stringify(payload);
+	while (serialized.length > BOOTSTRAP_INPUT_MAX_CHARS) {
+		if (rejected.length > 0) rejected.pop();
+		else if (conflicts.length > 0) conflicts.pop();
+		else if (siblingFiles.length > 1) siblingFiles.pop();
+		else if (importedRules.length > 1) importedRules.pop();
+		else break;
+		adoption.presentedSourceCount = siblingFiles.length;
+		serialized = JSON.stringify(payload);
+	}
+	if (serialized.length > BOOTSTRAP_INPUT_MAX_CHARS) {
+		serialized = JSON.stringify({
+			projectRoot: ".",
+			expectedProjectName: truncate(input.expectedProjectName ?? "Project", 80),
+			projectType: input.projectType,
+			...(input.existingClioMdText ? { existingClioMd: truncate(input.existingClioMdText, 2000) } : {}),
+			...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
+			siblingFiles: [],
+			adoption: {
+				includeGlobal: input.adoption.includeGlobal,
+				sourceCount: input.adoption.sources.length,
+				presentedSourceCount: 0,
+				importedRuleCount: input.adoption.importedRules.length,
+				conflictCount: input.adoption.conflicts.length,
+				rejectedCount: input.adoption.rejected.length,
+			},
+		});
+	}
+	return `${BOOTSTRAP_PROMPT}\n\n<bootstrap-input>\n${serialized}\n</bootstrap-input>`;
 }
 
 function extractJsonObject(text: string): unknown {

@@ -23,10 +23,19 @@ import { compile } from "../../src/domains/prompts/compiler.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
+import { createPromptsDomainModule, PromptsManifest } from "../../src/domains/prompts/index.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 
 const scratchRoots: string[] = [];
+
+describe("contracts/prompts domain dependencies", () => {
+	it("drops the context dependency only when project context files are suppressed", () => {
+		ok(PromptsManifest.dependsOn.includes("context"));
+		ok(createPromptsDomainModule().manifest.dependsOn.includes("context"));
+		strictEqual(createPromptsDomainModule({ noContextFiles: true }).manifest.dependsOn.includes("context"), false);
+	});
+});
 
 afterEach(() => {
 	for (const root of scratchRoots.splice(0)) {

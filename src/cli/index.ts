@@ -82,18 +82,13 @@ async function main(argv: string[]): Promise<number> {
 		printError(versionError);
 		return 1;
 	}
-	const { apiKey, rest: afterApiKey, error: apiKeyError } = extractApiKeyFlag(argv, isRecognizedSubcommand);
+	const { apiKey, rest: afterApiKey, error: apiKeyError } = extractApiKeyFlag(argv, isCommandToken);
 	if (apiKeyError) {
 		printError(apiKeyError);
 		return 2;
 	}
 	const { noContextFiles, rest: afterNoContextFiles } = extractNoContextFilesFlag(afterApiKey);
-	const {
-		noSkills,
-		skillPaths,
-		rest,
-		error: skillError,
-	} = extractSkillsFlags(afterNoContextFiles, isRecognizedSubcommand);
+	const { noSkills, skillPaths, rest, error: skillError } = extractSkillsFlags(afterNoContextFiles, isCommandToken);
 	if (skillError) {
 		printError(skillError);
 		return 2;
@@ -152,9 +147,6 @@ const RECOGNIZED_SUBCOMMANDS = new Set<string>([
 	"export",
 	"import",
 	"context",
-	"context-init",
-	"context-index",
-	"context-clear",
 	"run",
 	"doctor",
 	"paths",
@@ -164,8 +156,12 @@ const RECOGNIZED_SUBCOMMANDS = new Set<string>([
 	"version",
 ]);
 
-function isRecognizedSubcommand(token: string): boolean {
-	return RECOGNIZED_SUBCOMMANDS.has(token);
+// Retired commands are not dispatchable, but remain command-shaped tombstones
+// so top-level value flags cannot consume them and accidentally boot another mode.
+const RETIRED_SUBCOMMANDS = new Set<string>(["context-init", "context-index", "context-clear"]);
+
+function isCommandToken(token: string): boolean {
+	return RECOGNIZED_SUBCOMMANDS.has(token) || RETIRED_SUBCOMMANDS.has(token);
 }
 
 /**
@@ -228,12 +224,6 @@ async function dispatch(
 			return (await import("./share.js")).runImportCommand(subArgs);
 		case "context":
 			return (await import("./context.js")).runContextCommand(subArgs);
-		case "context-init":
-			return (await import("./init.js")).runInitCommand(subArgs);
-		case "context-index":
-			return (await import("./context-index.js")).runContextIndexCommand(subArgs);
-		case "context-clear":
-			return (await import("./context-clear.js")).runContextClearCommand(subArgs);
 		case "run":
 			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
 		case "doctor":

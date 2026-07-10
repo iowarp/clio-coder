@@ -869,6 +869,24 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	);
 }
 
+/** Fail closed until another runtime has an explicitly tested JSON-schema wire contract. */
+function assertResponseSchemaEnforceable(
+	runtime: RuntimeDescriptor,
+	capabilities: CapabilityFlags | null,
+	responseSchema: Record<string, unknown> | undefined,
+): void {
+	if (responseSchema === undefined) return;
+	if (runtime.id === "llamacpp" && runtime.kind === "http" && runtime.apiFamily === "openai-completions") {
+		if (capabilities?.structuredOutputs === "json-schema") return;
+		throw new Error(
+			"dispatch: responseSchema requires resolved structuredOutputs='json-schema'; the selected llama.cpp target/model reports no enforceable schema support",
+		);
+	}
+	throw new Error(
+		`dispatch: responseSchema requires the native llamacpp runtime; runtime '${runtime.id}' cannot enforce it`,
+	);
+}
+
 function acpRuntimeLimitations(): string[] {
 	return ["external ACP agent executes its own tools; Clio mediates permission requests and records decisions"];
 }
@@ -961,6 +979,7 @@ function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyCon
 }
 
 export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
+	assertResponseSchemaEnforceable(input.target.runtime, input.target.modelCapabilities, input.req.responseSchema);
 	const spec: WorkerSpec = {
 		specVersion: WORKER_SPEC_VERSION,
 		systemPrompt: input.systemPrompt,
@@ -978,6 +997,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		allowedTools: input.admission.allowedTools,
 		middlewareSnapshot: input.middlewareSnapshot,
 	};
+	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	// Carry the operator's configured model ids so the worker subprocess (whose
@@ -1429,16 +1449,18 @@ export function createDispatchBundle(
 	const maybeAgents = context.getContract<AgentsContract>("agents");
 	const maybeProviders = context.getContract<ProvidersContract>("providers");
 	const maybeMiddleware = context.getContract<MiddlewareContract>("middleware");
+	const maybeScheduling = context.getContract<SchedulingContract>("scheduling");
 	if (!maybeSafety) throw new Error("dispatch domain requires 'safety' contract");
 	if (!maybeAgents) throw new Error("dispatch domain requires 'agents' contract");
 	if (!maybeProviders) throw new Error("dispatch domain requires 'providers' contract");
 	if (!maybeMiddleware) throw new Error("dispatch domain requires 'middleware' contract");
+	if (!maybeScheduling) throw new Error("dispatch domain requires 'scheduling' contract");
 	const safety: SafetyContract = maybeSafety;
 	const agents: AgentsContract = maybeAgents;
 	const providers: ProvidersContract = maybeProviders;
 	const middleware: MiddlewareContract = maybeMiddleware;
+	const scheduling: SchedulingContract = maybeScheduling;
 	const config = context.getContract<ConfigContract>("config");
-	const scheduling = context.getContract<SchedulingContract>("scheduling");
 	// Optional: absent in minimal test bundles. Workers just get no project
 	// message when the context domain is not loaded.
 	const projectContext = context.getContract<ContextContract>("context");
@@ -1907,24 +1929,20 @@ export function createDispatchBundle(
 		const wireModelId = lifecycle.agentConfig.id;
 		assertTargetNotCoolingDown(targetId, runtimeId, wireModelId);
 
-		if (scheduling) {
-			const preflight = scheduling.preflight();
-			if (preflight.verdict === "over" || preflight.verdict === "at") {
-				denyDispatchForBudget(preflight, req.agentId);
-			}
+		const preflight = scheduling.preflight();
+		if (preflight.verdict === "over" || preflight.verdict === "at") {
+			denyDispatchForBudget(preflight, req.agentId);
 		}
 
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {
-			if (!workerSlotHeld || !scheduling) return;
+			if (!workerSlotHeld) return;
 			workerSlotHeld = false;
 			scheduling.releaseWorker();
 		};
-		if (scheduling) {
-			workerSlotHeld = scheduling.tryAcquireWorker();
-			if (!workerSlotHeld) {
-				throw new DispatchConcurrencyError(scheduling.activeWorkers());
-			}
+		workerSlotHeld = scheduling.tryAcquireWorker();
+		if (!workerSlotHeld) {
+			throw new DispatchConcurrencyError(scheduling.activeWorkers());
 		}
 
 		// Resolve the ledger before starting the ACP process: an external agent
@@ -2465,7 +2483,16 @@ export function createDispatchBundle(
 		if (!validated.ok) {
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
+		// Carry the normalized, detached spec from this point forward. In
+		// particular, responseSchema must not retain a caller-owned reference across
+		// the asynchronous target-resolution window below.
+		req = { ...req, ...validated.spec };
 		if (req.delegationAgentId) {
+			if (req.responseSchema !== undefined) {
+				throw new Error(
+					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
+				);
+			}
 			// An external ACP agent runs its own tool loop, so Clio cannot mediate
 			// per-tool writes and cannot honor write-root confinement. Fail closed
 			// rather than accept a guarantee we cannot keep.
@@ -2478,27 +2505,24 @@ export function createDispatchBundle(
 		}
 
 		const lifecycle = await resolveLifecycle(req);
+		assertResponseSchemaEnforceable(lifecycle.target.runtime, lifecycle.target.modelCapabilities, req.responseSchema);
 		assertTargetNotCoolingDown(lifecycle.target.target.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
 
-		if (scheduling) {
-			const preflight = scheduling.preflight();
-			if (preflight.verdict === "over" || preflight.verdict === "at") {
-				denyDispatchForBudget(preflight, req.agentId);
-			}
+		const preflight = scheduling.preflight();
+		if (preflight.verdict === "over" || preflight.verdict === "at") {
+			denyDispatchForBudget(preflight, req.agentId);
 		}
 
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {
-			if (!workerSlotHeld || !scheduling) return;
+			if (!workerSlotHeld) return;
 			workerSlotHeld = false;
 			scheduling.releaseWorker();
 		};
 
-		if (scheduling) {
-			workerSlotHeld = scheduling.tryAcquireWorker();
-			if (!workerSlotHeld) {
-				throw new DispatchConcurrencyError(scheduling.activeWorkers());
-			}
+		workerSlotHeld = scheduling.tryAcquireWorker();
+		if (!workerSlotHeld) {
+			throw new DispatchConcurrencyError(scheduling.activeWorkers());
 		}
 
 		// Resolve the ledger before spawning: a worker subprocess must never

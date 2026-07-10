@@ -44,7 +44,7 @@ export async function runContextClear(input: RunContextClearInput = {}): Promise
 	const cwd = input.cwd ?? process.cwd();
 	const confirmed = await input.confirmContext?.();
 	if (confirmed !== true) {
-		out(input.io, "clio context-clear cancelled; no files removed.\n");
+		out(input.io, "clio context reset cancelled; no files removed.\n");
 		return { action: "cancelled", removed: [], preserved: [...PRESERVED_CONTEXT_PATHS] };
 	}
 
@@ -64,7 +64,7 @@ export async function runContextClear(input: RunContextClearInput = {}): Promise
 	out(
 		input.io,
 		[
-			`clio context-clear removed ${removed.length === 0 ? "nothing" : removed.join(", ")}`,
+			`clio context reset removed ${removed.length === 0 ? "nothing" : removed.join(", ")}`,
 			`  preserved ${preserved.join(", ")}`,
 			"",
 		].join("\n"),

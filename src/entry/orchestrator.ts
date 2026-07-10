@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import chalk from "chalk";
-import { modelBootstrapGenerate } from "../cli/bootstrap-generate.js";
+import { modelBootstrapGenerate, resolveBootstrapScoutRoute } from "../cli/bootstrap-generate.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
@@ -1136,7 +1136,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							includeGlobalImports?: boolean;
 							heuristic?: boolean;
 						},
-						_runIo?: RunIo,
+						runIo?: RunIo,
 					) => {
 						// Interactive context-init explores the repo with the configured target by
 						// default, grounded in the freshly built codewiki, and falls back to the
@@ -1153,7 +1153,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								? {
 										generate: modelBootstrapGenerate({
 											dispatch,
-											onFallback: () => undefined,
+											resolveRoute: () => {
+												if (!config) throw new Error("bootstrap Scout configuration unavailable");
+												return resolveBootstrapScoutRoute(config.get());
+											},
+											onFallback: (err, mode) =>
+												runIo?.stderr(
+													`context init: Scout unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,
+												),
 										}),
 										modelId: "configured-clio-target",
 									}

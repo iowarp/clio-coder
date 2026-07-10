@@ -1,5 +1,7 @@
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { classifyCHeaderLanguage } from "../../../core/c-header-language.js";
+import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
 
 export type SourceProjectType =
 	| "typescript"
@@ -37,22 +39,6 @@ const SOURCE_LANGUAGES: ReadonlyArray<SourceProjectType> = [
 	"c#",
 ];
 
-const EXCLUDED_DIRS = new Set([
-	".git",
-	".clio",
-	".hg",
-	".svn",
-	"node_modules",
-	"dist",
-	"build",
-	"coverage",
-	".venv",
-	"venv",
-	"__pycache__",
-	"target",
-	"vendor",
-]);
-
 const EXTENSION_LANGUAGES = new Map<string, SourceProjectType>([
 	[".ts", "typescript"],
 	[".tsx", "typescript"],
@@ -74,6 +60,8 @@ const EXTENSION_LANGUAGES = new Map<string, SourceProjectType>([
 	[".hpp", "c++"],
 	[".hh", "c++"],
 	[".hxx", "c++"],
+	[".cu", "c++"],
+	[".cuh", "c++"],
 	[".java", "java"],
 	[".rb", "ruby"],
 	[".cs", "c#"],
@@ -126,49 +114,36 @@ function countManifest(name: string, manifestCounts: Partial<Record<SourceProjec
 	}
 }
 
-function scanTree(
-	dir: string,
+function scanFiles(
+	cwd: string,
+	files: ReadonlyArray<string>,
 	languageCounts: Record<SourceProjectType, number>,
 	manifestCounts: Partial<Record<SourceProjectType, number>>,
 ): void {
-	let entries: import("node:fs").Dirent[];
-	try {
-		entries = readdirSync(dir, { withFileTypes: true });
-	} catch {
-		return;
-	}
-	for (const entry of entries) {
-		if (entry.isDirectory()) {
-			if (EXCLUDED_DIRS.has(entry.name)) continue;
-			scanTree(join(dir, entry.name), languageCounts, manifestCounts);
-			continue;
+	for (const path of files) {
+		const name = path.split("/").pop() ?? path;
+		countManifest(name, manifestCounts);
+		if (name.endsWith(".d.ts")) continue;
+		const extension = extensionOf(name);
+		let language = EXTENSION_LANGUAGES.get(extension);
+		if (extension === ".h") {
+			try {
+				language = classifyCHeaderLanguage(readFileSync(join(cwd, path), "utf8"));
+			} catch {
+				language = "c";
+			}
 		}
-		if (!entry.isFile()) continue;
-		countManifest(entry.name, manifestCounts);
-		if (entry.name.endsWith(".d.ts")) continue;
-		const language = EXTENSION_LANGUAGES.get(extensionOf(entry.name));
 		if (language) languageCounts[language] += 1;
 	}
 }
 
-function looksLikeDotfiles(cwd: string): boolean {
-	let entries: string[];
-	try {
-		entries = readdirSync(cwd);
-	} catch {
-		return false;
+function looksLikeDotfiles(files: ReadonlyArray<string>): boolean {
+	const dotDirs = new Set<string>();
+	for (const path of files) {
+		const [root, child] = path.split("/", 2);
+		if (child && root?.startsWith("dot-")) dotDirs.add(root);
 	}
-	let dotDirs = 0;
-	for (const name of entries) {
-		if (!name.startsWith("dot-")) continue;
-		try {
-			if (statSync(join(cwd, name)).isDirectory()) dotDirs += 1;
-		} catch {
-			// ignore unreadable entries
-		}
-		if (dotDirs >= 2) return true;
-	}
-	return false;
+	return dotDirs.size >= 2;
 }
 
 function dominantFromCounts(
@@ -191,7 +166,8 @@ function dominantFromCounts(
 export function detectProjectProfile(cwd: string): ProjectTypeProfile {
 	const languageCounts = emptyLanguageCounts();
 	const manifestCounts: Partial<Record<SourceProjectType, number>> = {};
-	scanTree(cwd, languageCounts, manifestCounts);
+	const files = enumerateWorkspaceFiles(cwd);
+	scanFiles(cwd, files, languageCounts, manifestCounts);
 	const sourceFiles = SOURCE_LANGUAGES.reduce((sum, language) => sum + languageCounts[language], 0);
 	const dominantSource = dominantFromCounts(languageCounts);
 	const dominantCount = dominantSource ? languageCounts[dominantSource] : 0;
@@ -228,7 +204,7 @@ export function detectProjectProfile(cwd: string): ProjectTypeProfile {
 		};
 	}
 	return {
-		projectType: looksLikeDotfiles(cwd) ? "dotfiles" : "unknown",
+		projectType: looksLikeDotfiles(files) ? "dotfiles" : "unknown",
 		sourceFiles,
 		languageCounts,
 		manifestCounts,

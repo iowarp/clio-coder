@@ -136,7 +136,7 @@ describe("contracts/codewiki", () => {
 		rmSync(scratch, { recursive: true, force: true });
 	});
 
-	it("writes v4 normalized files, symbols, imports, hashes, summaries, and edges", async () => {
+	it("writes v5 normalized files, symbols, imports, hashes, summaries, and edges", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(
 			join(scratch, "src", "index.ts"),
@@ -165,7 +165,7 @@ describe("contracts/codewiki", () => {
 		deepStrictEqual(JSON.parse(serialized), codewiki);
 		const read = readCodewiki(scratch);
 		ok(read);
-		strictEqual(read.version, 4);
+		strictEqual(read.version, 5);
 		strictEqual(read.files.find((file) => file.path === "src/index.ts")?.role, "entry");
 		strictEqual(read.files.find((file) => file.path === "src/math.test.ts")?.role, "test");
 		strictEqual(read.files.find((file) => file.path === "src/worker.ts")?.role, "module");
@@ -182,7 +182,7 @@ describe("contracts/codewiki", () => {
 	});
 
 	it("indexes the whole tree when a grammar crashes on one file", async () => {
-		// Some web-tree-sitter grammars throw on otherwise valid input. A single crashing
+		// Some tree-sitter grammars throw on otherwise valid input. A single crashing
 		// file must degrade to no extraction for that file, never abort the whole build.
 		mkdirSync(join(scratch, "fixtures"), { recursive: true });
 		writeFileSync(
@@ -243,7 +243,7 @@ describe("contracts/codewiki", () => {
 		strictEqual(readCodewiki(scratch), null);
 	});
 
-	it("upgrades v2 and v3 codewiki files to degraded v4 on read", async () => {
+	it("upgrades v2 and v3 codewiki files to degraded v5 on read", async () => {
 		mkdirSync(join(scratch, ".clio"), { recursive: true });
 		writeFileSync(
 			join(scratch, ".clio", "codewiki.json"),
@@ -261,7 +261,7 @@ describe("contracts/codewiki", () => {
 
 		const read = readCodewiki(scratch);
 		ok(read);
-		strictEqual(read.version, 4);
+		strictEqual(read.version, 5);
 		strictEqual(read.files.find((file) => file.path === "src/index.ts")?.role, "entry");
 		deepStrictEqual(read.files.find((file) => file.path === "src/index.ts")?.imports, []);
 		strictEqual(read.files.find((file) => file.path === "src/index.ts")?.hash, "");
@@ -285,7 +285,7 @@ describe("contracts/codewiki", () => {
 
 		const upgradedV3 = readCodewiki(scratch);
 		ok(upgradedV3);
-		strictEqual(upgradedV3.version, 4);
+		strictEqual(upgradedV3.version, 5);
 		strictEqual(upgradedV3.files.find((file) => file.path === "src/index.ts")?.hash, "");
 		deepStrictEqual(upgradedV3.files.find((file) => file.path === "src/index.ts")?.imports, []);
 		strictEqual(codewikiNeedsBackfill(upgradedV3), true);
@@ -297,7 +297,7 @@ describe("contracts/codewiki", () => {
 		strictEqual(codewikiNeedsBackfill(rebuilt), false);
 	});
 
-	it("strips legacy signature fields from unsupported symbol kinds on read", () => {
+	it("migrates v4 for a full extraction backfill and strips unsupported signature fields", () => {
 		mkdirSync(join(scratch, ".clio"), { recursive: true });
 		writeFileSync(
 			join(scratch, ".clio", "codewiki.json"),
@@ -330,6 +330,9 @@ describe("contracts/codewiki", () => {
 
 		const read = readCodewiki(scratch);
 		ok(read);
+		strictEqual(read.version, 5);
+		strictEqual(read.files[0]?.hash, "");
+		strictEqual(codewikiNeedsBackfill(read), true);
 		strictEqual(symbolFor(read, "src/legacy.ts", "main", "func")?.sig, "export function main() {}");
 		strictEqual(symbolFor(read, "src/legacy.ts", "Service", "class")?.sig, "export class Service {}");
 		strictEqual(symbolFor(read, "src/legacy.ts", "value", "const")?.sig, undefined);
@@ -359,7 +362,7 @@ describe("contracts/codewiki", () => {
 		ok(codewiki.symbols.some((symbol) => symbol.name === "run" && symbol.kind === "func"));
 	});
 
-	it("uses web-tree-sitter extraction in the unified builder", async () => {
+	it("uses tree-sitter extraction in the unified builder", async () => {
 		mkdirSync(join(scratch, "src"), { recursive: true });
 		writeFileSync(join(scratch, "src", "stream.ts"), "export function* stream() {\n  yield 1;\n}\n", "utf8");
 
@@ -756,7 +759,7 @@ describe("contracts/codewiki", () => {
 		const codewiki = await buildCodewiki({ cwd: scratch, language: "typescript" });
 		const digest = renderCodewikiDigest(codewiki, 200);
 
-		ok(digest.includes("codewiki v4 language=typescript"));
+		ok(digest.includes("codewiki v5 language=typescript"));
 		ok(digest.includes("areas: src=2"));
 		ok(digest.includes("- src/index.ts"));
 		ok(digest.includes("Starts the digest entry."));
@@ -782,11 +785,11 @@ describe("contracts/codewiki", () => {
 
 		const loaded = await loadCodewikiForTool(scratch);
 		if (!loaded.ok) throw new Error(loaded.message);
-		strictEqual(loaded.codewiki.version, 4);
+		strictEqual(loaded.codewiki.version, 5);
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "rebuilt"));
 		ok(existsSync(join(scratch, ".clio", "codewiki.json")));
 		ok(existsSync(join(scratch, ".clio", "state.json")));
-		strictEqual(readClioState(scratch)?.codewikiVersion, 4);
+		strictEqual(readClioState(scratch)?.codewikiVersion, 5);
 	});
 
 	it("backfills degraded upgraded codewiki artifacts on tool demand", async () => {
@@ -866,7 +869,7 @@ describe("contracts/codewiki", () => {
 		await runContextRefresh({ cwd: scratch });
 		const refreshed = readCodewiki(scratch);
 		ok(refreshed);
-		strictEqual(readClioState(scratch)?.codewikiVersion, 4);
+		strictEqual(readClioState(scratch)?.codewikiVersion, 5);
 
 		const originalCwd = process.cwd();
 		process.chdir(scratch);
@@ -878,7 +881,7 @@ describe("contracts/codewiki", () => {
 		}
 		const indexed = readCodewiki(scratch);
 		ok(indexed);
-		strictEqual(readClioState(scratch)?.codewikiVersion, 4);
+		strictEqual(readClioState(scratch)?.codewikiVersion, 5);
 		deepStrictEqual(indexed, refreshed);
 	});
 

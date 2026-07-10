@@ -1,4 +1,5 @@
 import type { BootstrapProgressEvent } from "../domains/context/index.js";
+import type { BootstrapGenerationState } from "../domains/context/state.js";
 
 const HELP = `Usage:
   clio context
@@ -23,6 +24,34 @@ function printWikiProgress(event: BootstrapProgressEvent): void {
 	process.stderr.write(`clio context wiki: ${event.message}${detail}\n`);
 }
 
+function compactMetric(value: number, suffix: string): string {
+	if (value < 1000) return `${value}${suffix}`;
+	return `${(value / 1000).toFixed(1)}k${suffix}`;
+}
+
+function formatGenerationStatus(generation: BootstrapGenerationState | undefined): string | null {
+	if (!generation) return null;
+	const details: string[] = [`parser ${generation.parserOutcome}`];
+	const route = [generation.targetId, generation.wireModelId, generation.runtimeId].filter(
+		(value): value is string => typeof value === "string",
+	);
+	if (route.length > 0) details.push(route.join("/"));
+	const usage: string[] = [];
+	if (generation.tokenCount !== undefined) usage.push(`${generation.tokenCount} tokens`);
+	if (generation.toolCalls !== undefined) usage.push(`${generation.toolCalls} tools`);
+	if (generation.durationMs !== undefined) usage.push(`${(generation.durationMs / 1000).toFixed(2)}s`);
+	if (generation.promptBytes !== undefined && generation.outputBytes !== undefined) {
+		usage.push(`${compactMetric(generation.promptBytes, "B")} in/${compactMetric(generation.outputBytes, "B")} out`);
+	}
+	if (usage.length > 0) details.push(usage.join(", "));
+	if (generation.fallbackReason) {
+		const reason =
+			generation.fallbackReason.length > 160 ? `${generation.fallbackReason.slice(0, 157)}...` : generation.fallbackReason;
+		details.push(`fallback: ${reason}`);
+	}
+	return `generation: ${generation.mode} (${details.join("; ")})`;
+}
+
 async function printContextStatus(): Promise<number> {
 	const context = await import("../domains/context/index.js");
 	const preload = await import("../domains/prompts/preload.js");
@@ -34,7 +63,7 @@ async function printContextStatus(): Promise<number> {
 		? "none"
 		: !clio.ok
 			? "malformed"
-			: state?.contextSources && state.contextSources.length > 0 && context.adoptionSourcesChanged(state.contextSources)
+			: state?.contextSources !== undefined && context.adoptionSourcesChanged(state.contextSources, { cwd })
 				? "stale"
 				: "ok";
 
@@ -55,8 +84,10 @@ async function printContextStatus(): Promise<number> {
 	if (codewiki) codewikiLines.push(context.renderCodewikiDigest(codewiki));
 
 	const adoptionSources = state?.contextSources ?? [];
-	const adoptionChanged = adoptionSources.length > 0 && context.adoptionSourcesChanged(adoptionSources);
+	const adoptionChanged =
+		state?.contextSources !== undefined ? context.adoptionSourcesChanged(adoptionSources, { cwd }) : false;
 	const adoptionState = adoptionChanged ? "changed (run clio context init --adopt)" : "up to date";
+	const generationLine = formatGenerationStatus(state?.lastBootstrap);
 
 	process.stdout.write(
 		[
@@ -64,6 +95,7 @@ async function printContextStatus(): Promise<number> {
 			`preload: ${preloadClass.label}`,
 			...codewikiLines,
 			`adoption: ${adoptionSources.length} source${adoptionSources.length === 1 ? "" : "s"}, ${adoptionState}`,
+			...(generationLine ? [generationLine] : []),
 			"",
 		].join("\n"),
 	);

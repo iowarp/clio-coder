@@ -9,6 +9,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { workerToolCallCapExceededReason } from "../../src/core/guardrails.js";
+import { RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES } from "../../src/core/response-schema.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
@@ -17,8 +18,10 @@ import type { ConfigContract } from "../../src/domains/config/contract.js";
 import {
 	buildDynamicPromptMessages,
 	buildStableSystemPrompt,
+	createDispatchBundle,
 	renderWorkerProjectContext,
 } from "../../src/domains/dispatch/extension.js";
+import { DispatchManifest } from "../../src/domains/dispatch/manifest.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
@@ -360,6 +363,18 @@ async function receiptForRuntime(input: {
 describe("contracts/dispatch", () => {
 	beforeEach(isolateDispatchState);
 	afterEach(restoreDispatchState);
+
+	it("declares and requires scheduling while keeping project context optional", () => {
+		strictEqual(DispatchManifest.dependsOn.includes("scheduling"), true);
+		strictEqual(DispatchManifest.dependsOn.includes("context"), false);
+		const base = stubContext();
+		const withoutScheduling: DomainContext = {
+			...base,
+			getContract: ((name: string) =>
+				name === "scheduling" ? undefined : base.getContract(name)) as DomainContext["getContract"],
+		};
+		throws(() => createDispatchBundle(withoutScheduling), /requires 'scheduling' contract/);
+	});
 
 	it("dispatches single task using a fake worker and returns exit receipt", async () => {
 		const context = stubContext();
@@ -1314,6 +1329,50 @@ describe("contracts/dispatch", () => {
 		const blank = validateJobSpec({ agentId: "documenter", task: "write wiki", writeRoots: [""] });
 		strictEqual(blank.ok, false);
 		if (!blank.ok) ok(blank.errors.some((error) => error.includes("writeRoots")));
+	});
+
+	it("validates responseSchema as a bounded plain JSON object", () => {
+		const schema = {
+			type: "object",
+			properties: { summary: { type: "string" } },
+			required: ["summary"],
+			additionalProperties: false,
+		};
+		const good = validateJobSpec({ agentId: "scout", task: "inspect repository", responseSchema: schema });
+		strictEqual(good.ok, true);
+		if (good.ok) {
+			deepStrictEqual(good.spec.responseSchema, schema);
+			notStrictEqual(good.spec.responseSchema, schema);
+			schema.properties.summary.type = "number";
+			deepStrictEqual(good.spec.responseSchema, {
+				type: "object",
+				properties: { summary: { type: "string" } },
+				required: ["summary"],
+				additionalProperties: false,
+			});
+		}
+
+		const circular: Record<string, unknown> = { type: "object" };
+		circular.self = circular;
+		const hookedRequired = ["summary"];
+		Object.defineProperty(hookedRequired, "toJSON", { value: () => ["summary"] });
+		const oversizedProperty = "x".repeat(RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES);
+		for (const responseSchema of [
+			[],
+			{ type: "object", invalid: undefined },
+			{ type: "object", invalid: new Date(0) },
+			circular,
+			{ type: 7 },
+			{ type: "object", properties: { summary: { type: "string" } }, required: "summary" },
+			{ type: "object", properties: {}, oneOf: [] },
+			{ type: "array" },
+			{ type: "object", properties: { summary: { type: "string" } }, required: hookedRequired },
+			{ type: "object", properties: { [oversizedProperty]: { type: "string" } } },
+		]) {
+			const result = validateJobSpec({ agentId: "scout", task: "inspect repository", responseSchema });
+			strictEqual(result.ok, false);
+			if (!result.ok) ok(result.errors.some((error) => error.includes("responseSchema")));
+		}
 	});
 
 	it("keeps memory before pipeline input and the stable system prompt untouched by dynamic context", () => {
@@ -3196,6 +3255,170 @@ rl.once("line", () => {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "stage wiki", writeRoots: roots });
 			await handle.finalPromise;
 			deepStrictEqual((capturedSpec as WorkerSpec | null)?.writeRoots, roots);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("threads responseSchema onto a native llama.cpp worker spec", async () => {
+		const target: TargetDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: "scout-model" };
+		const runtime: RuntimeDescriptor = {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: {
+				...EMPTY_CAPABILITIES,
+				chat: true,
+				tools: true,
+				structuredOutputs: "json-schema",
+			},
+			synthesizeModel: () => ({ id: "scout-model", provider: "llamacpp" }) as never,
+		};
+		const context = stubContext({ target, runtime });
+		const responseSchema = {
+			type: "object",
+			properties: { project: { type: "string" } },
+			required: ["project"],
+		};
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				capturedSpec = spec;
+				return {
+					pid: 4243,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: emptyEvents(),
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const dispatchPromise = bundle.contract.dispatch({ agentId: "coder", task: "inspect", responseSchema });
+			responseSchema.properties.project.type = "number";
+			const handle = await dispatchPromise;
+			await handle.finalPromise;
+			deepStrictEqual((capturedSpec as WorkerSpec | null)?.responseSchema, {
+				type: "object",
+				properties: { project: { type: "string" } },
+				required: ["project"],
+			});
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("refuses responseSchema when the resolved llama.cpp capability disables structured output", async () => {
+		const target: TargetDescriptor = { id: "mini", runtime: "llamacpp", defaultModel: "scout-model" };
+		const runtime: RuntimeDescriptor = {
+			id: "llamacpp",
+			displayName: "llama.cpp",
+			kind: "http",
+			apiFamily: "openai-completions",
+			auth: "none",
+			defaultCapabilities: {
+				...EMPTY_CAPABILITIES,
+				chat: true,
+				structuredOutputs: "json-schema",
+			},
+			synthesizeModel: () => ({ id: "scout-model", provider: "llamacpp" }) as never,
+		};
+		const context = stubContext({
+			target,
+			runtime,
+			status: { capabilities: { ...runtime.defaultCapabilities, structuredOutputs: "none" } },
+		});
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					task: "inspect",
+					responseSchema: { type: "object" },
+				}),
+				/resolved structuredOutputs='json-schema'/,
+			);
+			strictEqual(spawned, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("refuses responseSchema on non-llama.cpp and ACP runtimes before execution", async () => {
+		const context = stubContext();
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		const responseSchema = { type: "object" };
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "inspect", responseSchema }),
+				/responseSchema requires the native llamacpp runtime/,
+			);
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					task: "inspect",
+					delegationAgentId: "external-agent",
+					responseSchema,
+				}),
+				/responseSchema requires the native llamacpp runtime.*ACP delegation/,
+			);
+			strictEqual(spawned, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("refuses responseSchema on a subprocess runtime before spawning", async () => {
+		const target: TargetDescriptor = {
+			id: "subprocess-response-schema",
+			runtime: "claude-code",
+			defaultModel: "claude-sonnet",
+		};
+		const runtime: RuntimeDescriptor = {
+			id: "claude-code",
+			displayName: "Claude Code",
+			kind: "subprocess",
+			apiFamily: "claude-code-subprocess",
+			auth: "claude-cli",
+			defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+			synthesizeModel: () => ({ id: "claude-sonnet", provider: "claude-code" }) as never,
+		};
+		const context = stubContext({ target, runtime });
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "coder",
+					task: "inspect",
+					responseSchema: { type: "object" },
+				}),
+				/responseSchema requires the native llamacpp runtime/,
+			);
+			strictEqual(spawned, false);
 		} finally {
 			await bundle.extension.stop?.();
 		}

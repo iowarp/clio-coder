@@ -26,6 +26,7 @@ const defaultCapabilities: CapabilityFlags = {
 	chat: true,
 	tools: true,
 	toolCallFormat: "openai",
+	structuredOutputs: "json-schema",
 	reasoning: false,
 	vision: false,
 	audio: false,
