@@ -4,6 +4,9 @@ import { describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import type { TUI } from "../../src/engine/tui.js";
+import { visibleWidth } from "../../src/engine/tui.js";
+import { ClioEditor } from "../../src/interactive/clio-editor.js";
 import {
 	buildSlashAutocompleteCommands,
 	createSlashCommandAutocompleteProvider,
@@ -132,36 +135,28 @@ describe("contracts/slash-spec", () => {
 			["/help foo", { kind: "help", query: "foo" }],
 			["/help foo bar", { kind: "help", query: "foo bar" }],
 
-			// context init (hub) and the deprecated /context-init spelling
+			// context init is intentionally zero-argument in the interactive surface
 			["/context init", { kind: "init", options: {} }],
-			["/context init --preview", { kind: "init", options: { preview: true } }],
-			["/context init --adopt", { kind: "init", options: { adopt: true } }],
-			["/context init --apply", { kind: "init", options: { applyClioMd: true } }],
-			["/context init --rewrite", { kind: "init", options: { applyClioMd: true, rewriteClioMd: true } }],
-			["/context init --propose", { kind: "init", options: { proposeClioMd: true } }],
-			["/context init --global", { kind: "init", options: { includeGlobalImports: true } }],
-			["/context init --include-global", { kind: "init", options: { includeGlobalImports: true } }],
-			["/context init --heuristic", { kind: "init", options: { heuristic: true } }],
-			["/context init --no-generate", { kind: "init", options: { heuristic: true } }],
-			["/context init --preview --adopt", { kind: "init", options: { preview: true, adopt: true } }],
-			["/context init --invalid", { kind: "unknown", text: "/context init --invalid" }],
-			[
-				"/context-init --preview",
-				{ kind: "init", options: { preview: true }, deprecation: { from: "context-init", to: "context init" } },
-			],
-			["/context-init --invalid", { kind: "unknown", text: "/context-init --invalid" }],
+			["/context init   ", { kind: "init", options: {} }],
+			...["--preview", "--adopt", "--apply", "--rewrite", "--propose", "--global", "--heuristic"].map(
+				(flag): [string, unknown] => [`/context init ${flag}`, { kind: "unknown", text: `/context init ${flag}` }],
+			),
+			["/context init --include-global", { kind: "unknown", text: "/context init --include-global" }],
+			["/context init --no-generate", { kind: "unknown", text: "/context init --no-generate" }],
+			["/context init extra", { kind: "unknown", text: "/context init extra" }],
+			["/context-init", { kind: "unknown", text: "/context-init" }],
+			["/context-init --preview", { kind: "unknown", text: "/context-init --preview" }],
 
-			// context reset (hub) and the deprecated /context-clear spelling
+			// context reset is zero-argument; confirmation happens in its chooser
 			["/context reset", { kind: "context-clear", options: {} }],
-			["/context reset --all", { kind: "context-clear", options: { all: true } }],
-			["/context reset --confirm", { kind: "context-clear", options: { confirmed: true } }],
-			["/context reset --confirm-all", { kind: "context-clear", options: { confirmedAll: true } }],
+			["/context reset   ", { kind: "context-clear", options: {} }],
+			["/context reset --all", { kind: "unknown", text: "/context reset --all" }],
+			["/context reset --confirm", { kind: "unknown", text: "/context reset --confirm" }],
+			["/context reset --confirm-all", { kind: "unknown", text: "/context reset --confirm-all" }],
 			["/context reset --invalid", { kind: "unknown", text: "/context reset --invalid" }],
-			[
-				"/context-clear --all",
-				{ kind: "context-clear", options: { all: true }, deprecation: { from: "context-clear", to: "context reset" } },
-			],
-			["/context-clear --invalid", { kind: "unknown", text: "/context-clear --invalid" }],
+			["/context reset extra", { kind: "unknown", text: "/context reset extra" }],
+			["/context-clear", { kind: "unknown", text: "/context-clear" }],
+			["/context-clear --all", { kind: "unknown", text: "/context-clear --all" }],
 
 			// context refresh (hub)
 			["/context refresh", { kind: "context-refresh" }],
@@ -306,23 +301,17 @@ describe("contracts/slash-spec", () => {
 			["/model provider/model:high:extra", { kind: "model-set", pattern: "provider/model:high:extra" }],
 			["/models pattern:thinking", { kind: "model-set", pattern: "pattern:thinking" }],
 
-			// context compact (hub) and the deprecated /compact spelling
+			// context compact alone keeps its optional free-form instructions
 			["/context compact", { kind: "compact", instructions: undefined }],
+			["/context compact   ", { kind: "compact", instructions: undefined }],
 			["/context compact my instructions", { kind: "compact", instructions: "my instructions" }],
-			["/compact", { kind: "compact", instructions: undefined, deprecation: { from: "compact", to: "context compact" } }],
-			[
-				"/compact    ",
-				{ kind: "compact", instructions: undefined, deprecation: { from: "compact", to: "context compact" } },
-			],
-			[
-				"/compact my instructions",
-				{ kind: "compact", instructions: "my instructions", deprecation: { from: "compact", to: "context compact" } },
-			],
+			["/compact", { kind: "unknown", text: "/compact" }],
+			["/compact my instructions", { kind: "unknown", text: "/compact my instructions" }],
 
-			// context overlay (hub, no args) and the deprecated /context-view spelling
+			// context overlay (hub, no args); the retired spelling no longer parses
 			["/context", { kind: "context-view" }],
 			["/ctx", { kind: "context-view" }],
-			["/context-view", { kind: "context-view", deprecation: { from: "context-view", to: "context" } }],
+			["/context-view", { kind: "unknown", text: "/context-view" }],
 
 			// status (deleted) -> falls through to unknown
 			["/status", { kind: "unknown", text: "/status" }],
@@ -399,7 +388,7 @@ describe("contracts/slash-spec", () => {
 		}
 	});
 
-	it("locks the v0.2.8 post-context-hub command registry", () => {
+	it("locks the canonical command registry after retired context spellings are removed", () => {
 		const visible = [
 			"quit",
 			"help",
@@ -426,44 +415,43 @@ describe("contracts/slash-spec", () => {
 			"fork",
 			"export",
 		];
-		const deprecatedHidden = ["compact", "context-init", "context-clear", "context-view"];
 		deepStrictEqual(
 			BUILTIN_SLASH_COMMANDS.map((entry) => entry.name),
-			[...visible, ...deprecatedHidden],
+			visible,
 		);
 		deepStrictEqual(
 			commandReference().map((entry) => entry.name),
 			visible,
 		);
-		for (const name of deprecatedHidden) {
-			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === name);
-			strictEqual(entry?.hidden, true, `deprecated spelling "${name}" stays hidden`);
-			deepStrictEqual(entry?.kinds, [], `deprecated spelling "${name}" owns no kinds`);
-		}
-		for (const deleted of ["status", "hotkeys", "skills", "connect", "disconnect", "receipts"]) {
+		for (const deleted of [
+			"status",
+			"hotkeys",
+			"skills",
+			"connect",
+			"disconnect",
+			"receipts",
+			"compact",
+			"context-init",
+			"context-clear",
+			"context-view",
+		]) {
 			deepStrictEqual(parseSlashCommand(`/${deleted}`), { kind: "unknown", text: `/${deleted}` });
 		}
 	});
 
-	it("emits one deprecation notice and still routes deprecated spellings", () => {
-		const notices: string[] = [];
+	it("routes retired context spellings as ordinary unknown chat input", () => {
 		const routed: string[] = [];
 		const ctx = {
-			notice: (_level: string, text: string) => notices.push(text),
 			openContextView: () => routed.push("context-view"),
 			runCompact: () => routed.push("compact"),
-			submitChat: () => routed.push("chat"),
+			submitChat: (text: string) => routed.push(`chat:${text}`),
 		} as unknown as SlashCommandContext;
 
 		dispatchSlashCommand(parseSlashCommand("/context-view"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/compact tidy up"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/context"), ctx);
 
-		deepStrictEqual(routed, ["context-view", "compact", "context-view"]);
-		deepStrictEqual(notices, [
-			"/context-view is deprecated; use /context",
-			"/compact is deprecated; use /context compact",
-		]);
+		deepStrictEqual(routed, ["chat:/context-view", "chat:/compact tidy up", "context-view"]);
 	});
 
 	it("builds slash autocomplete commands with hints that fit the suggestion row", () => {
@@ -471,8 +459,8 @@ describe("contracts/slash-spec", () => {
 		const byName = new Map(commands.map((command) => [command.name, command]));
 
 		ok(!byName.has("status"), "retired /status command is not suggested");
-		for (const hiddenName of ["compact", "context-init", "context-clear", "context-view"]) {
-			ok(!byName.has(hiddenName), `deprecated /${hiddenName} is not suggested`);
+		for (const removedName of ["compact", "context-init", "context-clear", "context-view"]) {
+			ok(!byName.has(removedName), `removed /${removedName} is not suggested`);
 		}
 		strictEqual(byName.get("context")?.argumentHint, "compact | init | refresh | reset");
 		strictEqual(byName.get("quit")?.argumentHint, undefined);
@@ -488,18 +476,24 @@ describe("contracts/slash-spec", () => {
 		}
 	});
 
-	it("completes subcommands after the command name, with the subcommand grammar as the hint", async () => {
+	it("completes exactly the four canonical context actions with short stable descriptions", async () => {
 		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
 		const context = byName.get("context");
 
 		const all = await context?.getArgumentCompletions?.("");
 		deepStrictEqual(
-			all?.map((item) => item.label),
-			["compact", "init", "refresh", "reset"],
+			all?.map((item) => ({ label: item.label, description: item.description })),
+			[
+				{ label: "compact", description: "Compact session context" },
+				{ label: "init", description: "Initialize project context" },
+				{ label: "refresh", description: "Refresh project context" },
+				{ label: "reset", description: "Reset project context" },
+			],
 		);
-		const init = all?.find((item) => item.label === "init");
-		strictEqual(init?.value, "init");
-		strictEqual(init?.description, "[--preview] [--adopt] [--apply] [--rewrite] [--propose] [--global] [--heuristic]");
+		ok(
+			all?.every((item) => (item.description?.length ?? 0) <= 28),
+			"action descriptions stay row-sized",
+		);
 
 		const filtered = await context?.getArgumentCompletions?.("in");
 		deepStrictEqual(
@@ -508,29 +502,71 @@ describe("contracts/slash-spec", () => {
 		);
 	});
 
-	it("completes a subcommand's flags, excluding flags already spent", async () => {
+	it("stops completion after a zero-argument action's trailing space", async () => {
 		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
 		const context = byName.get("context");
 
-		const flags = await context?.getArgumentCompletions?.("init --");
-		deepStrictEqual(
-			flags?.map((item) => item.label),
-			["--preview", "--adopt", "--apply", "--rewrite", "--propose", "--global", "--heuristic"],
-		);
-		strictEqual(flags?.[0]?.value, "init --preview", "the value replays the typed stem with the token completed");
-
-		const remaining = await context?.getArgumentCompletions?.("init --preview --");
-		ok(remaining, "flag completion continues after a spent flag");
-		ok(!remaining?.some((item) => item.label === "--preview"), "a spent non-repeatable flag is not offered again");
+		for (const action of ["init", "refresh", "reset"]) {
+			deepStrictEqual(
+				(await context?.getArgumentCompletions?.(action))?.map((item) => item.value),
+				[action],
+				`${action} completes before its trailing space`,
+			);
+			strictEqual(
+				await context?.getArgumentCompletions?.(`${action} `),
+				null,
+				`${action} has no completions after its trailing space`,
+			);
+			strictEqual(await context?.getArgumentCompletions?.(`${action} --`), null, `${action} exposes no flags`);
+		}
+		strictEqual(await context?.getArgumentCompletions?.("compact "), null, "compact switches to free-form text");
 	});
 
-	it("falls back to alias completion when no primary flag name matches the typed token", async () => {
-		const byName = new Map(buildSlashAutocompleteCommands().map((command) => [command.name, command]));
-		const items = await byName.get("context")?.getArgumentCompletions?.("init --rew");
-		deepStrictEqual(
-			items?.map((item) => item.value),
-			["init --rewrite"],
-		);
+	it("returns one action before and null after the trailing space through the editor provider", async () => {
+		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
+		for (const action of ["compact", "init", "refresh", "reset"]) {
+			const before = `/context ${action}`;
+			const suggestion = await provider.getSuggestions([before], 0, before.length, {
+				signal: new AbortController().signal,
+			});
+			deepStrictEqual(
+				suggestion?.items.map((item) => item.value),
+				[action],
+			);
+
+			const after = `${before} `;
+			strictEqual(await provider.getSuggestions([after], 0, after.length, { signal: new AbortController().signal }), null);
+		}
+	});
+
+	it("keeps an action completion on one row at narrow and normal editor widths", async () => {
+		const tui = {
+			terminal: { rows: 30, columns: 80 },
+			requestRender() {},
+		} as unknown as TUI;
+		const editor = new ClioEditor(tui, {
+			getModelLabel: () => "target/model",
+			getThinkingLabel: () => "off",
+		});
+		editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider({ fdPath: null }));
+		editor.setText("/context ");
+		editor.handleInput("i");
+		// Autocomplete refreshes asynchronously. Yield until its one matching row
+		// appears, without a timing delay that could make the render test flaky.
+		for (let attempt = 0; attempt < 10 && editor.render(80).length < 4; attempt++) {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+
+		for (const width of [40, 80]) {
+			const lines = editor.render(width);
+			strictEqual(lines.length, 4, `${width} columns keep top, input, footer, and one suggestion row distinct`);
+			for (const line of lines) strictEqual(visibleWidth(line), width, `completion row overflow at ${width} columns`);
+			strictEqual(
+				lines.some((line) => line.includes("Initialize project context")),
+				width === 80,
+				`${width} columns ${width === 80 ? "show" : "drop"} the description without adding a row`,
+			);
+		}
 	});
 
 	it("completes closed value sets in a flag's value slot and stays silent for open values", async () => {
@@ -550,21 +586,21 @@ describe("contracts/slash-spec", () => {
 		strictEqual(await run?.getArgumentCompletions?.("--target "), null, "an open flag value never completes");
 	});
 
-	it("completes arguments for alias spellings and preserves the typed alias on accept", async () => {
+	it("completes actions for /ctx and preserves the typed alias on accept", async () => {
 		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
-		const line = "/ctx init --rew";
+		const line = "/ctx in";
 		const suggestions = await provider.getSuggestions([line], 0, line.length, {
 			signal: new AbortController().signal,
 		});
 		deepStrictEqual(
 			suggestions?.items.map((item) => item.value),
-			["init --rewrite"],
+			["init"],
 			"/ctx completes exactly like /context",
 		);
 		const first = suggestions?.items[0];
 		ok(first, "the alias invocation yields a completion to accept");
 		const applied = provider.applyCompletion([line], 0, line.length, first, suggestions?.prefix ?? "");
-		strictEqual(applied.lines[0], "/ctx init --rewrite", "accepting keeps the user's alias spelling");
+		strictEqual(applied.lines[0], "/ctx init", "accepting keeps the user's alias spelling");
 	});
 
 	it("never completes inside free rest text", async () => {

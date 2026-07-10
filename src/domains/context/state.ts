@@ -13,11 +13,13 @@ export interface BootstrapGenerationState {
 	mode: BootstrapGenerationMode;
 	parserOutcome: BootstrapParserOutcome;
 	fallbackReason?: string;
+	structuredOutputMode?: "native-schema" | "prompt-parser";
 	runId?: string;
 	targetId?: string;
 	wireModelId?: string;
 	runtimeId?: string;
 	runtimeKind?: string;
+	thinkingLevel?: string;
 	tokenCount?: number;
 	toolCalls?: number;
 	durationMs?: number;
@@ -48,18 +50,20 @@ const BOOTSTRAP_GENERATION_KEYS = new Set([
 	"mode",
 	"parserOutcome",
 	"fallbackReason",
+	"structuredOutputMode",
 	"runId",
 	"targetId",
 	"wireModelId",
 	"runtimeId",
 	"runtimeKind",
+	"thinkingLevel",
 	"tokenCount",
 	"toolCalls",
 	"durationMs",
 	"promptBytes",
 	"outputBytes",
 ]);
-const BOOTSTRAP_ID_KEYS = ["runId", "targetId", "wireModelId", "runtimeId", "runtimeKind"] as const;
+const BOOTSTRAP_ID_KEYS = ["runId", "targetId", "wireModelId", "runtimeId", "runtimeKind", "thinkingLevel"] as const;
 const BOOTSTRAP_COUNTER_KEYS = ["tokenCount", "toolCalls", "durationMs", "promptBytes", "outputBytes"] as const;
 
 function isBoundedNonemptyString(value: unknown, maxLength: number): value is string {
@@ -86,6 +90,13 @@ function isBootstrapGenerationState(value: unknown): value is BootstrapGeneratio
 	if (
 		obj.fallbackReason !== undefined &&
 		!isBoundedNonemptyString(obj.fallbackReason, BOOTSTRAP_FALLBACK_REASON_MAX_LENGTH)
+	) {
+		return false;
+	}
+	if (
+		obj.structuredOutputMode !== undefined &&
+		obj.structuredOutputMode !== "native-schema" &&
+		obj.structuredOutputMode !== "prompt-parser"
 	) {
 		return false;
 	}
@@ -135,6 +146,10 @@ function isContextSourceSnapshot(value: unknown): value is AdoptionSourceSnapsho
 		ADOPTION_PROVIDERS.has(obj.provider as AdoptionProvider) &&
 		typeof obj.kind === "string" &&
 		ADOPTION_KINDS.has(obj.kind as AdoptionSourceKind) &&
+		(obj.directoryScope === undefined ||
+			(typeof obj.directoryScope === "string" &&
+				obj.directoryScope.trim().length > 0 &&
+				obj.directoryScope.length <= 512)) &&
 		typeof obj.sha256 === "string" &&
 		/^[0-9a-f]{64}$/.test(obj.sha256) &&
 		(obj.status === undefined || obj.status === "accepted" || obj.status === "rejected") &&

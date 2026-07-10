@@ -20,6 +20,11 @@ export interface EvalArtifactSummaryV2 {
 export interface EvalArtifactResultV2 {
 	taskId: string;
 	repeatIndex: number;
+	target: {
+		id: string;
+		model: string | null;
+		thinking: string | null;
+	};
 	pass: boolean;
 	failureClass: string | null;
 	metrics: Record<string, number | string | boolean | null>;

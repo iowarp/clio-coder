@@ -72,6 +72,7 @@ async function runMatrixItem(
 		return {
 			taskId: task.id,
 			repeatIndex,
+			target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
 			pass,
 			failureClass,
 			metrics,
@@ -85,6 +86,7 @@ async function runMatrixItem(
 		return {
 			taskId: task.id,
 			repeatIndex,
+			target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
 			pass: false,
 			failureClass: "command_error",
 			metrics: {
@@ -117,7 +119,8 @@ async function runTaskRunner(
 ): Promise<EvalRunnerOutput> {
 	if (task.runner.kind === "external-command") return runExternalCommandRunner(task.runner, cwd, task.timeoutMs);
 	if (task.runner.kind === "context-index") return runContextIndexRunner(cwd, clioEntry, task.timeoutMs, target);
-	if (task.runner.kind === "context-init") return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs);
+	if (task.runner.kind === "context-init")
+		return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs, target);
 	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target);
 }
 

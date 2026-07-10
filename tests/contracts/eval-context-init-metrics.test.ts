@@ -17,6 +17,13 @@ describe("contracts/eval context-init metrics", () => {
 					mode: "scout",
 					parserOutcome: "parsed",
 					scout: {
+						structuredOutputMode: "prompt-parser",
+						runId: "scout-eval-1",
+						targetId: "mini",
+						wireModelId: "Qwopus-test",
+						runtimeId: "llamacpp",
+						runtimeKind: "http",
+						thinkingLevel: "off",
 						tokens: { input: 101, output: 22, total: 123, cacheRead: 4, cacheWrite: 2 },
 						toolCalls: 3,
 						toolFailures: 1,
@@ -43,6 +50,7 @@ describe("contracts/eval context-init metrics", () => {
 				root,
 				entry,
 				5000,
+				{ id: "mini", model: "Qwopus-test", thinking: "off" },
 			);
 
 			strictEqual(output.exitCode, 0);
@@ -80,6 +88,16 @@ describe("contracts/eval context-init metrics", () => {
 			const invokedArgs = JSON.parse(output.stderr) as string[];
 			ok(invokedArgs.includes("--json"));
 			ok(invokedArgs.includes("--heuristic"));
+			deepStrictEqual(invokedArgs.slice(invokedArgs.indexOf("--target"), invokedArgs.indexOf("--heuristic")), [
+				"--target",
+				"mini",
+				"--model",
+				"Qwopus-test",
+				"--thinking",
+				"off",
+			]);
+			strictEqual(output.artifacts.effectiveTarget, "mini");
+			strictEqual(output.artifacts.scoutRunId, "scout-eval-1");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -94,10 +112,11 @@ describe("contracts/eval context-init metrics", () => {
 				'process.stdout.write(JSON.stringify({version:1,generation:{mode:"heuristic",parserOutcome:"not-run"}}));\nprocess.stderr.write(JSON.stringify(process.argv.slice(2)));\n',
 				"utf8",
 			);
-			const output = await runContextInitRunner({ kind: "context-init" }, root, entry, 5000);
+			const output = await runContextInitRunner({ kind: "context-init" }, root, entry, 5000, { id: "mini" });
 			const invokedArgs = JSON.parse(output.stderr) as string[];
 			strictEqual(invokedArgs.includes("--heuristic"), false);
 			strictEqual(output.metrics["context.initMode"], "heuristic");
+			strictEqual(output.metrics["tokens.total"], null);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -109,10 +128,33 @@ describe("contracts/eval context-init metrics", () => {
 			const entry = join(root, "fake-clio.mjs");
 			writeFileSync(entry, "process.stdout.write(JSON.stringify({version:1,generation:{}}));\n", "utf8");
 
-			const output = await runContextInitRunner({ kind: "context-init" }, root, entry, 5000);
+			const output = await runContextInitRunner({ kind: "context-init" }, root, entry, 5000, { id: "mini" });
 			strictEqual(output.exitCode, 1);
 			match(output.stderr, /did not receive a valid JSON generation result/);
 			strictEqual(output.metrics["context.initMode"], "unknown");
+			strictEqual(output.metrics["verifier.exitCode"], 1);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("fails closed when receipt-backed Scout identity disagrees with the matrix row", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-eval-context-init-route-"));
+		try {
+			const entry = join(root, "fake-clio.mjs");
+			writeFileSync(
+				entry,
+				`process.stdout.write(JSON.stringify({version:1,generation:{mode:"scout",parserOutcome:"parsed",scout:{structuredOutputMode:"native-schema",runId:"run-1",targetId:"dynamo",wireModelId:"wrong",runtimeId:"lmstudio-native",runtimeKind:"http",thinkingLevel:"off",durationMs:1,promptBytes:1,outputBytes:1}}}));\n`,
+				"utf8",
+			);
+
+			const output = await runContextInitRunner({ kind: "context-init" }, root, entry, 5000, {
+				id: "mini",
+				model: "Qwopus-test",
+			});
+
+			strictEqual(output.exitCode, 1);
+			match(output.stderr, /requested target 'mini'.*used 'dynamo'/);
 			strictEqual(output.metrics["verifier.exitCode"], 1);
 		} finally {
 			rmSync(root, { recursive: true, force: true });

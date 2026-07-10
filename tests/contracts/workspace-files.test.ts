@@ -1,11 +1,15 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { enumerateWorkspaceFiles, filterWorkspaceFileCandidates } from "../../src/core/workspace-files.js";
+import {
+	enumerateWorkspaceFiles,
+	filterWorkspaceFileCandidates,
+	WorkspaceEnumerationLimitError,
+} from "../../src/core/workspace-files.js";
 import { buildCodewiki, updateCodewikiPaths } from "../../src/domains/context/codewiki/indexer.js";
 import { computeFingerprint } from "../../src/domains/context/fingerprint.js";
 import { detectProjectProfile } from "../../src/domains/session/workspace/project-type.js";
@@ -106,6 +110,42 @@ describe("contracts/workspace-files", () => {
 		);
 		strictEqual(files.includes("src/linked.py"), false);
 		strictEqual(detectProjectProfile(cwd).sourceFiles, 1);
+	});
+
+	it("fails non-Git enumeration explicitly at every resource boundary", () => {
+		const cwd = scratchProject("clio-workspace-files-limits-");
+		mkdirSync(join(cwd, "deep"), { recursive: true });
+		writeFileSync(join(cwd, "root.ts"), "export const root = true;\n", "utf8");
+		writeFileSync(join(cwd, "deep", "child.ts"), "export const child = true;\n", "utf8");
+
+		const expectLimit = (kind: WorkspaceEnumerationLimitError["kind"], action: () => unknown): void => {
+			throws(action, (error: unknown) => {
+				ok(error instanceof WorkspaceEnumerationLimitError);
+				strictEqual(error.code, "WORKSPACE_ENUMERATION_LIMIT");
+				strictEqual(error.kind, kind);
+				return true;
+			});
+		};
+
+		expectLimit("entries", () => enumerateWorkspaceFiles(cwd, undefined, { maxVisitedEntries: 0 }));
+		expectLimit("depth", () => enumerateWorkspaceFiles(cwd, undefined, { maxDepth: 1 }));
+		expectLimit("path-bytes", () => enumerateWorkspaceFiles(cwd, undefined, { maxPathBytes: 0 }));
+		expectLimit("time", () => enumerateWorkspaceFiles(cwd, undefined, { maxDurationMs: 0 }));
+	});
+
+	it("does not let non-Git incremental candidates bypass fallback limits", () => {
+		const cwd = scratchProject("clio-workspace-files-incremental-limits-");
+		mkdirSync(join(cwd, "src"), { recursive: true });
+		writeFileSync(join(cwd, "src", "main.ts"), "export const main = true;\n", "utf8");
+
+		throws(
+			() => filterWorkspaceFileCandidates(cwd, ["src/main.ts"], undefined, { maxVisitedEntries: 0 }),
+			(error: unknown) => {
+				ok(error instanceof WorkspaceEnumerationLimitError);
+				strictEqual(error.kind, "entries");
+				return true;
+			},
+		);
 	});
 
 	it("reconciles indexed paths when Git ignore visibility changes", async () => {

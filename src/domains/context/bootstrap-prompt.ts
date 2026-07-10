@@ -114,6 +114,9 @@ function compactImportedRules(adoption: AdoptionScanResult): Array<Record<string
 		text: truncate(rule.text, 240),
 		sources: rule.sources.slice(0, 2).map((source) => truncate(source, 160)),
 		providers: rule.providers.slice(0, 2).map((provider) => truncate(provider, 80)),
+		...(rule.directoryScopes
+			? { directoryScopes: rule.directoryScopes.slice(0, 2).map((scope) => truncate(scope, 160)) }
+			: {}),
 		...(rule.conflictKey ? { conflictKey: truncate(rule.conflictKey, 80) } : {}),
 	}));
 }

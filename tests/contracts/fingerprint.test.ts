@@ -142,7 +142,7 @@ describe("contracts/fingerprint", () => {
 					lang: "typescript",
 					loc: 17,
 					role: "entry",
-					hash: "hash-index",
+					hash: "1111111111111111",
 					imports: [],
 				},
 				{
@@ -151,7 +151,7 @@ describe("contracts/fingerprint", () => {
 					lang: "config",
 					loc: 99,
 					role: "config",
-					hash: "hash-package",
+					hash: "2222222222222222",
 					imports: [],
 				},
 			],

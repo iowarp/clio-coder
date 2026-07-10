@@ -8,11 +8,11 @@ export function renderEvalMarkdownReportV2(artifact: EvalArtifactV2): string {
 		`Target: ${artifact.matrix.target}`,
 		`Pass rate: ${(artifact.summary.passRate * 100).toFixed(2)}%`,
 		"",
-		"| Task | Repeat | Pass | Failure |",
-		"|---|---:|---|---|",
+		"| Task | Target | Model | Repeat | Pass | Failure |",
+		"|---|---|---|---:|---|---|",
 		...artifact.results.map(
 			(result) =>
-				`| ${result.taskId} | ${result.repeatIndex} | ${result.pass ? "pass" : "fail"} | ${result.failureClass ?? ""} |`,
+				`| ${result.taskId} | ${result.target.id} | ${result.target.model ?? ""} | ${result.repeatIndex} | ${result.pass ? "pass" : "fail"} | ${result.failureClass ?? ""} |`,
 		),
 		"",
 	];

@@ -81,18 +81,25 @@ function compactArgumentHint(args: CommandArgsSpec | undefined): string | undefi
 	return hint.length > 0 ? hint : undefined;
 }
 
-function argumentCompletionItems(args: CommandArgsSpec, argumentText: string): AutocompleteItem[] | null {
+function argumentCompletionItems(
+	args: CommandArgsSpec,
+	argumentText: string,
+	subcommandDescriptions?: Readonly<Record<string, string>>,
+): AutocompleteItem[] | null {
 	const result = completeArgs(args, argumentText);
 	if (!result) return null;
 	// The provider replaces the whole argument text with the item value, so
 	// each value carries the typed stem verbatim with only the trailing token
 	// swapped for the completion.
 	const stem = argumentText.slice(0, result.tokenStart);
-	return result.completions.map((completion) => ({
-		value: `${stem}${completion.token}`,
-		label: completion.token,
-		...(completion.hint ? { description: completion.hint } : {}),
-	}));
+	return result.completions.map((completion) => {
+		const description = subcommandDescriptions?.[completion.token] ?? completion.hint;
+		return {
+			value: `${stem}${completion.token}`,
+			label: completion.token,
+			...(description ? { description } : {}),
+		};
+	});
 }
 
 export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
@@ -103,7 +110,12 @@ export function buildSlashAutocompleteCommands(): SlashAutocompleteCommand[] {
 			name: ref.name,
 			description: ref.description,
 			...(argumentHint ? { argumentHint } : {}),
-			...(args ? { getArgumentCompletions: (argumentText: string) => argumentCompletionItems(args, argumentText) } : {}),
+			...(args
+				? {
+						getArgumentCompletions: (argumentText: string) =>
+							argumentCompletionItems(args, argumentText, ref.subcommandDescriptions),
+					}
+				: {}),
 		};
 	});
 }

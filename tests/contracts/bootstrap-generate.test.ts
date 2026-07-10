@@ -3,8 +3,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { modelBootstrapGenerate, resolveBootstrapScoutRoute } from "../../src/cli/bootstrap-generate.js";
+import {
+	BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES,
+	modelBootstrapGenerate,
+	resolveBootstrapScoutRoute,
+} from "../../src/cli/bootstrap-generate.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { UnsupportedResponseSchemaError } from "../../src/core/response-schema.js";
 import { BOOTSTRAP_OUTPUT_JSON_SCHEMA, buildBootstrapPrompt } from "../../src/domains/context/bootstrap-prompt.js";
 import {
 	type BootstrapGenerateInput,
@@ -45,6 +50,9 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		wireModelId: "MiniCPM-test",
 		runtimeId: "llamacpp",
 		runtimeKind: "http",
+		runtimeResolution: {
+			effectiveThinkingLevel: "off",
+		} as NonNullable<RunReceipt["runtimeResolution"]>,
 		startedAt: "2026-07-09T00:00:00.000Z",
 		endedAt: "2026-07-09T00:00:01.250Z",
 		exitCode: 0,
@@ -146,11 +154,13 @@ describe("contracts/bootstrap Scout generation", () => {
 			mode: "scout",
 			parserOutcome: "parsed",
 			scout: {
+				structuredOutputMode: "native-schema",
 				runId: "scout-run-1",
 				targetId: "mini",
 				wireModelId: "MiniCPM-test",
 				runtimeId: "llamacpp",
 				runtimeKind: "http",
+				thinkingLevel: "off",
 				tokens: { total: 321, input: 250, output: 71, cacheRead: 12, cacheWrite: 3, reasoning: 0 },
 				toolCalls: 2,
 				toolFailures: 0,
@@ -163,6 +173,7 @@ describe("contracts/bootstrap Scout generation", () => {
 		strictEqual(dispatch.tasks.length, 1);
 		strictEqual(dispatch.requests[0]?.target, "mini");
 		strictEqual(dispatch.requests[0]?.model, "MiniCPM-test");
+		strictEqual(dispatch.requests[0]?.thinkingLevel, "off");
 		deepStrictEqual(dispatch.requests[0]?.responseSchema, BOOTSTRAP_OUTPUT_JSON_SCHEMA);
 	});
 
@@ -174,12 +185,70 @@ describe("contracts/bootstrap Scout generation", () => {
 			thinkingLevel: "off",
 		};
 		configured.workers.agentBindings.scout = "scout";
-		deepStrictEqual(resolveBootstrapScoutRoute(configured), { target: "mini", model: "MiniCPM-test" });
+		deepStrictEqual(resolveBootstrapScoutRoute(configured), {
+			target: "mini",
+			model: "MiniCPM-test",
+			thinkingLevel: "off",
+		});
 
 		const unbound = structuredClone(DEFAULT_SETTINGS);
 		throws(() => resolveBootstrapScoutRoute(unbound), /has no worker profile binding/);
 		unbound.workers.agentBindings.scout = "missing";
 		throws(() => resolveBootstrapScoutRoute(unbound), /profile 'missing' is not configured/);
+	});
+
+	it("retries a valid non-schema Scout route through the bounded prompt parser", async () => {
+		const input = await bootstrapInput();
+		const response = JSON.stringify({
+			projectName: "Telemetry Fixture",
+			identity: "A compact scientific service.",
+			conventions: [],
+			invariants: [],
+			sections: [],
+		});
+		const dispatch = fakeDispatch(response);
+		const original = dispatch.contract.dispatch;
+		dispatch.contract.dispatch = async (request) => {
+			if (request.responseSchema !== undefined) {
+				dispatch.requests.push(request);
+				throw new UnsupportedResponseSchemaError("schema unavailable on this runtime");
+			}
+			return original(request);
+		};
+		const reports: BootstrapGenerationTelemetry[] = [];
+
+		const output = await modelBootstrapGenerate({
+			dispatch: dispatch.contract,
+			route: { target: "dynamo", model: "qwopus", thinkingLevel: "medium" },
+		})({ ...input, reportGeneration: (telemetry) => reports.push(telemetry) });
+
+		strictEqual(output.projectName, "Telemetry Fixture");
+		strictEqual(dispatch.requests.length, 2);
+		ok(dispatch.requests[0]?.responseSchema);
+		strictEqual(dispatch.requests[1]?.responseSchema, undefined);
+		strictEqual(dispatch.requests[1]?.target, "dynamo");
+		strictEqual(dispatch.requests[1]?.model, "qwopus");
+		strictEqual(dispatch.requests[1]?.thinkingLevel, "medium");
+		strictEqual(reports[0]?.mode, "scout");
+		strictEqual(reports[0]?.scout?.structuredOutputMode, "prompt-parser");
+	});
+
+	it("bounds Scout output before parsing and discloses the observed bytes", async () => {
+		const input = await bootstrapInput();
+		const oversized = "x".repeat(BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES + 1);
+		const dispatch = fakeDispatch(oversized);
+		const reports: BootstrapGenerationTelemetry[] = [];
+
+		const output = await modelBootstrapGenerate({ dispatch: dispatch.contract })({
+			...input,
+			reportGeneration: (telemetry) => reports.push(telemetry),
+		});
+
+		strictEqual(output.projectName, "Telemetry Fixture");
+		strictEqual(reports[0]?.mode, "heuristic");
+		strictEqual(reports[0]?.parserOutcome, "not-run");
+		match(reports[0]?.fallbackReason ?? "", /output exceeded/);
+		strictEqual(reports[0]?.scout?.outputBytes, BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES + 1);
 	});
 
 	it("reports rejected parsing once and retains the successful Scout receipt on fallback", async () => {

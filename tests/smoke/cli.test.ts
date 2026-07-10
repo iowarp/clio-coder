@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import {
 	closeServer,
+	seedBootstrapTransportTargets,
 	seedOpenAICompatFleetDefault,
 	seedOpenAICompatOrchestrator,
 	seedUnregisteredRuntimeTarget,
@@ -570,6 +571,97 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			strictEqual(result.stdout, "mock reply\n");
+		} finally {
+			await closeServer(fixture.server);
+		}
+	});
+
+	it("carries bootstrap schema and fallback contracts through the provider wire", async () => {
+		await runCli(["doctor", "--fix"], { env: scratch.env });
+		const groundedRule = "Always preserve the captured provider request when changing bootstrap transport behavior.";
+		const bootstrapReply = JSON.stringify({
+			projectName: "transport-fixture",
+			identity: "A transport fixture for bootstrap dispatch.",
+			conventions: [],
+			invariants: [],
+			sections: [{ title: "Transport evidence", body: groundedRule }],
+		});
+		const fixture = await startOpenAICompatFixture(bootstrapReply);
+		const env = { ...scratch.env, CLIO_TEST_OPENAI_KEY: "sk-test" };
+		try {
+			seedBootstrapTransportTargets(join(scratch.dir, "config"), fixture.url);
+			const runBootstrap = async (target: string, projectDir: string) => {
+				mkdirSync(projectDir, { recursive: true });
+				writeFileSync(
+					join(projectDir, "package.json"),
+					JSON.stringify({ name: "transport-fixture", type: "module" }),
+					"utf8",
+				);
+				writeFileSync(join(projectDir, "index.ts"), "export const transportFixture = true;\n", "utf8");
+				writeFileSync(join(projectDir, "AGENTS.md"), `- ${groundedRule}\n`, "utf8");
+				const result = await runCli(["context", "init", "--yes", "--json", "--target", target, "--model", "mock-model"], {
+					env,
+					cwd: projectDir,
+					timeoutMs: 30_000,
+				});
+				strictEqual(result.code, 0, `target=${target} stderr=${result.stderr}`);
+				const output = JSON.parse(result.stdout) as {
+					generation?: {
+						mode?: unknown;
+						scout?: {
+							structuredOutputMode?: unknown;
+							targetId?: unknown;
+							wireModelId?: unknown;
+							runtimeId?: unknown;
+						};
+					};
+				};
+				strictEqual(output.generation?.mode, "scout", `target=${target} stdout=${result.stdout}`);
+				strictEqual(output.generation?.scout?.targetId, target);
+				strictEqual(output.generation?.scout?.wireModelId, "mock-model");
+				ok(existsSync(join(projectDir, "CLIO.md")), `target=${target} did not write validated bootstrap output`);
+				return output;
+			};
+
+			const llamaOutput = await runBootstrap("fixture-llama", join(scratch.dir, "llama-project"));
+			strictEqual(llamaOutput.generation?.scout?.structuredOutputMode, "native-schema");
+			strictEqual(llamaOutput.generation?.scout?.runtimeId, "llamacpp");
+			strictEqual(fixture.requests.length, 1);
+			const llamaRequest = fixture.requests[0];
+			strictEqual(llamaRequest?.stream, true);
+			ok(Array.isArray(llamaRequest?.tools) && llamaRequest.tools.length > 0, "Scout tools must reach llama.cpp");
+			deepStrictEqual(llamaRequest?.response_format, {
+				type: "json_object",
+				schema: {
+					type: "object",
+					additionalProperties: false,
+					required: ["projectName", "identity", "conventions", "invariants", "sections"],
+					properties: {
+						projectName: { type: "string" },
+						identity: { type: "string" },
+						conventions: { type: "array", items: { type: "string" } },
+						invariants: { type: "array", items: { type: "string" } },
+						sections: {
+							type: "array",
+							items: {
+								type: "object",
+								additionalProperties: false,
+								required: ["title", "body"],
+								properties: { title: { type: "string" }, body: { type: "string" } },
+							},
+						},
+					},
+				},
+			});
+
+			const compatOutput = await runBootstrap("fixture-openai-scout", join(scratch.dir, "openai-project"));
+			strictEqual(compatOutput.generation?.scout?.structuredOutputMode, "prompt-parser");
+			strictEqual(compatOutput.generation?.scout?.runtimeId, "openai-compat");
+			strictEqual(fixture.requests.length, 2, "unsupported schema attempt must retry once without an HTTP preflight");
+			const compatRequest = fixture.requests[1];
+			strictEqual(compatRequest?.stream, true);
+			ok(Array.isArray(compatRequest?.tools) && compatRequest.tools.length > 0, "Scout tools must survive fallback");
+			strictEqual("response_format" in (compatRequest ?? {}), false);
 		} finally {
 			await closeServer(fixture.server);
 		}

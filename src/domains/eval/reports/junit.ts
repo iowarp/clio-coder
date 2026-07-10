@@ -3,7 +3,9 @@ import type { EvalArtifactV2 } from "../schema/artifact.js";
 export function renderEvalJunitReportV2(artifact: EvalArtifactV2): string {
 	const cases = artifact.results
 		.map((result) => {
-			const name = escapeXml(`${result.taskId}[${result.repeatIndex}]`);
+			const name = escapeXml(
+				`${result.taskId}[${result.target.id}:${result.target.model ?? "default"}:${result.repeatIndex}]`,
+			);
 			if (result.pass) return `  <testcase name="${name}" />`;
 			return `  <testcase name="${name}"><failure message="${escapeXml(result.failureClass ?? "failed")}" /></testcase>`;
 		})

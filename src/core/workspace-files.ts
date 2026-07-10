@@ -1,8 +1,42 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, readdirSync } from "node:fs";
+import { type Dir, lstatSync, opendirSync } from "node:fs";
 import { join, sep } from "node:path";
+import { performance } from "node:perf_hooks";
 
 const GIT_OUTPUT_LIMIT_BYTES = 128 * 1024 * 1024;
+
+export interface WorkspaceFallbackLimits {
+	maxVisitedEntries: number;
+	maxDepth: number;
+	maxPathBytes: number;
+	maxDurationMs: number;
+}
+
+export type WorkspaceFallbackLimitKind = "entries" | "depth" | "path-bytes" | "time";
+
+export const DEFAULT_WORKSPACE_FALLBACK_LIMITS: Readonly<WorkspaceFallbackLimits> = Object.freeze({
+	maxVisitedEntries: 100_000,
+	maxDepth: 64,
+	maxPathBytes: 64 * 1024 * 1024,
+	maxDurationMs: 5_000,
+});
+
+/**
+ * Explicit failure for a non-Git scan that cannot prove it saw the whole
+ * workspace within its resource contract. Callers must never publish the
+ * partial prefix as an authoritative file set.
+ */
+export class WorkspaceEnumerationLimitError extends Error {
+	readonly code = "WORKSPACE_ENUMERATION_LIMIT";
+
+	constructor(
+		readonly kind: WorkspaceFallbackLimitKind,
+		readonly limit: number,
+	) {
+		super(`non-Git workspace enumeration exceeded ${kind} limit (${limit})`);
+		this.name = "WorkspaceEnumerationLimitError";
+	}
+}
 
 /**
  * Directories omitted even when Git tracks files beneath them. Git ignore
@@ -78,28 +112,101 @@ function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): strin
 		.filter((path) => path.length > 0);
 }
 
-function fallbackFiles(cwd: string, excludedDirs: ReadonlySet<string>): string[] {
-	const files: string[] = [];
-	const walk = (dir: string, prefix: string): void => {
-		let entries: import("node:fs").Dirent[];
-		try {
-			entries = readdirSync(dir, { withFileTypes: true });
-		} catch {
-			return;
+function resolveFallbackLimits(overrides: Partial<WorkspaceFallbackLimits> | undefined): WorkspaceFallbackLimits {
+	const limits = { ...DEFAULT_WORKSPACE_FALLBACK_LIMITS, ...overrides };
+	for (const [name, value] of Object.entries(limits)) {
+		if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+			throw new RangeError(`workspace fallback ${name} must be a non-negative integer`);
 		}
-		for (const entry of entries) {
-			const relPath = prefix.length > 0 ? `${prefix}/${entry.name}` : entry.name;
+	}
+	return limits;
+}
+
+interface WalkFrame {
+	dir: Dir;
+	absPath: string;
+	prefix: string;
+	depth: number;
+}
+
+function closeFrame(frame: WalkFrame): void {
+	try {
+		frame.dir.closeSync();
+	} catch {
+		// Best-effort cleanup after an unreadable directory or bounded failure.
+	}
+}
+
+function fallbackFiles(
+	cwd: string,
+	excludedDirs: ReadonlySet<string>,
+	overrides?: Partial<WorkspaceFallbackLimits>,
+): string[] {
+	const limits = resolveFallbackLimits(overrides);
+	const startedAt = performance.now();
+	let visitedEntries = 0;
+	let pathBytes = 0;
+	let root: Dir;
+	try {
+		root = opendirSync(cwd);
+	} catch {
+		return [];
+	}
+	const stack: WalkFrame[] = [{ dir: root, absPath: cwd, prefix: "", depth: 0 }];
+	const files: string[] = [];
+	try {
+		while (stack.length > 0) {
+			if (performance.now() - startedAt >= limits.maxDurationMs) {
+				throw new WorkspaceEnumerationLimitError("time", limits.maxDurationMs);
+			}
+			const frame = stack.at(-1);
+			if (!frame) break;
+			let entry: ReturnType<Dir["readSync"]>;
+			try {
+				entry = frame.dir.readSync();
+			} catch {
+				closeFrame(frame);
+				stack.pop();
+				continue;
+			}
+			if (!entry) {
+				closeFrame(frame);
+				stack.pop();
+				continue;
+			}
+
+			visitedEntries += 1;
+			if (visitedEntries > limits.maxVisitedEntries) {
+				throw new WorkspaceEnumerationLimitError("entries", limits.maxVisitedEntries);
+			}
+			const depth = frame.depth + 1;
+			if (depth > limits.maxDepth) {
+				throw new WorkspaceEnumerationLimitError("depth", limits.maxDepth);
+			}
+			const relPath = frame.prefix.length > 0 ? `${frame.prefix}/${entry.name}` : entry.name;
+			pathBytes += Buffer.byteLength(relPath, "utf8");
+			if (pathBytes > limits.maxPathBytes) {
+				throw new WorkspaceEnumerationLimitError("path-bytes", limits.maxPathBytes);
+			}
 			if (entry.isDirectory()) {
 				if (excludedDirs.has(entry.name)) continue;
-				walk(join(dir, entry.name), relPath);
+				const absPath = join(frame.absPath, entry.name);
+				let child: Dir;
+				try {
+					child = opendirSync(absPath);
+				} catch {
+					continue;
+				}
+				stack.push({ dir: child, absPath, prefix: relPath, depth });
 				continue;
 			}
 			// Dirent#isFile excludes symlinks and special files, matching the Git path.
 			if (entry.isFile()) files.push(relPath);
 		}
-	};
-	walk(cwd, "");
-	return files;
+		return files;
+	} finally {
+		for (const frame of stack) closeFrame(frame);
+	}
 }
 
 function normalizeVisibleFiles(cwd: string, paths: ReadonlyArray<string>, excludedDirs: ReadonlySet<string>): string[] {
@@ -120,9 +227,10 @@ function normalizeVisibleFiles(cwd: string, paths: ReadonlyArray<string>, exclud
 export function enumerateWorkspaceFiles(
 	cwd: string,
 	excludedDirs: ReadonlySet<string> = WORKSPACE_EXCLUDED_DIRS,
+	fallbackLimits?: Partial<WorkspaceFallbackLimits>,
 ): string[] {
 	const gitFiles = gitVisibleFiles(cwd);
-	return normalizeVisibleFiles(cwd, gitFiles ?? fallbackFiles(cwd, excludedDirs), excludedDirs);
+	return normalizeVisibleFiles(cwd, gitFiles ?? fallbackFiles(cwd, excludedDirs, fallbackLimits), excludedDirs);
 }
 
 /** Apply the same visibility rules to one incremental batch without walking the tree. */
@@ -130,11 +238,19 @@ export function filterWorkspaceFileCandidates(
 	cwd: string,
 	paths: ReadonlyArray<string>,
 	excludedDirs: ReadonlySet<string> = WORKSPACE_EXCLUDED_DIRS,
+	fallbackLimits?: Partial<WorkspaceFallbackLimits>,
 ): string[] {
 	const candidates = paths
 		.map(normalizeRelativePath)
 		.filter((path): path is string => path !== null && !isWorkspacePathExcluded(path, excludedDirs));
 	if (candidates.length === 0) return [];
 	const gitFiles = gitVisibleFiles(cwd, candidates);
-	return normalizeVisibleFiles(cwd, gitFiles ?? candidates, excludedDirs);
+	if (gitFiles) return normalizeVisibleFiles(cwd, gitFiles, excludedDirs);
+	// Outside Git, incremental candidates must be reconciled against the same
+	// complete bounded snapshot as a full build. Otherwise a notification can
+	// add a path that a bounded full scan could not authoritatively enumerate.
+	const fallbackVisible = new Set(
+		normalizeVisibleFiles(cwd, fallbackFiles(cwd, excludedDirs, fallbackLimits), excludedDirs),
+	);
+	return candidates.filter((path) => fallbackVisible.has(path)).sort(comparePaths);
 }

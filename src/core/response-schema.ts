@@ -1,5 +1,19 @@
 export const RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES = 64 * 1024;
 
+/**
+ * Admission-time signal that the resolved worker runtime cannot enforce a
+ * response schema. A caller that treats native enforcement as an optimization
+ * may retry without the schema only after receiving this exact error type.
+ */
+export class UnsupportedResponseSchemaError extends Error {
+	readonly code = "UNSUPPORTED_RESPONSE_SCHEMA";
+
+	constructor(message: string) {
+		super(message);
+		this.name = "UnsupportedResponseSchemaError";
+	}
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const prototype = Object.getPrototypeOf(value);

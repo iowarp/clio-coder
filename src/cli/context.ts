@@ -32,10 +32,12 @@ function compactMetric(value: number, suffix: string): string {
 function formatGenerationStatus(generation: BootstrapGenerationState | undefined): string | null {
 	if (!generation) return null;
 	const details: string[] = [`parser ${generation.parserOutcome}`];
+	if (generation.structuredOutputMode) details.push(generation.structuredOutputMode);
 	const route = [generation.targetId, generation.wireModelId, generation.runtimeId].filter(
 		(value): value is string => typeof value === "string",
 	);
 	if (route.length > 0) details.push(route.join("/"));
+	if (generation.thinkingLevel) details.push(`thinking ${generation.thinkingLevel}`);
 	const usage: string[] = [];
 	if (generation.tokenCount !== undefined) usage.push(`${generation.tokenCount} tokens`);
 	if (generation.toolCalls !== undefined) usage.push(`${generation.toolCalls} tools`);

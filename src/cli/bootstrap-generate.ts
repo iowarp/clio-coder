@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
+import { UnsupportedResponseSchemaError } from "../core/response-schema.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -24,6 +25,7 @@ import type { RunReceipt } from "../domains/dispatch/types.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
+import type { ThinkingLevel } from "../domains/providers/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
@@ -32,6 +34,7 @@ import { SessionDomainModule } from "../domains/session/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 
 export const BOOTSTRAP_SCOUT_TIMEOUT_MS = 30_000;
+export const BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES = 256 * 1024;
 
 /**
  * Model-driven CLIO.md generation. Dispatches Clio's internal `scout` shadow
@@ -50,6 +53,7 @@ export interface ModelBootstrapGenerateOptions {
 export interface BootstrapScoutRoute {
 	target: string;
 	model?: string;
+	thinkingLevel?: ThinkingLevel;
 }
 
 export function resolveBootstrapScoutRoute(settings: Readonly<ClioSettings>): BootstrapScoutRoute {
@@ -62,7 +66,11 @@ export function resolveBootstrapScoutRoute(settings: Readonly<ClioSettings>): Bo
 	const profile = settings.workers.profiles[profileName];
 	if (!profile) throw new Error(`bootstrap Scout profile '${profileName}' is not configured`);
 	if (!profile.target) throw new Error(`bootstrap Scout profile '${profileName}' has no target`);
-	return { target: profile.target, ...(profile.model ? { model: profile.model } : {}) };
+	return {
+		target: profile.target,
+		...(profile.model ? { model: profile.model } : {}),
+		...(profile.thinkingLevel ? { thinkingLevel: profile.thinkingLevel } : {}),
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -115,6 +123,13 @@ class BootstrapScoutAttemptError extends Error {
 	}
 }
 
+class BootstrapScoutOutputLimitError extends Error {
+	constructor(readonly observedBytes: number) {
+		super(`bootstrap scout output exceeded ${BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES} UTF-8 bytes`);
+		this.name = "BootstrapScoutOutputLimitError";
+	}
+}
+
 function durationFromReceipt(receipt: RunReceipt): number | undefined {
 	const startedAt = Date.parse(receipt.startedAt);
 	const endedAt = Date.parse(receipt.endedAt);
@@ -126,12 +141,15 @@ function scoutTelemetry(
 	prompt: string,
 	output: string,
 	startedAt: number,
+	structuredOutputMode: BootstrapScoutTelemetry["structuredOutputMode"],
 	runId?: string,
 	receipt?: RunReceipt,
+	observedOutputBytes?: number,
 ): BootstrapScoutTelemetry {
 	const telemetry: BootstrapScoutTelemetry = {
+		structuredOutputMode,
 		promptBytes: Buffer.byteLength(prompt, "utf8"),
-		outputBytes: Buffer.byteLength(output, "utf8"),
+		outputBytes: observedOutputBytes ?? Buffer.byteLength(output, "utf8"),
 		durationMs: receipt
 			? (durationFromReceipt(receipt) ?? Math.max(0, Date.now() - startedAt))
 			: Math.max(0, Date.now() - startedAt),
@@ -143,6 +161,9 @@ function scoutTelemetry(
 	telemetry.wireModelId = receipt.wireModelId;
 	telemetry.runtimeId = receipt.runtimeId;
 	telemetry.runtimeKind = receipt.runtimeKind;
+	if (receipt.runtimeResolution?.effectiveThinkingLevel) {
+		telemetry.thinkingLevel = receipt.runtimeResolution.effectiveThinkingLevel;
+	}
 	telemetry.tokens = {
 		total: receipt.tokenCount,
 		...(receipt.inputTokenCount !== undefined ? { input: receipt.inputTokenCount } : {}),
@@ -162,6 +183,7 @@ async function collectDispatchAssistantText(
 	input: BootstrapGenerateInput,
 ): Promise<string> {
 	let streamedText = "";
+	let streamedBytes = 0;
 	let lastAssistantText = "";
 	for await (const event of events) {
 		if (isRecord(event) && event.type === "route_warning" && typeof event.message === "string") {
@@ -197,10 +219,21 @@ async function collectDispatchAssistantText(
 				});
 			}
 		}
-		streamedText += textDeltaFromEvent(event);
+		const delta = textDeltaFromEvent(event);
+		if (delta.length > 0) {
+			streamedBytes += Buffer.byteLength(delta, "utf8");
+			if (streamedBytes > BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES) {
+				throw new BootstrapScoutOutputLimitError(streamedBytes);
+			}
+			streamedText += delta;
+		}
 		if (isRecord(event) && event.type === "message_end") {
 			const text = assistantTextFromMessage(event.message);
-			if (text.length > 0) lastAssistantText = text;
+			if (text.length > 0) {
+				const bytes = Buffer.byteLength(text, "utf8");
+				if (bytes > BOOTSTRAP_SCOUT_MAX_OUTPUT_BYTES) throw new BootstrapScoutOutputLimitError(bytes);
+				lastAssistantText = text;
+			}
 		}
 	}
 	const text = (lastAssistantText || streamedText).trim();
@@ -227,21 +260,39 @@ export async function generateBootstrapWithScout(
 		detail: "agent=scout",
 	});
 	let handle: Awaited<ReturnType<DispatchContract["dispatch"]>>;
-	try {
-		handle = await dispatch.dispatch({
+	let structuredOutputMode: BootstrapScoutTelemetry["structuredOutputMode"] = "native-schema";
+	const dispatchScout = (nativeSchema: boolean) =>
+		dispatch.dispatch({
 			agentId: "scout",
 			task: prompt,
 			cwd: input.cwd,
 			requestOrigin: "internal",
-			thinkingLevel: "off",
+			thinkingLevel: route?.thinkingLevel ?? "off",
 			noSkills: true,
-			responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA,
+			...(nativeSchema ? { responseSchema: BOOTSTRAP_OUTPUT_JSON_SCHEMA } : {}),
 			...(route ? { target: route.target } : {}),
 			...(route?.model ? { model: route.model } : {}),
 		});
+	try {
+		handle = await dispatchScout(true);
 	} catch (err) {
-		const error = err instanceof Error ? err : new Error(String(err));
-		throw new BootstrapScoutAttemptError(error, "not-run", scoutTelemetry(prompt, "", startedAt));
+		if (!(err instanceof UnsupportedResponseSchemaError)) {
+			const error = err instanceof Error ? err : new Error(String(err));
+			throw new BootstrapScoutAttemptError(error, "not-run", scoutTelemetry(prompt, "", startedAt, structuredOutputMode));
+		}
+		structuredOutputMode = "prompt-parser";
+		input.progress?.({
+			phase: "generate",
+			status: "running",
+			message: "native schema unavailable; using bounded Scout output parser",
+			detail: err.message,
+		});
+		try {
+			handle = await dispatchScout(false);
+		} catch (fallbackErr) {
+			const error = fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr));
+			throw new BootstrapScoutAttemptError(error, "not-run", scoutTelemetry(prompt, "", startedAt, structuredOutputMode));
+		}
 	}
 	const deadline = armInternalDispatchDeadline(
 		dispatch,
@@ -269,7 +320,7 @@ export async function generateBootstrapWithScout(
 		input.reportGeneration?.({
 			mode: "scout",
 			parserOutcome: "parsed",
-			scout: scoutTelemetry(prompt, text, startedAt, handle.runId, receipt),
+			scout: scoutTelemetry(prompt, text, startedAt, structuredOutputMode, handle.runId, receipt),
 		});
 		return output;
 	} catch (err) {
@@ -283,7 +334,15 @@ export async function generateBootstrapWithScout(
 		throw new BootstrapScoutAttemptError(
 			error,
 			parserAttempted ? "rejected" : "not-run",
-			scoutTelemetry(prompt, text, startedAt, handle.runId, receipt),
+			scoutTelemetry(
+				prompt,
+				text,
+				startedAt,
+				structuredOutputMode,
+				handle.runId,
+				receipt,
+				err instanceof BootstrapScoutOutputLimitError ? err.observedBytes : undefined,
+			),
 		);
 	} finally {
 		deadline.clear();
@@ -292,8 +351,8 @@ export async function generateBootstrapWithScout(
 
 async function loadBootstrapDispatch(): Promise<{
 	dispatch: DispatchContract;
+	config: ConfigContract;
 	loaded: LoadResult;
-	route: BootstrapScoutRoute;
 }> {
 	const loaded = await loadDomains([
 		ConfigDomainModule,
@@ -314,12 +373,7 @@ async function loadBootstrapDispatch(): Promise<{
 		await loaded.stop();
 		throw new Error("bootstrap Scout dispatch or configuration unavailable");
 	}
-	try {
-		return { dispatch, loaded, route: resolveBootstrapScoutRoute(config.get()) };
-	} catch (err) {
-		await loaded.stop();
-		throw err;
-	}
+	return { dispatch, config, loaded };
 }
 
 /**
@@ -338,7 +392,8 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 			{
 				const lazy = await loadBootstrapDispatch();
 				loaded = lazy.loaded;
-				return await generateBootstrapWithScout(lazy.dispatch, input, lazy.route);
+				const route = options.route ?? resolveBootstrapScoutRoute(lazy.config.get());
+				return await generateBootstrapWithScout(lazy.dispatch, input, route);
 			}
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));

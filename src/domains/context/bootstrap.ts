@@ -64,11 +64,13 @@ export type BootstrapProgressEvent = Omit<ContextActivityPayload, "kind" | "at">
 export type BootstrapProgressSink = (event: BootstrapProgressEvent) => void;
 
 export interface BootstrapScoutTelemetry {
+	structuredOutputMode: "native-schema" | "prompt-parser";
 	runId?: string;
 	targetId?: string;
 	wireModelId?: string;
 	runtimeId?: string;
 	runtimeKind?: string;
+	thinkingLevel?: string;
 	tokens?: {
 		total: number;
 		input?: number;
@@ -250,10 +252,28 @@ function readReadmeSummary(cwd: string): string | null {
 	} catch {
 		return null;
 	}
-	const paragraphs = readme
+	const cleanedReadme = readme
+		.replace(/<!--[\s\S]*?-->/g, "")
+		.replace(/<picture\b[\s\S]*?<\/picture>/gi, "")
+		.replace(/^\s*<h[1-6]\b[^>]*>[\s\S]*?<\/h[1-6]>\s*$/gim, "")
+		.replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, "")
+		.replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+		.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+		.replace(/<img\b[^>]*>/gi, "")
+		.replace(/<[^>]+>/g, "")
+		.replace(/[*_~]/g, "");
+	const paragraphs = cleanedReadme
 		.split(/\n\s*\n/)
-		.map((part) => part.trim())
-		.filter((part) => part.length > 0 && !part.startsWith("#") && !part.startsWith("```"));
+		.map((part) =>
+			part
+				.replace(/^\s*#{1,6}\s+.*$/gm, "")
+				.replace(/^\s*[-|: ]+\s*$/gm, "")
+				.trim(),
+		)
+		.filter(
+			(part) =>
+				part.length >= 20 && /[A-Za-z]{3}/.test(part) && !part.startsWith("```") && !/^table of contents$/i.test(part),
+		);
 	const first = paragraphs[0];
 	if (!first) return null;
 	const cleaned = first.replace(/\s+/g, " ").replace(/\.$/, "").trim();
@@ -944,12 +964,14 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 	if (fallbackReason) state.fallbackReason = fallbackReason;
 	const scout = telemetry.scout;
 	if (!scout) return state;
+	state.structuredOutputMode = scout.structuredOutputMode;
 	for (const [key, value] of [
 		["runId", scout.runId],
 		["targetId", scout.targetId],
 		["wireModelId", scout.wireModelId],
 		["runtimeId", scout.runtimeId],
 		["runtimeKind", scout.runtimeKind],
+		["thinkingLevel", scout.thinkingLevel],
 	] as const) {
 		const bounded = boundedStateString(value, 512);
 		if (bounded) state[key] = bounded;

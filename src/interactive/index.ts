@@ -109,6 +109,7 @@ import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
 import { openAuthDialog } from "./overlays/auth-dialog.js";
+import { contextResetOptions, openContextResetOverlay } from "./overlays/context-reset.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
@@ -343,6 +344,7 @@ export type OverlayState =
 	| "auth"
 	| "cost"
 	| "context-view"
+	| "context-reset"
 	| "fleet"
 	| "tasks"
 	| "view"
@@ -822,6 +824,10 @@ export function routeOverlayKey(
 		// Read-only overlay; same policy as /cost: Esc closes, all else swallowed.
 		routeCostOverlayKey(data, deps);
 		return true;
+	}
+	if (overlayState === "context-reset") {
+		// SelectList owns arrows, Enter, and Esc so every cancel path is identical.
+		return false;
 	}
 	if (overlayState === "fleet") {
 		// The overlay body owns all keys, including Esc (cancel submenu/confirm, else close).
@@ -1628,26 +1634,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					tui.requestRender();
 				});
 		},
-		runContextClear: (options) => {
+		runContextClear: () => {
 			if (!deps.onContextClear) {
 				io.stderr("[/context reset] context reset not wired; pass onContextClear to startInteractive\n");
 				return;
 			}
-			if (options.confirmed !== true) {
-				const line =
-					options.all === true
-						? "[/context reset] will delete .clio/codewiki.json, .clio/state.json, .clio/handoffs/, .clio/proposals/, and CLIO.md. Rerun /context reset --all --confirm --confirm-all to proceed.\n"
-						: "[/context reset] will delete .clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/; CLIO.md is preserved. Rerun /context reset --confirm to proceed.\n";
-				io.stdout(line);
-				return;
-			}
-			void deps
-				.onContextClear(options)
-				.catch((err) => {
-					const msg = err instanceof Error ? err.message : String(err);
-					io.stderr(`[/context reset] ${msg}\n`);
-				})
-				.finally(() => tui.requestRender());
+			openContextResetOverlayState();
 		},
 		runContextRefresh: () => {
 			if (!deps.onContextRefresh) {
@@ -2586,6 +2578,30 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		if (overlayState !== "closed") return;
 		overlayState = "context-view";
 		overlayHandle = openContextOverlay(tui, () => deps.chat.contextLedger(), { bus: deps.bus, chat: deps.chat });
+		tui.requestRender();
+	};
+
+	const openContextResetOverlayState = (): void => {
+		if (overlayState !== "closed" || !deps.onContextClear) return;
+		overlayState = "context-reset";
+		overlayHandle = openContextResetOverlay(tui, {
+			onReset: (choice) => {
+				closeOverlay();
+				const onContextClear = deps.onContextClear;
+				if (!onContextClear) return;
+				void Promise.resolve()
+					.then(() => onContextClear(contextResetOptions(choice)))
+					.catch((err) => {
+						const msg = err instanceof Error ? err.message : String(err);
+						io.stderr(`[/context reset] ${msg}\n`);
+					})
+					.finally(() => {
+						footer.refresh();
+						tui.requestRender();
+					});
+			},
+			onCancel: () => closeOverlay(),
+		});
 		tui.requestRender();
 	};
 

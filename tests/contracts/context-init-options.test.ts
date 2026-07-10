@@ -78,23 +78,27 @@ async function captureProcessWrites<T>(fn: () => Promise<T>): Promise<{ stdout: 
 }
 
 describe("contracts/context-init-options", () => {
-	it("parses /context init --rewrite as rewrite plus apply through the shared implication", () => {
-		deepStrictEqual(slashInitOptions("/context init --rewrite"), {
+	it("keeps rewrite implications in the shell options while /context init stays zero-argument", () => {
+		deepStrictEqual(applyInitImplications({ rewriteClioMd: true }), {
 			applyClioMd: true,
 			rewriteClioMd: true,
 		});
-		deepStrictEqual(slashInitOptions("/context init --apply"), {
-			applyClioMd: true,
-		});
+		deepStrictEqual(slashInitOptions("/context init"), {});
+		for (const flag of ["--rewrite", "--apply", "--include-global", "--no-generate"]) {
+			deepStrictEqual(parseSlashCommand(`/context init ${flag}`), {
+				kind: "unknown",
+				text: `/context init ${flag}`,
+			});
+		}
 	});
 
-	it("keeps CLI and TUI init flag semantics table-driven, including legacy aliases", () => {
-		deepStrictEqual(contextInitOptionsFromCliArgs(["--rewrite"]), slashInitOptions("/context init --rewrite"));
-		deepStrictEqual(
-			contextInitOptionsFromCliArgs(["--include-global"]),
-			slashInitOptions("/context init --include-global"),
-		);
-		deepStrictEqual(contextInitOptionsFromCliArgs(["--no-generate"]), slashInitOptions("/context init --no-generate"));
+	it("keeps advanced shell init flags table-driven, including legacy aliases", () => {
+		deepStrictEqual(contextInitOptionsFromCliArgs(["--rewrite"]), {
+			applyClioMd: true,
+			rewriteClioMd: true,
+		});
+		deepStrictEqual(contextInitOptionsFromCliArgs(["--include-global"]), { includeGlobalImports: true });
+		deepStrictEqual(contextInitOptionsFromCliArgs(["--no-generate"]), { heuristic: true });
 	});
 
 	it("regenerates from scratch on --rewrite instead of using the existing CLIO.md as source", async () => {
