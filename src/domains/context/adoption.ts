@@ -301,13 +301,10 @@ function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolea
 	addProject("GEMINI.md", "gemini", "instructions");
 	addProject(join(".gemini", "GEMINI.md"), "gemini", "instructions");
 	addProject(join(".github", "copilot-instructions.md"), "copilot", "instructions");
-	let visibleWorkspaceFiles: string[] = [];
-	try {
-		visibleWorkspaceFiles = enumerateWorkspaceFiles(cwd);
-	} catch {
-		// Explicit root constitutions above still participate when a non-Git
-		// workspace cannot be enumerated authoritatively within its resource cap.
-	}
+	// Nested constitutions are part of the claimed provenance set. Let the
+	// walker's typed limit/incomplete failures propagate instead of silently
+	// publishing an authoritative-looking partial adoption snapshot.
+	const visibleWorkspaceFiles = enumerateWorkspaceFiles(cwd);
 	for (const relPath of visibleWorkspaceFiles) {
 		const parts = relPath.split("/");
 		if (parts.length - 1 > 6) continue;
@@ -374,6 +371,13 @@ function stripCodeFences(text: string): string {
 	return lines.join("\n");
 }
 
+function isBarePathOrFileName(text: string): boolean {
+	const token = /^`([^`]+)`$/.exec(text)?.[1] ?? text;
+	if (/\s/.test(token)) return false;
+	if (!/^[A-Za-z0-9_@.+~/-]+$/.test(token)) return false;
+	return token.includes("/") || extname(token).length > 1;
+}
+
 function cleanRuleText(raw: string): string | null {
 	let text = raw
 		.replace(/<!--.*?-->/g, "")
@@ -384,6 +388,7 @@ function cleanRuleText(raw: string): string | null {
 	if (text.length < 8 || text.length > 260) return null;
 	if (/^(todo|note|example|marker)\b/i.test(text)) return null;
 	if (/\$[A-Z][A-Z0-9_]*|\{\{[^}]+\}\}|<\/?[A-Z][A-Z0-9_-]*>/i.test(text)) return null;
+	if (isBarePathOrFileName(text)) return null;
 	if (!RULE_KEYWORDS.test(text)) return null;
 	if (hasSecretLikeLine(text)) return null;
 	if (text.length > 200) text = `${text.slice(0, 197).trimEnd()}…`;
