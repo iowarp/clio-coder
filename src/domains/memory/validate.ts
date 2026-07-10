@@ -1,8 +1,10 @@
+import { isAbsolute, resolve } from "node:path";
 import {
 	MEMORY_SCOPES,
 	MEMORY_VERSION,
 	type MemoryRecord,
 	type MemoryRecordValidationResult,
+	type MemoryRepositoryIdentity,
 	type MemoryScope,
 	type MemoryStoreValidationResult,
 	type MemoryValidationIssue,
@@ -62,6 +64,7 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 			"regressions",
 			"approved",
 			"rejectedAt",
+			"repository",
 		],
 		issues,
 	);
@@ -89,8 +92,15 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	const regressions = readOptionalStringArray(value, `${path}.regressions`, issues);
 	const approved = readBoolean(value, `${path}.approved`, issues);
 	const rejectedAt = readOptionalIsoString(value, `${path}.rejectedAt`, issues);
+	const repository = readOptionalMemoryRepositoryIdentity(value, `${path}.repository`, issues);
 	if (approved === true && rejectedAt !== undefined) {
 		issues.push({ path: `${path}.rejectedAt`, message: "approved records must not be rejected" });
+	}
+	if (repository !== undefined && scope !== null && scope !== "repo") {
+		issues.push({ path: `${path}.repository`, message: "repository applicability requires repo scope" });
+	}
+	if (repository === undefined && scope === "repo") {
+		issues.push({ path: `${path}.repository`, message: "repo scope requires repository applicability" });
 	}
 	if (
 		id === null ||
@@ -121,7 +131,37 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	if (lastVerifiedAt !== undefined) record.lastVerifiedAt = lastVerifiedAt;
 	if (regressions !== undefined) record.regressions = regressions;
 	if (rejectedAt !== undefined) record.rejectedAt = rejectedAt;
+	if (repository !== undefined) record.repository = repository;
 	return record;
+}
+
+function readOptionalMemoryRepositoryIdentity(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryRepositoryIdentity | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	rejectUnexpectedFields(value, path, ["kind", "key"], issues);
+	const kind = readString(value, `${path}.kind`, issues);
+	if (kind !== null && kind !== "canonical-path") {
+		issues.push({ path: `${path}.kind`, message: "expected canonical-path" });
+	}
+	const key = readString(value, `${path}.key`, issues);
+	if (key !== null && !isNormalizedAbsoluteRepositoryPath(key)) {
+		issues.push({ path: `${path}.key`, message: "expected normalized absolute repository path" });
+	}
+	if (kind !== "canonical-path" || key === null || !isNormalizedAbsoluteRepositoryPath(key)) return undefined;
+	return { kind, key };
+}
+
+function isNormalizedAbsoluteRepositoryPath(value: string): boolean {
+	return !/[\0\r\n]/u.test(value) && isAbsolute(value) && resolve(value) === value;
 }
 
 function rejectUnexpectedFields(

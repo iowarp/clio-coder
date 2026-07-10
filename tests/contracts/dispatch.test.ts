@@ -441,6 +441,117 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("freezes parent protected artifacts into local and SSH worker specs and receipts", async () => {
+		const protectedPath = join(process.cwd(), "PLAN.md");
+		for (const transport of ["local", "ssh"] as const) {
+			const context = stubContext();
+			const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+			let capturedSpec: WorkerSpec | null = null;
+			const fakeSpawn = (spec: WorkerSpec) => {
+				capturedSpec = spec;
+				return {
+					pid: 9999,
+					promise: exit.promise,
+					events: (async function* () {
+						yield {
+							type: "clio_tool_finish",
+							payload: {
+								tool: "write",
+								durationMs: 1,
+								outcome: "blocked",
+								decision: "blocked",
+								actionClass: "write",
+								reasonCode: "protected-artifact",
+								reason: `protected artifact blocked: write would modify protected path ${protectedPath}`,
+							},
+						};
+					})(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			};
+			const bundle = makeDispatchBundle(context, {
+				getProtectedArtifactState: () => ({
+					artifacts: [
+						{
+							path: protectedPath,
+							protectedAt: "2026-07-10T12:00:00.000Z",
+							reason: "validated plan",
+							source: "validation",
+						},
+					],
+				}),
+				spawnWorker:
+					transport === "local"
+						? fakeSpawn
+						: () => {
+								throw new Error("local spawn should not run for SSH placement");
+							},
+				resolveNode:
+					transport === "ssh"
+						? () => ({ node: { id: "blade", kind: "ssh", host: "blade.example" }, spawn: fakeSpawn })
+						: () => null,
+			});
+			await bundle.extension.start();
+			try {
+				const handle = await bundle.contract.dispatch({ agentId: "coder", task: `protected ${transport} worker` });
+				await drainEvents(handle.events);
+				exit.resolve({ exitCode: 0, signal: null });
+				const receipt = await handle.finalPromise;
+				const launchedSpec = capturedSpec as unknown as WorkerSpec;
+				strictEqual(launchedSpec.protectedArtifactState?.version, 1);
+				deepStrictEqual(
+					launchedSpec.protectedArtifactState?.artifacts.map((artifact) => artifact.path),
+					[protectedPath],
+				);
+				strictEqual(receipt.safety?.protectedArtifacts?.count, 1);
+				match(receipt.safety?.protectedArtifacts?.stateHash ?? "", /^[0-9a-f]{64}$/);
+				strictEqual(receipt.safety?.blockedAttempts[0]?.reasonCode, "protected-artifact");
+				strictEqual(receipt.node?.id ?? "local", transport === "ssh" ? "blade" : "local");
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		}
+	});
+
+	it("rejects inherited protected artifacts on an unenforceable subprocess runtime before launch", async () => {
+		const runtime = runtimeDescriptor({
+			id: "claude-code",
+			kind: "subprocess",
+			apiFamily: "claude-code-subprocess",
+		});
+		const target: TargetDescriptor = { id: "claude", runtime: runtime.id, defaultModel: "claude" };
+		const context = stubContext({ target, runtime });
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			getProtectedArtifactState: () => ({
+				artifacts: [
+					{
+						path: join(process.cwd(), "PLAN.md"),
+						protectedAt: "2026-07-10T12:00:00.000Z",
+						reason: "validated plan",
+						source: "validation",
+					},
+				],
+			}),
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not launch");
+			},
+			resolveNode: () => null,
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "must preserve hard blocks" }),
+				/cannot enforce 1 protected artifact hard block/,
+			);
+			strictEqual(spawned, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("forwards the run cwd through the reproducibility seam onto the receipt", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
@@ -1913,6 +2024,118 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("clamps request-level ACP autonomy and receipts requested, session, and effective authority", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (!configContract) throw new Error("test requires config contract");
+		const settings = configContract.get() as ClioSettings;
+		settings.autonomy = "full-auto";
+		settings.delegation.agents = [{ id: "mediated", command: "mock-acp", args: [], toolGovernance: "clio-policy" }];
+		let launchedAutonomy: string | undefined;
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: (input) => {
+				launchedAutonomy = input.autonomy;
+				return successfulAcpHandle();
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "mediated",
+				delegationAgentId: "mediated",
+				task: "review without writes",
+				autonomy: "read-only",
+			});
+			const receipt = await handle.finalPromise;
+			strictEqual(launchedAutonomy, "read-only");
+			deepStrictEqual(receipt.autonomyEnforcement, {
+				grade: "mediated",
+				autonomy: "read-only",
+				requestedAutonomy: "read-only",
+				sessionAutonomy: "full-auto",
+				externalMode: "clio-policy",
+			});
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("rejects agent-managed ACP request narrowing before launch", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (!configContract) throw new Error("test requires config contract");
+		const settings = configContract.get() as ClioSettings;
+		settings.autonomy = "full-auto";
+		settings.delegation.agents = [{ id: "unmediated", command: "mock-acp", args: [], toolGovernance: "agent-managed" }];
+		let started = false;
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => {
+				started = true;
+				return successfulAcpHandle();
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({
+					agentId: "unmediated",
+					delegationAgentId: "unmediated",
+					task: "review without writes",
+					autonomy: "read-only",
+				}),
+				/cannot enforce request autonomy narrowing from 'full-auto' to 'read-only'/,
+			);
+			strictEqual(started, false);
+			strictEqual(bundle.contract.listRuns().length, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("rejects narrowing ACP tool profiles before launch while retaining full-agent", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (!configContract) throw new Error("test requires config contract");
+		const settings = configContract.get() as ClioSettings;
+		settings.delegation.agents = [{ id: "profiled", command: "mock-acp", args: [], toolGovernance: "clio-policy" }];
+		let starts = 0;
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => {
+				starts += 1;
+				return successfulAcpHandle();
+			},
+		});
+		await bundle.extension.start();
+		try {
+			for (const toolProfile of ["minimal-local", "science-local"] as const) {
+				await rejects(
+					bundle.contract.dispatch({
+						agentId: "profiled",
+						delegationAgentId: "profiled",
+						task: "profile must be real",
+						toolProfile,
+					}),
+					new RegExp(`ACP delegation runtime cannot enforce tool_profile '${toolProfile}'`),
+				);
+			}
+			strictEqual(starts, 0);
+			strictEqual(bundle.contract.listRuns().length, 0);
+
+			const handle = await bundle.contract.dispatch({
+				agentId: "profiled",
+				delegationAgentId: "profiled",
+				task: "full surface makes no narrowing claim",
+				toolProfile: "full-agent",
+			});
+			const receipt = await handle.finalPromise;
+			strictEqual(starts, 1);
+			strictEqual(receipt.safety?.toolProfile, "full-agent");
+			strictEqual(receipt.toolSignature, null, "ACP receipts must represent the unobservable external surface as unknown");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("records mediated deny-all and bypassed agent-managed ACP autonomy grades", async () => {
 		const cases = [
 			{
@@ -2622,6 +2845,21 @@ rl.once("line", () => {
 			const projectCwd = join(scratch, "project");
 			const lineage: RunLineage = { parentRunId: null, rootRunId: "root", attempt: 0, depth: 0 };
 			const identity = { host: "h", user: "u", hpc: null };
+			const pipeline = { fromRunId: "upstream", position: 2, inputBytes: 12, inputTruncated: false };
+			const gate = {
+				role: "reviewer" as const,
+				group: "gate-orphan",
+				cycle: 1,
+				subjects: [{ runId: "builder", digest: "a".repeat(64) }],
+			};
+			const plan = {
+				hash: "b".repeat(64),
+				topology: "parallel" as const,
+				taskCount: 2,
+				approval: "operator" as const,
+				costCeilingUsd: 1,
+			};
+			const personaOverride = { promptHash: "c".repeat(64) };
 			const ledger = openLedger({ maxRuns: 10 });
 			const env = ledger.create({
 				agentId: "coder",
@@ -2640,10 +2878,18 @@ rl.once("line", () => {
 				outcomeDetail: null,
 				lineage,
 				identity,
+				pipeline,
+				gate,
+				plan,
+				personaOverride,
 				endedAt,
 				exitCode: 0,
 				tokenCount: 0,
+				inputTokenCount: 0,
+				outputTokenCount: 0,
 				reasoningTokenCount: 0,
+				promptSignature: "prompt-signature",
+				toolSignature: "tool-signature",
 				costUsd: 0,
 			});
 			const receiptDraft: RunReceiptDraft = {
@@ -2658,14 +2904,22 @@ rl.once("line", () => {
 				outcomeDetail: null,
 				lineage,
 				identity,
+				pipeline,
+				gate,
+				plan,
+				personaOverride,
 				startedAt: env.startedAt,
 				endedAt,
 				exitCode: 0,
 				tokenCount: 0,
+				inputTokenCount: 0,
+				outputTokenCount: 0,
 				reasoningTokenCount: 0,
 				costUsd: 0,
 				compiledPromptHash: null,
 				staticCompositionHash: null,
+				promptSignature: "prompt-signature",
+				toolSignature: "tool-signature",
 				clioVersion: "0.0.0",
 				piMonoVersion: "0.0.0",
 				platform: process.platform,
@@ -2696,6 +2950,10 @@ rl.once("line", () => {
 			strictEqual(summary.recovered, 1);
 			strictEqual(summary.corrupt, 1);
 			strictEqual(reopened.get(env.id)?.outcome, "succeeded");
+			deepStrictEqual(reopened.get(env.id)?.gate, gate);
+			deepStrictEqual(reopened.get(env.id)?.plan, plan);
+			deepStrictEqual(reopened.get(env.id)?.pipeline, pipeline);
+			deepStrictEqual(reopened.get(env.id)?.personaOverride, personaOverride);
 			ok(existsSync(`${corruptPath}.corrupt`));
 		});
 	});
@@ -2736,7 +2994,7 @@ rl.once("line", () => {
 				orphanPath,
 				JSON.stringify({
 					runId: "nocwd0000001",
-					integrity: { version: 2, algorithm: "sha256", digest: "a".repeat(64) },
+					integrity: { version: 4, algorithm: "sha256", digest: "a".repeat(64) },
 				}),
 				"utf8",
 			);

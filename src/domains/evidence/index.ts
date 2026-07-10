@@ -19,6 +19,7 @@ export {
 	evidenceRoot,
 	inspectEvidence,
 	listEvidenceOverviews,
+	loadEvidenceGateDecisions,
 	loadEvidenceOverview,
 	loadEvidenceRunProvenance,
 } from "./store.js";
@@ -31,6 +32,7 @@ export type {
 	EvidenceEvalTraceRow,
 	EvidenceFinding,
 	EvidenceFindingsFile,
+	EvidenceGateDecisionsFile,
 	EvidenceInspectable,
 	EvidenceLinkConfidence,
 	EvidenceOverview,

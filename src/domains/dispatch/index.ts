@@ -15,6 +15,12 @@ export function createDispatchDomainModule(options: DispatchBundleOptions = {}):
 }
 
 export type { DispatchContract, DispatchRequest } from "./contract.js";
+export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
+export {
+	readGateDecisionArtifacts,
+	readGateDecisionArtifactsForRunIds,
+	verifyGateDecisionArtifact,
+} from "./gate-decisions.js";
 export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
 export type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "./types.js";

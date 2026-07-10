@@ -13,6 +13,7 @@ import type {
 	DispatchRequestOrigin,
 	RunGateProvenance,
 	RunLineage,
+	RunNodeIdentity,
 	RunNodeReroute,
 	RunPlanProvenance,
 } from "./types.js";
@@ -32,6 +33,11 @@ export interface PipelineInput {
 	text: string;
 }
 
+export interface ProtectedArtifactPathRemap {
+	sourceRoot: string;
+	workerRoot: string;
+}
+
 export interface JobSpec {
 	agentId: string;
 	task: string;
@@ -43,6 +49,10 @@ export interface JobSpec {
 	thinkingLevel?: JobThinkingLevel;
 	/** Explicit fleet node pin; `local` or a configured fleet.nodes id. */
 	node?: string;
+	/** Immutable plan-time node identity. Internal dispatch-tool field, never model-authored. */
+	plannedNode?: RunNodeIdentity;
+	/** Internal compete-worktree mapping that only expands inherited hard blocks. */
+	protectedArtifactRemap?: ProtectedArtifactPathRemap;
 	/**
 	 * Failover lineage threaded by the internal retry path when a node was
 	 * classified dead. Hops arrive with an empty toNode; placement fills it
@@ -104,6 +114,8 @@ const KNOWN_KEYS = new Set([
 	"model",
 	"thinkingLevel",
 	"node",
+	"plannedNode",
+	"protectedArtifactRemap",
 	"reroutes",
 	"requiredCapabilities",
 	"toolProfile",
@@ -184,6 +196,44 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("node" in spec && spec.node !== undefined) {
 		if (typeof spec.node !== "string" || spec.node.trim().length === 0) {
 			errors.push("node must be a non-empty string");
+		}
+	}
+
+	if ("plannedNode" in spec && spec.plannedNode !== undefined) {
+		if (!isPlainObject(spec.plannedNode)) {
+			errors.push("plannedNode must be an object");
+		} else {
+			for (const key of Object.keys(spec.plannedNode)) {
+				if (key !== "id" && key !== "kind" && key !== "host") errors.push(`plannedNode unknown key: ${key}`);
+			}
+			if (typeof spec.plannedNode.id !== "string" || spec.plannedNode.id.trim().length === 0) {
+				errors.push("plannedNode.id must be a non-empty string");
+			}
+			if (spec.plannedNode.kind !== "local" && spec.plannedNode.kind !== "ssh") {
+				errors.push("plannedNode.kind must be local or ssh");
+			}
+			if (
+				spec.plannedNode.kind === "ssh" &&
+				(typeof spec.plannedNode.host !== "string" || spec.plannedNode.host.trim().length === 0)
+			) {
+				errors.push("plannedNode.host must be a non-empty string for ssh nodes");
+			}
+			if (spec.plannedNode.kind === "local" && spec.plannedNode.host !== undefined) {
+				errors.push("plannedNode.host must be absent for local nodes");
+			}
+		}
+	}
+
+	if ("protectedArtifactRemap" in spec && spec.protectedArtifactRemap !== undefined) {
+		if (
+			!isPlainObject(spec.protectedArtifactRemap) ||
+			Object.keys(spec.protectedArtifactRemap).some((key) => key !== "sourceRoot" && key !== "workerRoot") ||
+			typeof spec.protectedArtifactRemap.sourceRoot !== "string" ||
+			!path.isAbsolute(spec.protectedArtifactRemap.sourceRoot) ||
+			typeof spec.protectedArtifactRemap.workerRoot !== "string" ||
+			!path.isAbsolute(spec.protectedArtifactRemap.workerRoot)
+		) {
+			errors.push("protectedArtifactRemap must carry absolute sourceRoot and workerRoot paths");
 		}
 	}
 
@@ -295,7 +345,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if ("plan" in spec && spec.plan !== undefined) {
 		if (!isValidPlan(spec.plan)) {
 			errors.push(
-				"plan must carry hash (non-empty), topology (parallel|sequential|pipeline|compete|detached), taskCount >= 1, approval (operator|full-auto), optional costCeilingUsd > 0",
+				"plan must carry hash (non-empty), topology (parallel|sequential|pipeline|review|compete|detached), taskCount >= 1, approval (operator|full-auto), optional costCeilingUsd > 0",
 			);
 		}
 	}
@@ -314,6 +364,10 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.target === "string") out.target = spec.target;
 	if (typeof spec.model === "string") out.model = spec.model;
 	if (typeof spec.node === "string") out.node = spec.node.trim();
+	if (isValidPlannedNode(spec.plannedNode)) out.plannedNode = { ...spec.plannedNode };
+	if (isValidProtectedArtifactRemap(spec.protectedArtifactRemap)) {
+		out.protectedArtifactRemap = { ...spec.protectedArtifactRemap };
+	}
 	if (Array.isArray(spec.reroutes) && spec.reroutes.every((hop) => isValidReroute(hop))) {
 		out.reroutes = spec.reroutes.map((hop) => ({ ...hop }));
 	}
@@ -364,9 +418,25 @@ function isValidReroute(value: unknown): value is RunNodeReroute {
 	return attemptOk && fromOk && toOk && reasonOk;
 }
 
+function isValidPlannedNode(value: unknown): value is RunNodeIdentity {
+	if (!isPlainObject(value) || typeof value.id !== "string" || value.id.trim().length === 0) return false;
+	if (value.kind === "local") return value.host === undefined;
+	return value.kind === "ssh" && typeof value.host === "string" && value.host.trim().length > 0;
+}
+
+function isValidProtectedArtifactRemap(value: unknown): value is ProtectedArtifactPathRemap {
+	return (
+		isPlainObject(value) &&
+		typeof value.sourceRoot === "string" &&
+		path.isAbsolute(value.sourceRoot) &&
+		typeof value.workerRoot === "string" &&
+		path.isAbsolute(value.workerRoot)
+	);
+}
+
 const VALID_GATE_ROLES = new Set(["builder", "reviewer", "candidate", "judge"]);
 const VALID_GATE_VERDICTS = new Set(["pass", "fail", "revise"]);
-const VALID_PLAN_TOPOLOGIES = new Set(["parallel", "sequential", "pipeline", "compete", "detached"]);
+const VALID_PLAN_TOPOLOGIES = new Set(["parallel", "sequential", "pipeline", "review", "compete", "detached"]);
 const VALID_PLAN_APPROVALS = new Set(["operator", "full-auto"]);
 
 function isValidGate(value: unknown): value is RunGateProvenance {
@@ -404,6 +474,18 @@ function isValidPlan(value: unknown): value is RunPlanProvenance {
 	if (typeof value.topology !== "string" || !VALID_PLAN_TOPOLOGIES.has(value.topology)) return false;
 	if (typeof value.taskCount !== "number" || !Number.isInteger(value.taskCount) || value.taskCount < 1) return false;
 	if (typeof value.approval !== "string" || !VALID_PLAN_APPROVALS.has(value.approval)) return false;
+	if (
+		value.approvalRequestId !== undefined &&
+		(typeof value.approvalRequestId !== "string" || value.approvalRequestId.length === 0)
+	) {
+		return false;
+	}
+	if (
+		value.approvalRequestedBy !== undefined &&
+		(typeof value.approvalRequestedBy !== "string" || value.approvalRequestedBy.length === 0)
+	) {
+		return false;
+	}
 	if (value.costCeilingUsd !== undefined && (typeof value.costCeilingUsd !== "number" || value.costCeilingUsd <= 0)) {
 		return false;
 	}

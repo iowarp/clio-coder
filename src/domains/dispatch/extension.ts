@@ -10,11 +10,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { resolve as resolvePath } from "node:path";
+import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModelIds } from "../../core/residency-protection.js";
 import { UnsupportedResponseSchemaError } from "../../core/response-schema.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
@@ -26,10 +27,11 @@ import {
 } from "../../engine/acp/adapter.js";
 import { antigravitySubprocessConfigForAutonomy } from "../../engine/antigravity/subprocess-runtime.js";
 import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude/subprocess-runtime.js";
-import { applyToolProfile, type ToolProfileName } from "../../tools/profiles.js";
+import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import {
 	serializeWorkerRuntimeDescriptor,
+	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
 	WORKER_SPEC_VERSION,
 	type WorkerPromptMessage,
 } from "../../worker/spec-contract.js";
@@ -67,6 +69,7 @@ import type { ActionClass } from "../safety/action-classifier.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
+import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
@@ -80,15 +83,18 @@ import {
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
 import {
+	type DispatchAdmissionObserver,
 	DispatchConcurrencyError,
 	type DispatchContract,
+	type DispatchPlanTaskResolution,
 	type DispatchRequest,
 	type DispatchSnapshot,
 } from "./contract.js";
+import { isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
-import { createFleetPlacementResolver } from "./placement.js";
+import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { createSpeculationObserver, type SpeculationObserver } from "./speculation.js";
@@ -208,6 +214,8 @@ export interface DispatchBundleOptions {
 	 * byte for byte.
 	 */
 	resolveNode?: (req: DispatchRequest) => DispatchNodePlacement | null;
+	/** Side-effect-free companion to resolveNode, primarily for alternate fleet backends and deterministic tests. */
+	previewNode?: (req: DispatchRequest) => { node: RunNodeIdentity };
 	startAcpDelegationRun?: (input: AcpDelegationRunInput) => AcpDelegationRunHandle;
 	heartbeatSpec?: HeartbeatSpec;
 	heartbeatIntervalMs?: number;
@@ -221,6 +229,11 @@ export interface DispatchBundleOptions {
 	 * the shared config snapshot when absent (headless boots, tests).
 	 */
 	getSettings?: () => Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+	/**
+	 * Live orchestrator protection state. It is cloned and canonicalized once at
+	 * dispatch admission, then carried immutably on every mediated worker spec.
+	 */
+	getProtectedArtifactState?: () => ProtectedArtifactState;
 	/** True only when this invocation supplied an explicit one-run autonomy override. */
 	autonomyOverride?: boolean;
 	/**
@@ -785,6 +798,7 @@ interface DispatchWorkerSpecInput {
 	dynamicHash: string | null;
 	apiKey: string | undefined;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
+	protectedArtifactState?: ProtectedArtifactState;
 	/** Effective settings snapshot for this run; falls back to config.get(). */
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 }
@@ -824,12 +838,14 @@ interface AcpDelegationLifecycleStage {
 	sessionShellHash: string | null;
 	dynamicHash: string | null;
 	promptSignature: string | null;
-	toolSignature: string;
+	/** External ACP tool inventory is not observable; null is an explicit unknown, never a synthetic empty surface. */
+	toolSignature: null;
 	runtimeLimitations: string[];
 	requestOrigin: DispatchRequestOrigin;
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	sessionAutonomy: AutonomyLevel;
 	autonomy: AutonomyLevel;
 }
 
@@ -917,6 +933,76 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	);
 }
 
+function frozenProtectedArtifactState(state: ProtectedArtifactState | undefined): ProtectedArtifactState {
+	return {
+		artifacts: (state?.artifacts ?? []).map((artifact) => ({
+			...structuredClone(artifact),
+			path: canonicalizeExistingPath(resolvePath(process.cwd(), artifact.path)),
+		})),
+	};
+}
+
+function protectedArtifactStateForRequest(state: ProtectedArtifactState, req: DispatchRequest): ProtectedArtifactState {
+	const frozen = frozenProtectedArtifactState(state);
+	const remap = req.protectedArtifactRemap;
+	if (remap === undefined) return frozen;
+	const sourceRoot = canonicalizeExistingPath(resolvePath(remap.sourceRoot));
+	const workerRoot = canonicalizeExistingPath(resolvePath(remap.workerRoot));
+	const artifacts = [...frozen.artifacts];
+	for (const artifact of frozen.artifacts) {
+		const rel = relative(sourceRoot, artifact.path);
+		if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue;
+		const mappedPath = canonicalizeExistingPath(resolvePath(workerRoot, rel));
+		if (artifacts.some((candidate) => candidate.path === mappedPath)) continue;
+		artifacts.push({ ...artifact, path: mappedPath, reason: `${artifact.reason} (compete worktree mirror)` });
+	}
+	return { artifacts };
+}
+
+function assertProtectedArtifactsEnforceable(
+	runtimeLabel: string,
+	enforceable: boolean,
+	state: ProtectedArtifactState,
+): void {
+	if (state.artifacts.length === 0 || enforceable) return;
+	throw new Error(
+		`dispatch: runtime '${runtimeLabel}' cannot enforce ${state.artifacts.length} protected artifact hard block(s); choose a native or claude-sdk worker`,
+	);
+}
+
+function protectedArtifactReceiptSummary(
+	state: WorkerSpec["protectedArtifactState"],
+): NonNullable<RunReceiptDraft["safety"]>["protectedArtifacts"] | undefined {
+	if (state === undefined || state.artifacts.length === 0) return undefined;
+	const artifacts = [...state.artifacts]
+		.map((artifact) => ({ ...artifact }))
+		.sort((left, right) => left.path.localeCompare(right.path));
+	return {
+		version: state.version,
+		count: artifacts.length,
+		stateHash: sha256(JSON.stringify(artifacts)),
+	};
+}
+
+function assertPlannedNodeIdentity(req: DispatchRequest, actual: RunNodeIdentity): void {
+	const planned = req.plannedNode;
+	if (planned === undefined) return;
+	if (planned.id === actual.id && planned.kind === actual.kind && (planned.host ?? null) === (actual.host ?? null))
+		return;
+	throw new Error(
+		`dispatch: approved node identity drifted: planned ${planned.id}/${planned.kind}/${planned.host ?? "-"}, resolved ${actual.id}/${actual.kind}/${actual.host ?? "-"}`,
+	);
+}
+
+function assertApprovedCostCeiling(req: DispatchRequest, liveCeilingUsd: number): void {
+	const approved = req.plan?.costCeilingUsd;
+	if (approved === undefined) return;
+	if (Object.is(approved, liveCeilingUsd)) return;
+	throw new Error(
+		`dispatch: scheduling cost ceiling drifted after plan approval (approved $${approved.toFixed(4)}, current $${liveCeilingUsd.toFixed(4)}); re-plan before launch`,
+	);
+}
+
 /** Fail closed until another runtime has an explicitly tested JSON-schema wire contract. */
 function assertResponseSchemaEnforceable(
 	runtime: RuntimeDescriptor,
@@ -936,7 +1022,9 @@ function assertResponseSchemaEnforceable(
 }
 
 function acpRuntimeLimitations(): string[] {
-	return ["external ACP agent executes its own tools; Clio mediates permission requests and records decisions"];
+	return [
+		"external ACP agent executes its own unknown tool surface; Clio mediates permission requests and records decisions",
+	];
 }
 
 function readWorkerTargets(settings: ReturnType<ConfigContract["get"]> | undefined): WorkerTargets {
@@ -1003,6 +1091,7 @@ function resolveDispatchAdmissionStage(
 }
 
 function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyContract): DispatchAdmissionStage {
+	assertToolProfileEnforceable(req.toolProfile, "ACP delegation");
 	const allowedTools = applyToolProfile([], req.toolProfile);
 	const requestedActions = deriveRequestedActions(allowedTools, safety);
 	const orchScope = pickOrchestratorScope(safety);
@@ -1045,6 +1134,18 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		allowedTools: input.admission.allowedTools,
 		middlewareSnapshot: input.middlewareSnapshot,
 	};
+	const protectedArtifactState = frozenProtectedArtifactState(input.protectedArtifactState);
+	assertProtectedArtifactsEnforceable(
+		input.target.runtime.id,
+		input.target.runtime.kind !== "subprocess",
+		protectedArtifactState,
+	);
+	if (protectedArtifactState.artifacts.length > 0) {
+		spec.protectedArtifactState = {
+			version: WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
+			artifacts: protectedArtifactState.artifacts,
+		};
+	}
 	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
@@ -1119,19 +1220,32 @@ export function clampWorkerAutonomy(session: AutonomyLevel, requested: AutonomyL
 	return AUTONOMY_ORDER[requested] < AUTONOMY_ORDER[session] ? requested : session;
 }
 
-function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyEnforcement {
+function requestedAutonomyEvidence(
+	sessionAutonomy: AutonomyLevel,
+	requestedAutonomy: AutonomyLevel | undefined,
+): Pick<RunReceiptAutonomyEnforcement, "requestedAutonomy" | "sessionAutonomy"> {
+	return requestedAutonomy === undefined ? {} : { requestedAutonomy, sessionAutonomy };
+}
+
+function autonomyEnforcementForWorkerSpec(
+	spec: WorkerSpec,
+	sessionAutonomy: AutonomyLevel,
+	requestedAutonomy: AutonomyLevel | undefined,
+): RunReceiptAutonomyEnforcement {
 	const autonomy = spec.autonomy ?? "auto-edit";
+	const authorityEvidence = requestedAutonomyEvidence(sessionAutonomy, requestedAutonomy);
 	if (spec.runtimeId === "claude-code") {
 		try {
 			const config = claudeSubprocessPermissionConfigForAutonomy(autonomy);
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
+				...authorityEvidence,
 				externalMode: config.permissionMode,
 				dangerousBypass: config.dangerousBypass,
 			};
 		} catch {
-			return { grade: "approximated", autonomy };
+			return { grade: "approximated", autonomy, ...authorityEvidence };
 		}
 	}
 	if (spec.runtimeId === "antigravity-code") {
@@ -1140,24 +1254,29 @@ function autonomyEnforcementForWorkerSpec(spec: WorkerSpec): RunReceiptAutonomyE
 			return {
 				grade: config.dangerousBypass ? "bypassed" : "approximated",
 				autonomy,
+				...authorityEvidence,
 				externalMode: config.extraArgs.includes("--sandbox") ? "sandbox" : "agy-settings-default",
 				dangerousBypass: config.dangerousBypass,
 			};
 		} catch {
-			return { grade: "approximated", autonomy };
+			return { grade: "approximated", autonomy, ...authorityEvidence };
 		}
 	}
-	return { grade: "mediated", autonomy };
+	return { grade: "mediated", autonomy, ...authorityEvidence };
 }
 
 function autonomyEnforcementForAcpDelegation(
 	autonomy: AutonomyLevel,
 	toolGovernance: DelegationToolGovernance,
+	sessionAutonomy: AutonomyLevel,
+	requestedAutonomy: AutonomyLevel | undefined,
 ): RunReceiptAutonomyEnforcement {
+	const authorityEvidence = requestedAutonomyEvidence(sessionAutonomy, requestedAutonomy);
 	if (toolGovernance === "agent-managed") {
 		return {
 			grade: "bypassed",
 			autonomy,
+			...authorityEvidence,
 			externalMode: toolGovernance,
 			dangerousBypass: true,
 		};
@@ -1165,7 +1284,7 @@ function autonomyEnforcementForAcpDelegation(
 	// clio-policy applies the exact autonomy mapping to every permission
 	// request. deny-all is stricter than every autonomy level, but is still a
 	// Clio-mediated upper bound rather than an external approximation.
-	return { grade: "mediated", autonomy, externalMode: toolGovernance };
+	return { grade: "mediated", autonomy, ...authorityEvidence, externalMode: toolGovernance };
 }
 
 function pickCapabilityMatchedWorker(
@@ -1544,6 +1663,8 @@ export function createDispatchBundle(
 	const config = context.getContract<ConfigContract>("config");
 	const getEffectiveSettings = (): Readonly<ReturnType<ConfigContract["get"]>> | undefined =>
 		options?.getSettings?.() ?? config?.get();
+	const getProtectedArtifactState = (): ProtectedArtifactState =>
+		frozenProtectedArtifactState(options?.getProtectedArtifactState?.());
 	// Optional: absent in minimal test bundles. Workers just get no project
 	// message when the context domain is not loaded.
 	const projectContext = context.getContract<ContextContract>("context");
@@ -1553,6 +1674,9 @@ export function createDispatchBundle(
 	const fleetRegistry = scheduling.fleet;
 	const resolveNode =
 		options?.resolveNode ?? createFleetPlacementResolver({ getSettings: getEffectiveSettings, fleet: fleetRegistry });
+	const previewNode =
+		options?.previewNode ??
+		createFleetPlacementPreviewResolver({ getSettings: getEffectiveSettings, fleet: fleetRegistry });
 	const startAcpRun = options?.startAcpDelegationRun ?? startAcpDelegationRun;
 	const collectReproducibility = options?.collectReproducibility ?? collectReproducibilityMetadata;
 	const heartbeatSpec = options?.heartbeatSpec ?? DEFAULT_HEARTBEAT_SPEC;
@@ -2033,7 +2157,12 @@ export function createDispatchBundle(
 	): AcpDelegationLifecycleStage {
 		const agentId = req.delegationAgentId;
 		if (!agentId) throw new Error("dispatch: missing delegationAgentId");
-		if (hasPersonaOverride(req)) {
+		const boundedGateRolePrompt = isBoundedGateRolePrompt({
+			role: req.gate?.role,
+			autonomy: req.autonomy,
+			systemPrompt: req.systemPrompt,
+		});
+		if (hasPersonaOverride(req) && !boundedGateRolePrompt) {
 			throw new Error(`dispatch: persona overrides are not allowed for ACP delegation agent '${agentId}'`);
 		}
 		if (req.agentId && maybeAgents) {
@@ -2054,6 +2183,13 @@ export function createDispatchBundle(
 			);
 		}
 		const admission = resolveDelegationAdmissionStage(req, safety);
+		const sessionAutonomy = settings.autonomy ?? "auto-edit";
+		const autonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
+		if (toolGovernance === "agent-managed" && autonomy !== sessionAutonomy) {
+			throw new Error(
+				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed' and cannot enforce request autonomy narrowing from '${sessionAutonomy}' to '${autonomy}'`,
+			);
+		}
 		const cwd = req.cwd ?? process.cwd();
 		const systemPrompt = buildStableSystemPrompt(req, null);
 		// ACP delegation defaults to no project context: repo conventions and
@@ -2065,7 +2201,7 @@ export function createDispatchBundle(
 		const project = projectContext && tier === "bounded" ? projectContext.projectStructuredContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			projectContextTier: tier,
-			autonomy: settings.autonomy ?? "auto-edit",
+			autonomy,
 			project,
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
@@ -2075,7 +2211,6 @@ export function createDispatchBundle(
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
 		const personaOverride = personaOverrideFor(req, staticCompositionHash);
-		const currentToolSignature = toolSignature(admission.allowedTools);
 		return {
 			admission,
 			agentConfig: configured,
@@ -2087,19 +2222,21 @@ export function createDispatchBundle(
 			sessionShellHash,
 			dynamicHash,
 			promptSignature: compiledPromptHash,
-			toolSignature: currentToolSignature,
+			toolSignature: null,
 			requestOrigin: requestOriginFor(req),
 			runtimeLimitations: acpRuntimeLimitations(),
 			pipeline: pipelineProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
-			autonomy: settings.autonomy ?? "auto-edit",
+			sessionAutonomy,
+			autonomy,
 		};
 	}
 
 	async function dispatchAcpDelegation(
 		req: DispatchRequest,
 		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+		observer?: DispatchAdmissionObserver,
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
@@ -2112,6 +2249,7 @@ export function createDispatchBundle(
 		assertTargetNotCoolingDown(targetId, runtimeId, wireModelId);
 
 		const preflight = scheduling.preflight();
+		assertApprovedCostCeiling(req, preflight.ceilingUsd);
 		if (preflight.verdict === "over" || preflight.verdict === "at") {
 			denyDispatchForBudget(preflight, req.agentId);
 		}
@@ -2309,11 +2447,14 @@ export function createDispatchBundle(
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 			});
+			observer?.onAdmitted({
+				runId: envelope.id,
+				pid: acp.pid,
+				runtimeKind: "acp-delegation",
+			});
 			// One durable write at start so sibling processes (clio fleet status)
 			// can observe the running row; finalization persists the terminal state.
-			void ledgerRef
-				.persist()
-				.catch((error) => reportDispatchDiagnostic(`persist running row for run ${envelope.id}`, error));
+			await ledgerRef.persist();
 			context.bus.emit(BusChannels.DispatchEnqueued, {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -2454,6 +2595,8 @@ export function createDispatchBundle(
 				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
 					lifecycle.autonomy,
 					lifecycle.agentConfig.toolGovernance ?? "clio-policy",
+					lifecycle.sessionAutonomy,
+					req.autonomy,
 				),
 				safety: {
 					decisions: safetyDecisionCounts,
@@ -2658,7 +2801,10 @@ export function createDispatchBundle(
 		};
 	}
 
-	async function dispatch(req: DispatchRequest): Promise<{
+	async function dispatch(
+		req: DispatchRequest,
+		observer?: DispatchAdmissionObserver,
+	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
@@ -2678,6 +2824,9 @@ export function createDispatchBundle(
 		// particular, responseSchema must not retain a caller-owned reference across
 		// the asynchronous target-resolution window below.
 		req = { ...req, ...validated.spec };
+		// Freeze the parent hard-block boundary before runtime routing or fleet
+		// placement. Every accepted runtime consumes this same immutable state.
+		const protectedArtifactState = protectedArtifactStateForRequest(getProtectedArtifactState(), req);
 
 		// Shadow observation: the rule pipeline computes its would-be plan
 		// synchronously; the outcome is recorded when the run's receipt seals.
@@ -2702,6 +2851,8 @@ export function createDispatchBundle(
 			return handle;
 		};
 		if (req.delegationAgentId) {
+			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
+			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
 					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
@@ -2715,7 +2866,7 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			return attachSpeculation(await dispatchAcpDelegation(req, settings));
+			return attachSpeculation(await dispatchAcpDelegation(req, settings, observer));
 		}
 
 		const lifecycle = await resolveLifecycle(req, settings);
@@ -2723,6 +2874,7 @@ export function createDispatchBundle(
 		assertTargetNotCoolingDown(lifecycle.target.target.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
 
 		const preflight = scheduling.preflight();
+		assertApprovedCostCeiling(req, preflight.ceilingUsd);
 		if (preflight.verdict === "over" || preflight.verdict === "at") {
 			denyDispatchForBudget(preflight, req.agentId);
 		}
@@ -2732,6 +2884,16 @@ export function createDispatchBundle(
 		// clean rejection that never holds a concurrency slot. The placement's
 		// own capacity is released on every exit path below.
 		const placement = resolveNode(req) ?? null;
+		try {
+			assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
+		} catch (error) {
+			try {
+				placement?.release?.();
+			} catch (releaseError) {
+				reportDispatchDiagnostic("release drifted fleet node slot", releaseError);
+			}
+			throw error;
+		}
 		// Fold the placement-completed reroute hops back onto the effective
 		// request: a later retry of this run must extend the filled lineage,
 		// not re-open hops placement already resolved.
@@ -2789,6 +2951,7 @@ export function createDispatchBundle(
 				toolSignature: lifecycle.toolSignature,
 				dynamicHash: lifecycle.dynamicHash,
 				middlewareSnapshot: middleware.snapshot(),
+				protectedArtifactState,
 				apiKey: lifecycle.apiKey,
 				...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 			},
@@ -3040,11 +3203,14 @@ export function createDispatchBundle(
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
 				...(heartbeatAt ? { heartbeatAt: heartbeatIso(heartbeatAt.current) } : {}),
 			});
+			observer?.onAdmitted({
+				runId: envelope.id,
+				pid,
+				runtimeKind: lifecycle.runtimeKind,
+			});
 			// One durable write at start so sibling processes (clio fleet status)
 			// can observe the running row; finalization persists the terminal state.
-			void ledgerRef
-				.persist()
-				.catch((error) => reportDispatchDiagnostic(`persist running row for run ${envelope.id}`, error));
+			await ledgerRef.persist();
 
 			// Fleet-visibility facts for the board: node placement, gate role,
 			// reroute lineage depth, and the model context window for the
@@ -3163,6 +3329,7 @@ export function createDispatchBundle(
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
+			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -3213,7 +3380,11 @@ export function createDispatchBundle(
 				toolStats: snapshotToolStats(toolStats),
 				toolActivity,
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
-				autonomyEnforcement: autonomyEnforcementForWorkerSpec(spec),
+				autonomyEnforcement: autonomyEnforcementForWorkerSpec(
+					spec,
+					lifecycle.settings?.autonomy ?? "auto-edit",
+					req.autonomy,
+				),
 				safety: {
 					// Escalation tallies are folded in only when at least one ask was
 					// escalated, so deny/fail receipts stay byte-identical.
@@ -3230,6 +3401,7 @@ export function createDispatchBundle(
 					blockedAttempts,
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
+					...(protectedArtifacts !== undefined ? { protectedArtifacts } : {}),
 					runtimeLimitations: lifecycle.runtimeLimitations,
 				},
 				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
@@ -3431,6 +3603,76 @@ export function createDispatchBundle(
 			events: enrichedEvents,
 			finalPromise,
 		});
+	}
+
+	function preview(req: DispatchRequest): DispatchPlanTaskResolution {
+		const settings = getEffectiveSettings();
+		const isAcpAgent = settings?.delegation?.agents?.some((entry) => entry.id === req.agentId) ?? false;
+		if (isAcpAgent && !req.delegationAgentId) req = { ...req, delegationAgentId: req.agentId };
+		const { systemPrompt: _systemPrompt, ...jobSpec } = req;
+		const validated = validateJobSpec(jobSpec);
+		if (!validated.ok) throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
+		req = { ...req, ...validated.spec };
+
+		if (req.delegationAgentId) {
+			const protectedArtifactState = getProtectedArtifactState();
+			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
+			if (req.responseSchema !== undefined) {
+				throw new UnsupportedResponseSchemaError(
+					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
+				);
+			}
+			if (req.writeRoots !== undefined && req.writeRoots.length > 0) {
+				throw new Error(
+					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
+				);
+			}
+			const lifecycle = resolveAcpDelegationLifecycle(req, settings);
+			return {
+				agentId: req.agentId,
+				targetId: `delegation:${lifecycle.agentConfig.id}`,
+				wireModelId: lifecycle.agentConfig.id,
+				node: previewNode({ ...req, node: "local" }).node,
+			};
+		}
+
+		const recipe = agents.get(req.agentId);
+		if (!recipe) throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
+		const agentSpec = normalizeAgentSpec(recipe);
+		if (req.requestOrigin === "user" && !isUserVisibleAgent(agentSpec)) {
+			throw new Error(
+				`dispatch: agent '${req.agentId}' is a ${agentSpec.audience} agent reserved for Clio internal orchestration`,
+			);
+		}
+		if (hasPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
+			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);
+		}
+		resolveDispatchAdmissionStage(req, recipe, safety);
+		const targets = readWorkerTargets(settings);
+		const target = resolveDispatchTarget(
+			req,
+			recipe,
+			targets.workerDefault,
+			targets.workerProfiles,
+			targets.agentBindings,
+			targets.targetOrder,
+			providers,
+		);
+		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
+		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
+		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema);
+		assertWriteRootsEnforceable(target.runtime, req.writeRoots);
+		assertProtectedArtifactsEnforceable(
+			target.runtime.id,
+			target.runtime.kind !== "subprocess",
+			getProtectedArtifactState(),
+		);
+		return {
+			agentId: req.agentId,
+			targetId: target.target.id,
+			wireModelId: target.wireModelId,
+			node: previewNode(req).node,
+		};
 	}
 
 	function mergeBatchEvents(
@@ -3669,6 +3911,9 @@ export function createDispatchBundle(
 	}
 
 	const contract: DispatchContract = {
+		preview,
+		costCeilingUsd: () => scheduling.ceilingUsd(),
+		protectedArtifactState: () => getProtectedArtifactState(),
 		dispatch,
 		dispatchBatch,
 		listRuns(status) {

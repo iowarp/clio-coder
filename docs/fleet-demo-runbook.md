@@ -136,7 +136,10 @@ clio evidence inspect <evidenceId>
 `clio evidence build` recomputes the receipt's integrity digest against the
 run ledger; a tampered or mismatched receipt fails the build with the field
 that diverged. The receipts of the remote runs verify on zbook because the
-ledger and receipts live on the shared filesystem.
+ledger and receipts live on the shared filesystem. Current v4 receipts have
+full field coverage. A valid v1-v3 receipt is readable but reported as partial;
+the result lists fields outside that version's historical digest projection,
+and evidence does not use those fields as verified provenance.
 
 ## Provenance walkthrough: what a PI can verify from receipts alone
 
@@ -162,11 +165,12 @@ reconstruct:
    that sent it back, with the verdict. Following `gate.subjects` digests
    backward reconstructs the whole review chain, and any edit to an earlier
    receipt breaks the digest the later one recorded.
-5. That nothing was altered. `integrity` is a sha256 over the canonical
-   receipt and its ledger row. `clio evidence build --run <id>` recomputes
-   and cross-checks it; `verifyReceiptIntegrity` in
+5. That nothing was altered. The `integrity` block is a sha256 over the
+   complete receipt schema and its stable ledger row. `clio evidence build
+   --run <id>` recomputes and cross-checks it; `verifyReceiptIntegrity` in
    `src/domains/dispatch/receipt-integrity.ts` is the reference
-   implementation.
+   implementation. A receipt declaring any other integrity version fails
+   verification.
 
 The walkthrough for an audience is three commands: `clio evidence build
 --run <id>` (it verifies), open the receipt JSON (read `node`, `gate`,

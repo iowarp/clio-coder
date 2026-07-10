@@ -6,11 +6,18 @@ import type { ClioWorkerEvent } from "../worker-events.js";
 import { AcpTimeoutError } from "./errors.js";
 import { AcpEventMapper } from "./event-mapper.js";
 import { AcpToolMediator } from "./tool-mediator.js";
-import { type AcpJsonRpcTransport, createStdioTransport } from "./transport.js";
+import {
+	type AcpForceTerminationResult,
+	type AcpJsonRpcTransport,
+	createStdioTransport,
+	type StdioTransportOptions,
+} from "./transport.js";
 import type { AcpDelegationResult, AcpDelegationUsage, AcpInitializeResponse, AcpPromptResponse } from "./types.js";
 import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY } from "./types.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
+
+const DEFAULT_CANCEL_GRACE_MS = 1_000;
 
 export interface AcpDelegationRunInput {
 	agent: DelegationAgentConfig;
@@ -23,6 +30,12 @@ export interface AcpDelegationRunInput {
 	autonomy?: AutonomyLevel;
 	signal?: AbortSignal;
 	clientVersion?: string;
+	/** Testable SIGTERM grace used by hard termination. */
+	terminationGraceMs?: number;
+	/** Testable post-SIGKILL exit-observation bound. */
+	terminationWaitMs?: number;
+	/** Grace for session/cancel before abort escalates into hard termination. */
+	cancelGraceMs?: number;
 }
 
 export interface AcpDelegationRunHandle {
@@ -31,9 +44,10 @@ export interface AcpDelegationRunHandle {
 	promise: Promise<AcpDelegationResult>;
 	abort(): void;
 	/**
-	 * Hard-terminate a stalled peer: closes the transport (SIGTERM to the
-	 * child, rejects all pending requests) so `promise` resolves promptly even
-	 * when the peer no longer answers session/cancel.
+	 * Hard-terminate a stalled peer: reject pending RPCs, SIGTERM the owned
+	 * process scope, escalate to SIGKILL after a bounded grace, and keep
+	 * `promise` pending until process/stdio closure has been observed or the
+	 * final observation bound expires.
 	 */
 	kill(): void;
 	heartbeatAt: { current: number };
@@ -137,6 +151,10 @@ function errorMessage(value: unknown): string {
 	return value instanceof Error ? value.message : String(value);
 }
 
+function cancelGraceMs(value: number | undefined): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : DEFAULT_CANCEL_GRACE_MS;
+}
+
 function errorEvents(messageText: string): AgentEvent[] {
 	const message = {
 		role: "assistant",
@@ -153,12 +171,27 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	const queue = new AsyncEventQueue<AcpRunEvent>();
 	const usage = emptyUsage();
 	const mapper = new AcpEventMapper();
-	const transportOptions: { cwd?: string; env?: Record<string, string> } = { cwd: input.agent.cwd ?? input.cwd };
+	const transportOptions: StdioTransportOptions = { cwd: input.agent.cwd ?? input.cwd };
 	if (input.agent.env !== undefined) transportOptions.env = input.agent.env;
+	if (input.terminationGraceMs !== undefined) transportOptions.terminationGraceMs = input.terminationGraceMs;
+	if (input.terminationWaitMs !== undefined) transportOptions.terminationWaitMs = input.terminationWaitMs;
 	const transport = createStdioTransport(input.agent.command, input.agent.args ?? [], transportOptions);
 	let sessionId: string | null = null;
 	let initialized: AcpInitializeResponse | null = null;
 	let aborted = false;
+	let finished = false;
+	let cancelTimer: ReturnType<typeof setTimeout> | null = null;
+	let forceTermination: Promise<AcpForceTerminationResult> | null = null;
+	let unregisterAbortSignal = (): void => {};
+	const beginForceTermination = (): Promise<AcpForceTerminationResult> => {
+		forceTermination ??= transport.forceTerminate();
+		return forceTermination;
+	};
+	const clearCancelTimer = (): void => {
+		if (cancelTimer === null) return;
+		clearTimeout(cancelTimer);
+		cancelTimer = null;
+	};
 	const emit = (event: AcpRunEvent): void => {
 		heartbeatAt.current = Date.now();
 		queue.push(event);
@@ -188,6 +221,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	];
 
 	const abort = (): void => {
+		if (finished) return;
 		aborted = true;
 		if (sessionId) {
 			try {
@@ -196,10 +230,19 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				// best effort
 			}
 		}
+		if (cancelTimer === null && forceTermination === null) {
+			cancelTimer = setTimeout(() => {
+				cancelTimer = null;
+				void beginForceTermination();
+			}, cancelGraceMs(input.cancelGraceMs));
+		}
 	};
 	if (input.signal) {
 		if (input.signal.aborted) abort();
-		else input.signal.addEventListener("abort", abort, { once: true });
+		else {
+			input.signal.addEventListener("abort", abort, { once: true });
+			unregisterAbortSignal = () => input.signal?.removeEventListener("abort", abort);
+		}
 	}
 
 	const promise = (async (): Promise<AcpDelegationResult> => {
@@ -228,6 +271,9 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			);
 			sessionId = sessionIdFrom(session);
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
+			if (aborted) {
+				transport.notify("session/cancel", { sessionId });
+			}
 			const promptResponse = await transport.request<AcpPromptResponse>(
 				"session/prompt",
 				{
@@ -268,7 +314,11 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 			};
 		} catch (err) {
-			const message = `ACP delegation failed: ${errorMessage(err)}`;
+			const termination = await beginForceTermination();
+			const baseMessage = `ACP delegation failed: ${errorMessage(err)}`;
+			const message = termination.exited
+				? baseMessage
+				: `${baseMessage}; ACP ${termination.scope} exit was not observed within the force-termination bound`;
 			for (const event of errorEvents(message)) emit(event);
 			const toolSnapshot = mediator.snapshot();
 			return {
@@ -287,26 +337,41 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 			};
 		} finally {
+			unregisterAbortSignal();
 			for (const unregister of unregisters) unregister();
-			if (sessionId && supportsSessionClose(initialized)) {
+			clearCancelTimer();
+			let gracefulCloseFailed = false;
+			if (forceTermination === null && !aborted && sessionId && supportsSessionClose(initialized)) {
 				try {
 					await transport.request("session/close", { sessionId }, 1000);
 				} catch {
-					// session close is best effort during teardown
+					gracefulCloseFailed = true;
 				}
 			}
-			transport.close();
+			if (gracefulCloseFailed || aborted) {
+				await beginForceTermination();
+			} else if (forceTermination !== null) {
+				await forceTermination;
+			} else {
+				transport.close();
+				// A successful prompt still owns the external process. Give a peer
+				// that does not advertise session/close a bounded EOF grace, then use
+				// the same hard lifetime bound as abort/stall rather than returning a
+				// successful run while the child remains alive.
+				if (!(await transport.waitForExit(cancelGraceMs(input.cancelGraceMs)))) {
+					await beginForceTermination();
+				}
+			}
 			queue.close();
+			finished = true;
 		}
 	})();
 
 	const kill = (): void => {
+		if (finished) return;
 		aborted = true;
-		try {
-			transport.close();
-		} catch {
-			// best effort; the close handler resolves the promise either way
-		}
+		clearCancelTimer();
+		void beginForceTermination();
 	};
 
 	return {

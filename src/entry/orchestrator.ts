@@ -40,11 +40,16 @@ import { type ContextContract, createContextDomainModule } from "../domains/cont
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
+import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
-import { buildMemoryPromptSection, loadMemoryRecordsSync } from "../domains/memory/index.js";
+import {
+	buildMemoryPromptSection,
+	canonicalMemoryRepositoryIdentity,
+	loadMemoryRecordsSync,
+} from "../domains/memory/index.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	openDetachedBatchViews,
@@ -81,6 +86,7 @@ import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import type { AutonomyLevel, SafetyContract } from "../domains/safety/index.js";
 import { parseRigorOverride, resolveRigor, SafetyDomainModule } from "../domains/safety/index.js";
+import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import {
 	createProtectedArtifactsRegistration,
 	type ProtectedArtifactProtectEvent,
@@ -93,6 +99,11 @@ import { ceilChars, estimateAgentContextTokens } from "../domains/session/contex
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import {
+	clearPendingProtectedArtifact,
+	reconcilePendingProtectedArtifacts,
+	stagePendingProtectedArtifact,
+} from "../domains/session/protected-artifact-journal.js";
 import {
 	protectedArtifactEntryFromArtifact,
 	protectedArtifactStateFromSessionEntries,
@@ -128,6 +139,7 @@ import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
+import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
 import { coalescePathSink, createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 
@@ -319,6 +331,7 @@ function protectedArtifactStateForCurrentSession(
 ): ReturnType<typeof protectedArtifactStateFromSessionEntries> {
 	const meta = session.current();
 	if (!meta) return { artifacts: [] };
+	reconcilePendingProtectedArtifacts(session);
 	return protectedArtifactStateFromSessionEntries(readSessionEntriesForCompact(meta.id));
 }
 
@@ -326,21 +339,25 @@ function appendProtectedArtifactRegistryEvent(
 	session: SessionContract | undefined,
 	event: ProtectedArtifactProtectEvent,
 ): void {
-	if (!session?.current()) return;
-	try {
-		session.appendEntry(
-			protectedArtifactEntryFromArtifact(event.artifact, {
-				parentTurnId: event.turnId ?? null,
-				toolName: event.toolName,
-				...(event.toolCallId !== undefined ? { toolCallId: event.toolCallId } : {}),
-				...(event.runId !== undefined ? { runId: event.runId } : {}),
-				...(event.correlationId !== undefined ? { correlationId: event.correlationId } : {}),
-			}),
-		);
-	} catch {
-		// Protected state is already live in memory. Session persistence is
-		// best-effort so a transient write failure cannot change tool behavior.
+	const current = session?.current();
+	if (session === undefined || current === null || current === undefined) {
+		throw new Error("no active session is available for protected artifact persistence");
 	}
+	const pending = stagePendingProtectedArtifact(current.id, event);
+	session.appendEntry(
+		protectedArtifactEntryFromArtifact(event.artifact, {
+			parentTurnId: event.turnId ?? null,
+			toolName: event.toolName,
+			...(event.toolCallId !== undefined ? { toolCallId: event.toolCallId } : {}),
+			...(event.runId !== undefined ? { runId: event.runId } : {}),
+			...(event.correlationId !== undefined ? { correlationId: event.correlationId } : {}),
+		}),
+	);
+	if (session.flushAppends === undefined) {
+		throw new Error("session does not expose the durable append flush required by protected artifact persistence");
+	}
+	session.flushAppends();
+	clearPendingProtectedArtifact(pending);
 }
 
 function appendSkillActivationRegistryEvent(
@@ -400,6 +417,20 @@ async function runCompactionFlow(
 	if (trigger !== undefined) entry.trigger = trigger;
 	session.appendEntry(entry);
 	return result;
+}
+
+/**
+ * Compose the production chat-loop compaction callback. Errors intentionally
+ * propagate: the chat loop owns activity failure reporting and distinguishes
+ * a thrown read/model/persistence failure from the legitimate null no-op that
+ * `runCompactionFlow` returns for an empty session or an unavailable cut.
+ */
+export function createProductionAutoCompact(
+	session: SessionContract,
+	getSettings: () => ClioSettings,
+	providers: ProvidersContract,
+): (instructions?: string, trigger?: CompactionTrigger) => Promise<CompactResult | null> {
+	return (instructions, trigger) => runCompactionFlow(session, getSettings(), providers, instructions, trigger);
 }
 
 function estimateTokensFromSummary(summary: string): number {
@@ -478,7 +509,51 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	ensureClioState();
 	timer.mark("install check");
 
+	// A hard-killed coordinator cannot run domain drains. Reconcile its compete
+	// process leases before dispatch startup scans the ledger, so abandoned rows
+	// observe dead workers and no stale worktree can be reused by this boot.
+	if (isGitRepository(process.cwd())) {
+		try {
+			const pendingGate = readPendingGateDecisions();
+			const pendingCompeteGroups = new Set<string>();
+			for (const handle of pendingGate.records) {
+				if (handle.record.kind === "output" && handle.record.topology === "compete") {
+					pendingCompeteGroups.add(handle.record.group);
+				} else if (handle.record.kind === "decision" && handle.record.decision.topology === "compete") {
+					pendingCompeteGroups.add(handle.record.decision.group);
+				}
+			}
+			const durableDecisions = readGateDecisionArtifacts();
+			const confirmedGroups = new Set(
+				durableDecisions
+					.filter(
+						({ artifact }) =>
+							artifact.topology === "compete" &&
+							(artifact.outcome === "operator-confirmed" || artifact.outcome === "full-auto-applied"),
+					)
+					.map(({ artifact }) => artifact.group),
+			);
+			for (const { artifact } of durableDecisions) {
+				if (artifact.topology === "compete" && artifact.outcome === "winner" && !confirmedGroups.has(artifact.group)) {
+					pendingCompeteGroups.add(artifact.group);
+				}
+			}
+			const recovery = recoverCleanupReadyCompeteGroups(process.cwd(), {
+				preserveActiveGroups: pendingCompeteGroups,
+				preserveAllActive: pendingGate.errors.length > 0,
+			});
+			for (const failure of recovery.failed) {
+				process.stderr.write(`[dispatch] compete recovery preserved ${failure.group}: ${failure.message}\n`);
+			}
+		} catch (err) {
+			process.stderr.write(
+				`[dispatch] compete recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		}
+	}
+
 	let effectiveSettingsForDispatch: (() => Readonly<ClioSettings>) | null = null;
+	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
 
 	const result = await loadDomains([
 		ConfigDomainModule,
@@ -510,6 +585,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// contract loads); until then it falls back to the shared snapshot.
 		createDispatchDomainModule({
 			getSettings: () => effectiveSettingsForDispatch?.(),
+			getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
 			autonomyOverride: options.headless?.autonomy !== undefined,
 		}),
 		LifecycleDomainModule,
@@ -655,10 +731,40 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			turnSynthesisLockout: true,
 		}),
 	);
+	let initialProtectedArtifactState: ProtectedArtifactState | undefined;
+	let initialProtectionReadError: string | null = null;
+	if (session) {
+		try {
+			initialProtectedArtifactState = protectedArtifactStateForCurrentSession(session);
+		} catch (error) {
+			initialProtectionReadError = error instanceof Error ? error.message : String(error);
+		}
+	}
 	const protectedArtifactsGuard = createProtectedArtifactsRegistration({
-		...(session ? { initialState: protectedArtifactStateForCurrentSession(session) } : {}),
+		...(initialProtectedArtifactState !== undefined ? { initialState: initialProtectedArtifactState } : {}),
 		onProtect: (event) => appendProtectedArtifactRegistryEvent(session, event),
+		onDurabilityFailure: (health) => {
+			bus.emit(BusChannels.MiddlewareHookFailed, {
+				kind: "hook_failed",
+				registrationId: "guard.protected-artifacts",
+				hook: "before_tool",
+				at: Date.now(),
+				message: health.reason,
+			});
+		},
 	});
+	if (initialProtectionReadError !== null) {
+		protectedArtifactsGuard.markDegraded(
+			`initial session protection history could not be read: ${initialProtectionReadError}`,
+		);
+	}
+	protectedArtifactStateForDispatch = () => {
+		const health = protectedArtifactsGuard.health();
+		if (health.kind === "degraded") {
+			throw new Error(`dispatch: protected artifact durability degraded: ${health.reason}`);
+		}
+		return protectedArtifactsGuard.state();
+	};
 	middleware.registerHook(protectedArtifactsGuard);
 	middleware.registerHook(createDispatchDedupRegistration());
 	// Observers run after the guards; they emit no effects and their sinks are
@@ -795,6 +901,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			options.headless?.autonomy ??
 			(config?.get() ?? readSettings()).autonomy ??
 			"auto-edit",
+		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
@@ -939,8 +1046,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 
 	const readCurrentSessionEntries = (): ReadonlyArray<SessionEntry> => {
-		const meta = session?.current();
+		if (session === undefined) return [];
+		const meta = session.current();
 		if (!meta) return [];
+		reconcilePendingProtectedArtifacts(session);
 		return readSessionEntriesForCompact(meta.id);
 	};
 
@@ -972,7 +1081,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSettings: getCurrentSettings,
 		providers,
 		middleware,
-		protectedArtifacts: { replace: (state) => protectedArtifactsGuard.replaceState(state) },
+		protectedArtifacts: {
+			replace: (state) => protectedArtifactsGuard.replaceState(state),
+			markDegraded: (reason) => protectedArtifactsGuard.markDegraded(reason),
+		},
 		knownTargets: () => new Set(providers.list().map((entry) => entry.target.id)),
 		observability,
 		bus,
@@ -982,7 +1094,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getMemorySection: () => {
 			try {
 				const records = loadMemoryRecordsSync(clioDataDir());
-				return buildMemoryPromptSection(records).section;
+				return buildMemoryPromptSection(records, {
+					activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
+				}).section;
 			} catch {
 				return "";
 			}
@@ -990,13 +1104,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session
 			? {
 					readSessionEntries: readCurrentSessionEntries,
-					autoCompact: async (instructions?: string, trigger?: CompactionTrigger): Promise<CompactResult | null> => {
-						try {
-							return await runCompactionFlow(session, getCurrentSettings(), providers, instructions, trigger);
-						} catch {
-							return null;
-						}
-					},
+					autoCompact: createProductionAutoCompact(session, getCurrentSettings, providers),
 				}
 			: {}),
 		toolRegistry,

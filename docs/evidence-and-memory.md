@@ -44,6 +44,7 @@ Run/session evidence files:
 ├── tool-events.jsonl
 ├── audit-linked.jsonl
 ├── receipt.json
+├── gate-decisions.json
 ├── protected-artifacts.json
 ├── findings.json
 └── findings.md
@@ -61,7 +62,8 @@ Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact 
 | `trace.cleaned.jsonl` | Compact normalized rows plus findings. |
 | `tool-events.jsonl` | Tool summaries from session entries, audit rows, receipts, or eval commands. |
 | `audit-linked.jsonl` | Audit rows linked to run/session context when available. |
-| `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`). |
+| `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
+| `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
 | `protected-artifacts.json` | Protected artifact state/events. |
 | `findings.json` / `findings.md` | Structured and readable findings. |
 
@@ -133,7 +135,14 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ### Computation and Lifecycle
 - **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
-- **Cryptographic Coverage**: The `findingsSummary` is protected under version 3 of the receipt integrity digest (`RUN_RECEIPT_INTEGRITY_VERSION = 3`). Any attempt to alter the findings summary will invalidate the receipt's integrity check. Pre-existing v2 receipts remain valid without this summary.
+- **Cryptographic Coverage**: The `findingsSummary` and the complete receipt provenance surface are protected under the single receipt integrity digest version (`RUN_RECEIPT_INTEGRITY_VERSION = 4`). Any field alteration invalidates verification, and a receipt declaring any other integrity version fails verification outright. Registering every receipt field in the digest coverage map is a compile-time requirement, so a new field can never ship outside integrity coverage.
+
+| Receipt integrity version | Fields added to the authenticated receipt projection | Current fields outside that projection |
+|---|---|---|
+| v1 | Base identity, runtime, timing, token/cost, prompt hashes, tools, safety, reproducibility, runtime resolution, and session fields | `outcome`, `outcomeDetail`, `lineage`, `identity`, `node`, `reroutes`, `pipeline`, `gate`, `plan`, `personaOverride`, `projectContext`, `promptSignature`, `toolSignature`, `autonomyEnforcement`, `delegation`, `findingsSummary` |
+| v2 | `outcome`, `outcomeDetail`, `lineage`, `identity` | `node`, `reroutes`, `pipeline`, `gate`, `plan`, `personaOverride`, `projectContext`, `promptSignature`, `toolSignature`, `autonomyEnforcement`, `delegation`, `findingsSummary` |
+| v3 | `node`, `reroutes`, `gate`, `plan`, `autonomyEnforcement`, `findingsSummary` | `pipeline`, `personaOverride`, `projectContext`, `promptSignature`, `toolSignature`, `delegation` |
+| v4 | Every `RunReceiptDraft` field | None |
 
 
 ---
@@ -191,6 +200,18 @@ Defaults:
 | Suppression | Records with active `regressions[]` entries are skipped |
 
 Rendered memory lines always cite record ID, scope, lesson, and evidence IDs. The prompt tells the model not to extrapolate beyond cited findings.
+
+### Repository-scoped identity
+
+Repository memory is selected by an exact canonical absolute-path identity. The interactive orchestrator and `clio run --agent` compute that identity from the active working directory; symlink aliases collapse to the same key. A repository move, a different Git worktree path, a subdirectory launch, a malformed identity, or a missing identity does not inherit another repository's memory. Global records are unaffected.
+
+Every `scope: "repo"` record must carry:
+
+```json
+"repository": { "kind": "canonical-path", "key": "/canonical/absolute/repository/path" }
+```
+
+The structured `repository` field is the only applicability mechanism: store validation rejects repo records without it, and `appliesWhen` tokens never grant repository applicability. There is intentionally no automatic path rewrite for moved repositories or worktrees: a filesystem move produces a different identity and the record simply stops applying until it is re-scoped with new evidence.
 
 ---
 

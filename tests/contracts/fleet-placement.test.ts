@@ -9,7 +9,10 @@ import {
 	readFleetPreflightRecords,
 	recordFleetPreflight,
 } from "../../src/domains/dispatch/fleet-preflight.js";
-import { createFleetPlacementResolver } from "../../src/domains/dispatch/placement.js";
+import {
+	createFleetPlacementPreviewResolver,
+	createFleetPlacementResolver,
+} from "../../src/domains/dispatch/placement.js";
 import type { WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import type { RunNodeReroute } from "../../src/domains/dispatch/types.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
@@ -168,6 +171,11 @@ describe("fleet placement resolution order", () => {
 		const registry = options?.registry ?? createFleetRegistry(() => settings.fleet.nodes);
 		return {
 			registry,
+			preview: createFleetPlacementPreviewResolver({
+				getSettings: () => settings,
+				fleet: registry,
+				preflightVerdict: options?.preflight ?? passingPreflight,
+			}),
 			resolve: createFleetPlacementResolver({
 				getSettings: () => settings,
 				fleet: registry,
@@ -181,6 +189,32 @@ describe("fleet placement resolution order", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		const { resolve } = resolver({ settings, registry: createFleetRegistry(() => []) });
 		strictEqual(resolve({ agentId: "coder", task: "t" }), null);
+	});
+
+	it("previews explicit, profile-bound, and automatic placement without taking capacity", () => {
+		const automatic = resolver();
+		strictEqual(automatic.preview({ agentId: "coder", task: "t" }).node.id, "blade");
+		strictEqual(automatic.registry.get("blade")?.activeWorkers, 0, "preview must not reserve capacity");
+		strictEqual(automatic.preview({ agentId: "coder", task: "t", node: "mini" }).node.id, "mini");
+		strictEqual(automatic.registry.get("mini")?.activeWorkers, 0);
+
+		const profileBound = resolver({
+			settings: settingsWithFleet({
+				profiles: { pinned: { target: null, model: null, thinkingLevel: "off", node: "mini" } },
+				agentBindings: { coder: "pinned" },
+			}),
+		});
+		strictEqual(profileBound.preview({ agentId: "coder", task: "t" }).node.id, "mini");
+		strictEqual(profileBound.registry.get("mini")?.activeWorkers, 0);
+	});
+
+	it("pins a previewed automatic node so later load cannot drift execution", () => {
+		const { preview, resolve, registry } = resolver();
+		const planned = preview({ agentId: "coder", task: "t" }).node;
+		strictEqual(planned.id, "blade");
+		strictEqual(registry.tryAcquire("mini"), true, "unrelated load changes after approval");
+		const launched = resolve({ agentId: "coder", task: "t", node: planned.id });
+		strictEqual(launched?.node.id, "blade", "execution honors the approved pin");
 	});
 
 	it("prefers the explicit node param over every other signal", () => {

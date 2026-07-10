@@ -104,6 +104,12 @@ export interface ToolSpec {
 	 * the same function at the top of `run`.
 	 */
 	prepareArguments?(args: Record<string, unknown>): Record<string, unknown>;
+	/**
+	 * Pure, synchronous admission planner. Unlike `prepareArguments`, this runs
+	 * before safety/autonomy mapping so approval-sensitive tools can attach the
+	 * exact immutable artifact that admission and execution will share.
+	 */
+	prepareAdmissionArguments?(args: Record<string, unknown>): Record<string, unknown>;
 	/** Execute the tool. Only called after admission. */
 	run(args: Record<string, unknown>, options?: ToolInvokeOptions): Promise<ToolResult>;
 }
@@ -155,6 +161,8 @@ export interface ToolInvokeOptions {
 	correlationId?: string;
 	pendingSkillPolicy?: PendingSkillToolPolicy;
 	askUserPolicy?: AskUserToolPolicy;
+	/** Registry-authenticated one-shot operator approval for this execution. */
+	approval?: { requestId: string; requestedBy: string; actionClass: ActionClass };
 }
 
 export type AskUserInterviewStatus = "idle" | "active" | "complete" | "cancelled";
@@ -611,14 +619,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		listRegistered: () => Array.from(tools.keys()),
 		listVisible: () => Array.from(tools.values()),
 		async invoke(call, options) {
-			const outcome = admit(call, undefined, options);
+			const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
+			const outcome = admit(admissionCall, undefined, options);
 			if (outcome.kind === "terminal") {
-				return observeBlockedAttempt(call, outcome.verdict, options) ?? outcome.verdict;
+				return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
 			}
-			if (outcome.kind === "execute") return runSpec(outcome.spec, call, outcome.decision, options);
+			if (outcome.kind === "execute") return runSpec(outcome.spec, admissionCall, outcome.decision, options);
 			const abortReason = "run aborted before the operator decided";
 			if (options?.signal?.aborted) {
-				const loopReason = observeRejectedAttempt(call, outcome.decision, options);
+				const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
 				return { kind: "blocked", reason: loopReason ?? abortReason, decision: outcome.decision };
 			}
 			return new Promise<RegistryVerdict>((resolve) => {
@@ -626,8 +635,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					requestId: nextApprovalRequestId(),
 					axis: outcome.axis,
 				};
-				recordRegistryDisposition(call, outcome.decision, "permission_requested", { requestId: meta.requestId });
-				const parkedCall: ParkedCall = { call, decision: outcome.decision, meta, resolve };
+				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", { requestId: meta.requestId });
+				const parkedCall: ParkedCall = { call: admissionCall, decision: outcome.decision, meta, resolve };
 				if (options !== undefined) parkedCall.options = options;
 				if (options?.signal) {
 					const onAbort = (): void => {
@@ -639,7 +648,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					};
 				}
 				parked.push(parkedCall);
-				notifyPermissionRequired(call, outcome.decision, meta);
+				notifyPermissionRequired(admissionCall, outcome.decision, meta);
 			});
 		},
 		hasParkedCalls: () => parked.length > 0,
@@ -685,7 +694,18 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
 					continue;
 				}
-				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision, entry.options));
+				const approvedOptions: ToolInvokeOptions | undefined =
+					grant === undefined
+						? entry.options
+						: {
+								...(entry.options ?? {}),
+								approval: {
+									requestId: entry.meta.requestId,
+									requestedBy: grant.requestedBy,
+									actionClass: grant.actionClass,
+								},
+							};
+				entry.resolve(await runSpec(outcome.spec, entry.call, outcome.decision, approvedOptions));
 			}
 			const next = parked[0];
 			if (next) notifyPermissionRequired(next.call, next.decision, next.meta);
@@ -727,6 +747,17 @@ function prepareToolArgs(spec: ToolSpec, args: Record<string, unknown>): Record<
 		return prepared !== null && typeof prepared === "object" && !Array.isArray(prepared) ? prepared : args;
 	} catch {
 		return args;
+	}
+}
+
+function prepareAdmissionCall(spec: ToolSpec | undefined, call: ClassifierCall): ClassifierCall {
+	if (!spec?.prepareAdmissionArguments) return call;
+	try {
+		const prepared = spec.prepareAdmissionArguments(call.args ?? {});
+		if (prepared === null || typeof prepared !== "object" || Array.isArray(prepared)) return call;
+		return { ...call, args: prepared };
+	} catch {
+		return call;
 	}
 }
 

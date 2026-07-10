@@ -22,7 +22,7 @@ describe("contracts/durable customization stores", () => {
 		const dataDir = path.join(scratch, "data");
 		const record: MemoryRecord = {
 			id: "mem-0000000000000001",
-			scope: "repo",
+			scope: "global",
 			key: "durable-write",
 			lesson: "Use atomic resource writes.",
 			evidenceRefs: ["test:durable-stores"],

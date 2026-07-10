@@ -170,7 +170,7 @@ function seedArchive(dir: string): void {
 		records: [
 			{
 				id: "mem-0123456789abcdef",
-				scope: "repo",
+				scope: "global",
 				key: "build-failure recovery playbook",
 				lesson: "When the build fails on missing generated headers, re-run codegen before make.",
 				evidenceRefs: ["ev-build-1"],

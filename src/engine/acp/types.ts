@@ -90,6 +90,16 @@ export interface AcpContentResourceLink {
 
 export type AcpContentBlock = AcpContentText | AcpContentResourceLink | Record<string, unknown>;
 
+/** ACP v1 `ToolCallLocation` (schema 0.4.5). */
+export interface AcpToolCallLocation {
+	/** The file path being accessed or modified. */
+	path: string;
+	/** Optional zero-based line number within the file. */
+	line?: number | null;
+	/** ACP extension point. */
+	_meta?: unknown;
+}
+
 export interface AcpToolCallUpdate {
 	sessionUpdate?: "tool_call" | "tool_call_update";
 	toolCallId?: string;
@@ -97,7 +107,7 @@ export interface AcpToolCallUpdate {
 	kind?: string;
 	status?: "pending" | "in_progress" | "completed" | "failed" | "cancelled" | string;
 	content?: unknown;
-	locations?: unknown;
+	locations?: AcpToolCallLocation[] | null;
 	rawInput?: Record<string, unknown>;
 	rawOutput?: Record<string, unknown>;
 }

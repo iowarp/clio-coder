@@ -11,20 +11,18 @@
  * evaluation, preserving the registry's former post-hooks recheck semantics.
  */
 
-import { ToolNames } from "../../core/tool-names.js";
 import type {
 	MiddlewareEffect,
 	MiddlewareHookEvaluationContext,
 	MiddlewareHookInput,
 	MiddlewareHookRegistration,
 } from "../middleware/index.js";
+import { classify } from "./action-classifier.js";
 import {
-	classifyDestructiveCommand,
-	isProtectedPath,
 	type ProtectedArtifact,
 	type ProtectedArtifactState,
 	protectArtifact,
-	toolMutationPaths,
+	protectedArtifactMutationBlockReason,
 } from "./protected-artifacts.js";
 
 export const PROTECTED_ARTIFACTS_REGISTRATION_ID = "guard.protected-artifacts";
@@ -44,49 +42,72 @@ export interface ProtectedArtifactProtectEvent {
 export interface ProtectedArtifactsRegistration extends MiddlewareHookRegistration {
 	/** Current protection state, cloned for callers. */
 	state(): ProtectedArtifactState;
+	/** Durability/reload health for the hard-block boundary. */
+	health(): ProtectedArtifactsHealth;
 	/** Replace the state wholesale, typically after a session switch. */
 	replaceState(state: ProtectedArtifactState): void;
+	/** Preserve last-known state and fail closed after a persistence/reload fault. */
+	markDegraded(reason: string): void;
 }
+
+export type ProtectedArtifactsHealth = { kind: "healthy" } | { kind: "degraded"; reason: string; since: string };
 
 export interface CreateProtectedArtifactsRegistrationOptions {
 	initialState?: ProtectedArtifactState;
 	/**
-	 * Best-effort persistence sink. Errors are swallowed: protection state is
-	 * already live in memory and persistence must not change tool execution.
+	 * Persistence sink. A thrown error keeps protection live, marks durability
+	 * degraded, and makes later non-read calls fail closed until a trustworthy
+	 * state replacement succeeds.
 	 */
 	onProtect?: (event: ProtectedArtifactProtectEvent) => void;
+	/** Operator-visible diagnostic seam for a newly degraded boundary. */
+	onDurabilityFailure?: (health: Extract<ProtectedArtifactsHealth, { kind: "degraded" }>) => void;
 }
 
 export function createProtectedArtifactsRegistration(
 	options: CreateProtectedArtifactsRegistrationOptions = {},
 ): ProtectedArtifactsRegistration {
 	let state = cloneState(options.initialState ?? { artifacts: [] });
+	let health: ProtectedArtifactsHealth = { kind: "healthy" };
+
+	const markDegraded = (reason: string): void => {
+		if (health.kind === "degraded") return;
+		const degraded: Extract<ProtectedArtifactsHealth, { kind: "degraded" }> = {
+			kind: "degraded",
+			reason,
+			since: new Date().toISOString(),
+		};
+		health = degraded;
+		try {
+			options.onDurabilityFailure?.({ ...degraded });
+		} catch {
+			// Diagnostics must not weaken or destabilize the hard-block boundary.
+		}
+	};
 
 	const absorb = (input: MiddlewareHookInput, context: MiddlewareHookEvaluationContext | undefined): void => {
 		for (const effect of context?.priorEffects ?? []) {
 			if (effect.kind !== "protect_path") continue;
 			const artifact = artifactFromEffect(effect, input);
 			state = protectArtifact(state, artifact);
-			emitProtect(options.onProtect, artifact, input);
+			try {
+				emitProtect(options.onProtect, artifact, input);
+			} catch (error) {
+				markDegraded(`protected artifact persistence failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
 		}
 	};
 
 	const blockReason = (input: MiddlewareHookInput): string | null => {
-		if (state.artifacts.length === 0) return null;
 		const toolName = input.toolName ?? "";
 		const args = input.toolArgs !== undefined ? { ...input.toolArgs } : undefined;
-		for (const candidate of toolMutationPaths(toolName, args)) {
-			if (isProtectedPath(state, candidate)) {
-				return `protected artifact blocked: ${toolName} would modify protected path ${candidate}`;
+		if (health.kind === "degraded") {
+			const actionClass = classify({ tool: toolName, ...(args !== undefined ? { args } : {}) }).actionClass;
+			if (actionClass !== "read") {
+				return `protected artifact durability degraded: ${health.reason}; non-read tool '${toolName}' is blocked until protection state is trustworthy`;
 			}
 		}
-		if (toolName !== ToolNames.Bash) return null;
-		const command = commandArg(args);
-		if (command === null) return null;
-		const classification = classifyDestructiveCommand(command, state.artifacts);
-		if (classification.kind === "benign") return null;
-		const affected = classification.matches.map((match) => match.artifactPath).join(", ");
-		return `protected artifact blocked: ${classification.operation} would affect ${affected}`;
+		return protectedArtifactMutationBlockReason(state, toolName, args);
 	};
 
 	return {
@@ -94,9 +115,12 @@ export function createProtectedArtifactsRegistration(
 		description: "blocks mutations of protected paths and absorbs protect_path effects",
 		hooks: ["before_tool", "after_tool"],
 		state: () => cloneState(state),
+		health: () => ({ ...health }),
 		replaceState(next) {
 			state = cloneState(next);
+			health = { kind: "healthy" };
 		},
+		markDegraded,
 		evaluate(input, context): ReadonlyArray<MiddlewareEffect> {
 			absorb(input, context);
 			if (input.hook !== "before_tool") return [];
@@ -141,16 +165,7 @@ function emitProtect(
 	if (input.turnId !== undefined) event.turnId = input.turnId;
 	if (input.toolCallId !== undefined) event.toolCallId = input.toolCallId;
 	if (input.correlationId !== undefined) event.correlationId = input.correlationId;
-	try {
-		sink(event);
-	} catch {
-		// Persistence is best-effort and must not change tool execution.
-	}
-}
-
-function commandArg(args: Record<string, unknown> | undefined): string | null {
-	if (!args) return null;
-	return typeof args.command === "string" && args.command.length > 0 ? args.command : null;
+	sink(event);
 }
 
 function cloneState(state: ProtectedArtifactState): ProtectedArtifactState {

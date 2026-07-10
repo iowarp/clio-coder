@@ -39,6 +39,7 @@ import {
 	WORKER_EXIT_PERMISSION_REQUIRED,
 	type WorkerEscalationConfig,
 	type WorkerPromptMessage,
+	type WorkerProtectedArtifactState,
 } from "../worker/spec-contract.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { startAntigravityWorkerRun } from "./antigravity/subprocess-runtime.js";
@@ -84,6 +85,8 @@ export interface WorkerRunInput {
 	toolProfile?: ToolProfileName;
 	/** Worker-safe declarative middleware metadata captured by the orchestrator. */
 	middlewareSnapshot?: MiddlewareSnapshot;
+	/** Frozen parent-session protection state, enforced before every mediated call. */
+	protectedArtifactState?: WorkerProtectedArtifactState;
 	signal?: AbortSignal;
 	noSkills?: boolean;
 	skillPaths?: ReadonlyArray<string>;
@@ -279,6 +282,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const safety = createWorkerSafety({
 		cwd: process.cwd(),
 		...(input.writeRoots !== undefined ? { writeRoots: input.writeRoots } : {}),
+		...(input.protectedArtifactState !== undefined
+			? { protectedArtifactState: { artifacts: [...input.protectedArtifactState.artifacts] } }
+			: {}),
 	});
 	// Flipped by the loop guard's lockout callback; read by onPayload below to
 	// force the remaining model rounds text-only via tool_choice none.
@@ -296,11 +302,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// after the loop-block budget the worker is told to report from what it
 		// gathered instead of burning the lifetime cap on a retry spiral, and
 		// the bounded backstop reason is watched in telemetry.onFinish below to
-		// abort a worker that keeps calling tools anyway. The
-		// protected-artifacts guard starts empty (workers receive no
-		// orchestrator protection state) and has no persistence sink; it exists
-		// so protect_path effects from snapshot rules behave identically in
-		// workers.
+		// abort a worker that keeps calling tools anyway.
+		// The protected-artifacts guard starts from the parent-session snapshot
+		// and has no persistence sink. It can still absorb worker-local
+		// protect_path effects from snapshot rules for the rest of this run.
 		[
 			createLoopGuardRegistration({
 				safety,
@@ -314,7 +319,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					synthesisToolLock = true;
 				},
 			}),
-			createProtectedArtifactsRegistration(),
+			createProtectedArtifactsRegistration({
+				...(input.protectedArtifactState !== undefined
+					? { initialState: { artifacts: [...input.protectedArtifactState.artifacts] } }
+					: {}),
+			}),
 		],
 		input.autonomy,
 	);

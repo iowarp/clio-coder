@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,20 @@ import {
 	type ProtectedArtifactProtectEvent,
 } from "../../src/domains/safety/protected-artifacts-registration.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
+import type { SessionContract } from "../../src/domains/session/contract.js";
+import { createSessionBundle } from "../../src/domains/session/extension.js";
+import {
+	readPendingProtectedArtifacts,
+	reconcilePendingProtectedArtifacts,
+	stagePendingProtectedArtifact,
+} from "../../src/domains/session/protected-artifact-journal.js";
+import { protectedArtifactStateFromSessionEntries } from "../../src/domains/session/protected-artifacts.js";
+import { openSession } from "../../src/engine/session.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { reloadProtectedArtifactsForSession } from "../../src/interactive/chat-loop.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function allowAllSafety() {
 	return {
@@ -24,6 +37,13 @@ function allowAllSafety() {
 		isSubset: () => true,
 		audit: { recordCount: () => 0 },
 	};
+}
+
+function sessionContext() {
+	return {
+		bus: { emit: () => {}, on: () => () => {} },
+		getContract: () => undefined,
+	} as never;
 }
 
 function mockSpec(name: ToolName, output = "tool output"): ToolSpec {
@@ -192,10 +212,12 @@ describe("protected-artifacts registration", () => {
 	});
 
 	it("survives a throwing persistence sink", async () => {
+		const failures: string[] = [];
 		const guard = createProtectedArtifactsRegistration({
 			onProtect: () => {
 				throw new Error("sink exploded");
 			},
+			onDurabilityFailure: (health) => failures.push(health.reason),
 		});
 		const bundle = createMiddlewareBundle({
 			ruleDefinitions: [protectRule("policy.protect-plan", "/repo/PLAN.md", ["after_tool"])],
@@ -206,5 +228,203 @@ describe("protected-artifacts registration", () => {
 		const verdict = await registry.invoke({ tool: ToolNames.Write, args: { path: "/repo/PLAN.md" } });
 		strictEqual(verdict.kind, "ok", "tool execution is unaffected by sink failures");
 		strictEqual(guard.state().artifacts.length, 1, "protection state still grew");
+		strictEqual(guard.health().kind, "degraded");
+		deepStrictEqual(failures, ["protected artifact persistence failed: sink exploded"]);
+		const unrelated = await registry.invoke({ tool: ToolNames.Write, args: { path: "/repo/other.md" } });
+		strictEqual(unrelated.kind, "blocked", "degraded durability fails closed for every non-read call");
+		guard.replaceState(guard.state());
+		strictEqual(guard.health().kind, "healthy");
+		strictEqual((await registry.invoke({ tool: ToolNames.Write, args: { path: "/repo/other.md" } })).kind, "ok");
+	});
+
+	it("preserves last-known protection and fails closed when a reload is marked degraded", async () => {
+		const guard = createProtectedArtifactsRegistration({ initialState: protectedState("/repo/PLAN.md") });
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = createRegistry({ safety: allowAllSafety(), middleware: bundle.contract });
+		registry.register(mockSpec(ToolNames.Write));
+		registry.register(mockSpec(ToolNames.Read));
+
+		guard.markDegraded("session protection history could not be read");
+		deepStrictEqual(
+			guard.state().artifacts.map((artifact) => artifact.path),
+			["/repo/PLAN.md"],
+		);
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: {} })).kind, "ok");
+		const write = await registry.invoke({ tool: ToolNames.Write, args: { path: "/repo/other.md" } });
+		strictEqual(write.kind, "blocked");
+		ok(write.kind === "blocked" && write.reason.includes("protected artifact durability degraded"));
+	});
+
+	it("session reload read failure preserves the guard and enters degraded mode", () => {
+		const guard = createProtectedArtifactsRegistration({ initialState: protectedState("/repo/PLAN.md") });
+		reloadProtectedArtifactsForSession(
+			{
+				replace: (state) => guard.replaceState(state),
+				markDegraded: (reason) => guard.markDegraded(reason),
+			},
+			() => {
+				throw new Error("ledger read fault");
+			},
+		);
+		deepStrictEqual(
+			guard.state().artifacts.map((artifact) => artifact.path),
+			["/repo/PLAN.md"],
+		);
+		const health = guard.health();
+		strictEqual(health.kind, "degraded");
+		if (health.kind === "degraded") {
+			strictEqual(health.reason, "session protection history could not be read: ledger read fault");
+			ok(Number.isFinite(Date.parse(health.since)));
+		}
+	});
+
+	it("write-ahead protection survives append failure, reload, and process restart until reconciliation", async () => {
+		const isolated = isolateClioEnv("clio-protection-journal-");
+		const session = createSessionBundle(sessionContext()).contract;
+		const meta = session.create({ cwd: "/repo" });
+		try {
+			const guard = createProtectedArtifactsRegistration({
+				onProtect: (event) => {
+					stagePendingProtectedArtifact(meta.id, event);
+					throw new Error("primary session append fault");
+				},
+			});
+			const middleware = createMiddlewareBundle({
+				ruleDefinitions: [protectRule("policy.protect-plan", "/repo/PLAN.md", ["after_tool"])],
+				registrations: [guard],
+			});
+			const registry = createRegistry({ safety: allowAllSafety(), middleware: middleware.contract });
+			registry.register(mockSpec(ToolNames.Write));
+
+			strictEqual((await registry.invoke({ tool: ToolNames.Write, args: { path: "/repo/PLAN.md" } })).kind, "ok");
+			strictEqual(guard.health().kind, "degraded");
+			strictEqual(readPendingProtectedArtifacts(meta.id).records.length, 1, "write-ahead record survived");
+			strictEqual(
+				(await registry.invoke({ tool: ToolNames.Write, args: { path: "/repo/other.md" } })).kind,
+				"blocked",
+				"degraded live process remains fail-closed",
+			);
+
+			const failingSession = new Proxy(session, {
+				get(target, property, receiver) {
+					if (property === "appendEntry")
+						return () => {
+							throw new Error("append still unavailable");
+						};
+					return Reflect.get(target, property, receiver) as unknown;
+				},
+			}) as SessionContract;
+			reloadProtectedArtifactsForSession(
+				{
+					replace: (state) => guard.replaceState(state),
+					markDegraded: (reason) => guard.markDegraded(reason),
+				},
+				() => {
+					reconcilePendingProtectedArtifacts(failingSession);
+					return [];
+				},
+			);
+			strictEqual(guard.health().kind, "degraded", "failed reset cannot clear degradation");
+			strictEqual(guard.state().artifacts[0]?.path, "/repo/PLAN.md", "last-known state survives reset");
+
+			const pending = readPendingProtectedArtifacts(meta.id);
+			const restarted = createProtectedArtifactsRegistration({
+				initialState: { artifacts: pending.records.map((entry) => entry.record.artifact) },
+			});
+			restarted.markDegraded("pending protection journal requires reconciliation");
+			const restartedMiddleware = createMiddlewareBundle({ registrations: [restarted] });
+			const restartedRegistry = createRegistry({ safety: allowAllSafety(), middleware: restartedMiddleware.contract });
+			restartedRegistry.register(mockSpec(ToolNames.Write));
+			strictEqual(
+				(await restartedRegistry.invoke({ tool: ToolNames.Write, args: { path: "/repo/other.md" } })).kind,
+				"blocked",
+				"restart reconstructs a fail-closed boundary from the journal",
+			);
+
+			strictEqual(reconcilePendingProtectedArtifacts(session), 1, "recovered append adopts pending protection");
+			strictEqual(readPendingProtectedArtifacts(meta.id).records.length, 0, "journal clears only after durable append");
+			const entries = collectSessionEntries(openSession(meta.id).turns());
+			const restoredState = protectedArtifactStateFromSessionEntries(entries);
+			restarted.replaceState(restoredState);
+			strictEqual(restarted.health().kind, "healthy");
+			strictEqual(
+				(await restartedRegistry.invoke({ tool: ToolNames.Write, args: { path: "/repo/PLAN.md" } })).kind,
+				"blocked",
+				"reconciled session retains the exact protected path",
+			);
+		} finally {
+			await session.close();
+			isolated.restore();
+		}
+	});
+
+	it("fails closed on a corrupt pending-protection journal", async () => {
+		const isolated = isolateClioEnv("clio-protection-corrupt-");
+		const session = createSessionBundle(sessionContext()).contract;
+		const meta = session.create({ cwd: "/repo" });
+		try {
+			const artifact = protectedState("/repo/PLAN.md").artifacts[0];
+			if (artifact === undefined) throw new Error("protected artifact fixture missing");
+			const pending = stagePendingProtectedArtifact(meta.id, {
+				kind: "protect",
+				artifact,
+				toolName: ToolNames.Write,
+			});
+			writeFileSync(pending.path, JSON.stringify({ ...pending.record, sessionId: "tampered" }));
+			strictEqual(readPendingProtectedArtifacts(meta.id).errors.length, 1);
+			throws(() => reconcilePendingProtectedArtifacts(session), /pending protection journal is untrustworthy/);
+			const guard = createProtectedArtifactsRegistration();
+			guard.markDegraded("pending protection journal is untrustworthy");
+			const middleware = createMiddlewareBundle({ registrations: [guard] });
+			const registry = createRegistry({ safety: allowAllSafety(), middleware: middleware.contract });
+			registry.register(mockSpec(ToolNames.Write));
+			strictEqual((await registry.invoke({ tool: ToolNames.Write, args: { path: "/repo/other.md" } })).kind, "blocked");
+		} finally {
+			await session.close();
+			isolated.restore();
+		}
+	});
+
+	it("retains the write-ahead record until the session append is synchronously durable", async () => {
+		const isolated = isolateClioEnv("clio-protection-flush-");
+		const session = createSessionBundle(sessionContext()).contract;
+		const meta = session.create({ cwd: "/repo" });
+		try {
+			const artifact = protectedState("/repo/PLAN.md").artifacts[0];
+			if (artifact === undefined) throw new Error("protected artifact fixture missing");
+			stagePendingProtectedArtifact(meta.id, { kind: "protect", artifact, toolName: ToolNames.Write });
+			const unflushedSession = new Proxy(session, {
+				get(target, property, receiver) {
+					if (property === "flushAppends")
+						return () => {
+							throw new Error("injected fsync fault");
+						};
+					return Reflect.get(target, property, receiver) as unknown;
+				},
+			}) as SessionContract;
+			throws(() => reconcilePendingProtectedArtifacts(unflushedSession), /injected fsync fault/);
+			strictEqual(
+				readPendingProtectedArtifacts(meta.id).records.length,
+				1,
+				"WAL survives append-before-fsync crash window",
+			);
+			strictEqual(reconcilePendingProtectedArtifacts(session), 1);
+			strictEqual(readPendingProtectedArtifacts(meta.id).records.length, 0, "WAL clears only after fsync succeeds");
+		} finally {
+			await session.close();
+			isolated.restore();
+		}
+	});
+
+	it("enforces inherited protection at the shared mediated-worker safety seam", () => {
+		const safety = createWorkerSafety({
+			cwd: "/repo",
+			protectedArtifactState: protectedState("/repo/PLAN.md"),
+		});
+		const blocked = safety.evaluate({ tool: ToolNames.Write, args: { path: "/repo/PLAN.md" } }, "operating");
+		strictEqual(blocked.kind, "block");
+		strictEqual(blocked.policy?.reasonCode, "protected-artifact");
+		const allowed = safety.evaluate({ tool: ToolNames.Write, args: { path: "/repo/other.md" } }, "operating");
+		ok(allowed.kind !== "block", "an unrelated write follows the ordinary autonomy policy");
 	});
 });

@@ -1,5 +1,6 @@
 export {
 	approveMemoryRecord,
+	canonicalMemoryRepositoryIdentity,
 	estimateMemoryTokens,
 	pruneStaleMemory,
 	rejectMemoryRecord,
@@ -38,6 +39,7 @@ export type {
 	MemoryPruneResult,
 	MemoryRecord,
 	MemoryRecordValidationResult,
+	MemoryRepositoryIdentity,
 	MemoryRetrievalOptions,
 	MemoryScope,
 	MemoryStatus,

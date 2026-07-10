@@ -3,6 +3,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
@@ -259,7 +260,7 @@ export interface SlashCommandContext {
 	 * and emit a single status line. Kept on the context so the registry does
 	 * not import the overlay module.
 	 */
-	verifyReceipt: (runId: string) => { ok: true } | { ok: false; reason: string };
+	verifyReceipt: (runId: string) => ReceiptIntegrityResult;
 	/**
 	 * Handles the "unknown" case: append the text to the chat panel as a user
 	 * turn, submit to the chat loop, and schedule a re-render. Handlers for

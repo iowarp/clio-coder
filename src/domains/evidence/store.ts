@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
+import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/index.js";
 import { hasRunProvenance, type RunProvenanceView, runProvenanceFromUnknown } from "./provenance.js";
 import type { EvidenceFinding, EvidenceFindingsFile, EvidenceInspectable, EvidenceOverview } from "./types.js";
 
@@ -12,6 +13,7 @@ export const EVIDENCE_FILES = [
 	"tool-events.jsonl",
 	"audit-linked.jsonl",
 	"receipt.json",
+	"gate-decisions.json",
 	"protected-artifacts.json",
 	"findings.json",
 	"findings.md",
@@ -70,6 +72,24 @@ export async function loadEvidenceRunProvenance(dataDir: string, evidenceId: str
 		if (hasRunProvenance(view)) out.push({ runId: entry.runId, view });
 	}
 	return out;
+}
+
+/** Load only integrity-valid coordinator decisions linked into an evidence bundle. */
+export async function loadEvidenceGateDecisions(dataDir: string, evidenceId: string): Promise<GateDecisionArtifact[]> {
+	let raw: string;
+	try {
+		raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "gate-decisions.json"), "utf8");
+	} catch (error) {
+		const err = error as NodeJS.ErrnoException;
+		if (err.code === "ENOENT") return [];
+		throw error;
+	}
+	const parsed = parseJson(raw, `${evidenceId}/gate-decisions.json`);
+	if (!isRecord(parsed) || !Array.isArray(parsed.decisions)) return [];
+	return parsed.decisions.filter((entry): entry is GateDecisionArtifact => {
+		if (!isRecord(entry)) return false;
+		return verifyGateDecisionArtifact(entry as unknown as GateDecisionArtifact).ok;
+	});
 }
 
 export async function listEvidenceOverviews(dataDir: string): Promise<EvidenceOverview[]> {

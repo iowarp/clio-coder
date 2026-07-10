@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
+import { readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { redactArtifactForStorage } from "../eval/artifacts/redact.js";
 import type { EvalCommandResult, EvalRunArtifact, EvalRunRecord } from "../eval/index.js";
 import { loadEvalArtifact } from "../eval/index.js";
@@ -14,6 +15,7 @@ import {
 	type EvidenceEvalRawTraceRow,
 	type EvidenceEvalTraceRow,
 	type EvidenceFinding,
+	type EvidenceGateDecisionsFile,
 	type EvidenceOverview,
 	type EvidenceProtectedArtifactsFile,
 	type EvidenceReceiptFile,
@@ -29,6 +31,7 @@ const EVAL_EVIDENCE_FILES = [
 	"tool-events.jsonl",
 	"audit-linked.jsonl",
 	"receipt.json",
+	"gate-decisions.json",
 	"protected-artifacts.json",
 	"eval-result.json",
 	"findings.json",
@@ -73,7 +76,18 @@ export async function buildEvalEvidence(options: BuildEvalEvidenceOptions): Prom
 	const toolEventRows = [...evalToolEvents(artifact), ...linkedRuns.toolEvents].sort(compareEvidenceToolEvents);
 	const findings = evalFindings(artifact);
 	const overview = evalOverview(evidenceId, artifact, findings, toolEventRows, linkedRuns, options.sidecars);
-	await writeEvalEvidenceFiles(directory, artifact, overview, findings, toolEventRows, linkedRuns);
+	const gateDecisions: EvidenceGateDecisionsFile = {
+		version: EVIDENCE_VERSION,
+		evidenceId,
+		decisions:
+			options.stateDir === undefined
+				? []
+				: readGateDecisionArtifactsForRunIds(
+						new Set(linkedRuns.runSources.map((source) => source.envelope.id)),
+						options.stateDir,
+					).map((entry) => entry.artifact),
+	};
+	await writeEvalEvidenceFiles(directory, artifact, overview, findings, toolEventRows, linkedRuns, gateDecisions);
 	return { evidenceId, directory, overview, findings };
 }
 
@@ -203,6 +217,7 @@ async function writeEvalEvidenceFiles(
 	findings: ReadonlyArray<EvidenceFinding>,
 	toolEventRows: ReadonlyArray<EvidenceToolEvent>,
 	linkedRuns: EvalLinkedRuns,
+	gateDecisions: EvidenceGateDecisionsFile,
 ): Promise<void> {
 	const emptyProtected: EvidenceProtectedArtifactsFile = { version: EVIDENCE_VERSION, artifacts: [], events: [] };
 	const receiptsFile: EvidenceReceiptFile = {
@@ -218,6 +233,7 @@ async function writeEvalEvidenceFiles(
 	await writeJsonl(join(directory, "tool-events.jsonl"), redactArtifactForStorage(toolEventRows));
 	await writeJsonl(join(directory, "audit-linked.jsonl"), linkedRuns.auditRows);
 	await writeJson(join(directory, "receipt.json"), receiptsFile);
+	await writeJson(join(directory, "gate-decisions.json"), gateDecisions);
 	await writeJson(join(directory, "protected-artifacts.json"), emptyProtected);
 	await writeJson(join(directory, "eval-result.json"), redactedArtifact);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));

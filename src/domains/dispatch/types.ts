@@ -175,9 +175,12 @@ export interface RunGateProvenance {
  */
 export interface RunPlanProvenance {
 	hash: string;
-	topology: "parallel" | "sequential" | "pipeline" | "compete" | "detached";
+	topology: "parallel" | "sequential" | "pipeline" | "review" | "compete" | "detached";
 	taskCount: number;
 	approval: "operator" | "full-auto";
+	/** Registry-issued identity of the one-shot operator approval, when applicable. */
+	approvalRequestId?: string;
+	approvalRequestedBy?: string;
 	costCeilingUsd?: number;
 }
 
@@ -192,7 +195,7 @@ export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 export interface RunReceiptIntegrity {
-	version: 1 | 2 | 3;
+	version: 4;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -368,6 +371,12 @@ export interface RunReceiptSafetySummary {
 	blockedAttempts: SafetyBlockedAttempt[];
 	requestedActions: ReadonlyArray<string>;
 	toolProfile?: ToolProfileName;
+	/** Frozen parent-session hard blocks enforced by this worker specification. */
+	protectedArtifacts?: {
+		version: 1;
+		count: number;
+		stateHash: string;
+	};
 	runtimeLimitations: ReadonlyArray<string>;
 }
 
@@ -400,7 +409,12 @@ export type RunAutonomyEnforcementGrade = "mediated" | "approximated" | "bypasse
 
 export interface RunReceiptAutonomyEnforcement {
 	grade: RunAutonomyEnforcementGrade;
+	/** Effective authority enforced by the runtime. */
 	autonomy: string;
+	/** Request-level narrowing, present when the caller supplied one. */
+	requestedAutonomy?: string;
+	/** Session ceiling against which a request-level value was clamped. */
+	sessionAutonomy?: string;
 	externalMode?: string;
 	dangerousBypass?: boolean;
 }

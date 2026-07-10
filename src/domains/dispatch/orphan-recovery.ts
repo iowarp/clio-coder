@@ -71,6 +71,8 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	if (receipt.cacheReadTokenCount !== undefined) envelope.cacheReadTokenCount = receipt.cacheReadTokenCount;
 	if (receipt.cacheWriteTokenCount !== undefined) envelope.cacheWriteTokenCount = receipt.cacheWriteTokenCount;
 	if (receipt.reasoningTokenCount !== undefined) envelope.reasoningTokenCount = receipt.reasoningTokenCount;
+	if (receipt.inputTokenCount !== undefined) envelope.inputTokenCount = receipt.inputTokenCount;
+	if (receipt.outputTokenCount !== undefined) envelope.outputTokenCount = receipt.outputTokenCount;
 	if (receipt.staticShellHash !== undefined) envelope.staticShellHash = receipt.staticShellHash;
 	if (receipt.sessionShellHash !== undefined) envelope.sessionShellHash = receipt.sessionShellHash;
 	if (receipt.dynamicHash !== undefined) envelope.dynamicHash = receipt.dynamicHash;
@@ -84,6 +86,10 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	if (receipt.identity !== undefined) envelope.identity = receipt.identity;
 	if (receipt.node !== undefined) envelope.node = receipt.node;
 	if (receipt.reroutes !== undefined) envelope.reroutes = receipt.reroutes;
+	if (receipt.pipeline !== undefined) envelope.pipeline = receipt.pipeline;
+	if (receipt.gate !== undefined) envelope.gate = receipt.gate;
+	if (receipt.plan !== undefined) envelope.plan = receipt.plan;
+	if (receipt.personaOverride !== undefined) envelope.personaOverride = receipt.personaOverride;
 	return envelope;
 }
 

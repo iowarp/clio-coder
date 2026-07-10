@@ -152,6 +152,10 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			if (!state) throw new Error("session.checkpoint: no current session");
 			await performCheckpoint(state, reason);
 		},
+		flushAppends() {
+			if (!state) throw new Error("session.flushAppends: no current session");
+			state.writer.flushAppends();
+		},
 		resume(sessionId) {
 			if (state && state.meta.id === sessionId) return state.meta;
 			if (state) {

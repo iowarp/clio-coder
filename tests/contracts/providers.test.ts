@@ -671,6 +671,34 @@ describe("contracts/providers/runtime-cleanup", () => {
 		throws(() => parseWorkerSpec(minimalWorkerSpec({ protectedModels: [42] })), /protectedModels/);
 	});
 
+	it("round-trips versioned protected-artifact state and rejects malformed wire state", () => {
+		const protectedArtifactState = {
+			version: 1,
+			artifacts: [
+				{
+					path: "/repo/PLAN.md",
+					protectedAt: "2026-07-10T12:00:00.000Z",
+					reason: "validated plan",
+					source: "validation",
+					validationCommand: "npm test",
+					validationExitCode: 0,
+				},
+			],
+		};
+		deepStrictEqual(
+			parseWorkerSpec(minimalWorkerSpec({ protectedArtifactState })).protectedArtifactState,
+			protectedArtifactState,
+		);
+		for (const malformed of [
+			{ version: 2, artifacts: [] },
+			{ version: 1, artifacts: "all" },
+			{ version: 1, artifacts: [{ path: "/repo/PLAN.md", protectedAt: "now", reason: "test", source: "other" }] },
+			{ version: 1, artifacts: [{ path: 42, protectedAt: "now", reason: "test", source: "user" }] },
+		]) {
+			throws(() => parseWorkerSpec(minimalWorkerSpec({ protectedArtifactState: malformed })), /protectedArtifactState/);
+		}
+	});
+
 	it("round-trips a bounded llama.cpp response schema and refuses unsupported worker runtimes", () => {
 		const responseSchema = {
 			type: "object",

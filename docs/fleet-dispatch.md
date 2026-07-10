@@ -159,31 +159,68 @@ levels the winner's branch and worktree are preserved and the operator
 confirms through `apply_winner`, whose approval prompt is the winner
 confirmation. Losers are cleaned on every path, including abort.
 
+The compete group is a durable transaction owner. Its manifest records the
+coordinator identity and every admitted worker process before the dispatch
+handle is returned. At orchestrator startup, Clio uses process birth tokens
+to distinguish the leased process from PID reuse, terminates an abandoned
+worker or ACP process group, and then removes the group's registered
+worktrees and branches. If a judge output is waiting in the decision journal,
+the workers are quiesced but the candidates remain until that output is bound
+to an integrity-verified judge receipt; a recovered winner is preserved for
+operator inspection rather than silently auto-applied after restart.
+
 ### Plan approval
 
-A plan-scale dispatch call (more than one task, compete, a remote node pin,
-or `apply_winner`) maps to an approval ask at supervised autonomy levels. The
-parked call shows the rendered plan artifact (topology, per-task agent,
-model, node), and one approval covers the whole plan. Full-auto skips the
-stop and seals the plan hash into every run's receipt instead
+A plan-scale dispatch call (more than one task, review, compete, effective
+remote placement, or `apply_winner`) maps to an approval ask at supervised
+autonomy levels. Before asking, Clio resolves the effective agent, target,
+model, node, bounded review cycles/candidates/judge, and scheduling cost
+ceiling without reserving capacity. The parked call shows that sanitized
+artifact, and one approval covers the whole plan. Execution consumes the
+same pins, including each expanded builder/reviewer/candidate/judge role and
+the SSH node's transport kind and host. A placement, host, capability, or
+cost-ceiling change fails before launch rather than silently choosing an
+unapproved alternative. Full-auto skips the stop and seals the
+same plan hash into every run's receipt instead
 (`plan.approval: "full-auto"`). Read-only autonomy denies dispatch outright,
 as it denies every non-read action.
 
 ## Receipts
 
-Receipt integrity stays v3. Fleet dispatch adds optional, presence-gated
-fields only, so every receipt sealed before this work still verifies:
+Receipts use a single integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 4`)
+that authenticates the complete receipt and reconstructible ledger provenance
+surface. A receipt sealed under any other version fails verification; there is
+no partial or legacy tier. The fleet provenance fields covered by the digest
+include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`).
 - `reroutes`: dead-node failover hops, oldest first.
 - `gate`: review/compete provenance (role, group, cycle, subject run ids with
   their receipt digests, and the verdict that caused a revise builder).
-- `plan`: plan-approval provenance (hash, topology, task count, approval).
+- `plan`: plan-approval provenance (hash, topology, task count, cost ceiling,
+  approval kind, and the registry approval identity when supervised).
 
 Gate references point backward: a reviewer references the builder it
 reviewed, a revise builder references the reviewer whose findings it
-received, a judge references every candidate. The chain is reconstructable
-newest to oldest from receipts alone.
+received, and a judge references every candidate. Because a worker receipt
+seals before the coordinator parses its final verdict, terminal pass/fail,
+exhaustion, winner, and confirmation outcomes are append-only integrity-
+covered gate-decision artifacts under the state directory. Evidence builds
+discover them from linked receipt ids and export `gate-decisions.json`.
+Reviewer and judge terminal output first crosses an integrity-covered
+write-ahead boundary under `state/gate-decisions/pending/`, before the caller
+waits for the final receipt. Restart recovery verifies the receipt, applies
+the same verdict/winner parser, materializes the final artifact idempotently,
+and only then clears the pending record. Missing receipts, tampering, or a
+conflicting artifact fail closed and leave the journal and any compete
+worktrees available for inspection.
+
+Protected-artifact hard blocks follow compete work into candidate worktrees:
+Clio mirrors every applicable parent-checkout path into each admitted worker
+spec and independently rejects a winner branch whose diff touches a protected
+parent path. The merge/apply coordinator rechecks the live protection state,
+so neither full-auto nor a later supervised winner approval can override that
+hard block.
 
 ## Operator visibility
 

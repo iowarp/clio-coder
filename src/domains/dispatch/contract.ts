@@ -1,9 +1,23 @@
+import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunReceipt, RunStatus } from "./types.js";
 import type { JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
 	systemPrompt?: string;
+}
+
+/** Internal, non-serializable admission hook for transactional resource owners. */
+export interface DispatchAdmissionObserver {
+	onAdmitted(run: { runId: string; pid: number | null; runtimeKind: RunEnvelope["runtimeKind"] }): void;
+}
+
+/** Side-effect-free effective routing used to construct a dispatch approval artifact. */
+export interface DispatchPlanTaskResolution {
+	agentId: string;
+	targetId: string;
+	wireModelId: string;
+	node: RunNodeIdentity;
 }
 
 /**
@@ -74,8 +88,21 @@ export interface DetachedBatchesContract {
 }
 
 export interface DispatchContract {
+	/**
+	 * Resolve effective agent/target/model/node without launching or acquiring a
+	 * slot. Callers pin this result into the approved request; later placement
+	 * failure aborts rather than choosing a different unapproved node.
+	 */
+	preview?(req: DispatchRequest): DispatchPlanTaskResolution;
+	/** Session scheduling ceiling captured in the same immutable approval artifact. */
+	costCeilingUsd?(): number;
+	/** Current trusted hard-block state for coordinator-side merge validation. */
+	protectedArtifactState?(): ProtectedArtifactState;
 	/** Validate + admit + spawn a native worker. Returns run id + promise. */
-	dispatch(req: DispatchRequest): Promise<{
+	dispatch(
+		req: DispatchRequest,
+		observer?: DispatchAdmissionObserver,
+	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
