@@ -154,6 +154,7 @@ const RECOGNIZED_SUBCOMMANDS = new Set<string>([
 	"uninstall",
 	"upgrade",
 	"version",
+	"worker",
 ]);
 
 // Retired commands are not dispatchable, but remain command-shaped tombstones
@@ -238,6 +239,14 @@ async function dispatch(
 			return (await import("./upgrade.js")).runUpgradeCommand(subArgs);
 		case "version":
 			return (await import("./version.js")).runVersionCommand();
+		case "worker":
+			// Internal: the native worker stream server (WorkerSpec on stdin,
+			// NDJSON on stdout). SSH fleet transports invoke `clio worker` on
+			// remote nodes; operators never run it by hand, so it stays out of
+			// HELP. The entry module runs main() on import and owns process
+			// exit; the promise below settles only on a pre-run import failure.
+			await import("../worker/entry.js");
+			return 0;
 		default:
 			printError(`unknown subcommand: ${subcommand}`);
 			process.stdout.write(HELP);

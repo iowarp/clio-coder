@@ -9,6 +9,7 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
+import { hostname } from "node:os";
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { setProtectedModelsProvider, setResidencyNoticeSink } from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
@@ -18,6 +19,9 @@ import { drainStdout, emitEvent } from "./ndjson.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
 import { validateRehydratedWorkerRuntime } from "./spec-contract.js";
 import { createWorkerStdinDemux } from "./stdin-demux.js";
+
+/** Bound between channel-close abort and forced exit for a hung run. */
+const CHANNEL_CLOSE_EXIT_GRACE_MS = 5000;
 
 async function main(): Promise<number> {
 	// A worker has no TUI, so residency notices go to stderr (the parent
@@ -34,6 +38,12 @@ async function main(): Promise<number> {
 	process.stdin.resume();
 
 	const spec = await demux.readSpec();
+	// Remote transports set CLIO_WORKER_ANNOUNCE=1 so the orchestrator learns
+	// the remote pid for its kill fallback. The transport consumes this event;
+	// local workers never emit it, keeping the local stream byte-identical.
+	if (process.env.CLIO_WORKER_ANNOUNCE === "1") {
+		emitEvent({ type: "worker_announce", pid: process.pid, host: hostname() });
+	}
 	// The worker has no settings view of its own; the dispatcher copied the
 	// operator's configured model ids onto the spec so this process protects
 	// the same residents as the orchestrator.
@@ -96,6 +106,17 @@ async function main(): Promise<number> {
 		if (!resolved) {
 			process.stderr.write(`[worker] dropped permission_decision for unknown request '${requestId}'\n`);
 		}
+	});
+	// Parent monitor: the control channel closing after the spec means the
+	// dispatcher is gone (orchestrator exit, SSH channel drop). Abort the run
+	// and bound the exit so no worker is ever stranded on a remote node. The
+	// timer is unref'd: it cannot keep an otherwise-finished process alive,
+	// but it fires if a hung run is still holding the event loop.
+	demux.onChannelClose(() => {
+		process.stderr.write("[worker] control channel closed; aborting run\n");
+		handle.abort();
+		const forceExit = setTimeout(() => process.exit(1), CHANNEL_CLOSE_EXIT_GRACE_MS);
+		forceExit.unref?.();
 	});
 	const onSignal = () => handle.abort();
 	process.on("SIGINT", onSignal);

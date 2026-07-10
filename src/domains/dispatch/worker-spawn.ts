@@ -1,9 +1,16 @@
 /**
  * Orchestrator-side subprocess spawner for the native worker.
  *
- * Spawns `dist/worker/entry.js` with its WorkerSpec written to stdin, consumes
- * NDJSON events line-by-line from stdout, and exposes them as an async iterator
- * so the dispatch domain can drive the orchestrator-side state machine.
+ * Spawns a worker process with its WorkerSpec written to stdin, consumes
+ * NDJSON events line-by-line from stdout, and exposes them as an async
+ * iterator so the dispatch domain can drive the orchestrator-side state
+ * machine.
+ *
+ * The channel machinery (spec write, NDJSON demux, stderr tail, heartbeat
+ * bump, abort escalation) is transport-neutral: `spawnWorkerProcess` takes an
+ * argv and works for both the local `node dist/worker/entry.js` fork and an
+ * `ssh <host> -- clio worker` remote launch (see transport.ts). The wire
+ * protocol is identical on every transport.
  *
  * Post-W5 WorkerSpec carries a resolved TargetDescriptor + runtime id +
  * wireModelId instead of providerId/modelId. The worker subprocess re-hydrates
@@ -47,6 +54,31 @@ export interface SpawnOptions {
 	shutdownGraceMs?: number;
 }
 
+/** First stdout event a worker emits under CLIO_WORKER_ANNOUNCE=1. */
+export interface WorkerAnnounce {
+	pid: number | null;
+	host: string | null;
+}
+
+export interface WorkerProcessOptions {
+	cwd?: string;
+	env?: NodeJS.ProcessEnv;
+	shutdownGraceMs?: number;
+	/**
+	 * Capture-and-consume `worker_announce` events. Remote transports use the
+	 * announced remote pid for a kill fallback when the channel-close signal is
+	 * not honored. When set, announce events are delivered here and never
+	 * yielded on the event stream; when unset they pass through untouched
+	 * (local workers never emit them).
+	 */
+	onAnnounce?: (announce: WorkerAnnounce) => void;
+	/**
+	 * Invoked when abort escalates from SIGTERM to SIGKILL after the grace
+	 * window. Remote transports hook their remote kill fallback here.
+	 */
+	onForcedKill?: () => void;
+}
+
 /**
  * SIGTERM→SIGKILL window on worker abort. Kept tight so TUI exit with an
  * in-flight worker still returns the shell prompt in well under a second.
@@ -57,11 +89,24 @@ export interface SpawnOptions {
 const DEFAULT_SHUTDOWN_GRACE_MS = 500;
 const STDERR_TAIL_BYTES = 4096;
 
-export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {
-	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
+function isWorkerAnnounce(value: unknown): value is { type: "worker_announce"; pid?: unknown; host?: unknown } {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		(value as { type?: unknown }).type === "worker_announce"
+	);
+}
+
+export function spawnWorkerProcess(
+	command: string,
+	args: ReadonlyArray<string>,
+	spec: WorkerSpec,
+	opts?: WorkerProcessOptions,
+): SpawnedWorker {
 	const shutdownGraceMs = opts?.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
 
-	const child: ChildProcess = spawn(process.execPath, [workerEntry], {
+	const child: ChildProcess = spawn(command, [...args], {
 		stdio: ["pipe", "pipe", "pipe"],
 		cwd: opts?.cwd,
 		env: opts?.env ?? process.env,
@@ -137,6 +182,14 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 			if (trimmed.length === 0) return;
 			try {
 				const value = JSON.parse(trimmed) as unknown;
+				if (opts?.onAnnounce && isWorkerAnnounce(value)) {
+					heartbeatAt.current = Date.now();
+					opts.onAnnounce({
+						pid: typeof value.pid === "number" && Number.isFinite(value.pid) ? value.pid : null,
+						host: typeof value.host === "string" && value.host.length > 0 ? value.host : null,
+					});
+					return;
+				}
 				push(value);
 			} catch {
 				malformedStdoutLines += 1;
@@ -217,6 +270,11 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 				} catch {
 					// swallow; close handler still resolves the promise
 				}
+				try {
+					opts?.onForcedKill?.();
+				} catch {
+					// fallback is best-effort; the local channel is already dead
+				}
 			}
 		}, shutdownGraceMs);
 		killTimer.unref?.();
@@ -230,4 +288,13 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 		heartbeatAt,
 		send,
 	};
+}
+
+export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {
+	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
+	return spawnWorkerProcess(process.execPath, [workerEntry], spec, {
+		...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
+		env: opts?.env ?? process.env,
+		...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
+	});
 }

@@ -20,6 +20,13 @@ export interface WorkerStdinDemux {
 	onPermissionDecision(handler: (decision: { requestId: string; decision: "approve" | "deny" }) => void): void;
 	/** Post-spec lines that were not valid steer or permission-decision messages. */
 	droppedLineCount(): number;
+	/**
+	 * Register the handler for the control channel closing after the spec was
+	 * received (parent exit, SSH channel drop). Fires at most once; if the
+	 * channel already closed the handler is invoked immediately. The pre-spec
+	 * close case stays a readSpec() rejection, not a channel-close event.
+	 */
+	onChannelClose(handler: () => void): void;
 }
 
 export function createWorkerStdinDemux(): WorkerStdinDemux {
@@ -35,6 +42,15 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	let permissionHandler: ((decision: { requestId: string; decision: "approve" | "deny" }) => void) | null = null;
 	const pendingPermissionDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
 	let droppedLines = 0;
+	let channelCloseHandler: (() => void) | null = null;
+	let channelCloseDelivered = false;
+	let channelClosedAfterSpec = false;
+
+	function deliverChannelClose(): void {
+		if (channelCloseDelivered || channelCloseHandler === null) return;
+		channelCloseDelivered = true;
+		channelCloseHandler();
+	}
 
 	function resolveSpec(spec: WorkerSpec): void {
 		specValue = spec;
@@ -130,7 +146,12 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 				processLine(buffer);
 				buffer = "";
 			}
-			if (!specReceived) rejectSpec(new Error("worker stdin closed before spec received"));
+			if (!specReceived) {
+				rejectSpec(new Error("worker stdin closed before spec received"));
+				return;
+			}
+			channelClosedAfterSpec = true;
+			deliverChannelClose();
 		},
 		readSpec(): Promise<WorkerSpec> {
 			if (specValue) return Promise.resolve(specValue);
@@ -157,6 +178,10 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		},
 		droppedLineCount(): number {
 			return droppedLines;
+		},
+		onChannelClose(handler: () => void): void {
+			channelCloseHandler = handler;
+			if (channelClosedAfterSpec) deliverChannelClose();
 		},
 	};
 }
