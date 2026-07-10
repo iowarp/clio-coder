@@ -36,6 +36,7 @@ import { getMarketplaceSkills, installSkill } from "../domains/resources/skills/
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import { probeGit, probeWorkspace } from "../domains/session/workspace/index.js";
@@ -238,6 +239,8 @@ export interface InteractiveDeps {
 	 * first-available entry.
 	 */
 	getSettings?: () => Readonly<ClioSettings>;
+	/** Live fleet node snapshots for the /fleet nodes view and node-pin editor. */
+	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
 	/** Install the TUI-backed ask_user handler for this interactive process. */
@@ -2630,6 +2633,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			getObservability: () => observabilitySnapshot,
 			...(deps.agents ? { agents: deps.agents } : {}),
 			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+			...(deps.getFleetNodes ? { getFleetNodes: deps.getFleetNodes } : {}),
 			...(deps.writeSettings
 				? {
 						writeSettings: (next) => {

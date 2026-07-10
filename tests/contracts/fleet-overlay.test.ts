@@ -55,6 +55,7 @@ function runningRow(runId: string): DispatchSnapshot["running"][number] {
 		elapsedMs: 1000,
 		tokens: { input: 1, output: 1, total: 2 },
 		costUsd: 0,
+		node: null,
 	};
 }
 
@@ -216,6 +217,7 @@ describe("fleet overlay", () => {
 						elapsedMs: 12_000,
 						tokens: { input: 100, output: 42, total: 142 },
 						costUsd: 0.0012,
+						node: null,
 					},
 				],
 				retrying: [
@@ -265,6 +267,7 @@ describe("fleet overlay", () => {
 						elapsedMs: 4_000,
 						tokens: { input: 10, output: 5, total: 15 },
 						costUsd: 0,
+						node: null,
 					},
 				],
 			}),
@@ -350,6 +353,7 @@ describe("fleet overlay", () => {
 			const component = harness.component();
 			component.handleInput?.("\t");
 			component.handleInput?.("\t");
+			component.handleInput?.("\t");
 			component.handleInput?.("b");
 
 			const rendered = strip(component.render(132).join("\n"));
@@ -376,6 +380,7 @@ describe("fleet overlay", () => {
 		});
 		try {
 			const component = harness.component();
+			component.handleInput?.("\t");
 			component.handleInput?.("\t");
 			component.handleInput?.("\t");
 
@@ -407,6 +412,7 @@ describe("fleet overlay", () => {
 		});
 		try {
 			const component = harness.component();
+			component.handleInput?.("\t");
 			component.handleInput?.("\t");
 			component.handleInput?.("\t");
 			component.handleInput?.("k");

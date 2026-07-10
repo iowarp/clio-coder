@@ -345,6 +345,7 @@ export function statusSnapshot(): {
 				elapsedMs: Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : 0,
 				tokens: { input: 0, output: 0, total: row.tokenCount },
 				costUsd: row.costUsd,
+				node: row.node?.id ?? "local",
 			};
 		});
 	const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
@@ -381,7 +382,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 		for (const row of snapshot.running) {
 			const lineage = row.lineage as { attempt: number; depth: number };
 			process.stdout.write(
-				`  ${row.runId}  ${row.agentId}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  $${(row.costUsd as number).toFixed(4)}\n`,
+				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  $${(row.costUsd as number).toFixed(4)}\n`,
 			);
 		}
 	}

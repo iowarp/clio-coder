@@ -36,7 +36,7 @@ export interface MonitorToolDeps {
 function runLine(run: RunEnvelope): string {
 	const state = run.outcome ?? run.status;
 	const receipt = run.receiptPath ?? "n/a";
-	return `- ${run.id} agent=${run.agentId} state=${state} started=${run.startedAt} tokens=${run.tokenCount} receipt=${receipt}`;
+	return `- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} started=${run.startedAt} tokens=${run.tokenCount} receipt=${receipt}`;
 }
 
 function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined): ToolResult {
@@ -72,10 +72,14 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 	const run = deps.dispatch.getRun(runId);
 	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
 	const live = deps.dispatch.snapshot().running.find((entry) => entry.runId === runId) ?? null;
+	const reroutes =
+		run.reroutes !== undefined && run.reroutes.length > 0
+			? ` reroutes=${run.reroutes.map((hop) => `${hop.fromNode}>${hop.toNode}`).join(",")}`
+			: "";
 	const lines = [
 		`run ${run.id} (${run.agentId})`,
 		`state: ${run.status}${run.outcome ? ` outcome=${run.outcome}` : ""}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
-		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind}`,
+		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind} node=${run.node?.id ?? "local"}${reroutes}`,
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
 		`tokens=${run.tokenCount} cost=$${run.costUsd.toFixed(4)} receipt=${run.receiptPath ?? "n/a"}`,
 	];
@@ -228,7 +232,7 @@ function collectRunLine(row: CollectRow): string[] {
 	const state = run.outcome ?? run.status;
 	const detail = run.outcomeDetail ? ` detail=${run.outcomeDetail}` : "";
 	const lines = [
-		`- ${run.id} agent=${run.agentId} state=${state} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=$${run.costUsd.toFixed(4)} receipt=${run.receiptPath ?? "n/a"}${detail}`,
+		`- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=$${run.costUsd.toFixed(4)} receipt=${run.receiptPath ?? "n/a"}${detail}`,
 	];
 	const text = tailAssistantText(run.id);
 	if (text !== null) {

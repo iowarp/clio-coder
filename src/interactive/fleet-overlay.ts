@@ -5,6 +5,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract, DispatchSnapshot } from "../domains/dispatch/contract.js";
 import type { ObservabilitySnapshot } from "../domains/observability/index.js";
 import { isDispatchEligibleRuntime, type ProvidersContract } from "../domains/providers/index.js";
+import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import {
 	type Component,
 	matchesKey,
@@ -32,7 +33,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as 
 
 export const FLEET_OVERLAY_WIDTH = "100%";
 
-type FleetMode = "status" | "profiles" | "bindings";
+type FleetMode = "status" | "nodes" | "profiles" | "bindings";
 type FleetNoticeLevel = "info" | "success" | "warning" | "error";
 
 interface ProfileRow {
@@ -127,7 +128,8 @@ function runningHeader(width: number): string {
 		fitContentLine(
 			[
 				fitLeft("run", 10),
-				fitLeft("agent", 12),
+				fitLeft("agent", 10),
+				fitLeft("node", 6),
 				fitLeft("rt", 5),
 				fitLeft("hb", 6),
 				fitLeft("phase", 11),
@@ -156,7 +158,8 @@ function retryHeader(width: number): string {
 function runningRow(row: DispatchSnapshot["running"][number], width: number, proofMarker: string | null): string {
 	const line = [
 		muted(fitLeft(shortId(row.runId), 10)),
-		muted(fitLeft(row.agentId, 12)),
+		muted(fitLeft(row.agentId, 10)),
+		muted(fitLeft(row.node?.id ?? "local", 6)),
 		muted(fitLeft(row.runtimeKind, 5)),
 		statusCell(row.heartbeat, 6),
 		statusCell(row.outcomePhase, 11),
@@ -255,7 +258,7 @@ function footerForMode(mode: FleetMode): string {
 		return buildHint("browse", [
 			{ key: "Tab", verb: "mode" },
 			{ key: "n", verb: "new" },
-			{ key: "t/m/l", verb: "edit" },
+			{ key: "t/m/l/o", verb: "edit" },
 			{ key: "r", verb: "rename" },
 			{ key: "d", verb: "delete" },
 		]);
@@ -273,9 +276,65 @@ function footerForMode(mode: FleetMode): string {
 }
 
 function nextMode(mode: FleetMode): FleetMode {
-	if (mode === "status") return "profiles";
+	if (mode === "status") return "nodes";
+	if (mode === "nodes") return "profiles";
 	if (mode === "profiles") return "bindings";
 	return "status";
+}
+
+function nodeStateToken(state: FleetNodeSnapshot["state"]): ClioToken {
+	if (state === "offline") return "error";
+	if (state === "draining") return "warning";
+	return "success";
+}
+
+function nodesHeader(width: number): string {
+	return dim(
+		fitContentLine(
+			[
+				fitLeft("node", 10),
+				fitLeft("kind", 6),
+				fitLeft("host", 22),
+				fitLeft("state", 9),
+				fitRight("busy", 4),
+				fitRight("max", 4),
+				fitLeft("seen", 10),
+				fitLeft("reason", 24),
+			].join(" "),
+			width,
+		),
+	);
+}
+
+function nodeRow(node: FleetNodeSnapshot, width: number): string {
+	const line = [
+		muted(fitLeft(node.id, 10)),
+		muted(fitLeft(node.kind, 6)),
+		muted(fitLeft(node.host, 22)),
+		clioTheme().fg(nodeStateToken(node.state), fitLeft(node.state, 9)),
+		muted(fitRight(String(node.activeWorkers), 4)),
+		muted(fitRight(node.maxWorkers > 0 ? String(node.maxWorkers) : "-", 4)),
+		muted(fitLeft(node.lastSeenAt !== null ? formatClock(node.lastSeenAt) : "-", 10)),
+		node.stateReason !== null ? clioTheme().fg("warning", fitLeft(node.stateReason, 24)) : muted(fitLeft("-", 24)),
+	].join(" ");
+	return truncateToWidth(line, width, "", true);
+}
+
+/** Pure body renderer for the `/fleet` nodes view, shared with tests. */
+export function formatFleetNodesBodyLines(
+	nodes: ReadonlyArray<FleetNodeSnapshot>,
+	contentWidth = DEFAULT_CONTENT_WIDTH,
+): string[] {
+	const width = Math.max(1, Math.floor(contentWidth));
+	const lines: string[] = [listGroupHeader(`nodes (${nodes.length})`), divider(width)];
+	if (nodes.length === 0) {
+		lines.push(dim("no fleet nodes configured; every dispatch runs on the local node"));
+		lines.push(dim("declare fleet.nodes in settings.yaml and run `clio doctor` to preflight them"));
+		return lines;
+	}
+	lines.push(nodesHeader(width));
+	for (const node of nodes) lines.push(nodeRow(node, width));
+	return lines;
 }
 
 function normalizeSettingValue(value: string | null | undefined): string {
@@ -294,7 +353,14 @@ function rowWarning(warning: string | null): string {
 function profileHeader(width: number): string {
 	return dim(
 		fitContentLine(
-			[fitLeft("profile", 20), fitLeft("target", 18), fitLeft("model", 26), fitLeft("thinking", 8), "warning"].join(" "),
+			[
+				fitLeft("profile", 20),
+				fitLeft("target", 18),
+				fitLeft("model", 26),
+				fitLeft("thinking", 8),
+				fitLeft("node", 8),
+				"warning",
+			].join(" "),
 			width,
 		),
 	);
@@ -307,6 +373,7 @@ function profileLine(row: ProfileRow, selected: boolean, width: number): string 
 			muted(fitLeft(row.target, 18)),
 			muted(fitLeft(row.model, 26)),
 			muted(fitLeft(row.profile.thinkingLevel, 8)),
+			muted(fitLeft(row.profile.node ?? "-", 8)),
 			rowWarning(row.warning),
 		].join(" ")}`,
 		Math.max(1, width),
@@ -359,13 +426,15 @@ export interface OpenFleetOverlayOptions {
 	getObservability?: () => ObservabilitySnapshot | undefined;
 	getSettings?: () => Readonly<ClioSettings> | undefined;
 	writeSettings?: (next: ClioSettings) => void;
+	/** Live fleet node snapshots (scheduling.fleet.list()); absent renders the local-only hint. */
+	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
 	notice?: (level: FleetNoticeLevel, text: string, key?: string) => void;
 	onClose?: () => void;
 }
 
 class FleetOverlayBody implements Component {
 	private mode: FleetMode = "status";
-	private readonly selectedByMode: Record<FleetMode, number> = { status: 0, profiles: 0, bindings: 0 };
+	private readonly selectedByMode: Record<FleetMode, number> = { status: 0, nodes: 0, profiles: 0, bindings: 0 };
 	private submenuComponent: Component | null = null;
 	private confirmDeleteProfileName: string | null = null;
 
@@ -376,6 +445,7 @@ class FleetOverlayBody implements Component {
 	) {}
 
 	titleText(): string {
+		if (this.mode === "nodes") return "Fleet · Nodes";
 		if (this.mode === "profiles") return "Fleet · Profiles";
 		if (this.mode === "bindings") return "Fleet · Bindings";
 		return "Fleet · Status";
@@ -391,6 +461,9 @@ class FleetOverlayBody implements Component {
 		const contentWidth = Math.max(1, Math.floor(width));
 		if (this.submenuComponent) return this.submenuComponent.render(contentWidth);
 		if (this.mode === "status") return renderSnapshot(this.dispatch, contentWidth, this.options.getObservability?.());
+		if (this.mode === "nodes") {
+			return formatFleetNodesBodyLines(this.options.getFleetNodes?.() ?? [], contentWidth);
+		}
 		if (!this.canEditSettings()) return [muted("settings writer unavailable")];
 		return this.mode === "profiles" ? this.renderProfiles(contentWidth) : this.renderBindings(contentWidth);
 	}
@@ -424,7 +497,7 @@ class FleetOverlayBody implements Component {
 			this.moveSelection(-1);
 			return;
 		}
-		if (!this.canEditSettings() || this.mode === "status") return;
+		if (!this.canEditSettings() || this.mode === "status" || this.mode === "nodes") return;
 		if (this.mode === "profiles") {
 			if (data === "n") {
 				this.createProfile();
@@ -440,6 +513,10 @@ class FleetOverlayBody implements Component {
 			}
 			if (data === "l") {
 				this.editSelectedProfileThinking();
+				return;
+			}
+			if (data === "o") {
+				this.editSelectedProfileNodePin();
 				return;
 			}
 			if (data === "r") {
@@ -772,6 +849,51 @@ class FleetOverlayBody implements Component {
 		list.onSelect = (item) => finish(THINKING_LEVELS.find((level) => level === item.value));
 		list.onCancel = () => finish();
 		this.submenuComponent = new SubmenuWrapper("Select thinking level", list);
+		this.requestRender();
+	}
+
+	/**
+	 * Node-pin editor (deferred here from the WS1 fleet work): pin a worker
+	 * profile to a fleet node, route it back to automatic placement, or pin it
+	 * local. The pick list is the live registry view plus the two idioms.
+	 */
+	private editSelectedProfileNodePin(): void {
+		const row = this.selectedProfileRow();
+		if (!row) return;
+		const nodes = this.options.getFleetNodes?.() ?? [];
+		const items = [
+			{ value: "", label: "(auto placement)" },
+			{ value: "local", label: "local (never remote)" },
+			...nodes
+				.filter((node) => node.kind === "ssh")
+				.map((node) => ({ value: node.id, label: `${node.id} (${node.host}, ${node.state})` })),
+		];
+		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
+		const currentIndex = items.findIndex((item) => item.value === (row.profile.node ?? ""));
+		if (currentIndex >= 0) list.setSelectedIndex(currentIndex);
+		list.onSelect = (item) => {
+			this.submenuComponent = null;
+			const pin = item.value;
+			const next = this.mutateSettings((settings) => {
+				const profile = settings.workers.profiles[row.name];
+				if (!profile) return;
+				if (pin.length === 0) delete profile.node;
+				else profile.node = pin;
+			});
+			if (next?.workers.profiles[row.name]) {
+				this.selectProfileByName(row.name);
+				this.notice(
+					"success",
+					`profile ${row.name} node ${pin.length === 0 ? "(auto placement)" : pin}`,
+					`fleet:profile:${row.name}`,
+				);
+			}
+		};
+		list.onCancel = () => {
+			this.submenuComponent = null;
+			this.requestRender();
+		};
+		this.submenuComponent = new SubmenuWrapper("Pin profile to node", list);
 		this.requestRender();
 	}
 
