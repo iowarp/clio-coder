@@ -6,6 +6,7 @@ import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { enumerateWorkspaceFiles, filterWorkspaceFileCandidates } from "../../../core/workspace-files.js";
 import type { ProjectType, SourceProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
+import { extractCMake, isCMakePath } from "./cmake.js";
 import { createTreeSitterExtractor, type TreeSitterExtractor } from "./tree-sitter.js";
 
 export type CodewikiLanguage = SourceProjectType | "config";
@@ -208,7 +209,9 @@ function languageForPath(relPath: string): CodewikiLanguage | null {
 	const source = sourceLanguageForPath(relPath);
 	if (source) return source;
 	const name = relPath.split("/").pop() ?? relPath;
-	return CONFIG_FILE_NAMES.has(name) || name.endsWith(".csproj") ? "config" : null;
+	return CONFIG_FILE_NAMES.has(name) || name.endsWith(".csproj") || name.toLowerCase().endsWith(".cmake")
+		? "config"
+		: null;
 }
 
 export function isIndexablePath(relPath: string): boolean {
@@ -886,9 +889,13 @@ function buildFile(
 		hash: contentHash(text),
 		imports: [],
 	};
-	const isSource = language !== "config";
-	if (!isSource || text.trim().length === 0) return { file, symbols: [] };
-	const extracted = extractSourceFile(language, relPath, text, treeSitterExtractor);
+	if (text.trim().length === 0) return { file, symbols: [] };
+	const extracted = isCMakePath(relPath)
+		? extractCMake(text)
+		: language !== "config"
+			? extractSourceFile(language, relPath, text, treeSitterExtractor)
+			: null;
+	if (!extracted) return { file, symbols: [] };
 	const summary = firstDocSummary(text);
 	const sourceFile: CodewikiFile = {
 		...file,
