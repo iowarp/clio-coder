@@ -135,6 +135,53 @@ export interface RunNodeReroute {
 }
 
 /**
+ * One receipt-chain reference to another run in the same gate group. `digest`
+ * is the referenced run's receipt integrity digest at reference time (null
+ * when the referenced run sealed no receipt, e.g. a spawn failure).
+ */
+export interface RunGateSubjectRef {
+	runId: string;
+	digest: string | null;
+}
+
+/**
+ * Review/compete gate provenance, carried on the request and sealed into the
+ * receipt. References point backward only: a reviewer references the builder
+ * it reviewed, a revise builder references the reviewer whose findings it
+ * received, a judge references every candidate it ranked. The chain is
+ * reconstructed newest-to-oldest from these links; verdicts are evidenced on
+ * the run they caused (`verdict` on a revise builder is the reviewer verdict
+ * that triggered it).
+ */
+export interface RunGateProvenance {
+	role: "builder" | "reviewer" | "candidate" | "judge";
+	/** Gate group id shared by every run of one gated dispatch. */
+	group: string;
+	/** 1-based review cycle, or candidate ordinal for compete candidates. */
+	cycle: number;
+	/** Runs this run reviews, revises from, or judges; absent on the first builder. */
+	subjects?: RunGateSubjectRef[];
+	/** Reviewer verdict that caused this run; only on revise builders. */
+	verdict?: "pass" | "fail" | "revise";
+}
+
+/**
+ * Plan-approval provenance for multi-task, compete, or remote dispatch.
+ * `approval: "operator"` records that a supervised autonomy level parked the
+ * dispatch call and an operator approved the plan; `"full-auto"` records that
+ * full-auto skipped the stop and the plan was logged instead. The hash covers
+ * the rendered plan artifact so every run of the plan chains to the same
+ * approved text.
+ */
+export interface RunPlanProvenance {
+	hash: string;
+	topology: "parallel" | "sequential" | "pipeline" | "compete" | "detached";
+	taskCount: number;
+	approval: "operator" | "full-auto";
+	costCeilingUsd?: number;
+}
+
+/**
  * Runtime kind recorded on a run envelope/receipt. "http" covers Clio-owned
  * pi-agent model runtimes; "sdk" and "subprocess" cover sanctioned worker
  * runtimes with dedicated worker runners; "acp-delegation" covers external
@@ -190,6 +237,10 @@ export interface RunEnvelope {
 	reroutes?: RunNodeReroute[];
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */
 	pipeline?: RunPipelineProvenance;
+	/** Review/compete gate provenance; present only on runs of a gated dispatch. */
+	gate?: RunGateProvenance;
+	/** Plan-approval provenance; present only on runs of an approval-gated plan. */
+	plan?: RunPlanProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
 	personaOverride?: RunPersonaOverride;
 	exitCode: number | null;
@@ -377,6 +428,10 @@ export interface RunReceipt {
 	reroutes?: RunNodeReroute[];
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */
 	pipeline?: RunPipelineProvenance;
+	/** Review/compete gate provenance; present only on runs of a gated dispatch. */
+	gate?: RunGateProvenance;
+	/** Plan-approval provenance; present only on runs of an approval-gated plan. */
+	plan?: RunPlanProvenance;
 	/** Ad-hoc specialist provenance; present only when a persona override composed the stable prompt. */
 	personaOverride?: RunPersonaOverride;
 	/** Effective project-context tier for this run; absent on receipts written before this field landed. */

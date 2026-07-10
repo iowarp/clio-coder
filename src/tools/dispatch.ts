@@ -1,11 +1,24 @@
+import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import {
+	type CandidateWorktree,
+	candidateDiffStat,
+	cleanupCompeteGroup,
+	commitCandidateWork,
+	createCandidateWorktree,
+	isGitRepository,
+	mergeWinnerBranch,
+	removeCandidateWorktree,
+} from "./compete-worktrees.js";
+import { describeDispatchPlan } from "./dispatch-plan.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
@@ -23,6 +36,15 @@ export interface DispatchToolDeps {
 	bus?: SafeEventBus;
 	/** Renders the agent fleet catalog for the `list: true` action. */
 	getAgentCatalog?: () => string;
+	/**
+	 * Session-effective autonomy level. Plan provenance records how the plan
+	 * gate resolved (operator approval versus full-auto logging) and compete
+	 * decides whether to apply the judge's pick or hand the winner to the
+	 * operator. Absent (minimal test bundles) defaults to auto-edit.
+	 */
+	getAutonomy?: () => AutonomyLevel;
+	/** Scheduling cost ceiling recorded on plan provenance when available. */
+	getCostCeilingUsd?: () => number;
 }
 
 interface EventSummary {
@@ -441,6 +463,549 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 	};
 }
 
+function newGateGroupId(prefix: string): string {
+	return `${prefix}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
+}
+
+function subjectRef(receipt: RunReceipt): RunGateSubjectRef {
+	return { runId: receipt.runId, digest: receipt.integrity?.digest ?? null };
+}
+
+/** Verdict protocol: the reviewer's LAST "VERDICT: ..." line decides. */
+export function parseReviewVerdict(text: string): "pass" | "fail" | "revise" | null {
+	let verdict: "pass" | "fail" | "revise" | null = null;
+	for (const match of text.matchAll(/^\s*VERDICT:\s*(pass|fail|revise)\b/gim)) {
+		const raw = match[1]?.toLowerCase();
+		if (raw === "pass" || raw === "fail" || raw === "revise") verdict = raw;
+	}
+	return verdict;
+}
+
+const REVIEWER_PERSONA = [
+	"You are a strict, read-only code reviewer for a dispatched build task.",
+	"Inspect the repository state with read tools (git diff via file reads, grep, ls) and compare the work against the task requirements you were given.",
+	"You cannot modify anything; report findings instead.",
+	"End your final message with exactly one line:",
+	"VERDICT: pass    (the work fulfils the task)",
+	"VERDICT: revise  (fixable findings; list them concretely above the verdict)",
+	"VERDICT: fail    (the approach is wrong or the task was not attempted)",
+].join("\n");
+
+function reviewerTask(originalTask: string, builderRunId: string, cycle: number): string {
+	return [
+		`Review the work of builder run ${builderRunId} (review cycle ${cycle}).`,
+		"The builder's final answer is provided as input data; verify it against the workspace, do not trust it blindly.",
+		"Original task the builder was given:",
+		originalTask,
+		'End with exactly one line "VERDICT: pass", "VERDICT: revise", or "VERDICT: fail".',
+	].join("\n\n");
+}
+
+export interface ReviewGateSettings {
+	reviewer?: string;
+	maxCycles: number;
+	node?: string;
+	model?: string;
+	target?: string;
+}
+
+const REVIEW_MAX_CYCLES_DEFAULT = 2;
+const REVIEW_MAX_CYCLES_LIMIT = 4;
+
+function reviewSettingsFromArgs(
+	args: Record<string, unknown>,
+): { ok: true; review: ReviewGateSettings | undefined } | { ok: false; message: string } {
+	const raw = args.review;
+	if (raw === undefined || raw === false) return { ok: true, review: undefined };
+	const record = raw === true ? {} : isRecord(raw) ? raw : null;
+	if (record === null) return { ok: false, message: "dispatch: review must be true or an options object" };
+	const review: ReviewGateSettings = { maxCycles: REVIEW_MAX_CYCLES_DEFAULT };
+	const reviewer = stringArg(record, "reviewer", "agent");
+	if (reviewer) review.reviewer = reviewer;
+	if (record.max_cycles !== undefined) {
+		const cycles = record.max_cycles;
+		if (typeof cycles !== "number" || !Number.isInteger(cycles) || cycles < 1 || cycles > REVIEW_MAX_CYCLES_LIMIT) {
+			return { ok: false, message: `dispatch: review.max_cycles must be an integer 1..${REVIEW_MAX_CYCLES_LIMIT}` };
+		}
+		review.maxCycles = cycles;
+	}
+	const node = stringArg(record, "node");
+	if (node) review.node = node;
+	const model = stringArg(record, "model");
+	if (model) review.model = model;
+	const target = stringArg(record, "target");
+	if (target) review.target = target;
+	return { ok: true, review };
+}
+
+interface GateRunOutcome {
+	runs: CompletedRun[];
+	verdict: "pass" | "fail" | null;
+	cycles: number;
+	/** Set when the gate ended without a pass/fail verdict and needs the operator. */
+	needsDecision?: string;
+}
+
+/**
+ * Reviewer-gated dispatch: the builder runs, a read-only reviewer evaluates
+ * the workspace against the task, and a revise verdict re-runs the builder
+ * with the findings threaded as input data. Bounded by maxCycles; exhaustion
+ * (or an unparseable reviewer answer at the last cycle) surfaces as a
+ * needs-decision outcome, never a silent failure. Receipts chain backward:
+ * each reviewer references the builder it reviewed, each revise builder
+ * references the reviewer whose findings it received.
+ */
+async function runReviewGated(
+	deps: DispatchToolDeps,
+	base: DispatchRequest,
+	review: ReviewGateSettings,
+	timeoutMs: number | undefined,
+	signal: AbortSignal | undefined,
+): Promise<GateRunOutcome> {
+	const group = newGateGroupId("review");
+	const runs: CompletedRun[] = [];
+	let expired = false;
+	let activeRunId: string | null = null;
+	const abortActive = (bySignal: boolean): void => {
+		expired = true;
+		if (activeRunId !== null) {
+			deps.dispatch.abort(
+				activeRunId,
+				bySignal ? undefined : { cause: "timeout", detail: `timed out after ${timeoutMs}ms` },
+			);
+		}
+	};
+	const onSignalAbort = (): void => abortActive(true);
+	const timer = timeoutMs !== undefined ? setTimeout(() => abortActive(false), timeoutMs) : null;
+	signal?.addEventListener("abort", onSignalAbort, { once: true });
+
+	const runOne = async (request: DispatchRequest): Promise<CompletedRun> => {
+		if (expired || signal?.aborted) {
+			throw new Error(
+				`review dispatch stopped after ${runs.length} run(s): ${signal?.aborted ? "aborted" : `timed out after ${timeoutMs}ms`}`,
+			);
+		}
+		const handle = await deps.dispatch.dispatch(request);
+		activeRunId = handle.runId;
+		const summary = await consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus);
+		const receipt = await handle.finalPromise;
+		activeRunId = null;
+		const completed: CompletedRun = {
+			receipt,
+			receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
+			summary,
+		};
+		runs.push(completed);
+		return completed;
+	};
+
+	try {
+		let findings: { reviewer: CompletedRun; text: string } | null = null;
+		for (let cycle = 1; cycle <= review.maxCycles; cycle += 1) {
+			const builderGate: RunGateProvenance = {
+				role: "builder",
+				group,
+				cycle,
+				...(findings !== null ? { subjects: [subjectRef(findings.reviewer.receipt)], verdict: "revise" } : {}),
+			};
+			const builder = await runOne({
+				...base,
+				gate: builderGate,
+				...(findings !== null
+					? { pipelineInput: { fromRunId: findings.reviewer.receipt.runId, position: cycle, text: findings.text } }
+					: {}),
+			});
+			if (isPipelineStepFailure(builder.receipt)) {
+				return {
+					runs,
+					verdict: null,
+					cycles: cycle,
+					needsDecision: `builder run ${builder.receipt.runId} ended ${pipelineFailureReason(builder.receipt)} in cycle ${cycle}`,
+				};
+			}
+			const reviewerRequest: DispatchRequest = {
+				agentId: review.reviewer ?? base.agentId,
+				task: reviewerTask(base.task, builder.receipt.runId, cycle),
+				systemPrompt: REVIEWER_PERSONA,
+				autonomy: "read-only",
+				gate: { role: "reviewer", group, cycle, subjects: [subjectRef(builder.receipt)] },
+				pipelineInput: { fromRunId: builder.receipt.runId, position: cycle, text: builder.summary.lastAssistantText },
+				...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
+				...(review.node !== undefined ? { node: review.node } : {}),
+				...(review.model !== undefined ? { model: review.model } : {}),
+				...(review.target !== undefined ? { target: review.target } : {}),
+				...(base.plan !== undefined ? { plan: base.plan } : {}),
+			};
+			const reviewer = await runOne(reviewerRequest);
+			if (isPipelineStepFailure(reviewer.receipt)) {
+				return {
+					runs,
+					verdict: null,
+					cycles: cycle,
+					needsDecision: `reviewer run ${reviewer.receipt.runId} ended ${pipelineFailureReason(reviewer.receipt)} in cycle ${cycle}`,
+				};
+			}
+			const verdict = parseReviewVerdict(reviewer.summary.lastAssistantText);
+			if (verdict === "pass" || verdict === "fail") {
+				return { runs, verdict, cycles: cycle };
+			}
+			// An unparseable answer counts as revise: the findings text is the
+			// whole reviewer answer, and the cycle bound still terminates the gate.
+			findings = { reviewer, text: reviewer.summary.lastAssistantText };
+		}
+		return {
+			runs,
+			verdict: null,
+			cycles: review.maxCycles,
+			needsDecision: `review gate exhausted after ${review.maxCycles} cycle(s) without a pass; the operator decides whether to accept, retry, or revert`,
+		};
+	} finally {
+		if (timer) clearTimeout(timer);
+		signal?.removeEventListener("abort", onSignalAbort);
+	}
+}
+
+const JUDGE_PERSONA = [
+	"You are a strict, read-only judge ranking candidate implementations of the same task.",
+	"Each candidate is a git branch with its work committed; inspect the branches and worktree paths you are given with read tools.",
+	"You cannot modify anything.",
+	"Rank every candidate with concrete reasons, then end your final message with exactly one line:",
+	"WINNER: <candidate number>",
+].join("\n");
+
+function judgeTask(originalTask: string, candidates: ReadonlyArray<CandidateWorktree>, stats: string[]): string {
+	const lines = [
+		`Rank ${candidates.length} candidate implementations of this task and pick the best one.`,
+		"Original task:",
+		originalTask,
+		"Candidates:",
+		...candidates.map(
+			(candidate, index) =>
+				`  ${candidate.index}. branch=${candidate.branch} worktree=${candidate.path} (${stats[index] ?? "?"})`,
+		),
+		'End with exactly one line "WINNER: <candidate number>".',
+	];
+	return lines.join("\n\n");
+}
+
+/** The judge's LAST "WINNER: n" line decides. */
+export function parseJudgeWinner(text: string, candidateCount: number): number | null {
+	let winner: number | null = null;
+	for (const match of text.matchAll(/^\s*WINNER:\s*(\d+)\b/gim)) {
+		const raw = Number.parseInt(match[1] ?? "", 10);
+		if (Number.isInteger(raw) && raw >= 1 && raw <= candidateCount) winner = raw;
+	}
+	return winner;
+}
+
+export interface CompeteSettings {
+	candidates: number;
+	judge?: { agent?: string; model?: string; target?: string; node?: string };
+}
+
+const COMPETE_MIN_CANDIDATES = 2;
+const COMPETE_MAX_CANDIDATES = 4;
+
+function competeSettingsFromArgs(
+	args: Record<string, unknown>,
+): { ok: true; compete: CompeteSettings } | { ok: false; message: string } {
+	const raw = args.candidates;
+	let candidates = COMPETE_MIN_CANDIDATES;
+	if (raw !== undefined) {
+		if (
+			typeof raw !== "number" ||
+			!Number.isInteger(raw) ||
+			raw < COMPETE_MIN_CANDIDATES ||
+			raw > COMPETE_MAX_CANDIDATES
+		) {
+			return {
+				ok: false,
+				message: `dispatch: candidates must be an integer ${COMPETE_MIN_CANDIDATES}..${COMPETE_MAX_CANDIDATES}`,
+			};
+		}
+		candidates = raw;
+	}
+	const judgeRaw = args.judge;
+	if (judgeRaw !== undefined && !isRecord(judgeRaw)) {
+		return { ok: false, message: "dispatch: judge must be an options object" };
+	}
+	let judge: CompeteSettings["judge"];
+	if (isRecord(judgeRaw)) {
+		judge = {};
+		const agent = stringArg(judgeRaw, "agent");
+		if (agent !== undefined) judge.agent = agent;
+		const model = stringArg(judgeRaw, "model");
+		if (model !== undefined) judge.model = model;
+		const target = stringArg(judgeRaw, "target");
+		if (target !== undefined) judge.target = target;
+		const node = stringArg(judgeRaw, "node");
+		if (node !== undefined) judge.node = node;
+	}
+	return { ok: true, compete: { candidates, ...(judge !== undefined ? { judge } : {}) } };
+}
+
+interface CompeteOutcome {
+	runs: CompletedRun[];
+	group: string;
+	winner: { index: number; branch: string; applied: boolean } | null;
+	needsDecision?: string;
+}
+
+/**
+ * Best-of-N compete: N candidate builders run the same task in isolated
+ * scratch git worktrees, each candidate's work is committed on its branch, a
+ * read-only judge ranks them, and the winner is applied (full-auto) or handed
+ * to the operator (supervised: the winner's branch and worktree survive; the
+ * apply_winner action routes through plan approval). Losers are always
+ * cleaned, including on abort and on any thrown error.
+ */
+async function runCompete(
+	deps: DispatchToolDeps,
+	base: DispatchRequest,
+	compete: CompeteSettings,
+	autonomy: AutonomyLevel,
+	timeoutMs: number | undefined,
+	signal: AbortSignal | undefined,
+): Promise<CompeteOutcome> {
+	const root = base.cwd !== undefined && base.cwd.length > 0 ? base.cwd : process.cwd();
+	if (!isGitRepository(root)) {
+		throw new Error(`compete requires a git repository at ${root}; scratch worktrees isolate the candidates`);
+	}
+	const group = newGateGroupId("compete");
+	const worktrees: CandidateWorktree[] = [];
+	for (let index = 1; index <= compete.candidates; index += 1) {
+		worktrees.push(createCandidateWorktree(root, group, index));
+	}
+	const runs: CompletedRun[] = [];
+	const runIds: string[] = [];
+	const abort = (bySignal: boolean): void => {
+		const reason = bySignal ? undefined : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
+		for (const runId of runIds) deps.dispatch.abort(runId, reason);
+	};
+	const onSignalAbort = (): void => abort(true);
+	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;
+	signal?.addEventListener("abort", onSignalAbort, { once: true });
+	let winner: CompeteOutcome["winner"] = null;
+	try {
+		// Candidates run concurrently through the normal per-run admission path;
+		// per-candidate node pins are not offered (placement spreads them).
+		const handles = await Promise.all(
+			worktrees.map(async (worktree) => {
+				const request: DispatchRequest = {
+					...base,
+					cwd: worktree.path,
+					gate: { role: "candidate", group, cycle: worktree.index },
+				};
+				const handle = await deps.dispatch.dispatch(request);
+				runIds.push(handle.runId);
+				return { worktree, handle, agentId: request.agentId };
+			}),
+		);
+		const candidateRuns: CompletedRun[] = [];
+		for (const { handle, agentId } of handles) {
+			const summary = await consumeDispatchEvents(handle.runId, agentId, handle.events, deps.bus);
+			const receipt = await handle.finalPromise;
+			const completed: CompletedRun = {
+				receipt,
+				receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
+				summary,
+			};
+			candidateRuns.push(completed);
+			runs.push(completed);
+		}
+		if (signal?.aborted) throw new Error("compete dispatch aborted");
+		const stats = worktrees.map((worktree, index) => {
+			const receipt = candidateRuns[index]?.receipt;
+			const failed = receipt !== undefined && isPipelineStepFailure(receipt);
+			if (failed) return "builder failed";
+			commitCandidateWork(worktree, `clio compete ${group} candidate ${worktree.index}`);
+			return candidateDiffStat(root, worktree.branch);
+		});
+		if (candidateRuns.every((run) => isPipelineStepFailure(run.receipt))) {
+			return { runs, group, winner: null, needsDecision: "every candidate builder failed; nothing to judge" };
+		}
+		const judgeRequest: DispatchRequest = {
+			agentId: compete.judge?.agent ?? base.agentId,
+			task: judgeTask(base.task, worktrees, stats),
+			systemPrompt: JUDGE_PERSONA,
+			autonomy: "read-only",
+			cwd: root,
+			gate: {
+				role: "judge",
+				group,
+				cycle: 1,
+				subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
+			},
+			...(compete.judge?.model !== undefined ? { model: compete.judge.model } : {}),
+			...(compete.judge?.target !== undefined ? { target: compete.judge.target } : {}),
+			...(compete.judge?.node !== undefined ? { node: compete.judge.node } : {}),
+			...(base.plan !== undefined ? { plan: base.plan } : {}),
+		};
+		const judgeHandle = await deps.dispatch.dispatch(judgeRequest);
+		runIds.push(judgeHandle.runId);
+		const judgeSummary = await consumeDispatchEvents(
+			judgeHandle.runId,
+			judgeRequest.agentId,
+			judgeHandle.events,
+			deps.bus,
+		);
+		const judgeReceipt = await judgeHandle.finalPromise;
+		runs.push({
+			receipt: judgeReceipt,
+			receiptPath: deps.dispatch.getRun(judgeReceipt.runId)?.receiptPath ?? null,
+			summary: judgeSummary,
+		});
+		if (isPipelineStepFailure(judgeReceipt)) {
+			return {
+				runs,
+				group,
+				winner: null,
+				needsDecision: `judge run ${judgeReceipt.runId} ended ${pipelineFailureReason(judgeReceipt)}; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly`,
+			};
+		}
+		const pick = parseJudgeWinner(judgeSummary.lastAssistantText, compete.candidates);
+		if (pick === null) {
+			return {
+				runs,
+				group,
+				winner: null,
+				needsDecision:
+					"judge returned no parseable WINNER line; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly",
+			};
+		}
+		const pickedWorktree = worktrees.find((worktree) => worktree.index === pick);
+		const pickedRun = candidateRuns[pick - 1];
+		if (!pickedWorktree || pickedRun === undefined || isPipelineStepFailure(pickedRun.receipt)) {
+			return {
+				runs,
+				group,
+				winner: null,
+				needsDecision: `judge picked candidate ${pick}, whose builder failed; the operator decides`,
+			};
+		}
+		if (autonomy === "full-auto") {
+			const merge = mergeWinnerBranch(root, pickedWorktree.branch);
+			if (!merge.ok) {
+				winner = { index: pick, branch: pickedWorktree.branch, applied: false };
+				return {
+					runs,
+					group,
+					winner,
+					needsDecision: `winner candidate ${pick} could not be merged (${merge.reason}); its branch ${pickedWorktree.branch} is preserved`,
+				};
+			}
+			winner = { index: pick, branch: pickedWorktree.branch, applied: true };
+			return { runs, group, winner };
+		}
+		winner = { index: pick, branch: pickedWorktree.branch, applied: false };
+		return { runs, group, winner };
+	} finally {
+		if (timer) clearTimeout(timer);
+		signal?.removeEventListener("abort", onSignalAbort);
+		// Losers are always cleaned; the winner's worktree and branch survive
+		// only while an operator decision is pending (supervised pick or a
+		// failed merge). An applied or absent winner clears the whole group.
+		if (winner !== null && !winner.applied) {
+			const keep = winner.index;
+			for (const worktree of worktrees) {
+				if (worktree.index === keep) continue;
+				removeCandidateWorktree(root, worktree, true);
+			}
+		} else {
+			cleanupCompeteGroup(root, group);
+		}
+	}
+}
+
+/**
+ * Apply a preserved compete winner. Plan-scale by definition, so supervised
+ * autonomy levels park this call for operator confirmation; the approval IS
+ * the winner confirmation. After a successful merge the whole compete group
+ * is cleaned up.
+ */
+function runApplyWinner(args: Record<string, unknown>): ToolResult {
+	const raw = args.apply_winner;
+	if (!isRecord(raw)) return { kind: "error", message: "dispatch: apply_winner must be an options object" };
+	const branch = stringArg(raw, "branch");
+	if (!branch) return { kind: "error", message: "dispatch: apply_winner.branch is required" };
+	const match = /^clio\/compete\/([^/]+)\/(\d+)$/.exec(branch);
+	if (!match) {
+		return { kind: "error", message: "dispatch: apply_winner.branch must be a clio/compete/<group>/<n> branch" };
+	}
+	const group = match[1] ?? "";
+	const root = stringArg(raw, "cwd") ?? process.cwd();
+	if (!isGitRepository(root)) {
+		return { kind: "error", message: `dispatch: apply_winner requires a git repository at ${root}` };
+	}
+	const merge = mergeWinnerBranch(root, branch);
+	if (!merge.ok) {
+		return {
+			kind: "error",
+			message: `dispatch: winner branch ${branch} could not be merged: ${merge.reason}; the branch is preserved`,
+		};
+	}
+	cleanupCompeteGroup(root, group);
+	return {
+		kind: "ok",
+		output: `winner ${branch} merged into the current branch; compete group ${group} cleaned up`,
+		details: { mode: "apply_winner", branch, group },
+	};
+}
+
+function reviewGateResult(outcome: GateRunOutcome, maxOutputBytes: number): ToolResult {
+	const body = formatDispatchOutput("review", outcome.runs, maxOutputBytes);
+	const details: ToolResultDetails = {
+		...dispatchDetails("review", outcome.runs),
+		gate: {
+			verdict: outcome.verdict,
+			cycles: outcome.cycles,
+			...(outcome.needsDecision !== undefined ? { needsDecision: outcome.needsDecision } : {}),
+		},
+	};
+	if (outcome.verdict === "pass") {
+		return { kind: "ok", output: `review gate passed after ${outcome.cycles} cycle(s)\n\n${body}`, details };
+	}
+	if (outcome.verdict === "fail") {
+		return { kind: "error", message: `dispatch: review gate failed (reviewer verdict fail)\n\n${body}`, details };
+	}
+	return {
+		kind: "error",
+		message: `dispatch: review gate needs an operator decision: ${outcome.needsDecision ?? "no verdict"}\n\n${body}`,
+		details,
+	};
+}
+
+function competeResult(outcome: CompeteOutcome, autonomy: AutonomyLevel, maxOutputBytes: number): ToolResult {
+	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes);
+	const details: ToolResultDetails = {
+		...dispatchDetails("compete", outcome.runs),
+		compete: {
+			group: outcome.group,
+			winner: outcome.winner,
+			...(outcome.needsDecision !== undefined ? { needsDecision: outcome.needsDecision } : {}),
+		},
+	};
+	if (outcome.winner?.applied === true) {
+		return {
+			kind: "ok",
+			output: `compete winner candidate ${outcome.winner.index} applied (branch ${outcome.winner.branch} merged)\n\n${body}`,
+			details,
+		};
+	}
+	if (outcome.winner !== null && outcome.needsDecision === undefined) {
+		const lines = [
+			`compete winner: candidate ${outcome.winner.index} (branch ${outcome.winner.branch}), preserved for confirmation at autonomy ${autonomy}`,
+			`Apply it with dispatch apply_winner={branch: "${outcome.winner.branch}"}; the approval prompt is the winner confirmation. Losing candidates were cleaned up.`,
+		];
+		return { kind: "ok", output: `${lines.join("\n")}\n\n${body}`, details };
+	}
+	return {
+		kind: "error",
+		message: `dispatch: compete needs an operator decision: ${outcome.needsDecision ?? "no winner"}\n\n${body}`,
+		details,
+	};
+}
+
 export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
@@ -473,8 +1038,8 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 			),
 			mode: Type.Optional(
 				stringEnum(
-					["parallel", "sequential", "pipeline"],
-					"Run tasks concurrently (default), one at a time, or as a pipeline where each task receives the previous task's output as input data.",
+					["parallel", "sequential", "pipeline", "compete"],
+					"Run tasks concurrently (default), one at a time, as a pipeline where each task receives the previous task's output as input data, or as a compete where N candidates build the same single task in scratch worktrees and a judge picks the winner.",
 				),
 			),
 			detach: Type.Optional(
@@ -482,6 +1047,56 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 					description:
 						"Return immediately after admission with a batch id and run ids; runs continue in the background. Collect later with the monitor tool. Parallel mode only.",
 				}),
+			),
+			review: Type.Optional(
+				Type.Union(
+					[
+						Type.Boolean(),
+						Type.Object({
+							reviewer: Type.Optional(
+								Type.String({
+									description: "Reviewer agent recipe id (default: the builder's agent as a read-only reviewer).",
+								}),
+							),
+							max_cycles: Type.Optional(
+								Type.Number({
+									description: "Max review/revise cycles before the gate needs an operator decision (default 2, max 4).",
+								}),
+							),
+							node: Type.Optional(Type.String({ description: "Fleet node pin for the reviewer." })),
+							model: Type.Optional(Type.String({ description: "Model override for the reviewer." })),
+							target: Type.Optional(Type.String({ description: "Target override for the reviewer." })),
+						}),
+					],
+					{
+						description:
+							"Reviewer gate for a single task: the builder runs, a read-only reviewer verdicts pass/revise/fail against the workspace, and revise re-runs the builder with the findings.",
+					},
+				),
+			),
+			candidates: Type.Optional(Type.Number({ description: "Compete candidates 2..4 (mode=compete only, default 2)." })),
+			judge: Type.Optional(
+				Type.Object(
+					{
+						agent: Type.Optional(Type.String({ description: "Judge agent recipe id (default: the builder's agent)." })),
+						model: Type.Optional(Type.String()),
+						target: Type.Optional(Type.String()),
+						node: Type.Optional(Type.String({ description: "Fleet node pin for the judge." })),
+					},
+					{ description: "Read-only judge that ranks compete candidates." },
+				),
+			),
+			apply_winner: Type.Optional(
+				Type.Object(
+					{
+						branch: Type.String({ description: "Preserved winner branch: clio/compete/<group>/<n>." }),
+						cwd: Type.Optional(Type.String({ description: "Repository root (default: current directory)." })),
+					},
+					{
+						description:
+							"Apply a preserved compete winner: merges its branch and cleans up the compete group. Supervised autonomy parks this call so the operator confirms the winner.",
+					},
+				),
 			),
 			agent: Type.Optional(Type.String({ description: "Default agent recipe for string tasks (default coder)." })),
 			persona: Type.Optional(
@@ -512,22 +1127,61 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 				}
 				return { kind: "ok", output: catalog };
 			}
+			if (args.apply_winner !== undefined) {
+				return runApplyWinner(args);
+			}
 			const parsed = dispatchRequestsFromArgs(args);
 			if (!parsed.ok) return { kind: "error", message: parsed.message };
-			const mode = args.mode === "sequential" ? "sequential" : args.mode === "pipeline" ? "pipeline" : "parallel";
-			if (args.mode !== undefined && args.mode !== "parallel" && args.mode !== "sequential" && args.mode !== "pipeline") {
+			const validModes = ["parallel", "sequential", "pipeline", "compete"];
+			if (args.mode !== undefined && !validModes.includes(String(args.mode))) {
 				return {
 					kind: "error",
-					message: `dispatch: mode must be parallel, sequential, or pipeline; got '${String(args.mode)}'`,
+					message: `dispatch: mode must be parallel, sequential, pipeline, or compete; got '${String(args.mode)}'`,
 				};
 			}
+			const mode =
+				args.mode === "sequential"
+					? "sequential"
+					: args.mode === "pipeline"
+						? "pipeline"
+						: args.mode === "compete"
+							? "compete"
+							: "parallel";
 			if (options?.signal?.aborted) return { kind: "error", message: "dispatch: aborted" };
 			const maxOutputBytes = maxOutputBytesArg(args);
 			const timeoutMs = timeoutMsArg(args);
+			const reviewParsed = reviewSettingsFromArgs(args);
+			if (!reviewParsed.ok) return { kind: "error", message: reviewParsed.message };
+			const review = reviewParsed.review;
+
+			// Plan provenance: plan-scale calls (multi-task, compete, remote node)
+			// were either approved by the operator at admission (supervised) or run
+			// unstopped at full-auto; either way every run of the plan seals the
+			// same plan hash into its receipt.
+			const autonomy = deps.getAutonomy?.() ?? "auto-edit";
+			const planView = describeDispatchPlan(args);
+			let requests = parsed.requests;
+			if (planView.planScale) {
+				const ceiling = deps.getCostCeilingUsd?.();
+				const plan: RunPlanProvenance = {
+					hash: planView.hash,
+					topology: planView.topology,
+					taskCount: planView.taskCount,
+					approval: autonomy === "full-auto" ? "full-auto" : "operator",
+					...(ceiling !== undefined && ceiling > 0 ? { costCeilingUsd: ceiling } : {}),
+				};
+				requests = requests.map((request) => ({ ...request, plan }));
+			}
 
 			if (args.detach === true) {
 				if (mode !== "parallel") {
 					return { kind: "error", message: `dispatch: detach only supports parallel mode; got '${mode}'` };
+				}
+				if (review !== undefined) {
+					return {
+						kind: "error",
+						message: "dispatch: detach cannot combine with a review gate; run gated dispatch attached",
+					};
 				}
 				if (timeoutMs !== undefined) {
 					return {
@@ -537,7 +1191,39 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 					};
 				}
 				try {
-					return await runDetached(deps, parsed.requests, options?.sessionId ?? null);
+					return await runDetached(deps, requests, options?.sessionId ?? null);
+				} catch (err) {
+					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+				}
+			}
+
+			if (mode === "compete") {
+				if (requests.length !== 1 || requests[0] === undefined) {
+					return { kind: "error", message: "dispatch: compete requires exactly one task" };
+				}
+				if (review !== undefined) {
+					return { kind: "error", message: "dispatch: compete has its own judge and cannot combine with review" };
+				}
+				const competeParsed = competeSettingsFromArgs(args);
+				if (!competeParsed.ok) return { kind: "error", message: competeParsed.message };
+				try {
+					const outcome = await runCompete(deps, requests[0], competeParsed.compete, autonomy, timeoutMs, options?.signal);
+					return competeResult(outcome, autonomy, maxOutputBytes);
+				} catch (err) {
+					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
+				}
+			}
+
+			if (review !== undefined) {
+				if (requests.length !== 1 || requests[0] === undefined) {
+					return { kind: "error", message: "dispatch: review supports exactly one task" };
+				}
+				if (mode !== "parallel") {
+					return { kind: "error", message: `dispatch: review does not combine with mode=${mode}` };
+				}
+				try {
+					const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal);
+					return reviewGateResult(outcome, maxOutputBytes);
 				} catch (err) {
 					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
 				}
@@ -545,14 +1231,14 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 
 			try {
 				let runs: CompletedRun[];
-				if (mode === "pipeline" && parsed.requests.length > 1) {
-					runs = await runPipeline(deps, parsed.requests, timeoutMs, options?.signal);
-				} else if (mode === "sequential" || mode === "pipeline" || parsed.requests.length === 1) {
+				if (mode === "pipeline" && requests.length > 1) {
+					runs = await runPipeline(deps, requests, timeoutMs, options?.signal);
+				} else if (mode === "sequential" || mode === "pipeline" || requests.length === 1) {
 					// A single-task pipeline has nothing to thread, so it degrades to
 					// plain sequential and no pipeline-input message is sent.
-					runs = await runSequential(deps, parsed.requests, mode, timeoutMs, options?.signal);
+					runs = await runSequential(deps, requests, mode, timeoutMs, options?.signal);
 				} else {
-					runs = await runBatch(deps, parsed.requests, timeoutMs, options?.signal);
+					runs = await runBatch(deps, requests, timeoutMs, options?.signal);
 				}
 				const output = formatDispatchOutput(mode, runs, maxOutputBytes);
 				const details = dispatchDetails(mode, runs);

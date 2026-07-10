@@ -153,6 +153,10 @@ function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft, version: Rec
 		// before fleet dispatch landed still recomputes to its stored digest.
 		if (receipt.node !== undefined) draft.node = receipt.node;
 		if (receipt.reroutes !== undefined) draft.reroutes = receipt.reroutes;
+		// Gate and plan provenance follow the same presence gate: receipts
+		// sealed before review topologies landed keep verifying unchanged.
+		if (receipt.gate !== undefined) draft.gate = receipt.gate;
+		if (receipt.plan !== undefined) draft.plan = receipt.plan;
 	}
 	return draft;
 }
@@ -170,6 +174,8 @@ function ledgerDigestFields(envelope: RunEnvelope, version: ReceiptIntegrityVers
 			// placement landed.
 			...(envelope.node !== undefined ? { node: envelope.node } : {}),
 			...(envelope.reroutes !== undefined ? { reroutes: envelope.reroutes } : {}),
+			...(envelope.gate !== undefined ? { gate: envelope.gate } : {}),
+			...(envelope.plan !== undefined ? { plan: envelope.plan } : {}),
 		};
 	}
 	return ledgerDigestFieldsV1(envelope);

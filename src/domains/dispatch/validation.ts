@@ -8,7 +8,14 @@
 import path from "node:path";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
-import type { DispatchRequestOrigin, RunLineage, RunNodeReroute } from "./types.js";
+import { type AutonomyLevel, isAutonomyLevel } from "../safety/autonomy.js";
+import type {
+	DispatchRequestOrigin,
+	RunGateProvenance,
+	RunLineage,
+	RunNodeReroute,
+	RunPlanProvenance,
+} from "./types.js";
 
 export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -72,6 +79,17 @@ export interface JobSpec {
 	 * with rootRunId = the new run's own id.
 	 */
 	lineage?: RunLineage;
+	/**
+	 * Per-run autonomy narrowing. Admission clamps the worker's effective
+	 * autonomy to the LOWER of this and the session level, so a request can
+	 * make a reviewer or judge read-only but can never grant a worker more
+	 * authority than the orchestrator holds.
+	 */
+	autonomy?: AutonomyLevel;
+	/** Review/compete gate provenance sealed into the run's receipt. */
+	gate?: RunGateProvenance;
+	/** Plan-approval provenance sealed into the run's receipt. */
+	plan?: RunPlanProvenance;
 }
 
 type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
@@ -99,6 +117,9 @@ const KNOWN_KEYS = new Set([
 	"requestOrigin",
 	"pipelineInput",
 	"lineage",
+	"autonomy",
+	"gate",
+	"plan",
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal"]);
@@ -257,6 +278,28 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("autonomy" in spec && spec.autonomy !== undefined) {
+		if (!isAutonomyLevel(spec.autonomy)) {
+			errors.push("autonomy must be one of: read-only|suggest|auto-edit|full-auto");
+		}
+	}
+
+	if ("gate" in spec && spec.gate !== undefined) {
+		if (!isValidGate(spec.gate)) {
+			errors.push(
+				"gate must carry role (builder|reviewer|candidate|judge), group (non-empty), cycle >= 1, optional subjects [{runId, digest|null}], optional verdict (pass|fail|revise)",
+			);
+		}
+	}
+
+	if ("plan" in spec && spec.plan !== undefined) {
+		if (!isValidPlan(spec.plan)) {
+			errors.push(
+				"plan must carry hash (non-empty), topology (parallel|sequential|pipeline|compete|detached), taskCount >= 1, approval (operator|full-auto), optional costCeilingUsd > 0",
+			);
+		}
+	}
+
 	if (errors.length > 0) {
 		return { ok: false, errors };
 	}
@@ -298,6 +341,9 @@ export function validateJobSpec(spec: unknown): Validated {
 	}
 	if (isValidPipelineInput(spec.pipelineInput)) out.pipelineInput = spec.pipelineInput;
 	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
+	if (isAutonomyLevel(spec.autonomy)) out.autonomy = spec.autonomy;
+	if (isValidGate(spec.gate)) out.gate = cloneGate(spec.gate);
+	if (isValidPlan(spec.plan)) out.plan = { ...spec.plan };
 	return { ok: true, spec: out };
 }
 
@@ -316,6 +362,52 @@ function isValidReroute(value: unknown): value is RunNodeReroute {
 	const toOk = typeof value.toNode === "string";
 	const reasonOk = typeof value.reason === "string";
 	return attemptOk && fromOk && toOk && reasonOk;
+}
+
+const VALID_GATE_ROLES = new Set(["builder", "reviewer", "candidate", "judge"]);
+const VALID_GATE_VERDICTS = new Set(["pass", "fail", "revise"]);
+const VALID_PLAN_TOPOLOGIES = new Set(["parallel", "sequential", "pipeline", "compete", "detached"]);
+const VALID_PLAN_APPROVALS = new Set(["operator", "full-auto"]);
+
+function isValidGate(value: unknown): value is RunGateProvenance {
+	if (!isPlainObject(value)) return false;
+	if (typeof value.role !== "string" || !VALID_GATE_ROLES.has(value.role)) return false;
+	if (typeof value.group !== "string" || value.group.length === 0) return false;
+	if (typeof value.cycle !== "number" || !Number.isInteger(value.cycle) || value.cycle < 1) return false;
+	if (value.subjects !== undefined) {
+		if (!Array.isArray(value.subjects)) return false;
+		for (const subject of value.subjects) {
+			if (!isPlainObject(subject)) return false;
+			if (typeof subject.runId !== "string" || subject.runId.length === 0) return false;
+			if (subject.digest !== null && typeof subject.digest !== "string") return false;
+		}
+	}
+	if (value.verdict !== undefined && (typeof value.verdict !== "string" || !VALID_GATE_VERDICTS.has(value.verdict))) {
+		return false;
+	}
+	return true;
+}
+
+function cloneGate(gate: RunGateProvenance): RunGateProvenance {
+	return {
+		role: gate.role,
+		group: gate.group,
+		cycle: gate.cycle,
+		...(gate.subjects !== undefined ? { subjects: gate.subjects.map((subject) => ({ ...subject })) } : {}),
+		...(gate.verdict !== undefined ? { verdict: gate.verdict } : {}),
+	};
+}
+
+function isValidPlan(value: unknown): value is RunPlanProvenance {
+	if (!isPlainObject(value)) return false;
+	if (typeof value.hash !== "string" || value.hash.length === 0) return false;
+	if (typeof value.topology !== "string" || !VALID_PLAN_TOPOLOGIES.has(value.topology)) return false;
+	if (typeof value.taskCount !== "number" || !Number.isInteger(value.taskCount) || value.taskCount < 1) return false;
+	if (typeof value.approval !== "string" || !VALID_PLAN_APPROVALS.has(value.approval)) return false;
+	if (value.costCeilingUsd !== undefined && (typeof value.costCeilingUsd !== "number" || value.costCeilingUsd <= 0)) {
+		return false;
+	}
+	return true;
 }
 
 function isValidLineage(value: unknown): value is RunLineage {

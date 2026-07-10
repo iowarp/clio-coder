@@ -34,6 +34,14 @@ export interface AutonomyMappingOptions {
 	 * (verify). Raw bash outside that set is unrecognized.
 	 */
 	executeRecognized?: boolean;
+	/**
+	 * Dispatch-class calls only: true when the call is a plan-scale dispatch
+	 * (multi-task fan-out, compete topology, remote node placement, or winner
+	 * application). Supervised levels route these through ONE plan approval;
+	 * approving the parked call approves the whole plan. full-auto skips the
+	 * stop (the dispatch tool logs the plan into the receipt chain instead).
+	 */
+	dispatchPlanScale?: boolean;
 }
 
 /**
@@ -53,7 +61,9 @@ export function mapAutonomy(
 	// auto-edit and full-auto from here.
 	switch (actionClass) {
 		case "write":
+			return "allow";
 		case "dispatch":
+			if (options.dispatchPlanScale === true && level !== "full-auto") return "ask";
 			return "allow";
 		case "execute": {
 			if (options.executeRecognized !== false) return "allow";

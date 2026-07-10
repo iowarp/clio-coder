@@ -21,6 +21,7 @@ import {
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
+import { describeDispatchPlan, isPlanScaleDispatchArgs } from "./dispatch-plan.js";
 import { shapeToolResult } from "./result-shaping.js";
 
 /**
@@ -431,9 +432,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			};
 		}
 		// Stage 2, the autonomy mapping (sd-01 §2.3): the net passed; the level
-		// decides run / ask / deny per action class.
+		// decides run / ask / deny per action class. Plan-scale dispatch calls
+		// (multi-task, compete, remote node) carry the plan flag so supervised
+		// levels route them through one plan approval.
+		const planScale = call.tool === ToolNames.Dispatch && isPlanScaleDispatchArgs(call.args);
 		const disposition = mapAutonomy(level, actionClass, {
 			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
+			...(planScale ? { dispatchPlanScale: true } : {}),
 		});
 		if (disposition === "deny") {
 			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
@@ -442,7 +447,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "terminal", verdict };
 		}
 		if (disposition === "ask") {
-			const askDecision = toAutonomyAskDecision(decision, level, call.tool, actionClass);
+			const askDecision = planScale
+				? toDispatchPlanAskDecision(decision, level, call)
+				: toAutonomyAskDecision(decision, level, call.tool, actionClass);
 			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
 		}
 		recordRegistryDisposition(call, decision, "allowed");
@@ -825,6 +832,32 @@ function toAutonomyAskDecision(
 		kind: "ask",
 		classification: decision.classification,
 		rejection: autonomyAskRejection(level, tool, actionClass),
+		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+	};
+}
+
+/**
+ * Plan-approval ask for a plan-scale dispatch call. The rejection detail IS
+ * the plan artifact (topology, per-task agent/model/node), so the approval
+ * overlay shows the operator exactly what one approval will launch.
+ */
+function toDispatchPlanAskDecision(
+	decision: SafetyDecision,
+	level: AutonomyLevel,
+	call: ClassifierCall,
+): SafetyDecision {
+	const plan = describeDispatchPlan(call.args);
+	return {
+		kind: "ask",
+		classification: decision.classification,
+		rejection: {
+			short: `dispatch plan needs approval (${plan.topology}, ${plan.taskCount} task(s)) at autonomy ${level}`,
+			detail: `Approving this call approves the whole plan:\n${plan.text}`,
+			hints: [
+				"One approval covers every run in the plan, including remote placements.",
+				"Deny to keep the fleet idle and revise the plan first.",
+			],
+		},
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }

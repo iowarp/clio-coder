@@ -786,6 +786,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
+		// Same effective-autonomy resolution the registry admission uses, so plan
+		// provenance and compete winner handling agree with the approval surface.
+		getAutonomy: () =>
+			activeAcpSessionAutonomy ??
+			effectiveSettingsForDispatch?.().autonomy ??
+			options.headless?.autonomy ??
+			(config?.get() ?? readSettings()).autonomy ??
+			"auto-edit",
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: config?.get().skills.trustProjectCompatRoots === true,
 			disableDiscovery: options.noSkills === true || options.headless?.noSkills === true,
