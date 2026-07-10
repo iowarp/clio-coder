@@ -58,7 +58,7 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
 | `clio share inspect <path> [--json]` | Inspect a share archive without importing it. |
 | `clio context` | Show project context status, preload class, codewiki freshness, and the codewiki digest when present. |
-| `clio context init [--preview] [--heuristic] [--yes] [--adopt] [--propose\|--apply\|--rewrite]` | Explore the repo and bootstrap or update project context: `CLIO.md`, `.clio/codewiki.json`, and `.clio/state.json`. |
+| `clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose\|--apply\|--rewrite] [--target <id> [--model <id>] [--thinking <level>]]` | Explore the repo and bootstrap or update project context: `CLIO.md`, `.clio/codewiki.json`, and `.clio/state.json`. |
 | `clio context refresh [--wiki]` | Rebuild the codewiki and state without touching `CLIO.md`; with `--wiki`, update an existing Markdown wiki. |
 | `clio context wiki [--update\|--status]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio/wiki/`. |
 | `clio context reset [--all]` | Clear accumulated project context artifacts. |
@@ -114,7 +114,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/agents` | - | `/agents` | List Clio agents and ACP delegation agents |
 | `/targets` | - | `/targets` | Show target hub for health, auth, models, and actions |
 | `/cost` | - | `/cost` | Show session token and cost totals |
-| `/context` | `/ctx` | `/context compact [instructions] \| /context init [--preview] [--adopt] [--apply] [--rewrite] [--propose] [--global] [--heuristic] \| /context refresh \| /context reset [--all] [--confirm] [--confirm-all]` | Context hub: window overlay plus compact, init, refresh, and reset |
+| `/context` | `/ctx` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
@@ -134,12 +134,10 @@ turns in the session window, `init` bootstraps or updates `CLIO.md` and the
 codewiki, `refresh` re-indexes the codewiki and refreshes `.clio/state.json`
 without touching `CLIO.md`, and `reset` deletes accumulated
 context artifacts (`.clio/codewiki.json`, `.clio/state.json`,
-`.clio/handoffs/`, `.clio/proposals/`), preserving `CLIO.md` unless `--all`
-plus `--confirm-all` is given. Session reset stays `/new`; there is
-deliberately no `/context clear`. The pre-0.2.8 spellings `/compact`,
-`/context-init`, `/context-clear`, and `/context-view` still parse but are
-hidden from help and autocomplete and print a one-line deprecation notice;
-they will be removed in a future release.
+`.clio/handoffs/`, `.clio/proposals/`). Its interactive choice preserves or
+deletes `CLIO.md`; cancellation makes no changes. Session reset stays `/new`;
+there is deliberately no `/context clear`. The retired spellings `/compact`,
+`/context-init`, `/context-clear`, and `/context-view` are no longer parsed.
 
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.

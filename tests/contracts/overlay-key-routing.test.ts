@@ -100,6 +100,14 @@ describe("list-overlay key routing", () => {
 		strictEqual(closed(), 0);
 	});
 
+	it("forwards the full /context reset chooser keymap to its SelectList", () => {
+		const { deps, closed } = makeDeps();
+		for (const key of ["\x1b[A", "\x1b[B", "\r", ESC, KITTY_ESC]) {
+			strictEqual(routeOverlayKey(key, "context-reset", deps, neverMatches), false);
+		}
+		strictEqual(closed(), 0, "the chooser closes through its own select/cancel callbacks");
+	});
+
 	it("recognizes Escape across raw, CSI-u, and modifyOtherKeys encodings", () => {
 		strictEqual(isEscapeKey(ESC), true);
 		strictEqual(isEscapeKey(KITTY_ESC), true);

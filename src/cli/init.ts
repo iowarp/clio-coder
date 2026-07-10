@@ -7,10 +7,12 @@ import {
 	type ContextInitOptions,
 	validateInitOptions,
 } from "../domains/context/init-options.js";
+import type { ThinkingLevel } from "../domains/providers/index.js";
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
 
 const HELP = `Usage:
   clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose|--apply|--rewrite]
+                    [--target <id> [--model <id>] [--thinking <level>]]
 
 Explore the repository and bootstrap the project context in one pass: CLIO.md,
 the codewiki index, and the .clio state. The configured Clio
@@ -28,6 +30,9 @@ Options:
   --rewrite        replace an existing CLIO.md with a fresh draft that ignores it as source
   --json           emit one machine-readable result object on stdout
   --yes, -y        update .gitignore without prompting
+  --target <id>    override the configured Scout target for this noninteractive run
+  --model <id>     override the Scout wire model (requires --target)
+  --thinking <n>   override Scout thinking: off|minimal|low|medium|high|xhigh (requires --target)
 `;
 
 function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
@@ -37,14 +42,36 @@ function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
 function parseContextInitArgs(args: ReadonlyArray<string>): {
 	options: ContextInitOptions;
 	json: boolean;
+	target?: string;
+	model?: string;
+	thinkingLevel?: ThinkingLevel;
 	error: string | null;
 } {
 	const options: ContextInitOptions = {};
 	let json = false;
-	for (const arg of args) {
+	let target: string | undefined;
+	let model: string | undefined;
+	let thinkingLevel: ThinkingLevel | undefined;
+	const thinkingLevels = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] as string;
 		if (arg === "--help" || arg === "-h" || arg === "--yes" || arg === "-y") continue;
 		if (arg === "--json") {
 			json = true;
+			continue;
+		}
+		if (arg === "--target" || arg === "--model" || arg === "--thinking") {
+			const value = args[index + 1];
+			if (!value || value.startsWith("-")) return { options, json, error: `${arg} requires a value` };
+			index += 1;
+			if (arg === "--target") target = value;
+			else if (arg === "--model") model = value;
+			else {
+				if (!thinkingLevels.has(value as ThinkingLevel)) {
+					return { options, json, error: `--thinking must be one of: ${[...thinkingLevels].join("|")}` };
+				}
+				thinkingLevel = value as ThinkingLevel;
+			}
 			continue;
 		}
 		const row = CONTEXT_INIT_FLAG_TABLE.find((candidate) => candidate.flag === arg || candidate.aliases?.includes(arg));
@@ -53,7 +80,17 @@ function parseContextInitArgs(args: ReadonlyArray<string>): {
 		}
 		options[row.field] = true;
 	}
-	return { options, json, error: null };
+	if (!target && (model || thinkingLevel)) {
+		return { options, json, error: "--model and --thinking require --target" };
+	}
+	return {
+		options,
+		json,
+		...(target ? { target } : {}),
+		...(model ? { model } : {}),
+		...(thinkingLevel ? { thinkingLevel } : {}),
+		error: null,
+	};
 }
 
 interface InitPhaseTiming {
@@ -117,6 +154,15 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			...(useModel
 				? {
 						generate: modelBootstrapGenerate({
+							...(parsed.target
+								? {
+										route: {
+											target: parsed.target,
+											...(parsed.model ? { model: parsed.model } : {}),
+											...(parsed.thinkingLevel ? { thinkingLevel: parsed.thinkingLevel } : {}),
+										},
+									}
+								: {}),
 							onFallback: (err, mode) =>
 								process.stderr.write(
 									`clio context init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,

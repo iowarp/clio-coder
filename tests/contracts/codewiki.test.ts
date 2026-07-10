@@ -15,7 +15,13 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { runContextIndexCommand } from "../../src/cli/context-index.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { codewikiPath, fallbackExtraction, serializeCodewiki } from "../../src/domains/context/codewiki/indexer.js";
+import {
+	type Codewiki,
+	codewikiPath,
+	fallbackExtraction,
+	parseCodewikiRaw,
+	serializeCodewiki,
+} from "../../src/domains/context/codewiki/indexer.js";
 import { createTreeSitterExtractor } from "../../src/domains/context/codewiki/tree-sitter.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import {
@@ -339,6 +345,76 @@ describe("contracts/codewiki", () => {
 		strictEqual(symbolFor(read, "src/legacy.ts", "state", "var")?.sig, undefined);
 		strictEqual(symbolFor(read, "src/legacy.ts", "Runnable", "trait")?.sig, undefined);
 		strictEqual(symbolFor(read, "src/legacy.ts", "Shape", "iface")?.sig, undefined);
+	});
+
+	it("rejects semantically invalid native v5 artifacts", () => {
+		const valid: Codewiki = {
+			version: 5,
+			language: "typescript",
+			files: [
+				{
+					id: "f_source",
+					path: "src/source.ts",
+					lang: "typescript",
+					loc: 2,
+					role: "module",
+					hash: "0123456789abcdef",
+					imports: [],
+				},
+			],
+			symbols: [{ name: "source", kind: "const", fileId: "f_source", line: 2 }],
+			edges: [{ fileId: "f_source", externalModule: "node:fs" }],
+		};
+		ok(parseCodewikiRaw(JSON.stringify(valid)));
+		const firstFile = (artifact: Codewiki): Codewiki["files"][number] => {
+			const file = artifact.files[0];
+			if (!file) throw new Error("native-v5 fixture has no file");
+			return file;
+		};
+		const firstSymbol = (artifact: Codewiki): Codewiki["symbols"][number] => {
+			const symbol = artifact.symbols[0];
+			if (!symbol) throw new Error("native-v5 fixture has no symbol");
+			return symbol;
+		};
+		const firstEdge = (artifact: Codewiki): Codewiki["edges"][number] => {
+			const edge = artifact.edges[0];
+			if (!edge) throw new Error("native-v5 fixture has no edge");
+			return edge;
+		};
+
+		const invalidCases: ReadonlyArray<readonly [string, (artifact: Codewiki) => void]> = [
+			[
+				"duplicate file id",
+				(artifact) => {
+					artifact.files.push({ ...firstFile(artifact), path: "src/other.ts" });
+				},
+			],
+			[
+				"duplicate file path",
+				(artifact) => {
+					artifact.files.push({ ...firstFile(artifact), id: "f_other" });
+				},
+			],
+			["absolute path", (artifact) => (firstFile(artifact).path = "/src/source.ts")],
+			["non-normalized path", (artifact) => (firstFile(artifact).path = "src/../source.ts")],
+			["backslash path", (artifact) => (firstFile(artifact).path = "src\\source.ts")],
+			["noncanonical hash length", (artifact) => (firstFile(artifact).hash = "0123456789abcde")],
+			["noncanonical hash case", (artifact) => (firstFile(artifact).hash = "0123456789abcdeF")],
+			["dangling symbol file", (artifact) => (firstSymbol(artifact).fileId = "f_missing")],
+			["symbol line past loc", (artifact) => (firstSymbol(artifact).line = 3)],
+			["dangling edge source", (artifact) => (firstEdge(artifact).fileId = "f_missing")],
+			[
+				"dangling internal edge target",
+				(artifact) => {
+					artifact.edges = [{ fileId: "f_source", toFileId: "f_missing" }];
+				},
+			],
+		];
+		for (const [name, mutate] of invalidCases) {
+			const artifact = structuredClone(valid);
+			mutate(artifact);
+			strictEqual(parseCodewikiRaw(JSON.stringify(artifact)), null, name);
+		}
 	});
 
 	it("indexes non-empty source files across languages, including single-file repositories", async () => {
@@ -681,7 +757,7 @@ describe("contracts/codewiki", () => {
 				lang: "typescript",
 				loc: 1,
 				role: "module",
-				hash: "external-marker",
+				hash: "eeeeeeeeeeeeeeee",
 				imports: [],
 			};
 			writeCodewiki(scratch, {
@@ -919,9 +995,14 @@ describe("contracts/codewiki", () => {
 		mkdirSync(join(scratch, "java"), { recursive: true });
 		writeFileSync(join(scratch, "java", "App.java"), "import java.util.List;\nclass App { void run() {} }\n", "utf8");
 
-		mkdirSync(join(scratch, "rb"), { recursive: true });
-		writeFileSync(join(scratch, "rb", "app.rb"), "require_relative 'helper'\nclass App\nend\n", "utf8");
+		mkdirSync(join(scratch, "rb", "vendor"), { recursive: true });
+		writeFileSync(
+			join(scratch, "rb", "app.rb"),
+			"require_relative 'helper'\nrequire 'vendor/tool'\nclass App\nend\n",
+			"utf8",
+		);
 		writeFileSync(join(scratch, "rb", "helper.rb"), "class Helper\nend\n", "utf8");
+		writeFileSync(join(scratch, "rb", "vendor", "tool.rb"), "class Tool\nend\n", "utf8");
 
 		const codewiki = await buildCodewiki({ cwd: scratch, language: "polyglot" });
 
@@ -933,6 +1014,8 @@ describe("contracts/codewiki", () => {
 		ok(hasExternalEdge(codewiki, "c/main.c", "stdio.h"));
 		ok(hasExternalEdge(codewiki, "java/App.java", "java.util.List"));
 		ok(hasInternalEdge(codewiki, "rb/app.rb", "rb/helper.rb"));
+		ok(hasExternalEdge(codewiki, "rb/app.rb", "vendor/tool"));
+		strictEqual(hasInternalEdge(codewiki, "rb/app.rb", "rb/vendor/tool.rb"), false);
 	});
 
 	it("indexes C# declarations and using directives without method locals", async () => {

@@ -224,7 +224,7 @@ describe("contracts/bootstrap", () => {
 				input.reportGeneration?.({
 					mode: "scout",
 					parserOutcome: "parsed",
-					scout: { promptBytes: 100, outputBytes: 100 },
+					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: scratch,
@@ -271,7 +271,7 @@ describe("contracts/bootstrap", () => {
 				input.reportGeneration?.({
 					mode: "scout",
 					parserOutcome: "parsed",
-					scout: { promptBytes: 100, outputBytes: 100 },
+					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: "Ignored",
@@ -320,7 +320,7 @@ describe("contracts/bootstrap", () => {
 				input.reportGeneration?.({
 					mode: "scout",
 					parserOutcome: "parsed",
-					scout: { promptBytes: 100, outputBytes: 100 },
+					scout: { structuredOutputMode: "native-schema", promptBytes: 100, outputBytes: 100 },
 				});
 				return {
 					projectName: "Ignored",
@@ -399,7 +399,7 @@ describe("contracts/bootstrap", () => {
 				input.reportGeneration?.({
 					mode: "scout",
 					parserOutcome: "parsed",
-					scout: { promptBytes: 10, outputBytes: 20 },
+					scout: { structuredOutputMode: "native-schema", promptBytes: 10, outputBytes: 20 },
 				});
 				return {
 					projectName: "Invented Ownership",
@@ -761,6 +761,67 @@ describe("contracts/bootstrap", () => {
 		ok(state.contextSources.some((source) => source.provider === "copilot" && source.kind === "skill"));
 		ok(state?.contextSourceHash);
 		strictEqual(result.summary.adoption.mode, "adopt");
+	});
+
+	it("reserves the import budget for constitutions and retains nested directory scope", () => {
+		writeFileSync(join(scratch, "AGENTS.md"), "- Always run the root verification command.\n", "utf8");
+		mkdirSync(join(scratch, "src", "solver"), { recursive: true });
+		writeFileSync(join(scratch, "src", "solver", "AGENTS.md"), "- Prefer MPI-aware tests for solver changes.\n", "utf8");
+		for (let index = 0; index < 8; index += 1) {
+			const dir = join(scratch, ".claude", "agents");
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(
+				join(dir, `generic-${index}.md`),
+				Array.from({ length: 4 }, (_, rule) => `- Always use generic helper ${index}-${rule}.`).join("\n"),
+				"utf8",
+			);
+		}
+
+		const scan = scanAgentConfigs({ cwd: scratch });
+		const rootRule = scan.importedRules.find((rule) => rule.text.includes("root verification"));
+		const nestedRule = scan.importedRules.find((rule) => rule.text.includes("MPI-aware"));
+		ok(rootRule, "the root constitution survives a saturated auxiliary-source budget");
+		deepStrictEqual(rootRule.directoryScopes, ["."]);
+		deepStrictEqual(nestedRule?.directoryScopes, ["src/solver"]);
+		ok(scan.sources.some((source) => source.displayPath === "src/solver/AGENTS.md"));
+	});
+
+	it("does not adopt unresolved skill-template variables as project rules", () => {
+		mkdirSync(join(scratch, ".claude", "skills", "templated"), { recursive: true });
+		writeFileSync(
+			join(scratch, ".claude", "skills", "templated", "SKILL.md"),
+			"- Always build `$APP_DIR` before continuing.\n- Prefer project-local verification.\n",
+			"utf8",
+		);
+
+		const scan = scanAgentConfigs({ cwd: scratch });
+		strictEqual(
+			scan.importedRules.some((rule) => rule.text.includes("$APP_DIR")),
+			false,
+		);
+		ok(scan.importedRules.some((rule) => rule.text.includes("project-local verification")));
+	});
+
+	it("filters README comments, banners, badges, and HTML before deriving identity", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "banner-project", type: "module" }), "utf8");
+		writeFileSync(
+			join(scratch, "README.md"),
+			[
+				"<!-- mcp-name: should-not-be-identity -->",
+				'<picture><img src="banner.png" alt="banner" /></picture>',
+				"[![Build](https://example.invalid/badge.svg)](https://example.invalid/build)",
+				"",
+				"<p><strong>Banner Project</strong> is a scientific workflow engine for MPI applications.</p>",
+			].join("\n"),
+			"utf8",
+		);
+
+		await runBootstrap({ cwd: scratch, confirmGitignore: () => false });
+		const clio = readFileSync(join(scratch, "CLIO.md"), "utf8");
+		ok(clio.includes("scientific workflow engine for MPI applications"), clio);
+		strictEqual(clio.includes("mcp-name"), false);
+		strictEqual(clio.includes("badge.svg"), false);
+		strictEqual(clio.includes("<picture>"), false);
 	});
 
 	it("detects supported agent context sources added after the recorded snapshot", () => {

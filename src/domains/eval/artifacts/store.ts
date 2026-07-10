@@ -71,15 +71,33 @@ export function parseEvalArtifactV2(value: unknown, source: string): EvalArtifac
 			},
 			wallTimeMs: readNumber(summary, `${source}.summary`, "wallTimeMs"),
 		},
-		results: readArray(value, source, "results").map((entry, index) => parseResult(entry, `${source}.results[${index}]`)),
+		results: readArray(value, source, "results").map((entry, index) =>
+			parseResult(entry, `${source}.results[${index}]`, {
+				id: readString(matrix, `${source}.matrix`, "target"),
+				model: readNullableString(matrix, `${source}.matrix`, "model"),
+				thinking: readNullableString(matrix, `${source}.matrix`, "thinking"),
+			}),
+		),
 	};
 }
 
-function parseResult(value: unknown, source: string): EvalArtifactV2["results"][number] {
+function parseResult(
+	value: unknown,
+	source: string,
+	legacyTarget: EvalArtifactV2["results"][number]["target"],
+): EvalArtifactV2["results"][number] {
 	const record = asRecord(value, source);
+	const target = record.target === undefined ? null : asRecord(record.target, `${source}.target`);
 	return {
 		taskId: readString(record, source, "taskId"),
 		repeatIndex: readNumber(record, source, "repeatIndex"),
+		target: target
+			? {
+					id: readString(target, `${source}.target`, "id"),
+					model: readNullableString(target, `${source}.target`, "model"),
+					thinking: readNullableString(target, `${source}.target`, "thinking"),
+				}
+			: legacyTarget,
 		pass: readBoolean(record, source, "pass"),
 		failureClass: readNullableString(record, source, "failureClass"),
 		metrics: asRecord(record.metrics, `${source}.metrics`) as Record<string, number | string | boolean | null>,

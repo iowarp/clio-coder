@@ -137,6 +137,49 @@ export function seedOpenAICompatFleetDefault(configDir: string): void {
 	writeFileSync(p, patched, "utf8");
 }
 
+/**
+ * Seed two tool-capable Scout targets over one HTTP fixture. The llama.cpp
+ * target exercises the native response-schema wire contract; the generic
+ * OpenAI target exercises the bounded prompt-parser fallback. No ambient Scout
+ * binding is seeded: explicit CLI routing must stand on its own.
+ */
+export function seedBootstrapTransportTargets(configDir: string, url: string): void {
+	const p = join(configDir, "settings.yaml");
+	const yaml = readFileSync(p, "utf8");
+	const targets = [
+		"targets:",
+		"  - id: fixture-llama",
+		"    runtime: llamacpp",
+		`    url: ${url}`,
+		"    defaultModel: mock-model",
+		"    wireModels:",
+		"      - mock-model",
+		"    lifecycle: user-managed",
+		"    capabilities:",
+		"      chat: true",
+		"      tools: true",
+		"      toolCallFormat: openai",
+		"      structuredOutputs: json-schema",
+		"      contextWindow: 32768",
+		"      maxTokens: 4096",
+		"  - id: fixture-openai-scout",
+		"    runtime: openai-compat",
+		`    url: ${url}`,
+		"    defaultModel: mock-model",
+		"    wireModels:",
+		"      - mock-model",
+		"    capabilities:",
+		"      chat: true",
+		"      tools: true",
+		"      toolCallFormat: openai",
+		"      structuredOutputs: none",
+		"      contextWindow: 32768",
+		"      maxTokens: 4096",
+	].join("\n");
+	const patched = yaml.replace(/^targets:.*$/m, targets);
+	writeFileSync(p, patched, "utf8");
+}
+
 export function seedUnregisteredRuntimeTarget(configDir: string): void {
 	const p = join(configDir, "settings.yaml");
 	const yaml = readFileSync(p, "utf8");

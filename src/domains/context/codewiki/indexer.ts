@@ -322,6 +322,234 @@ function extractMatches(text: string, regex: RegExp, group = 1): string[] {
 	return out;
 }
 
+interface CFamilyAliasStatement {
+	text: string;
+	masked: string;
+	line: number;
+}
+
+function maskCFamilyCommentsAndStrings(text: string): string {
+	// split("") preserves UTF-16 offsets so slices of the masked text line up
+	// exactly with slices of the original source, including astral characters.
+	const chars = text.split("");
+	let state: "code" | "line-comment" | "block-comment" | "single-quote" | "double-quote" = "code";
+	for (let index = 0; index < chars.length; index += 1) {
+		const current = chars[index] ?? "";
+		const next = chars[index + 1] ?? "";
+		if (state === "code") {
+			if (current === "/" && next === "/") {
+				chars[index] = " ";
+				chars[index + 1] = " ";
+				state = "line-comment";
+				index += 1;
+			} else if (current === "/" && next === "*") {
+				chars[index] = " ";
+				chars[index + 1] = " ";
+				state = "block-comment";
+				index += 1;
+			} else if (current === "'") {
+				chars[index] = " ";
+				state = "single-quote";
+			} else if (current === '"') {
+				chars[index] = " ";
+				state = "double-quote";
+			}
+			continue;
+		}
+		if (current === "\n") {
+			if (state === "line-comment") state = "code";
+			continue;
+		}
+		chars[index] = " ";
+		if (state === "block-comment" && current === "*" && next === "/") {
+			chars[index + 1] = " ";
+			state = "code";
+			index += 1;
+			continue;
+		}
+		if ((state === "single-quote" || state === "double-quote") && current === "\\") {
+			if (index + 1 < chars.length && chars[index + 1] !== "\n") {
+				chars[index + 1] = " ";
+				index += 1;
+			}
+			continue;
+		}
+		if (state === "single-quote" && current === "'") state = "code";
+		if (state === "double-quote" && current === '"') state = "code";
+	}
+	return chars.join("");
+}
+
+function cFamilyAliasStatements(text: string): CFamilyAliasStatement[] {
+	const masked = maskCFamilyCommentsAndStrings(text);
+	const statements: CFamilyAliasStatement[] = [];
+	const token = /\b(?:typedef|using)\b/g;
+	for (let match = token.exec(masked); match; match = token.exec(masked)) {
+		const start = match.index;
+		const lineStart = masked.lastIndexOf("\n", start - 1) + 1;
+		if (masked.slice(lineStart, start).trimStart().startsWith("#")) continue;
+		let braces = 0;
+		let parentheses = 0;
+		let brackets = 0;
+		let end = -1;
+		for (let index = token.lastIndex; index < masked.length; index += 1) {
+			const current = masked[index];
+			if (current === "{") braces += 1;
+			else if (current === "}") braces = Math.max(0, braces - 1);
+			else if (current === "(") parentheses += 1;
+			else if (current === ")") parentheses = Math.max(0, parentheses - 1);
+			else if (current === "[") brackets += 1;
+			else if (current === "]") brackets = Math.max(0, brackets - 1);
+			else if (current === ";" && braces === 0 && parentheses === 0 && brackets === 0) {
+				end = index + 1;
+				break;
+			}
+		}
+		if (end === -1) continue;
+		statements.push({
+			text: text.slice(start, end),
+			masked: masked.slice(start, end),
+			line: 1 + Array.from(masked.slice(0, start).matchAll(/\n/g)).length,
+		});
+		token.lastIndex = end;
+	}
+	return statements;
+}
+
+function stripCFamilyBraceBodies(statement: string): string {
+	let depth = 0;
+	let result = "";
+	for (const current of statement) {
+		if (current === "{") {
+			depth += 1;
+			result += " ";
+			continue;
+		}
+		if (current === "}") {
+			depth = Math.max(0, depth - 1);
+			result += " ";
+			continue;
+		}
+		result += depth === 0 || current === "\n" ? current : " ";
+	}
+	return result;
+}
+
+function splitCFamilyDeclarators(value: string): string[] {
+	const parts: string[] = [];
+	let start = 0;
+	let parentheses = 0;
+	let brackets = 0;
+	let angles = 0;
+	for (let index = 0; index < value.length; index += 1) {
+		const current = value[index];
+		if (current === "(") parentheses += 1;
+		else if (current === ")") parentheses = Math.max(0, parentheses - 1);
+		else if (current === "[") brackets += 1;
+		else if (current === "]") brackets = Math.max(0, brackets - 1);
+		else if (current === "<") angles += 1;
+		else if (current === ">") angles = Math.max(0, angles - 1);
+		else if (current === "," && parentheses === 0 && brackets === 0 && angles === 0) {
+			parts.push(value.slice(start, index));
+			start = index + 1;
+		}
+	}
+	parts.push(value.slice(start));
+	return parts;
+}
+
+const C_FAMILY_TYPE_WORDS = new Set([
+	"typedef",
+	"const",
+	"volatile",
+	"restrict",
+	"signed",
+	"unsigned",
+	"short",
+	"long",
+	"void",
+	"char",
+	"int",
+	"float",
+	"double",
+	"struct",
+	"union",
+	"enum",
+	"class",
+	"typename",
+	"auto",
+]);
+
+function stripTrailingCFamilyDeclaratorSuffixes(value: string): string {
+	let end = value.length;
+	while (end > 0) {
+		while (end > 0 && /\s/.test(value[end - 1] ?? "")) end -= 1;
+		const close = value[end - 1];
+		if (close !== ")" && close !== "]") break;
+		const open = close === ")" ? "(" : "[";
+		let depth = 1;
+		let start = end - 1;
+		for (start -= 1; start >= 0; start -= 1) {
+			const current = value[start];
+			if (current === close) depth += 1;
+			else if (current === open) {
+				depth -= 1;
+				if (depth === 0) break;
+			}
+		}
+		if (start < 0) break;
+		// A suffix follows an identifier, another completed declarator group, or
+		// an array. A standalone `(Alias)` is a wrapper around the name itself and
+		// must remain available to the identifier search below. Requiring direct
+		// adjacency is what distinguishes `callable_t(...)` from `int (Wrapped)`.
+		if (start === 0 || !/[A-Za-z_0-9)\]]/.test(value[start - 1] ?? "")) break;
+		end = start;
+	}
+	return value.slice(0, end);
+}
+
+function cFamilyTypedefNames(maskedStatement: string): string[] {
+	const withoutBodies = stripCFamilyBraceBodies(maskedStatement)
+		.replace(/^\s*typedef\b/, "")
+		.replace(/;\s*$/, "");
+	const names: string[] = [];
+	for (const declarator of splitCFamilyDeclarators(withoutBodies)) {
+		const functionPointerNames = Array.from(
+			declarator.matchAll(
+				/\(\s*(?:[A-Za-z_]\w*\s+)*[*&]+\s*(?:(?:const|volatile|restrict)\s+)*([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*\)(?=\s*\()/g,
+			),
+			(match) => match[1] ?? "",
+		).filter((name) => name.length > 0);
+		if (functionPointerNames.length > 0) {
+			names.push(...functionPointerNames);
+			continue;
+		}
+		const declaratorWithoutSuffixes = stripTrailingCFamilyDeclaratorSuffixes(declarator);
+		const identifiers = Array.from(declaratorWithoutSuffixes.matchAll(/\b[A-Za-z_]\w*\b/g), (match) => match[0]).filter(
+			(name) => !C_FAMILY_TYPE_WORDS.has(name),
+		);
+		const name = identifiers.at(-1);
+		if (name) names.push(name);
+	}
+	return uniqueSorted(names);
+}
+
+function extractCFamilyAliasSymbols(text: string): ExtractedSymbol[] {
+	const symbols: ExtractedSymbol[] = [];
+	const seen = new Set<string>();
+	for (const statement of cFamilyAliasStatements(text)) {
+		const usingName = /^\s*using\s+([A-Za-z_]\w*)\s*=/.exec(statement.masked)?.[1];
+		const names = usingName
+			? [usingName]
+			: /^\s*typedef\b/.test(statement.masked)
+				? cFamilyTypedefNames(statement.masked)
+				: [];
+		const signature = statement.text.replace(/\s+/g, " ").trim();
+		for (const name of names) addSymbol(symbols, seen, name, "type", statement.line, signature);
+	}
+	return symbols;
+}
+
 const tsJsExtractor: LanguageExtractor = {
 	langs: ["typescript", "javascript"],
 	extractImports(_path, text) {
@@ -428,19 +656,35 @@ const rustExtractor: LanguageExtractor = {
 const cFamilyExtractor: LanguageExtractor = {
 	langs: ["c", "c++"],
 	extractImports(_path, text) {
-		return uniqueSorted(extractMatches(text, /^\s*#\s*include\s+[<"]([^>"]+)[>"]/gm));
+		const imports: string[] = [];
+		for (const match of text.matchAll(/^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)/gm)) {
+			const quoted = match[1];
+			const system = match[2];
+			if (quoted) imports.push(quoted.startsWith(".") || quoted.startsWith("/") ? quoted : `./${quoted}`);
+			else if (system) imports.push(system);
+		}
+		return uniqueSorted(imports);
 	},
 	extract(_path, text) {
-		const symbols = extractWithLineRegex(text, [
-			{ regex: /^\s*(?:class|struct)\s+([A-Za-z_]\w*)\b/, kind: "class" },
-			{ regex: /^\s*(?:typedef\s+)?(?:struct|enum)\s+([A-Za-z_]\w*)\b/, kind: "type" },
+		const regexSymbols = extractWithLineRegex(text, [
+			{ regex: /^\s*class\s+([A-Za-z_]\w*)\b/, kind: "class" },
+			{
+				regex: /^\s*(?:typedef\s+)?(?:struct\s+|union\s+|enum\s+(?:(?:class|struct)\s+)?)([A-Za-z_]\w*)\b/,
+				kind: "type",
+			},
 			{
 				regex:
-					/^\s*(?:template\s*<[^>]+>\s*)?(?:[A-Za-z_][\w:<>,*&\s]+\s+)+(?:(?:[A-Za-z_]\w*)::)*([~A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:;|\{)?$/,
+					/^\s*(?!(?:typedef|using)\b)(?:template\s*<[^>]+>\s*)?(?:[A-Za-z_][\w:<>,*&\s]+\s+)+(?:(?:[A-Za-z_]\w*)::)*([~A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:;|\{)?$/,
 				kind: "func",
 			},
 			{ regex: /^(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },
 		]);
+		const symbolsByKey = new Map<string, ExtractedSymbol>();
+		for (const symbol of [...regexSymbols, ...extractCFamilyAliasSymbols(text)]) {
+			const key = `${symbol.name}\0${symbol.kind}\0${symbol.line}`;
+			if (!symbolsByKey.has(key)) symbolsByKey.set(key, symbol);
+		}
+		const symbols = [...symbolsByKey.values()].sort(compareSymbols);
 		return { symbols, imports: cFamilyExtractor.extractImports?.(_path, text) ?? [] };
 	},
 };
@@ -667,12 +911,7 @@ function buildFile(
 function candidatePathsForImport(cwd: string, fromRel: string, specifier: string): string[] {
 	const fromDir = dirname(join(cwd, fromRel));
 	const cleaned = specifier.replace(/\\/g, "/");
-	const base =
-		cleaned.startsWith(".") || cleaned.startsWith("/")
-			? resolve(fromDir, cleaned)
-			: cleaned.includes("/") && !cleaned.includes("://")
-				? resolve(fromDir, cleaned)
-				: "";
+	const base = cleaned.startsWith(".") || cleaned.startsWith("/") ? resolve(fromDir, cleaned) : "";
 	if (!base) return [];
 	const candidates = [base];
 	for (const ext of RESOLUTION_EXTENSIONS) candidates.push(`${base}${ext}`);
@@ -1096,12 +1335,44 @@ function upgradeV2Codewiki(value: CodewikiV2): Codewiki {
 	});
 }
 
+function isNormalizedRelativeCodewikiPath(path: string): boolean {
+	if (path.length === 0 || path.includes("\0") || path.includes("\\") || path.startsWith("/")) return false;
+	if (/^[A-Za-z]:\//.test(path)) return false;
+	const segments = path.split("/");
+	return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+}
+
+function hasValidNativeV5Semantics(value: Codewiki): boolean {
+	const fileIds = new Set<string>();
+	const filePaths = new Set<string>();
+	const locByFileId = new Map<string, number>();
+	for (const file of value.files) {
+		if (fileIds.has(file.id) || filePaths.has(file.path)) return false;
+		if (!isNormalizedRelativeCodewikiPath(file.path) || !/^[0-9a-f]{16}$/.test(file.hash)) return false;
+		fileIds.add(file.id);
+		filePaths.add(file.path);
+		locByFileId.set(file.id, file.loc);
+	}
+	for (const symbol of value.symbols) {
+		const loc = locByFileId.get(symbol.fileId);
+		if (loc === undefined || symbol.line > loc) return false;
+	}
+	for (const edge of value.edges) {
+		if (!fileIds.has(edge.fileId)) return false;
+		if ("toFileId" in edge && !fileIds.has(edge.toFileId)) return false;
+	}
+	return true;
+}
+
 function isCodewikiV5(value: unknown): value is Codewiki {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
 	if (obj.version !== CODEWIKI_VERSION || typeof obj.language !== "string") return false;
 	if (!Array.isArray(obj.files) || !Array.isArray(obj.symbols) || !Array.isArray(obj.edges)) return false;
-	return obj.files.every(isCodewikiFile) && obj.symbols.every(isCodewikiSymbol) && obj.edges.every(isCodewikiEdge);
+	if (!obj.files.every(isCodewikiFile) || !obj.symbols.every(isCodewikiSymbol) || !obj.edges.every(isCodewikiEdge)) {
+		return false;
+	}
+	return hasValidNativeV5Semantics(obj as unknown as Codewiki);
 }
 
 function isCodewikiV4(value: unknown): value is CodewikiV4 {

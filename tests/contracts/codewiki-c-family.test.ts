@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fallbackExtraction } from "../../src/domains/context/codewiki/indexer.js";
 import { createTreeSitterExtractor } from "../../src/domains/context/codewiki/tree-sitter.js";
 import { buildCodewiki, structuralCodewikiHash, updateCodewikiPaths } from "../../src/domains/context/index.js";
 
@@ -25,6 +26,14 @@ function hasInternalEdge(codewiki: BuiltCodewiki, fromPath: string, toPath: stri
 	const to = fileFor(codewiki, toPath);
 	if (!from || !to) return false;
 	return codewiki.edges.some((edge) => edge.fileId === from.id && "toFileId" in edge && edge.toFileId === to.id);
+}
+
+function hasExternalEdge(codewiki: BuiltCodewiki, fromPath: string, externalModule: string): boolean {
+	const from = fileFor(codewiki, fromPath);
+	if (!from) return false;
+	return codewiki.edges.some(
+		(edge) => edge.fileId === from.id && "externalModule" in edge && edge.externalModule === externalModule,
+	);
 }
 
 const PURE_C_HEADER = [
@@ -158,6 +167,146 @@ describe("contracts/codewiki-c-family", () => {
 		const codewiki = await buildCodewiki({ cwd: scratch, language: "c" });
 		strictEqual(fileFor(codewiki, "local_string.h")?.lang, "c");
 		ok(hasSymbol(codewiki, "local_string.h", "local_string_size", "func"));
+	});
+
+	it("resolves quoted C includes locally while angle includes remain external", async () => {
+		mkdirSync(join(scratch, "api"), { recursive: true });
+		writeFileSync(
+			join(scratch, "api", "main.c"),
+			['#include "local.h"', "#include <system.h>", "int main(void) { return local_value(); }", ""].join("\n"),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "api", "local.h"), "int local_value(void);\n", "utf8");
+		writeFileSync(join(scratch, "api", "system.h"), "int system_value(void);\n", "utf8");
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "c" });
+		ok(hasInternalEdge(codewiki, "api/main.c", "api/local.h"));
+		ok(hasExternalEdge(codewiki, "api/main.c", "system.h"));
+		strictEqual(hasInternalEdge(codewiki, "api/main.c", "api/system.h"), false);
+		deepStrictEqual(fileFor(codewiki, "api/main.c")?.imports, ["./local.h", "system.h"]);
+	});
+
+	it("extracts C-family aliases without promoting aggregate members", async () => {
+		const cAliases = [
+			"union PublicValue { int integer; double decimal; };",
+			"typedef struct {",
+			"  int member;",
+			"} Point;",
+			"typedef union {",
+			"  int code;",
+			"  float real;",
+			"} Number;",
+			"typedef unsigned long Count;",
+			"typedef int First, *Second;",
+			"typedef const unsigned long WrappedCount;",
+			"typedef int WrappedValue[8];",
+			"typedef int (ParenthesizedValue);",
+			"typedef int Callable(void *parameter);",
+			"typedef void (*Callback)(void *parameter);",
+			"",
+		].join("\n");
+		const cppAliases = [
+			"using Index = unsigned long;",
+			"using Handler = void (*)(int parameter);",
+			"template <typename T>",
+			"using Buffer = T*;",
+			"typedef int (Owner::*MemberCallback)(double);",
+			"class Api {",
+			" public:",
+			"  union CppValue { int count; double ratio; };",
+			"};",
+			"",
+		].join("\n");
+		writeFileSync(join(scratch, "aliases.c"), cAliases, "utf8");
+		writeFileSync(join(scratch, "aliases.cpp"), cppAliases, "utf8");
+
+		const codewiki = await buildCodewiki({ cwd: scratch, language: "polyglot" });
+		for (const name of [
+			"PublicValue",
+			"Point",
+			"Number",
+			"Count",
+			"First",
+			"Second",
+			"WrappedCount",
+			"WrappedValue",
+			"ParenthesizedValue",
+			"Callable",
+			"Callback",
+		]) {
+			ok(hasSymbol(codewiki, "aliases.c", name, "type"), name);
+		}
+		for (const name of ["Index", "Handler", "Buffer", "MemberCallback", "CppValue"]) {
+			ok(hasSymbol(codewiki, "aliases.cpp", name, "type"), name);
+		}
+		for (const bogus of ["integer", "decimal", "member", "code", "real", "parameter", "count", "ratio"]) {
+			strictEqual(hasSymbol(codewiki, "aliases.c", bogus), false, bogus);
+			strictEqual(hasSymbol(codewiki, "aliases.cpp", bogus), false, bogus);
+		}
+	});
+
+	it("keeps C-family alias extraction equivalent in the regex fallback", () => {
+		const cSource = [
+			"union PublicValue { int integer; double decimal; };",
+			"typedef struct {",
+			"  int member;",
+			"} Point;",
+			"typedef union {",
+			"  int code;",
+			"  float real;",
+			"} Number;",
+			"typedef unsigned long Count;",
+			"typedef int First, *Second;",
+			"typedef const unsigned long WrappedCount;",
+			"typedef int WrappedValue[SIZE];",
+			"typedef int (ParenthesizedValue);",
+			"typedef int Callable(void *parameter);",
+			"typedef void (*Callback)(void *parameter);",
+			"",
+		].join("\n");
+		const c = fallbackExtraction("c", "aliases.c", cSource);
+		const cpp = fallbackExtraction(
+			"c++",
+			"aliases.cpp",
+			[
+				"using Index = unsigned long;",
+				"using Handler = void (*)(int parameter);",
+				"template <typename T>",
+				"using Buffer = T*;",
+				"typedef int (Owner::*MemberCallback)(double);",
+				"class Api {",
+				" public:",
+				"  union CppValue { int count; double ratio; };",
+				"};",
+				"",
+			].join("\n"),
+		);
+		const cNames = new Set(c.symbols.filter((symbol) => symbol.kind === "type").map((symbol) => symbol.name));
+		const allCNames = new Set(c.symbols.map((symbol) => symbol.name));
+		for (const name of [
+			"PublicValue",
+			"Point",
+			"Number",
+			"Count",
+			"First",
+			"Second",
+			"WrappedCount",
+			"WrappedValue",
+			"ParenthesizedValue",
+			"Callable",
+			"Callback",
+		]) {
+			ok(cNames.has(name), name);
+		}
+		for (const bogus of ["integer", "decimal", "member", "code", "real", "parameter", "SIZE"]) {
+			strictEqual(allCNames.has(bogus), false, bogus);
+		}
+		deepStrictEqual(
+			cpp.symbols.filter((symbol) => symbol.kind === "type").map((symbol) => symbol.name),
+			["Index", "Handler", "Buffer", "MemberCallback", "CppValue"],
+		);
+		const allCppNames = new Set(cpp.symbols.map((symbol) => symbol.name));
+		for (const bogus of ["parameter", "count", "ratio"]) strictEqual(allCppNames.has(bogus), false, bogus);
 	});
 
 	it("indexes declaration-only C++ APIs and out-of-class method definitions", async () => {

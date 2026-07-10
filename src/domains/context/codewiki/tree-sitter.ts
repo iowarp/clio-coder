@@ -320,6 +320,52 @@ function extractRust(root: SyntaxNode): ExtractedSymbol[] {
 
 const C_FAMILY_CLASS_SCOPES = new Set(["class_specifier", "struct_specifier", "union_specifier"]);
 
+function cFamilyDeclaredTypeName(node: SyntaxNode): string | null {
+	// Aggregate bodies contain field/type identifiers of their own. A missing
+	// name field means the aggregate is anonymous; never fall through into its
+	// body looking for a plausible identifier.
+	const name = node.childForFieldName("name");
+	return name ? name.text.trim() || null : null;
+}
+
+function cFamilyDeclaratorName(node: SyntaxNode): string | null {
+	if (NAME_NODE_TYPES.has(node.type)) return node.text.trim() || null;
+
+	// Pointer, array, parenthesized, and function declarators all wrap the
+	// declared identifier in their `declarator` field. Following only that
+	// chain avoids mistaking a function-pointer parameter for the typedef name.
+	const declarator = node.childForFieldName("declarator") ?? node.childForFieldName("name");
+	if (declarator) return cFamilyDeclaratorName(declarator);
+
+	// Some grammar versions omit the field on transparent parentheses. Those
+	// nodes have one declarator-shaped named child, so a narrow fallback remains
+	// safe without searching arbitrary aggregate bodies or parameter lists.
+	if (
+		node.type === "parenthesized_declarator" ||
+		node.type === "abstract_parenthesized_declarator" ||
+		node.type === "attributed_declarator"
+	) {
+		for (const child of namedChildren(node)) {
+			const name = cFamilyDeclaratorName(child);
+			if (name) return name;
+		}
+	}
+	return null;
+}
+
+function cFamilyDeclarators(node: SyntaxNode): SyntaxNode[] {
+	return node.childrenForFieldName("declarator").filter((child): child is SyntaxNode => child !== null);
+}
+
+function uniqueCFamilySymbols(symbols: ReadonlyArray<ExtractedSymbol>): ExtractedSymbol[] {
+	const unique = new Map<string, ExtractedSymbol>();
+	for (const symbol of symbols) {
+		const key = `${symbol.name}\0${symbol.kind}\0${symbol.line}`;
+		if (!unique.has(key)) unique.set(key, symbol);
+	}
+	return [...unique.values()];
+}
+
 function cFamilyFunctionDeclarator(node: SyntaxNode): SyntaxNode | null {
 	// The symbol name lives in the declarator, never in the return type; a
 	// pointer or reference declarator can wrap the function_declarator. Walk
@@ -381,7 +427,7 @@ function extractCFamily(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
 	const classNames = new Set(
 		descendants(root, ["class_specifier", "struct_specifier", "union_specifier"])
-			.map((node) => nameFromNode(node))
+			.map((node) => cFamilyDeclaredTypeName(node))
 			.filter((name): name is string => name !== null),
 	);
 	const namespaceNames = new Set(
@@ -410,10 +456,23 @@ function extractCFamily(root: SyntaxNode): ExtractedSymbol[] {
 				: "func";
 		addSymbol(symbols, node, kind, name);
 	}
-	for (const node of descendants(root, ["class_specifier", "struct_specifier", "enum_specifier"])) {
-		addSymbol(symbols, node, node.type === "class_specifier" ? "class" : "type");
+	for (const node of descendants(root, ["class_specifier", "struct_specifier", "union_specifier", "enum_specifier"])) {
+		const name = cFamilyDeclaredTypeName(node);
+		if (name) addSymbol(symbols, node, node.type === "class_specifier" ? "class" : "type", name);
 	}
-	return symbols;
+	for (const node of descendants(root, "type_definition")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		for (const declarator of cFamilyDeclarators(node)) {
+			const name = cFamilyDeclaratorName(declarator);
+			if (name) addSymbol(symbols, node, "type", name);
+		}
+	}
+	for (const node of descendants(root, "alias_declaration")) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		const name = node.childForFieldName("name")?.text.trim();
+		if (name) addSymbol(symbols, node, "type", name);
+	}
+	return uniqueCFamilySymbols(symbols);
 }
 
 function extractJava(root: SyntaxNode): ExtractedSymbol[] {
@@ -556,8 +615,11 @@ function extractRustImports(root: SyntaxNode): string[] {
 function extractCFamilyImports(root: SyntaxNode): string[] {
 	const imports: string[] = [];
 	for (const node of descendants(root, "preproc_include")) {
-		const source = stringValue(node.childForFieldName("path") ?? firstStringDescendant(node));
-		if (source) imports.push(source);
+		const sourceNode = node.childForFieldName("path") ?? firstStringDescendant(node);
+		const source = stringValue(sourceNode);
+		if (!source) continue;
+		const quoted = sourceNode?.text.trim().startsWith('"') === true;
+		imports.push(quoted && !source.startsWith(".") && !source.startsWith("/") ? `./${source}` : source);
 	}
 	return uniqueSorted(imports);
 }

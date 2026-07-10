@@ -16,11 +16,13 @@ const fingerprint = { treeHash: "a".repeat(64), gitHead: null, loc: 0 };
 const completeBootstrapState: BootstrapGenerationState = {
 	mode: "scout",
 	parserOutcome: "parsed",
+	structuredOutputMode: "prompt-parser",
 	runId: "run-1",
 	targetId: "local",
 	wireModelId: "model-1",
 	runtimeId: "ollama-native",
 	runtimeKind: "native",
+	thinkingLevel: "off",
 	tokenCount: 42,
 	toolCalls: 3,
 	durationMs: 1250,
@@ -67,6 +69,7 @@ describe("contracts/context-state", () => {
 		const invalid: ReadonlyArray<unknown> = [
 			{ ...valid, mode: "model" },
 			{ ...valid, parserOutcome: "unknown" },
+			{ ...valid, structuredOutputMode: "grammar" },
 			{ ...valid, fallbackReason: " " },
 			{ ...valid, fallbackReason: "x".repeat(4097) },
 			{ ...valid, runId: "" },

@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { EvalRunnerV2 } from "../schema/suite.js";
+import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
 import { type EvalRunnerOutput, runShellCommand, shellQuote } from "./external-command.js";
 
 export async function runContextInitRunner(
@@ -8,22 +8,42 @@ export async function runContextInitRunner(
 	cwd: string,
 	clioEntry: string,
 	timeoutMs: number,
+	target: EvalSuiteTargetV2,
 ): Promise<EvalRunnerOutput> {
 	const extraArgs = runner.args ?? [];
-	const command = [process.execPath, clioEntry, "context", "init", "--yes", "--json", ...extraArgs]
+	const command = [
+		process.execPath,
+		clioEntry,
+		"context",
+		"init",
+		"--yes",
+		"--json",
+		"--target",
+		target.id,
+		...(target.model === undefined ? [] : ["--model", target.model]),
+		...(target.thinking === undefined ? [] : ["--thinking", target.thinking]),
+		...extraArgs,
+	]
 		.map(shellQuote)
 		.join(" ");
 	const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs);
 	const payload = parseInitPayload(result.stdout);
 	const candidateGeneration = recordField(payload, "generation");
 	const generation = isValidGenerationPayload(payload, candidateGeneration) ? candidateGeneration : null;
-	const payloadError = generation ? null : "context-init runner did not receive a valid JSON generation result";
+	const routeError = generation ? generationRouteError(generation, target) : null;
+	const payloadError = generation ? routeError : "context-init runner did not receive a valid JSON generation result";
 	const exitCode = result.exitCode === 0 && payloadError ? 1 : result.exitCode;
 	const stderr = payloadError
 		? `${result.stderr}${result.stderr.endsWith("\n") || result.stderr.length === 0 ? "" : "\n"}${payloadError}\n`
 		: result.stderr;
 	const scout = recordField(generation, "scout");
 	const tokens = recordField(scout, "tokens");
+	const effectiveTarget = stringField(scout, "targetId");
+	const effectiveModel = stringField(scout, "wireModelId");
+	const effectiveRuntime = stringField(scout, "runtimeId");
+	const effectiveRuntimeKind = stringField(scout, "runtimeKind");
+	const effectiveThinking = stringField(scout, "thinkingLevel");
+	const structuredOutputMode = stringField(scout, "structuredOutputMode");
 	const clioMdPath = join(cwd, "CLIO.md");
 	const clioMdBytes = existsSync(clioMdPath) ? statSync(clioMdPath).size : 0;
 	return {
@@ -48,9 +68,26 @@ export async function runContextInitRunner(
 			"context.initFallback": stringField(generation, "fallbackReason") !== null,
 			"context.initPromptBytes": numberField(scout, "promptBytes"),
 			"context.initOutputBytes": numberField(scout, "outputBytes"),
+			"context.initTargetId": effectiveTarget,
+			"context.initModelId": effectiveModel,
+			"context.initRuntimeId": effectiveRuntime,
+			"context.initRuntimeKind": effectiveRuntimeKind,
+			"context.initThinkingLevel": effectiveThinking,
+			"context.initStructuredOutputMode": structuredOutputMode,
 			"verifier.exitCode": exitCode,
 		},
-		artifacts: { stdout: result.stdout, stderr },
+		artifacts: {
+			stdout: result.stdout,
+			stderr,
+			requestedTarget: target.id,
+			requestedModel: target.model ?? null,
+			requestedThinking: target.thinking ?? null,
+			effectiveTarget,
+			effectiveModel,
+			effectiveRuntime,
+			effectiveThinking,
+			scoutRunId: stringField(scout, "runId"),
+		},
 	};
 }
 
@@ -67,6 +104,7 @@ function isValidScoutPayload(value: unknown): boolean {
 	for (const key of ["durationMs", "promptBytes", "outputBytes"] as const) {
 		if (!isNonnegativeFiniteNumber(scout[key])) return false;
 	}
+	if (scout.structuredOutputMode !== "native-schema" && scout.structuredOutputMode !== "prompt-parser") return false;
 	for (const key of ["toolCalls", "toolFailures", "toolBlocked"] as const) {
 		if (scout[key] !== undefined && !isNonnegativeFiniteNumber(scout[key])) return false;
 	}
@@ -78,6 +116,13 @@ function isValidScoutPayload(value: unknown): boolean {
 		}
 	}
 	return true;
+}
+
+function hasReceiptIdentity(scout: Record<string, unknown> | null): boolean {
+	if (!scout) return false;
+	return ["runId", "targetId", "wireModelId", "runtimeId", "runtimeKind", "thinkingLevel"].every(
+		(key) => typeof scout[key] === "string" && (scout[key] as string).trim().length > 0,
+	);
 }
 
 function isValidGenerationPayload(
@@ -97,9 +142,29 @@ function isValidGenerationPayload(
 	}
 	const scoutPresent = generation.scout !== undefined;
 	if (scoutPresent && !isValidScoutPayload(generation.scout)) return false;
-	if (mode === "scout" && (parserOutcome !== "parsed" || !scoutPresent)) return false;
+	const scout = recordField(generation, "scout");
+	if (mode === "scout" && (parserOutcome !== "parsed" || !hasReceiptIdentity(scout))) return false;
 	if ((parserOutcome === "parsed" || parserOutcome === "rejected") && !scoutPresent) return false;
+	if (parserOutcome === "rejected" && !hasReceiptIdentity(scout)) return false;
 	return true;
+}
+
+function generationRouteError(generation: Record<string, unknown>, target: EvalSuiteTargetV2): string | null {
+	const scout = recordField(generation, "scout");
+	if (!scout) return null;
+	const actualTarget = stringField(scout, "targetId");
+	const actualModel = stringField(scout, "wireModelId");
+	const actualThinking = stringField(scout, "thinkingLevel");
+	if (actualTarget !== null && actualTarget !== target.id) {
+		return `context-init runner requested target '${target.id}' but Scout receipt used '${actualTarget}'`;
+	}
+	if (target.model !== undefined && actualModel !== null && actualModel !== target.model) {
+		return `context-init runner requested model '${target.model}' but Scout receipt used '${actualModel}'`;
+	}
+	if (target.thinking !== undefined && actualThinking !== null && actualThinking !== target.thinking) {
+		return `context-init runner requested thinking '${target.thinking}' but Scout receipt used '${actualThinking}'`;
+	}
+	return null;
 }
 
 function parseInitPayload(stdout: string): Record<string, unknown> | null {
@@ -121,10 +186,10 @@ function recordField(value: unknown, field?: string): Record<string, unknown> | 
 		: null;
 }
 
-function numberField(value: unknown, field: string): number {
+function numberField(value: unknown, field: string): number | null {
 	const record = recordField(value);
 	const selected = record?.[field];
-	return typeof selected === "number" && Number.isFinite(selected) ? selected : 0;
+	return typeof selected === "number" && Number.isFinite(selected) ? selected : null;
 }
 
 function stringField(value: unknown, field: string): string | null {

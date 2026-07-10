@@ -15,6 +15,7 @@ import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-event
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { protectedResidencyModelIds } from "../../core/residency-protection.js";
+import { UnsupportedResponseSchemaError } from "../../core/response-schema.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import {
@@ -878,11 +879,11 @@ function assertResponseSchemaEnforceable(
 	if (responseSchema === undefined) return;
 	if (runtime.id === "llamacpp" && runtime.kind === "http" && runtime.apiFamily === "openai-completions") {
 		if (capabilities?.structuredOutputs === "json-schema") return;
-		throw new Error(
+		throw new UnsupportedResponseSchemaError(
 			"dispatch: responseSchema requires resolved structuredOutputs='json-schema'; the selected llama.cpp target/model reports no enforceable schema support",
 		);
 	}
-	throw new Error(
+	throw new UnsupportedResponseSchemaError(
 		`dispatch: responseSchema requires the native llamacpp runtime; runtime '${runtime.id}' cannot enforce it`,
 	);
 }
@@ -2489,7 +2490,7 @@ export function createDispatchBundle(
 		req = { ...req, ...validated.spec };
 		if (req.delegationAgentId) {
 			if (req.responseSchema !== undefined) {
-				throw new Error(
+				throw new UnsupportedResponseSchemaError(
 					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
 				);
 			}
