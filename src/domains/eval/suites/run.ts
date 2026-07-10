@@ -53,8 +53,10 @@ async function runMatrixItem(
 		const patch = collectPatchMetrics(workspace.dir);
 		const metrics: Record<string, number | string | boolean | null> = {
 			...zeroToolCallMetrics(),
-			...runner.metrics,
 			...collectContextMetrics(workspace.dir),
+			// A runner may have exact measurements from command output. Those win
+			// over the generic post-run artifact collector.
+			...runner.metrics,
 			"patch.bytes": patch.bytes,
 			"patch.filesChanged": patch.filesChanged,
 			"patch.testFilesModified": patch.testFilesModified,
@@ -115,7 +117,7 @@ async function runTaskRunner(
 ): Promise<EvalRunnerOutput> {
 	if (task.runner.kind === "external-command") return runExternalCommandRunner(task.runner, cwd, task.timeoutMs);
 	if (task.runner.kind === "context-index") return runContextIndexRunner(cwd, clioEntry, task.timeoutMs, target);
-	if (task.runner.kind === "context-init") return runContextInitRunner(cwd, clioEntry, task.timeoutMs);
+	if (task.runner.kind === "context-init") return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs);
 	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target);
 }
 

@@ -124,6 +124,68 @@ export function patchToolChoiceNonePayload(payload: unknown, model: Model<never>
 	return { ...payload, tool_choice: "none" };
 }
 
+/** Attach llama-server's native JSON-schema response constraint without changing its tool surface. */
+export function patchLlamaCppResponseSchemaPayload(
+	payload: unknown,
+	runtimeId: string,
+	responseSchema: Record<string, unknown> | undefined,
+): unknown | undefined {
+	if (responseSchema === undefined) return undefined;
+	if (runtimeId !== "llamacpp") {
+		throw new Error(`responseSchema requires the native llamacpp runtime; received '${runtimeId}'`);
+	}
+	if (!isRecord(payload)) throw new Error("cannot apply responseSchema to a non-object provider payload");
+	return {
+		...payload,
+		response_format: {
+			// llama-server accepts schema-constrained JSON through the widely
+			// compatible json_object form; some deployed gateways silently ignore
+			// the newer json_schema discriminator while still returning HTTP 200.
+			type: "json_object",
+			schema: responseSchema,
+		},
+	};
+}
+
+export interface WorkerPayloadPatchOptions {
+	runtimeId: string;
+	thinkingLevel?: ThinkingLevel;
+	responseSchema?: Record<string, unknown>;
+	toolChoiceNone?: boolean;
+}
+
+/** Compose all worker-owned request mutations over one payload in a stable order. */
+export function patchWorkerRequestPayload(
+	payload: unknown,
+	model: Model<never>,
+	options: WorkerPayloadPatchOptions,
+): unknown | undefined {
+	let patched = payload;
+	let changed = false;
+
+	const thinkingPatched = patchProviderThinkingPayload(patched, model, options.thinkingLevel);
+	if (thinkingPatched !== undefined) {
+		patched = thinkingPatched;
+		changed = true;
+	}
+
+	const schemaPatched = patchLlamaCppResponseSchemaPayload(patched, options.runtimeId, options.responseSchema);
+	if (schemaPatched !== undefined) {
+		patched = schemaPatched;
+		changed = true;
+	}
+
+	if (options.toolChoiceNone === true) {
+		const toolChoicePatched = patchToolChoiceNonePayload(patched, model);
+		if (toolChoicePatched !== undefined) {
+			patched = toolChoicePatched;
+			changed = true;
+		}
+	}
+
+	return changed ? patched : undefined;
+}
+
 export function patchReasoningSummaryPayload(
 	payload: unknown,
 	model: Model<never>,

@@ -63,7 +63,6 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio context wiki [--update\|--status]` | Generate, update, or inspect the agent-authored Markdown wiki under `.clio/wiki/`. |
 | `clio context reset [--all]` | Clear accumulated project context artifacts. |
 | `clio context index [--json]` | Build the structural codewiki index without model calls; writes `.clio/codewiki.json` and `.clio/state.json` and prints coverage plus a structural hash. |
-| `clio context-clear` / `clio context-init` / `clio context-index` | Legacy spellings for reset, init, and index. |
 
 ## Headless Run Flags
 
@@ -307,14 +306,14 @@ clio -nc run --agent scout "..."
 
 ### Codewiki index
 
-`clio context index` and the legacy `clio context-index` build the structural
-codewiki without any model calls. They write `.clio/codewiki.json` plus
-`.clio/state.json`, record `codewikiVersion`, and print coverage plus a
+`clio context index` builds the structural codewiki without any model calls. It
+writes `.clio/codewiki.json` plus
+`.clio/state.json`, records `codewikiVersion`, and prints coverage plus a
 structural hash. The same builder is used by `clio context init`, `clio context
 refresh`, session freshness checks, tool-demand backfill, and in-session
 incremental updates.
 
-The current artifact is schema v4. It records files with path, language, line
+The current artifact is schema v5. It records files with path, language, line
 count, role, content hash, imports, and optional summary; declaration-only
 symbols with name, kind, file id, line, and optional signature; and import edges
 to internal files or external modules. The writer emits compact JSON.

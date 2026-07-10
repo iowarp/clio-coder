@@ -1,5 +1,11 @@
 import { createRequire } from "node:module";
-import Parser from "web-tree-sitter";
+import { dirname, join } from "node:path";
+import TreeSitter, {
+	type Parser as ParserInstance,
+	type Node as SyntaxNode,
+	type Tree,
+} from "@vscode/tree-sitter-wasm";
+import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
 import type {
 	CodewikiLanguage,
 	CodewikiSymbolKind,
@@ -8,9 +14,9 @@ import type {
 	LanguageExtractor,
 } from "./indexer.js";
 
-type SyntaxNode = Parser.SyntaxNode;
-
 const require = createRequire(import.meta.url);
+const { Language, Parser } = TreeSitter;
+const VSCODE_WASM_DIR = dirname(require.resolve("@vscode/tree-sitter-wasm"));
 
 type GrammarName =
 	| "typescript"
@@ -26,17 +32,19 @@ type GrammarName =
 	| "c_sharp";
 
 const WASM_BY_GRAMMAR: Record<GrammarName, string> = {
-	typescript: "tree-sitter-typescript.wasm",
-	tsx: "tree-sitter-tsx.wasm",
-	javascript: "tree-sitter-javascript.wasm",
-	python: "tree-sitter-python.wasm",
-	go: "tree-sitter-go.wasm",
-	rust: "tree-sitter-rust.wasm",
-	c: "tree-sitter-c.wasm",
-	cpp: "tree-sitter-cpp.wasm",
-	java: "tree-sitter-java.wasm",
-	ruby: "tree-sitter-ruby.wasm",
-	c_sharp: "tree-sitter-c_sharp.wasm",
+	typescript: join(VSCODE_WASM_DIR, "tree-sitter-typescript.wasm"),
+	tsx: join(VSCODE_WASM_DIR, "tree-sitter-tsx.wasm"),
+	javascript: join(VSCODE_WASM_DIR, "tree-sitter-javascript.wasm"),
+	python: join(VSCODE_WASM_DIR, "tree-sitter-python.wasm"),
+	go: join(VSCODE_WASM_DIR, "tree-sitter-go.wasm"),
+	rust: join(VSCODE_WASM_DIR, "tree-sitter-rust.wasm"),
+	// VS Code does not currently ship a C grammar; its runtime accepts this
+	// ABI-compatible compact C side module from tree-sitter-wasms.
+	c: require.resolve("tree-sitter-wasms/out/tree-sitter-c.wasm"),
+	cpp: join(VSCODE_WASM_DIR, "tree-sitter-cpp.wasm"),
+	java: join(VSCODE_WASM_DIR, "tree-sitter-java.wasm"),
+	ruby: join(VSCODE_WASM_DIR, "tree-sitter-ruby.wasm"),
+	c_sharp: join(VSCODE_WASM_DIR, "tree-sitter-c-sharp.wasm"),
 };
 
 const NAME_NODE_TYPES = new Set([
@@ -76,7 +84,7 @@ let parserInit: Promise<void> | null = null;
 function ensureParserInit(): Promise<void> {
 	parserInit ??= Parser.init({
 		locateFile() {
-			return require.resolve("web-tree-sitter/tree-sitter.wasm");
+			return join(VSCODE_WASM_DIR, "tree-sitter.wasm");
 		},
 	});
 	return parserInit;
@@ -104,9 +112,13 @@ function sig(node: SyntaxNode): string {
 	return node.text.split(/\r?\n/, 1)[0]?.trim().slice(0, 240) ?? "";
 }
 
+function namedChildren(node: SyntaxNode): SyntaxNode[] {
+	return node.namedChildren.filter((child): child is SyntaxNode => child !== null);
+}
+
 function firstNamedDescendant(node: SyntaxNode, types: ReadonlySet<string> = NAME_NODE_TYPES): SyntaxNode | null {
 	if (types.has(node.type)) return node;
-	for (const child of node.namedChildren) {
+	for (const child of namedChildren(node)) {
 		const found = firstNamedDescendant(child, types);
 		if (found) return found;
 	}
@@ -116,7 +128,7 @@ function firstNamedDescendant(node: SyntaxNode, types: ReadonlySet<string> = NAM
 function nameFromNode(node: SyntaxNode): string | null {
 	const direct = node.childForFieldName("name");
 	if (direct) return firstNamedDescendant(direct)?.text ?? direct.text;
-	for (const child of node.namedChildren) {
+	for (const child of namedChildren(node)) {
 		if (NAME_NODE_TYPES.has(child.type)) return child.text;
 	}
 	return firstNamedDescendant(node)?.text ?? null;
@@ -162,7 +174,7 @@ function addSymbol(
 }
 
 function descendants(root: SyntaxNode, types: string | string[]): SyntaxNode[] {
-	return root.descendantsOfType(types);
+	return root.descendantsOfType(types).filter((node): node is SyntaxNode => node !== null);
 }
 
 function compareStrings(a: string, b: string): number {
@@ -203,7 +215,7 @@ function firstStringDescendant(node: SyntaxNode | null | undefined): SyntaxNode 
 	) {
 		return node;
 	}
-	for (const child of node.namedChildren) {
+	for (const child of namedChildren(node)) {
 		const found = firstStringDescendant(child);
 		if (found) return found;
 	}
@@ -306,9 +318,98 @@ function extractRust(root: SyntaxNode): ExtractedSymbol[] {
 	return symbols;
 }
 
+const C_FAMILY_CLASS_SCOPES = new Set(["class_specifier", "struct_specifier", "union_specifier"]);
+
+function cFamilyFunctionDeclarator(node: SyntaxNode): SyntaxNode | null {
+	// The symbol name lives in the declarator, never in the return type; a
+	// pointer or reference declarator can wrap the function_declarator. Walk
+	// deepest-first so a function returning a function pointer resolves the
+	// inner callable while a plain function-pointer variable is rejected.
+	const declarator = node.childForFieldName("declarator");
+	if (!declarator) return null;
+	const candidates = [
+		...(declarator.type === "function_declarator" ? [declarator] : []),
+		...declarator.descendantsOfType("function_declarator"),
+	];
+	for (let index = candidates.length - 1; index >= 0; index -= 1) {
+		const candidate = candidates[index];
+		const inner = candidate?.childForFieldName("declarator");
+		if (inner && inner.type !== "parenthesized_declarator") return candidate ?? null;
+	}
+	return null;
+}
+
+function cFamilyFunctionName(node: SyntaxNode): string | null {
+	const fnDeclarator = cFamilyFunctionDeclarator(node);
+	const inner = fnDeclarator?.childForFieldName("declarator");
+	if (!inner) return null;
+	let name: SyntaxNode = inner;
+	while (name.type === "qualified_identifier") {
+		const unqualified = name.childForFieldName("name");
+		if (!unqualified) break;
+		name = unqualified;
+	}
+	if (name.type === "template_function") name = name.childForFieldName("name") ?? name;
+	return name.text;
+}
+
+function cFamilyFunctionQualifier(node: SyntaxNode): string | null {
+	const inner = cFamilyFunctionDeclarator(node)?.childForFieldName("declarator");
+	if (inner?.type !== "qualified_identifier") return null;
+	const parts = inner.text.split("::");
+	parts.pop();
+	return parts.join("::") || null;
+}
+
+function cFamilyQualifiedMethod(
+	node: SyntaxNode,
+	classNames: ReadonlySet<string>,
+	namespaceNames: ReadonlySet<string>,
+): boolean {
+	const qualifier = cFamilyFunctionQualifier(node);
+	if (!qualifier) return false;
+	const last = qualifier.split("::").at(-1) ?? qualifier;
+	if (classNames.has(last)) return true;
+	if (namespaceNames.has(last) || namespaceNames.has(qualifier)) return false;
+	// Tree-sitter represents namespace and class qualification identically when
+	// the declaration lives in an included header. Scientific C++ conventionally
+	// uses type-like capitalization for classes and lowercase namespaces.
+	return /^[A-Z_]/.test(last);
+}
+
 function extractCFamily(root: SyntaxNode): ExtractedSymbol[] {
 	const symbols: ExtractedSymbol[] = [];
-	for (const node of descendants(root, "function_definition")) addSymbol(symbols, node, "func");
+	const classNames = new Set(
+		descendants(root, ["class_specifier", "struct_specifier", "union_specifier"])
+			.map((node) => nameFromNode(node))
+			.filter((name): name is string => name !== null),
+	);
+	const namespaceNames = new Set(
+		descendants(root, "namespace_definition")
+			.map((node) => nameFromNode(node))
+			.filter((name): name is string => name !== null),
+	);
+	for (const node of descendants(root, "function_definition")) {
+		const kind =
+			nearestAncestorType(node, C_FAMILY_CLASS_SCOPES) || cFamilyQualifiedMethod(node, classNames, namespaceNames)
+				? "method"
+				: "func";
+		addSymbol(symbols, node, kind, cFamilyFunctionName(node) ?? nameFromNode(node));
+	}
+	for (const node of descendants(root, ["declaration", "field_declaration"])) {
+		if (hasFunctionLikeAncestor(node)) continue;
+		const name = cFamilyFunctionName(node);
+		if (!name) continue;
+		const isTypedef = namedChildren(node).some(
+			(child) => child.type === "storage_class_specifier" && child.text === "typedef",
+		);
+		const kind = isTypedef
+			? "type"
+			: nearestAncestorType(node, C_FAMILY_CLASS_SCOPES) || cFamilyQualifiedMethod(node, classNames, namespaceNames)
+				? "method"
+				: "func";
+		addSymbol(symbols, node, kind, name);
+	}
 	for (const node of descendants(root, ["class_specifier", "struct_specifier", "enum_specifier"])) {
 		addSymbol(symbols, node, node.type === "class_specifier" ? "class" : "type");
 	}
@@ -325,13 +426,13 @@ function extractJava(root: SyntaxNode): ExtractedSymbol[] {
 		// A field_declaration is `modifiers? type declarator (',' declarator)*`.
 		// Record each declarator name, never the shared type identifier. Static
 		// final fields and SCREAMING_CASE names classify as const.
-		const modifiers = node.namedChildren.find((child) => child.type === "modifiers")?.text ?? "";
+		const modifiers = namedChildren(node).find((child) => child.type === "modifiers")?.text ?? "";
 		const staticFinal = /\bstatic\b/.test(modifiers) && /\bfinal\b/.test(modifiers);
-		for (const declarator of node.namedChildren) {
+		for (const declarator of namedChildren(node)) {
 			if (declarator.type !== "variable_declarator") continue;
 			const name =
 				declarator.childForFieldName("name")?.text ??
-				declarator.namedChildren.find((child) => child.type === "identifier")?.text;
+				namedChildren(declarator).find((child) => child.type === "identifier")?.text;
 			if (!name) continue;
 			const isConst = staticFinal || /^[A-Z][A-Z0-9_]*$/.test(name);
 			addSymbol(symbols, declarator, isConst ? "const" : "var", name);
@@ -413,7 +514,7 @@ function extractTsJsImports(root: SyntaxNode): string[] {
 function extractPythonImports(root: SyntaxNode): string[] {
 	const imports: string[] = [];
 	for (const node of descendants(root, "import_statement")) {
-		for (const child of node.namedChildren) {
+		for (const child of namedChildren(node)) {
 			if (child.type === "dotted_name") imports.push(child.text);
 			if (child.type === "aliased_import") {
 				const name = child.childForFieldName("name") ?? child.namedChild(0);
@@ -424,7 +525,7 @@ function extractPythonImports(root: SyntaxNode): string[] {
 	for (const node of descendants(root, "import_from_statement")) {
 		const moduleName =
 			node.childForFieldName("module_name") ??
-			node.namedChildren.find((child) => child.type === "relative_import" || child.type === "dotted_name");
+			namedChildren(node).find((child) => child.type === "relative_import" || child.type === "dotted_name");
 		if (moduleName) imports.push(moduleName.text);
 	}
 	return uniqueSorted(imports);
@@ -446,7 +547,7 @@ function extractRustImports(root: SyntaxNode): string[] {
 		if (argument) imports.push(argument.text.trim());
 	}
 	for (const node of descendants(root, "extern_crate_declaration")) {
-		const name = node.childForFieldName("name") ?? node.namedChildren.find((child) => child.type === "identifier");
+		const name = node.childForFieldName("name") ?? namedChildren(node).find((child) => child.type === "identifier");
 		if (name) imports.push(name.text.trim());
 	}
 	return uniqueSorted(imports);
@@ -512,17 +613,17 @@ function sortSymbols(symbols: ExtractedSymbol[]): ExtractedSymbol[] {
 	return symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
 }
 
-function grammarForSourceFile(path: string): GrammarName | null {
-	const lang = path.endsWith(".tsx")
-		? "typescript"
-		: path.endsWith(".jsx")
-			? "javascript"
-			: path.endsWith(".cpp") || path.endsWith(".cc") || path.endsWith(".cxx") || path.endsWith(".hpp")
-				? "c++"
-				: path.endsWith(".c") || path.endsWith(".h")
-					? "c"
-					: null;
-	return grammarForPath(path, lang ?? languageFromPath(path));
+function grammarForSourceFile(path: string, text: string): GrammarName | null {
+	if (isAmbiguousHeaderPath(path)) return classifyCHeaderLanguage(text) === "c++" ? "cpp" : "c";
+	return grammarForPath(path, languageFromPath(path));
+}
+
+function grammarCandidatesForSourceFile(path: string): GrammarName[] {
+	// Ambiguous headers resolve to C or C++ from content at extraction time,
+	// so preloading must cover both grammars a header can select.
+	if (isAmbiguousHeaderPath(path)) return ["c", "cpp"];
+	const grammar = grammarForPath(path, languageFromPath(path));
+	return grammar ? [grammar] : [];
 }
 
 export interface TreeSitterExtractor extends LanguageExtractor {
@@ -531,13 +632,13 @@ export interface TreeSitterExtractor extends LanguageExtractor {
 
 export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> {
 	await ensureParserInit();
-	const parsers = new Map<GrammarName, Parser>();
+	const parsers = new Map<GrammarName, ParserInstance>();
 	const loading = new Map<GrammarName, Promise<void>>();
 	const loadGrammar = (grammar: GrammarName): Promise<void> => {
 		if (parsers.has(grammar)) return Promise.resolve();
 		let pending = loading.get(grammar);
 		if (!pending) {
-			pending = Parser.Language.load(require.resolve(`tree-sitter-wasms/out/${WASM_BY_GRAMMAR[grammar]}`))
+			pending = Language.load(WASM_BY_GRAMMAR[grammar])
 				.then((language) => {
 					const parser = new Parser();
 					parser.setLanguage(language);
@@ -555,26 +656,27 @@ export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> 
 		async ensureGrammarsForPaths(paths: ReadonlyArray<string>): Promise<void> {
 			const needed = new Set<GrammarName>();
 			for (const path of paths) {
-				const grammar = grammarForSourceFile(path);
-				if (grammar) needed.add(grammar);
+				for (const grammar of grammarCandidatesForSourceFile(path)) needed.add(grammar);
 			}
 			await Promise.all([...needed].map(loadGrammar));
 		},
 		extract(path: string, text: string): LanguageExtraction {
-			const grammar = grammarForSourceFile(path);
+			const grammar = grammarForSourceFile(path, text);
 			if (!grammar || text.trim().length === 0) return { symbols: [], imports: [] };
 			const parser = parsers.get(grammar);
 			// A missing parser means the caller skipped ensureGrammarsForPaths for this
 			// path; throwing routes the file to the regex fallback instead of silently
 			// indexing it with zero symbols.
 			if (!parser) throw new Error(`tree-sitter grammar not loaded for ${path}`);
-			let tree: Parser.Tree | null = null;
+			let tree: Tree | null = null;
 			try {
-				tree = parser.parse(text);
-				const symbols = sortSymbols(extractSymbolsByGrammar(grammar, tree.rootNode));
+				const parsed = parser.parse(text);
+				if (!parsed) throw new Error(`tree-sitter returned no tree for ${path}`);
+				tree = parsed;
+				const symbols = sortSymbols(extractSymbolsByGrammar(grammar, parsed.rootNode));
 				return {
 					symbols,
-					imports: extractImportsByGrammar(grammar, tree.rootNode),
+					imports: extractImportsByGrammar(grammar, parsed.rootNode),
 				};
 			} catch {
 				throw new Error(`tree-sitter parse failed for ${path}`);
@@ -591,7 +693,7 @@ function languageFromPath(path: string): CodewikiLanguage {
 	if (path.endsWith(".py") || path.endsWith(".pyw")) return "python";
 	if (path.endsWith(".go")) return "go";
 	if (path.endsWith(".rs")) return "rust";
-	if (/\.(cc|cpp|cxx|hpp|hh|hxx)$/.test(path)) return "c++";
+	if (/\.(cc|cpp|cxx|hpp|hh|hxx|cu|cuh)$/.test(path)) return "c++";
 	if (/\.(c|h)$/.test(path)) return "c";
 	if (path.endsWith(".java")) return "java";
 	if (path.endsWith(".rb")) return "ruby";

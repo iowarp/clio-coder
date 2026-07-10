@@ -15,7 +15,13 @@ export const PromptsDomainModule: DomainModule = {
  */
 export function createPromptsDomainModule(options: PromptsBundleOptions = {}): DomainModule {
 	return {
-		manifest: PromptsManifest,
+		manifest:
+			options.noContextFiles === true
+				? {
+						...PromptsManifest,
+						dependsOn: PromptsManifest.dependsOn.filter((name) => name !== "context"),
+					}
+				: PromptsManifest,
 		createExtension: (context) => createPromptsBundle(context, options),
 	};
 }

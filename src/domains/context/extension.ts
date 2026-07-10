@@ -46,6 +46,7 @@ function persistState(
 		codewikiVersion,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
 		lastSessionAt: prev?.lastSessionAt ?? new Date().toISOString(),
 		lastIndexedAt: indexedAt,
@@ -105,7 +106,7 @@ function resolveClioMdState(cwd: string): ContextState["clioMd"] {
 	if (!clio) return "none";
 	if (!clio.ok) return "malformed";
 	const state = readClioState(cwd);
-	if (state?.contextSources && state.contextSources.length > 0 && adoptionSourcesChanged(state.contextSources)) {
+	if (state?.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
 		return "stale";
 	}
 	return "ok";
@@ -149,7 +150,7 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 	}
 	const state = readClioState(cwd);
 	if (!state) return hints;
-	if (state.contextSources && state.contextSources.length > 0 && adoptionSourcesChanged(state.contextSources)) {
+	if (state.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
 		hints.push("clio: Imported agent context changed. Run /context init --adopt to refresh.");
 	}
 	return hints;
@@ -259,6 +260,7 @@ export function createContextBundle(
 				...(codewiki ? { codewikiVersion: codewiki.version } : {}),
 				...(state?.contextSources ? { contextSources: state.contextSources } : {}),
 				...(state?.contextSourceHash ? { contextSourceHash: state.contextSourceHash } : {}),
+				...(state?.lastBootstrap ? { lastBootstrap: state.lastBootstrap } : {}),
 				...(state?.lastInitAt ? { lastInitAt: state.lastInitAt } : {}),
 				lastSessionAt: new Date().toISOString(),
 				...(lastIndexedAt ? { lastIndexedAt } : {}),
@@ -282,7 +284,7 @@ export function createContextBundle(
 				emitProgress({
 					phase: "done",
 					status: "failed",
-					message: "context-init failed",
+					message: "context init failed",
 					detail: err instanceof Error ? err.message : String(err),
 				});
 				throw err;

@@ -66,4 +66,16 @@ describe("contracts/project-type", () => {
 		strictEqual(profile.projectType, "unknown");
 		strictEqual(profile.sourceFiles, 0);
 	});
+
+	it("classifies declaration-only headers and CUDA sources as C++", () => {
+		writeFileSync(join(scratch, "CMakeLists.txt"), "project(header_only LANGUAGES CXX CUDA)\n", "utf8");
+		writeFileSync(join(scratch, "widget.h"), "struct Widget { int Get() const; };\n", "utf8");
+		writeFileSync(join(scratch, "kernel.cu"), "__global__ void fill(float *data) { data[0] = 0; }\n", "utf8");
+
+		const profile = detectProjectProfile(scratch);
+		strictEqual(profile.projectType, "c++");
+		strictEqual(profile.sourceFiles, 2);
+		strictEqual(profile.languageCounts["c++"], 2);
+		strictEqual(profile.languageCounts.c, 0);
+	});
 });

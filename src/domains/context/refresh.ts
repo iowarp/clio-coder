@@ -63,6 +63,7 @@ export async function runContextRefresh(input: RunContextRefreshInput = {}): Pro
 		codewikiVersion: codewiki.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
 		lastSessionAt: prev?.lastSessionAt ?? indexedAt,
 		lastIndexedAt: indexedAt,

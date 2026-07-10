@@ -21,6 +21,7 @@ export async function runClioRunRunner(
 	];
 	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs);
 	const tokens = tokensFromJsonl(result.stdout);
+	const tools = toolCallMetricsFromJsonl(result.stdout);
 	return {
 		exitCode: result.exitCode,
 		stdout: result.stdout,
@@ -33,6 +34,9 @@ export async function runClioRunRunner(
 			"tokens.total": tokens.total,
 			"tokens.cacheRead": tokens.cacheRead,
 			"tokens.cacheWrite": tokens.cacheWrite,
+			"tools.totalCalls": tools.totalCalls,
+			"tools.failed": tools.failed,
+			"tools.blocked": tools.blocked,
 			"verifier.exitCode": result.exitCode,
 		},
 		artifacts: { stdout: result.stdout, stderr: result.stderr },
@@ -64,9 +68,78 @@ function tokensFromJsonl(stdout: string): {
 	return totals;
 }
 
+type ToolCallMetrics = {
+	totalCalls: number;
+	failed: number;
+	blocked: number;
+};
+
+type ToolOutcome = "ok" | "error" | "blocked";
+
+/** Fold the terminal tool events emitted by `clio run --json`. */
+export function toolCallMetricsFromJsonl(stdout: string): ToolCallMetrics {
+	const executionEnds: ToolCallMetrics = { totalCalls: 0, failed: 0, blocked: 0 };
+	const canonicalFinishes: ToolCallMetrics = { totalCalls: 0, failed: 0, blocked: 0 };
+	const seenExecutionEnds = new Set<string>();
+	const seenCanonicalFinishes = new Set<string>();
+
+	for (const line of stdout.split(/\r?\n/)) {
+		if (line.trim().length === 0) continue;
+		let event: Record<string, unknown>;
+		try {
+			const parsed: unknown = JSON.parse(line);
+			if (!isRecord(parsed)) continue;
+			event = parsed;
+		} catch {
+			continue;
+		}
+
+		if (event.type === "tool_execution_end") {
+			const callId = stringField(event, "toolCallId");
+			if (callId !== undefined) {
+				if (seenExecutionEnds.has(callId)) continue;
+				seenExecutionEnds.add(callId);
+			}
+			recordToolOutcome(executionEnds, toolOutcome(event) ?? (event.isError === true ? "error" : "ok"));
+			continue;
+		}
+
+		if (event.type !== "clio_tool_finish" || !isRecord(event.payload)) continue;
+		const outcome = toolOutcome(event.payload);
+		if (outcome === undefined) continue;
+		const callId = stringField(event.payload, "toolCallId") ?? stringField(event, "toolCallId");
+		if (callId !== undefined) {
+			if (seenCanonicalFinishes.has(callId)) continue;
+			seenCanonicalFinishes.add(callId);
+		}
+		recordToolOutcome(canonicalFinishes, outcome);
+	}
+
+	// Some runtimes emit both pi's execution end and Clio's richer finish
+	// event for the same call. Prefer the finish stream wholesale so a call is
+	// counted once and blocked admissions stay distinct from execution errors.
+	return canonicalFinishes.totalCalls > 0 ? canonicalFinishes : executionEnds;
+}
+
+function recordToolOutcome(metrics: ToolCallMetrics, outcome: ToolOutcome): void {
+	metrics.totalCalls += 1;
+	if (outcome === "error") metrics.failed += 1;
+	else if (outcome === "blocked") metrics.blocked += 1;
+}
+
+function toolOutcome(record: Record<string, unknown>): ToolOutcome | undefined {
+	const outcome = record.outcome;
+	return outcome === "ok" || outcome === "error" || outcome === "blocked" ? outcome : undefined;
+}
+
 function numberField(record: Record<string, unknown>, field: string): number {
 	const value = record[field];
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function stringField(record: Record<string, unknown>, field: string): string | undefined {
+	const value = record[field];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

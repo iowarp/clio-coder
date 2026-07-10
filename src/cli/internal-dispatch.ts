@@ -26,8 +26,12 @@ export function armInternalDispatchDeadline(
 	runId: string,
 	label: string,
 	env: NodeJS.ProcessEnv = process.env,
+	maxTimeoutMs?: number,
 ): InternalDispatchDeadline {
-	const timeoutMs = resolveGuardrail("internalDispatchTimeoutMs", env);
+	const configuredTimeoutMs = resolveGuardrail("internalDispatchTimeoutMs", env);
+	const timeoutMs =
+		maxTimeoutMs === undefined ? configuredTimeoutMs : Math.min(configuredTimeoutMs, Math.max(1, maxTimeoutMs));
+	const productCapped = timeoutMs < configuredTimeoutMs;
 	let fired = false;
 	const timer = setTimeout(() => {
 		fired = true;
@@ -43,7 +47,9 @@ export function armInternalDispatchDeadline(
 		timedOut: () => fired,
 		clear: () => clearTimeout(timer),
 		message: () =>
-			`${label} timed out after ${Math.round(timeoutMs / 1000)}s and was aborted. ` +
-			`Raise guardrails.internalDispatchTimeoutMs (env ${GUARDRAIL_ENV_VARS.internalDispatchTimeoutMs}) for slower targets.`,
+			productCapped
+				? `${label} exceeded its ${Math.round(timeoutMs / 1000)}s latency ceiling and was aborted.`
+				: `${label} timed out after ${Math.round(timeoutMs / 1000)}s and was aborted. ` +
+					`Raise guardrails.internalDispatchTimeoutMs (env ${GUARDRAIL_ENV_VARS.internalDispatchTimeoutMs}) for slower targets.`,
 	};
 }

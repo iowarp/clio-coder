@@ -95,19 +95,31 @@ when the operator explicitly asks for it.
 
 ### Structural Index
 
-`.clio/codewiki.json` uses schema v4 and is written as compact JSON. File
+`.clio/codewiki.json` uses schema v5 and is written as compact JSON. File
 records contain a stable id, path, language, line count, role, per-file content
 hash, extracted import specifiers, and an optional first docstring/JSDoc
 summary. Symbol records store declaration-level symbols only (such as classes, interfaces, types, global functions, and methods) and intentionally skip function-local symbols. Each record stores name, kind, file id, line, and optional signature. Edges are built from imports and record either an internal file id target or an external module string.
 
-The indexer walks source files and config manifests while excluding generated, scratch, and local-state directories such as `.git`, `.clio`, `.superpowers`, `.codex`, `.claude`, `.clio-benchmark`, `node_modules`, `dist`, `build`, `coverage`, virtualenvs, `target`, and `vendor`. Source coverage spans TypeScript, JavaScript, Python, Rust, Go, C, C++, Java, Ruby, and C#, with config entries for manifests such as `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`, `CMakeLists.txt`, `Gemfile`, and `*.csproj`.
+In Git workspaces, the indexer uses the same visible file set across full builds,
+incremental updates, fingerprints, and project profiles: tracked files plus
+untracked, unignored work in progress. It excludes symlinks, submodule gitlinks,
+generated output, scratch space, and local-state directories such as `.git`,
+`.clio`, `.superpowers`, `.codex`, `.claude`, `.clio-benchmark`, `node_modules`,
+`dist`, `build`, `coverage`, virtualenvs, `target`, and `vendor`. Non-Git
+workspaces use a bounded filesystem walk with the same directory exclusions.
+Source coverage spans TypeScript, JavaScript, Python, Rust, Go, C, C++, CUDA
+(`.cu` and `.cuh`), Java, Ruby, and C#, with config entries for manifests such
+as `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`,
+`CMakeLists.txt`, `Gemfile`, and `*.csproj`.
 
 Extraction is async and tree-sitter-first. Clio loads WASM grammars for the ten
-source languages above, extracts symbols/imports/exports from the parsed tree,
+source language grammars above, extracts symbols/imports/exports from the parsed tree,
 and merges regex import extraction for languages with regex extractors. If a
 tree-sitter parse fails for one file, that file falls back to the available
 regex extractor instead of aborting the whole build. C# is covered by the
-tree-sitter C# grammar.
+tree-sitter C# grammar. Ambiguous `.h` files are classified from their contents,
+and declaration-only C/C++ APIs are indexed so header-heavy MPI, CUDA, and
+scientific libraries remain navigable even when implementations live elsewhere.
 
 Incremental updates are real updates, not a full rebuild hidden behind the
 name. Successful file-mutating tools report changed paths through the
@@ -131,9 +143,9 @@ only after the generated layout validates and the page content changed.
 
 | Event | Structural codewiki behavior | Markdown wiki behavior |
 | --- | --- | --- |
-| Session start | If state or `.clio/codewiki.json` already exists, Clio checks freshness best-effort and performs a full rebuild when the index is stale, missing, unreadable, or needs v4 backfill. Never-indexed directories are skipped. | No generation or update. Existing wiki status may surface in the welcome dashboard. |
+| Session start | If state or `.clio/codewiki.json` already exists, Clio checks freshness best-effort and performs a full rebuild when the index is stale, missing, unreadable, or needs v5 backfill. Never-indexed directories are skipped. | No generation or update. Existing wiki status may surface in the welcome dashboard. |
 | In-session edits | Successful file mutations enqueue changed paths for incremental `updateCodewikiPaths`; the queue is serialized and best-effort. | No automatic update. |
-| Session stop | Drains the incremental queue, then rebuilds only when state is stale, the index is missing, or v4 backfill is needed. State records `lastSessionAt`, `lastIndexedAt` when applicable, and `codewikiVersion`. | No automatic update. |
+| Session stop | Drains the incremental queue, then rebuilds only when state is stale, the index is missing, or v5 backfill is needed. State records `lastSessionAt`, `lastIndexedAt` when applicable, and `codewikiVersion`. | No automatic update. |
 | `/context init` or `clio context init` | Performs a full codewiki rebuild before generating, preserving, proposing, or previewing `CLIO.md`; writes state with the fingerprint and codewiki version when it writes state. | No wiki generation. |
 | `/context refresh` or `clio context refresh` | Performs a full codewiki rebuild and writes state. Does not touch `CLIO.md`. | If an existing wiki is stale and `--wiki` was not passed on the CLI, prints a hint to run `clio context refresh --wiki` or `clio context wiki --update`. |
 | `clio context refresh --wiki` | Performs the same full codewiki rebuild and state write. | Updates an existing wiki through the model-backed documenter path. No wiki metadata means no wiki model call. |
@@ -152,10 +164,10 @@ line count over source extensions. Those fields are reporting data, not the
 stale predicate.
 
 `.clio/state.json` stores the fingerprint and optional `codewikiVersion`.
-Legacy v2/v3 codewiki files can still be read as degraded v4 artifacts, but
-their missing per-file hashes/imports make `codewikiNeedsBackfill` true. The
+Legacy v2/v3/v4 codewiki files can still be read as degraded v5 artifacts, but
+their missing or deliberately invalidated per-file hashes make `codewikiNeedsBackfill` true. The
 next session freshness check, `code_nav` demand load, wiki generation, or
-explicit refresh rebuilds them into full v4.
+explicit refresh rebuilds them into full v5.
 
 Wiki staleness is separate. `.clio/wiki/meta.json` records the git head used
 when the wiki content last changed. If the current git head differs, Clio

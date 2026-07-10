@@ -36,8 +36,11 @@ export function applyInitImplications(options: ContextInitOptions): ContextInitO
 
 /** Conflict validation. Returns a usage-error string or null. */
 export function validateInitOptions(options: ContextInitOptions): string | null {
-	if (options.proposeClioMd === true && (options.applyClioMd === true || options.rewriteClioMd === true)) {
-		return "clio context init: --propose cannot be combined with --apply or --rewrite";
+	if (
+		options.proposeClioMd === true &&
+		(options.adopt === true || options.applyClioMd === true || options.rewriteClioMd === true)
+	) {
+		return "clio context init: --propose cannot be combined with --adopt, --apply, or --rewrite";
 	}
 	return null;
 }

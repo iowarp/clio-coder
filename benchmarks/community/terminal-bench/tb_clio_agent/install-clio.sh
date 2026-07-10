@@ -80,5 +80,5 @@ if ! curl -fsS -m 8 "${CLIO_MAIN_URL}/v1/models" >/dev/null 2>&1; then
 fi
 
 # 5. Deterministic Stage 1 index so code_nav has data immediately.
-clio context-index >/dev/null 2>&1 || true
+clio context index >/dev/null 2>&1 || true
 log "ready"

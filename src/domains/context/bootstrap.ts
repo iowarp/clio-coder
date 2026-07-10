@@ -15,7 +15,14 @@ import { buildCodewiki, type Codewiki, writeCodewiki } from "./codewiki/indexer.
 import { computeFingerprint } from "./fingerprint.js";
 import { renderPromptContext } from "./prompt-context.js";
 import type { SiblingContextFile } from "./sibling-files.js";
-import { readClioState, statePath as resolveStatePath, writeClioState } from "./state.js";
+import {
+	type BootstrapGenerationMode,
+	type BootstrapGenerationState,
+	type BootstrapParserOutcome,
+	readClioState,
+	statePath as resolveStatePath,
+	writeClioState,
+} from "./state.js";
 
 export interface BootstrapStructuredOutput {
 	projectName: string;
@@ -38,6 +45,7 @@ export interface BootstrapIo {
  */
 export interface BootstrapGenerateInput {
 	cwd: string;
+	expectedProjectName?: string;
 	projectType: ProjectType;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
 	adoption: AdoptionScanResult;
@@ -45,6 +53,7 @@ export interface BootstrapGenerateInput {
 	existingClioMd?: ParsedClioMd;
 	existingClioMdText?: string;
 	progress?: BootstrapProgressSink;
+	reportGeneration?: BootstrapGenerationSink;
 }
 
 export type BootstrapGenerate = (
@@ -53,6 +62,37 @@ export type BootstrapGenerate = (
 
 export type BootstrapProgressEvent = Omit<ContextActivityPayload, "kind" | "at">;
 export type BootstrapProgressSink = (event: BootstrapProgressEvent) => void;
+
+export interface BootstrapScoutTelemetry {
+	runId?: string;
+	targetId?: string;
+	wireModelId?: string;
+	runtimeId?: string;
+	runtimeKind?: string;
+	tokens?: {
+		total: number;
+		input?: number;
+		output?: number;
+		cacheRead?: number;
+		cacheWrite?: number;
+		reasoning?: number;
+	};
+	toolCalls?: number;
+	toolFailures?: number;
+	toolBlocked?: number;
+	durationMs?: number;
+	promptBytes: number;
+	outputBytes: number;
+}
+
+export interface BootstrapGenerationTelemetry {
+	mode: BootstrapGenerationMode;
+	parserOutcome: BootstrapParserOutcome;
+	fallbackReason?: string;
+	scout?: BootstrapScoutTelemetry;
+}
+
+export type BootstrapGenerationSink = (telemetry: BootstrapGenerationTelemetry) => void;
 
 export type BootstrapFallbackMode = "existing" | "heuristic";
 
@@ -86,6 +126,9 @@ export interface RunBootstrapResult {
 	projectType: ProjectType;
 	summary: RunBootstrapSummary;
 	adoption: AdoptionScanResult;
+	telemetry: {
+		generation: BootstrapGenerationTelemetry;
+	};
 	/**
 	 * How the session compiler will preload the project context that exists
 	 * on disk after this run: full, synopsis (with the limit that forced it),
@@ -386,16 +429,22 @@ function contextArtifactsSection(): ClioMdSection {
 			"`CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed.",
 			"`.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts.",
 			"Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact.",
-			"`context-init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.",
+			"`clio context init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.",
 		].join(" "),
 	};
 }
 
-const ARTIFACT_SECTION_RE = /\b(artifact|generated|local state|local file|context artifact)\b/i;
+const ARTIFACT_SECTION_RE = /\b(artifacts?|generated|local state|local files?|context artifacts?)\b/i;
 const VERIFICATION_SECTION_RE = /\bverification\b/i;
 const SOURCE_SPARSE_RISK_RE =
 	/\b(ownership|dedicated team|review requirement|migration chain|workflow traps|failure modes)\b/i;
-
+const MODEL_SECTION_EVIDENCE_TERMS = [
+	"ownership",
+	"dedicated team",
+	"review requirement",
+	"release process",
+	"migration chain",
+];
 function sourceSparseBootstrap(input: BootstrapGenerateInput): boolean {
 	return (
 		input.siblingFiles.length === 0 &&
@@ -410,11 +459,120 @@ function sourceSparseNeedsHeuristicFloor(input: BootstrapGenerateInput, output: 
 	return (output.sections ?? []).some((section) => SOURCE_SPARSE_RISK_RE.test(`${section.title}\n${section.body}`));
 }
 
+interface ModelGroundingCorpus {
+	lower: string;
+	lines: ReadonlySet<string>;
+	indexedPaths: ReadonlySet<string>;
+}
+
+function normalizeGroundingLine(value: string): string {
+	return value
+		.trim()
+		.replace(/^[>*+-]\s+|^\d+[.)]\s+/, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundingCorpus {
+	let siblingBudget = 64_000;
+	const siblingEvidence: string[] = [];
+	for (const file of input.siblingFiles) {
+		if (siblingBudget <= 0) break;
+		const chunk = file.content.slice(0, siblingBudget);
+		siblingEvidence.push(chunk);
+		siblingBudget -= chunk.length;
+	}
+	const indexedPaths = new Set(input.codewiki.files.map((file) => file.path));
+	const evidence = [
+		...siblingEvidence,
+		(input.existingClioMdText ?? "").slice(0, 8000),
+		input.expectedProjectName ?? "",
+		input.projectType,
+		[...indexedPaths].join("\n").slice(0, 64_000),
+		input.codewiki.symbols
+			.map((symbol) => symbol.name)
+			.join("\n")
+			.slice(0, 128_000),
+	].join("\n");
+	const lines = new Set(
+		evidence
+			.split(/\r?\n/)
+			.map(normalizeGroundingLine)
+			.filter((line) => line.length >= 8),
+	);
+	return { lower: evidence.toLowerCase(), lines, indexedPaths };
+}
+
+function groundedModelBody(body: string, evidence: ModelGroundingCorpus): string {
+	const kept: string[] = [];
+	let inFence = false;
+	for (const rawLine of body.split(/\r?\n/)) {
+		const trimmed = rawLine.trim();
+		if (trimmed.startsWith("```")) {
+			inFence = !inFence;
+			continue;
+		}
+		if (inFence || trimmed.length === 0 || /^#{1,6}\s|^---+$/.test(trimmed)) continue;
+		if (
+			MODEL_SECTION_EVIDENCE_TERMS.some((term) => trimmed.toLowerCase().includes(term) && !evidence.lower.includes(term))
+		) {
+			continue;
+		}
+		const codeTokens = [...trimmed.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]?.trim()).filter(Boolean);
+		if (
+			codeTokens.some(
+				(token) =>
+					token !== undefined &&
+					!evidence.lower.includes(token.toLowerCase()) &&
+					!evidence.indexedPaths.has(token.replace(/^\.\//, "")),
+			)
+		) {
+			continue;
+		}
+		const prose = trimmed.replace(/^[>*+-]\s+|^\d+[.)]\s+/, "").trim();
+		if (prose.length === 0) continue;
+		// Scout enrichment is extractive by construction. Fuzzy lexical overlap is
+		// unsafe here: one altered command verb can invert a repository rule while
+		// retaining nearly every other word. Normalize list markers and whitespace,
+		// then require membership in one complete evidence line.
+		if (evidence.lines.has(normalizeGroundingLine(prose))) kept.push(trimmed);
+	}
+	const bounded: string[] = [];
+	let length = 0;
+	for (const line of kept) {
+		const nextLength = length + (bounded.length > 0 ? 1 : 0) + line.length;
+		if (nextLength > 1200) break;
+		bounded.push(line);
+		length = nextLength;
+	}
+	return bounded.join("\n").trim();
+}
+
+function sanitizeModelSection(section: ClioMdSection, evidence: ModelGroundingCorpus): ClioMdSection | null {
+	const body = groundedModelBody(section.body, evidence);
+	if (body.length < 40) return null;
+	let title = section.title;
+	for (const term of MODEL_SECTION_EVIDENCE_TERMS) {
+		if (!evidence.lower.includes(term)) title = title.replace(new RegExp(term, "gi"), "");
+	}
+	title = title
+		.replace(/\s+/g, " ")
+		.replace(/\s*(?:&|and|\/)\s*$/i, "")
+		.replace(/^(?:&|and|\/)\s*/i, "")
+		.trim();
+	return title.length > 0 ? { title, body } : null;
+}
+
 function stabilizeGeneratedOutput(
 	input: BootstrapGenerateInput,
 	output: BootstrapStructuredOutput,
+	onHeuristicFloor?: () => void,
+	onModelSectionRetained?: () => void,
+	groundModelOutput = false,
 ): BootstrapStructuredOutput {
-	const base = sourceSparseNeedsHeuristicFloor(input, output)
+	const useHeuristicFloor = sourceSparseNeedsHeuristicFloor(input, output);
+	if (useHeuristicFloor) onHeuristicFloor?.();
+	const base = useHeuristicFloor
 		? {
 				...output,
 				projectName: projectName(input.cwd),
@@ -424,18 +582,48 @@ function stabilizeGeneratedOutput(
 				sections: inferHeuristicSections(input),
 			}
 		: output;
+	const existing = input.existingClioMd;
+	const conventions: string[] = [];
+	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
+	for (const convention of inferConventions(input.cwd, input.projectType, input.siblingFiles)) {
+		pushUnique(conventions, convention);
+	}
+	const invariants: string[] = [];
+	for (const invariant of existing?.invariants ?? []) pushUnique(invariants, invariant);
+	for (const invariant of inferInvariants(input.siblingFiles)) pushUnique(invariants, invariant);
+
 	const verification = verificationSection(input.cwd);
-	const ordinarySections = (base.sections ?? []).filter(
-		(section) => !ARTIFACT_SECTION_RE.test(section.title) && !VERIFICATION_SECTION_RE.test(section.title),
-	);
+	const inferredSections = inferHeuristicSections(input);
+	const existingSections = existing?.sections ?? [];
+	const ordinarySections: ClioMdSection[] = [];
+	const modelSections = new Set<ClioMdSection>();
+	const seenSectionTitles = new Set<string>();
+	const addSection = (section: ClioMdSection): boolean => {
+		if (ARTIFACT_SECTION_RE.test(section.title) || VERIFICATION_SECTION_RE.test(section.title)) return false;
+		const titleKey = section.title.replace(/\s+/g, " ").trim().toLowerCase();
+		if (seenSectionTitles.has(titleKey)) return false;
+		seenSectionTitles.add(titleKey);
+		ordinarySections.push(section);
+		return true;
+	};
+	for (const section of existing ? [...existingSections, ...inferredSections] : inferredSections) addSection(section);
+	const groundingCorpus = groundModelOutput ? createModelGroundingCorpus(input) : null;
+	for (const section of base.sections ?? []) {
+		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
+		if (sanitized && addSection(sanitized)) modelSections.add(sanitized);
+	}
 	const ordinaryLimit = verification ? 6 : 7;
+	const retainedOrdinarySections = ordinarySections.slice(0, ordinaryLimit);
+	for (const section of retainedOrdinarySections) {
+		if (modelSections.has(section)) onModelSectionRetained?.();
+	}
 	return {
 		...base,
-		sections: [
-			...ordinarySections.slice(0, ordinaryLimit),
-			...(verification ? [verification] : []),
-			contextArtifactsSection(),
-		],
+		projectName: existing?.projectName ?? projectName(input.cwd),
+		identity: existing?.identity ?? defaultIdentity(input.cwd, input.projectType, input.siblingFiles),
+		conventions: conventions.slice(0, 6),
+		invariants: invariants.slice(0, 3),
+		sections: [...retainedOrdinarySections, ...(verification ? [verification] : []), contextArtifactsSection()],
 	};
 }
 
@@ -449,7 +637,7 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 			body: [
 				`The codewiki currently indexes ${indexedCount} source file${indexedCount === 1 ? "" : "s"}.`,
 				`Start orientation with these indexed entry points: ${entryPoints.map((entry) => `\`${entry}\``).join(", ")}.`,
-				"Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.",
+				"Use `code_nav` (modes: symbol, path, entries, outline, deps, dependents, wiki) before broad reads when the task is navigational.",
 			].join(" "),
 		});
 	}
@@ -472,14 +660,14 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 	}
 	if (input.adoption.sources.length > 0) {
 		const sourceNames = input.adoption.sources
-			.map((source) => `\`${source.path}\``)
+			.map((source) => `\`${source.displayPath}\``)
 			.slice(0, 8)
 			.join(", ");
 		sections.push({
-			title: "Sibling agent context",
+			title: "Agent context interop",
 			body: [
 				`Bootstrap scanned ${input.adoption.sources.length} sibling context source${input.adoption.sources.length === 1 ? "" : "s"}: ${sourceNames}${input.adoption.sources.length > 8 ? ", ..." : ""}.`,
-				"Imported rules appear in the provenance section only when adoption mode is enabled.",
+				"Run `clio context init --adopt` to refresh the managed provenance section when those sources change.",
 			].join(" "),
 		});
 	}
@@ -609,7 +797,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	if (summary.action === "previewed") {
 		const adoptionLine = formatAdoptionLine(summary);
 		return [
-			"clio context-init preview",
+			"clio context init preview",
 			`  ${contextLine}; codewiki would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
 			...(adoptionLine ? [adoptionLine] : []),
 			"",
@@ -619,7 +807,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	const proposalLine = summary.proposalPath ? `  proposal written ${summary.proposalPath}` : null;
 	if (summary.action === "preserved") {
 		return [
-			"clio context-init preserved CLIO.md",
+			"clio context init preserved CLIO.md",
 			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			"  CLIO.md is treated as human-owned. Use --apply to replace it with a generated draft, --propose to write an ignored proposal, or --adopt to refresh only imported agent context.",
 			...(adoptionLine ? [adoptionLine] : []),
@@ -628,7 +816,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	}
 	if (summary.action === "proposed") {
 		return [
-			"clio context-init proposed CLIO.md",
+			"clio context init proposed CLIO.md",
 			`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			...(proposalLine ? [proposalLine] : []),
 			"  CLIO.md was not changed. Re-run with --apply only after reviewing the proposal.",
@@ -637,7 +825,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 		].join("\n");
 	}
 	return [
-		`clio context-init ${summary.action} CLIO.md`,
+		`clio context init ${summary.action} CLIO.md`,
 		`  ${contextLine}; codewiki rebuilt ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 		"  git policy: .clio/ stays ignored by default; CLIO.md stays versioned and human-owned. Force-add .clio assets only when you explicitly intend to share them.",
 		...(proposalLine ? [proposalLine] : []),
@@ -701,7 +889,7 @@ async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<v
 	if (!confirmed) {
 		warn(
 			input.io,
-			"clio context-init: .gitignore does not ignore .clio/; local context, skills, agents, and handoffs may leak into commits.\n",
+			"clio context init: .gitignore does not ignore .clio/; local context, skills, agents, and handoffs may leak into commits.\n",
 		);
 		return;
 	}
@@ -737,6 +925,48 @@ function writeClioMdProposal(cwd: string, now: Date, output: BootstrapStructured
 	return proposalPath;
 }
 
+function boundedStateString(value: string | undefined, maxChars: number): string | undefined {
+	if (value === undefined) return undefined;
+	const bounded = value.replace(/\s+/g, " ").trim().slice(0, maxChars);
+	return bounded.length > 0 ? bounded : undefined;
+}
+
+function safeStateCounter(value: number | undefined): number | undefined {
+	return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): BootstrapGenerationState {
+	const state: BootstrapGenerationState = {
+		mode: telemetry.mode,
+		parserOutcome: telemetry.parserOutcome,
+	};
+	const fallbackReason = boundedStateString(telemetry.fallbackReason, 500);
+	if (fallbackReason) state.fallbackReason = fallbackReason;
+	const scout = telemetry.scout;
+	if (!scout) return state;
+	for (const [key, value] of [
+		["runId", scout.runId],
+		["targetId", scout.targetId],
+		["wireModelId", scout.wireModelId],
+		["runtimeId", scout.runtimeId],
+		["runtimeKind", scout.runtimeKind],
+	] as const) {
+		const bounded = boundedStateString(value, 512);
+		if (bounded) state[key] = bounded;
+	}
+	for (const [key, value] of [
+		["tokenCount", scout.tokens?.total],
+		["toolCalls", scout.toolCalls],
+		["durationMs", scout.durationMs],
+		["promptBytes", scout.promptBytes],
+		["outputBytes", scout.outputBytes],
+	] as const) {
+		const counter = safeStateCounter(value);
+		if (counter !== undefined) state[key] = counter;
+	}
+	return state;
+}
+
 function writeProjectState(
 	cwd: string,
 	projectType: ProjectType,
@@ -745,12 +975,13 @@ function writeProjectState(
 	adoption: AdoptionScanResult,
 	recordAdoption: boolean,
 	codewikiVersion: number,
+	generation: BootstrapGenerationTelemetry,
 ): string {
 	const finalFingerprint = computeFingerprint(cwd);
 	const statePath = resolveStatePath(cwd);
 	const prev = readClioState(cwd);
-	const contextSources = recordAdoption ? adoption.sourceSnapshots : (prev?.contextSources ?? []);
-	const contextSourceHash = contextSources.length > 0 ? adoptionSnapshotsHash(contextSources) : undefined;
+	const contextSources = recordAdoption ? adoption.sourceSnapshots : prev?.contextSources;
+	const contextSourceHash = contextSources ? adoptionSnapshotsHash(contextSources) : undefined;
 	writeClioState(cwd, {
 		version: 1,
 		projectType,
@@ -759,10 +990,39 @@ function writeProjectState(
 		lastInitAt: now.toISOString(),
 		lastSessionAt: now.toISOString(),
 		lastIndexedAt: indexedAt,
-		...(contextSources.length > 0 ? { contextSources } : {}),
+		lastBootstrap: durableGenerationTelemetry(generation),
+		...(contextSources ? { contextSources } : {}),
 		...(contextSourceHash ? { contextSourceHash } : {}),
 	});
 	return statePath;
+}
+
+/**
+ * Publish the deterministic index before Scout runs so a worker-side code_nav
+ * call reuses this build instead of demand-building the same repository again.
+ * This is an index checkpoint, not a completed init: lastInitAt remains unchanged
+ * until CLIO.md handling succeeds below.
+ */
+function persistCodewikiForGeneration(
+	cwd: string,
+	projectType: ProjectType,
+	indexedAt: string,
+	codewiki: Codewiki,
+): void {
+	writeCodewiki(cwd, codewiki);
+	const prev = readClioState(cwd);
+	writeClioState(cwd, {
+		version: 1,
+		projectType,
+		fingerprint: computeFingerprint(cwd, codewiki),
+		codewikiVersion: codewiki.version,
+		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+		lastSessionAt: prev?.lastSessionAt ?? indexedAt,
+		lastIndexedAt: indexedAt,
+	});
 }
 
 function summarizeAdoption(
@@ -851,13 +1111,39 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		current: codewikiEntryCount,
 		total: codewikiEntryCount,
 	});
+	if (input.preview !== true) {
+		await ensureGitignore(cwd, input);
+		persistCodewikiForGeneration(cwd, projectType, indexedAt, codewiki);
+	}
 	const hadClioMd = existsSync(join(cwd, "CLIO.md"));
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
 	const existingClioMdText = useExistingClioMdAsSource ? readExistingClioMdText(cwd) : null;
 	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
 	const existingParsed = existingClioMd?.ok ? existingClioMd.value : undefined;
-	const shouldGenerate = !hadClioMd || input.applyClioMd === true || input.proposeClioMd === true;
+	const replaceClioMd = input.applyClioMd === true || input.rewriteClioMd === true;
+	if (
+		input.adopt === true &&
+		input.preview !== true &&
+		hadClioMd &&
+		!existingParsed &&
+		!replaceClioMd &&
+		input.proposeClioMd !== true
+	) {
+		const detail = existingClioMd && !existingClioMd.ok ? ` (${existingClioMd.error})` : "";
+		throw new Error(
+			`cannot refresh Imported agent context because CLIO.md is malformed${detail}; use --apply or --rewrite after reviewing the handbook`,
+		);
+	}
+	const shouldGenerate = !hadClioMd || replaceClioMd || input.proposeClioMd === true;
 	let output: BootstrapStructuredOutput;
+	let generation: BootstrapGenerationTelemetry = {
+		mode: shouldGenerate ? "heuristic" : existingParsed ? "existing" : "heuristic",
+		parserOutcome: "not-run",
+	};
+	let reportedGeneration: BootstrapGenerationTelemetry | undefined;
+	const reportGeneration: BootstrapGenerationSink = (reported) => {
+		if (reportedGeneration === undefined) reportedGeneration = reported;
+	};
 	if (shouldGenerate) {
 		progress(input, {
 			phase: "generate",
@@ -866,6 +1152,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		});
 		output = await (input.generate ?? heuristicBootstrapOutput)({
 			cwd,
+			expectedProjectName: projectName(cwd),
 			projectType,
 			siblingFiles,
 			adoption,
@@ -873,15 +1160,15 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			...(existingParsed ? { existingClioMd: existingParsed } : {}),
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
+			reportGeneration,
 		});
-		progress(input, {
-			phase: "generate",
-			status: "completed",
-			message: `${output.projectName}: ${output.sections?.length ?? 0} custom section${(output.sections?.length ?? 0) === 1 ? "" : "s"}`,
-		});
+		generation = reportedGeneration ?? generation;
+		let heuristicFloorApplied = false;
+		let retainedModelSections = 0;
 		output = stabilizeGeneratedOutput(
 			{
 				cwd,
+				expectedProjectName: projectName(cwd),
 				projectType,
 				siblingFiles,
 				adoption,
@@ -890,7 +1177,33 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 				...(existingClioMdText ? { existingClioMdText } : {}),
 			},
 			output,
+			() => {
+				heuristicFloorApplied = true;
+			},
+			() => {
+				retainedModelSections += 1;
+			},
+			generation.mode === "scout",
 		);
+		if (heuristicFloorApplied && generation.mode === "scout") {
+			generation = {
+				...generation,
+				mode: "heuristic",
+				fallbackReason: "source-sparse Scout output triggered heuristic floor",
+			};
+		} else if (generation.mode === "scout" && retainedModelSections === 0) {
+			generation = {
+				...generation,
+				mode: "heuristic",
+				fallbackReason: "Scout draft contributed no evidence-grounded custom sections",
+			};
+		}
+		progress(input, {
+			phase: "generate",
+			status: "completed",
+			message: `${output.projectName}: ${output.sections?.length ?? 0} custom section${(output.sections?.length ?? 0) === 1 ? "" : "s"}`,
+			detail: `${generation.mode}; parser=${generation.parserOutcome}`,
+		});
 	} else {
 		output = existingParsed
 			? bootstrapOutputFromParsed(existingParsed)
@@ -925,11 +1238,11 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			projectType,
 			summary,
 			adoption,
+			telemetry: { generation },
 			preload: measureProjectPreload(cwd),
 		};
 	}
 
-	await ensureGitignore(cwd, input);
 	let clioMdPath = join(cwd, "CLIO.md");
 	let proposalPath: string | undefined;
 	let action: RunBootstrapSummary["action"] = "preserved";
@@ -941,7 +1254,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	if (!hadClioMd) {
 		clioMdPath = writeClioMdFile(cwd, output);
 		action = "wrote";
-	} else if (input.applyClioMd === true) {
+	} else if (replaceClioMd) {
 		clioMdPath = writeClioMdFile(cwd, output);
 		action = "refreshed";
 	} else if (input.adopt === true && existingParsed) {
@@ -964,16 +1277,17 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 						: "CLIO.md preserved",
 		detail: proposalPath ?? clioMdPath,
 	});
+	const adoptionApplied = input.adopt === true && (action === "wrote" || action === "refreshed");
 	progress(input, { phase: "state", status: "started", message: "persisting codewiki and project state" });
-	writeCodewiki(cwd, codewiki);
 	const statePath = writeProjectState(
 		cwd,
 		projectType,
 		now,
 		indexedAt,
 		adoption,
-		input.adopt === true,
+		adoptionApplied,
 		codewiki.version,
+		generation,
 	);
 	progress(input, {
 		phase: "state",
@@ -988,7 +1302,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		contextFileNames: readNames,
 		codewikiEntries: codewikiEntryCount,
 		dirtyFiles: countStatusLines(postStatus),
-		adoption: summarizeAdoption(adoption, input.adopt === true ? "adopt" : "scan"),
+		adoption: summarizeAdoption(adoption, adoptionApplied ? "adopt" : "scan"),
 		...(proposalPath ? { proposalPath } : {}),
 	};
 	out(input.io, formatBootstrapSummary(summary));
@@ -1013,6 +1327,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 		projectType,
 		summary,
 		adoption,
+		telemetry: { generation },
 		preload,
 	};
 }

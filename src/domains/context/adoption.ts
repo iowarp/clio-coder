@@ -13,6 +13,8 @@ export interface AdoptionSourceSnapshot {
 	provider: AdoptionProvider;
 	kind: AdoptionSourceKind;
 	sha256: string;
+	status?: "accepted" | "rejected";
+	reason?: string;
 }
 
 export interface AdoptionSource {
@@ -34,8 +36,10 @@ export interface AdoptionRejectedSource {
 	path: string;
 	displayPath: string;
 	scope: AdoptionScope;
-	provider?: AdoptionProvider;
+	provider: AdoptionProvider;
+	kind: AdoptionSourceKind;
 	reason: string;
+	fingerprintSha256: string;
 }
 
 export interface AdoptedAgentRule {
@@ -66,6 +70,12 @@ export interface AdoptionScanResult {
 
 export interface AdoptionScanOptions {
 	cwd: string;
+	homeDir?: string;
+	includeGlobal?: boolean;
+}
+
+export interface AdoptionSourcesChangedOptions {
+	cwd?: string;
 	homeDir?: string;
 	includeGlobal?: boolean;
 }
@@ -197,14 +207,6 @@ function hasSecretLikeLine(text: string): boolean {
 		if (SECRET_LINE_PATTERNS.some((pattern) => pattern.test(line))) return true;
 	}
 	return false;
-}
-
-function maybeFile(path: string): boolean {
-	try {
-		return lstatSync(path).isFile();
-	} catch {
-		return false;
-	}
 }
 
 function collectFiles(
@@ -528,28 +530,37 @@ function buildImportPlan(sources: ReadonlyArray<AdoptionSource>): {
 	return { importedRules: accepted, conflicts: [...conflicts.values()] };
 }
 
+function rejectedCandidate(
+	spec: CandidateSpec,
+	displayPath: string,
+	reason: string,
+	evidence: string,
+): AdoptionRejectedSource {
+	return {
+		path: spec.path,
+		displayPath,
+		scope: spec.scope,
+		provider: spec.provider,
+		kind: spec.kind,
+		reason,
+		fingerprintSha256: sha256(`rejected\0${reason}\0${evidence}`),
+	};
+}
+
+function statEvidence(stat: import("node:fs").Stats): string {
+	return `${stat.size}:${Math.floor(stat.mtimeMs)}:${stat.mode}`;
+}
+
 function readCandidate(spec: CandidateSpec, cwd: string, home: string): AdoptionSource | AdoptionRejectedSource | null {
 	const shown = displayPath(spec.path, cwd, home);
 	if (unsafePathName(spec.path)) {
-		return {
-			path: spec.path,
-			displayPath: shown,
-			scope: spec.scope,
-			provider: spec.provider,
-			reason: "unsafe path name",
-		};
+		return rejectedCandidate(spec, shown, "unsafe path name", "");
 	}
 	let stat: import("node:fs").Stats;
 	try {
 		const lst = lstatSync(spec.path);
 		if (lst.isSymbolicLink()) {
-			return {
-				path: spec.path,
-				displayPath: shown,
-				scope: spec.scope,
-				provider: spec.provider,
-				reason: "symlink skipped",
-			};
+			return rejectedCandidate(spec, shown, "symlink skipped", statEvidence(lst));
 		}
 		stat = statSync(spec.path);
 	} catch {
@@ -557,26 +568,20 @@ function readCandidate(spec: CandidateSpec, cwd: string, home: string): Adoption
 	}
 	if (!stat.isFile()) return null;
 	if (stat.size > MAX_SOURCE_BYTES) {
-		return { path: spec.path, displayPath: shown, scope: spec.scope, provider: spec.provider, reason: "file too large" };
+		return rejectedCandidate(spec, shown, "file too large", statEvidence(stat));
 	}
 	let raw: string;
 	try {
 		raw = readFileSync(spec.path, "utf8");
 	} catch {
-		return { path: spec.path, displayPath: shown, scope: spec.scope, provider: spec.provider, reason: "unreadable" };
+		return rejectedCandidate(spec, shown, "unreadable", statEvidence(stat));
 	}
 	if (raw.includes("\0")) {
-		return { path: spec.path, displayPath: shown, scope: spec.scope, provider: spec.provider, reason: "binary content" };
+		return rejectedCandidate(spec, shown, "binary content", raw);
 	}
 	const content = normalizeText(raw);
 	if (hasSecretLikeLine(content)) {
-		return {
-			path: spec.path,
-			displayPath: shown,
-			scope: spec.scope,
-			provider: spec.provider,
-			reason: "secret-like content",
-		};
+		return rejectedCandidate(spec, shown, "secret-like content", content);
 	}
 	const rules = extractRules(spec, content);
 	return {
@@ -595,10 +600,33 @@ function readCandidate(spec: CandidateSpec, cwd: string, home: string): Adoption
 	};
 }
 
+function sourceSnapshot(source: AdoptionSource | AdoptionRejectedSource): AdoptionSourceSnapshot {
+	if ("content" in source) {
+		return {
+			path: source.path,
+			scope: source.scope,
+			provider: source.provider,
+			kind: source.kind,
+			sha256: source.contentSha256,
+		};
+	}
+	return {
+		path: source.path,
+		scope: source.scope,
+		provider: source.provider,
+		kind: source.kind,
+		sha256: source.fingerprintSha256,
+		status: "rejected",
+		reason: source.reason,
+	};
+}
+
 function sourceSetHash(snapshots: ReadonlyArray<AdoptionSourceSnapshot>): string {
 	const hash = createHash("sha256");
 	for (const snapshot of snapshots) {
-		hash.update(`${snapshot.scope}\0${snapshot.provider}\0${snapshot.kind}\0${snapshot.path}\0${snapshot.sha256}\n`);
+		hash.update(
+			`${snapshot.scope}\0${snapshot.provider}\0${snapshot.kind}\0${snapshot.path}\0${snapshot.status ?? "accepted"}\0${snapshot.reason ?? ""}\0${snapshot.sha256}\n`,
+		);
 	}
 	return hash.digest("hex");
 }
@@ -624,13 +652,7 @@ export function scanAgentConfigs(options: AdoptionScanOptions): AdoptionScanResu
 		return scopeDelta !== 0 ? scopeDelta : a.order - b.order;
 	});
 	const plan = buildImportPlan(sources);
-	const sourceSnapshots = sources.map((source) => ({
-		path: source.path,
-		scope: source.scope,
-		provider: source.provider,
-		kind: source.kind,
-		sha256: source.contentSha256,
-	}));
+	const sourceSnapshots = [...sources.map(sourceSnapshot), ...rejected.map(sourceSnapshot)];
 	return {
 		cwd,
 		homeDir: home,
@@ -702,16 +724,62 @@ export function renderImportedAgentContext(scan: AdoptionScanResult): string {
 	return lines.join("\n");
 }
 
-export function adoptionSourcesChanged(snapshots: ReadonlyArray<AdoptionSourceSnapshot>): boolean {
+function inferAdoptionCwd(snapshots: ReadonlyArray<AdoptionSourceSnapshot>, home: string): string | null {
 	for (const snapshot of snapshots) {
-		if (!maybeFile(snapshot.path)) return true;
-		let content: string;
-		try {
-			content = normalizeText(readFileSync(snapshot.path, "utf8"));
-		} catch {
-			return true;
+		if (snapshot.scope !== "project") continue;
+		let candidate = resolve(snapshot.path, "..");
+		for (;;) {
+			const match = discoverCandidateSpecs(candidate, home, false).some(
+				(spec) =>
+					spec.path === resolve(snapshot.path) &&
+					spec.scope === snapshot.scope &&
+					spec.provider === snapshot.provider &&
+					spec.kind === snapshot.kind,
+			);
+			if (match) return candidate;
+			const parent = resolve(candidate, "..");
+			if (parent === candidate) break;
+			candidate = parent;
 		}
-		if (sha256(content) !== snapshot.sha256) return true;
 	}
-	return false;
+	return null;
+}
+
+function inferAdoptionHome(snapshots: ReadonlyArray<AdoptionSourceSnapshot>): string | null {
+	const global = snapshots.find((snapshot) => snapshot.scope === "global");
+	return global ? resolve(global.path, "..", "..") : null;
+}
+
+export function adoptionSourcesChanged(
+	snapshots: ReadonlyArray<AdoptionSourceSnapshot>,
+	options: AdoptionSourcesChangedOptions = {},
+): boolean {
+	const homeDir = resolve(options.homeDir ?? inferAdoptionHome(snapshots) ?? homedir());
+	const cwd = options.cwd ? resolve(options.cwd) : inferAdoptionCwd(snapshots, homeDir);
+	if (!cwd) {
+		for (const snapshot of snapshots) {
+			const current = readCandidate(
+				{
+					path: snapshot.path,
+					scope: snapshot.scope,
+					provider: snapshot.provider,
+					kind: snapshot.kind,
+					order: 0,
+				},
+				resolve(snapshot.path, ".."),
+				homeDir,
+			);
+			if (!current || adoptionSnapshotsHash([sourceSnapshot(current)]) !== adoptionSnapshotsHash([snapshot])) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const current = scanAgentConfigs({
+		cwd,
+		homeDir,
+		includeGlobal: options.includeGlobal ?? snapshots.some((snapshot) => snapshot.scope === "global"),
+	}).sourceSnapshots;
+	return adoptionSnapshotsHash(current) !== adoptionSnapshotsHash(snapshots);
 }

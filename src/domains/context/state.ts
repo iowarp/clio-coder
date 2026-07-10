@@ -5,11 +5,32 @@ import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionProvider, AdoptionScope, AdoptionSourceKind, AdoptionSourceSnapshot } from "./adoption.js";
 import type { Fingerprint } from "./fingerprint.js";
 
+export type BootstrapGenerationMode = "scout" | "heuristic" | "existing";
+
+export type BootstrapParserOutcome = "parsed" | "rejected" | "not-run";
+
+export interface BootstrapGenerationState {
+	mode: BootstrapGenerationMode;
+	parserOutcome: BootstrapParserOutcome;
+	fallbackReason?: string;
+	runId?: string;
+	targetId?: string;
+	wireModelId?: string;
+	runtimeId?: string;
+	runtimeKind?: string;
+	tokenCount?: number;
+	toolCalls?: number;
+	durationMs?: number;
+	promptBytes?: number;
+	outputBytes?: number;
+}
+
 export interface ClioProjectState {
 	version: 1;
 	projectType?: ProjectType;
 	fingerprint: Fingerprint;
 	bootstrapFingerprint?: Fingerprint;
+	lastBootstrap?: BootstrapGenerationState;
 	codewikiVersion?: number;
 	contextSources?: AdoptionSourceSnapshot[];
 	contextSourceHash?: string;
@@ -19,6 +40,63 @@ export interface ClioProjectState {
 }
 
 const STATE_RELATIVE_PATH = ".clio/state.json";
+
+const BOOTSTRAP_GENERATION_MODES = new Set<BootstrapGenerationMode>(["scout", "heuristic", "existing"]);
+const BOOTSTRAP_PARSER_OUTCOMES = new Set<BootstrapParserOutcome>(["parsed", "rejected", "not-run"]);
+const BOOTSTRAP_FALLBACK_REASON_MAX_LENGTH = 4096;
+const BOOTSTRAP_GENERATION_KEYS = new Set([
+	"mode",
+	"parserOutcome",
+	"fallbackReason",
+	"runId",
+	"targetId",
+	"wireModelId",
+	"runtimeId",
+	"runtimeKind",
+	"tokenCount",
+	"toolCalls",
+	"durationMs",
+	"promptBytes",
+	"outputBytes",
+]);
+const BOOTSTRAP_ID_KEYS = ["runId", "targetId", "wireModelId", "runtimeId", "runtimeKind"] as const;
+const BOOTSTRAP_COUNTER_KEYS = ["tokenCount", "toolCalls", "durationMs", "promptBytes", "outputBytes"] as const;
+
+function isBoundedNonemptyString(value: unknown, maxLength: number): value is string {
+	return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+}
+
+function isNonemptyString(value: unknown): value is string {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+function isBootstrapGenerationState(value: unknown): value is BootstrapGenerationState {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const obj = value as Record<string, unknown>;
+	if (!Object.keys(obj).every((key) => BOOTSTRAP_GENERATION_KEYS.has(key))) return false;
+	if (typeof obj.mode !== "string" || !BOOTSTRAP_GENERATION_MODES.has(obj.mode as BootstrapGenerationMode)) {
+		return false;
+	}
+	if (
+		typeof obj.parserOutcome !== "string" ||
+		!BOOTSTRAP_PARSER_OUTCOMES.has(obj.parserOutcome as BootstrapParserOutcome)
+	) {
+		return false;
+	}
+	if (
+		obj.fallbackReason !== undefined &&
+		!isBoundedNonemptyString(obj.fallbackReason, BOOTSTRAP_FALLBACK_REASON_MAX_LENGTH)
+	) {
+		return false;
+	}
+	for (const key of BOOTSTRAP_ID_KEYS) {
+		if (obj[key] !== undefined && !isNonemptyString(obj[key])) return false;
+	}
+	for (const key of BOOTSTRAP_COUNTER_KEYS) {
+		if (obj[key] !== undefined && (!Number.isSafeInteger(obj[key]) || (obj[key] as number) < 0)) return false;
+	}
+	return true;
+}
 
 function isFingerprint(value: unknown): value is Fingerprint {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -58,7 +136,10 @@ function isContextSourceSnapshot(value: unknown): value is AdoptionSourceSnapsho
 		typeof obj.kind === "string" &&
 		ADOPTION_KINDS.has(obj.kind as AdoptionSourceKind) &&
 		typeof obj.sha256 === "string" &&
-		/^[0-9a-f]{64}$/.test(obj.sha256)
+		/^[0-9a-f]{64}$/.test(obj.sha256) &&
+		(obj.status === undefined || obj.status === "accepted" || obj.status === "rejected") &&
+		(obj.reason === undefined || isBoundedNonemptyString(obj.reason, 256)) &&
+		(obj.status !== "rejected" || typeof obj.reason === "string")
 	);
 }
 
@@ -71,6 +152,9 @@ function isProjectState(value: unknown): value is ClioProjectState {
 		obj.bootstrapFingerprint !== undefined &&
 		!isFingerprint(obj.bootstrapFingerprint)
 	) {
+		return false;
+	}
+	if ("lastBootstrap" in obj && obj.lastBootstrap !== undefined && !isBootstrapGenerationState(obj.lastBootstrap)) {
 		return false;
 	}
 	if (

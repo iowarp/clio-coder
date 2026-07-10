@@ -167,6 +167,15 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(result.stdout, /Usage:/);
 	});
 
+	it("rejects removed top-level context aliases", async () => {
+		for (const alias of ["context-init", "context-index", "context-clear"]) {
+			const result = await runCli([alias, "--help"], { env: scratch.env });
+			strictEqual(result.code, 2, alias);
+			match(result.stderr, new RegExp(`unknown subcommand: ${alias}`));
+			match(result.stdout, /clio context init/);
+		}
+	});
+
 	it("doctor --fix bootstraps the configurations and environment", async () => {
 		const result = await runCli(["doctor", "--fix"], { env: scratch.env });
 		strictEqual(result.code, 0);

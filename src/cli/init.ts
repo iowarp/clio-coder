@@ -10,7 +10,7 @@ import {
 import { modelBootstrapGenerate } from "./bootstrap-generate.js";
 
 const HELP = `Usage:
-  clio context-init [--preview] [--heuristic] [--yes] [--adopt] [--propose|--apply|--rewrite]
+  clio context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--propose|--apply|--rewrite]
 
 Explore the repository and bootstrap the project context in one pass: CLIO.md,
 the codewiki index, and the .clio state. The configured Clio
@@ -26,6 +26,7 @@ Options:
   --propose        write an ignored .clio/proposals/CLIO-*.md draft when CLIO.md exists
   --apply          replace an existing CLIO.md with a draft grounded in the existing handbook
   --rewrite        replace an existing CLIO.md with a fresh draft that ignores it as source
+  --json           emit one machine-readable result object on stdout
   --yes, -y        update .gitignore without prompting
 `;
 
@@ -33,17 +34,31 @@ function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
 	return args.includes(name);
 }
 
-function parseContextInitArgs(args: ReadonlyArray<string>): { options: ContextInitOptions; error: string | null } {
+function parseContextInitArgs(args: ReadonlyArray<string>): {
+	options: ContextInitOptions;
+	json: boolean;
+	error: string | null;
+} {
 	const options: ContextInitOptions = {};
+	let json = false;
 	for (const arg of args) {
 		if (arg === "--help" || arg === "-h" || arg === "--yes" || arg === "-y") continue;
+		if (arg === "--json") {
+			json = true;
+			continue;
+		}
 		const row = CONTEXT_INIT_FLAG_TABLE.find((candidate) => candidate.flag === arg || candidate.aliases?.includes(arg));
 		if (!row) {
-			return { options, error: arg.startsWith("-") ? `unknown flag ${arg}` : `unexpected argument ${arg}` };
+			return { options, json, error: arg.startsWith("-") ? `unknown flag ${arg}` : `unexpected argument ${arg}` };
 		}
 		options[row.field] = true;
 	}
-	return { options, error: null };
+	return { options, json, error: null };
+}
+
+interface InitPhaseTiming {
+	startedAt: number;
+	completedMs?: number;
 }
 
 async function confirmGitignore(assumeYes: boolean): Promise<boolean> {
@@ -66,7 +81,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	const assumeYes = hasFlag(args, "--yes") || hasFlag(args, "-y");
 	const parsed = parseContextInitArgs(args);
 	if (parsed.error) {
-		process.stderr.write(`clio context-init: ${parsed.error}\n`);
+		process.stderr.write(`clio context init: ${parsed.error}\n`);
 		process.stdout.write(HELP);
 		return 2;
 	}
@@ -80,12 +95,22 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	// Model-driven exploration is the default. --heuristic (or legacy --no-generate)
 	// forces the deterministic generator; preview never spawns a model.
 	const useModel = parsed.options.heuristic !== true && parsed.options.preview !== true;
+	const startedAt = performance.now();
+	const phaseTimings = new Map<string, InitPhaseTiming>();
 	try {
-		await runBootstrap({
+		const result = await runBootstrap({
 			cwd: process.cwd(),
 			io: {
-				stdout: (s) => process.stdout.write(s),
+				stdout: (s) => {
+					if (!parsed.json) process.stdout.write(s);
+				},
 				stderr: (s) => process.stderr.write(s),
+			},
+			onProgress: (event) => {
+				const now = performance.now();
+				const timing = phaseTimings.get(event.phase);
+				if (event.status === "started") phaseTimings.set(event.phase, { startedAt: now });
+				else if (event.status === "completed" && timing) timing.completedMs = Math.max(0, now - timing.startedAt);
 			},
 			confirmGitignore: () => confirmGitignore(assumeYes),
 			...bootstrapOptions,
@@ -94,16 +119,40 @@ export async function runInitCommand(args: string[]): Promise<number> {
 						generate: modelBootstrapGenerate({
 							onFallback: (err, mode) =>
 								process.stderr.write(
-									`clio context-init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,
+									`clio context init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO.md" : "heuristic"} (${err.message})\n`,
 								),
 						}),
 						modelId: "configured-clio-target",
 					}
 				: {}),
 		});
+		if (parsed.json) {
+			process.stdout.write(
+				`${JSON.stringify({
+					version: 1,
+					action: result.summary.action,
+					projectType: result.projectType,
+					codewikiEntries: result.summary.codewikiEntries,
+					clioMdPath: result.clioMdPath,
+					statePath: result.statePath,
+					preload: result.preload,
+					adoption: result.summary.adoption,
+					generation: result.telemetry.generation,
+					timings: {
+						wallMs: Math.max(0, performance.now() - startedAt),
+						...(phaseTimings.get("codewiki")?.completedMs !== undefined
+							? { codewikiMs: phaseTimings.get("codewiki")?.completedMs }
+							: {}),
+						...(phaseTimings.get("generate")?.completedMs !== undefined
+							? { generationMs: phaseTimings.get("generate")?.completedMs }
+							: {}),
+					},
+				})}\n`,
+			);
+		}
 		return 0;
 	} catch (err) {
-		process.stderr.write(`clio context-init failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(`clio context init failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	}
 }

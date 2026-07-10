@@ -48,7 +48,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	const allowed = new Set(["--json"]);
 	for (const arg of args) {
 		if (!allowed.has(arg)) {
-			process.stderr.write(`clio context-index: unknown flag ${arg}\n`);
+			process.stderr.write(`clio context index: unknown flag ${arg}\n`);
 			return 2;
 		}
 	}
@@ -66,6 +66,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 		codewikiVersion: codewiki.version,
 		...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
 		...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+		...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
 		...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
 		lastSessionAt: prev?.lastSessionAt ?? now,
 		lastIndexedAt: now,
@@ -89,7 +90,7 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 	}
 	process.stdout.write(
 		[
-			`clio context-index indexed ${indexed}/${profile.sourceFiles} source file${profile.sourceFiles === 1 ? "" : "s"} (${(coverage * 100).toFixed(1)}%)`,
+			`clio context index indexed ${indexed}/${profile.sourceFiles} source file${profile.sourceFiles === 1 ? "" : "s"} (${(coverage * 100).toFixed(1)}%)`,
 			`  language ${profile.projectType}; counts ${formatCounts(counts)}`,
 			`  codewiki ${payload.codewikiPath}`,
 			`  state ${payload.statePath}`,

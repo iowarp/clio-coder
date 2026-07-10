@@ -133,23 +133,33 @@ describe("contracts/context-init-options", () => {
 					identity: "Fresh Context is generated without the old handbook as source.",
 					conventions: ["Use fresh repository evidence."],
 					invariants: [],
+					sections: [
+						{
+							title: "Fresh Rewrite Evidence",
+							body: "This custom section was generated without the old handbook as source.",
+						},
+					],
 				};
 			},
 		});
 
 		strictEqual(generated, true);
 		const after = readFileSync(join(cwd, "CLIO.md"), "utf8");
-		ok(after.includes("Fresh Context"), after);
+		ok(after.includes("# Init Options Fixture"), after);
+		ok(after.includes("## Fresh Rewrite Evidence"), after);
 		strictEqual(after.includes("Curated Context"), false);
 	});
 
 	it("rejects --propose conflicts through the shared validator and CLI usage path", async () => {
+		ok(validateInitOptions({ proposeClioMd: true, adopt: true }));
 		ok(validateInitOptions({ proposeClioMd: true, applyClioMd: true }));
 		ok(validateInitOptions({ proposeClioMd: true, rewriteClioMd: true }));
 
-		const captured = await captureProcessWrites(() => runInitCommand(["--propose", "--apply"]));
-		strictEqual(captured.value, 2);
-		match(captured.stderr, /--propose cannot be combined with --apply or --rewrite/);
-		match(captured.stdout, /Usage:/);
+		for (const conflict of ["--adopt", "--apply", "--rewrite"]) {
+			const captured = await captureProcessWrites(() => runInitCommand(["--propose", conflict]));
+			strictEqual(captured.value, 2);
+			match(captured.stderr, /--propose cannot be combined with --adopt, --apply, or --rewrite/);
+			match(captured.stdout, /Usage:/);
+		}
 	});
 });

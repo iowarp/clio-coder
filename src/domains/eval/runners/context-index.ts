@@ -8,7 +8,7 @@ export async function runContextIndexRunner(
 	target: EvalSuiteTargetV2,
 ): Promise<EvalRunnerOutput> {
 	const result = await runShellCommand(
-		`${shellQuote(process.execPath)} ${shellQuote(clioEntry)} context-index --json`,
+		`${shellQuote(process.execPath)} ${shellQuote(clioEntry)} context index --json`,
 		cwd,
 		timeoutMs,
 	);
@@ -23,7 +23,6 @@ export async function runContextIndexRunner(
 			"context.indexedFiles": parsed.indexedSourceFiles ?? 0,
 			"context.coverage": parsed.coverage ?? 0,
 			"context.structuralHash": parsed.structuralHash ?? null,
-			"context.digestTokens": 0,
 			"verifier.exitCode": result.exitCode,
 		},
 		artifacts: {

@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 import { type Codewiki, isIndexablePath, readCodewiki } from "./codewiki/indexer.js";
 import { EXCLUDED_DIRS } from "./excluded-dirs.js";
 
@@ -33,10 +34,16 @@ const LOC_EXTENSIONS = new Set([
 	".py",
 	".rs",
 	".go",
+	".cc",
 	".cpp",
+	".cxx",
 	".hpp",
+	".hh",
+	".hxx",
 	".c",
 	".h",
+	".cu",
+	".cuh",
 	".java",
 	".kt",
 ]);
@@ -44,25 +51,6 @@ const LOC_EXTENSIONS = new Set([
 function extensionOf(name: string): string {
 	const index = name.lastIndexOf(".");
 	return index === -1 ? "" : name.slice(index);
-}
-
-function walkFiles(cwd: string, dir: string, out: string[]): void {
-	let entries: import("node:fs").Dirent[];
-	try {
-		entries = readdirSync(dir, { withFileTypes: true });
-	} catch {
-		return;
-	}
-	for (const entry of entries) {
-		if (entry.isDirectory()) {
-			if (EXCLUDED_DIRS.has(entry.name)) continue;
-			walkFiles(cwd, join(dir, entry.name), out);
-			continue;
-		}
-		if (!entry.isFile()) continue;
-		const relPath = relative(cwd, join(dir, entry.name)).split("\\").join("/");
-		if (isIndexablePath(relPath)) out.push(relPath);
-	}
 }
 
 function currentGitHead(cwd: string): string | null {
@@ -97,9 +85,7 @@ function locFromCodewiki(codewiki: Codewiki | null): number | null {
 }
 
 export function computeFingerprint(cwd: string, codewiki: Codewiki | null = readCodewiki(cwd)): Fingerprint {
-	const files: string[] = [];
-	walkFiles(cwd, cwd, files);
-	files.sort((a, b) => a.localeCompare(b));
+	const files = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
 
 	const hash = createHash("sha256");
 	const artifactLoc = locFromCodewiki(codewiki);

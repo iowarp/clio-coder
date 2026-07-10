@@ -29,7 +29,7 @@ const PHASES: ReadonlyArray<ContextActivityPhase> = ["scan", "codewiki", "genera
 const PHASE_LABELS: Record<ContextActivityPhase, string> = {
 	scan: "scan",
 	codewiki: "wiki",
-	generate: "scout",
+	generate: "draft",
 	"clio-md": "CLIO.md",
 	state: "state",
 	done: "done",

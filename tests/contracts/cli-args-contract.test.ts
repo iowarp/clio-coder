@@ -15,9 +15,11 @@ describe("contracts/cli-args-contract", () => {
 		["--api-key"],
 		["--api-key", "--version"],
 		["--api-key", "paths", "--json"],
+		["--api-key", "context-init"],
 		["--skill"],
 		["--skill", "--version"],
 		["--skill", "paths", "--json"],
+		["--skill", "context-index"],
 	];
 
 	for (const args of missingValueCases) {

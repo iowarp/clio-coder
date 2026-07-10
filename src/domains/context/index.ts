@@ -16,6 +16,7 @@ export function createContextDomainModule(options: ContextBundleOptions = {}): D
 
 export {
 	type AdoptionScanResult,
+	type AdoptionSourcesChangedOptions,
 	adoptionSnapshotsHash,
 	adoptionSourcesChanged,
 	renderImportedAgentContext,
@@ -26,8 +27,11 @@ export {
 	type BootstrapFallbackResult,
 	type BootstrapGenerate,
 	type BootstrapGenerateInput,
+	type BootstrapGenerationSink,
+	type BootstrapGenerationTelemetry,
 	type BootstrapProgressEvent,
 	type BootstrapProgressSink,
+	type BootstrapScoutTelemetry,
 	type BootstrapStructuredOutput,
 	existingClioMdBootstrapOutput,
 	fallbackBootstrapOutput,
@@ -40,6 +44,7 @@ export { parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
 export { renderCodewikiDigest } from "./codewiki/digest.js";
 export {
 	buildCodewiki,
+	CODEWIKI_VERSION,
 	codewikiEntries,
 	codewikiNeedsBackfill,
 	readCodewiki,
@@ -68,7 +73,13 @@ export {
 	type RunContextRefreshResult,
 	runContextRefresh,
 } from "./refresh.js";
-export { readClioState, writeClioState } from "./state.js";
+export {
+	type BootstrapGenerationMode,
+	type BootstrapGenerationState,
+	type BootstrapParserOutcome,
+	readClioState,
+	writeClioState,
+} from "./state.js";
 export {
 	type RunWikiGenerateInput,
 	type RunWikiGenerateResult,

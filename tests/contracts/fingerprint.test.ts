@@ -133,7 +133,7 @@ describe("contracts/fingerprint", () => {
 		writeFileSync(join(withArtifact, "src", "index.ts"), "export const actual = true;\n", "utf8");
 		writeFileSync(join(withArtifact, "package.json"), '{"name":"fixture"}\n', "utf8");
 		writeCodewiki(withArtifact, {
-			version: 4,
+			version: 5,
 			language: "typescript",
 			files: [
 				{

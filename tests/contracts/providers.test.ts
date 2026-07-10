@@ -671,6 +671,57 @@ describe("contracts/providers/runtime-cleanup", () => {
 		throws(() => parseWorkerSpec(minimalWorkerSpec({ protectedModels: [42] })), /protectedModels/);
 	});
 
+	it("round-trips a bounded llama.cpp response schema and refuses unsupported worker runtimes", () => {
+		const responseSchema = {
+			type: "object",
+			properties: { summary: { type: "string" } },
+			required: ["summary"],
+		};
+		const llamaSpec = minimalWorkerSpec({
+			target: { id: "mini", runtime: "llamacpp" },
+			runtime: {
+				version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+				id: "llamacpp",
+				kind: "http",
+				apiFamily: "openai-completions",
+				auth: "none",
+			},
+			runtimeId: "llamacpp",
+			modelCapabilities: { structuredOutputs: "json-schema" },
+			responseSchema,
+		});
+		deepStrictEqual(parseWorkerSpec(llamaSpec).responseSchema, responseSchema);
+		throws(
+			() => parseWorkerSpec({ ...llamaSpec, modelCapabilities: { structuredOutputs: "none" } }),
+			/requires resolved JSON-schema model capability/,
+		);
+		throws(
+			() => parseWorkerSpec({ ...llamaSpec, responseSchema: { type: "object", invalid: undefined } }),
+			/WorkerSpec\.responseSchema must be JSON-serializable/,
+		);
+
+		throws(
+			() => parseWorkerSpec(minimalWorkerSpec({ responseSchema })),
+			/responseSchema is supported only by the native llamacpp runtime/,
+		);
+		throws(
+			() =>
+				parseWorkerSpec({
+					...llamaSpec,
+					target: { id: "claude", runtime: "claude-code" },
+					runtime: {
+						version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
+						id: "claude-code",
+						kind: "subprocess",
+						apiFamily: "claude-code-subprocess",
+						auth: "claude-cli",
+					},
+					runtimeId: "claude-code",
+				}),
+			/responseSchema is supported only by the native llamacpp runtime/,
+		);
+	});
+
 	it("keeps removed legacy Claude Code SDK/CLI, native CLI auth, and generic subprocess paths absent", () => {
 		const removedPaths = [
 			"src/engine/claude-code-sdk-runtime.ts",
@@ -709,6 +760,12 @@ describe("contracts/providers/runtime-cleanup", () => {
 		strictEqual(sub?.apiFamily, "anthropic-messages");
 		strictEqual(sub?.oauthProviderId, "anthropic");
 		ok(sub?.authNotice && sub.authNotice.length > 0, "subscription runtime must carry a usage-terms notice");
+	});
+
+	it("advertises JSON-schema structured output support for native llama.cpp chat", () => {
+		const runtime = BUILTIN_RUNTIMES.find((entry) => entry.id === "llamacpp");
+		ok(runtime, "llamacpp runtime must be registered");
+		strictEqual(runtime?.defaultCapabilities.structuredOutputs, "json-schema");
 	});
 
 	it("routes subscription auth to the pi-ai anthropic provider without colliding with the api-key runtime", () => {

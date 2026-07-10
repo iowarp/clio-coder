@@ -1,13 +1,26 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { buildBootstrapPrompt } from "../../src/domains/context/bootstrap-prompt.js";
+import {
+	BOOTSTRAP_INPUT_MAX_CHARS,
+	BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS,
+	buildBootstrapPrompt,
+} from "../../src/domains/context/bootstrap-prompt.js";
 import { parseClioMd, renderProjectContextFragment, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
-import { fallbackBootstrapOutput, runBootstrap, runContextClear } from "../../src/domains/context/index.js";
+import {
+	adoptionSourcesChanged,
+	computeFingerprint,
+	fallbackBootstrapOutput,
+	isStale,
+	readCodewiki,
+	runBootstrap,
+	runContextClear,
+	scanAgentConfigs,
+} from "../../src/domains/context/index.js";
 import { readClioState } from "../../src/domains/context/state.js";
 
 const fingerprint = {
@@ -70,6 +83,7 @@ describe("contracts/bootstrap", () => {
 	it("builds bootstrap prompt text with real code navigation guidance", () => {
 		const prompt = buildBootstrapPrompt({
 			cwd: scratch,
+			expectedProjectName: "Private Project",
 			projectType: "typescript",
 			siblingFiles: [],
 			adoption: {
@@ -86,6 +100,73 @@ describe("contracts/bootstrap", () => {
 		});
 
 		ok(prompt.includes("code_nav"), prompt);
+	});
+
+	it("bounds aggregate sibling context and uses display paths in the Scout payload", () => {
+		const sources = Array.from({ length: 30 }, (_, index) => ({
+			path: `/home/private/.agents/skills/skill-${index}/SKILL.md`,
+			displayPath: `.agents/skills/skill-${index}/SKILL.md`,
+			scope: "project" as const,
+			provider: "agents" as const,
+			providerLabel: "Agent Skills",
+			kind: "skill" as const,
+			kindLabel: "skill",
+			content: `rule ${index} ${"x".repeat(10_000)}`,
+			contentSha256: "a".repeat(64),
+			byteLength: 10_000,
+			itemCount: 1,
+			order: index,
+		}));
+		const prompt = buildBootstrapPrompt({
+			cwd: scratch,
+			expectedProjectName: "Private Project",
+			projectType: "typescript",
+			siblingFiles: sources.map((source) => ({ source: source.scope, path: source.path, content: source.content })),
+			adoption: {
+				cwd: scratch,
+				homeDir: "/home/private",
+				includeGlobal: false,
+				sources,
+				rejected: [],
+				importedRules: sources.slice(0, 20).map((source) => ({
+					text: source.content,
+					sources: [source.path],
+					providers: [source.provider],
+				})),
+				conflicts: [],
+				sourceHash: "b".repeat(64),
+				sourceSnapshots: sources.map((source) => ({
+					path: source.path,
+					scope: source.scope,
+					provider: source.provider,
+					kind: source.kind,
+					sha256: source.contentSha256,
+				})),
+			},
+			existingClioMdText: `# Existing\n\n${"z".repeat(20_000)}`,
+		});
+		const serialized = /<bootstrap-input>\n([^\n]+)\n<\/bootstrap-input>/.exec(prompt)?.[1];
+		ok(serialized);
+		ok(serialized.length <= BOOTSTRAP_INPUT_MAX_CHARS, `${serialized.length}`);
+		const payload = JSON.parse(serialized) as {
+			projectRoot: string;
+			expectedProjectName: string;
+			siblingFiles: Array<{ path: string; content: string }>;
+			adoption: { sourceCount: number; presentedSourceCount: number };
+		};
+		strictEqual(payload.projectRoot, ".");
+		strictEqual(payload.expectedProjectName, "Private Project");
+		strictEqual(serialized.includes(scratch), false);
+		strictEqual(payload.adoption.sourceCount, 30);
+		ok(payload.adoption.presentedSourceCount <= 12);
+		strictEqual(
+			payload.siblingFiles.some((source) => source.path.startsWith("/home/private")),
+			false,
+		);
+		ok(
+			payload.siblingFiles.reduce((total, source) => total + source.content.length, 0) <=
+				BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS,
+		);
 	});
 
 	it("demotes nested generated headings so CLIO.md keeps one H1", async () => {
@@ -121,6 +202,147 @@ describe("contracts/bootstrap", () => {
 		ok(parsed.ok);
 	});
 
+	it("keeps identity and hard rules evidence-owned while Scout contributes bounded sections", async () => {
+		const groundedRule = "Always run npm test before handing results to partners.";
+		const alteredRule = "Always run npm publish before handing results to partners.";
+		writeFileSync(
+			join(scratch, "package.json"),
+			JSON.stringify({
+				name: "grounded-project",
+				type: "module",
+				description: "an HPC workflow engine for scientific data",
+			}),
+			"utf8",
+		);
+		writeFileSync(join(scratch, "index.ts"), "export const grounded = true;\n", "utf8");
+		writeFileSync(join(scratch, "AGENTS.md"), `- ${groundedRule}\n`, "utf8");
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			generate: (input) => {
+				input.reportGeneration?.({
+					mode: "scout",
+					parserOutcome: "parsed",
+					scout: { promptBytes: 100, outputBytes: 100 },
+				});
+				return {
+					projectName: scratch,
+					identity: "Generic helper",
+					conventions: ["python", "Always invent a framework."],
+					invariants: ["Dependency list is a hard invariant."],
+					sections: [
+						{ title: "Architecture & Ownership", body: "A dedicated team owns every change." },
+						{
+							title: "Operational workflow",
+							body: [alteredRule, ...Array.from({ length: 40 }, () => groundedRule)].join("\n"),
+						},
+					],
+				};
+			},
+		});
+
+		strictEqual(result.output.projectName, "Grounded Project");
+		match(result.output.identity, /HPC workflow engine for scientific data/i);
+		deepStrictEqual(result.output.conventions, [groundedRule]);
+		deepStrictEqual(result.output.invariants, []);
+		const sectionTitles = result.output.sections?.map((section) => section.title) ?? [];
+		ok(sectionTitles.includes("Context retrieval"));
+		ok(sectionTitles.includes("Repository shape"));
+		ok(sectionTitles.includes("Operational workflow"));
+		strictEqual(sectionTitles.includes("Architecture & Ownership"), false);
+		const workflow = result.output.sections?.find((section) => section.title === "Operational workflow");
+		ok(workflow);
+		ok(workflow.body.length <= 1200);
+		ok(workflow.body.split("\n").every((line) => line === groundedRule));
+		strictEqual(workflow.body.includes("npm publish"), false);
+		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8").includes(scratch), false);
+		strictEqual(result.telemetry.generation.mode, "scout");
+	});
+
+	it("records a parsed Scout draft as heuristic when no enrichment survives grounding", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "grounding-floor", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "AGENTS.md"), "- Always keep generated context concise.\n", "utf8");
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			generate: (input) => {
+				input.reportGeneration?.({
+					mode: "scout",
+					parserOutcome: "parsed",
+					scout: { promptBytes: 100, outputBytes: 100 },
+				});
+				return {
+					projectName: "Ignored",
+					identity: "Ignored",
+					conventions: [],
+					invariants: [],
+					sections: [],
+				};
+			},
+		});
+
+		strictEqual(result.telemetry.generation.mode, "heuristic");
+		strictEqual(result.telemetry.generation.parserOutcome, "parsed");
+		strictEqual(
+			result.telemetry.generation.fallbackReason,
+			"Scout draft contributed no evidence-grounded custom sections",
+		);
+		strictEqual(readClioState(scratch)?.lastBootstrap?.mode, "heuristic");
+	});
+
+	it("does not attribute a Scout section that is removed by the final section limit", async () => {
+		const groundedRule = "Always run the saturated handbook verifier before handoff.";
+		writeFileSync(join(scratch, "index.ts"), "export const saturated = true;\n", "utf8");
+		writeFileSync(join(scratch, "AGENTS.md"), `- ${groundedRule}\n`, "utf8");
+		writeFileSync(
+			join(scratch, "CLIO.md"),
+			serializeClioMd({
+				projectName: "Saturated Handbook",
+				identity: "Saturated Handbook has a full set of curated project sections.",
+				conventions: [],
+				invariants: [],
+				sections: Array.from({ length: 7 }, (_, index) => ({
+					title: `Curated section ${index + 1}`,
+					body: `Curated body ${index + 1} remains human-owned.`,
+				})),
+				fingerprint,
+			}),
+			"utf8",
+		);
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			applyClioMd: true,
+			confirmGitignore: () => true,
+			generate: (input) => {
+				input.reportGeneration?.({
+					mode: "scout",
+					parserOutcome: "parsed",
+					scout: { promptBytes: 100, outputBytes: 100 },
+				});
+				return {
+					projectName: "Ignored",
+					identity: "Ignored",
+					conventions: [],
+					invariants: [],
+					sections: [{ title: "Scout appendix", body: groundedRule }],
+				};
+			},
+		});
+
+		strictEqual(
+			result.output.sections?.some((section) => section.title === "Scout appendix"),
+			false,
+		);
+		strictEqual(result.telemetry.generation.mode, "heuristic");
+		strictEqual(
+			result.telemetry.generation.fallbackReason,
+			"Scout draft contributed no evidence-grounded custom sections",
+		);
+	});
+
 	it("parses more than six convention bullets with a warning", () => {
 		const bullets = Array.from({ length: 7 }, (_, index) => `- rule ${index}`).join("\n");
 		const parsed = parseClioMd(`# Sample\n\nSample is a project with too many rules.\n\n## Conventions\n\n${bullets}\n`);
@@ -139,14 +361,7 @@ describe("contracts/bootstrap", () => {
 		const result = await runBootstrap({
 			cwd: scratch,
 			confirmGitignore: () => true,
-			modelId: "stub-model",
 			now: () => new Date("2026-05-01T00:00:00.000Z"),
-			generate: () => ({
-				projectName: "Mock Project",
-				identity: "Mock Project is a dynamic test project.",
-				conventions: ["Keep files short."],
-				invariants: [],
-			}),
 		});
 
 		ok(existsSync(join(scratch, "CLIO.md")));
@@ -162,10 +377,99 @@ describe("contracts/bootstrap", () => {
 
 		strictEqual(result.projectType, "typescript");
 		strictEqual(result.summary.action, "wrote");
+		strictEqual(result.telemetry.generation.mode, "heuristic");
+		strictEqual(result.telemetry.generation.parserOutcome, "not-run");
+		strictEqual(result.output.sections?.filter((section) => section.title === "Context artifacts").length, 1);
+		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8").match(/^## Context artifacts$/gm)?.length, 1);
 
 		const state = readClioState(scratch);
 		strictEqual(state?.projectType, "typescript");
 		strictEqual(state?.lastIndexedAt, "2026-05-01T00:00:00.000Z");
+		strictEqual(state?.lastBootstrap?.mode, "heuristic");
+	});
+
+	it("discloses when a parsed Scout draft is replaced by the source-sparse heuristic floor", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "floor-project", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "index.ts"), "export const floor = true;\n", "utf8");
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			generate: (input) => {
+				input.reportGeneration?.({
+					mode: "scout",
+					parserOutcome: "parsed",
+					scout: { promptBytes: 10, outputBytes: 20 },
+				});
+				return {
+					projectName: "Invented Ownership",
+					identity: "An unsupported identity from a source-sparse model response.",
+					conventions: [],
+					invariants: [],
+					sections: [{ title: "Workflow traps", body: "A dedicated team owns every change." }],
+				};
+			},
+		});
+
+		strictEqual(result.output.projectName, "Floor Project");
+		strictEqual(result.telemetry.generation.mode, "heuristic");
+		strictEqual(result.telemetry.generation.parserOutcome, "parsed");
+		strictEqual(result.telemetry.generation.fallbackReason, "source-sparse Scout output triggered heuristic floor");
+		strictEqual(readClioState(scratch)?.lastBootstrap?.mode, "heuristic");
+		strictEqual(readClioState(scratch)?.lastBootstrap?.parserOutcome, "parsed");
+	});
+
+	it("publishes a fresh codewiki checkpoint before the scout generator runs", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "staged-context", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "index.ts"), "export const staged = true;\n", "utf8");
+
+		await runBootstrap({
+			cwd: scratch,
+			confirmGitignore: () => true,
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+			generate: () => {
+				const codewiki = readCodewiki(scratch);
+				const state = readClioState(scratch);
+				ok(codewiki, "codewiki must be visible to the scout worker before generation");
+				ok(state, "matching freshness state must be visible before generation");
+				strictEqual(isStale(state.fingerprint, computeFingerprint(scratch, codewiki)), false);
+				strictEqual(state.lastInitAt, undefined, "the checkpoint must not claim init completed early");
+				return {
+					projectName: "Staged Context",
+					identity: "Staged Context exercises the pre-generation index checkpoint.",
+					conventions: [],
+					invariants: [],
+				};
+			},
+		});
+
+		strictEqual(readClioState(scratch)?.lastInitAt, "2026-05-01T00:00:00.000Z");
+	});
+
+	it("keeps preview strictly write-free before and after generation", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "preview-context", type: "module" }), "utf8");
+		let confirmationRequested = false;
+
+		const result = await runBootstrap({
+			cwd: scratch,
+			preview: true,
+			confirmGitignore: () => {
+				confirmationRequested = true;
+				return true;
+			},
+			generate: () => ({
+				projectName: "Preview Context",
+				identity: "Preview Context verifies that orientation can be inspected without writes.",
+				conventions: [],
+				invariants: [],
+			}),
+		});
+
+		strictEqual(confirmationRequested, false);
+		strictEqual(existsSync(join(scratch, ".clio")), false);
+		strictEqual(existsSync(join(scratch, "CLIO.md")), false);
+		strictEqual(existsSync(join(scratch, ".gitignore")), false);
+		strictEqual(result.telemetry.generation.mode, "heuristic");
 	});
 
 	it("preserves existing CLIO.md by default without a model rewrite", async () => {
@@ -191,7 +495,7 @@ describe("contracts/bootstrap", () => {
 		const phases: string[] = [];
 		let generated = false;
 
-		await runBootstrap({
+		const result = await runBootstrap({
 			cwd: scratch,
 			confirmGitignore: () => true,
 			modelId: "stub-model",
@@ -214,6 +518,8 @@ describe("contracts/bootstrap", () => {
 			strictEqual(parsed.value.sections[0]?.body, "Preserve this section when scout or model generation is unavailable.");
 		}
 		strictEqual(generated, false);
+		strictEqual(result.telemetry.generation.mode, "existing");
+		strictEqual(readClioState(scratch)?.lastBootstrap?.mode, "existing");
 		ok(phases.includes("codewiki:completed"));
 		ok(phases.includes("clio-md:completed"));
 		ok(phases.includes("done:completed"));
@@ -455,5 +761,87 @@ describe("contracts/bootstrap", () => {
 		ok(state.contextSources.some((source) => source.provider === "copilot" && source.kind === "skill"));
 		ok(state?.contextSourceHash);
 		strictEqual(result.summary.adoption.mode, "adopt");
+	});
+
+	it("detects supported agent context sources added after the recorded snapshot", () => {
+		writeFileSync(join(scratch, "CLAUDE.md"), "- Prefer pnpm for package management.\n", "utf8");
+		const recorded = scanAgentConfigs({ cwd: scratch }).sourceSnapshots;
+
+		strictEqual(adoptionSourcesChanged(recorded), false);
+		writeFileSync(join(scratch, "AGENTS.md"), "- Always run focused tests before handoff.\n", "utf8");
+		strictEqual(adoptionSourcesChanged(recorded), true);
+	});
+
+	it("records an empty adoption baseline so the first supported source makes context stale", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "empty-adoption", type: "module" }), "utf8");
+
+		await runBootstrap({
+			cwd: scratch,
+			adopt: true,
+			confirmGitignore: () => true,
+			now: () => new Date("2026-05-01T00:00:00.000Z"),
+		});
+
+		const state = readClioState(scratch);
+		ok(state?.contextSources);
+		strictEqual(state.contextSources.length, 0);
+		ok(state.contextSourceHash);
+		strictEqual(adoptionSourcesChanged(state.contextSources, { cwd: scratch }), false);
+
+		writeFileSync(join(scratch, "CLAUDE.md"), "- Always run focused tests before handoff.\n", "utf8");
+		strictEqual(adoptionSourcesChanged(state.contextSources, { cwd: scratch }), true);
+
+		const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+		strictEqual(bundle.contract.contextState(scratch).clioMd, "stale");
+	});
+
+	it("tracks rejected agent context so changed rejection provenance becomes stale", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "rejected-adoption", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "AGENTS.md"), 'api_key = "not-a-real-secret-value"\n', "utf8");
+
+		await runBootstrap({
+			cwd: scratch,
+			adopt: true,
+			confirmGitignore: () => true,
+		});
+
+		const clio = readFileSync(join(scratch, "CLIO.md"), "utf8");
+		ok(clio.includes("### Rejected sources"), clio);
+		ok(clio.includes("skipped secret-like content"), clio);
+		const state = readClioState(scratch);
+		ok(state?.contextSources);
+		strictEqual(state.contextSources.length, 1);
+		strictEqual(state.contextSources[0]?.status, "rejected");
+		strictEqual(adoptionSourcesChanged(state.contextSources, { cwd: scratch }), false);
+
+		writeFileSync(join(scratch, "AGENTS.md"), 'api_key = "another-fake-secret-value"\n', "utf8");
+		strictEqual(adoptionSourcesChanged(state.contextSources, { cwd: scratch }), true);
+	});
+
+	it("rejects bare adoption for malformed CLIO.md without changing it or recording sources", async () => {
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ name: "malformed-adoption", type: "module" }), "utf8");
+		writeFileSync(join(scratch, "CLAUDE.md"), "- Always run focused tests before handoff.\n", "utf8");
+		const malformed = "This handbook has no project heading.\n";
+		writeFileSync(join(scratch, "CLIO.md"), malformed, "utf8");
+		const stdout: string[] = [];
+
+		await rejects(
+			() =>
+				runBootstrap({
+					cwd: scratch,
+					adopt: true,
+					confirmGitignore: () => true,
+					io: { stdout: (text) => stdout.push(text), stderr: () => {} },
+				}),
+			/cannot refresh Imported agent context because CLIO\.md is malformed.*--apply or --rewrite/,
+		);
+
+		strictEqual(readFileSync(join(scratch, "CLIO.md"), "utf8"), malformed);
+		strictEqual(readClioState(scratch)?.contextSources, undefined);
+		strictEqual(readClioState(scratch)?.contextSourceHash, undefined);
+		strictEqual(
+			stdout.some((line) => line.includes("adoption imported")),
+			false,
+		);
 	});
 });

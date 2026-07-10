@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { runContextClear } from "../domains/context/index.js";
 
 const HELP = `Usage:
-  clio context-clear [--all]
+  clio context reset [--all]
 
 Clear accumulated project context owned by the context engine:
 .clio/codewiki.json, .clio/state.json, .clio/handoffs/, and .clio/proposals/.
@@ -39,7 +39,7 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 	}
 	for (const arg of args) {
 		if (arg !== "--all") {
-			process.stderr.write(`clio context-clear: unknown flag ${arg}\n`);
+			process.stderr.write(`clio context reset: unknown flag ${arg}\n`);
 			process.stdout.write(HELP);
 			return 2;
 		}
@@ -59,7 +59,7 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 		});
 		return 0;
 	} catch (err) {
-		process.stderr.write(`clio context-clear failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(`clio context reset failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	}
 }

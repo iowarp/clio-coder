@@ -95,7 +95,7 @@ function initGitRepo(cwd: string): string {
 
 function promptCodewiki(): Codewiki {
 	return {
-		version: 4,
+		version: 5,
 		language: "typescript",
 		files: [
 			{
