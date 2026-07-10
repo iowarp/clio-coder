@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
@@ -98,7 +98,7 @@ interface ScenarioOutcome {
 	baseline: CapturedRun | null;
 	treatment: CapturedRun | null;
 	judge: CapturedRun | null;
-	/** Temp workspace the runs executed in; removed after the run, kept as a record. */
+	/** Seed workspace cloned for both arms; removed after the run, kept as a record. */
 	workspace: string;
 	wallTimeMs: number;
 	infraError: string | null;
@@ -282,10 +282,11 @@ async function runScenario(
 	trustFixtures: boolean,
 ): Promise<ScenarioOutcome> {
 	const scenarioStart = Date.now();
-	const workspace = workspaceOverride ?? (await mkdtemp(join(tmpdir(), "clio-skill-eval-")));
-	const removeWorkspace = workspaceOverride === null;
+	const workspace = await mkdtemp(join(tmpdir(), "clio-skill-eval-seed-"));
+	let runWorkspaces: MaterializedSkillEvalWorkspaces | null = null;
 	const targetArgs = target === undefined ? [] : ["--target", target];
 	try {
+		if (workspaceOverride !== null) await copyWorkspace(workspaceOverride, workspace);
 		const fixtureError = await runFixtureCommands(scenario, workspace, timeoutMs, trustFixtures);
 		if (fixtureError !== null) {
 			return await completeScenarioOutcome({
@@ -299,9 +300,10 @@ async function runScenario(
 				infraError: fixtureError,
 			});
 		}
+		runWorkspaces = await materializeSkillEvalWorkspaces(workspace);
 		const baseline = await captureHeadlessRun(
 			["run", "--json", "--json-events", "terminal", "--no-skills", ...targetArgs, scenario.setup],
-			workspace,
+			runWorkspaces.baseline,
 			timeoutMs,
 		);
 		const treatment = await captureHeadlessRun(
@@ -316,7 +318,7 @@ async function runScenario(
 				...targetArgs,
 				`/skill:${skillName} ${scenario.setup}`,
 			],
-			workspace,
+			runWorkspaces.treatment,
 			timeoutMs,
 		);
 		const infra = runInfraError("baseline", baseline) ?? runInfraError("treatment", treatment);
@@ -345,7 +347,7 @@ async function runScenario(
 				...targetArgs,
 				judgePrompt(scenario, baseline.transcript, treatment.transcript),
 			],
-			workspace,
+			runWorkspaces.judge,
 			timeoutMs,
 		);
 		const judgeInfra = runInfraError("judge", judge);
@@ -373,8 +375,52 @@ async function runScenario(
 			infraError: null,
 		});
 	} finally {
-		if (removeWorkspace) await rm(workspace, { recursive: true, force: true });
+		try {
+			if (runWorkspaces !== null) await runWorkspaces.cleanup();
+		} finally {
+			await rm(workspace, { recursive: true, force: true });
+		}
 	}
+}
+
+export interface MaterializedSkillEvalWorkspaces {
+	baseline: string;
+	treatment: string;
+	judge: string;
+	cleanup(): Promise<void>;
+}
+
+/** @internal Exported for contract tests. */
+export async function materializeSkillEvalWorkspaces(seedWorkspace: string): Promise<MaterializedSkillEvalWorkspaces> {
+	const created: string[] = [];
+	try {
+		const baseline = await mkdtemp(join(tmpdir(), "clio-skill-eval-baseline-"));
+		created.push(baseline);
+		const treatment = await mkdtemp(join(tmpdir(), "clio-skill-eval-treatment-"));
+		created.push(treatment);
+		const judge = await mkdtemp(join(tmpdir(), "clio-skill-eval-judge-"));
+		created.push(judge);
+		await Promise.all([copyWorkspace(seedWorkspace, baseline), copyWorkspace(seedWorkspace, treatment)]);
+		return {
+			baseline,
+			treatment,
+			judge,
+			cleanup: async () => {
+				await Promise.all(created.map((path) => rm(path, { recursive: true, force: true })));
+			},
+		};
+	} catch (error) {
+		await Promise.all(created.map((path) => rm(path, { recursive: true, force: true })));
+		throw error;
+	}
+}
+
+async function copyWorkspace(source: string, destination: string): Promise<void> {
+	await cp(source, destination, {
+		recursive: true,
+		preserveTimestamps: true,
+		verbatimSymlinks: true,
+	});
 }
 
 async function completeScenarioOutcome(outcome: Omit<ScenarioOutcome, "usage">): Promise<ScenarioOutcome> {

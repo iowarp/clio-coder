@@ -37,10 +37,10 @@ eval (experimental) executes the skill's evals.md RED-GREEN scenarios: per
 scenario a baseline headless run without the skill, a treatment run with it,
 and a judge run scoring each Expected bullet from the transcripts. Exit is
 nonzero when any treatment bullet fails. --json emits one JSONL row per
-(scenario, bullet) with schema: "experimental". --workspace runs scenarios in
-an existing checkout instead of a throwaway temp directory. Fixture commands
-declared in evals.md are real shell run in the scenario workspace; they only
-execute with --trust-fixtures, after you have reviewed the evals.md.
+(scenario, bullet) with schema: "experimental". --workspace copies an existing
+checkout into a throwaway seed; the source checkout is not mutated. Fixture
+commands declared in evals.md are real shell run in that seed; they only execute
+with --trust-fixtures, after you have reviewed the evals.md.
 `;
 
 type SkillInstallScope = "user" | "project";
