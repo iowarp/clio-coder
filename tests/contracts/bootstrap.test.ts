@@ -1,9 +1,10 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { WorkspaceEnumerationIncompleteError } from "../../src/core/workspace-files.js";
 import {
 	BOOTSTRAP_INPUT_MAX_CHARS,
 	BOOTSTRAP_SIBLING_CONTENT_MAX_CHARS,
@@ -784,6 +785,39 @@ describe("contracts/bootstrap", () => {
 		deepStrictEqual(rootRule.directoryScopes, ["."]);
 		deepStrictEqual(nestedRule?.directoryScopes, ["src/solver"]);
 		ok(scan.sources.some((source) => source.displayPath === "src/solver/AGENTS.md"));
+	});
+
+	it("does not adopt bare filename or path inventory entries as agent rules", () => {
+		writeFileSync(
+			join(scratch, "AGENTS.md"),
+			[
+				"- permission-allow-once.png",
+				"- `screens/permission-deny.png`",
+				"- Allow the operator to review the proposed patch before writing.",
+				"- Deny destructive commands unless the operator approves them.",
+			].join("\n"),
+			"utf8",
+		);
+
+		const scan = scanAgentConfigs({ cwd: scratch });
+		deepStrictEqual(
+			scan.importedRules.map((rule) => rule.text),
+			[
+				"Allow the operator to review the proposed patch before writing.",
+				"Deny destructive commands unless the operator approves them.",
+			],
+		);
+	});
+
+	it("does not turn an incomplete workspace walk into a partial adoption snapshot", () => {
+		const missing = join(scratch, "missing-workspace");
+		throws(
+			() => scanAgentConfigs({ cwd: missing }),
+			(error: unknown) =>
+				error instanceof WorkspaceEnumerationIncompleteError &&
+				error.code === "WORKSPACE_ENUMERATION_INCOMPLETE" &&
+				error.operation === "open-root",
+		);
 	});
 
 	it("does not adopt unresolved skill-template variables as project rules", () => {
