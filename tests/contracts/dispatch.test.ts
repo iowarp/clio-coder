@@ -1066,6 +1066,7 @@ describe("contracts/dispatch", () => {
 			strictEqual(receipt.exitCode, 0);
 			strictEqual(receipt.agentAudience, "shadow");
 			strictEqual(receipt.requestOrigin, "agent");
+			deepStrictEqual(receipt.verification, { state: "not_applicable", basis: "read-only-agent" });
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -2482,6 +2483,7 @@ describe("contracts/dispatch", () => {
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "timed_out");
 			strictEqual(receipt.exitCode, 1);
+			deepStrictEqual(receipt.verification, { state: "unknown", basis: "acp-external-unobserved" });
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -4176,6 +4178,18 @@ rl.once("line", () => {
 describe("contracts/dispatch tool activity honesty", () => {
 	beforeEach(isolateDispatchState);
 	afterEach(restoreDispatchState);
+	const mutatingCoderRecipes: ReadonlyArray<AgentRecipe> = [
+		{
+			id: "coder",
+			name: "coder",
+			description: "mutating test recipe",
+			tools: ["read", "write", "verify"],
+			capabilityClass: "workspace-edit",
+			source: "builtin",
+			filepath: "/test/coder.md",
+			body: "# Test Recipe",
+		},
+	];
 
 	function instantWorker() {
 		return {
@@ -4188,7 +4202,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	}
 
 	it("stamps a zero-tool succeeded run with an honest note on receipt, ledger row, and terminal payload", async () => {
-		const context = stubContext();
+		const context = stubContext({ recipes: mutatingCoderRecipes });
 		const completed: unknown[] = [];
 		const unsubscribe = context.bus.on(BusChannels.DispatchCompleted, (payload) => {
 			completed.push(payload);
@@ -4203,6 +4217,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.exitCode, 0);
 			strictEqual(receipt.outcomeDetail, "completed without executing any tools");
+			deepStrictEqual(receipt.verification, { state: "unverified", basis: "no-validation-tool" });
 			deepStrictEqual(receipt.toolActivity, {
 				calls: 0,
 				succeeded: 0,
@@ -4222,7 +4237,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	});
 
 	it("dispatch tool summary surfaces the zero-tool note to the calling model", async () => {
-		const context = stubContext();
+		const context = stubContext({ recipes: mutatingCoderRecipes });
 		const bundle = makeDispatchBundle(context, { spawnWorker: instantWorker });
 		await bundle.extension.start();
 		try {
@@ -4274,7 +4289,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	});
 
 	it("keeps outcomeDetail null when at least one tool call succeeded", async () => {
-		const context = stubContext();
+		const context = stubContext({ recipes: mutatingCoderRecipes });
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
@@ -4298,6 +4313,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.outcomeDetail, null);
+			deepStrictEqual(receipt.verification, { state: "unverified", basis: "no-validation-tool" });
 			deepStrictEqual(receipt.toolActivity, {
 				calls: 1,
 				succeeded: 1,
@@ -4313,6 +4329,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	it("records and enforces the finish contract for high-rigor dispatched worker completions", async () => {
 		const completionRows: CompletionContractAuditInput[] = [];
 		const context = stubContext({
+			recipes: mutatingCoderRecipes,
 			completionSink: completionRows,
 			status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true } },
 		});
@@ -4372,6 +4389,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	it("records validation evidence for a dispatched worker that validates after mutating", async () => {
 		const completionRows: CompletionContractAuditInput[] = [];
 		const context = stubContext({
+			recipes: mutatingCoderRecipes,
 			completionSink: completionRows,
 			status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true } },
 		});
@@ -4412,6 +4430,10 @@ describe("contracts/dispatch tool activity honesty", () => {
 						isError: false,
 						result: { details: { exitCode: 0 } },
 					};
+					yield {
+						type: "clio_tool_finish",
+						payload: { tool: "verify", durationMs: 3, outcome: "ok", decision: "allowed" },
+					};
 					yield { type: "message_end", message: { role: "assistant", content: "Tests pass. Done." } };
 				})(),
 			}),
@@ -4428,6 +4450,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 			strictEqual(completionRows[0]?.reason, "validation_evidence");
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.exitCode, 0);
+			deepStrictEqual(receipt.verification, { state: "verified", basis: "validation-tool" });
 		} finally {
 			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
 			else process.env.CLIO_RIGOR = originalRigor;

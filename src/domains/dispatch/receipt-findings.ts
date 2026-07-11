@@ -13,7 +13,7 @@
  */
 
 import { type EvidenceTag, FAILURE_CAUSE_TAG_ORDER, FAILURE_CAUSE_TAGS } from "../evidence/index.js";
-import type { RunEnvelope, RunReceiptDraft, RunReceiptFindingsSummary } from "./types.js";
+import type { RunEnvelope, RunReceiptDraft, RunReceiptFindingsSummary, RunReceiptVerification } from "./types.js";
 
 function lower(value: string | null | undefined): string {
 	return (value ?? "").toLowerCase();
@@ -108,12 +108,38 @@ function classifyTags(draft: RunReceiptDraft, envelope: RunEnvelope): Set<Eviden
 	return tags;
 }
 
-function hasValidationEvidence(draft: RunReceiptDraft): boolean {
+export function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boolean {
 	return draft.toolStats.some((stat) => {
 		if (stat.ok <= 0 || stat.errors > 0) return false;
 		const tool = stat.tool.toLowerCase();
 		return VALIDATION_TOOL_NEEDLES.some((needle) => tool.includes(needle));
 	});
+}
+
+/**
+ * Derive the receipt's descriptive evidence-confidence marker without
+ * changing execution semantics. ACP agents may validate externally, so lack
+ * of Clio-observed validation is unknown rather than a negative assertion.
+ */
+export function deriveReceiptVerification(
+	draft: Pick<RunReceiptDraft, "toolStats">,
+	context: { capabilityClass?: string | null; acpDelegation?: boolean } = {},
+): RunReceiptVerification {
+	if (context.capabilityClass === "read-only") {
+		return { state: "not_applicable", basis: "read-only-agent" };
+	}
+	if (hasValidationEvidence(draft)) {
+		return { state: "verified", basis: "validation-tool" };
+	}
+	if (context.acpDelegation === true) {
+		return { state: "unknown", basis: "acp-external-unobserved" };
+	}
+	return { state: "unverified", basis: "no-validation-tool" };
+}
+
+/** Conservative consumer view for receipts written before verification landed. */
+export function readReceiptVerification(receipt: Pick<RunReceiptDraft, "verification">): RunReceiptVerification {
+	return receipt.verification ?? { state: "unknown", basis: "legacy-receipt" };
 }
 
 /**

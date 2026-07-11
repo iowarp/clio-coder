@@ -437,6 +437,17 @@ export interface RunReceiptAutonomyEnforcement {
 	dangerousBypass?: boolean;
 }
 
+/**
+ * Evidence confidence is descriptive receipt provenance, orthogonal to the
+ * execution outcome. It must never drive retry, reroute, or finish gating.
+ */
+export type ReceiptVerificationState = "verified" | "unverified" | "not_applicable" | "unknown";
+
+export interface RunReceiptVerification {
+	state: ReceiptVerificationState;
+	basis: "validation-tool" | "read-only-agent" | "no-validation-tool" | "acp-external-unobserved" | "legacy-receipt";
+}
+
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
@@ -494,6 +505,8 @@ export interface RunReceipt {
 	toolCalls: number;
 	toolStats: ToolCallStat[];
 	toolActivity?: ToolActivitySummary;
+	/** Integrity-sealed evidence confidence; absent on legacy receipts. */
+	verification?: RunReceiptVerification;
 	skillActivations?: SkillActivation[];
 	/** How this runtime enforced the run's captured autonomy level. */
 	autonomyEnforcement?: RunReceiptAutonomyEnforcement;

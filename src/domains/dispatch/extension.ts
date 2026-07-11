@@ -96,6 +96,7 @@ import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type Hea
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
+import { deriveReceiptVerification } from "./receipt-findings.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { createSpeculationObserver, type SpeculationObserver } from "./speculation.js";
@@ -820,6 +821,7 @@ interface DispatchLifecycleStage {
 	apiKey: string | undefined;
 	runtimeKind: RunKind;
 	agentAudience: AgentAudience;
+	capabilityClass: AgentCapabilityClass;
 	requestOrigin: DispatchRequestOrigin;
 	runtimeLimitations: string[];
 	pipeline: RunPipelineProvenance | null;
@@ -2143,6 +2145,7 @@ export function createDispatchBundle(
 			apiKey,
 			runtimeKind,
 			agentAudience: spec.audience,
+			capabilityClass: spec.capabilityClass,
 			requestOrigin: requestOriginFor(req),
 			runtimeLimitations: limitations,
 			pipeline: pipelineProvenanceFor(req),
@@ -2542,6 +2545,7 @@ export function createDispatchBundle(
 			const agentInfo = init?.agentInfo;
 			const finalFailureMessage = result.failureMessage ?? failureMessage;
 			const capturedOutput = outputCapture.snapshot();
+			const finalToolStats = snapshotToolStats(toolStats);
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -2588,10 +2592,11 @@ export function createDispatchBundle(
 				platform: process.platform,
 				nodeVersion: process.version,
 				toolCalls: countToolCalls(toolStats),
-				toolStats: snapshotToolStats(toolStats),
+				toolStats: finalToolStats,
 				// Clio-observed telemetry only: an external ACP agent executes its
 				// own tools, so no zero-activity note is derived from this record.
 				toolActivity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
+				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
 				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
 					lifecycle.autonomy,
 					lifecycle.agentConfig.toolGovernance ?? "clio-policy",
@@ -3334,6 +3339,7 @@ export function createDispatchBundle(
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			const capturedOutput = outputCapture.snapshot();
+			const finalToolStats = snapshotToolStats(toolStats);
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -3382,8 +3388,12 @@ export function createDispatchBundle(
 				platform: process.platform,
 				nodeVersion: process.version,
 				toolCalls: countToolCalls(toolStats),
-				toolStats: snapshotToolStats(toolStats),
+				toolStats: finalToolStats,
 				toolActivity,
+				verification: deriveReceiptVerification(
+					{ toolStats: finalToolStats },
+					{ capabilityClass: lifecycle.capabilityClass },
+				),
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				autonomyEnforcement: autonomyEnforcementForWorkerSpec(
 					spec,

@@ -115,6 +115,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	toolCalls: true,
 	toolStats: true,
 	toolActivity: true,
+	verification: true,
 	skillActivations: true,
 	autonomyEnforcement: true,
 	safety: true,
