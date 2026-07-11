@@ -92,6 +92,17 @@ export function isWorkerToolCallCapSynthesisReason(reason: string): boolean {
 	return /^workerToolCallCap reached \([1-9]\d*\); tool calls are now disabled/.test(reason);
 }
 
+/**
+ * True when a receipt diagnostic (failureMessage/outcomeDetail) embeds the
+ * cap telemetry prefix. Unlike the anchored predicates above this matches
+ * anywhere in the text, because worker diagnostics merge the reason into a
+ * larger machine-written string. It is deliberately keyed on the guard's own
+ * prefix, never on free-form worker prose.
+ */
+export function mentionsWorkerToolCallCap(text: string | null | undefined): boolean {
+	return typeof text === "string" && /workerToolCallCap reached \([1-9]\d*\)/.test(text);
+}
+
 let configured: Partial<GuardrailValues> = {};
 
 /**
