@@ -501,7 +501,7 @@ describe("detached dispatch + collect", () => {
 		try {
 			// The open batch is visible to the new session's nudge surface.
 			const views = openDetachedBatchViews(second.contract);
-			deepStrictEqual(views, [{ id: batchId, total: 1, terminal: 1 }]);
+			deepStrictEqual(views, [{ id: batchId, total: 1, terminal: 1, terminalOutcomes: { succeeded: 1 } }]);
 
 			const monitor = createMonitorTool({ dispatch: second.contract });
 			const collected = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
