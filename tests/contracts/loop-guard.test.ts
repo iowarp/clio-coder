@@ -39,10 +39,13 @@ import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 const LOOP_THRESHOLD = createLoopState().maxRepeats;
 
 /** Safety stub backed by the real sliding-window loop detector. */
-function testSafety(options: { blockTool?: string; askTool?: string } = {}): SafetyContract {
+function testSafety(
+	options: { blockTool?: string; askTool?: string; actionClass?: "read" | "execute" } = {},
+): SafetyContract {
 	let loopState = createLoopState();
+	const actionClass = options.actionClass ?? "read";
 	return {
-		classify: () => ({ actionClass: "read", reasons: [] }),
+		classify: () => ({ actionClass, reasons: [] }),
 		evaluate: (call) => {
 			if (options.blockTool !== undefined && call.tool === options.blockTool) {
 				return {
@@ -58,7 +61,7 @@ function testSafety(options: { blockTool?: string; askTool?: string } = {}): Saf
 					rejection: { short: `${call.tool} needs confirmation`, detail: "test ask", hints: [] },
 				};
 			}
-			return { kind: "allow", classification: { actionClass: "read", reasons: [] } };
+			return { kind: "allow", classification: { actionClass, reasons: [] } };
 		},
 		observeLoop(key, now) {
 			const [next, verdict] = observe(loopState, key, now ?? Date.now());
@@ -238,6 +241,113 @@ describe("unified loop guard registration", () => {
 				{ turnId: "t1" },
 			);
 			strictEqual(verdict.kind, "ok", `distinct-query call ${i} must execute`);
+		}
+	});
+
+	it("annotates substantial identical results across distinct substantive arguments without blocking", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = createRegistry({ safety, middleware: bundle.contract });
+		const repeated = `wiki page listing ${"x".repeat(80)}`;
+		registry.register({
+			name: ToolNames.CodeNav,
+			description: "argument-ignoring test tool",
+			parameters: Type.Object({ query: Type.String() }),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: repeated }),
+		});
+
+		for (const query of ["quickstart", "architecture"]) {
+			const result = await registry.invoke({ tool: ToolNames.CodeNav, args: { query } }, { turnId: "t1" });
+			ok(result.kind === "ok" && result.result.kind === "ok");
+			if (result.kind === "ok" && result.result.kind === "ok") strictEqual(result.result.output, repeated);
+		}
+		const warned = await registry.invoke({ tool: ToolNames.CodeNav, args: { query: "fleet" } }, { turnId: "t1" });
+		ok(warned.kind === "ok" && warned.result.kind === "ok", "the diagnostic never blocks");
+		if (warned.kind === "ok" && warned.result.kind === "ok") {
+			ok(warned.result.output.startsWith(repeated));
+			ok(warned.result.output.includes("3 distinct code_nav arguments"));
+			ok(warned.result.output.includes("may be ignoring an argument"));
+		}
+		const fourth = await registry.invoke({ tool: ToolNames.CodeNav, args: { query: "engine" } }, { turnId: "t1" });
+		ok(fourth.kind === "ok" && fourth.result.kind === "ok");
+		if (fourth.kind === "ok" && fourth.result.kind === "ok") strictEqual(fourth.result.output, repeated);
+	});
+
+	it("resets the diagnostic streak when a read result changes and ignores non-read results", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = createRegistry({ safety, middleware: bundle.contract });
+		const repeated = `stable result ${"x".repeat(80)}`;
+		registry.register({
+			name: ToolNames.CodeNav,
+			description: "changing result test tool",
+			parameters: Type.Object({ query: Type.String() }),
+			baseActionClass: "read",
+			run: async (args) => ({ kind: "ok", output: args.query === "reset" ? `different ${"y".repeat(80)}` : repeated }),
+		});
+		for (const query of ["one", "two", "reset", "three", "four"]) {
+			const result = await registry.invoke({ tool: ToolNames.CodeNav, args: { query } }, { turnId: "reset" });
+			ok(result.kind === "ok" && result.result.kind === "ok");
+			if (result.kind === "ok" && result.result.kind === "ok") {
+				strictEqual(result.result.output.includes("may be ignoring an argument"), false);
+			}
+		}
+
+		const executeSafety = testSafety({ actionClass: "execute" });
+		const executeBundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety: executeSafety })],
+		});
+		const executeRegistry = createRegistry({ safety: executeSafety, middleware: executeBundle.contract });
+		executeRegistry.register({
+			name: ToolNames.Bash,
+			description: "repeated execute receipt",
+			parameters: Type.Object({ command: Type.String() }),
+			baseActionClass: "execute",
+			run: async () => ({ kind: "ok", output: repeated }),
+		});
+		for (const command of ["build one", "build two", "build three", "build four"]) {
+			const result = await executeRegistry.invoke({ tool: ToolNames.Bash, args: { command } }, { turnId: "execute" });
+			ok(result.kind === "ok" && result.result.kind === "ok");
+			if (result.kind === "ok" && result.result.kind === "ok") strictEqual(result.result.output, repeated);
+		}
+	});
+
+	it("does not annotate short generic results or zero-item cap stubs across distinct arguments", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety })] });
+		const registry = createRegistry({ safety, middleware: bundle.contract });
+		registry.register({
+			name: ToolNames.CodeNav,
+			description: "generic empty result",
+			parameters: Type.Object({ query: Type.String() }),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "No matches found" }),
+		});
+		for (const query of ["one", "two", "three", "four"]) {
+			const result = await registry.invoke({ tool: ToolNames.CodeNav, args: { query } }, { turnId: "short" });
+			ok(result.kind === "ok" && result.result.kind === "ok");
+			if (result.kind === "ok" && result.result.kind === "ok") strictEqual(result.result.output, "No matches found");
+		}
+
+		const capRegistry = createRegistry({ safety: testSafety(), middleware: bundle.contract });
+		capRegistry.register({
+			name: ToolNames.Context,
+			description: "large cap stub",
+			parameters: Type.Object({ query: Type.String() }),
+			baseActionClass: "read",
+			run: async () => ({
+				kind: "ok",
+				output: `result exceeded cap ${"x".repeat(80)}`,
+				details: { observation: { truncated: true, shownCount: 0 } },
+			}),
+		});
+		for (const query of ["one", "two", "three", "four"]) {
+			const result = await capRegistry.invoke({ tool: ToolNames.Context, args: { query } }, { turnId: "stub" });
+			ok(result.kind === "ok" && result.result.kind === "ok");
+			if (result.kind === "ok" && result.result.kind === "ok") {
+				strictEqual(result.result.output.includes("may be ignoring an argument"), false);
+			}
 		}
 	});
 
