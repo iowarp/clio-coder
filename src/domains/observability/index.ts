@@ -17,7 +17,14 @@ export type {
 	ObservabilitySnapshot,
 	TokenThroughputSnapshot,
 } from "./contract.js";
-export type { CostEntry, UsageBreakdown } from "./cost.js";
+export {
+	aggregateCostAmounts,
+	type CostAggregate,
+	type CostAmount,
+	type CostEntry,
+	emptyCostAggregate,
+	type UsageBreakdown,
+} from "./cost.js";
 export type { EvidenceIndexRow } from "./evidence-index.js";
 export { EVIDENCE_INDEX_FILE, MAX_EVIDENCE_INDEX_ROWS, readEvidenceIndex } from "./evidence-index.js";
 export { ObservabilityManifest } from "./manifest.js";
