@@ -3,7 +3,11 @@ import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract, DispatchSnapshot } from "../domains/dispatch/contract.js";
-import type { ObservabilitySnapshot } from "../domains/observability/index.js";
+import {
+	costAggregateForAmount,
+	formatCostAggregate,
+	type ObservabilitySnapshot,
+} from "../domains/observability/index.js";
 import { isDispatchEligibleRuntime, type ProvidersContract } from "../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import {
@@ -16,7 +20,6 @@ import {
 	visibleWidth,
 } from "../engine/tui.js";
 import { deriveRunEvidenceState, evidenceMarker } from "./dispatch-board.js";
-import { formatUsd } from "./footer/widgets.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "./overlay-frame.js";
 import {
 	type SettingSubmenuBuilder,
@@ -156,7 +159,7 @@ function retryHeader(width: number): string {
 }
 
 function runningRow(row: DispatchSnapshot["running"][number], width: number, proofMarker: string | null): string {
-	const line = [
+	const fields = [
 		muted(fitLeft(shortId(row.runId), 10)),
 		muted(fitLeft(row.agentId, 10)),
 		muted(fitLeft(row.node?.id ?? "local", 6)),
@@ -167,12 +170,19 @@ function runningRow(row: DispatchSnapshot["running"][number], width: number, pro
 		muted(fitRight(String(row.lineage.depth), 3)),
 		muted(fitRight(formatCompactMs(row.elapsedMs), 7)),
 		muted(fitRight(formatTokens(row.tokens.total), 8)),
-		muted(fitRight(formatUsd(row.costUsd), 9)),
-	].join(" ");
+	];
+	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
+	const line = [...fields, muted(fitRight(cost, 12))].join(" ");
 	// The proof marker is a compact trailing evidence chip; truncateToWidth clips
 	// it ANSI-aware on tight widths, so it never overflows the existing columns.
 	const full = proofMarker ? `${line} ${proofMarker}` : line;
-	return truncateToWidth(full, width, "", true);
+	if (visibleWidth(full) <= width) return full;
+	// Cost provenance labels are semantic units (not decorative suffixes). If a
+	// narrow overlay cannot fit the whole unit, omit it rather than displaying a
+	// misleading fragment such as "cost unk" or "~$0.01" without "est".
+	const withoutCost = fields.join(" ");
+	const fallback = proofMarker ? `${withoutCost} ${proofMarker}` : withoutCost;
+	return truncateToWidth(fallback, width, "", true);
 }
 
 function retryRow(row: DispatchSnapshot["retrying"][number], width: number): string {
@@ -194,7 +204,7 @@ function totalsRows(totals: DispatchSnapshot["totals"]): string[] {
 		kvRow("input", formatTokens(totals.inputTokens), keyWidth),
 		kvRow("output", formatTokens(totals.outputTokens), keyWidth),
 		kvRow("total", formatTokens(totals.totalTokens), keyWidth),
-		kvRow("cost", formatUsd(totals.costUsd), keyWidth),
+		kvRow("cost", formatCostAggregate(totals.cost ?? costAggregateForAmount(totals.costUsd, undefined)), keyWidth),
 		kvRow("runtime", formatCompactMs(totals.runtimeSeconds * 1000), keyWidth),
 	];
 }

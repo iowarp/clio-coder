@@ -4,6 +4,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { isTerminalRunEnvelope, type RunEnvelope, type RunReceipt } from "../domains/dispatch/types.js";
+import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import { runEventTail } from "./dispatch.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
@@ -83,7 +84,7 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 		`state: ${run.status}${run.outcome ? ` outcome=${run.outcome}` : ""}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind} node=${run.node?.id ?? "local"}${reroutes}`,
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
-		`tokens=${run.tokenCount} cost=$${run.costUsd.toFixed(4)} receipt=${run.receiptPath ?? "n/a"}`,
+		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}`,
 	];
 	if (live) {
 		lines.push(
@@ -102,6 +103,7 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 			exitCode: run.exitCode,
 			tokenCount: run.tokenCount,
 			costUsd: run.costUsd,
+			costProvenance: run.costProvenance ?? "unknown",
 			receiptPath: run.receiptPath,
 			running: live !== null,
 		},
@@ -238,7 +240,7 @@ function collectRunLine(row: CollectRow): string[] {
 	const state = run.outcome ?? run.status;
 	const detail = run.outcomeDetail ? ` detail=${run.outcomeDetail}` : "";
 	const lines = [
-		`- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=$${run.costUsd.toFixed(4)} receipt=${run.receiptPath ?? "n/a"}${detail}`,
+		`- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}${detail}`,
 	];
 	const output = durableRunOutput(run);
 	if (output) {

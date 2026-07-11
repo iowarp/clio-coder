@@ -34,6 +34,7 @@ function makeRow(overrides: Partial<DispatchBoardRow> = {}): DispatchBoardRow {
 		elapsedMs: 1200,
 		tokenCount: 512,
 		costUsd: 0.0123,
+		costProvenance: "known",
 		inputTokens: 300,
 		outputTokens: 212,
 		ttftMs: 180,
@@ -226,6 +227,18 @@ describe("dispatch board card", () => {
 		ok(stripped.includes("cost $0.50"), `expected a muted cost value, got: ${stripped}`);
 	});
 
+	it("renders truthful cost provenance labels as whole telemetry units", () => {
+		const estimated = stripSgr(renderDispatchCard(makeRow({ costUsd: 0.5, costProvenance: "estimated" }), 76).join("\n"));
+		ok(estimated.includes("cost ~$0.50 est"), estimated);
+
+		const { costProvenance: _legacyProvenance, ...legacyRow } = makeRow({ costUsd: 0 });
+		const unknown = stripSgr(renderDispatchCard(legacyRow, 76).join("\n"));
+		ok(unknown.includes("cost cost unknown"), unknown);
+
+		const narrow = stripSgr(renderDispatchCard(makeRow({ costUsd: 0.5, costProvenance: "estimated" }), 34).join("\n"));
+		ok(!narrow.includes("~$0.50") || narrow.includes("~$0.50 est"), narrow);
+	});
+
 	it("suppresses throughput on a queued card", () => {
 		const rendered = renderDispatchCard(
 			makeRow({ status: "enqueued", inputTokens: 0, outputTokens: 0, tokenCount: 0, elapsedMs: 3000 }),
@@ -262,6 +275,28 @@ describe("dispatch status presentation", () => {
 });
 
 describe("dispatch board terminal taxonomy", () => {
+	it("folds terminal bus cost provenance into the rendered row", () => {
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus);
+		try {
+			bus.emit(BusChannels.DispatchCompleted, {
+				runId: "run-cost",
+				agentId: "coder",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				costUsd: 0.25,
+				costProvenance: "estimated",
+			} as never);
+			const row = store.rows()[0];
+			strictEqual(row?.costProvenance, "estimated");
+			ok(stripSgr(renderDispatchCard(row as DispatchBoardRow, 76).join("\n")).includes("~$0.25 est"));
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
 	it("maps terminal run outcomes to board statuses with timeout detail", () => {
 		const cases: Array<{ reason: string; status: DispatchBoardRow["status"]; detail?: string }> = [
 			{ reason: "canceled", status: "aborted" },

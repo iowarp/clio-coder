@@ -8,10 +8,15 @@ import {
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
-import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
+import {
+	costAggregateForAmount,
+	formatCostAggregate,
+	type ObservabilityNotice,
+	type ObservabilitySnapshot,
+} from "../domains/observability/index.js";
+import type { CostProvenance } from "../domains/providers/index.js";
 import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
-import { formatUsd } from "./footer/widgets.js";
 import { formatFooterTokens } from "./footer-panel.js";
 import {
 	type ClioTheme,
@@ -44,6 +49,8 @@ export interface DispatchBoardRow {
 	elapsedMs: number;
 	tokenCount: number;
 	costUsd: number;
+	/** Pricing truth for costUsd; absent legacy events are treated as unknown. */
+	costProvenance?: CostProvenance;
 	inputTokens: number;
 	outputTokens: number;
 	ttftMs: number | null;
@@ -291,7 +298,7 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost = formatUsd(row.costUsd);
+	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
 	const detail = terminalDetail(row);
 
 	const presentation = dispatchStatusPresentation(row.status, {
@@ -370,7 +377,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	const theme = clioTheme();
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
-	const cost = formatUsd(row.costUsd);
+	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
 
 	const dot = dotSep(theme);
 	const presentation = dispatchStatusPresentation(row.status, {
@@ -598,6 +605,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		elapsedMs: resolveElapsedMs(entry, now),
 		tokenCount: entry.tokenCount,
 		costUsd: entry.costUsd,
+		...(entry.costProvenance !== undefined ? { costProvenance: entry.costProvenance } : {}),
 		inputTokens: entry.inputTokens,
 		outputTokens: entry.outputTokens,
 		ttftMs: entry.ttftMs,
@@ -670,6 +678,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			status,
 			tokenCount: previous?.tokenCount ?? 0,
 			costUsd: previous?.costUsd ?? 0,
+			costProvenance: previous?.costProvenance ?? "unknown",
 			sequence: previous?.sequence ?? nextSequence++,
 			enqueuedAtMs: previous?.enqueuedAtMs ?? now,
 			startedAtMs: previous?.startedAtMs ?? null,
@@ -714,6 +723,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
+			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = null;
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount;
@@ -736,6 +746,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.durationMs = parseFiniteNumber(payload.durationMs, Math.max(0, now - entry.startedAtMs));
 			entry.tokenCount = parseFiniteNumber(payload.tokenCount, entry.tokenCount);
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
+			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount;
