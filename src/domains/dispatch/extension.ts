@@ -90,6 +90,7 @@ import {
 	type DispatchRequest,
 	type DispatchSnapshot,
 } from "./contract.js";
+import { createWorkerOutputCapture, startDispatchEventPump } from "./event-pump.js";
 import { isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
@@ -401,11 +402,11 @@ function appendDispatchFinishContractEntry(
 }
 
 /**
- * Grace window finalization grants the enriched-event consumer after the
- * worker ends. Token meters, tool stats, and finish-contract text fold in as
- * a side effect of iteration, so the receipt must wait for the stream to
- * finish; the bound exists because a consumer that abandoned or never started
- * the stream must not stall finalization forever.
+ * Grace window finalization grants the domain event pump after the worker
+ * ends. Token meters, tool stats, finish-contract text, and output capture
+ * fold inside the pump, so the receipt waits for it to drain the source
+ * stream; the bound exists so a source channel that misbehaves after process
+ * exit cannot stall finalization forever.
  */
 const DISPATCH_DRAIN_GRACE_MS = 2000;
 
@@ -1852,9 +1853,9 @@ export function createDispatchBundle(
 		};
 		try {
 			const handle = await dispatch(retryReq);
-			// No interactive consumer exists for a retry, so drain the event
-			// stream here; token accounting and tool stats fold in as a side
-			// effect of iteration.
+			// No interactive consumer exists for a retry; accounting is folded by
+			// the domain event pump regardless, so this drain only keeps the
+			// bounded tee empty.
 			void (async () => {
 				for await (const _ of handle.events) {
 					// drained
@@ -2302,114 +2303,103 @@ export function createDispatchBundle(
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
 		let runIdForPermissionAudit: string | null = null;
-		let drainStarted = false;
-		let settleEventDrain!: () => void;
-		const eventsDrained = new Promise<void>((resolve) => {
-			settleEventDrain = resolve;
-		});
-		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
-			drainStarted = true;
-			try {
-				for await (const raw of acp.events) {
-					const event = raw as {
-						type?: string;
-						message?: {
-							role?: string;
-							usage?: unknown;
-							model?: unknown;
-							responseModel?: unknown;
-							responseId?: unknown;
-							stopReason?: unknown;
-							errorMessage?: unknown;
-						};
-						payload?: {
-							tool?: string;
-							posture?: string;
-							durationMs?: number;
-							outcome?: "ok" | "error" | "blocked";
-							decision?: "allowed" | "blocked" | "permission_requested";
-							actionClass?: string;
-							ruleId?: string;
-							reasonCode?: string;
-							policySource?: string;
-							reason?: string;
-							requestId?: string;
-							mode?: "deny" | "fail" | "escalate";
-							source?: "operator" | "timeout" | "policy";
-						};
-					};
-					if (isRecord(event)) {
-						const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
-						if (finishEntry !== null) {
-							finishContractAssistantText = finishEntry.assistantText;
-							finishContractAssistantTurnId = finishEntry.assistantTurnId;
-						}
-					}
-					if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-						const u = event.message.usage;
-						tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
-						tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
-						tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
-						tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
-						tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
-						const model = readStringOrNull(event.message.model);
-						const responseModel = readStringOrNull(event.message.responseModel);
-						const responseId = readStringOrNull(event.message.responseId);
-						if (model !== null || responseModel !== null || responseId !== null) {
-							upstreamResponses.push({ model, responseModel, responseId });
-						}
-						if (event.message.stopReason === "error") {
-							const message = readStringOrNull(event.message.errorMessage);
-							if (message !== null) failureMessage = message;
-						}
-					}
-					if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
-						const requestId =
-							typeof event.payload.requestId === "string" ? event.payload.requestId : `delegation-permission-${Date.now()}`;
-						const origin = runIdForPermissionAudit !== null ? `delegation:${runIdForPermissionAudit}` : "delegation:unknown";
-						const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
-						const reason =
-							typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
-						context.bus.emit(BusChannels.PermissionRequested, {
-							tool: event.payload.tool,
-							actionClass,
-							requestId,
-							origin,
-							requestedBy: runIdForPermissionAudit ?? undefined,
-							rejection: { short: reason, detail: reason, hints: [] },
-						});
-						context.bus.emit(BusChannels.PermissionResolved, {
-							status: "denied",
-							tool: event.payload.tool,
-							requestId,
-							origin,
-							decidedBy: "policy:no-operator",
-							actionClass,
-							reason,
-							...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
-						});
-					}
-					if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
-						recordToolFinish(toolStats, event.payload);
-						if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
-						else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-						else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
-						if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
-							const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
-							if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
-							if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
-							if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
-							if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
-							if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
-							blockedAttempts.push(attempt);
-						}
-					}
-					yield raw;
+		const outputCapture = createWorkerOutputCapture();
+		const foldAcpEvent = (raw: unknown): void => {
+			outputCapture.observe(raw);
+			const event = raw as {
+				type?: string;
+				message?: {
+					role?: string;
+					usage?: unknown;
+					model?: unknown;
+					responseModel?: unknown;
+					responseId?: unknown;
+					stopReason?: unknown;
+					errorMessage?: unknown;
+				};
+				payload?: {
+					tool?: string;
+					posture?: string;
+					durationMs?: number;
+					outcome?: "ok" | "error" | "blocked";
+					decision?: "allowed" | "blocked" | "permission_requested";
+					actionClass?: string;
+					ruleId?: string;
+					reasonCode?: string;
+					policySource?: string;
+					reason?: string;
+					requestId?: string;
+					mode?: "deny" | "fail" | "escalate";
+					source?: "operator" | "timeout" | "policy";
+				};
+			};
+			if (isRecord(event)) {
+				const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
+				if (finishEntry !== null) {
+					finishContractAssistantText = finishEntry.assistantText;
+					finishContractAssistantTurnId = finishEntry.assistantTurnId;
 				}
-			} finally {
-				settleEventDrain();
 			}
-		})();
+			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
+				const u = event.message.usage;
+				tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
+				tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+				tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
+				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
+				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+				const model = readStringOrNull(event.message.model);
+				const responseModel = readStringOrNull(event.message.responseModel);
+				const responseId = readStringOrNull(event.message.responseId);
+				if (model !== null || responseModel !== null || responseId !== null) {
+					upstreamResponses.push({ model, responseModel, responseId });
+				}
+				if (event.message.stopReason === "error") {
+					const message = readStringOrNull(event.message.errorMessage);
+					if (message !== null) failureMessage = message;
+				}
+			}
+			if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+				const requestId =
+					typeof event.payload.requestId === "string" ? event.payload.requestId : `delegation-permission-${Date.now()}`;
+				const origin = runIdForPermissionAudit !== null ? `delegation:${runIdForPermissionAudit}` : "delegation:unknown";
+				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
+				const reason =
+					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
+				context.bus.emit(BusChannels.PermissionRequested, {
+					tool: event.payload.tool,
+					actionClass,
+					requestId,
+					origin,
+					requestedBy: runIdForPermissionAudit ?? undefined,
+					rejection: { short: reason, detail: reason, hints: [] },
+				});
+				context.bus.emit(BusChannels.PermissionResolved, {
+					status: "denied",
+					tool: event.payload.tool,
+					requestId,
+					origin,
+					decidedBy: "policy:no-operator",
+					actionClass,
+					reason,
+					...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
+				});
+			}
+			if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+				recordToolFinish(toolStats, event.payload);
+				if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
+				else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
+				else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
+				if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
+					const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
+					if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
+					if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
+					if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
+					if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
+					if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
+					blockedAttempts.push(attempt);
+				}
+			}
+		};
 
 		// The ACP process is already live; any failure to establish its tracking
 		// row must not leave an orphaned agent holding a concurrency slot.
@@ -2484,6 +2474,14 @@ export function createDispatchBundle(
 			throw error;
 		}
 
+		// Domain-owned ingestion starts here, whether or not any external
+		// consumer ever iterates the returned stream: meters, tool stats, finish
+		// contract state, permission audit events, and output capture fold in
+		// the pump; consumers get a bounded replay tee.
+		const eventPump = startDispatchEventPump(acp.events, foldAcpEvent, {
+			onError: (error) => reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error),
+		});
+
 		const startedAt = envelope.startedAt;
 		const activeRun: ActiveRun = {
 			runId: envelope.id,
@@ -2543,6 +2541,7 @@ export function createDispatchBundle(
 			const init = result.delegation.initialize;
 			const agentInfo = init?.agentInfo;
 			const finalFailureMessage = result.failureMessage ?? failureMessage;
+			const capturedOutput = outputCapture.snapshot();
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -2575,6 +2574,7 @@ export function createDispatchBundle(
 				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
 				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
+				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd: 0,
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
@@ -2691,12 +2691,17 @@ export function createDispatchBundle(
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await acp.promise;
-				// The receipt reads meters that fill as a side effect of event
-				// iteration; wait (bounded) for an active consumer to finish
-				// draining before sealing tool stats and the finish gate. A
-				// stream nobody started will never fold anything in, so it must
-				// not delay finalization.
-				if (drainStarted) await awaitEventDrain(eventsDrained);
+				// The receipt reads meters the domain pump fills. Finalization
+				// always waits (bounded by the drain grace) for the pump to finish
+				// the source stream, whether or not an external consumer ever
+				// subscribed, so a fast peer cannot seal a zero-token receipt.
+				await awaitEventDrain(eventPump.done);
+				if (eventPump.droppedEvents() > 0) {
+					reportDispatchDiagnostic(
+						`run ${envelope.id}`,
+						new Error(`${eventPump.droppedEvents()} event(s) dropped from the bounded consumer tee`),
+					);
+				}
 				const endedAt = new Date().toISOString();
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode,
@@ -2796,7 +2801,7 @@ export function createDispatchBundle(
 
 		return {
 			runId: envelope.id,
-			events: enrichedEvents,
+			events: eventPump.events,
 			finalPromise,
 		};
 	}
@@ -2985,182 +2990,168 @@ export function createDispatchBundle(
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
 		let runIdForPermissionAudit: string | null = null;
-		let drainStarted = false;
 		let workerPolicyPermissionCounter = 0;
-		let settleEventDrain!: () => void;
-		const eventsDrained = new Promise<void>((resolve) => {
-			settleEventDrain = resolve;
-		});
-		const enrichedEvents: AsyncIterableIterator<unknown> = (async function* () {
-			drainStarted = true;
-			try {
-				if (lifecycle.target.routeWarning) {
-					yield { type: "route_warning", level: "warning", message: lifecycle.target.routeWarning };
+		const outputCapture = createWorkerOutputCapture();
+		const foldWorkerEvent = (raw: unknown): void => {
+			outputCapture.observe(raw);
+			const event = raw as {
+				type?: string;
+				message?: {
+					role?: string;
+					usage?: unknown;
+					model?: unknown;
+					responseModel?: unknown;
+					responseId?: unknown;
+					stopReason?: unknown;
+					errorMessage?: unknown;
+				};
+				payload?: {
+					tool?: string;
+					posture?: string;
+					durationMs?: number;
+					outcome?: "ok" | "error" | "blocked";
+					decision?: unknown;
+					actionClass?: string;
+					ruleId?: string;
+					reasonCode?: string;
+					policySource?: string;
+					reason?: string;
+					skillActivation?: unknown;
+					// Worker permission-escalation fields (clio_permission_escalated /
+					// clio_permission_resolved escalate path).
+					requestId?: string;
+					summary?: string;
+					target?: string;
+					axis?: string;
+					timeoutMs?: number;
+					source?: "operator" | "timeout" | "policy";
+				};
+			};
+			if (isRecord(event)) {
+				const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
+				if (finishEntry !== null) {
+					finishContractAssistantText = finishEntry.assistantText;
+					finishContractAssistantTurnId = finishEntry.assistantTurnId;
 				}
-				for await (const raw of workerEvents) {
-					const event = raw as {
-						type?: string;
-						message?: {
-							role?: string;
-							usage?: unknown;
-							model?: unknown;
-							responseModel?: unknown;
-							responseId?: unknown;
-							stopReason?: unknown;
-							errorMessage?: unknown;
-						};
-						payload?: {
-							tool?: string;
-							posture?: string;
-							durationMs?: number;
-							outcome?: "ok" | "error" | "blocked";
-							decision?: unknown;
-							actionClass?: string;
-							ruleId?: string;
-							reasonCode?: string;
-							policySource?: string;
-							reason?: string;
-							skillActivation?: unknown;
-							// Worker permission-escalation fields (clio_permission_escalated /
-							// clio_permission_resolved escalate path).
-							requestId?: string;
-							summary?: string;
-							target?: string;
-							axis?: string;
-							timeoutMs?: number;
-							source?: "operator" | "timeout" | "policy";
-						};
-					};
-					if (isRecord(event)) {
-						const finishEntry = appendDispatchFinishContractEntry(finishContractEntries, event);
-						if (finishEntry !== null) {
-							finishContractAssistantText = finishEntry.assistantText;
-							finishContractAssistantTurnId = finishEntry.assistantTurnId;
-						}
-					}
-					if (event.type === "clio_permission_escalated" && event.payload && typeof event.payload.requestId === "string") {
-						escalationCounts.requested += 1;
-						const ctx = isRecord(event.payload.decision) ? event.payload.decision : null;
-						const classification = ctx !== null && isRecord(ctx.classification) ? ctx.classification : null;
-						const policy = ctx !== null && isRecord(ctx.policy) ? ctx.policy : null;
-						const actionClass =
-							readStringOrNull(classification?.actionClass) ??
-							readStringOrNull(ctx?.actionClass) ??
-							readStringOrNull(event.payload.actionClass) ??
-							"unknown";
-						const reasons = readStringArrayOrNull(ctx?.reasons) ?? readStringArrayOrNull(classification?.reasons);
-						const reasonCode = readStringOrNull(ctx?.reasonCode) ?? readStringOrNull(policy?.reasonCode);
-						const ruleId = readStringOrNull(ctx?.ruleId) ?? readStringOrNull(policy?.ruleId);
-						const policySource = readStringOrNull(ctx?.policySource) ?? readStringOrNull(policy?.policySource);
-						const policyKind = readStringOrNull(policy?.kind);
-						const axis =
-							readStringOrNull(event.payload.axis) ??
-							(ruleId !== null ? `net:${ruleId}` : policyKind === "ask" && reasonCode !== null ? `net:${reasonCode}` : null);
-						context.bus.emit(BusChannels.PermissionRequested, {
-							tool: typeof event.payload.tool === "string" ? event.payload.tool : "unknown",
-							actionClass,
-							requestedBy: runIdForPermissionAudit ?? undefined,
-							requestId: event.payload.requestId,
-							...(runIdForPermissionAudit !== null ? { origin: `worker:${runIdForPermissionAudit}` } : {}),
-							...(axis !== null ? { axis } : {}),
-							agentId: req.agentId,
-							...(typeof event.payload.summary === "string" ? { summary: event.payload.summary } : {}),
-							...(typeof event.payload.target === "string" && event.payload.target.length > 0
-								? { target: event.payload.target }
-								: {}),
-							...(reasons !== null ? { reasons } : {}),
-							...(reasonCode !== null ? { reasonCode } : {}),
-							...(ruleId !== null ? { ruleId } : {}),
-							...(policySource !== null ? { policySource } : {}),
-							...(typeof event.payload.timeoutMs === "number" ? { timeoutMs: event.payload.timeoutMs } : {}),
-							escalation: true,
-						});
-					}
-					if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
-						const u = event.message.usage;
-						tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
-						tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
-						tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
-						tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
-						tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
-						const model = readStringOrNull(event.message.model);
-						const responseModel = readStringOrNull(event.message.responseModel);
-						const responseId = readStringOrNull(event.message.responseId);
-						if (model !== null || responseModel !== null || responseId !== null) {
-							upstreamResponses.push({ model, responseModel, responseId });
-						}
-						if (event.message.stopReason === "error") {
-							const message = readStringOrNull(event.message.errorMessage);
-							if (message !== null) failureMessage = message;
-						}
-					}
-					if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
-						// Escalation resolutions already have a request event. Policy
-						// deny/fail is non-stalling, so dispatch mints the adjacent pair.
-						const source = event.payload.source;
-						const granted = source === "operator" && event.payload.decision === "approved";
-						const decidedBy = source === "operator" ? "operator" : source === "timeout" ? "timeout" : "policy:no-operator";
-						const requestId =
-							typeof event.payload.requestId === "string"
-								? event.payload.requestId
-								: source === "operator" || source === "timeout"
-									? undefined
-									: `worker-permission-${++workerPolicyPermissionCounter}`;
-						const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
-						const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
-						const reason =
-							typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
-						if (decidedBy === "policy:no-operator" && requestId && origin) {
-							context.bus.emit(BusChannels.PermissionRequested, {
-								tool: event.payload.tool,
-								actionClass,
-								requestId,
-								origin,
-								requestedBy: runIdForPermissionAudit ?? undefined,
-								rejection: { short: reason, detail: reason, hints: [] },
-							});
-						}
-						if (source === "operator") {
-							if (granted) escalationCounts.approved += 1;
-							else escalationCounts.denied += 1;
-						} else if (source === "timeout") {
-							escalationCounts.timedOut += 1;
-						}
-						context.bus.emit(BusChannels.PermissionResolved, {
-							status: granted ? "granted" : "denied",
-							tool: event.payload.tool,
-							...(requestId !== undefined ? { requestId } : {}),
-							...(origin !== undefined ? { origin } : {}),
-							decidedBy,
-							actionClass,
-							reason,
-							...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
-						});
-					}
-					if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
-						recordToolFinish(toolStats, event.payload);
-						if (isSkillActivation(event.payload.skillActivation)) {
-							skillActivations.push(event.payload.skillActivation);
-						}
-						if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
-						else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-						else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
-						if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
-							const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
-							if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
-							if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
-							if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
-							if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
-							if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
-							blockedAttempts.push(attempt);
-						}
-					}
-					yield raw;
-				}
-			} finally {
-				settleEventDrain();
 			}
-		})();
+			if (event.type === "clio_permission_escalated" && event.payload && typeof event.payload.requestId === "string") {
+				escalationCounts.requested += 1;
+				const ctx = isRecord(event.payload.decision) ? event.payload.decision : null;
+				const classification = ctx !== null && isRecord(ctx.classification) ? ctx.classification : null;
+				const policy = ctx !== null && isRecord(ctx.policy) ? ctx.policy : null;
+				const actionClass =
+					readStringOrNull(classification?.actionClass) ??
+					readStringOrNull(ctx?.actionClass) ??
+					readStringOrNull(event.payload.actionClass) ??
+					"unknown";
+				const reasons = readStringArrayOrNull(ctx?.reasons) ?? readStringArrayOrNull(classification?.reasons);
+				const reasonCode = readStringOrNull(ctx?.reasonCode) ?? readStringOrNull(policy?.reasonCode);
+				const ruleId = readStringOrNull(ctx?.ruleId) ?? readStringOrNull(policy?.ruleId);
+				const policySource = readStringOrNull(ctx?.policySource) ?? readStringOrNull(policy?.policySource);
+				const policyKind = readStringOrNull(policy?.kind);
+				const axis =
+					readStringOrNull(event.payload.axis) ??
+					(ruleId !== null ? `net:${ruleId}` : policyKind === "ask" && reasonCode !== null ? `net:${reasonCode}` : null);
+				context.bus.emit(BusChannels.PermissionRequested, {
+					tool: typeof event.payload.tool === "string" ? event.payload.tool : "unknown",
+					actionClass,
+					requestedBy: runIdForPermissionAudit ?? undefined,
+					requestId: event.payload.requestId,
+					...(runIdForPermissionAudit !== null ? { origin: `worker:${runIdForPermissionAudit}` } : {}),
+					...(axis !== null ? { axis } : {}),
+					agentId: req.agentId,
+					...(typeof event.payload.summary === "string" ? { summary: event.payload.summary } : {}),
+					...(typeof event.payload.target === "string" && event.payload.target.length > 0
+						? { target: event.payload.target }
+						: {}),
+					...(reasons !== null ? { reasons } : {}),
+					...(reasonCode !== null ? { reasonCode } : {}),
+					...(ruleId !== null ? { ruleId } : {}),
+					...(policySource !== null ? { policySource } : {}),
+					...(typeof event.payload.timeoutMs === "number" ? { timeoutMs: event.payload.timeoutMs } : {}),
+					escalation: true,
+				});
+			}
+			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
+				const u = event.message.usage;
+				tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
+				tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
+				tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
+				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
+				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+				const model = readStringOrNull(event.message.model);
+				const responseModel = readStringOrNull(event.message.responseModel);
+				const responseId = readStringOrNull(event.message.responseId);
+				if (model !== null || responseModel !== null || responseId !== null) {
+					upstreamResponses.push({ model, responseModel, responseId });
+				}
+				if (event.message.stopReason === "error") {
+					const message = readStringOrNull(event.message.errorMessage);
+					if (message !== null) failureMessage = message;
+				}
+			}
+			if (event.type === "clio_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
+				// Escalation resolutions already have a request event. Policy
+				// deny/fail is non-stalling, so dispatch mints the adjacent pair.
+				const source = event.payload.source;
+				const granted = source === "operator" && event.payload.decision === "approved";
+				const decidedBy = source === "operator" ? "operator" : source === "timeout" ? "timeout" : "policy:no-operator";
+				const requestId =
+					typeof event.payload.requestId === "string"
+						? event.payload.requestId
+						: source === "operator" || source === "timeout"
+							? undefined
+							: `worker-permission-${++workerPolicyPermissionCounter}`;
+				const origin = runIdForPermissionAudit !== null ? `worker:${runIdForPermissionAudit}` : undefined;
+				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
+				const reason =
+					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
+				if (decidedBy === "policy:no-operator" && requestId && origin) {
+					context.bus.emit(BusChannels.PermissionRequested, {
+						tool: event.payload.tool,
+						actionClass,
+						requestId,
+						origin,
+						requestedBy: runIdForPermissionAudit ?? undefined,
+						rejection: { short: reason, detail: reason, hints: [] },
+					});
+				}
+				if (source === "operator") {
+					if (granted) escalationCounts.approved += 1;
+					else escalationCounts.denied += 1;
+				} else if (source === "timeout") {
+					escalationCounts.timedOut += 1;
+				}
+				context.bus.emit(BusChannels.PermissionResolved, {
+					status: granted ? "granted" : "denied",
+					tool: event.payload.tool,
+					...(requestId !== undefined ? { requestId } : {}),
+					...(origin !== undefined ? { origin } : {}),
+					decidedBy,
+					actionClass,
+					reason,
+					...(runIdForPermissionAudit !== null ? { requestedBy: runIdForPermissionAudit } : {}),
+				});
+			}
+			if (event.type === "clio_tool_finish" && event.payload && typeof event.payload.tool === "string") {
+				recordToolFinish(toolStats, event.payload);
+				if (isSkillActivation(event.payload.skillActivation)) {
+					skillActivations.push(event.payload.skillActivation);
+				}
+				if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
+				else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
+				else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
+				if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
+					const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
+					if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
+					if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
+					if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
+					if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
+					if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
+					blockedAttempts.push(attempt);
+				}
+			}
+		};
 
 		// The worker is already live; any failure to establish its tracking row
 		// must not leave an orphaned subprocess holding a concurrency slot.
@@ -3259,6 +3250,18 @@ export function createDispatchBundle(
 			throw error;
 		}
 
+		// Domain-owned ingestion starts here, whether or not any external
+		// consumer ever iterates the returned stream: meters, tool stats, finish
+		// contract state, permission audit events, and output capture fold in
+		// the pump; consumers get a bounded replay tee. Events the worker
+		// emitted before this point are still queued in the spawn channel.
+		const eventPump = startDispatchEventPump(workerEvents, foldWorkerEvent, {
+			...(lifecycle.target.routeWarning !== undefined
+				? { prelude: [{ type: "route_warning", level: "warning", message: lifecycle.target.routeWarning }] }
+				: {}),
+			onError: (error) => reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error),
+		});
+
 		const startedAt = envelope.startedAt;
 
 		const activeRun: ActiveRun = {
@@ -3330,6 +3333,7 @@ export function createDispatchBundle(
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
+			const capturedOutput = outputCapture.snapshot();
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -3364,6 +3368,7 @@ export function createDispatchBundle(
 				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
 				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
+				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd,
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
@@ -3477,12 +3482,17 @@ export function createDispatchBundle(
 		const finalPromise = (async (): Promise<RunReceipt> => {
 			try {
 				const result = await workerDone;
-				// The receipt reads meters that fill as a side effect of event
-				// iteration; wait (bounded) for an active consumer to finish
-				// draining before sealing token counts, tool stats, and the
-				// finish gate. A stream nobody started will never fold anything
-				// in, so it must not delay finalization.
-				if (drainStarted) await awaitEventDrain(eventsDrained);
+				// The receipt reads meters the domain pump fills. Finalization
+				// always waits (bounded by the drain grace) for the pump to finish
+				// the source stream, whether or not an external consumer ever
+				// subscribed, so a fast worker cannot seal a zero-token receipt.
+				await awaitEventDrain(eventPump.done);
+				if (eventPump.droppedEvents() > 0) {
+					reportDispatchDiagnostic(
+						`run ${envelope.id}`,
+						new Error(`${eventPump.droppedEvents()} event(s) dropped from the bounded consumer tee`),
+					);
+				}
 				const endedAt = new Date().toISOString();
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode ?? null,
@@ -3600,7 +3610,7 @@ export function createDispatchBundle(
 
 		return attachSpeculation({
 			runId: envelope.id,
-			events: enrichedEvents,
+			events: eventPump.events,
 			finalPromise,
 		});
 	}

@@ -711,35 +711,122 @@ describe("contracts/worker-steer", () => {
 	});
 
 	describe("worker runtime guardrail bounds", () => {
-		it("terminates a denied-call spiral at workerToolCallCap", async () => {
+		function withWorkerCap<T>(cap: number, fn: () => Promise<T>): Promise<T> {
 			const previousCap = process.env.CLIO_WORKER_TOOL_CALL_CAP;
-			process.env.CLIO_WORKER_TOOL_CALL_CAP = "3";
-			const events: unknown[] = [];
-			const { input, unregister } = fauxRuntimeInput(
-				Array.from({ length: 8 }, (_, i) =>
-					fauxAssistantMessage([fauxToolCall("bash", { command: `printf denied-${i}` }, { id: `call-denied-${i}` })], {
-						stopReason: "toolUse",
-					}),
-				),
-				{ onPermission: "deny" },
-			);
-			try {
-				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
-				const finishes = toolFinishes(events);
-				const capFinish = finishes.find((finish) => String(finish.reason ?? "").includes("workerToolCallCap reached (3)"));
-
-				strictEqual(result.exitCode, 1);
-				strictEqual(finishes.length, 4, "three denied calls are followed by the terminal cap block");
-				strictEqual(finishes.filter((finish) => finish.decision === "permission_requested").length, 3);
-				strictEqual(capFinish?.outcome, "blocked");
-				strictEqual(capFinish?.decision, "blocked");
-				strictEqual(capFinish?.reasonCode, "guard_block");
-				strictEqual(capFinish?.actionClass, "execute");
-			} finally {
-				unregister();
+			process.env.CLIO_WORKER_TOOL_CALL_CAP = String(cap);
+			return fn().finally(() => {
 				if (previousCap === undefined) Reflect.deleteProperty(process.env, "CLIO_WORKER_TOOL_CALL_CAP");
 				else process.env.CLIO_WORKER_TOOL_CALL_CAP = previousCap;
+			});
+		}
+
+		function lastAssistantText(events: ReadonlyArray<unknown>): string {
+			for (let index = events.length - 1; index >= 0; index -= 1) {
+				const event = events[index] as { type?: unknown; message?: { role?: unknown; content?: unknown } };
+				if (event?.type !== "message_end" || event.message?.role !== "assistant") continue;
+				const content = Array.isArray(event.message.content) ? event.message.content : [];
+				const text = content
+					.filter(
+						(block): block is { type: string; text: string } =>
+							typeof block === "object" &&
+							block !== null &&
+							(block as { type?: unknown }).type === "text" &&
+							typeof (block as { text?: unknown }).text === "string",
+					)
+					.map((block) => block.text)
+					.join("")
+					.trim();
+				if (text.length > 0) return text;
 			}
+			return "";
+		}
+
+		it("gives a cap-exhausted run one text-only synthesis round instead of aborting", async () => {
+			// With cap=3, three tool calls execute; the fourth attempt is blocked
+			// before its body runs and flips the request-level tool lock; the next
+			// scripted response is plain text, which must reach message_end while
+			// the run still exits non-clean (the cap was a real bound).
+			await withWorkerCap(3, async () => {
+				const scratch = mkdtempSync(join(tmpdir(), "clio-cap-synthesis-"));
+				const events: unknown[] = [];
+				const readCall = (index: number) => {
+					const path = join(scratch, `file-${index}.md`);
+					writeFileSync(path, `contents ${index}\n`);
+					return fauxAssistantMessage([fauxToolCall("read", { path }, { id: `call-read-${index}` })], {
+						stopReason: "toolUse",
+					});
+				};
+				const { input, unregister } = fauxRuntimeInput(
+					[
+						readCall(1),
+						readCall(2),
+						readCall(3),
+						readCall(4),
+						fauxAssistantMessage("synthesized after cap from gathered context"),
+					],
+					{ allowedTools: [ToolNames.Read], task: "summarize the scratch files" },
+				);
+				try {
+					const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+					const finishes = toolFinishes(events);
+					strictEqual(result.exitCode, 1, "a cap-exhausted run must not present as an unconstrained success");
+					strictEqual(finishes.filter((finish) => finish.outcome === "ok").length, 3, "exactly cap calls executed");
+					const capFinish = finishes.find((finish) =>
+						String(finish.reason ?? "").startsWith("workerToolCallCap reached (3); tool calls are now disabled"),
+					);
+					strictEqual(capFinish?.outcome, "blocked", "the crossing attempt is blocked, its body never runs");
+					strictEqual(capFinish?.decision, "blocked");
+					strictEqual(capFinish?.reasonCode, "guard_block");
+					strictEqual(
+						lastAssistantText(events),
+						"synthesized after cap from gathered context",
+						"the synthesis round's text reaches message_end",
+					);
+				} finally {
+					unregister();
+					rmSync(scratch, { recursive: true, force: true });
+				}
+			});
+		});
+
+		it("stops a model that keeps emitting tool calls after the cap at the bounded backstop", async () => {
+			await withWorkerCap(3, async () => {
+				const events: unknown[] = [];
+				const { input, unregister } = fauxRuntimeInput(
+					Array.from({ length: 10 }, (_, i) =>
+						fauxAssistantMessage([fauxToolCall("bash", { command: `printf denied-${i}` }, { id: `call-denied-${i}` })], {
+							stopReason: "toolUse",
+						}),
+					),
+					{ onPermission: "deny" },
+				);
+				try {
+					const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+					const finishes = toolFinishes(events);
+					const reasons = finishes.map((finish) => String(finish.reason ?? ""));
+
+					strictEqual(result.exitCode, 1);
+					strictEqual(
+						reasons.filter((reason) => reason.startsWith("permission denied by policy")).length,
+						3,
+						"exactly cap attempts reached the permission seam",
+					);
+					// Attempt 4 is the cap lockout; the bounded backstop then ends the
+					// run: the guard tolerates LOOP_SYNTHESIS_BACKSTOP_DENIALS further
+					// attempts, so the spiral cannot loop to the scripted end.
+					const capBlocks = reasons.filter((reason) =>
+						reason.startsWith("workerToolCallCap reached (3); tool calls are now disabled"),
+					);
+					strictEqual(capBlocks.length, 3, "the lockout plus the two bounded denials carry the synthesis directive");
+					ok(
+						reasons.some((reason) => reason.includes("was called again instead of answering")),
+						"the backstop reason ends the run",
+					);
+					strictEqual(finishes.length, 7, "3 denied calls + lockout + 2 bounded denials + the backstop, nothing more");
+				} finally {
+					unregister();
+				}
+			});
 		});
 	});
 

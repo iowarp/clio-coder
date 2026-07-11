@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { isTerminalRunEnvelope, type RunEnvelope } from "../domains/dispatch/types.js";
+import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import { isTerminalRunEnvelope, type RunEnvelope, type RunReceipt } from "../domains/dispatch/types.js";
 import { runEventTail } from "./dispatch.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
@@ -13,12 +14,13 @@ import { truncateUtf8 } from "./truncate-utf8.js";
  * gather half of detached dispatch. mode=list enumerates known runs (this
  * session first), status reports one run's state and progress counters, peek
  * returns the bounded tail of a run's recent events buffered in this process,
- * receipt returns the stored receipt, wait blocks on one run until it is
- * terminal or a timeout fires, collect is the batch barrier: a pending
+ * receipt returns the stored receipt, wait observes one run for a bounded
+ * time until it is terminal or the timeout fires (it never cancels anything;
+ * steer action=cancel stops a run), collect is the batch barrier: a pending
  * snapshot while runs are in flight, full results once every run is terminal.
  * Built strictly on the dispatch domain's ledger, live snapshot, durable
- * batch records, and the event stream the dispatch tool already consumes, so
- * wait and collect work across session resume.
+ * batch records, and integrity-verified receipts, so wait and collect work
+ * across session resume.
  */
 
 const LIST_LIMIT = 20;
@@ -163,19 +165,21 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 }
 
 /**
- * Newest assistant text buffered for a run in this process. Only assistant
- * `message_end` events carry a text detail in the tail, so a detail on that
- * type is the worker's answer (bounded by the tail's own text cap). Null
- * after a resume; the receipt remains the durable evidence.
+ * Verified durable output for a terminal run: read the sealed receipt, verify
+ * its integrity against the ledger row, and return its bounded output block.
+ * Same-process and resumed collection read the same artifact, so the answer
+ * survives session exit; tampered or unverifiable receipts yield nothing
+ * rather than unauthenticated text.
  */
-function tailAssistantText(runId: string): string | null {
-	const tail = runEventTail(runId);
-	if (!tail) return null;
-	for (let index = tail.entries.length - 1; index >= 0; index -= 1) {
-		const entry = tail.entries[index];
-		if (entry && entry.type === "message_end" && entry.detail !== undefined) return entry.detail;
+function durableRunOutput(run: RunEnvelope): RunReceipt["output"] | null {
+	if (!run.receiptPath) return null;
+	try {
+		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+		if (!verifyReceiptIntegrity(receipt, run).ok) return null;
+		return receipt.output ?? null;
+	} catch {
+		return null;
 	}
-	return null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -183,9 +187,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Block on one run until it is terminal, the timeout fires, or the tool call
- * is aborted. Elapsed time uses the monotonic clock: a wall-clock step (NTP
- * sync, VM resume) must not shrink or inflate the timeout window.
+ * Observe one run until it is terminal, the timeout fires, or the tool call
+ * is aborted. Purely a bounded observation: the run is never cancelled or
+ * otherwise affected (steer action=cancel stops a run). Elapsed time uses the
+ * monotonic clock: a wall-clock step (NTP sync, VM resume) must not shrink or
+ * inflate the timeout window.
  */
 async function runWait(
 	deps: MonitorToolDeps,
@@ -202,7 +208,7 @@ async function runWait(
 		if (elapsed >= timeoutMs) {
 			return {
 				kind: "ok",
-				output: `wait timed out after ${timeoutMs}ms: run ${runId} is still ${run.status}. Wait again, or use mode="collect" later.`,
+				output: `wait timed out after ${timeoutMs}ms: run ${runId} is still ${run.status} and keeps running. Wait again, collect later, or stop it with steer(action="cancel").`,
 				details: { mode: "wait", runId, timedOut: true, state: run.status, waitedMs: elapsed },
 			};
 		}
@@ -234,10 +240,12 @@ function collectRunLine(row: CollectRow): string[] {
 	const lines = [
 		`- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=$${run.costUsd.toFixed(4)} receipt=${run.receiptPath ?? "n/a"}${detail}`,
 	];
-	const text = tailAssistantText(run.id);
-	if (text !== null) {
-		const capped = truncateUtf8(text, COLLECT_TEXT_BYTES, "...");
-		lines.push("  agent output:", ...capped.split("\n").map((line) => `  ${line}`));
+	const output = durableRunOutput(run);
+	if (output) {
+		const capped = truncateUtf8(output.text, COLLECT_TEXT_BYTES, "...");
+		const qualifier = output.state === "partial" ? " (partial; the run did not complete this message)" : "";
+		const truncatedNote = output.truncated ? ` (stored output truncated; full text was ${output.bytes} bytes)` : "";
+		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));
 	}
 	return lines;
 }
@@ -297,34 +305,45 @@ async function runCollect(deps: MonitorToolDeps, batchId: string, runIds: Readon
 			(row.run.outcome !== undefined && row.run.outcome !== "succeeded" && row.run.outcome !== null),
 	);
 	const missing = rows.filter((row) => row.run === null);
+	// The batch is only reported collected when the durable mark actually
+	// persisted; on failure it stays open for a later collect and the result
+	// says so instead of pretending.
+	let collected = false;
 	if (batchId.length > 0) {
 		try {
-			await deps.dispatch.detached?.markCollected(batchId);
+			const marked = await deps.dispatch.detached?.markCollected(batchId);
+			collected = marked !== null && marked !== undefined;
 		} catch {
-			// Collection reporting must not fail on a bookkeeping write; the
-			// batch simply stays open for a later collect.
+			collected = false;
 		}
 	}
 	const lines = [
 		`collect complete for ${scope}: total=${rows.length} failed=${failed.length}${missing.length > 0 ? ` missing=${missing.length}` : ""}`,
 		...rows.flatMap((row) => collectRunLine(row)),
+		...(batchId.length > 0 && !collected
+			? ["", "note: the batch record could not be marked collected; it stays open for a later collect."]
+			: []),
 	];
 	return {
 		kind: "ok",
 		output: lines.join("\n"),
 		details: {
 			mode: "collect",
-			...(batchId.length > 0 ? { batchId, collected: true } : {}),
+			...(batchId.length > 0 ? { batchId, collected } : {}),
 			complete: true,
 			runCount: rows.length,
 			failedCount: failed.length,
-			runs: rows.map((row) => ({
-				runId: row.runId,
-				agentId: row.agentId,
-				state: row.run === null ? "missing" : (row.run.outcome ?? row.run.status),
-				exitCode: row.run?.exitCode ?? null,
-				receiptPath: row.run?.receiptPath ?? null,
-			})),
+			runs: rows.map((row) => {
+				const output = row.run !== null ? durableRunOutput(row.run) : null;
+				return {
+					runId: row.runId,
+					agentId: row.agentId,
+					state: row.run === null ? "missing" : (row.run.outcome ?? row.run.status),
+					exitCode: row.run?.exitCode ?? null,
+					receiptPath: row.run?.receiptPath ?? null,
+					...(output ? { output: { state: output.state, bytes: output.bytes, truncated: output.truncated } } : {}),
+				};
+			}),
 		},
 	};
 }
@@ -333,7 +352,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Monitor,
 		description:
-			"Inspect dispatched runs: mode=list enumerates known runs, status (default) reports one run's state, peek shows its recent output/events, receipt returns the stored receipt, wait blocks on one run until it finishes or timeout_ms elapses, collect gathers a detached batch (batch_id) or run-id list: a pending snapshot while runs are in flight, full results once all are done.",
+			"Inspect dispatched runs: mode=list enumerates known runs, status (default) reports one run's state, peek shows its recent output/events, receipt returns the stored receipt, wait observes one run for a bounded time until it finishes or timeout_ms elapses (it never cancels the run; use steer action=cancel to stop one), collect gathers a detached batch (batch_id) or run-id list: a pending snapshot while runs are in flight, full results once all are done.",
 		parameters: Type.Object({
 			run_id: Type.Optional(Type.String({ description: "Run id from dispatch output; omit with mode=list." })),
 			mode: Type.Optional(

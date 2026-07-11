@@ -168,6 +168,7 @@ describe("contracts/receipt-integrity", () => {
 			},
 			failureMessage: "diagnostic retained for evidence",
 			upstreamResponses: [{ model: "model-a", responseModel: "model-a-2026", responseId: "response-1" }],
+			output: { state: "final", text: "the durable final answer", bytes: 24, truncated: false },
 			promptSignature: required(envelope.promptSignature, "promptSignature"),
 			toolSignature: required(envelope.toolSignature, "toolSignature"),
 			toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 3 }],
@@ -290,6 +291,36 @@ describe("contracts/receipt-integrity", () => {
 			const tampered = { ...receipt, [field]: mutate(draft[field]) } as unknown as RunReceipt;
 			strictEqual(verifyReceiptIntegrity(tampered, envelope).ok, false, `expected ${field} mutation to fail`);
 		}
+	});
+
+	it("detects tampering with every durable output field on a sealed receipt", () => {
+		const envelope = fixtureEnvelope("run-output-tamper");
+		const draft: RunReceiptDraft = {
+			...fixtureReceiptDraft(envelope),
+			output: { state: "final", text: "authentic answer", bytes: 16, truncated: false },
+		};
+		const receipt = withReceiptIntegrity(draft, envelope);
+		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+
+		const tampers: Array<NonNullable<RunReceipt["output"]>> = [
+			{ state: "final", text: "forged answer", bytes: 16, truncated: false },
+			{ state: "partial", text: "authentic answer", bytes: 16, truncated: false },
+			{ state: "final", text: "authentic answer", bytes: 99, truncated: false },
+			{ state: "final", text: "authentic answer", bytes: 16, truncated: true },
+		];
+		for (const output of tampers) {
+			deepStrictEqual(
+				verifyReceiptIntegrity({ ...receipt, output }, envelope),
+				{ ok: false, reason: "integrity mismatch" },
+				`expected output tamper to fail: ${JSON.stringify(output)}`,
+			);
+		}
+		// Dropping the output entirely must also break the digest.
+		const { output: _output, ...withoutOutput } = receipt;
+		deepStrictEqual(verifyReceiptIntegrity(withoutOutput as RunReceipt, envelope), {
+			ok: false,
+			reason: "integrity mismatch",
+		});
 	});
 
 	it("detects tampering with the findings summary on a sealed receipt", () => {

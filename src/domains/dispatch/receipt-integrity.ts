@@ -99,6 +99,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	cacheWriteTokenCount: true,
 	reasoningTokenCount: true,
 	upstreamResponses: true,
+	output: true,
 	costUsd: true,
 	compiledPromptHash: true,
 	staticCompositionHash: true,

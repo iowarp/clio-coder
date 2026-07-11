@@ -167,6 +167,10 @@ function eventDetail(event: unknown): string | undefined {
 function recordRunEvent(runId: string, agentId: string, event: unknown): void {
 	const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
 	if (type === "heartbeat") return;
+	// Streaming deltas would flood the bounded tail with detail-less entries
+	// and evict the tool/terminal events peek exists to show. Skipped in the
+	// tail only; the bus path above still forwards every update (TTFT).
+	if (type === "message_update") return;
 	const state = runTails.get(runId) ?? { agentId, entries: [], lastSeenAt: Date.now() };
 	state.lastSeenAt = Date.now();
 	const entry: RunTailEntry = { at: new Date().toISOString(), type };
@@ -378,7 +382,10 @@ async function consumeBatchEvents(
 		summaries.set(runId, summary);
 		recordRunEvent(runId, agentId, inner);
 		if (type !== "heartbeat") {
-			bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
+			// The board folds direct worker event types (message_update,
+			// clio_tool_finish, ...); publish the inner event, not the
+			// batch_run_event wrapper.
+			bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event: inner });
 		}
 	}
 	return summaries;
@@ -478,18 +485,27 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 		...runs.flatMap(({ receipt, receiptPath, summary }, index) => {
 			const note = successNote(receipt);
 			const noteSuffix = note !== null ? ` note=${note}` : "";
+			// A non-success outcome is load-bearing evidence (a timeout has no
+			// failureMessage at all); render it and its detail on the run line.
+			const outcomeSuffix =
+				receipt.outcome !== undefined && receipt.outcome !== "succeeded"
+					? ` outcome=${receipt.outcome}${receipt.outcomeDetail ? ` detail=${receipt.outcomeDetail}` : ""}`
+					: "";
 			const failure = receipt.failureMessage ? ` failure=${receipt.failureMessage}` : "";
 			// Pipeline runs are an ordered chain, so each line names its step.
 			const stepLabel = mode === "pipeline" ? `step ${index + 1}/${runs.length} ` : "";
 			// Provenance suffix is empty when a run carries no
 			// pipeline/persona/escalation fields, so the line format is unchanged.
 			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
+			// The live summary is preferred; the receipt's durable bounded output
+			// covers runs whose event stream nobody consumed.
+			const answerText = summary.lastAssistantText.length > 0 ? summary.lastAssistantText : (receipt.output?.text ?? "");
 			const output =
-				summary.lastAssistantText.length > 0
-					? truncateUtf8(summary.lastAssistantText, perRunOutputBytes, TRUNCATION_MARKER)
+				answerText.length > 0
+					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${noteSuffix}${failure}${provenance}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${outcomeSuffix}${noteSuffix}${failure}${provenance}`,
 				"  agent output:",
 				...output.split("\n").map((line) => `  ${line}`),
 			];
@@ -515,6 +531,9 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 				exitCode: receipt.exitCode,
 				receiptPath,
 				eventCount: summary.count,
+				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
+					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
+					: {}),
 				...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 				...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 				...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
@@ -2269,7 +2288,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 					return {
 						kind: "error",
 						message:
-							'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; use monitor(mode="wait") with a timeout instead',
+							'dispatch: detach cannot enforce timeout_ms because no caller waits on the runs; monitor(mode="wait") only observes for a bounded time, and steer(action="cancel") stops a run',
 					};
 				}
 				try {

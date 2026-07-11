@@ -133,8 +133,9 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 `detach: true` validates, admits, and spawns every task, then returns. Runs
 keep streaming into the board and the run ledger. The batch is durable
 (`batches.json` under the state dir), so it survives session exit. Gather
-results with the monitor tool: `mode="wait"` blocks on one run with a
-timeout; `mode="collect"` is the barrier over a batch id or run-id list; a
+results with the monitor tool: `mode="wait"` observes one run for a bounded
+time (it never cancels the run; `steer` with `action="cancel"` stops one);
+`mode="collect"` is the barrier over a batch id or run-id list; a
 pending snapshot while runs are in flight, full results once all are
 terminal. Collecting marks the batch so the turn-end nudge stops firing.
 

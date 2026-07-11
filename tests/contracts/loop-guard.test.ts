@@ -3,7 +3,14 @@ import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { configureGuardrails, GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../src/core/guardrails.js";
+import {
+	configureGuardrails,
+	GUARDRAIL_DEFAULTS,
+	isWorkerToolCallCapExceededReason,
+	isWorkerToolCallCapSynthesisReason,
+	resolveGuardrail,
+	workerToolCallCapSynthesisReason,
+} from "../../src/core/guardrails.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/index.js";
@@ -662,6 +669,85 @@ describe("worker synthesis lockout", () => {
 		strictEqual(lockouts, 1, "lockout callback fired at the budget");
 		await registry.invoke(call); // post-lockout denial
 		strictEqual(lockouts, 1, "denials after the lockout do not re-fire the callback");
+	});
+
+	it("locks a cap-exhausted run to synthesis instead of aborting on the spot", async () => {
+		const safety = testSafety();
+		const cap = 3;
+		let lockouts = 0;
+		const bundle = createMiddlewareBundle({
+			registrations: [
+				createLoopGuardRegistration({
+					safety,
+					toolCallCap: cap,
+					turnSynthesisLockout: true,
+					onSynthesisLockout: () => {
+						lockouts += 1;
+					},
+				}),
+			],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		for (let i = 0; i < cap; i++) {
+			const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path: `cap-${i}.md` } });
+			strictEqual(verdict.kind, "ok", `call ${i + 1} within the cap must execute`);
+		}
+		strictEqual(lockouts, 0, "no lockout while the cap holds");
+		// The crossing call is denied without running its body, enters the
+		// lockout exactly once, and gets the synthesize-now directive.
+		const crossed = await registry.invoke({ tool: ToolNames.Read, args: { path: "cap-crossing.md" } });
+		strictEqual(crossed.kind, "blocked");
+		ok(crossed.kind === "blocked" && isWorkerToolCallCapSynthesisReason(crossed.reason), crossed.kind);
+		ok(crossed.kind === "blocked" && crossed.reason.includes(`workerToolCallCap reached (${cap})`));
+		strictEqual(lockouts, 1, "the lockout engages at the crossing");
+		// A second call crossing in the same parallel batch is denied with the
+		// same directive and must not re-fire the synthesis transition.
+		const parallel = await registry.invoke({ tool: ToolNames.Read, args: { path: "cap-parallel.md" } });
+		ok(parallel.kind === "blocked" && isWorkerToolCallCapSynthesisReason(parallel.reason));
+		strictEqual(lockouts, 1, "parallel crossings do not fire a second transition");
+	});
+
+	it("caps a noncompliant model with the bounded backstop after the cap lockout", async () => {
+		const safety = testSafety();
+		const cap = 2;
+		const bundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety, toolCallCap: cap, turnSynthesisLockout: true })],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		for (let i = 0; i < cap; i++) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: `pre-${i}.md` } })).kind, "ok");
+		}
+		const lockout = await registry.invoke({ tool: ToolNames.Read, args: { path: "over.md" } });
+		ok(lockout.kind === "blocked" && isWorkerToolCallCapSynthesisReason(lockout.reason));
+		for (let i = 0; i < LOOP_SYNTHESIS_BACKSTOP_DENIALS; i++) {
+			const denied = await registry.invoke({ tool: ToolNames.Read, args: { path: `post-${i}.md` } });
+			ok(
+				denied.kind === "blocked" && isWorkerToolCallCapSynthesisReason(denied.reason),
+				`denial ${i + 1} keeps directing the model to answer`,
+			);
+		}
+		const stopped = await registry.invoke({ tool: ToolNames.Read, args: { path: "still-calling.md" } });
+		ok(stopped.kind === "blocked", "the backstop denies the call");
+		ok(
+			stopped.kind === "blocked" && isLoopGuardSynthesisBackstopReason(stopped.reason),
+			"the backstop reason is recognizable by the worker abort seam",
+		);
+	});
+
+	it("keeps the immediate cap abort when no synthesis lockout is wired", async () => {
+		const safety = testSafety();
+		const bundle = createMiddlewareBundle({ registrations: [createLoopGuardRegistration({ safety, toolCallCap: 1 })] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "a.md" } })).kind, "ok");
+		const blocked = await registry.invoke({ tool: ToolNames.Read, args: { path: "b.md" } });
+		ok(blocked.kind === "blocked" && isWorkerToolCallCapExceededReason(blocked.reason));
+	});
+
+	it("keeps the cap predicates mutually exclusive", () => {
+		strictEqual(isWorkerToolCallCapSynthesisReason(workerToolCallCapSynthesisReason(50)), true);
+		strictEqual(isWorkerToolCallCapExceededReason(workerToolCallCapSynthesisReason(50)), false);
+		strictEqual(isWorkerToolCallCapSynthesisReason("workerToolCallCap reached (50); abort run"), false);
+		strictEqual(isLoopGuardSynthesisBackstopReason(workerToolCallCapSynthesisReason(50)), false);
 	});
 
 	it("keeps the backstop predicate specific to the backstop reason", () => {

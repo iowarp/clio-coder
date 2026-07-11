@@ -1,5 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -279,6 +281,124 @@ describe("detached dispatch + collect", () => {
 
 			const missing = (await monitor.run({ mode: "wait", run_id: "no-such-run", timeout_ms: 100 }, {})) as ToolRunResult;
 			strictEqual(missing.kind, "error");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("collect returns the durable output after a resume, with its final/partial classification", async () => {
+		// First bundle: dispatch without ever consuming the event stream, so the
+		// in-process tail never sees the answer and durable state is the only
+		// possible source. Finalize, then stop (session exit).
+		const context = dispatchStubContext();
+		const first = makeDispatchBundle(context, { spawnWorker: () => okWorker("resumed answer") });
+		await first.extension.start();
+		let runId = "";
+		try {
+			const handle = await first.contract.dispatch({ agentId: "coder", task: "durable answer" });
+			runId = handle.runId;
+			await handle.finalPromise;
+		} finally {
+			await first.extension.stop?.();
+		}
+
+		// Second bundle over the same state dir: collect must return the stored
+		// output from the verified receipt.
+		const second = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker() });
+		await second.extension.start();
+		try {
+			const monitor = createMonitorTool({ dispatch: second.contract });
+			const collected = (await monitor.run({ mode: "collect", run_ids: [runId] }, {})) as ToolRunResult;
+			strictEqual(collected.kind, "ok");
+			ok(collected.kind === "ok");
+			strictEqual(collected.details?.complete, true);
+			match(collected.output, /resumed answer/);
+			const runsDetail = collected.details?.runs as Array<{
+				runId: string;
+				output?: { state: string; bytes: number; truncated: boolean };
+			}>;
+			deepStrictEqual(runsDetail[0]?.output, { state: "final", bytes: 14, truncated: false });
+		} finally {
+			await second.extension.stop?.();
+		}
+	});
+
+	it("publishes the inner worker event on DispatchProgress for detached batches", async () => {
+		const bus = createSafeEventBus();
+		const progress: Array<{ runId: string; event: unknown }> = [];
+		bus.on(BusChannels.DispatchProgress, (payload) => {
+			progress.push({ runId: payload.runId, event: payload.event });
+		});
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: () => ({
+				pid: 300,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: (async function* () {
+					yield {
+						type: "message_update",
+						assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "str" },
+					};
+					yield { type: "clio_tool_finish", payload: { tool: "grep", outcome: "ok" } };
+					yield {
+						type: "message_end",
+						message: { role: "assistant", content: "detached done", usage: { input: 1, output: 1 } },
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract, bus });
+			const result = (await tool.run({ tasks: ["board visibility"], detach: true }, {})) as ToolRunResult;
+			strictEqual(result.kind, "ok");
+			await waitFor(
+				() => progress.some((entry) => (entry.event as { type?: string }).type === "message_end"),
+				"detached progress reached the bus",
+			);
+			const types = progress.map((entry) => (entry.event as { type?: string }).type);
+			ok(types.includes("message_update"), `board receives direct message_update, got ${types.join(",")}`);
+			ok(types.includes("clio_tool_finish"), `board receives direct clio_tool_finish, got ${types.join(",")}`);
+			ok(!types.includes("batch_run_event"), "the batch wrapper must not reach the board");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("does not report collected:true when the durable collection mark fails to persist", async () => {
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker("collect me") });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const result = (await tool.run({ tasks: ["mark failure"], detach: true }, {})) as ToolRunResult;
+			strictEqual(result.kind, "ok");
+			const batchId = result.details?.batchId as string;
+			const runIds = result.details?.runIds as string[];
+			const runId = runIds[0];
+			ok(runId !== undefined);
+			await waitFor(() => bundle.contract.getRun(runId)?.status === "completed", "detached run finalized");
+
+			const detached = bundle.contract.detached;
+			ok(detached);
+			const failingContract = {
+				...bundle.contract,
+				detached: {
+					...detached,
+					markCollected: async () => {
+						throw new Error("disk full");
+					},
+				},
+			};
+			const monitor = createMonitorTool({ dispatch: failingContract });
+			const collected = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
+			strictEqual(collected.kind, "ok");
+			ok(collected.kind === "ok");
+			strictEqual(collected.details?.complete, true);
+			strictEqual(collected.details?.collected, false, "a failed persistence write must not report collected");
+			match(collected.output, /could not be marked collected/);
+			// The batch record genuinely stayed open.
+			strictEqual(bundle.contract.detached?.get(batchId)?.collectedAt, null);
 		} finally {
 			await bundle.extension.stop?.();
 		}

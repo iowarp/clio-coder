@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
+import { BusChannels } from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
@@ -12,7 +14,7 @@ import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { credentialPresentTool } from "../../src/tools/credential-present.js";
-import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { createDispatchTool, runEventTail } from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
 import { findTool } from "../../src/tools/find.js";
 import { grepTool } from "../../src/tools/grep.js";
@@ -1409,6 +1411,144 @@ describe("contracts/tools dispatch run paths", () => {
 				externalMode: "acceptEdits",
 				dangerousBypass: false,
 			});
+		}
+	});
+
+	it("publishes the inner worker event on DispatchProgress for attached batches", async () => {
+		const bus = createSafeEventBus();
+		const progress: unknown[] = [];
+		bus.on(BusChannels.DispatchProgress, (payload) => {
+			progress.push(payload.event);
+		});
+		const innerEvents = [
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "st" } },
+			{ type: "clio_tool_finish", payload: { tool: "grep", outcome: "ok" } },
+			{ type: "message_end", message: { role: "assistant", content: "batched done" } },
+		];
+		const mockDispatch: DispatchContract = {
+			dispatch: async () => {
+				throw new Error("dispatch not used");
+			},
+			dispatchBatch: async () => ({
+				batchId: "batch-board",
+				runIds: ["run-b1", "run-b2"],
+				events: (async function* () {
+					for (const event of innerEvents) {
+						yield { type: "batch_run_event", batchId: "batch-board", runId: "run-b1", agentId: "coder", event };
+					}
+				})(),
+				finalPromise: Promise.resolve([runReceipt("run-b1", "task 1"), runReceipt("run-b2", "task 2")]),
+			}),
+			listRuns: () => [],
+			getRun: (runId: string) => runEnvelope(runId),
+			abort: () => {},
+			steer: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+		const tool = createDispatchTool({ dispatch: mockDispatch, bus });
+		const result = await tool.run(
+			{
+				tasks: [
+					{ task: "task 1", agent_id: "coder" },
+					{ task: "task 2", agent_id: "coder" },
+				],
+			},
+			approvedDispatch,
+		);
+		strictEqual(result.kind, "ok");
+		const types = progress.map((event) => (event as { type?: string }).type);
+		deepStrictEqual(
+			types,
+			["message_update", "clio_tool_finish", "message_end"],
+			"the board receives direct worker event types, never the batch wrapper",
+		);
+	});
+
+	it("keeps the monitor tail useful under streaming floods: updates are skipped, tool and terminal events survive", async () => {
+		const runId = `run-flood-${Date.now()}`;
+		const mockDispatch: DispatchContract = {
+			dispatch: async () => ({
+				runId,
+				events: (async function* () {
+					for (let i = 0; i < 150; i += 1) {
+						yield { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x" } };
+					}
+					yield { type: "clio_tool_start", payload: { tool: "grep" } };
+					yield { type: "clio_tool_finish", payload: { tool: "grep", outcome: "ok" } };
+					yield { type: "message_end", message: { role: "assistant", content: "flood survived" } };
+				})(),
+				finalPromise: Promise.resolve(runReceipt(runId, "flood")),
+			}),
+			dispatchBatch: async () => {
+				throw new Error("dispatchBatch not used");
+			},
+			listRuns: () => [],
+			getRun: (id: string) => runEnvelope(id),
+			abort: () => {},
+			steer: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const result = await tool.run({ task: "flood", agent_id: "coder" });
+		strictEqual(result.kind, "ok");
+		const tail = runEventTail(runId);
+		ok(tail !== null, "run tail exists");
+		const types = tail?.entries.map((entry) => entry.type) ?? [];
+		ok(!types.includes("message_update"), "bare streaming updates must not flood the tail");
+		deepStrictEqual(types, ["clio_tool_start", "clio_tool_finish", "message_end"]);
+		const terminal = tail?.entries.at(-1);
+		strictEqual(terminal?.detail, "flood survived", "the terminal answer detail survives the flood");
+	});
+
+	it("renders a non-success outcome and its detail in output and details, including a timeout with no failureMessage", async () => {
+		const mockDispatch: DispatchContract = {
+			dispatch: async () => ({
+				runId: "run-timeout",
+				events: (async function* () {})(),
+				finalPromise: Promise.resolve(
+					runReceipt("run-timeout", "slow work", {
+						exitCode: 1,
+						outcome: "timed_out",
+						outcomeDetail: "turn timeout exceeded",
+					}),
+				),
+			}),
+			dispatchBatch: async () => {
+				throw new Error("dispatchBatch not used");
+			},
+			listRuns: () => [],
+			getRun: () => ({ ...runEnvelope("run-timeout"), receiptPath: "/tmp/run-timeout.json" }),
+			abort: () => {},
+			steer: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const result = await tool.run({ task: "slow work", agent_id: "coder" });
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") {
+			ok(result.message.includes("outcome=timed_out"), result.message);
+			ok(result.message.includes("detail=turn timeout exceeded"), result.message);
+			const details = result.details as { runs?: Array<{ outcome?: unknown; outcomeDetail?: unknown }> };
+			strictEqual(details.runs?.[0]?.outcome, "timed_out");
+			strictEqual(details.runs?.[0]?.outcomeDetail, "turn timeout exceeded");
 		}
 	});
 

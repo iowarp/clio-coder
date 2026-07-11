@@ -9,7 +9,7 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { workerToolCallCapExceededReason } from "../../src/core/guardrails.js";
+import { workerToolCallCapExceededReason, workerToolCallCapSynthesisReason } from "../../src/core/guardrails.js";
 import { RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES } from "../../src/core/response-schema.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
@@ -1840,6 +1840,207 @@ describe("contracts/dispatch", () => {
 			strictEqual(receipt.inputTokenCount, 11);
 			strictEqual(receipt.outputTokenCount, 7);
 			strictEqual(receipt.tokenCount, 18);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("seals metering and durable output from a fast worker even when no consumer ever iterates", async () => {
+		const context = stubContext();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1010,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: (async function* () {
+					yield {
+						type: "message_end",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: "fast answer" }],
+							usage: { input: 3, output: 4 },
+						},
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "instant worker" });
+			// Deliberately no iteration of handle.events: receipt correctness must
+			// not depend on an external consumer.
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.inputTokenCount, 3);
+			strictEqual(receipt.outputTokenCount, 4);
+			strictEqual(receipt.tokenCount, 7);
+			deepStrictEqual(receipt.output, { state: "final", text: "fast answer", bytes: 11, truncated: false });
+			// The bounded tee still replays the events for a late consumer.
+			const replayed = await drainEvents(handle.events);
+			ok(
+				replayed.some((event) => (event as { type?: string }).type === "message_end"),
+				"late consumers still see the buffered stream",
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("keeps every receipt correct when batch admission throttles later members past an early fast finisher", async () => {
+		const context = stubContext();
+		// One-slot concurrency gate: the second batch member is admitted only
+		// after the first run settles, so the first worker finishes long before
+		// the merged iterator is returned to any consumer.
+		let activeWorkers = 0;
+		const scheduling = context.getContract<{ tryAcquireWorker(): boolean; releaseWorker(): void }>("scheduling");
+		if (!scheduling) throw new Error("test requires scheduling contract");
+		scheduling.tryAcquireWorker = () => {
+			if (activeWorkers >= 1) return false;
+			activeWorkers += 1;
+			return true;
+		};
+		scheduling.releaseWorker = () => {
+			activeWorkers -= 1;
+		};
+		let spawned = 0;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned += 1;
+				const answer = `answer ${spawned}`;
+				const usage = { input: spawned * 10, output: spawned };
+				return {
+					pid: 1100 + spawned,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: (async function* () {
+						yield {
+							type: "message_end",
+							message: { role: "assistant", content: [{ type: "text", text: answer }], usage },
+						};
+					})(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatchBatch([
+				{ agentId: "coder", task: "early member" },
+				{ agentId: "coder", task: "late member" },
+			]);
+			// No consumer for the merged stream either.
+			const receipts = await handle.finalPromise;
+			strictEqual(receipts.length, 2);
+			const first = receipts[0];
+			const second = receipts[1];
+			strictEqual(first?.inputTokenCount, 10);
+			strictEqual(first?.outputTokenCount, 1);
+			strictEqual(first?.output?.text, "answer 1");
+			strictEqual(second?.inputTokenCount, 20);
+			strictEqual(second?.outputTokenCount, 2);
+			strictEqual(second?.output?.text, "answer 2");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("seals ACP metering and durable output from a fast peer with no event consumer", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (!configContract) throw new Error("test requires config contract");
+		const settings = configContract.get() as ClioSettings;
+		settings.delegation.agents = [{ id: "fast-acp", command: "fast-acp", args: [], toolGovernance: "clio-policy" }];
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => ({
+				pid: 4243,
+				heartbeatAt: { current: Date.now() },
+				abort: () => {},
+				kill: () => {},
+				toolCallLog: () => [],
+				events: (async function* () {
+					yield {
+						type: "message_end",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: "delegated fast answer" }],
+							stopReason: "stop",
+							usage: { input: 3, output: 4 },
+						},
+					};
+				})() as AcpDelegationRunHandle["events"],
+				promise: Promise.resolve({
+					messages: [],
+					exitCode: 0,
+					stopReason: "end_turn",
+					// The adapter aggregate reports nothing, so the event-metered
+					// values must survive into the receipt.
+					usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+					delegation: {
+						acpSessionId: "sess-fast",
+						initialize: null,
+						toolCallsRequested: 0,
+						toolCallsApproved: 0,
+						toolCallsDenied: 0,
+					},
+				}),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "fast-acp",
+				delegationAgentId: "fast-acp",
+				task: "delegate fast",
+			});
+			// No consumer: ingestion is domain-owned.
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.inputTokenCount, 3);
+			strictEqual(receipt.outputTokenCount, 4);
+			strictEqual(receipt.tokenCount, 7);
+			strictEqual(receipt.output?.state, "final");
+			strictEqual(receipt.output?.text, "delegated fast answer");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("seals a cap-exhausted run with blocked telemetry, a failed outcome, and the synthesized durable output", async () => {
+		const context = stubContext();
+		const capReason = workerToolCallCapSynthesisReason(3);
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1200,
+				promise: Promise.resolve({ exitCode: 1, signal: null }),
+				events: (async function* () {
+					yield {
+						type: "clio_tool_finish",
+						payload: { tool: "read", outcome: "blocked", decision: "blocked", reason: capReason, durationMs: 1 },
+					};
+					yield {
+						type: "message_end",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: "synthesized report from gathered context" }],
+							stopReason: "stop",
+							usage: { input: 5, output: 6 },
+						},
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cap exhausted" });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "failed", "the cap bound must not present as an unconstrained success");
+			strictEqual(receipt.output?.state, "final");
+			strictEqual(receipt.output?.text, "synthesized report from gathered context");
+			ok(
+				receipt.safety?.blockedAttempts.some((attempt) => attempt.reason === capReason),
+				"the receipt records that the cap was reached",
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}
