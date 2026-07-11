@@ -31,6 +31,7 @@ const WAIT_POLL_MS = 250;
 const WAIT_DEFAULT_TIMEOUT_MS = 60_000;
 const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
 const COLLECT_TEXT_BYTES = 2_000;
+const COLLECT_TIMEOUT_NOTICE = 'collect never blocks; timeout_ms is ignored — block on one run with mode="wait".';
 
 export interface MonitorToolDeps {
 	dispatch: DispatchContract;
@@ -210,7 +211,7 @@ async function runWait(
 		if (elapsed >= timeoutMs) {
 			return {
 				kind: "ok",
-				output: `wait timed out after ${timeoutMs}ms: run ${runId} is still ${run.status} and keeps running. Wait again, collect later, or stop it with steer(action="cancel").`,
+				output: `wait timed out after ${timeoutMs}ms: run ${runId} is still ${run.status} and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the run's result is no longer needed — cancelling discards its work.`,
 				details: { mode: "wait", runId, timedOut: true, state: run.status, waitedMs: elapsed },
 			};
 		}
@@ -259,7 +260,12 @@ function collectRunLine(row: CollectRow): string[] {
  * completion nudges stop. A ledger row pruned from the bounded ring counts as
  * terminal (it can never complete) and is reported as missing.
  */
-async function runCollect(deps: MonitorToolDeps, batchId: string, runIds: ReadonlyArray<string>): Promise<ToolResult> {
+async function runCollect(
+	deps: MonitorToolDeps,
+	batchId: string,
+	runIds: ReadonlyArray<string>,
+	timeoutWasPassed: boolean,
+): Promise<ToolResult> {
 	let rows: CollectRow[];
 	let scope: string;
 	if (batchId.length > 0) {
@@ -286,6 +292,7 @@ async function runCollect(deps: MonitorToolDeps, batchId: string, runIds: Readon
 			}),
 			"",
 			'Collect again later, or block on a single run with mode="wait".',
+			...(timeoutWasPassed ? ["", COLLECT_TIMEOUT_NOTICE] : []),
 		];
 		return {
 			kind: "ok",
@@ -325,6 +332,7 @@ async function runCollect(deps: MonitorToolDeps, batchId: string, runIds: Readon
 		...(batchId.length > 0 && !collected
 			? ["", "note: the batch record could not be marked collected; it stays open for a later collect."]
 			: []),
+		...(timeoutWasPassed ? ["", COLLECT_TIMEOUT_NOTICE] : []),
 	];
 	return {
 		kind: "ok",
@@ -362,16 +370,25 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			),
 			batch_id: Type.Optional(Type.String({ description: "Detached batch id from dispatch detach:true (mode=collect)." })),
 			run_ids: Type.Optional(
-				Type.Array(Type.String(), { description: "Explicit run ids to collect instead of a batch id (mode=collect)." }),
+				Type.Array(Type.String(), {
+					description:
+						"Explicit run ids for mode=collect; a one-element array is also accepted by single-run modes when run_id is absent.",
+				}),
 			),
 			timeout_ms: Type.Optional(
-				Type.Number({ description: "mode=wait: max ms to block (default 60000, capped at 600000)." }),
+				Type.Number({
+					description:
+						"mode=wait: max ms to block (default 60000, capped at 600000); mode=collect never blocks and ignores this value with a notice.",
+				}),
 			),
 		}),
 		baseActionClass: "read",
 		executionMode: "parallel",
 		async run(args, options): Promise<ToolResult> {
-			const runId = typeof args.run_id === "string" ? args.run_id.trim() : "";
+			const explicitRunId = typeof args.run_id === "string" ? args.run_id.trim() : "";
+			const rawRunIds = Array.isArray(args.run_ids) ? args.run_ids : null;
+			const singletonRunId = rawRunIds?.length === 1 && typeof rawRunIds[0] === "string" ? rawRunIds[0].trim() : "";
+			const runId = explicitRunId.length > 0 ? explicitRunId : singletonRunId;
 			const mode = typeof args.mode === "string" ? args.mode : runId.length > 0 ? "status" : "list";
 			if (
 				mode !== "status" &&
@@ -389,15 +406,24 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			if (mode === "list") return listRuns(deps, options);
 			if (mode === "collect") {
 				const batchId = typeof args.batch_id === "string" ? args.batch_id.trim() : "";
-				const runIds = Array.isArray(args.run_ids)
-					? args.run_ids.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+				const runIds = rawRunIds
+					? rawRunIds.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
 					: [];
 				if (batchId.length === 0 && runIds.length === 0) {
 					return { kind: "error", message: "monitor: mode=collect requires batch_id or a non-empty run_ids array" };
 				}
-				return runCollect(deps, batchId, runIds);
+				return runCollect(deps, batchId, runIds, Object.hasOwn(args, "timeout_ms"));
 			}
-			if (runId.length === 0) return { kind: "error", message: `monitor: mode=${mode} requires run_id` };
+			if (runId.length === 0) {
+				if (rawRunIds !== null) {
+					const entryLabel = rawRunIds.length === 1 ? "entry" : "entries";
+					return {
+						kind: "error",
+						message: `monitor: mode=${mode} observes one run; got run_ids with ${rawRunIds.length} ${entryLabel} — pass run_id=<one id>, or use mode=collect run_ids=[...] for a batch`,
+					};
+				}
+				return { kind: "error", message: `monitor: mode=${mode} requires run_id` };
+			}
 			if (mode === "wait") {
 				const rawTimeout = typeof args.timeout_ms === "number" && Number.isFinite(args.timeout_ms) ? args.timeout_ms : NaN;
 				const timeoutMs =

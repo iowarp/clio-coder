@@ -153,6 +153,64 @@ describe("detached dispatch + collect", () => {
 		}
 	});
 
+	it("folds one advertised run_ids entry into every single-run monitor mode and preserves run_id precedence", async () => {
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker("alias answer") });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const monitor = createMonitorTool({ dispatch: bundle.contract });
+			const dispatched = (await tool.run({ tasks: ["monitor alias"], detach: true }, approvedDispatch)) as ToolRunResult;
+			strictEqual(dispatched.kind, "ok");
+			const runId = (dispatched.details?.runIds as string[])[0];
+			ok(runId !== undefined);
+			await waitFor(() => bundle.contract.getRun(runId)?.status === "completed", "aliased monitor run finalized");
+
+			for (const mode of ["status", "peek", "receipt", "wait"] as const) {
+				const observed = (await monitor.run({ mode, run_ids: [runId] }, {})) as ToolRunResult;
+				strictEqual(observed.kind, "ok", `singleton run_ids works for mode=${mode}`);
+				ok(observed.kind === "ok");
+				strictEqual(observed.details?.runId, runId);
+			}
+
+			const defaultStatus = (await monitor.run({ run_ids: [runId] }, {})) as ToolRunResult;
+			strictEqual(defaultStatus.kind, "ok");
+			ok(defaultStatus.kind === "ok");
+			strictEqual(defaultStatus.details?.mode, "status");
+
+			const explicitWins = (await monitor.run(
+				{ mode: "status", run_id: runId, run_ids: ["wrong-one", "wrong-two"] },
+				{},
+			)) as ToolRunResult;
+			strictEqual(explicitWins.kind, "ok");
+			ok(explicitWins.kind === "ok");
+			strictEqual(explicitWins.details?.runId, runId);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("diagnoses empty and multi-entry run_ids on every single-run monitor mode", async () => {
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker() });
+		await bundle.extension.start();
+		try {
+			const monitor = createMonitorTool({ dispatch: bundle.contract });
+			for (const mode of ["status", "peek", "receipt", "wait"] as const) {
+				for (const runIds of [[], ["run-one", "run-two"]]) {
+					const diagnosed = (await monitor.run({ mode, run_ids: runIds }, {})) as ToolRunResult;
+					strictEqual(diagnosed.kind, "error");
+					ok(diagnosed.kind === "error");
+					strictEqual(
+						diagnosed.message,
+						`monitor: mode=${mode} observes one run; got run_ids with ${runIds.length} entries — pass run_id=<one id>, or use mode=collect run_ids=[...] for a batch`,
+					);
+					ok(!diagnosed.message.includes("requires run_id"), "run_ids mismatch never falls back to the bare error");
+				}
+			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("collect is a barrier: pending snapshot in flight, full mixed results once terminal, then marked collected", async () => {
 		const gated = gatedWorker();
 		const workers: Array<() => SpawnedWorker> = [() => okWorker("first answer"), () => gated.worker];
@@ -172,12 +230,16 @@ describe("detached dispatch + collect", () => {
 			ok(quickRunId !== undefined);
 			await waitFor(() => bundle.contract.getRun(quickRunId)?.status === "completed", "quick run finalized");
 
-			const pending = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
+			const pending = (await monitor.run(
+				{ mode: "collect", batch_id: batchId, timeout_ms: 120_000 },
+				{},
+			)) as ToolRunResult;
 			strictEqual(pending.kind, "ok");
 			ok(pending.kind === "ok");
 			strictEqual(pending.details?.complete, false);
 			strictEqual(pending.details?.pendingCount, 1);
 			match(pending.output, /collect pending/);
+			match(pending.output, /collect never blocks; timeout_ms is ignored — block on one run with mode="wait"\./);
 			// An incomplete collect must not close the batch.
 			strictEqual(bundle.contract.detached?.get(batchId)?.collectedAt, null);
 
@@ -186,7 +248,10 @@ describe("detached dispatch + collect", () => {
 			ok(slowRunId !== undefined);
 			await waitFor(() => bundle.contract.getRun(slowRunId)?.status === "failed", "slow run finalized as failed");
 
-			const collected = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
+			const collected = (await monitor.run(
+				{ mode: "collect", batch_id: batchId, timeout_ms: 120_000 },
+				{},
+			)) as ToolRunResult;
 			strictEqual(collected.kind, "ok");
 			ok(collected.kind === "ok");
 			strictEqual(collected.details?.complete, true);
@@ -194,12 +259,14 @@ describe("detached dispatch + collect", () => {
 			match(collected.output, /collect complete/);
 			match(collected.output, /first answer/);
 			match(collected.output, /cost=~\$0\.00 est/, "catalog fallback cost is labeled estimated");
+			match(collected.output, /collect never blocks; timeout_ms is ignored — block on one run with mode="wait"\./);
 			ok(bundle.contract.detached?.get(batchId)?.collectedAt !== null, "batch marked collected");
 
 			// Explicit run-id collect works without a batch record.
 			const byIds = (await monitor.run({ mode: "collect", run_ids: runIds }, {})) as ToolRunResult;
 			strictEqual(byIds.kind, "ok");
 			ok(byIds.kind === "ok" && byIds.details?.complete === true);
+			ok(!byIds.output.includes("timeout_ms is ignored"), "collect notice appears only when timeout_ms was passed");
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -270,7 +337,11 @@ describe("detached dispatch + collect", () => {
 			strictEqual(timedOut.kind, "ok");
 			ok(timedOut.kind === "ok");
 			strictEqual(timedOut.details?.timedOut, true);
-			match(timedOut.output, /wait timed out after 300ms/);
+			strictEqual(
+				timedOut.output,
+				`wait timed out after 300ms: run ${runId} is still running and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the run's result is no longer needed — cancelling discards its work.`,
+			);
+			ok(timedOut.output.indexOf("Wait again or collect later.") < timedOut.output.indexOf('steer(action="cancel")'));
 
 			gated.finish(0);
 			const done = (await monitor.run({ mode: "wait", run_id: runId, timeout_ms: 8000 }, {})) as ToolRunResult;
