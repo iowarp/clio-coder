@@ -303,6 +303,26 @@ describe("contracts/prompts compiler logic", () => {
 		strictEqual(flat.includes("experiment-protocol"), false);
 	});
 
+	it("operating contract qualifies delegated evidence and requires parent spot-checks", () => {
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: { provider: "p", model: "m" },
+		});
+		const flat = result.systemPrompt.replace(/\s+/g, " ");
+		// Sealed receipts are the durable evidence; raw worker prose is never
+		// called evidence without qualification.
+		ok(flat.includes("A sealed run receipt is the durable evidence for delegated work"));
+		ok(flat.includes("the worker's prose is an advisory claim until the receipt's verification state is verified"));
+		strictEqual(flat.includes("synthesize returned evidence"), false);
+		// The parent spot-check discipline: re-read cited locations and re-run
+		// named validations before repeating delegated claims.
+		ok(flat.includes("Before repeating a delegated file:line claim, re-read the cited location"));
+		ok(flat.includes('before repeating a delegated "tests pass" claim, re-run or inspect the named validation'));
+	});
+
 	it("renders no per-turn state: tool-free phrasing is an instruction, not a prompt change", () => {
 		const table = loadFragments();
 		const result = compile(table, {

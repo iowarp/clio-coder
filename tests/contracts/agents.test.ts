@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,6 +105,11 @@ describe("contracts/agents", () => {
 		// Recipe selection weighs skill fit: the catalog says to prefer a recipe
 		// whose bound skill matches the task.
 		match(catalog, /prefer the recipe that binds it/);
+		// Delegated evidence stays qualified: the sealed receipt is the evidence
+		// and worker prose is an advisory claim, never bare "evidence".
+		match(catalog, /synthesize from the sealed receipt/);
+		match(catalog, /advisory claim until its verification state is verified/);
+		doesNotMatch(catalog, /use that receipt\/output as evidence/);
 	});
 
 	it("includes config-synthesized delegation specs in the spec-based roster", () => {
