@@ -1,8 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import type { RunEnvelope, RunOutcome } from "../../src/domains/dispatch/types.js";
 import {
+	buildDetachedBatchesMessage,
 	createReadOnlyExplorationNudgeRegistration,
+	openDetachedBatchViews,
 	READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD,
 	READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
 } from "../../src/domains/middleware/dispatch-nudge.js";
@@ -27,6 +31,30 @@ function crossThreshold(
 				: beforeTool(turnId, ToolNames.Bash, { command: "wc -l src/index.ts" });
 		deepStrictEqual(registration.evaluate(input), []);
 	}
+}
+
+function terminalEnvelope(runId: string, outcome: RunOutcome): RunEnvelope {
+	return {
+		id: runId,
+		agentId: "scout",
+		task: "bounded reconnaissance",
+		targetId: "local",
+		wireModelId: "test-model",
+		runtimeId: "test-runtime",
+		runtimeKind: "http",
+		startedAt: "2026-07-11T00:00:00.000Z",
+		endedAt: "2026-07-11T00:00:01.000Z",
+		status: outcome === "canceled" ? "interrupted" : "failed",
+		outcome,
+		exitCode: 1,
+		pid: null,
+		heartbeatAt: null,
+		receiptPath: null,
+		sessionId: "test-session",
+		cwd: "/tmp",
+		tokenCount: 0,
+		costUsd: 0,
+	};
 }
 
 describe("contracts/read-only exploration dispatch nudge", () => {
@@ -74,5 +102,50 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 			registration.evaluate(beforeTool("turn-build", ToolNames.Bash, { command: "npm run build" }));
 		}
 		deepStrictEqual(registration.evaluate(turnEnd("turn-build")), []);
+	});
+});
+
+describe("contracts/detached dispatch nudge outcome copy", () => {
+	it("uses done only when every terminal run succeeded", () => {
+		const message = buildDetachedBatchesMessage(
+			[{ id: "batch-ok", total: 2, terminal: 2, terminalOutcomes: { succeeded: 2 } }],
+			[],
+		);
+		match(message, /batch batch-ok: 2\/2 run\(s\) done/);
+		strictEqual(message.includes("run(s) terminal"), false, message);
+	});
+
+	it("renders a truthful terminal-state breakdown for canceled and failed runs", () => {
+		const rows = new Map([
+			["run-canceled", terminalEnvelope("run-canceled", "canceled")],
+			["run-failed", terminalEnvelope("run-failed", "failed")],
+		]);
+		const dispatch: Pick<DispatchContract, "detached" | "getRun"> = {
+			detached: {
+				register: async () => {
+					throw new Error("register not used");
+				},
+				get: () => null,
+				list: () => [
+					{
+						id: "batch-mixed",
+						runs: [
+							{ runId: "run-canceled", agentId: "scout" },
+							{ runId: "run-failed", agentId: "scout" },
+						],
+						sessionId: "test-session",
+						createdAt: "2026-07-11T00:00:00.000Z",
+						collectedAt: null,
+					},
+				],
+				markCollected: async () => null,
+			},
+			getRun: (runId) => rows.get(runId) ?? null,
+		};
+		const ready = openDetachedBatchViews(dispatch);
+		deepStrictEqual(ready, [{ id: "batch-mixed", total: 2, terminal: 2, terminalOutcomes: { canceled: 1, failed: 1 } }]);
+		const message = buildDetachedBatchesMessage(ready, []);
+		match(message, /batch batch-mixed: 2\/2 run\(s\) terminal \(1 canceled, 1 failed\)/);
+		strictEqual(message.includes("2/2 run(s) done"), false, message);
 	});
 });

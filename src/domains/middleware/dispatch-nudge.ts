@@ -1,6 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { DispatchContract } from "../dispatch/contract.js";
-import { isTerminalRunEnvelope } from "../dispatch/types.js";
+import { isTerminalRunEnvelope, type RunOutcome } from "../dispatch/types.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
 
@@ -102,10 +102,47 @@ export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegi
 	};
 }
 
+type DetachedTerminalOutcome = RunOutcome | "missing" | "unknown";
+type DetachedTerminalOutcomeCounts = Partial<Record<DetachedTerminalOutcome, number>>;
+
 export interface DetachedBatchNudgeView {
 	id: string;
 	total: number;
 	terminal: number;
+	terminalOutcomes?: Readonly<DetachedTerminalOutcomeCounts>;
+}
+
+const TERMINAL_OUTCOME_ORDER: ReadonlyArray<DetachedTerminalOutcome> = [
+	"succeeded",
+	"canceled",
+	"failed",
+	"timed_out",
+	"stalled",
+	"denied_by_policy",
+	"spawn_failed",
+	"missing",
+	"unknown",
+];
+
+function terminalOutcomeLabel(outcome: DetachedTerminalOutcome): string {
+	switch (outcome) {
+		case "timed_out":
+			return "timed out";
+		case "denied_by_policy":
+			return "denied by policy";
+		case "spawn_failed":
+			return "spawn failed";
+		case "missing":
+			return "ledger row missing";
+		case "unknown":
+			return "outcome unknown";
+		default:
+			return outcome;
+	}
+}
+
+function incrementTerminalOutcome(counts: DetachedTerminalOutcomeCounts, outcome: DetachedTerminalOutcome): void {
+	counts[outcome] = (counts[outcome] ?? 0) + 1;
 }
 
 /**
@@ -127,19 +164,42 @@ export function openDetachedBatchViews(
 	}
 	return records.map((record) => {
 		let terminal = 0;
+		const terminalOutcomes: DetachedTerminalOutcomeCounts = {};
 		for (const run of record.runs) {
 			const row = dispatch.getRun(run.runId);
-			if (row === null || isTerminalRunEnvelope(row)) terminal += 1;
+			if (row === null) {
+				terminal += 1;
+				incrementTerminalOutcome(terminalOutcomes, "missing");
+			} else if (isTerminalRunEnvelope(row)) {
+				terminal += 1;
+				incrementTerminalOutcome(terminalOutcomes, row.outcome ?? "unknown");
+			}
 		}
-		return { id: record.id, total: record.runs.length, terminal };
+		return { id: record.id, total: record.runs.length, terminal, terminalOutcomes };
 	});
+}
+
+function detachedBatchProgress(view: DetachedBatchNudgeView): string {
+	const terminalOutcomes = view.terminalOutcomes ?? {};
+	if (view.terminal === view.total && terminalOutcomes.succeeded === view.total) {
+		return `${view.terminal}/${view.total} run(s) done`;
+	}
+	let accountedFor = 0;
+	const breakdown = TERMINAL_OUTCOME_ORDER.flatMap((outcome) => {
+		const count = terminalOutcomes[outcome] ?? 0;
+		accountedFor += count;
+		return count > 0 ? [`${count} ${terminalOutcomeLabel(outcome)}`] : [];
+	});
+	const unavailable = Math.max(0, view.terminal - accountedFor);
+	if (unavailable > 0) breakdown.push(`${unavailable} outcome unknown`);
+	return `${view.terminal}/${view.total} run(s) terminal (${breakdown.join(", ")})`;
 }
 
 export function buildDetachedBatchesMessage(
 	ready: ReadonlyArray<DetachedBatchNudgeView>,
 	running: ReadonlyArray<DetachedBatchNudgeView>,
 ): string {
-	const rows = ready.map((view) => `  - batch ${view.id}: ${view.terminal}/${view.total} run(s) done`);
+	const rows = ready.map((view) => `  - batch ${view.id}: ${detachedBatchProgress(view)}`);
 	const runningNote =
 		running.length > 0 ? `\n${running.length} other detached batch(es) are still running; leave those for later.` : "";
 	return (
