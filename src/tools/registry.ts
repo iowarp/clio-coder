@@ -926,6 +926,7 @@ function buildToolHookInput(
 		// producing new information, whatever their size arguments say.
 		if (result.kind === "ok" && typeof result.output === "string") {
 			metadata.resultFingerprint = createHash("sha256").update(result.output).digest("hex");
+			metadata.resultBytes = Buffer.byteLength(result.output, "utf8");
 		}
 	}
 

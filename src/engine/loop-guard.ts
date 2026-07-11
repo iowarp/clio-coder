@@ -106,6 +106,7 @@ const SIZE_ONLY_ARG_KEYS = new Set(["limit", "offset", "max_bytes", "context"]);
  * (limit: 10000 -> 20000 -> 50000 -> ...) that varies args enough to evade it.
  */
 export const RESULT_STAGNATION_THRESHOLD = 3;
+const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
 
 function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
 	const reduced: Record<string, unknown> = {};
@@ -120,6 +121,13 @@ function stagnationBlockReason(tool: string, identicalResults: number): string {
 		`loop detected: the last ${identicalResults} ${tool} calls returned byte-identical results even though ` +
 		`size arguments (limit/offset) changed. Raising them is not producing new information. ` +
 		`Re-read the result above, change the query or tool, or answer from what you have.`
+	);
+}
+
+function crossArgumentResultMessage(tool: string, distinctArguments: number): string {
+	return (
+		`loop guard: ${distinctArguments} distinct ${tool} arguments returned the same substantial result this turn. ` +
+		"The tool may be ignoring an argument; re-read the result, change tools, or answer from what you have."
 	);
 }
 
@@ -374,6 +382,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * differently answered call resets it.
 	 */
 	const stagnationByTurn = new Map<string, { reducedFingerprint: string; resultFingerprint: string; streak: number }>();
+	const crossArgumentResultsByTurn = new Map<
+		string,
+		{ tool: string; resultFingerprint: string; argumentFingerprints: Set<string>; warned: boolean }
+	>();
 	let count = 0;
 
 	const bumpBoundedCounter = (store: Map<string, number>, key: string, limit = LOOP_GUARD_TURN_LIMIT): number => {
@@ -446,6 +458,61 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			}
 		}
 		stagnationByTurn.set(turnKey, { reducedFingerprint, resultFingerprint, streak: 1 });
+	};
+
+	// Diagnostic-only coverage for tools that accept a substantive argument but
+	// ignore it. Track one consecutive same-tool/result streak per turn and
+	// annotate the third distinct argument shape. Short generic outputs and
+	// zero-item cap stubs are deliberately excluded; this path never blocks.
+	const crossArgumentResultEffects = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
+		const turnKey = input.turnId ?? NO_TURN_BUCKET;
+		const tool = input.toolName;
+		const resultFingerprint = input.metadata?.resultFingerprint;
+		const resultBytes = input.metadata?.resultBytes;
+		if (
+			typeof tool !== "string" ||
+			tool.length === 0 ||
+			input.metadata?.actionClass !== "read" ||
+			input.metadata?.resultKind !== "ok" ||
+			typeof resultFingerprint !== "string" ||
+			typeof resultBytes !== "number" ||
+			resultBytes < CROSS_ARGUMENT_RESULT_MIN_BYTES ||
+			!resultCarriesEvidence(input.toolResultDetails)
+		) {
+			crossArgumentResultsByTurn.delete(turnKey);
+			return [];
+		}
+		const argumentFingerprint = stagnationFingerprint(tool, input.toolArgs);
+		const previous = crossArgumentResultsByTurn.get(turnKey);
+		if (previous?.tool === tool && previous.resultFingerprint === resultFingerprint) {
+			if (previous.warned) return [];
+			previous.argumentFingerprints.add(argumentFingerprint);
+			if (previous.argumentFingerprints.size >= RESULT_STAGNATION_THRESHOLD) {
+				previous.warned = true;
+				return [
+					{
+						kind: "annotate_tool_result",
+						message: crossArgumentResultMessage(tool, previous.argumentFingerprints.size),
+						severity: "warn",
+					},
+				];
+			}
+			return [];
+		}
+		if (!crossArgumentResultsByTurn.has(turnKey)) {
+			while (crossArgumentResultsByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+				const oldest = crossArgumentResultsByTurn.keys().next().value;
+				if (typeof oldest !== "string") break;
+				crossArgumentResultsByTurn.delete(oldest);
+			}
+		}
+		crossArgumentResultsByTurn.set(turnKey, {
+			tool,
+			resultFingerprint,
+			argumentFingerprints: new Set([argumentFingerprint]),
+			warned: false,
+		});
+		return [];
 	};
 
 	const bumpTurnBlocks = (turnId: string): number => bumpBoundedCounter(blocksByTurn, turnId);
@@ -577,14 +644,14 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	return {
 		id: LOOP_GUARD_REGISTRATION_ID,
 		description:
-			"blocks verbatim-repeated tool calls, enforces the per-run tool-call cap, and records successful results for the block-reason evidence anchor",
+			"blocks repeated tool calls, enforces tool-call caps, and annotates substantial identical read results across distinct arguments",
 		hooks: ["before_tool", "after_tool"],
 		callCount: () => count,
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook === "after_tool") {
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
-				return [];
+				return crossArgumentResultEffects(input);
 			}
 			const now = options.now?.() ?? Date.now();
 			count += 1;
