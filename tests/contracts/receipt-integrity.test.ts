@@ -167,6 +167,7 @@ describe("contracts/receipt-integrity", () => {
 				sections: ["verification-expectations"],
 			},
 			failureMessage: "diagnostic retained for evidence",
+			costProvenance: "known",
 			upstreamResponses: [{ model: "model-a", responseModel: "model-a-2026", responseId: "response-1" }],
 			output: { state: "final", text: "the durable final answer", bytes: 24, truncated: false },
 			promptSignature: required(envelope.promptSignature, "promptSignature"),

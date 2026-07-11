@@ -1050,7 +1050,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getTerminalColumns: () => terminal.columns,
 		getSessionTokens: () => observabilitySnapshot.session.tokens,
 		getTokenThroughput: () => observabilitySnapshot.session.latestThroughput,
-		getSessionCost: () => observabilitySnapshot.session.costUsd,
+		getSessionCost: () => observabilitySnapshot.session.cost,
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),

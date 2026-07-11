@@ -10,7 +10,7 @@ import type { SkillActivation } from "../../core/skill-activation.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
-import type { RuntimeTargetSnapshot } from "../providers/index.js";
+import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
@@ -265,6 +265,7 @@ export interface RunEnvelope {
 	promptSignature?: string | null;
 	toolSignature?: string | null;
 	costUsd: number;
+	costProvenance?: CostProvenance;
 }
 
 /**
@@ -491,6 +492,8 @@ export interface RunReceipt {
 	/** Bounded final/partial assistant output; absent when none was captured. */
 	output?: RunReceiptOutput;
 	costUsd: number;
+	/** Pricing-source truth; absent on receipts written before provenance landed. */
+	costProvenance?: CostProvenance;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	staticShellHash?: string | null;

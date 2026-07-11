@@ -63,6 +63,12 @@ function makeHarness(): Harness {
 	const deps: ProjectionReadModel = {
 		metrics: () => session.metrics,
 		sessionCost: () => session.cost,
+		sessionCostSummary: () => ({
+			knownUsd: session.cost,
+			hasEstimated: false,
+			hasUnknown: false,
+			allKnownFree: false,
+		}),
 		sessionTokens: () => session.tokens,
 		latestThroughput: () => session.throughput,
 		readAccountability: () => session.accountability,

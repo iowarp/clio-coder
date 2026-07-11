@@ -23,6 +23,7 @@ import type {
 } from "../domains/dispatch/types.js";
 import type { MiddlewareHook } from "../domains/middleware/types.js";
 import type { TargetStatus } from "../domains/providers/contract.js";
+import type { CostProvenance } from "../domains/providers/index.js";
 import type { ClioSettings } from "./config.js";
 import type { SkillActivation } from "./skill-activation.js";
 import type { TerminationPhase } from "./termination.js";
@@ -486,6 +487,7 @@ export interface DispatchTerminalStats {
 	sessionShellHash: string | null;
 	dynamicHash: string | null;
 	costUsd: number;
+	costProvenance?: CostProvenance;
 	durationMs: number;
 	exitCode: number;
 	/** Honest activity record aggregated from the run's tool telemetry; null when the receipt predates it. */

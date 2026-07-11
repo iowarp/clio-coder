@@ -101,6 +101,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	upstreamResponses: true,
 	output: true,
 	costUsd: true,
+	costProvenance: true,
 	compiledPromptHash: true,
 	staticCompositionHash: true,
 	staticShellHash: true,

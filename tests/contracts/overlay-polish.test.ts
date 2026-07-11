@@ -220,6 +220,7 @@ function observability(entries: CostEntry[]): {
 		generatedAt: 0,
 		session: {
 			costUsd: entries.reduce((sum, entry) => sum + entry.usd, 0),
+			cost: { knownUsd: 0, hasEstimated: false, hasUnknown: true, allKnownFree: false },
 			tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 },
 			latestThroughput: null,
 		},
@@ -232,6 +233,7 @@ function observability(entries: CostEntry[]): {
 	});
 	const contract = {
 		sessionCost: () => entries.reduce((sum, entry) => sum + entry.usd, 0),
+		sessionCostSummary: () => ({ knownUsd: 0, hasEstimated: false, hasUnknown: true, allKnownFree: false }),
 		costEntries: () => entries,
 		accountability: () => ({ totalRuns: 0, firstPassRuns: 0, firstPassRate: 0, failureCauses: [] }),
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),

@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -85,6 +85,7 @@ function completedPayload(runId: string) {
 		sessionShellHash: null,
 		dynamicHash: null,
 		costUsd: 0.25,
+		costProvenance: "estimated",
 		durationMs: 4200,
 		exitCode: 0,
 		toolActivity: null,
@@ -116,6 +117,12 @@ describe("contracts/observability-snapshot wiring", { concurrency: false }, () =
 
 		const snap = bundle.contract.snapshot();
 		strictEqual(snap.session.costUsd, 0.25);
+		deepStrictEqual(snap.session.cost, {
+			knownUsd: 0.25,
+			hasEstimated: true,
+			hasUnknown: false,
+			allKnownFree: false,
+		});
 		strictEqual(snap.session.tokens.totalTokens, 800);
 		strictEqual(snap.metrics.dispatchesCompleted, 1);
 		strictEqual(snap.metrics.totalTokens, 800);
@@ -123,6 +130,7 @@ describe("contracts/observability-snapshot wiring", { concurrency: false }, () =
 		ok(run !== undefined);
 		strictEqual(run.status, "completed");
 		strictEqual(run.costUsd, 0.25);
+		strictEqual(run.costProvenance, "estimated");
 		strictEqual(run.tokens.total, 800);
 
 		// The evidence build is kicked off synchronously and tracked as pending

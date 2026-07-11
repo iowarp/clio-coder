@@ -27,7 +27,7 @@ import type {
 	ObservabilitySnapshot,
 	TokenThroughputSnapshot,
 } from "./contract.js";
-import type { UsageBreakdown } from "./cost.js";
+import type { CostAggregate, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
 
 /** Recent run summaries retained. Mirrors the dispatch board's window. */
@@ -47,6 +47,7 @@ export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
 export interface ProjectionReadModel {
 	metrics(): MetricsView;
 	sessionCost(): number;
+	sessionCostSummary(): CostAggregate;
 	sessionTokens(): UsageBreakdown;
 	latestThroughput(): TokenThroughputSnapshot | null;
 	readAccountability(): AccountabilitySummary;
@@ -142,6 +143,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			generatedAt: Date.now(),
 			session: {
 				costUsd: deps.sessionCost(),
+				cost: deps.sessionCostSummary(),
 				tokens: deps.sessionTokens(),
 				latestThroughput: deps.latestThroughput(),
 			},
@@ -202,6 +204,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			durationMs: null,
 			tokens: { input: 0, output: 0, reasoning: 0, total: 0 },
 			costUsd: 0,
+			costProvenance: "unknown",
 		};
 	}
 
@@ -219,6 +222,14 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		if (typeof payload.outputTokenCount === "number") summary.tokens.output = payload.outputTokenCount;
 		if (typeof payload.reasoningTokenCount === "number") summary.tokens.reasoning = payload.reasoningTokenCount;
 		if (typeof payload.costUsd === "number") summary.costUsd = payload.costUsd;
+		if (
+			payload.costProvenance === "known" ||
+			payload.costProvenance === "known_free" ||
+			payload.costProvenance === "estimated" ||
+			payload.costProvenance === "unknown"
+		) {
+			summary.costProvenance = payload.costProvenance;
+		}
 	}
 
 	function pushNotice(

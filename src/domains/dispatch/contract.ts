@@ -1,3 +1,4 @@
+import type { CostProvenance } from "../providers/index.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunReceipt, RunStatus } from "./types.js";
@@ -50,6 +51,7 @@ export interface DispatchSnapshot {
 		elapsedMs: number;
 		tokens: { input: number; output: number; total: number };
 		costUsd: number;
+		costProvenance?: CostProvenance;
 		/** Fleet node this run was placed on; null means the local node. */
 		node: RunNodeIdentity | null;
 	}>;
@@ -59,6 +61,7 @@ export interface DispatchSnapshot {
 		outputTokens: number;
 		totalTokens: number;
 		costUsd: number;
+		cost?: { knownUsd: number; hasEstimated: boolean; hasUnknown: boolean; allKnownFree: boolean };
 		runtimeSeconds: number;
 	};
 }
