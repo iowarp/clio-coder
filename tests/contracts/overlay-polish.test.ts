@@ -197,6 +197,7 @@ function costEntry(tokens: number, usd: number): CostEntry {
 		modelId: "model-a",
 		tokens,
 		usd,
+		provenance: "unknown",
 		input: tokens,
 		output: 0,
 		cacheRead: 0,

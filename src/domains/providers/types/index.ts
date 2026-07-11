@@ -1,4 +1,5 @@
 export * from "./capability-flags.js";
+export * from "./cost-provenance.js";
 export * from "./knowledge-base.js";
 export * from "./local-model-quirks.js";
 export * from "./runtime-descriptor.js";

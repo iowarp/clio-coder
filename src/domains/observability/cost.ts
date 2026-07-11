@@ -11,6 +11,40 @@
  * footer consumes the session sum through `ObservabilityContract.sessionTokens()`.
  */
 
+import { type CostProvenance, normalizeCostProvenance } from "../providers/index.js";
+
+export interface CostAmount {
+	usd: number;
+	provenance: CostProvenance;
+}
+
+export interface CostAggregate {
+	knownUsd: number;
+	hasEstimated: boolean;
+	hasUnknown: boolean;
+	allKnownFree: boolean;
+}
+
+export function emptyCostAggregate(): CostAggregate {
+	return { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false };
+}
+
+function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount, first: boolean): CostAggregate {
+	return {
+		knownUsd: aggregate.knownUsd + (amount.provenance === "unknown" ? 0 : amount.usd),
+		hasEstimated: aggregate.hasEstimated || amount.provenance === "estimated",
+		hasUnknown: aggregate.hasUnknown || amount.provenance === "unknown",
+		allKnownFree: amount.provenance === "known_free" && (first || aggregate.allKnownFree),
+	};
+}
+
+export function aggregateCostAmounts(amounts: ReadonlyArray<CostAmount>): CostAggregate {
+	return amounts.reduce(
+		(aggregate, amount, index) => accumulateCostAmount(aggregate, amount, index === 0),
+		emptyCostAggregate(),
+	);
+}
+
 export interface UsageBreakdown {
 	input: number;
 	output: number;
@@ -26,6 +60,7 @@ export interface CostEntry {
 	modelId: string;
 	tokens: number;
 	usd: number;
+	provenance: CostProvenance;
 	input: number;
 	output: number;
 	cacheRead: number;
@@ -41,8 +76,10 @@ export interface CostTracker {
 		tokens: number,
 		usd?: number,
 		breakdown?: Partial<UsageBreakdown>,
+		provenance?: CostProvenance,
 	): number;
 	sessionTotal(): number;
+	sessionCost(): CostAggregate;
 	sessionTokens(): UsageBreakdown;
 	entries(): ReadonlyArray<CostEntry>;
 	reset(): void;
@@ -57,8 +94,9 @@ export function createCostTracker(): CostTracker {
 	let total = 0;
 	const totals = emptyBreakdown();
 	return {
-		accumulate(providerId, modelId, tokens, usd, breakdown) {
+		accumulate(providerId, modelId, tokens, usd, breakdown, costProvenance) {
 			const resolvedUsd = usd ?? 0;
+			const provenance = normalizeCostProvenance(costProvenance);
 			const input = breakdown?.input ?? 0;
 			const output = breakdown?.output ?? 0;
 			const cacheRead = breakdown?.cacheRead ?? 0;
@@ -70,6 +108,7 @@ export function createCostTracker(): CostTracker {
 				modelId,
 				tokens,
 				usd: resolvedUsd,
+				provenance,
 				input,
 				output,
 				cacheRead,
@@ -88,6 +127,9 @@ export function createCostTracker(): CostTracker {
 		},
 		sessionTotal() {
 			return total;
+		},
+		sessionCost() {
+			return aggregateCostAmounts(log.map((entry) => ({ usd: entry.usd, provenance: entry.provenance })));
 		},
 		sessionTokens() {
 			return { ...totals };
