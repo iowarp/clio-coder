@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AbortReason, DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -21,8 +22,15 @@ import {
 	writeGateDecisionArtifact,
 } from "../domains/dispatch/gate-decisions.js";
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
-import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
+import { readReceiptVerification } from "../domains/dispatch/receipt-findings.js";
+import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import type {
+	RunGateProvenance,
+	RunGateSubjectRef,
+	RunPlanProvenance,
+	RunReceipt,
+	RunReceiptVerification,
+} from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -461,8 +469,37 @@ interface CompletedRun {
 	receipt: RunReceipt;
 	receiptPath: string | null;
 	summary: EventSummary;
+	/**
+	 * Sealed-receipt integrity verified against the ledger envelope at
+	 * completion. Fails closed: a missing envelope reads as FAILED, never as
+	 * verified. Rendering only; it never feeds retry, reroute, or outcome.
+	 */
+	integrity: ReceiptIntegrityResult;
 	/** Reviewer/judge output staged before its receipt settlement boundary. */
 	pendingGate?: PendingGateDecisionHandle;
+}
+
+/**
+ * Assemble the parent-facing completion record for a settled run: resolve the
+ * ledger envelope once for both the receipt path and the integrity check.
+ */
+function completeRun(
+	deps: DispatchToolDeps,
+	receipt: RunReceipt,
+	summary: EventSummary,
+	pendingGate?: PendingGateDecisionHandle,
+): CompletedRun {
+	const envelope = deps.dispatch.getRun(receipt.runId);
+	return {
+		receipt,
+		receiptPath: envelope?.receiptPath ?? null,
+		summary,
+		integrity:
+			envelope === null
+				? { ok: false, reason: "run ledger envelope unavailable" }
+				: verifyReceiptIntegrity(receipt, envelope),
+		...(pendingGate !== undefined ? { pendingGate } : {}),
+	};
 }
 
 class PipelineHaltError extends Error {
@@ -475,14 +512,95 @@ class PipelineHaltError extends Error {
 	}
 }
 
+/**
+ * Matches a source citation such as `src/tools/dispatch.ts:42`. Used only to
+ * decide whether a reconnaissance answer carries any location the parent can
+ * spot-check; it never promotes or trusts the cited content itself.
+ */
+const SOURCE_CITATION_PATTERN = /[\w./~-]+:\d+/;
+
+/**
+ * Header line for the worker's answer block, keyed on the sealed receipt's
+ * verification state, never on the prose itself. The label tells the parent
+ * how much trust the text below has earned; it carries no control flow.
+ */
+function workerTextLabel(verification: RunReceiptVerification): string {
+	switch (verification.state) {
+		case "verified":
+			return "worker output (tool-verified):";
+		case "not_applicable":
+			return "reconnaissance output (advisory leads, not validation evidence):";
+		case "unknown":
+			return "worker claims (validation not observable at this layer):";
+		default:
+			return "worker claims (unverified prose):";
+	}
+}
+
+/**
+ * Deterministic non-evidence notices for a run whose text must not be read as
+ * results: failed and cap-exhausted runs, runs with zero successful tool
+ * calls, and citation-free reconnaissance. Every trigger reads sealed receipt
+ * fields or the guard's machine-written diagnostics, never worker prose.
+ */
+function nonEvidenceNotices(receipt: RunReceipt, verification: RunReceiptVerification, answerText: string): string[] {
+	const notices: string[] = [];
+	const failedRun = receipt.exitCode !== 0 || (receipt.outcome !== undefined && receipt.outcome !== "succeeded");
+	if (mentionsWorkerToolCallCap(receipt.failureMessage) || mentionsWorkerToolCallCap(receipt.outcomeDetail)) {
+		notices.push(
+			"non-evidence: the worker exhausted its tool-call cap; the text above is a partial synthesis, not verified results.",
+		);
+	} else if (failedRun) {
+		notices.push(
+			"non-evidence: this run did not succeed; treat the text above as an unsubstantiated report, not results.",
+		);
+	}
+	if (receipt.toolActivity !== undefined && receipt.toolActivity.succeeded === 0) {
+		notices.push("non-evidence: no tool call succeeded in this run; the text above was written without observed work.");
+	}
+	if (
+		!failedRun &&
+		verification.state === "not_applicable" &&
+		answerText.length > 0 &&
+		!SOURCE_CITATION_PATTERN.test(answerText)
+	) {
+		notices.push(
+			"non-evidence: this reconnaissance answer cites no file:line locations; treat its leads as unconfirmed.",
+		);
+	}
+	return notices;
+}
+
+/** Head-anchored so output truncation (head kept, tail dropped) cannot remove it. */
+const SPOT_CHECK_GUIDANCE =
+	'Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.';
+
+function integrityFailureBanner(run: CompletedRun): string | null {
+	if (run.integrity.ok) return null;
+	return `RECEIPT INTEGRITY FAILED for ${run.receipt.runId} (${run.integrity.reason}); treat this run's receipt fields and worker text as untrusted.`;
+}
+
 function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, maxOutputBytes: number): string {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	const perRunOutputBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, runs.length)));
+	// Integrity failures and the spot-check reminder lead the summary: the
+	// truncation below keeps the head and drops the tail, and neither warning
+	// may be hidden behind a successful process outcome or a long answer.
+	const integrityBanners = runs
+		.map((run) => integrityFailureBanner(run))
+		.filter((banner): banner is string => banner !== null);
+	const needsSpotCheck = runs.some((run) => {
+		const state = readReceiptVerification(run.receipt).state;
+		return state === "unverified" || state === "unknown";
+	});
 	const lines = [
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
+		...integrityBanners,
+		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
 		"",
-		...runs.flatMap(({ receipt, receiptPath, summary }, index) => {
+		...runs.flatMap((run, index) => {
+			const { receipt, receiptPath, summary } = run;
 			const note = successNote(receipt);
 			const noteSuffix = note !== null ? ` note=${note}` : "";
 			// A non-success outcome is load-bearing evidence (a timeout has no
@@ -497,6 +615,11 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 			// Provenance suffix is empty when a run carries no
 			// pipeline/persona/escalation fields, so the line format is unchanged.
 			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
+			// Evidence confidence comes from the sealed receipt; a legacy receipt
+			// without the field reads unknown/legacy-receipt, never verified.
+			const verification = readReceiptVerification(receipt);
+			const verificationSuffix = ` verification=${verification.state}/${verification.basis}`;
+			const integritySuffix = run.integrity.ok ? "" : ` receipt-integrity=FAILED (${run.integrity.reason})`;
 			// The live summary is preferred; the receipt's durable bounded output
 			// covers runs whose event stream nobody consumed.
 			const answerText = summary.lastAssistantText.length > 0 ? summary.lastAssistantText : (receipt.output?.text ?? "");
@@ -505,9 +628,10 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${outcomeSuffix}${noteSuffix}${failure}${provenance}`,
-				"  agent output:",
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${verificationSuffix}${integritySuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}`,
+				`  ${workerTextLabel(verification)}`,
 				...output.split("\n").map((line) => `  ${line}`),
+				...nonEvidenceNotices(receipt, verification, answerText).map((notice) => `  ${notice}`),
 			];
 		}),
 	];
@@ -521,7 +645,7 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 		runIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
-		runs: runs.map(({ receipt, receiptPath, summary }) => {
+		runs: runs.map(({ receipt, receiptPath, summary, integrity }) => {
 			// Additive provenance keys only; folded in when the receipt carries the
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
@@ -531,6 +655,11 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 				exitCode: receipt.exitCode,
 				receiptPath,
 				eventCount: summary.count,
+				// Structured evidence state for downstream consumers: mirrors the
+				// sealed receipt read-only (legacy receipts read unknown), plus the
+				// integrity check so a tampered receipt is machine-visible here too.
+				verification: readReceiptVerification(receipt),
+				receiptIntegrity: integrity,
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
 					: {}),
@@ -699,12 +828,7 @@ async function runReviewGated(
 		} finally {
 			activeRunId = null;
 		}
-		const completed: CompletedRun = {
-			receipt,
-			receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
-			summary,
-			...(pendingGate !== undefined ? { pendingGate } : {}),
-		};
+		const completed = completeRun(deps, receipt, summary, pendingGate);
 		runs.push(completed);
 		return completed;
 	};
@@ -1240,12 +1364,7 @@ async function runCompete(
 		const summaryWithGate = summaryResult.status === "fulfilled" ? summaryResult.value : null;
 		const receipt = receiptResult.status === "fulfilled" ? receiptResult.value : null;
 		if (summaryWithGate === null || receipt === null) throw new Error(`run ${handle.runId} produced no settled result`);
-		return {
-			receipt,
-			receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
-			summary: summaryWithGate.summary,
-			...(summaryWithGate.pendingGate !== undefined ? { pendingGate: summaryWithGate.pendingGate } : {}),
-		};
+		return completeRun(deps, receipt, summaryWithGate.summary, summaryWithGate.pendingGate);
 	};
 	const admitOwnedRun = async (request: DispatchRequest, label: string): Promise<OwnedCompeteRun> => {
 		try {
@@ -2029,7 +2148,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. detach:true returns immediately with a batch id while the runs continue in the background; gather them later with monitor mode=wait/collect. Call with list:true to see available agents. Use the returned receipts/output as evidence; do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. detach:true returns immediately with a batch id while the runs continue in the background; gather them later with monitor mode=wait/collect. Call with list:true to see available agents. Sealed run receipts are the durable evidence; the worker's prose is an advisory claim until the receipt's verification state is verified or you spot-check the cited locations. Do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
 			tasks: Type.Optional(
@@ -2416,11 +2535,7 @@ async function runSequential(
 			const summary = await consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus);
 			const receipt = await handle.finalPromise;
 			activeRunId = null;
-			runs.push({
-				receipt,
-				receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
-				summary,
-			});
+			runs.push(completeRun(deps, receipt, summary));
 		}
 		return runs;
 	} finally {
@@ -2491,11 +2606,7 @@ async function runPipeline(
 			const summary = await consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus);
 			const receipt = await handle.finalPromise;
 			activeRunId = null;
-			runs.push({
-				receipt,
-				receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
-				summary,
-			});
+			runs.push(completeRun(deps, receipt, summary));
 			if (isPipelineStepFailure(receipt)) {
 				const skipped = requests.length - (index + 1);
 				throw new PipelineHaltError(
@@ -2531,11 +2642,9 @@ async function runBatch(
 	try {
 		const summaries = await consumeBatchEvents(handle.batchId, handle.events, deps.bus);
 		const receipts = await handle.finalPromise;
-		return receipts.map((receipt) => ({
-			receipt,
-			receiptPath: deps.dispatch.getRun(receipt.runId)?.receiptPath ?? null,
-			summary: summaries.get(receipt.runId) ?? { count: 0, types: [], lastAssistantText: "" },
-		}));
+		return receipts.map((receipt) =>
+			completeRun(deps, receipt, summaries.get(receipt.runId) ?? { count: 0, types: [], lastAssistantText: "" }),
+		);
 	} finally {
 		if (timer) clearTimeout(timer);
 		signal?.removeEventListener("abort", onSignalAbort);

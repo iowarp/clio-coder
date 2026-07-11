@@ -4246,6 +4246,25 @@ describe("contracts/dispatch tool activity honesty", () => {
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") {
 				ok(result.output.includes("note=completed without executing any tools"), result.output);
+				// A2 evidence labeling on a genuinely sealed receipt: the integrity
+				// re-check passes silently, the structured verification state labels
+				// the prose block, and the zero-tool non-evidence notice plus the
+				// spot-check reminder render for the unverified claim.
+				strictEqual(result.output.includes("RECEIPT INTEGRITY FAILED"), false, result.output);
+				ok(result.output.includes("verification=unverified/no-validation-tool"), result.output);
+				ok(result.output.includes("worker claims (unverified prose):"), result.output);
+				ok(result.output.includes("Spot-check delegated claims before repeating them"), result.output);
+				ok(
+					result.output.includes(
+						"non-evidence: no tool call succeeded in this run; the text above was written without observed work.",
+					),
+					result.output,
+				);
+				const details = result.details as {
+					runs?: Array<{ verification?: unknown; receiptIntegrity?: unknown }>;
+				};
+				deepStrictEqual(details.runs?.[0]?.verification, { state: "unverified", basis: "no-validation-tool" });
+				deepStrictEqual(details.runs?.[0]?.receiptIntegrity, { ok: true });
 			}
 		} finally {
 			await bundle.extension.stop?.();

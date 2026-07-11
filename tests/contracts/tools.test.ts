@@ -8,7 +8,8 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { RunEnvelope, RunReceipt, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
@@ -129,8 +130,57 @@ function createConfirmableWriteRegistry(executed: string[]) {
 	return registry;
 }
 
-function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> = {}): RunReceipt {
+// The fake dispatch contract mirrors production truthfully: every receipt is
+// sealed against the same ledger envelope getRun later returns, so the tool's
+// integrity re-check passes unless a test tampers on purpose.
+const sealedEnvelopes = new Map<string, RunEnvelope>();
+
+function envelopeForDraft(draft: RunReceiptDraft): RunEnvelope {
 	return {
+		id: draft.runId,
+		agentId: draft.agentId,
+		task: draft.task,
+		targetId: draft.targetId,
+		wireModelId: draft.wireModelId,
+		runtimeId: draft.runtimeId,
+		runtimeKind: draft.runtimeKind,
+		startedAt: draft.startedAt,
+		endedAt: draft.endedAt,
+		status: "completed",
+		exitCode: draft.exitCode,
+		pid: null,
+		heartbeatAt: null,
+		receiptPath: `/tmp/${draft.runId}.json`,
+		sessionId: draft.sessionId,
+		cwd: "/tmp",
+		tokenCount: draft.tokenCount,
+		costUsd: draft.costUsd,
+		...(draft.agentAudience !== undefined ? { agentAudience: draft.agentAudience } : {}),
+		...(draft.requestOrigin !== undefined ? { requestOrigin: draft.requestOrigin } : {}),
+		...(draft.outcome !== undefined ? { outcome: draft.outcome } : {}),
+		...(draft.outcomeDetail !== undefined ? { outcomeDetail: draft.outcomeDetail } : {}),
+		...(draft.lineage !== undefined ? { lineage: draft.lineage } : {}),
+		...(draft.identity !== undefined ? { identity: draft.identity } : {}),
+		...(draft.node !== undefined ? { node: draft.node } : {}),
+		...(draft.reroutes !== undefined ? { reroutes: draft.reroutes } : {}),
+		...(draft.pipeline !== undefined ? { pipeline: draft.pipeline } : {}),
+		...(draft.gate !== undefined ? { gate: draft.gate } : {}),
+		...(draft.plan !== undefined ? { plan: draft.plan } : {}),
+		...(draft.personaOverride !== undefined ? { personaOverride: draft.personaOverride } : {}),
+		...(draft.inputTokenCount !== undefined ? { inputTokenCount: draft.inputTokenCount } : {}),
+		...(draft.outputTokenCount !== undefined ? { outputTokenCount: draft.outputTokenCount } : {}),
+		...(draft.reasoningTokenCount !== undefined ? { reasoningTokenCount: draft.reasoningTokenCount } : {}),
+		...(draft.cacheReadTokenCount !== undefined ? { cacheReadTokenCount: draft.cacheReadTokenCount } : {}),
+		...(draft.cacheWriteTokenCount !== undefined ? { cacheWriteTokenCount: draft.cacheWriteTokenCount } : {}),
+		...(draft.staticShellHash !== undefined ? { staticShellHash: draft.staticShellHash } : {}),
+		...(draft.sessionShellHash !== undefined ? { sessionShellHash: draft.sessionShellHash } : {}),
+		...(draft.dynamicHash !== undefined ? { dynamicHash: draft.dynamicHash } : {}),
+	};
+}
+
+function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> = {}): RunReceipt {
+	const { integrity: _ignored, ...cleanOverrides } = overrides;
+	const draft: RunReceiptDraft = {
 		runId,
 		agentId: "coder",
 		task,
@@ -152,16 +202,16 @@ function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> 
 		toolCalls: 0,
 		toolStats: [],
 		sessionId: null,
-		integrity: {
-			version: 4,
-			algorithm: "sha256",
-			digest: "0".repeat(64),
-		},
-		...overrides,
+		...cleanOverrides,
 	};
+	const envelope = envelopeForDraft(draft);
+	sealedEnvelopes.set(runId, envelope);
+	return withReceiptIntegrity(draft, envelope);
 }
 
 function runEnvelope(runId: string): RunEnvelope {
+	const sealed = sealedEnvelopes.get(runId);
+	if (sealed !== undefined) return sealed;
 	return {
 		id: runId,
 		agentId: "coder",
@@ -1615,6 +1665,249 @@ describe("contracts/tools dispatch run paths", () => {
 
 		strictEqual(registry.get("resolveWorkerPermission" as ToolName), undefined);
 		strictEqual(/resolveWorkerPermission|permission_decision|worker permission/i.test(surface), false, surface);
+	});
+});
+
+// A2 recon-evidence contract: the dispatch summary distinguishes sealed
+// receipt integrity, the receipt's verification state, and advisory worker
+// prose. Labels are derived from the sealed receipt only and never drive
+// control flow; retry/outcome behavior is pinned unchanged elsewhere.
+describe("contracts/tools dispatch evidence labeling", () => {
+	const SPOT_CHECK_PHRASE = "Spot-check delegated claims before repeating them";
+
+	function singleRunTool(
+		runId: string,
+		assistantText: string,
+		receipt?: Partial<RunReceipt>,
+		tamper?: (receipt: RunReceipt) => RunReceipt,
+	) {
+		return createDispatchTool({
+			dispatch: {
+				dispatch: async (req: DispatchRequest) => {
+					const sealed = runReceipt(runId, req.task, receipt);
+					return {
+						runId,
+						events: assistantMessageEvents(assistantText),
+						finalPromise: Promise.resolve(tamper !== undefined ? tamper(sealed) : sealed),
+					};
+				},
+				dispatchBatch: async () => {
+					throw new Error("dispatchBatch not used");
+				},
+				listRuns: () => [],
+				getRun: (id: string) => runEnvelope(id),
+				abort: () => {},
+				steer: () => {},
+				snapshot: () => ({
+					generatedAt: new Date().toISOString(),
+					running: [],
+					retrying: [],
+					totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+				}),
+				drain: async () => {},
+			},
+		});
+	}
+
+	it("renders RECEIPT INTEGRITY FAILED when a sealed verification field was tampered", async () => {
+		const tool = singleRunTool(
+			"run-tamper",
+			"I ran the tests and they pass.",
+			{ verification: { state: "unverified", basis: "no-validation-tool" } },
+			// Post-seal forgery: promote unverified to verified without resealing.
+			(sealed) => ({ ...sealed, verification: { state: "verified", basis: "validation-tool" } }),
+		);
+		const result = await tool.run({ task: "tamper probe", agent_id: "coder" });
+		// Integrity failure is surfaced prominently but stays descriptive: the
+		// process outcome (exit 0) still shapes the result kind.
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("RECEIPT INTEGRITY FAILED for run-tamper (integrity mismatch)"), result.output);
+			ok(result.output.includes("receipt-integrity=FAILED (integrity mismatch)"), result.output);
+			const details = result.details as { runs?: Array<{ receiptIntegrity?: { ok?: boolean; reason?: string } }> };
+			deepStrictEqual(details.runs?.[0]?.receiptIntegrity, { ok: false, reason: "integrity mismatch" });
+		}
+	});
+
+	it("labels tool-verified worker output and omits spot-check guidance", async () => {
+		const tool = singleRunTool("run-verified", "Implemented and validated; tests pass.", {
+			verification: { state: "verified", basis: "validation-tool" },
+			toolStats: [{ tool: "verify", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 5 }],
+			toolActivity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: true },
+		});
+		const result = await tool.run({ task: "fix and test", agent_id: "coder" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("verification=verified/validation-tool"), result.output);
+			ok(result.output.includes("worker output (tool-verified):"), result.output);
+			strictEqual(result.output.includes(SPOT_CHECK_PHRASE), false, result.output);
+			strictEqual(result.output.includes("RECEIPT INTEGRITY FAILED"), false, result.output);
+			strictEqual(result.output.includes("non-evidence:"), false, result.output);
+		}
+	});
+
+	it("labels unverified prose as worker claims and appends spot-check guidance", async () => {
+		const tool = singleRunTool("run-unverified", "Edited src/x.ts:12 and everything works.", {
+			verification: { state: "unverified", basis: "no-validation-tool" },
+			toolActivity: { calls: 2, succeeded: 2, failed: 0, blocked: 0, mutatingSucceeded: true },
+		});
+		const result = await tool.run({ task: "quick edit", agent_id: "coder" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("verification=unverified/no-validation-tool"), result.output);
+			ok(result.output.includes("worker claims (unverified prose):"), result.output);
+			ok(result.output.includes(SPOT_CHECK_PHRASE), result.output);
+		}
+	});
+
+	it("labels read-only recon advisory without calling it failed or validation evidence", async () => {
+		const tool = singleRunTool("run-recon", "The dispatcher lives in src/tools/dispatch.ts:478.", {
+			verification: { state: "not_applicable", basis: "read-only-agent" },
+			toolActivity: { calls: 3, succeeded: 3, failed: 0, blocked: 0, mutatingSucceeded: false },
+		});
+		const result = await tool.run({ task: "map the dispatcher", agent_id: "scout" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("dispatch (parallel) total=1 failed=0"), result.output);
+			ok(result.output.includes("verification=not_applicable/read-only-agent"), result.output);
+			ok(result.output.includes("reconnaissance output (advisory leads, not validation evidence):"), result.output);
+			// A cited recon answer earns no citation-free notice, and recon is not
+			// an unverified/unknown claim, so no spot-check reminder either.
+			strictEqual(result.output.includes("cites no file:line locations"), false, result.output);
+			strictEqual(result.output.includes(SPOT_CHECK_PHRASE), false, result.output);
+			strictEqual(result.output.includes("non-evidence:"), false, result.output);
+		}
+	});
+
+	it("flags citation-free reconnaissance as non-evidence", async () => {
+		const tool = singleRunTool("run-recon-bare", "The code seems fine overall and probably handles retries.", {
+			verification: { state: "not_applicable", basis: "read-only-agent" },
+			toolActivity: { calls: 2, succeeded: 2, failed: 0, blocked: 0, mutatingSucceeded: false },
+		});
+		const result = await tool.run({ task: "assess retries", agent_id: "scout" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(
+				result.output.includes(
+					"non-evidence: this reconnaissance answer cites no file:line locations; treat its leads as unconfirmed.",
+				),
+				result.output,
+			);
+		}
+	});
+
+	it("keeps ACP-unobserved validation unknown instead of asserting unverified", async () => {
+		const tool = singleRunTool("run-acp", "Delegated agent reports the migration is complete.", {
+			verification: { state: "unknown", basis: "acp-external-unobserved" },
+		});
+		const result = await tool.run({ task: "delegate migration", agent_id: "claude-cli" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("verification=unknown/acp-external-unobserved"), result.output);
+			ok(result.output.includes("worker claims (validation not observable at this layer):"), result.output);
+			ok(result.output.includes(SPOT_CHECK_PHRASE), result.output);
+			strictEqual(result.output.includes("verification=unverified"), false, result.output);
+		}
+	});
+
+	it("reads a legacy receipt without verification as unknown, never verified", async () => {
+		const tool = singleRunTool("run-legacy", "Legacy worker answer.");
+		const result = await tool.run({ task: "legacy run", agent_id: "coder" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(result.output.includes("verification=unknown/legacy-receipt"), result.output);
+			ok(result.output.includes("worker claims (validation not observable at this layer):"), result.output);
+			ok(result.output.includes(SPOT_CHECK_PHRASE), result.output);
+			strictEqual(result.output.includes("verification=verified"), false, result.output);
+			const details = result.details as { runs?: Array<{ verification?: unknown }> };
+			deepStrictEqual(details.runs?.[0]?.verification, { state: "unknown", basis: "legacy-receipt" });
+		}
+	});
+
+	it("notices zero successful tool calls as non-evidence", async () => {
+		const tool = singleRunTool("run-zero-tool", "All done, nothing needed changing.", {
+			verification: { state: "unverified", basis: "no-validation-tool" },
+			outcome: "succeeded",
+			outcomeDetail: "completed without executing any tools",
+			toolActivity: { calls: 0, succeeded: 0, failed: 0, blocked: 0, mutatingSucceeded: false },
+		});
+		const result = await tool.run({ task: "impossible task", agent_id: "coder" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			ok(
+				result.output.includes(
+					"non-evidence: no tool call succeeded in this run; the text above was written without observed work.",
+				),
+				result.output,
+			);
+		}
+	});
+
+	it("notices failed and cap-exhausted runs as non-evidence", async () => {
+		const capturedRequests: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch(
+				[
+					{
+						runId: "run-hard-fail",
+						assistantText: "I finished the refactor.",
+						receipt: { exitCode: 1, outcome: "failed", outcomeDetail: "exit code 1", failureMessage: "worker crashed" },
+					},
+					{
+						runId: "run-cap",
+						assistantText: "Partial synthesis from what I gathered.",
+						receipt: {
+							exitCode: 1,
+							outcome: "failed",
+							outcomeDetail: "exit code 1",
+							failureMessage: "workerToolCallCap reached (50); tool calls are now disabled for the rest of this run.",
+						},
+					},
+				],
+				capturedRequests,
+			),
+		});
+		const result = await tool.run(
+			{
+				mode: "sequential",
+				tasks: [
+					{ task: "refactor", agent_id: "coder" },
+					{ task: "explore", agent_id: "coder" },
+				],
+			},
+			approvedDispatch,
+		);
+		strictEqual(result.kind, "error");
+		if (result.kind === "error") {
+			ok(
+				result.message.includes(
+					"non-evidence: this run did not succeed; treat the text above as an unsubstantiated report, not results.",
+				),
+				result.message,
+			);
+			ok(
+				result.message.includes(
+					"non-evidence: the worker exhausted its tool-call cap; the text above is a partial synthesis, not verified results.",
+				),
+				result.message,
+			);
+		}
+	});
+
+	it("carries the structured verification state and integrity result in dispatchDetails", async () => {
+		const tool = singleRunTool("run-details", "Structured details probe.", {
+			verification: { state: "verified", basis: "validation-tool" },
+			toolStats: [{ tool: "verify", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 3 }],
+		});
+		const result = await tool.run({ task: "details probe", agent_id: "coder" });
+		strictEqual(result.kind, "ok");
+		if (result.kind === "ok") {
+			const details = result.details as {
+				runs?: Array<{ verification?: unknown; receiptIntegrity?: unknown }>;
+			};
+			deepStrictEqual(details.runs?.[0]?.verification, { state: "verified", basis: "validation-tool" });
+			deepStrictEqual(details.runs?.[0]?.receiptIntegrity, { ok: true });
+		}
 	});
 });
 
