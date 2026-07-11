@@ -1,4 +1,5 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +39,19 @@ function pathsFromFiles(value: unknown): string[] {
 function writeWikiPage(cwd: string, name: string, text: string): void {
 	mkdirSync(wikiDir(cwd), { recursive: true });
 	writeFileSync(join(wikiDir(cwd), name), text, "utf8");
+}
+
+function git(cwd: string, args: ReadonlyArray<string>): string {
+	return execFileSync("git", [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function initGitRepo(cwd: string): string {
+	git(cwd, ["init"]);
+	git(cwd, ["config", "user.email", "clio-test@example.com"]);
+	git(cwd, ["config", "user.name", "Clio Test"]);
+	git(cwd, ["add", "."]);
+	git(cwd, ["commit", "-m", "initial"]);
+	return git(cwd, ["rev-parse", "HEAD"]);
 }
 
 describe("contracts/code_nav", () => {
@@ -207,7 +221,7 @@ describe("contracts/code_nav", () => {
 		const payload = parseJsonOutput(result.output);
 		ok(Array.isArray(payload.pages) && payload.pages.length === 0);
 		strictEqual((payload.staleness as Record<string, unknown>).state, "absent");
-		strictEqual(payload.message, "no wiki exists; run clio context wiki");
+		strictEqual(payload.message, "no wiki exists; wiki generation is operator-only: run `clio context wiki --update`");
 	});
 
 	it("lists Markdown wiki pages and staleness through mode=wiki", async () => {
@@ -234,6 +248,97 @@ describe("contracts/code_nav", () => {
 		);
 		strictEqual(pages.find((page) => page.path === "quickstart.md")?.title, "Quickstart");
 		strictEqual((payload.staleness as Record<string, unknown>).state, "fresh");
+	});
+
+	it("resolves wiki queries by page id or title with a summary and readable path", async () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nStart here.\n");
+		writeWikiPage(scratch, "runtime-map.md", "# Architecture\n\nThe runtime starts in `src/index.ts`.\n");
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: null,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		const byId = await codeNavTool.run({ mode: "wiki", query: "runtime-map" });
+		strictEqual(byId.kind, "ok");
+		const idPage = parseJsonOutput(byId.output).page as Record<string, unknown>;
+		deepStrictEqual(idPage, {
+			id: "runtime-map",
+			title: "Architecture",
+			summary: "The runtime starts in `src/index.ts`.",
+			path: ".clio/wiki/runtime-map.md",
+		});
+
+		const byTitle = await codeNavTool.run({ mode: "wiki", query: "Architecture" });
+		strictEqual(byTitle.kind, "ok");
+		deepStrictEqual(parseJsonOutput(byTitle.output).page, idPage);
+	});
+
+	it("rejects unmatched wiki queries instead of silently returning the page listing", async () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nStart here.\n");
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: null,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		const listing = await codeNavTool.run({ mode: "wiki" });
+		const missing = await codeNavTool.run({ mode: "wiki", query: "fleet" });
+		strictEqual(listing.kind, "ok");
+		strictEqual(missing.kind, "error");
+		if (missing.kind === "error") {
+			strictEqual(missing.message, "code_nav: no wiki page matches 'fleet'; pages are: quickstart (Quickstart)");
+			ok(!missing.message.includes(listing.output));
+		}
+	});
+
+	it("returns distinct payloads for distinct wiki pages", async () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nStart here.\n");
+		writeWikiPage(scratch, "architecture.md", "# Architecture\n\nRuntime map.\n");
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: null,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		const quickstart = await codeNavTool.run({ mode: "wiki", query: "quickstart" });
+		const architecture = await codeNavTool.run({ mode: "wiki", query: "architecture" });
+		strictEqual(quickstart.kind, "ok");
+		strictEqual(architecture.kind, "ok");
+		notStrictEqual(quickstart.output, architecture.output);
+	});
+
+	it("makes stale wiki results actionable without granting model-side regeneration", async () => {
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n\nStart here.\n");
+		const head = initGitRepo(scratch);
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: head,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+		writeFileSync(join(scratch, "src", "after-wiki.ts"), "export const afterWiki = true;\n", "utf8");
+		git(scratch, ["add", "src/after-wiki.ts"]);
+		git(scratch, ["commit", "-m", "change after wiki"]);
+
+		const result = await codeNavTool.run({ mode: "wiki", query: "quickstart" });
+		strictEqual(result.kind, "ok");
+		const payload = parseJsonOutput(result.output);
+		strictEqual((payload.staleness as Record<string, unknown>).state, "stale");
+		match(String(payload.message), /pages may be outdated/i);
+		match(String(payload.message), /wiki regeneration is operator-only/);
+		match(String(payload.message), /clio context wiki --update/);
 	});
 
 	it("advertises wiki in the mode enum and keeps unknown modes rejected", async () => {
