@@ -327,6 +327,97 @@ describe("chat-panel agent voice", () => {
 		);
 		ok(strip(rendered).includes("✦ [error] boom happened"), "the stripped failed reply reads glyph + error marker");
 	});
+
+	it("scopes a post-tool main-model timeout to the model and leaves the dispatch segment non-error", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "dispatch-1",
+			toolName: "dispatch",
+			args: { agent: "scout", task: "map the repository", detach: true },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "dispatch-1",
+			toolName: "dispatch",
+			result: "run fleet-1 accepted",
+			isError: false,
+			durationMs: 120,
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [] as unknown[],
+				stopReason: "error",
+				errorMessage: "request timed out after 30 seconds",
+			},
+		} as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+
+		const rendered = panel.render(120).join("\n");
+		const plain = strip(rendered);
+		ok(plain.includes("✓"), `the successful dispatch remains successful, got: ${plain}`);
+		ok(!plain.includes("✗"), `the model timeout must not turn dispatch into a failed tool, got: ${plain}`);
+		ok(
+			plain.includes("[error] main model response timed out after successful tool result; detached runs continue"),
+			`the terminal failure is scoped to the main model, got: ${plain}`,
+		);
+		ok(
+			rendered.includes(`${fgSequence("error")}[error] main model response timed out`),
+			"the scoped terminal failure preserves error-token styling",
+		);
+	});
+
+	it("does not claim detached continuation after a successful non-dispatch tool", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "read-1",
+			toolName: "read",
+			args: { path: "README.md" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "read-1",
+			toolName: "read",
+			result: "contents",
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [], stopReason: "error", errorMessage: "provider connection failed" },
+		} as unknown as ChatLoopEvent);
+
+		const plain = strip(panel.render(120).join("\n"));
+		ok(plain.includes("[error] main model response failed after successful tool result: provider connection failed"));
+		ok(!plain.includes("detached runs continue"));
+	});
+
+	it("does not claim detached continuation after an attached dispatch", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "dispatch-attached",
+			toolName: "dispatch",
+			args: { tasks: ["review the change"] },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "dispatch-attached",
+			toolName: "dispatch",
+			result: "attached run completed",
+			isError: false,
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [], stopReason: "error", errorMessage: "request timed out" },
+		} as unknown as ChatLoopEvent);
+
+		const plain = strip(panel.render(120).join("\n"));
+		ok(plain.includes("[error] main model response timed out after successful tool result"));
+		ok(!plain.includes("detached runs continue"));
+	});
 });
 
 describe("chat-panel tool ledger subline", () => {

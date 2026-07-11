@@ -224,6 +224,31 @@ function extractAssistantTerminalError(message: unknown): string {
 	return stopReason === "aborted" ? `[aborted] ${reason}` : `[error] ${reason}`;
 }
 
+function scopeTerminalErrorAfterSuccessfulTool(
+	entry: Extract<TranscriptEntry, { role: "assistant" }>,
+	terminalError: string,
+): string {
+	if (!terminalError.startsWith("[error] ")) return terminalError;
+	const successfulTools = entry.segments.filter(
+		(segment): segment is ToolSegment => segment.kind === "tool" && segment.finished && !segment.isError,
+	);
+	if (successfulTools.length === 0) return terminalError;
+
+	const reason = terminalError.slice("[error] ".length);
+	const timedOut = /\b(?:timed?\s*out|timeout)\b/i.test(reason);
+	const modelFailure = timedOut
+		? "main model response timed out after successful tool result"
+		: `main model response failed after successful tool result: ${reason}`;
+	const detachedDispatchSucceeded = successfulTools.some(
+		(segment) =>
+			segment.name === "dispatch" &&
+			segment.args !== null &&
+			typeof segment.args === "object" &&
+			(segment.args as { detach?: unknown }).detach === true,
+	);
+	return `[error] ${modelFailure}${detachedDispatchSucceeded ? "; detached runs continue" : ""}`;
+}
+
 function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
 	for (const seg of entry.segments) {
 		if (seg.kind === "tool") return true;
@@ -822,7 +847,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "message_end") {
 				const text = extractAssistantText(event.message);
 				const thinking = extractAssistantThinking(event.message);
-				const terminalError = extractAssistantTerminalError(event.message);
+				const extractedTerminalError = extractAssistantTerminalError(event.message);
+				const current = transcript[transcript.length - 1];
+				const terminalError =
+					current?.role === "assistant"
+						? scopeTerminalErrorAfterSuccessfulTool(current, extractedTerminalError)
+						: extractedTerminalError;
 				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0) return;
 				const assistant = ensureAssistant();
 				if (terminalError.length > 0) assistant.isError = true;
