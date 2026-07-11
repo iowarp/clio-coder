@@ -173,6 +173,7 @@ describe("contracts/receipt-integrity", () => {
 			toolSignature: required(envelope.toolSignature, "toolSignature"),
 			toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 3 }],
 			toolActivity: { calls: 1, succeeded: 1, failed: 0, blocked: 0, mutatingSucceeded: false },
+			verification: { state: "verified", basis: "validation-tool" },
 			skillActivations: [
 				{
 					name: "test-skill",

@@ -1,6 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { computeReceiptFindingsSummary } from "../../src/domains/dispatch/receipt-findings.js";
+import {
+	computeReceiptFindingsSummary,
+	deriveReceiptVerification,
+	readReceiptVerification,
+} from "../../src/domains/dispatch/receipt-findings.js";
 import type { RunEnvelope, RunLineage, RunReceiptDraft, ToolCallStat } from "../../src/domains/dispatch/types.js";
 
 function lineage(attempt: number): RunLineage {
@@ -95,6 +99,40 @@ function draft(partial: Partial<RunReceiptDraft> = {}): RunReceiptDraft {
 }
 
 describe("contracts/receipt findings summary", () => {
+	it("derives evidence confidence without changing execution outcome semantics", () => {
+		deepStrictEqual(deriveReceiptVerification(draft({ toolStats: [toolStat({ tool: "pytest" })] })), {
+			state: "verified",
+			basis: "validation-tool",
+		});
+		deepStrictEqual(deriveReceiptVerification(draft(), { capabilityClass: "read-only" }), {
+			state: "not_applicable",
+			basis: "read-only-agent",
+		});
+		deepStrictEqual(deriveReceiptVerification(draft(), { acpDelegation: true }), {
+			state: "unknown",
+			basis: "acp-external-unobserved",
+		});
+		deepStrictEqual(deriveReceiptVerification(draft()), {
+			state: "unverified",
+			basis: "no-validation-tool",
+		});
+	});
+
+	it("prefers observed validation over ACP uncertainty", () => {
+		deepStrictEqual(
+			deriveReceiptVerification(draft({ toolStats: [toolStat({ tool: "verify" })] }), { acpDelegation: true }),
+			{ state: "verified", basis: "validation-tool" },
+		);
+	});
+
+	it("reads a missing legacy verification field as unknown, never verified", () => {
+		deepStrictEqual(readReceiptVerification(draft()), { state: "unknown", basis: "legacy-receipt" });
+		deepStrictEqual(readReceiptVerification(draft({ verification: { state: "verified", basis: "validation-tool" } })), {
+			state: "verified",
+			basis: "validation-tool",
+		});
+	});
+
 	it("does not mark a succeeded first attempt as first-pass without validation evidence", () => {
 		const summary = computeReceiptFindingsSummary(draft({ toolStats: [] }), envelope());
 

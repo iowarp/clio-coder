@@ -23,5 +23,13 @@ export {
 } from "./gate-decisions.js";
 export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
-export type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "./types.js";
+export type {
+	ReceiptVerificationState,
+	RunEnvelope,
+	RunKind,
+	RunReceipt,
+	RunReceiptVerification,
+	RunStatus,
+	ToolCallStat,
+} from "./types.js";
 export type { JobSpec } from "./validation.js";
