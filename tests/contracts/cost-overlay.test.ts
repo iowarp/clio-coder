@@ -1,6 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { type CostRow, formatCostOverlayBodyLines } from "../../src/interactive/cost-overlay.js";
+import { costAggregateForAmount } from "../../src/domains/observability/index.js";
+import { aggregateCostEntries, type CostRow, formatCostOverlayBodyLines } from "../../src/interactive/cost-overlay.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 
 const ESC = String.fromCharCode(27);
@@ -19,14 +20,14 @@ function row(overrides: Partial<CostRow> = {}): CostRow {
 		cacheWrite: 100,
 		reasoningTokens: 200,
 		apiCalls: 4,
-		usd: 1.5,
+		cost: costAggregateForAmount(1.5, "known"),
 		...overrides,
 	};
 }
 
 describe("cost overlay", () => {
 	it("renders the summary as key-value rows in the design-system grammar", () => {
-		const lines = formatCostOverlayBodyLines(1.5, 8_000, [row()], 80);
+		const lines = formatCostOverlayBodyLines(costAggregateForAmount(1.5, "known"), 8_000, [row()], 80);
 		const body = strip(lines.join("\n"));
 		for (const key of [
 			"turns",
@@ -46,37 +47,84 @@ describe("cost overlay", () => {
 	});
 
 	it("renders the provider · model heading in bold accent", () => {
-		const lines = formatCostOverlayBodyLines(1.5, 8_000, [row()], 80);
+		const lines = formatCostOverlayBodyLines(costAggregateForAmount(1.5, "known"), 8_000, [row()], 80);
 		const expectedHeading = theme.style("accent", "openai · gpt-5", { bold: true });
 		ok(lines.includes(expectedHeading), "the per-model heading is a bold accent provider · model line");
 	});
 
 	it("draws the summary/detail divider in the frame token", () => {
-		const lines = formatCostOverlayBodyLines(1.5, 8_000, [row()], 80);
+		const lines = formatCostOverlayBodyLines(costAggregateForAmount(1.5, "known"), 8_000, [row()], 80);
 		const dividerLine = lines.find((line) => strip(line).includes("─"));
 		ok(dividerLine, "a horizontal divider separates the summary from the per-model blocks");
 		ok(dividerLine?.includes(theme.fgSequence("frame")), "the divider carries the frame token");
 	});
 
 	it("routes money through the shared cents formatter, never four decimals at or above a cent", () => {
-		const body = strip(formatCostOverlayBodyLines(0.42, 8_000, [row({ usd: 0.42 })], 80).join("\n"));
+		const cost = costAggregateForAmount(0.42, "known");
+		const body = strip(formatCostOverlayBodyLines(cost, 8_000, [row({ cost })], 80).join("\n"));
 		ok(body.includes("$0.42"), `cost should read cents, got: ${body}`);
 		ok(!body.includes("$0.4200"), "the four-decimal form must be impossible at or above a cent");
 	});
 
 	it("widens sub-cent costs to four decimals rather than rounding to a misleading $0.00", () => {
-		const body = strip(formatCostOverlayBodyLines(0.004, 8_000, [row({ usd: 0.004 })], 80).join("\n"));
+		const cost = costAggregateForAmount(0.004, "known");
+		const body = strip(formatCostOverlayBodyLines(cost, 8_000, [row({ cost })], 80).join("\n"));
 		ok(body.includes("$0.0040"), `a sub-cent cost should read four decimals, got: ${body}`);
 		ok(!/cost\s+\$0\.00\b/.test(body), "a sub-cent cost must not round down to $0.00");
 	});
 
 	it("marks a zero-cost model block as local", () => {
-		const body = strip(formatCostOverlayBodyLines(0, 5_000, [row({ usd: 0 })], 80).join("\n"));
+		const cost = costAggregateForAmount(0, "known_free");
+		const body = strip(formatCostOverlayBodyLines(cost, 5_000, [row({ cost })], 80).join("\n"));
 		ok(body.includes("$0.00 local"), `a zero-cost row reads as local, got: ${body}`);
 	});
 
+	it("renders estimated, mixed, and unknown costs without calling them local", () => {
+		const estimated = costAggregateForAmount(0.42, "estimated");
+		const unknown = costAggregateForAmount(0, "unknown");
+		const mixed = { ...estimated, hasUnknown: true };
+		const body = strip(
+			formatCostOverlayBodyLines(
+				mixed,
+				8_000,
+				[row({ cost: estimated }), row({ modelId: "unknown", cost: unknown })],
+				80,
+			).join("\n"),
+		);
+		ok(body.includes("~$0.42 est"), body);
+		ok(body.includes("$0.42 +?"), body);
+		ok(body.includes("cost unknown"), body);
+		ok(!body.includes("$0.00 local"), body);
+	});
+
+	it("preserves provenance while grouping repeated provider-model entries", () => {
+		const base = {
+			providerId: "openai",
+			modelId: "gpt-5",
+			tokens: 10,
+			input: 6,
+			output: 4,
+			cacheRead: 0,
+			cacheWrite: 0,
+			reasoningTokens: 0,
+		};
+		const rows = aggregateCostEntries([
+			{ ...base, usd: 0.42, provenance: "known" },
+			{ ...base, usd: 0, provenance: "unknown" },
+		]);
+		strictEqual(rows.length, 1);
+		strictEqual(rows[0]?.runs, 2);
+		strictEqual(rows[0]?.cost.knownUsd, 0.42);
+		strictEqual(rows[0]?.cost.hasUnknown, true);
+	});
+
 	it("aligns primary values in a tight column and hangs the cache-read annotation dim after the number", () => {
-		const lines = formatCostOverlayBodyLines(1.5, 8_000, [row({ cacheRead: 20_000, apiCalls: 7 })], 80);
+		const lines = formatCostOverlayBodyLines(
+			costAggregateForAmount(1.5, "known"),
+			8_000,
+			[row({ cacheRead: 20_000, apiCalls: 7 })],
+			80,
+		);
 		const body = lines.map(strip);
 		const endOf = (label: string, value: string): number => {
 			const line = body.find((candidate) => candidate.startsWith(label)) ?? "";
@@ -96,16 +144,16 @@ describe("cost overlay", () => {
 	});
 
 	it("styles the empty state instead of leaving it bare", () => {
-		const lines = formatCostOverlayBodyLines(0, 0, [], 80);
+		const lines = formatCostOverlayBodyLines(costAggregateForAmount(0, "unknown"), 0, [], 80);
 		const emptyLine = lines.find((line) => strip(line).includes("no token usage recorded"));
 		ok(emptyLine?.includes(ESC), "the empty-state line carries a token");
 	});
 
 	it("leaves no completely unstyled line in the overlay body", () => {
 		const lines = formatCostOverlayBodyLines(
-			1.5,
+			costAggregateForAmount(1.5, "known"),
 			8_000,
-			[row(), row({ providerId: "anthropic", modelId: "claude-sonnet-5", usd: 0 })],
+			[row(), row({ providerId: "anthropic", modelId: "claude-sonnet-5", cost: costAggregateForAmount(0, "known_free") })],
 			80,
 		);
 		for (const line of lines) {

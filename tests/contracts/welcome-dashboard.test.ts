@@ -11,7 +11,7 @@ import {
 	writeCodewiki,
 	writeWikiMeta,
 } from "../../src/domains/context/index.js";
-import type { ObservabilityContract } from "../../src/domains/observability/index.js";
+import { costAggregateForAmount, type ObservabilityContract } from "../../src/domains/observability/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { emptyWorkspaceSnapshot } from "../../src/domains/session/workspace/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
@@ -328,7 +328,7 @@ describe("welcome-dashboard and footer integration tests", () => {
 				cacheWrite: 0,
 			}),
 			getTokenThroughput: () => null,
-			getSessionCost: () => 0.05,
+			getSessionCost: () => costAggregateForAmount(0.05, "known"),
 			getContextUsage: () => ({
 				tokens: 1000,
 				contextWindow: 8000,
