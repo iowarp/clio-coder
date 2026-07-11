@@ -349,28 +349,118 @@ function runDependents(index: NavIndex, query: string, limit: number): NavPayloa
 	};
 }
 
-function runWiki(cwd: string): NavPayload {
+const WIKI_UPDATE_COMMAND = "clio context wiki --update";
+const WIKI_SUMMARY_MAX_CHARS = 240;
+
+function wikiPageId(path: string): string {
+	return path.replace(/\.md$/i, "");
+}
+
+function wikiPageSummary(cwd: string, path: string): string {
+	let text = "";
+	try {
+		text = readFileSync(join(cwd, ".clio", "wiki", path), "utf8");
+	} catch {
+		return "Summary unavailable; read the page for details.";
+	}
+	const paragraphs = text
+		.replace(/^#\s+.*$/m, "")
+		.split(/\r?\n\s*\r?\n/)
+		.map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+		.filter((paragraph) => paragraph.length > 0 && !paragraph.startsWith("#"));
+	const summary = paragraphs[0] ?? "Read the page for details.";
+	return summary.length <= WIKI_SUMMARY_MAX_CHARS
+		? summary
+		: `${summary.slice(0, WIKI_SUMMARY_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+function wikiPageCatalog(pages: ReadonlyArray<{ path: string; title: string }>): string {
+	return pages.map((page) => `${wikiPageId(page.path)} (${page.title})`).join(", ");
+}
+
+function resolveWikiPage(
+	pages: ReadonlyArray<{ path: string; title: string }>,
+	query: string,
+): { path: string; title: string } | { kind: "error"; message: string } {
+	const needle = query.toLocaleLowerCase();
+	const exact = pages.filter(
+		(page) => wikiPageId(page.path).toLocaleLowerCase() === needle || page.title.toLocaleLowerCase() === needle,
+	);
+	const matches =
+		exact.length > 0
+			? exact
+			: pages.filter(
+					(page) =>
+						wikiPageId(page.path).toLocaleLowerCase().includes(needle) || page.title.toLocaleLowerCase().includes(needle),
+				);
+	if (matches.length === 1 && matches[0]) return matches[0];
+	const catalog = wikiPageCatalog(pages) || "none";
+	if (matches.length === 0) {
+		return { kind: "error", message: `code_nav: no wiki page matches '${query}'; pages are: ${catalog}` };
+	}
+	return {
+		kind: "error",
+		message: `code_nav: wiki query '${query}' is ambiguous; matching pages are: ${wikiPageCatalog(matches)}`,
+	};
+}
+
+function runWiki(cwd: string, query: string): NavPayload | ToolResult {
 	const meta = readWikiMeta(cwd);
 	if (!meta) {
+		if (query.length > 0) {
+			return {
+				kind: "error",
+				message:
+					`code_nav: no wiki page matches '${query}'; pages are: none; ` +
+					`wiki generation is operator-only: run \`${WIKI_UPDATE_COMMAND}\``,
+			};
+		}
 		return {
 			payload: {
 				pages: [],
 				staleness: { state: "absent" },
-				message: "no wiki exists; run clio context wiki",
+				message: `no wiki exists; wiki generation is operator-only: run \`${WIKI_UPDATE_COMMAND}\``,
 			},
 			shownCount: 0,
 			totalCount: 0,
 		};
 	}
 	const validation = validateWikiLayout(cwd);
-	const pages = validation.ok ? listWikiPages(cwd) : meta.pages;
+	const onDiskPages = listWikiPages(cwd);
+	const pages = validation.ok ? onDiskPages : meta.pages;
+	const staleness = wikiStaleness(cwd);
+	const messages: string[] = [];
+	if (staleness.state !== "fresh") {
+		messages.push(`Wiki pages may be outdated; wiki regeneration is operator-only: run \`${WIKI_UPDATE_COMMAND}\`.`);
+	}
+	if (!validation.ok) {
+		messages.push(`Wiki layout is invalid (${validation.problems.join("; ")}).`);
+	}
+	if (query.length > 0) {
+		const resolved = resolveWikiPage(onDiskPages, query);
+		if ("kind" in resolved) {
+			return staleness.state === "fresh" ? resolved : { ...resolved, message: `${resolved.message}; ${messages[0]}` };
+		}
+		return {
+			payload: {
+				page: {
+					id: wikiPageId(resolved.path),
+					title: resolved.title,
+					summary: wikiPageSummary(cwd, resolved.path),
+					path: `.clio/wiki/${resolved.path}`,
+				},
+				staleness,
+				...(messages.length > 0 ? { message: messages.join(" ") } : {}),
+			},
+			shownCount: 1,
+			totalCount: 1,
+		};
+	}
 	return {
 		payload: {
 			pages,
-			staleness: wikiStaleness(cwd),
-			...(!validation.ok
-				? { message: `wiki layout invalid; run clio context wiki --update (${validation.problems.join("; ")})` }
-				: {}),
+			staleness,
+			...(messages.length > 0 ? { message: messages.join(" ") } : {}),
 		},
 		shownCount: pages.length,
 		totalCount: pages.length,
@@ -385,10 +475,12 @@ function parseLimit(value: unknown, fallback: number): number {
 export const codeNavTool: ToolSpec = {
 	name: ToolNames.CodeNav,
 	description:
-		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, dependents lists importers, wiki lists this repository's generated Markdown wiki pages. For Clio's bundled product docs use the context tool with scope=docs.",
+		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, and dependents lists importers. mode=wiki without query lists generated Markdown wiki pages; with query it resolves a page id/title and returns its summary plus a path to open with read. For Clio's bundled product docs use context scope=docs.",
 	parameters: Type.Object({
 		mode: stringEnum(["symbol", "path", "entries", "outline", "deps", "dependents", "wiki"], "Lookup mode."),
-		query: Type.Optional(Type.String({ description: "Symbol name, indexed path, path pattern, or path substring." })),
+		query: Type.Optional(
+			Type.String({ description: "Symbol name, indexed path/pattern/substring, or wiki page id/title." }),
+		),
 		limit: Type.Optional(
 			Type.Number({
 				description: `Max results (default ${DEFAULT_LIMIT}, entries ${DEFAULT_ENTRY_LIMIT}, max ${MAX_LIMIT}).`,
@@ -450,7 +542,7 @@ export const codeNavTool: ToolSpec = {
 			if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
 			return close(runDependents(index, query, limit));
 		}
-		if (mode === "wiki") return close(runWiki(process.cwd()));
+		if (mode === "wiki") return close(runWiki(process.cwd(), query));
 		return {
 			kind: "error",
 			message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, or wiki; got '${mode}'`,
