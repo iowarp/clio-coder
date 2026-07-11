@@ -52,6 +52,7 @@ import {
 } from "../domains/memory/index.js";
 import {
 	createDetachedDispatchNudgeRegistration,
+	createReadOnlyExplorationNudgeRegistration,
 	openDetachedBatchViews,
 } from "../domains/middleware/dispatch-nudge.js";
 import {
@@ -1058,6 +1059,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
+	middleware.registerHook(createReadOnlyExplorationNudgeRegistration());
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
 	);

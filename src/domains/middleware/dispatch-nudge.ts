@@ -23,6 +23,84 @@ import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
  */
 
 export const DETACHED_DISPATCH_NUDGE_REGISTRATION_ID = "nudge.detached-dispatch";
+export const READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID = "nudge.read-only-exploration";
+export const READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD = 9;
+
+const EXPLORATION_TOOL_NAMES = new Set<string>([
+	ToolNames.Read,
+	ToolNames.Grep,
+	ToolNames.Find,
+	ToolNames.Ls,
+	ToolNames.CodeNav,
+	ToolNames.Context,
+]);
+const EXPLORATION_NUDGE_TURN_LIMIT = 32;
+const NO_TURN = "no-turn";
+const READ_ONLY_SHELL_COMMAND_PATTERN = /^\s*(?:cat|head|tail|ls|grep|rg|find|wc)\b/;
+
+interface ExplorationTurnState {
+	readOnlyCalls: number;
+	dispatched: boolean;
+}
+
+export function buildReadOnlyExplorationMessage(): string {
+	return `[Clio Coder] This turn used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without dispatch; delegate broad repository reconnaissance to scout.`;
+}
+
+function isReadOnlyExplorationCall(input: MiddlewareHookInput): boolean {
+	if (input.toolName && EXPLORATION_TOOL_NAMES.has(input.toolName)) return true;
+	if (input.toolName !== ToolNames.Bash) return false;
+	const command = input.toolArgs?.command;
+	return typeof command === "string" && READ_ONLY_SHELL_COMMAND_PATTERN.test(command);
+}
+
+/**
+ * Counts broad read-only exploration during a turn and gives the orchestrator
+ * one bounded chance to continue with scout. It observes only; dispatch still
+ * remains the model's decision and normal safety policy controls that call.
+ */
+export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegistration {
+	const byTurn = new Map<string, ExplorationTurnState>();
+	const turnKey = (input: MiddlewareHookInput): string => input.turnId ?? input.runId ?? NO_TURN;
+	const stateFor = (key: string): ExplorationTurnState => {
+		let state = byTurn.get(key);
+		if (state) return state;
+		if (byTurn.size >= EXPLORATION_NUDGE_TURN_LIMIT) {
+			const oldest = byTurn.keys().next().value;
+			if (oldest !== undefined) byTurn.delete(oldest);
+		}
+		state = { readOnlyCalls: 0, dispatched: false };
+		byTurn.set(key, state);
+		return state;
+	};
+	return {
+		id: READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
+		description: "remind broad read-only exploration turns that the scout agent is available",
+		hooks: ["before_tool", "turn_end"],
+		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
+			const key = turnKey(input);
+			if (input.hook === "before_tool") {
+				const state = stateFor(key);
+				if (input.toolName === ToolNames.Dispatch) state.dispatched = true;
+				if (isReadOnlyExplorationCall(input)) state.readOnlyCalls += 1;
+				return [];
+			}
+			if (input.hook !== "turn_end") return [];
+			const state = byTurn.get(key);
+			byTurn.delete(key);
+			const stopReason = input.metadata?.stopReason;
+			if (stopReason !== undefined && stopReason !== "stop") return [];
+			const activeToolNames = input.metadata?.activeToolNames;
+			if (typeof activeToolNames !== "string" || !activeToolNames.split(",").includes(ToolNames.Dispatch)) return [];
+			if (!state || state.dispatched || state.readOnlyCalls < READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD) return [];
+			const message = buildReadOnlyExplorationMessage();
+			return [
+				{ kind: "request_continuation", message },
+				{ kind: "inject_reminder", message, severity: "info" },
+			];
+		},
+	};
+}
 
 export interface DetachedBatchNudgeView {
 	id: string;

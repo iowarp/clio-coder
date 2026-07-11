@@ -77,6 +77,10 @@ export interface CompiledSessionPrompt {
 	projectPreload?: ProjectPreloadClass | null;
 }
 
+export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 256;
+export const FLEET_ROUTING_GUIDANCE =
+	"Fleet routing: many-file exploration -> scout; external docs/papers -> researcher; receipts/evidence -> provenance; bounded code changes -> coder. Give each dispatch a concrete handoff and synthesize its result.";
+
 function lookupFragment(table: FragmentTable, id: string, role: string): LoadedFragment {
 	const frag = table.byId.get(id);
 	if (!frag) {
@@ -153,6 +157,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		.map((entry) => ({ tool: entry.tool.trim(), hint: entry.hint.trim() }))
 		.filter((entry) => entry.tool.length > 0 && entry.hint.length > 0)
 		.sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+	if (hints.some((entry) => entry.tool === "dispatch")) lines.push(FLEET_ROUTING_GUIDANCE);
 	for (const entry of hints) {
 		if (seen.has(entry.tool)) continue;
 		seen.add(entry.tool);

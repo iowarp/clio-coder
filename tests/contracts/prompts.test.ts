@@ -19,7 +19,11 @@ import {
 	writeWikiMeta,
 } from "../../src/domains/context/index.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
-import { compile } from "../../src/domains/prompts/compiler.js";
+import {
+	compile,
+	FLEET_ROUTING_GUIDANCE,
+	FLEET_ROUTING_GUIDANCE_MAX_BYTES,
+} from "../../src/domains/prompts/compiler.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
@@ -380,6 +384,7 @@ describe("contracts/prompts compiler logic", () => {
 			'Routing order: orient with structured observe tools before bash; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; dispatch only bounded parallel or delegated subwork and synthesize the receipts; validate with verify or git diff before final claims.',
 			'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
 			'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
+			FLEET_ROUTING_GUIDANCE,
 			TOOL_HINTS.ask_user.hint,
 			TOOL_HINTS.code_nav.hint,
 			TOOL_HINTS.context.hint,
@@ -400,6 +405,33 @@ describe("contracts/prompts compiler logic", () => {
 		]);
 		strictEqual(reordered.systemPrompt, result.systemPrompt);
 		strictEqual(reordered.systemPromptHash, result.systemPromptHash);
+	});
+
+	it("renders bounded fleet routing guidance only when dispatch is on the surface", () => {
+		ok(Buffer.byteLength(FLEET_ROUTING_GUIDANCE, "utf8") <= FLEET_ROUTING_GUIDANCE_MAX_BYTES);
+		const table = loadFragments();
+		const withDispatch = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: { providerSupportsTools: true, toolPromptHints: [TOOL_HINTS.dispatch] },
+		});
+		ok(withDispatch.systemPrompt.includes(FLEET_ROUTING_GUIDANCE));
+		for (const route of [
+			"many-file exploration -> scout",
+			"external docs/papers -> researcher",
+			"receipts/evidence -> provenance",
+			"bounded code changes -> coder",
+		]) {
+			ok(withDispatch.systemPrompt.includes(route), route);
+		}
+		const withoutDispatch = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: { providerSupportsTools: true, toolPromptHints: [] },
+		});
+		strictEqual(withoutDispatch.systemPrompt.includes(FLEET_ROUTING_GUIDANCE), false);
 	});
 
 	it("gates skill listing to skill-shaped tasks and teaches routing order plus failure recovery", () => {
