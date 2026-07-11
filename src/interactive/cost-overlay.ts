@@ -1,6 +1,12 @@
-import type { CostEntry, ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
+import {
+	aggregateCostAmounts,
+	type CostAggregate,
+	type CostEntry,
+	formatCostAggregate,
+	type ObservabilityContract,
+	type ObservabilitySnapshot,
+} from "../domains/observability/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { formatUsd } from "./footer/widgets.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { clioTheme, rule } from "./theme/index.js";
 
@@ -19,53 +25,50 @@ export interface CostRow {
 	cacheWrite: number;
 	reasoningTokens: number;
 	apiCalls: number;
-	usd: number;
+	cost: CostAggregate;
 }
 
 function formatTokens(n: number): string {
 	return n.toLocaleString("en-US");
 }
 
-// A zero cost is local and free, so it reads `$0.00 local`. Every other amount
-// goes through the shared USD formatter, which keeps two decimals normally and
-// widens to four only under one cent so a sub-cent row never rounds to a
-// misleading `$0.00`.
-function formatUsdCell(usd: number): string {
-	return usd === 0 ? `${formatUsd(0)} local` : formatUsd(usd);
-}
-
 export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow[] {
-	const map = new Map<string, CostRow>();
+	const grouped = new Map<string, { row: Omit<CostRow, "cost">; entries: CostEntry[] }>();
 	for (const entry of entries) {
 		const key = `${entry.providerId}::${entry.modelId}`;
-		const existing = map.get(key);
+		const existing = grouped.get(key);
 		if (existing) {
-			existing.runs += 1;
-			existing.tokens += entry.tokens;
-			existing.input += entry.input;
-			existing.output += entry.output;
-			existing.cacheRead += entry.cacheRead;
-			existing.cacheWrite += entry.cacheWrite;
-			existing.reasoningTokens += entry.reasoningTokens;
-			existing.apiCalls += entry.apiCalls ?? 1;
-			existing.usd += entry.usd;
+			existing.row.runs += 1;
+			existing.row.tokens += entry.tokens;
+			existing.row.input += entry.input;
+			existing.row.output += entry.output;
+			existing.row.cacheRead += entry.cacheRead;
+			existing.row.cacheWrite += entry.cacheWrite;
+			existing.row.reasoningTokens += entry.reasoningTokens;
+			existing.row.apiCalls += entry.apiCalls ?? 1;
+			existing.entries.push(entry);
 			continue;
 		}
-		map.set(key, {
-			providerId: entry.providerId,
-			modelId: entry.modelId,
-			runs: 1,
-			tokens: entry.tokens,
-			input: entry.input,
-			output: entry.output,
-			cacheRead: entry.cacheRead,
-			cacheWrite: entry.cacheWrite,
-			reasoningTokens: entry.reasoningTokens,
-			apiCalls: entry.apiCalls ?? 1,
-			usd: entry.usd,
+		grouped.set(key, {
+			row: {
+				providerId: entry.providerId,
+				modelId: entry.modelId,
+				runs: 1,
+				tokens: entry.tokens,
+				input: entry.input,
+				output: entry.output,
+				cacheRead: entry.cacheRead,
+				cacheWrite: entry.cacheWrite,
+				reasoningTokens: entry.reasoningTokens,
+				apiCalls: entry.apiCalls ?? 1,
+			},
+			entries: [entry],
 		});
 	}
-	const rows = Array.from(map.values());
+	const rows = Array.from(grouped.values(), ({ row, entries }) => ({
+		...row,
+		cost: aggregateCostAmounts(entries.map((entry) => ({ usd: entry.usd, provenance: entry.provenance }))),
+	}));
 	rows.sort((a, b) => {
 		if (a.providerId !== b.providerId) return a.providerId < b.providerId ? -1 : 1;
 		if (a.modelId !== b.modelId) return a.modelId < b.modelId ? -1 : 1;
@@ -74,7 +77,7 @@ export function aggregateCostEntries(entries: ReadonlyArray<CostEntry>): CostRow
 	return rows;
 }
 
-function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "modelId" | "usd"> {
+function sumRows(rows: ReadonlyArray<CostRow>): Omit<CostRow, "providerId" | "modelId" | "cost"> {
 	return rows.reduce(
 		(acc, row) => ({
 			runs: acc.runs + row.runs,
@@ -115,13 +118,13 @@ function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): st
 	});
 }
 
-function summaryBlock(totalUsd: number, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
+function summaryBlock(totalCost: CostAggregate, totalTokens: number, rows: ReadonlyArray<CostRow>): string[] {
 	const totals = sumRows(rows);
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
 	return kvBlock([
 		["turns", formatTokens(totals.runs)],
 		["requests", formatTokens(totals.apiCalls)],
-		["cost", formatUsdCell(totalUsd)],
+		["cost", formatCostAggregate(totalCost)],
 		["input", formatTokens(totals.input)],
 		["output", formatTokens(totals.output)],
 		["reasoning", formatTokens(totals.reasoningTokens)],
@@ -135,7 +138,7 @@ function modelBlock(row: CostRow): string[] {
 	return kvBlock([
 		["turns", formatTokens(row.runs)],
 		["requests", formatTokens(row.apiCalls)],
-		["cost", formatUsdCell(row.usd)],
+		["cost", formatCostAggregate(row.cost)],
 		["input", formatTokens(row.input)],
 		["output", formatTokens(row.output)],
 		["reasoning", formatTokens(row.reasoningTokens)],
@@ -146,14 +149,14 @@ function modelBlock(row: CostRow): string[] {
 }
 
 export function formatCostOverlayBodyLines(
-	totalUsd: number,
+	totalCost: CostAggregate,
 	totalTokens: number,
 	rows: ReadonlyArray<CostRow>,
 	contentWidth: number,
 ): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
-	for (const line of summaryBlock(totalUsd, totalTokens, rows)) {
+	for (const line of summaryBlock(totalCost, totalTokens, rows)) {
 		lines.push(line);
 	}
 	lines.push(rule(theme, contentWidth));
@@ -173,7 +176,7 @@ export function formatCostOverlayBodyLines(
 
 export interface CostSnapshot {
 	sessionId: string | null;
-	totalUsd: number;
+	totalCost: CostAggregate;
 	totalTokens: number;
 	rows: CostRow[];
 }
@@ -192,7 +195,7 @@ export function buildCostSnapshot(
 	const totalTokens = rows.reduce((sum, r) => sum + r.tokens, 0);
 	return {
 		sessionId,
-		totalUsd: snapshot?.session.costUsd ?? observability.sessionCost(),
+		totalCost: snapshot?.session.cost ?? observability.sessionCostSummary(),
 		totalTokens,
 		rows,
 	};
@@ -208,7 +211,7 @@ class CostOverlayBody implements Component {
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
 		const snapshot = this.getSnapshot();
-		return formatCostOverlayBodyLines(snapshot.totalUsd, snapshot.totalTokens, snapshot.rows, contentWidth);
+		return formatCostOverlayBodyLines(snapshot.totalCost, snapshot.totalTokens, snapshot.rows, contentWidth);
 	}
 
 	invalidate(): void {}

@@ -1,5 +1,10 @@
 import { ToolNames } from "../../core/tool-names.js";
-import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
+import {
+	type CostAggregate,
+	formatCostAggregate,
+	type TokenThroughputSnapshot,
+	type UsageBreakdown,
+} from "../../domains/observability/index.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
 import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/task-board.js";
@@ -322,7 +327,7 @@ export function compactSecondaryLine(
 	},
 	throughput: TokenThroughputSnapshot | null = null,
 	sessionTokens: UsageBreakdown | null = null,
-	sessionCost: number | null = null,
+	sessionCost: CostAggregate | null = null,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const barCells = compactContextBarWidth(safeWidth);
@@ -636,7 +641,7 @@ interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
 	toolCounts?: ToolTallySnapshot;
 	throughput?: TokenThroughputSnapshot | null;
 	sessionTokens?: UsageBreakdown | null;
-	sessionCost?: number | null;
+	sessionCost?: CostAggregate | null;
 	contextUsed?: number | null;
 	tick?: number;
 	now?: number;
@@ -783,8 +788,8 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	const total = cumulativeTokens(options.sessionTokens);
 	rows.push(total > 0 ? styledKv("totals", theme.fg("muted", `Σ${formatFooterTokens(total)}`)) : statusRow(null));
 	rows.push(
-		typeof options.sessionCost === "number" && Number.isFinite(options.sessionCost)
-			? styledKv("cost", theme.fg("muted", formatUsd(options.sessionCost)))
+		options.sessionCost !== null && options.sessionCost !== undefined
+			? styledKv("cost", theme.fg("muted", formatCostAggregate(options.sessionCost)))
 			: statusRow(null),
 	);
 	rows.push(
@@ -936,7 +941,7 @@ export function buildMetricStrip(
 	throughput: TokenThroughputSnapshot | null | undefined,
 	lastTurn: TurnSummary | null | undefined,
 	sessionTokens: UsageBreakdown | null | undefined,
-	sessionCost: number | null | undefined,
+	sessionCost: CostAggregate | null | undefined,
 	liveInputTokens: number | null | undefined,
 	maxWidth: number,
 	maxChipsCount = 6,
@@ -990,7 +995,7 @@ export function buildMetricStrip(
 	const fallbackTotal = finiteNonNegative(sessionTokens?.input) + finiteNonNegative(sessionTokens?.output);
 	const cumulativeTotal = finiteNonNegative(sessionTokens?.totalTokens) || fallbackTotal;
 	candidates.push(cumulativeTotal > 0 ? theme.fg("muted", `Σ${formatFooterTokens(cumulativeTotal)}`) : null);
-	candidates.push(finiteNonNegative(sessionCost) > 0 ? theme.fg("muted", formatUsd(sessionCost ?? 0)) : null);
+	candidates.push(sessionCost ? theme.fg("muted", formatCostAggregate(sessionCost)) : null);
 
 	const chipLimit = Math.max(0, Math.floor(maxChipsCount));
 	const activeChips = candidates

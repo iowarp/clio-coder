@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { UsageBreakdown } from "../../src/domains/observability/index.js";
+import { costAggregateForAmount, type UsageBreakdown } from "../../src/domains/observability/index.js";
 import { visibleWidth } from "../../src/engine/tui.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { type FooterDashboardRenderState, renderFooterStatusLines } from "../../src/interactive/footer/dashboard.js";
@@ -284,9 +284,19 @@ describe("IT3: Metric strip", () => {
 		cacheWrite: 0,
 		reasoningTokens: 0,
 	};
+	const knownCost = costAggregateForAmount(5.5, "known");
 
 	it("renders streaming/active state chips", () => {
-		const out = buildMetricStrip(theme, activeStatus, mockThroughput, mockLastTurn, mockSessionTokens, 5.5, 500, 100);
+		const out = buildMetricStrip(
+			theme,
+			activeStatus,
+			mockThroughput,
+			mockLastTurn,
+			mockSessionTokens,
+			knownCost,
+			500,
+			100,
+		);
 		const stripped = strip(out);
 		ok(stripped.includes("⚡50/s"), `should have speed, got "${stripped}"`);
 		ok(stripped.includes("↓200"), `should have live output, got "${stripped}"`);
@@ -297,7 +307,7 @@ describe("IT3: Metric strip", () => {
 	});
 
 	it("renders idle state chips using lastTurn", () => {
-		const out = buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, 5.5, 500, 100);
+		const out = buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, knownCost, 500, 100);
 		const stripped = strip(out);
 		ok(stripped.includes("✓ 3.0s"), `should have stop/time, got "${stripped}"`);
 		ok(stripped.includes("↑500 ↓150"), `should have turn in/out, got "${stripped}"`);
@@ -309,34 +319,67 @@ describe("IT3: Metric strip", () => {
 
 	it("drops lowest-priority chips first to fit within maxWidth", () => {
 		const fullStr = strip(
-			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, 5.5, 500, 100),
+			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, knownCost, 500, 100),
 		);
 		const maxLen = fullStr.length;
 
 		const cut1 = strip(
-			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, 5.5, 500, maxLen - 8),
+			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, knownCost, 500, maxLen - 8),
 		);
 		ok(!cut1.includes("$5.50"), `should have dropped cost, got "${cut1}"`);
 		ok(cut1.includes("Σ3k"), `should keep cumulative total, got "${cut1}"`);
 
 		const cut2 = strip(
-			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, 5.5, 500, maxLen - 16),
+			buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, knownCost, 500, maxLen - 16),
 		);
 		ok(!cut2.includes("$5.50"), `should have dropped cost`);
 		ok(!cut2.includes("Σ3k"), `should have dropped cumulative total, got "${cut2}"`);
 	});
 
 	it("never exceeds maxWidth while dropping whole chips", () => {
-		const full = buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, 5.5, 500, 100);
+		const full = buildMetricStrip(
+			theme,
+			idleStatus,
+			mockThroughput,
+			mockLastTurn,
+			mockSessionTokens,
+			knownCost,
+			500,
+			100,
+		);
 		for (let maxWidth = 1; maxWidth <= visibleWidth(full); maxWidth += 1) {
-			const out = buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, mockSessionTokens, 5.5, 500, maxWidth);
+			const out = buildMetricStrip(
+				theme,
+				idleStatus,
+				mockThroughput,
+				mockLastTurn,
+				mockSessionTokens,
+				knownCost,
+				500,
+				maxWidth,
+			);
 			ok(visibleWidth(out) <= maxWidth, `strip "${strip(out)}" exceeds ${maxWidth}`);
 			ok(!strip(out).includes("…"), `strip "${strip(out)}" should not be hard-truncated`);
 		}
 	});
 
+	it("renders truthful cost provenance and drops the entire cost chip when narrow", () => {
+		const costs = [
+			[costAggregateForAmount(0, "known_free"), "$0.00 local"],
+			[costAggregateForAmount(0.42, "estimated"), "~$0.42 est"],
+			[{ ...costAggregateForAmount(0.42, "known"), hasUnknown: true }, "$0.42 +?"],
+			[costAggregateForAmount(0, "unknown"), "cost unknown"],
+		] as const;
+		for (const [cost, expected] of costs) {
+			const full = strip(buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, null, cost, null, 100));
+			ok(full.includes(expected), full);
+			const narrow = strip(buildMetricStrip(theme, idleStatus, mockThroughput, mockLastTurn, null, cost, null, 8));
+			ok(!narrow.includes(expected.slice(0, 4)), `cost chip must be whole or absent, got "${narrow}"`);
+		}
+	});
+
 	it("returns empty string if neither active nor lastTurn exists", () => {
-		const out = buildMetricStrip(theme, idleStatus, null, null, mockSessionTokens, 5.5, null, 100);
+		const out = buildMetricStrip(theme, idleStatus, null, null, mockSessionTokens, knownCost, null, 100);
 		strictEqual(out, "");
 	});
 });
@@ -460,7 +503,16 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 			recordedAt: 1000,
 		};
 		for (const w of [40, 60, 80, 100, 120]) {
-			const line = compactSecondaryLine(context, agent, w, theme, status, throughput, null, 1.2);
+			const line = compactSecondaryLine(
+				context,
+				agent,
+				w,
+				theme,
+				status,
+				throughput,
+				null,
+				costAggregateForAmount(1.2, "known"),
+			);
 			strictEqual(visibleWidth(line), w, `visibleWidth should be exactly ${w}`);
 		}
 	});
@@ -499,7 +551,16 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 			modelId: "model",
 			recordedAt: 1000,
 		};
-		const line = compactSecondaryLine(context, agent, 40, theme, status, throughput, null, 1.2);
+		const line = compactSecondaryLine(
+			context,
+			agent,
+			40,
+			theme,
+			status,
+			throughput,
+			null,
+			costAggregateForAmount(1.2, "known"),
+		);
 		strictEqual(leadingBarCells(line).length, 6);
 		strictEqual(visibleWidth(line), 40);
 	});
@@ -790,7 +851,7 @@ function expandedRenderState(parts: {
 			recordedAt: 1000,
 		},
 		sessionTokens,
-		sessionCost: 1.2,
+		sessionCost: costAggregateForAmount(1.2, "known"),
 		tick: 0,
 		now: 2000,
 	};

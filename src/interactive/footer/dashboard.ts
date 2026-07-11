@@ -1,7 +1,12 @@
 import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ContextState } from "../../domains/context/index.js";
-import type { TokenThroughputSnapshot, UsageBreakdown } from "../../domains/observability/index.js";
+import {
+	type CostAggregate,
+	formatCostAggregate,
+	type TokenThroughputSnapshot,
+	type UsageBreakdown,
+} from "../../domains/observability/index.js";
 import {
 	type CapabilityFlags,
 	type ProvidersContract,
@@ -58,7 +63,6 @@ import {
 	EXPANDED_WIDE,
 	fitDashboardLine,
 	formatToolTally,
-	formatUsd,
 	type SessionFacts,
 	sessionQuadrant,
 	type ToolTallySnapshot,
@@ -79,7 +83,7 @@ export interface FooterDashboardDeps {
 	getTerminalColumns?: () => number;
 	getSessionTokens?: () => UsageBreakdown;
 	getTokenThroughput?: () => TokenThroughputSnapshot | null;
-	getSessionCost?: () => number;
+	getSessionCost?: () => CostAggregate;
 	getContextUsage?: () => ContextUsageSnapshot;
 	getContextLedger?: () => ContextLedger;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
@@ -112,7 +116,7 @@ export interface FooterDashboardRenderState {
 	dispatchRows: ReadonlyArray<DispatchBoardRow>;
 	throughput: TokenThroughputSnapshot | null;
 	sessionTokens: UsageBreakdown | null;
-	sessionCost: number | null;
+	sessionCost: CostAggregate | null;
 	tick: number;
 	now: number;
 }
@@ -124,8 +128,8 @@ function statusText(status: AgentStatus | undefined, now: number, width: number,
 	return status.phase === "ended" ? verb.text : `${spinnerFrame(frame)} ${verb.text}`;
 }
 
-function costSegment(value: number | undefined): string | null {
-	return typeof value === "number" && Number.isFinite(value) ? `cost ${formatUsd(value)}` : null;
+function costSegment(value: CostAggregate | undefined): string | null {
+	return value ? `cost ${formatCostAggregate(value)}` : null;
 }
 
 /** Compact footer: two always-on lines, deliberately free of model/mode/thinking (the editor rail owns those). */
