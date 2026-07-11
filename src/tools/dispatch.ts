@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AbortReason, DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -24,13 +23,7 @@ import {
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
 import { readReceiptVerification } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import type {
-	RunGateProvenance,
-	RunGateSubjectRef,
-	RunPlanProvenance,
-	RunReceipt,
-	RunReceiptVerification,
-} from "../domains/dispatch/types.js";
+import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -66,6 +59,7 @@ import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
+import { workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
 
 const DEFAULT_AGENT_ID = "coder";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
@@ -512,65 +506,6 @@ class PipelineHaltError extends Error {
 	}
 }
 
-/**
- * Matches a source citation such as `src/tools/dispatch.ts:42`. Used only to
- * decide whether a reconnaissance answer carries any location the parent can
- * spot-check; it never promotes or trusts the cited content itself.
- */
-const SOURCE_CITATION_PATTERN = /[\w./~-]+:\d+/;
-
-/**
- * Header line for the worker's answer block, keyed on the sealed receipt's
- * verification state, never on the prose itself. The label tells the parent
- * how much trust the text below has earned; it carries no control flow.
- */
-function workerTextLabel(verification: RunReceiptVerification): string {
-	switch (verification.state) {
-		case "verified":
-			return "worker output (tool-verified):";
-		case "not_applicable":
-			return "reconnaissance output (advisory leads, not validation evidence):";
-		case "unknown":
-			return "worker claims (validation not observable at this layer):";
-		default:
-			return "worker claims (unverified prose):";
-	}
-}
-
-/**
- * Deterministic non-evidence notices for a run whose text must not be read as
- * results: failed and cap-exhausted runs, runs with zero successful tool
- * calls, and citation-free reconnaissance. Every trigger reads sealed receipt
- * fields or the guard's machine-written diagnostics, never worker prose.
- */
-function nonEvidenceNotices(receipt: RunReceipt, verification: RunReceiptVerification, answerText: string): string[] {
-	const notices: string[] = [];
-	const failedRun = receipt.exitCode !== 0 || (receipt.outcome !== undefined && receipt.outcome !== "succeeded");
-	if (mentionsWorkerToolCallCap(receipt.failureMessage) || mentionsWorkerToolCallCap(receipt.outcomeDetail)) {
-		notices.push(
-			"non-evidence: the worker exhausted its tool-call cap; the text above is a partial synthesis, not verified results.",
-		);
-	} else if (failedRun) {
-		notices.push(
-			"non-evidence: this run did not succeed; treat the text above as an unsubstantiated report, not results.",
-		);
-	}
-	if (receipt.toolActivity !== undefined && receipt.toolActivity.succeeded === 0) {
-		notices.push("non-evidence: no tool call succeeded in this run; the text above was written without observed work.");
-	}
-	if (
-		!failedRun &&
-		verification.state === "not_applicable" &&
-		answerText.length > 0 &&
-		!SOURCE_CITATION_PATTERN.test(answerText)
-	) {
-		notices.push(
-			"non-evidence: this reconnaissance answer cites no file:line locations; treat its leads as unconfirmed.",
-		);
-	}
-	return notices;
-}
-
 /** Head-anchored so output truncation (head kept, tail dropped) cannot remove it. */
 const SPOT_CHECK_GUIDANCE =
 	'Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.';
@@ -631,7 +566,7 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${verificationSuffix}${integritySuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}`,
 				`  ${workerTextLabel(verification)}`,
 				...output.split("\n").map((line) => `  ${line}`),
-				...nonEvidenceNotices(receipt, verification, answerText).map((notice) => `  ${notice}`),
+				...workerTextNonEvidenceNotices(receipt, verification, answerText).map((notice) => `  ${notice}`),
 			];
 		}),
 	];

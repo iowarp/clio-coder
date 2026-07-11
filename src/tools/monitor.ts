@@ -2,13 +2,20 @@ import { readFileSync } from "node:fs";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import { isTerminalRunEnvelope, type RunEnvelope, type RunReceipt } from "../domains/dispatch/types.js";
+import { readReceiptVerification } from "../domains/dispatch/receipt-findings.js";
+import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import {
+	isTerminalRunEnvelope,
+	type RunEnvelope,
+	type RunReceipt,
+	type RunReceiptVerification,
+} from "../domains/dispatch/types.js";
 import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import { runEventTail } from "./dispatch.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
+import { workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
 
 /**
  * The monitor tool: read-only visibility into dispatched runs, plus the
@@ -167,22 +174,76 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 	};
 }
 
+interface DurableRunEvidence {
+	receipt: RunReceipt | null;
+	output: RunReceipt["output"] | null;
+	verification: RunReceiptVerification;
+	integrity: ReceiptIntegrityResult;
+	integrityNote: string | null;
+}
+
+function unavailableRunEvidence(reason: string, note: string): DurableRunEvidence {
+	return {
+		receipt: null,
+		output: null,
+		verification: readReceiptVerification({}),
+		integrity: { ok: false, reason },
+		integrityNote: note,
+	};
+}
+
 /**
- * Verified durable output for a terminal run: read the sealed receipt, verify
- * its integrity against the ledger row, and return its bounded output block.
- * Same-process and resumed collection read the same artifact, so the answer
- * survives session exit; tampered or unverifiable receipts yield nothing
- * rather than unauthenticated text.
+ * Read one terminal run's durable evidence boundary exactly once. Receipt
+ * fields and worker text become renderable only after the existing integrity
+ * check succeeds against the ledger envelope. Every failure returns unknown
+ * verification plus an explicit note; unauthenticated prose is withheld.
  */
-function durableRunOutput(run: RunEnvelope): RunReceipt["output"] | null {
-	if (!run.receiptPath) return null;
-	try {
-		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
-		if (!verifyReceiptIntegrity(receipt, run).ok) return null;
-		return receipt.output ?? null;
-	} catch {
-		return null;
+function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
+	if (!run) {
+		return unavailableRunEvidence(
+			"run ledger envelope unavailable",
+			"receipt integrity unavailable: the run ledger envelope is missing; worker text cannot be authenticated.",
+		);
 	}
+	if (!run.receiptPath) {
+		return unavailableRunEvidence(
+			"receipt unavailable",
+			"receipt integrity unavailable: no stored receipt; worker text is unavailable and validation is unknown.",
+		);
+	}
+	let receipt: RunReceipt;
+	try {
+		receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : String(err);
+		return unavailableRunEvidence(
+			`receipt unreadable: ${detail}`,
+			`receipt integrity unavailable: cannot read or parse ${run.receiptPath} (${detail}); worker text is unavailable and validation is unknown.`,
+		);
+	}
+	let integrity: ReceiptIntegrityResult;
+	try {
+		integrity = verifyReceiptIntegrity(receipt, run);
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : String(err);
+		return unavailableRunEvidence(
+			`receipt invalid: ${detail}`,
+			`receipt integrity failed: invalid receipt (${detail}); worker text is withheld as untrusted and validation is unknown.`,
+		);
+	}
+	if (!integrity.ok) {
+		return unavailableRunEvidence(
+			integrity.reason,
+			`receipt integrity failed: ${integrity.reason}; worker text is withheld as untrusted and validation is unknown.`,
+		);
+	}
+	return {
+		receipt,
+		output: receipt.output ?? null,
+		verification: readReceiptVerification(receipt),
+		integrity,
+		integrityNote: null,
+	};
 }
 
 function sleep(ms: number): Promise<void> {
@@ -235,20 +296,34 @@ interface CollectRow {
 	run: RunEnvelope | null;
 }
 
-function collectRunLine(row: CollectRow): string[] {
+interface CollectedRunRow extends CollectRow {
+	evidence: DurableRunEvidence;
+}
+
+function collectRunLine(row: CollectedRunRow): string[] {
 	const run = row.run;
-	if (!run) return [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; receipt may still exist)`];
-	const state = run.outcome ?? run.status;
-	const detail = run.outcomeDetail ? ` detail=${run.outcomeDetail}` : "";
-	const lines = [
-		`- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}${detail}`,
-	];
-	const output = durableRunOutput(run);
+	const lines = run
+		? [
+				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
+			]
+		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; receipt may still exist)`];
+	lines.push(`  ${workerTextLabel(row.evidence.verification)}`);
+	if (row.evidence.integrityNote) lines.push(`  ${row.evidence.integrityNote}`);
+	const output = row.evidence.output;
 	if (output) {
 		const capped = truncateUtf8(output.text, COLLECT_TEXT_BYTES, "...");
 		const qualifier = output.state === "partial" ? " (partial; the run did not complete this message)" : "";
 		const truncatedNote = output.truncated ? ` (stored output truncated; full text was ${output.bytes} bytes)` : "";
 		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));
+		if (row.evidence.receipt) {
+			lines.push(
+				...workerTextNonEvidenceNotices(row.evidence.receipt, row.evidence.verification, output.text).map(
+					(notice) => `  ${notice}`,
+				),
+			);
+		}
+	} else if (row.evidence.integrity.ok) {
+		lines.push("  (no assistant text captured)");
 	}
 	return lines;
 }
@@ -326,9 +401,10 @@ async function runCollect(
 			collected = false;
 		}
 	}
+	const collectedRows: CollectedRunRow[] = rows.map((row) => ({ ...row, evidence: durableRunEvidence(row.run) }));
 	const lines = [
 		`collect complete for ${scope}: total=${rows.length} failed=${failed.length}${missing.length > 0 ? ` missing=${missing.length}` : ""}`,
-		...rows.flatMap((row) => collectRunLine(row)),
+		...collectedRows.flatMap((row) => collectRunLine(row)),
 		...(batchId.length > 0 && !collected
 			? ["", "note: the batch record could not be marked collected; it stays open for a later collect."]
 			: []),
@@ -343,8 +419,8 @@ async function runCollect(
 			complete: true,
 			runCount: rows.length,
 			failedCount: failed.length,
-			runs: rows.map((row) => {
-				const output = row.run !== null ? durableRunOutput(row.run) : null;
+			runs: collectedRows.map((row) => {
+				const output = row.evidence.output;
 				return {
 					runId: row.runId,
 					agentId: row.agentId,

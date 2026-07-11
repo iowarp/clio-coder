@@ -385,6 +385,7 @@ describe("detached dispatch + collect", () => {
 			ok(collected.kind === "ok");
 			strictEqual(collected.details?.complete, true);
 			match(collected.output, /resumed answer/);
+			match(collected.output, /agent output:/, "the established collect output subheader is preserved");
 			const runsDetail = collected.details?.runs as Array<{
 				runId: string;
 				output?: { state: string; bytes: number; truncated: boolean };
