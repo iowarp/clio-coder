@@ -61,7 +61,12 @@ function isReadOnlyExplorationCall(input: MiddlewareHookInput): boolean {
  */
 export function createReadOnlyExplorationNudgeRegistration(): MiddlewareHookRegistration {
 	const byTurn = new Map<string, ExplorationTurnState>();
-	const turnKey = (input: MiddlewareHookInput): string => input.turnId ?? input.runId ?? NO_TURN;
+	const turnKey = (input: MiddlewareHookInput): string => {
+		const userTurnId = input.hook === "turn_end" ? input.metadata?.userTurnId : undefined;
+		return (
+			(typeof userTurnId === "string" && userTurnId.length > 0 ? userTurnId : input.turnId) ?? input.runId ?? NO_TURN
+		);
+	};
 	const stateFor = (key: string): ExplorationTurnState => {
 		let state = byTurn.get(key);
 		if (state) return state;

@@ -16,8 +16,16 @@ function beforeTool(turnId: string, toolName: string, toolArgs?: Record<string, 
 	return { hook: "before_tool", turnId, toolName, ...(toolArgs ? { toolArgs } : {}) };
 }
 
-function turnEnd(turnId: string, activeToolNames = "read,grep,find,ls,bash,dispatch"): MiddlewareHookInput {
-	return { hook: "turn_end", turnId, metadata: { stopReason: "stop", activeToolNames } };
+function turnEnd(
+	assistantTurnId: string,
+	activeToolNames = "read,grep,find,ls,bash,dispatch",
+	userTurnId = assistantTurnId,
+): MiddlewareHookInput {
+	return {
+		hook: "turn_end",
+		turnId: assistantTurnId,
+		metadata: { stopReason: "stop", activeToolNames, userTurnId },
+	};
 }
 
 function crossThreshold(
@@ -61,9 +69,9 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 	it("fires once after the named read-only call threshold without dispatch", () => {
 		const registration = createReadOnlyExplorationNudgeRegistration();
 		strictEqual(registration.id, READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID);
-		crossThreshold("turn-fire", registration);
+		crossThreshold("turn-fire-user", registration);
 
-		const effects = registration.evaluate(turnEnd("turn-fire"));
+		const effects = registration.evaluate(turnEnd("turn-fire-assistant", undefined, "turn-fire-user"));
 		deepStrictEqual(
 			effects.map((effect) => effect.kind),
 			["request_continuation", "inject_reminder"],
@@ -73,7 +81,25 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		match(continuation.message, /read-only exploration calls without dispatch/);
 		match(continuation.message, /scout/);
 
-		deepStrictEqual(registration.evaluate(turnEnd("turn-fire")), [], "same turn cannot nudge twice");
+		deepStrictEqual(
+			registration.evaluate(turnEnd("turn-fire-assistant", undefined, "turn-fire-user")),
+			[],
+			"same turn cannot nudge twice",
+		);
+	});
+
+	it("retains same-id correlation for direct or sessionless callers", () => {
+		const registration = createReadOnlyExplorationNudgeRegistration();
+		crossThreshold("turn-direct", registration);
+		const effects = registration.evaluate({
+			hook: "turn_end",
+			turnId: "turn-direct",
+			metadata: { stopReason: "stop", activeToolNames: "read,dispatch" },
+		});
+		deepStrictEqual(
+			effects.map((effect) => effect.kind),
+			["request_continuation", "inject_reminder"],
+		);
 	});
 
 	it("suppresses below-threshold turns, turns that dispatched, and surfaces without dispatch", () => {
