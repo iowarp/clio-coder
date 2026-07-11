@@ -4,29 +4,31 @@ import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 export function openAgentsOverlay(tui: TUI, ctx: SlashCommandContext, onClose: () => void): OverlayHandle {
 	const clioAgents = ctx.listAgents();
-	const fleetItems: ListOverlayItem[] = clioAgents.map((agent) => {
-		const label = `${agent.id.padEnd(16)}${agent.description}`;
-		const meta = `${agent.audience}/${agent.category}/${agent.capabilityClass}`;
-		return {
-			id: agent.id,
-			label,
-			meta,
-			group: "Fleet agents",
-			detail: () => {
-				const lines = [
-					`# Fleet Agent: ${agent.id}`,
-					`**Description:** ${agent.description}`,
-					`**Audience:** ${agent.audience}`,
-					`**Category:** ${agent.category}`,
-					`**Capability Class:** ${agent.capabilityClass}`,
-				];
-				if (agent.skills.length > 0) {
-					lines.push(`**Skills:** ${agent.skills.join(", ")}`);
-				}
-				return lines;
-			},
-		};
-	});
+	const fleetItems: ListOverlayItem[] = clioAgents
+		.filter((agent) => !agent.tags?.some((tag) => tag === "delegation" || tag === "acp"))
+		.map((agent) => {
+			const label = `${agent.id.padEnd(16)}${agent.description}`;
+			const meta = `${agent.audience}/${agent.category}/${agent.capabilityClass}`;
+			return {
+				id: agent.id,
+				label,
+				meta,
+				group: "Fleet agents",
+				detail: () => {
+					const lines = [
+						`# Fleet Agent: ${agent.id}`,
+						`**Description:** ${agent.description}`,
+						`**Audience:** ${agent.audience}`,
+						`**Category:** ${agent.category}`,
+						`**Capability Class:** ${agent.capabilityClass}`,
+					];
+					if (agent.skills.length > 0) {
+						lines.push(`**Skills:** ${agent.skills.join(", ")}`);
+					}
+					return lines;
+				},
+			};
+		});
 
 	const delegationAgents = ctx.listDelegationAgents();
 	const delegationItems: ListOverlayItem[] = delegationAgents.map((agent) => {

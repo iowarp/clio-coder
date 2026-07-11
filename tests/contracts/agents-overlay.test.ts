@@ -53,6 +53,15 @@ describe("contracts/agents-overlay", () => {
 						capabilityClass: "read-only",
 						skills: [],
 					},
+					{
+						id: "claude-cli",
+						description: "External ACP delegation agent",
+						audience: "base",
+						category: "build",
+						capabilityClass: "write",
+						skills: [],
+						tags: ["delegation", "acp"],
+					},
 				],
 				listDelegationAgents: () => [
 					{
@@ -78,5 +87,11 @@ describe("contracts/agents-overlay", () => {
 		ok(options.items[0]?.meta?.includes("base/build/write"));
 		ok(options.items[1]?.meta?.includes("shadow/research/read-only"));
 		ok(options.items[2]?.meta?.includes("governance=clio-policy"));
+		strictEqual(
+			options.items.filter((item) => item.id === "claude-cli").length,
+			1,
+			"ACP delegation specs should appear only in their dedicated group",
+		);
+		strictEqual(options.items.find((item) => item.id === "claude-cli")?.group, "ACP delegation agents");
 	});
 });
