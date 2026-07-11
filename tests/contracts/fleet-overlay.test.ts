@@ -55,9 +55,31 @@ function runningRow(runId: string): DispatchSnapshot["running"][number] {
 		elapsedMs: 1000,
 		tokens: { input: 1, output: 1, total: 2 },
 		costUsd: 0,
+		costProvenance: "known_free",
 		node: null,
 	};
 }
+
+it("fleet overlay renders running and total cost provenance truthfully", () => {
+	const row = { ...runningRow("run-cost"), costUsd: 0.125, costProvenance: "estimated" as const };
+	const body = strip(
+		formatFleetOverlayBodyLines(
+			snapshot({
+				running: [row],
+				totals: {
+					inputTokens: 1,
+					outputTokens: 1,
+					totalTokens: 2,
+					costUsd: 0.125,
+					cost: { knownUsd: 0.125, hasEstimated: true, hasUnknown: true, allKnownFree: false },
+					runtimeSeconds: 1,
+				},
+			}),
+		).join("\n"),
+	);
+	ok(body.includes("~$0.13 est"), body);
+	ok(body.includes("$0.13 +?"), body);
+});
 
 // deriveRunEvidenceState only reads runs, notices, and pendingEvidenceBuildRunIds.
 function observability(
@@ -217,6 +239,7 @@ describe("fleet overlay", () => {
 						elapsedMs: 12_000,
 						tokens: { input: 100, output: 42, total: 142 },
 						costUsd: 0.0012,
+						costProvenance: "known",
 						node: null,
 					},
 				],
@@ -229,7 +252,14 @@ describe("fleet overlay", () => {
 						reason: "stalled: no worker activity",
 					},
 				],
-				totals: { inputTokens: 100, outputTokens: 42, totalTokens: 142, costUsd: 0.0012, runtimeSeconds: 12 },
+				totals: {
+					inputTokens: 100,
+					outputTokens: 42,
+					totalTokens: 142,
+					costUsd: 0.0012,
+					cost: { knownUsd: 0.0012, hasEstimated: false, hasUnknown: false, allKnownFree: false },
+					runtimeSeconds: 12,
+				},
 			}),
 		);
 
@@ -281,7 +311,14 @@ describe("fleet overlay", () => {
 		const body = strip(
 			formatFleetOverlayBodyLines(
 				snapshot({
-					totals: { inputTokens: 100, outputTokens: 42, totalTokens: 142, costUsd: 0.42, runtimeSeconds: 12 },
+					totals: {
+						inputTokens: 100,
+						outputTokens: 42,
+						totalTokens: 142,
+						costUsd: 0.42,
+						cost: { knownUsd: 0.42, hasEstimated: false, hasUnknown: false, allKnownFree: false },
+						runtimeSeconds: 12,
+					},
 				}),
 			).join("\n"),
 		);

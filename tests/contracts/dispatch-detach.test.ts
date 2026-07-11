@@ -193,6 +193,7 @@ describe("detached dispatch + collect", () => {
 			strictEqual(collected.details?.failedCount, 1);
 			match(collected.output, /collect complete/);
 			match(collected.output, /first answer/);
+			match(collected.output, /cost=~\$0\.00 est/, "catalog fallback cost is labeled estimated");
 			ok(bundle.contract.detached?.get(batchId)?.collectedAt !== null, "batch marked collected");
 
 			// Explicit run-id collect works without a batch record.
