@@ -21,7 +21,12 @@ import {
 	type ToolBudgetExceededPayload,
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import { GUARDRAIL_DEFAULTS, resolveGuardrail, workerToolCallCapExceededReason } from "../core/guardrails.js";
+import {
+	GUARDRAIL_DEFAULTS,
+	resolveGuardrail,
+	workerToolCallCapExceededReason,
+	workerToolCallCapSynthesisReason,
+} from "../core/guardrails.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
@@ -346,6 +351,15 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		{ tool: string; repeatCount: number; blocksThisTurn: number; denials: number }
 	>();
 	/**
+	 * Lifetime-cap synthesis lockout (workers). Entered exactly once when the
+	 * observed attempt count crosses the cap while the synthesis lockout is
+	 * wired, however many parallel calls cross it in the same batch; further
+	 * attempts count denials toward the same bounded backstop the loop lockout
+	 * uses. Null until the cap is crossed; without the lockout the cap keeps
+	 * its original immediate-abort reason.
+	 */
+	let capLockout: { denials: number } | null = null;
+	/**
 	 * Per-fingerprint count of successful executions this run, for the evidence
 	 * anchor: when a looped call already returned a result, the block reason
 	 * points the model at that result instead of only asking for a new strategy.
@@ -575,7 +589,28 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const now = options.now?.() ?? Date.now();
 			count += 1;
 			if (cap !== undefined && count > cap) {
-				return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
+				// No tool body executes past the cap. With the synthesis lockout
+				// wired the run is not aborted on the spot: the first crossing flips
+				// the request-level tool lock (onSynthesisLockout) and directs the
+				// model to answer from what it gathered; a model that keeps emitting
+				// tool calls anyway reaches the bounded backstop, whose reason the
+				// worker runtime recognizes and aborts on. Parallel calls crossing
+				// the cap in one batch enter the lockout exactly once.
+				if (!synthesisLockout) {
+					return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
+				}
+				if (capLockout === null) {
+					capLockout = { denials: 0 };
+					options.onSynthesisLockout?.();
+					return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
+				}
+				capLockout.denials += 1;
+				if (capLockout.denials > LOOP_SYNTHESIS_BACKSTOP_DENIALS) {
+					return [
+						{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
+					];
+				}
+				return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
 			}
 			const turnKey = input.turnId ?? NO_TURN_BUCKET;
 

@@ -10,7 +10,11 @@
  */
 
 import { validateSettingsFile } from "../core/config.js";
-import { configureGuardrails, isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
+import {
+	configureGuardrails,
+	isWorkerToolCallCapExceededReason,
+	isWorkerToolCallCapSynthesisReason,
+} from "../core/guardrails.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
@@ -328,6 +332,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.autonomy,
 	);
 	let workerBoundFailure: string | null = null;
+	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
@@ -335,13 +340,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		},
 		onFinish(event) {
 			emit({ type: "clio_tool_finish", payload: event });
-			if (
-				workerBoundFailure === null &&
-				event.outcome === "blocked" &&
-				typeof event.reason === "string" &&
-				(isWorkerToolCallCapExceededReason(event.reason) || isLoopGuardSynthesisBackstopReason(event.reason))
-			) {
-				workerBoundFailure = event.reason;
+			if (event.outcome !== "blocked" || typeof event.reason !== "string") return;
+			// Lifetime-cap lockout: record the bound (the run must not seal as an
+			// ordinary success) but do not abort. The loop guard has flipped the
+			// synthesis tool lock, so the next model round runs text-only and the
+			// synthesized answer still reaches message_end and the receipt.
+			if (isWorkerToolCallCapSynthesisReason(event.reason)) {
+				if (workerBoundFailure === null) {
+					workerBoundFailure = event.reason;
+					process.stderr.write(`[worker] ${event.reason}\n`);
+				}
+				return;
+			}
+			// Hard bounds: the legacy immediate cap abort (lockout not wired) and
+			// the synthesis backstop for a model that keeps emitting tool calls
+			// after the lock. Both end the run; the first recorded bound wins the
+			// receipt diagnostic.
+			if (isWorkerToolCallCapExceededReason(event.reason) || isLoopGuardSynthesisBackstopReason(event.reason)) {
+				if (workerBoundAborted) return;
+				workerBoundAborted = true;
+				if (workerBoundFailure === null) workerBoundFailure = event.reason;
 				process.stderr.write(`[worker] ${event.reason}\n`);
 				abortWorkerForBound?.();
 			}

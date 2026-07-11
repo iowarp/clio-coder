@@ -72,6 +72,26 @@ export function isWorkerToolCallCapExceededReason(reason: string): boolean {
 	return /^workerToolCallCap reached \([1-9]\d*\); abort run$/.test(reason);
 }
 
+/**
+ * Cap-exhaustion synthesis directive. Emitted instead of the abort reason when
+ * the loop guard runs with the synthesis lockout (dispatched workers): the run
+ * gets one bounded text-only opportunity to report from what it gathered
+ * before the backstop ends it. The prefix keeps the cap telemetry recognizable
+ * in receipts and stderr diagnostics.
+ */
+export function workerToolCallCapSynthesisReason(cap: number): string {
+	return (
+		`workerToolCallCap reached (${cap}); tool calls are now disabled for the rest of this run. ` +
+		"Everything you retrieved is already in the conversation above. Answer the operator now, in plain prose, " +
+		"from what you have gathered. Do not write tool-call markup such as <tool_call> blocks; tool calls are " +
+		"disabled and will not run."
+	);
+}
+
+export function isWorkerToolCallCapSynthesisReason(reason: string): boolean {
+	return /^workerToolCallCap reached \([1-9]\d*\); tool calls are now disabled/.test(reason);
+}
+
 let configured: Partial<GuardrailValues> = {};
 
 /**

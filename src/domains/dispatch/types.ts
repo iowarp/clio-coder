@@ -405,6 +405,24 @@ export interface RunReceiptUpstreamResponse {
 	responseId: string | null;
 }
 
+/**
+ * Bounded assistant output captured by the dispatch event pump and sealed into
+ * the receipt so the worker's answer survives process exit and session resume.
+ * `state: "final"` means the text is a completed assistant message (the last
+ * `message_end`); `state: "partial"` means mid-stream text from a message that
+ * never completed (abort, stall, kill) and must never be presented as final.
+ * `bytes` is the UTF-8 length of the full captured text before the
+ * WORKER_OUTPUT_MAX_BYTES bound; `truncated` records that the bound clipped
+ * `text`, so truncation is always explicit. Absent when no assistant text was
+ * captured. Covered by the receipt integrity digest like every other field.
+ */
+export interface RunReceiptOutput {
+	state: "final" | "partial";
+	text: string;
+	bytes: number;
+	truncated: boolean;
+}
+
 export type RunAutonomyEnforcementGrade = "mediated" | "approximated" | "bypassed";
 
 export interface RunReceiptAutonomyEnforcement {
@@ -459,6 +477,8 @@ export interface RunReceipt {
 	cacheWriteTokenCount?: number;
 	reasoningTokenCount?: number;
 	upstreamResponses?: RunReceiptUpstreamResponse[];
+	/** Bounded final/partial assistant output; absent when none was captured. */
+	output?: RunReceiptOutput;
 	costUsd: number;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
