@@ -1,6 +1,7 @@
 import type { TargetStatus } from "../providers/contract.js";
+import type { CostProvenance } from "../providers/index.js";
 import type { AccountabilitySummary } from "./accountability.js";
-import type { CostEntry, UsageBreakdown } from "./cost.js";
+import type { CostAggregate, CostEntry, UsageBreakdown } from "./cost.js";
 import type { MetricsView } from "./metrics.js";
 import type { TelemetrySnapshot } from "./telemetry.js";
 
@@ -62,6 +63,7 @@ export interface ObservabilityRunSummary {
 		total: number;
 	};
 	costUsd: number;
+	costProvenance: CostProvenance;
 	outcome?: string | null;
 	outcomeDetail?: string | null;
 	evidence?: {
@@ -86,6 +88,7 @@ export interface ObservabilitySnapshot {
 	generatedAt: number;
 	session: {
 		costUsd: number;
+		cost: CostAggregate;
 		tokens: UsageBreakdown;
 		latestThroughput: TokenThroughputSnapshot | null;
 	};
@@ -104,6 +107,7 @@ export interface ObservabilityContract {
 	metrics(): MetricsView;
 	/** Running session USD cost. */
 	sessionCost(): number;
+	sessionCostSummary(): CostAggregate;
 	/** Running session token totals broken down by kind, including reasoning when exposed. */
 	sessionTokens(): UsageBreakdown;
 	/** Running session cost log entries. */
@@ -131,6 +135,7 @@ export interface ObservabilityContract {
 		tokens: number,
 		costUsd?: number,
 		breakdown?: Partial<UsageBreakdown>,
+		costProvenance?: CostProvenance,
 	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;

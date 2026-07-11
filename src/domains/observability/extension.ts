@@ -47,10 +47,17 @@ function recordDispatchCost(
 	// Dispatch bus payloads carry a total token count plus optional reasoning
 	// detail, so sessionTokens() leaves input/output at zero for dispatch runs.
 	// Chat-loop runs pass the full Usage breakdown through recordTokens().
-	cost.accumulate(payload.targetId, payload.wireModelId, payload.tokenCount, payload.costUsd, {
-		reasoningTokens: payload.reasoningTokenCount ?? 0,
-		totalTokens: payload.tokenCount,
-	});
+	cost.accumulate(
+		payload.targetId,
+		payload.wireModelId,
+		payload.tokenCount,
+		payload.costUsd,
+		{
+			reasoningTokens: payload.reasoningTokenCount ?? 0,
+			totalTokens: payload.tokenCount,
+		},
+		payload.costProvenance,
+	);
 }
 
 /**
@@ -129,6 +136,7 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 	const projection = createObservabilityProjection(context.bus, {
 		metrics: () => aggregateMetrics(telemetry.snapshot()),
 		sessionCost: () => cost.sessionTotal(),
+		sessionCostSummary: () => cost.sessionCost(),
 		sessionTokens: () => cost.sessionTokens(),
 		latestThroughput: () => latestThroughput,
 		readAccountability: () => readAccountabilitySummary(clioStateDir()),
@@ -212,6 +220,7 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 		telemetry: () => telemetry.snapshot(),
 		metrics: () => aggregateMetrics(telemetry.snapshot()),
 		sessionCost: () => cost.sessionTotal(),
+		sessionCostSummary: () => cost.sessionCost(),
 		sessionTokens: () => cost.sessionTokens(),
 		costEntries: () => cost.entries(),
 		accountability: () => readAccountabilitySummary(clioStateDir()),
@@ -221,9 +230,9 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 			latestThroughput = null;
 			projection.refresh();
 		},
-		recordTokens(providerId, modelId, tokens, costUsd, breakdown) {
+		recordTokens(providerId, modelId, tokens, costUsd, breakdown, costProvenance) {
 			telemetry.record("counter", "tokens.total", tokens);
-			cost.accumulate(providerId, modelId, tokens, costUsd, breakdown);
+			cost.accumulate(providerId, modelId, tokens, costUsd, breakdown, costProvenance);
 			projection.refresh();
 		},
 		recordTokenThroughput(snapshot) {

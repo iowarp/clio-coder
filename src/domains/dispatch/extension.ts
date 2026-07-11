@@ -183,6 +183,7 @@ interface ActiveRun {
 	heartbeatStatus: HeartbeatStatus;
 	meter: RunTokenMeter;
 	pricing: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null;
+	costProvenance: import("../providers/index.js").CostProvenance;
 	finalPromise: Promise<RunReceipt>;
 }
 
@@ -1750,6 +1751,7 @@ export function createDispatchBundle(
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
 	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
+	const finalizedCosts: Array<{ usd: number; provenance: import("../providers/index.js").CostProvenance }> = [];
 
 	function workersMaxRetries(): number {
 		const value = getEffectiveSettings()?.workers?.maxRetries;
@@ -1766,6 +1768,7 @@ export function createDispatchBundle(
 		finalizedTotals.outputTokens += receipt.outputTokenCount ?? 0;
 		finalizedTotals.totalTokens += receipt.tokenCount;
 		finalizedTotals.costUsd += receipt.costUsd;
+		finalizedCosts.push({ usd: receipt.costUsd, provenance: receipt.costProvenance ?? "unknown" });
 		const startMs = Date.parse(receipt.startedAt);
 		const endMs = Date.parse(receipt.endedAt);
 		if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
@@ -2515,6 +2518,7 @@ export function createDispatchBundle(
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
 			pricing: null,
+			costProvenance: "unknown",
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
 		};
 
@@ -2580,6 +2584,7 @@ export function createDispatchBundle(
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd: 0,
+				costProvenance: "unknown",
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
 				staticShellHash: lifecycle.staticCompositionHash,
@@ -2655,6 +2660,7 @@ export function createDispatchBundle(
 				sessionShellHash: receipt.sessionShellHash ?? null,
 				dynamicHash: receipt.dynamicHash ?? null,
 				costUsd: receipt.costUsd,
+				costProvenance: receipt.costProvenance ?? "unknown",
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
@@ -2742,6 +2748,7 @@ export function createDispatchBundle(
 					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
 					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
+					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
 					staticShellHash: receiptDraft.staticShellHash ?? null,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
@@ -3301,6 +3308,7 @@ export function createDispatchBundle(
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
 			pricing: lifecycle.target.target.pricing ?? null,
+			costProvenance: lifecycle.target.runtimeResolution.costProvenance,
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
 		};
 
@@ -3376,6 +3384,7 @@ export function createDispatchBundle(
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd,
+				costProvenance: lifecycle.target.runtimeResolution.costProvenance,
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
 				staticShellHash: lifecycle.staticCompositionHash,
@@ -3451,6 +3460,7 @@ export function createDispatchBundle(
 				sessionShellHash: receipt.sessionShellHash ?? null,
 				dynamicHash: receipt.dynamicHash ?? null,
 				costUsd: receipt.costUsd,
+				costProvenance: receipt.costProvenance ?? "unknown",
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
@@ -3535,6 +3545,7 @@ export function createDispatchBundle(
 					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
 					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
 					costUsd: receiptDraft.costUsd,
+					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
 					staticShellHash: receiptDraft.staticShellHash ?? null,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
@@ -3854,6 +3865,7 @@ export function createDispatchBundle(
 		const tickNow = now();
 		const running: DispatchSnapshot["running"] = [];
 		const totals = { ...finalizedTotals };
+		const costAmounts = [...finalizedCosts];
 		for (const run of active.values()) {
 			let heartbeat: "alive" | "stale" | "dead" | "n/a" = "n/a";
 			if (run.heartbeatAt && Number.isFinite(run.heartbeatAt.current)) {
@@ -3889,12 +3901,14 @@ export function createDispatchBundle(
 				elapsedMs,
 				tokens: { input: meter.inputTokens, output: meter.outputTokens, total: totalTokens },
 				costUsd,
+				costProvenance: run.costProvenance,
 				node: run.node !== null ? { ...run.node } : null,
 			});
 			totals.inputTokens += meter.inputTokens;
 			totals.outputTokens += meter.outputTokens;
 			totals.totalTokens += totalTokens;
 			totals.costUsd += costUsd;
+			costAmounts.push({ usd: costUsd, provenance: run.costProvenance });
 			totals.runtimeSeconds += elapsedMs / 1000;
 		}
 		const retrying = [...retryQueue.values()].map((entry) => ({
@@ -3904,11 +3918,18 @@ export function createDispatchBundle(
 			dueAt: new Date(entry.dueAt).toISOString(),
 			reason: entry.reason,
 		}));
+		const knownUsd = costAmounts.reduce((sum, amount) => sum + (amount.provenance === "unknown" ? 0 : amount.usd), 0);
+		const cost = {
+			knownUsd,
+			hasEstimated: costAmounts.some((amount) => amount.provenance === "estimated"),
+			hasUnknown: costAmounts.some((amount) => amount.provenance === "unknown"),
+			allKnownFree: costAmounts.length > 0 && costAmounts.every((amount) => amount.provenance === "known_free"),
+		};
 		return {
 			generatedAt: new Date(tickNow).toISOString(),
 			running,
 			retrying,
-			totals,
+			totals: { ...totals, cost },
 		};
 	}
 

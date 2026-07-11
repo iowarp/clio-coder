@@ -22,7 +22,9 @@ export {
 	type CostAggregate,
 	type CostAmount,
 	type CostEntry,
+	costAggregateForAmount,
 	emptyCostAggregate,
+	formatCostAggregate,
 	type UsageBreakdown,
 } from "./cost.js";
 export type { EvidenceIndexRow } from "./evidence-index.js";

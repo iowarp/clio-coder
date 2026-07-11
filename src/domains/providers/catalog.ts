@@ -2,6 +2,7 @@ import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/a
 import type { Api, KnownProvider, Model } from "../../engine/types.js";
 import { mergeCapabilities } from "./capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
+import type { CostProvenance } from "./types/cost-provenance.js";
 import type { KnowledgeBaseHit } from "./types/knowledge-base.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
@@ -34,6 +35,24 @@ export function listCatalogModelsForRuntime(runtimeId: string): Model<Api>[] {
 	} catch {
 		return [];
 	}
+}
+
+/** Resolve pricing truth from the same fallback chain used for model synthesis. */
+export function resolveCostProvenance(
+	target: TargetDescriptor,
+	runtimeId: string,
+	wireModelId: string,
+): CostProvenance {
+	if (target.pricing) {
+		const rates = [
+			target.pricing.input,
+			target.pricing.output,
+			target.pricing.cacheRead ?? 0,
+			target.pricing.cacheWrite ?? 0,
+		];
+		return rates.every((rate) => rate === 0) ? "known_free" : "known";
+	}
+	return getCatalogModelForRuntime(runtimeId, wireModelId) ? "estimated" : "unknown";
 }
 
 export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string): Model<Api> | undefined {

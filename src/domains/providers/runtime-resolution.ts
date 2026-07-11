@@ -1,6 +1,6 @@
 import { runOverrides } from "../../core/run-overrides.js";
 import { targetRequiresAuth } from "./auth/index.js";
-import { getCatalogModelForRuntime } from "./catalog.js";
+import { getCatalogModelForRuntime, resolveCostProvenance } from "./catalog.js";
 import type { ProvidersContract, TargetStatus } from "./contract.js";
 import { isDispatchEligibleRuntime, isOrchestratorEligibleRuntime, isTargetEligibleRuntime } from "./eligibility.js";
 import { probeCapabilitiesForModel, resolveModelCapabilities } from "./model-capabilities.js";
@@ -13,6 +13,7 @@ import {
 	resolveTargetRuntimeCapabilities,
 } from "./model-runtime-capabilities.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
+import type { CostProvenance } from "./types/cost-provenance.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
 import type {
 	RuntimeApiFamily,
@@ -75,6 +76,7 @@ export interface ResolvedRuntimeTarget {
 	auth: RuntimeAuth;
 	authRequired: boolean;
 	wireModelId: string;
+	costProvenance: CostProvenance;
 	requestedThinkingLevel: ThinkingLevel;
 	effectiveThinkingLevel: ThinkingLevel;
 	capabilities: CapabilityFlags;
@@ -406,6 +408,7 @@ export function resolveRuntimeTarget(
 		auth: runtime.auth,
 		authRequired: targetRequiresAuth(target, runtime),
 		wireModelId,
+		costProvenance: resolveCostProvenance(target, runtime.id, wireModelId),
 		requestedThinkingLevel,
 		effectiveThinkingLevel: modelRuntime.thinking.effectiveLevel,
 		capabilities,

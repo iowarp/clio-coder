@@ -1367,15 +1367,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (publicEvent?.type === "agent_end" && deps.observability) {
 				const summary = sumRunUsage(publicEvent.messages);
 				if (summary.hadUsage && (summary.tokens > 0 || summary.costUsd > 0)) {
-					deps.observability.recordTokens(localRuntime.targetId, localRuntime.wireModelId, summary.tokens, summary.costUsd, {
-						input: summary.input,
-						output: summary.output,
-						cacheRead: summary.cacheRead,
-						cacheWrite: summary.cacheWrite,
-						reasoningTokens: summary.reasoning,
-						totalTokens: summary.tokens,
-						apiCalls: summary.apiCalls,
-					});
+					deps.observability.recordTokens(
+						localRuntime.targetId,
+						localRuntime.wireModelId,
+						summary.tokens,
+						summary.costUsd,
+						{
+							input: summary.input,
+							output: summary.output,
+							cacheRead: summary.cacheRead,
+							cacheWrite: summary.cacheWrite,
+							reasoningTokens: summary.reasoning,
+							totalTokens: summary.tokens,
+							apiCalls: summary.apiCalls,
+						},
+						localRuntime.runtimeResolution.costProvenance,
+					);
 				}
 				if (summary.output > 0 && firstAssistantDeltaAt !== null) {
 					const durationMs = Math.max(1, eventAt - firstAssistantDeltaAt);

@@ -45,6 +45,23 @@ export function aggregateCostAmounts(amounts: ReadonlyArray<CostAmount>): CostAg
 	);
 }
 
+function formatUsdAmount(value: number): string {
+	if (!Number.isFinite(value) || value <= 0) return "$0.00";
+	return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+}
+
+/** Shared truthful formatter for every cost surface. */
+export function formatCostAggregate(cost: CostAggregate): string {
+	if (cost.allKnownFree) return "$0.00 local";
+	if (cost.hasUnknown) return cost.knownUsd > 0 ? `${formatUsdAmount(cost.knownUsd)} +?` : "cost unknown";
+	if (cost.hasEstimated) return `~${formatUsdAmount(cost.knownUsd)} est`;
+	return formatUsdAmount(cost.knownUsd);
+}
+
+export function costAggregateForAmount(usd: number, provenance: CostProvenance | undefined): CostAggregate {
+	return aggregateCostAmounts([{ usd, provenance: normalizeCostProvenance(provenance) }]);
+}
+
 export interface UsageBreakdown {
 	input: number;
 	output: number;
