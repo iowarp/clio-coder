@@ -901,6 +901,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 			turnToolCalls,
 		};
+		// turnId intentionally identifies the final assistant ledger entry (the
+		// finish contract needs that evidence boundary). Registrations that span
+		// tool hooks and turn_end correlate through the initiating user turn.
+		if (activeUserTurnId) metadata.userTurnId = activeUserTurnId;
 		if (typeof stopReason === "string") metadata.stopReason = stopReason;
 		const sessionId = deps.session?.current()?.id;
 		const input: MiddlewareHookInput = {

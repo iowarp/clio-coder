@@ -348,6 +348,13 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		strictEqual(input?.metadata?.runtimeId, "fake-runtime");
 		strictEqual(input?.metadata?.turnToolCalls, 0);
 		ok(typeof input?.turnId === "string" && input.turnId.length > 0);
+		const userEntry = entries.find((entry) => entry.kind === "message" && entry.role === "user");
+		const assistantEntry = entries.find((entry) => entry.kind === "message" && entry.role === "assistant");
+		ok(userEntry?.turnId);
+		ok(assistantEntry?.turnId);
+		strictEqual(input?.turnId, assistantEntry.turnId, "turn_end keeps the final assistant evidence boundary");
+		strictEqual(input?.metadata?.userTurnId, userEntry.turnId, "turn_end also names the initiating user turn");
+		ok(input?.turnId !== input?.metadata?.userTurnId, "live user and assistant ledger turns have distinct ids");
 	});
 
 	it("delivers the finish-contract advisory through turn_end: notice, ledger entry, next-request flush", async () => {
