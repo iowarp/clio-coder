@@ -79,6 +79,52 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
   a reviewer-gated CMake/C++ fix and a receipts-only provenance
   walkthrough).
 
+### Added (recon, evidence, and truthfulness hardening)
+
+- **Integrity-sealed receipt verification.** Receipts carry an optional
+  `verification` field (`verified`/`unverified`/`not_applicable`/`unknown`
+  with a stable basis token) derived at finalization from capability class,
+  ACP observability, and validation-tool evidence. Descriptive only: outcome,
+  retry, reroute, and the finish gate never read it. Legacy receipts read
+  `unknown`, never `verified`.
+- **Evidence-labeled dispatch and monitor output.** Worker text renders under
+  a label keyed on the integrity-checked verification state; receipt
+  integrity failures render head-anchored banners; deterministic non-evidence
+  notices flag failed, cap-exhausted, zero-tool, and citation-free
+  reconnaissance. Monitor collect verifies each receipt before labeling and
+  fails closed to unknown. The parent spot-check sentence is byte-shared
+  across dispatch output, the operating contract, the agent catalog, and
+  docs.
+- **Scout split recommendations.** A head-anchored, byte-bounded
+  `SPLIT RECOMMENDATION` envelope in a scout's answer is parsed fail-closed
+  and promoted into transient `dispatchDetails.splitRecommendation`; the
+  parent alone decides whether to fan out.
+- **Reconnaissance grounding prompts.** Scout must cite live `path:line`
+  reads, quarantine unverified leads under `Unresolved gaps:`, and treat
+  wiki content as orientation only; the operating contract adds the
+  recon-nonevidence qualifier.
+- **Receipt-derived eval bridge and bounded live suite.**
+  `evidence.verification`, `evidence.firstPassSuccess`, `cost.usd`,
+  `dispatch.count`, and `wiki.staleAcknowledged` metrics resolve from sealed
+  receipts and the run event stream, failing closed when absent; suites gain
+  a clio-run `agent` field and a matrix `maxCostUsd` ceiling
+  (budget-exhausted items fail closed). `npm run test:live-eval`
+  (CLIO_LIVE_EVAL=1) runs the stale-wiki and decomposition scenarios
+  sandboxed and cost-bounded.
+- **Worker synthesis reserve.** The tail of the worker tool-call cap is held
+  for verification reads and synthesis: a one-shot budget-reserve directive,
+  non-read calls steered back with a reason distinct from cap exhaustion,
+  and the unchanged hard cap and bounded backstop behind it.
+- **Truthful TUI approvals.** Permission-parked tool calls render as
+  ⏸ awaiting approval instead of a counting running line, flip back on
+  grant, and settle honestly on deny; permission-required metadata carries
+  the provider toolCallId for exact segment correlation.
+- **Honest monitor arguments and detached-batch nudges.** Single-run modes
+  accept singleton `run_ids`, collect documents that it never blocks,
+  wait-timeout copy leads with continuation, and batch nudges report
+  terminal-state breakdowns derived from ledger envelopes instead of
+  claiming success.
+
 ## 0.2.8 - 2026-07-07
 
 The final 0.2.8 release. It ships everything in the 0.2.8-rc section below
