@@ -62,6 +62,8 @@ Internal orchestration helpers. They are hidden from default displays (but visib
 | `researcher` | read, web_fetch, context | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
 
+`scout` is bound by a live-grounding contract: every source claim it returns must come from a live read in the same run and cite its `path:line` location, leads it could not verify go under a final `Unresolved gaps:` heading, and wiki or index content is orientation only, never citable as evidence. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):` and flags citation-free answers as unconfirmed leads.
+
 ---
 
 ## Frontmatter schema

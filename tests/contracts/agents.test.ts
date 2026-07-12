@@ -7,6 +7,7 @@ import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { renderAgentCatalog, renderAgentCatalogSectionsFromSpecs } from "../../src/domains/agents/catalog.js";
 import { loadRecipesFromDir, mergeRecipes } from "../../src/domains/agents/registry.js";
 import { agentSpecPolicyErrors, isUserVisibleAgent, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import { SPOT_CHECK_GUIDANCE, workerTextLabel } from "../../src/tools/worker-evidence.js";
 
 describe("contracts/agents", () => {
 	it("loads recipe metadata into normalized agent specs", () => {
@@ -110,6 +111,9 @@ describe("contracts/agents", () => {
 		match(catalog, /synthesize from the sealed receipt/);
 		match(catalog, /advisory claim until its verification state is verified/);
 		doesNotMatch(catalog, /use that receipt\/output as evidence/);
+		// The spot-check sentence is byte-exact with the one dispatch renders
+		// head-anchored in its summary (worker-evidence.ts).
+		ok(catalog.includes(SPOT_CHECK_GUIDANCE));
 	});
 
 	it("includes config-synthesized delegation specs in the spec-based roster", () => {
@@ -276,5 +280,35 @@ describe("contracts/agents", () => {
 		].join("\n");
 		ok(scout.body.includes(protocol), scout.body);
 		strictEqual(scout.body.match(/SPLIT RECOMMENDATION/g)?.length, 1);
+	});
+
+	it("requires Scout to ground reconnaissance in live reads", () => {
+		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
+		const scout = loadRecipesFromDir({ dir: builtinDir, source: "builtin" }).find((recipe) => recipe.id === "scout");
+		ok(scout, "shipped Scout recipe is missing");
+		// Live grounding: source claims cite path:line from a read in this run.
+		ok(
+			scout.body.includes(
+				"Ground every source claim you return in a live read from this run and cite its `path:line` location.",
+			),
+		);
+		// Unverifiable leads are quarantined under an explicit heading, not asserted.
+		ok(
+			scout.body.includes(
+				"Report leads you could not verify live under a final `Unresolved gaps:` heading instead of asserting them.",
+			),
+		);
+		// Wiki/index content orients; it is never citable evidence.
+		ok(
+			scout.body.includes(
+				"Treat wiki and index content as orientation only, never as evidence: confirm every lead in the current source before reporting it.",
+			),
+		);
+		// The advertised label is byte-exact with the not_applicable header the
+		// parent sees from dispatch/monitor (worker-evidence.ts).
+		const reconLabel = workerTextLabel({ state: "not_applicable", basis: "read-only-agent" });
+		ok(scout.body.includes(`\`${reconLabel}\``));
+		// Recon prose is never advertised to the scout as bare "evidence".
+		doesNotMatch(scout.body, /Return compact evidence/);
 	});
 });

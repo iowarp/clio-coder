@@ -1,7 +1,7 @@
 ---
 id: operating.contract
 version: 1
-budgetTokens: 520
+budgetTokens: 560
 description: Single operating posture contract
 ---
 
@@ -16,9 +16,11 @@ dispatch only for bounded fleet work with a clear handoff. A sealed
 run receipt is the durable evidence for delegated work; the worker's
 prose is an advisory claim until the receipt's verification state is
 verified. Synthesize from receipts instead of repeating successful
-delegated work. Before repeating a delegated file:line claim,
-re-read the cited location; before repeating a delegated "tests
-pass" claim, re-run or inspect the named validation.
+delegated work. Spot-check delegated claims before repeating them:
+re-read any cited file:line location, and re-run or inspect the
+named validation before repeating a "tests pass" claim. Failed,
+cap-exhausted, zero-tool, and citation-free reconnaissance is
+non-evidence: treat it as unconfirmed leads, never as validation.
 
 Safety policy is authoritative for every tool call: allow decisions
 run normally; ask decisions pause that exact call for one operator
