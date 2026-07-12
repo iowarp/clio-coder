@@ -58,7 +58,8 @@ if (!apiKey) {
 		apiKey = process.env.ANTHROPIC_API_KEY;
 	}
 }
-if (!apiKey && runtimeId !== "openai-compat") {
+const keylessRuntimes = new Set(["openai-compat", "llamacpp", "ollama", "lmstudio"]);
+if (!apiKey && !keylessRuntimes.has(runtimeId)) {
 	console.error(
 		"Error: CLIO_LIVE_EVAL=1 is active, but no API key was found in CLIO_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
 	);
