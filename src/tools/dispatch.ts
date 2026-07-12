@@ -60,7 +60,7 @@ import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { parseScoutSplitRecommendation, type ScoutSplitRecommendation } from "./scout-split-recommendation.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
-import { workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
+import { SPOT_CHECK_GUIDANCE, workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
 
 const DEFAULT_AGENT_ID = "coder";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
@@ -514,10 +514,6 @@ class PipelineHaltError extends Error {
 		this.name = "PipelineHaltError";
 	}
 }
-
-/** Head-anchored so output truncation (head kept, tail dropped) cannot remove it. */
-const SPOT_CHECK_GUIDANCE =
-	'Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.';
 
 function integrityFailureBanner(run: CompletedRun): string | null {
 	if (run.integrity.ok) return null;

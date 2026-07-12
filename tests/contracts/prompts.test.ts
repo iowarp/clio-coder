@@ -30,6 +30,7 @@ import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import { createPromptsDomainModule, PromptsManifest } from "../../src/domains/prompts/index.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { SPOT_CHECK_GUIDANCE } from "../../src/tools/worker-evidence.js";
 
 const scratchRoots: string[] = [];
 
@@ -317,10 +318,29 @@ describe("contracts/prompts compiler logic", () => {
 		ok(flat.includes("A sealed run receipt is the durable evidence for delegated work"));
 		ok(flat.includes("the worker's prose is an advisory claim until the receipt's verification state is verified"));
 		strictEqual(flat.includes("synthesize returned evidence"), false);
-		// The parent spot-check discipline: re-read cited locations and re-run
-		// named validations before repeating delegated claims.
-		ok(flat.includes("Before repeating a delegated file:line claim, re-read the cited location"));
-		ok(flat.includes('before repeating a delegated "tests pass" claim, re-run or inspect the named validation'));
+		// The parent spot-check discipline is the exact sentence dispatch renders
+		// head-anchored in its summary; every surface teaches the same bytes.
+		ok(flat.includes(SPOT_CHECK_GUIDANCE));
+	});
+
+	it("includes the recon-nonevidence qualifier in the operating contract prompt", () => {
+		// Bounded like FLEET_ROUTING_GUIDANCE: the qualifier is one short sentence,
+		// not an open-ended fragment that could bloat the static prefix.
+		const qualifier =
+			"Failed, cap-exhausted, zero-tool, and citation-free reconnaissance is non-evidence: treat it as unconfirmed leads, never as validation.";
+		ok(Buffer.byteLength(qualifier, "utf8") <= 256);
+		const table = loadFragments();
+		const result = compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: { provider: "p", model: "m" },
+		});
+		const flat = result.systemPrompt.replace(/\s+/g, " ");
+		// The four non-evidence triggers match the deterministic notices dispatch
+		// emits (worker-evidence.ts): failed, cap-exhausted, zero-tool, and
+		// citation-free reconnaissance never read as validation or results.
+		ok(flat.includes(qualifier));
 	});
 
 	it("renders no per-turn state: tool-free phrasing is an instruction, not a prompt change", () => {

@@ -5,6 +5,14 @@ import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/typ
 const SOURCE_CITATION_PATTERN = /[\w./~-]+:\d+/;
 
 /**
+ * Canonical parent spot-check sentence. Dispatch renders it head-anchored;
+ * the operating contract, agent catalog, and docs align to it byte-exact so
+ * every surface teaches the same discipline.
+ */
+export const SPOT_CHECK_GUIDANCE =
+	'Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.';
+
+/**
  * Header for delegated worker text, keyed only on integrity-checked receipt
  * verification. The string is shared by dispatch and monitor so detached
  * collection cannot silently assign a different evidence meaning.

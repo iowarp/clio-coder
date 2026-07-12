@@ -33,7 +33,7 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 		"User-facing agents are base/custom. Shadow agents are internal helpers for context, research, and provenance; do not recommend them as normal `/run` choices.",
 		"Prefer fast read-only agents for orientation, verification agents for gates, and workspace-edit agents only for bounded coding tasks.",
 		"When a task matches a skill named on an agent line (skills=...), prefer the recipe that binds it; its worker is told to load bound skills for the run.",
-		"After a dispatch succeeds, synthesize from the sealed receipt; the worker's prose is an advisory claim until its verification state is verified or you spot-check the cited locations. Do not repeat the same dispatch.",
+		'After a dispatch succeeds, synthesize from the sealed receipt; the worker\'s prose is an advisory claim until its verification state is verified. Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim. Do not repeat the same dispatch.',
 	];
 
 	if (publicSpecs.length > 0) {
