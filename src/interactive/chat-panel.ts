@@ -5,6 +5,7 @@ import { formatRetryStatus } from "./renderers/retry-status.js";
 import {
 	classifyResourceRead,
 	previewResult,
+	renderToolAwaitingApproval,
 	renderToolCallHeader,
 	renderToolExecution,
 	renderToolStreamingExecution,
@@ -98,6 +99,13 @@ type ToolSegment = {
 	 * the clear path can re-assign `undefined` without a `delete`.
 	 */
 	partialOutput?: string | undefined;
+	/**
+	 * True while the call is parked at the permission gate. Set/cleared by
+	 * `tool_approval_state` events and cleared by any settle so a denied or
+	 * resumed call never keeps the awaiting-approval styling. Meaningful only
+	 * while `!finished`.
+	 */
+	awaitingApproval?: boolean | undefined;
 };
 /**
  * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
@@ -392,6 +400,12 @@ function renderToolSegmentLines(
 ): string[] {
 	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
 	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, nowMs - seg.startedAtMs) : undefined;
+	// A parked call is not executing: the awaiting-approval line replaces the
+	// counting elapsed spinner in both collapsed and expanded form (there is no
+	// body or partial output to expand while the call sits at the gate).
+	if (!seg.finished && seg.awaitingApproval === true) {
+		return renderToolAwaitingApproval({ toolCallId: seg.id, toolName: seg.name, args: seg.args }, width);
+	}
 	if (!seg.expanded) {
 		return renderToolSubline(
 			seg.finished
@@ -537,6 +551,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		}
 		if (seg.result === undefined) seg.result = "(no result: the call did not complete)";
 		seg.partialOutput = undefined;
+		seg.awaitingApproval = undefined;
 	};
 
 	/**
@@ -793,6 +808,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
+			if (event.type === "tool_approval_state") {
+				const tool = findToolSegment(event.toolCallId);
+				if (tool && !tool.finished) {
+					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
+					markDirty();
+				}
+				return;
+			}
 			if (event.type === "tool_execution_update") {
 				// pi-agent emits `partialResult` as a cumulative tool-result envelope
 				// (the bash tool concatenates its rolling tail buffer on every tick).
@@ -838,8 +861,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 					// Drop the streaming buffer once the final result has landed; the
 					// expanded render switches to `renderToolExecution` and stays
-					// stable instead of churning through partial-frame layout.
+					// stable instead of churning through partial-frame layout. A
+					// denied park settles here too, so the awaiting styling must go.
 					tool.partialOutput = undefined;
+					tool.awaitingApproval = undefined;
 				}
 				markDirty();
 				return;

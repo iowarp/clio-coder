@@ -331,6 +331,20 @@ describe("contracts/autonomy ask provenance: notices and overlay", () => {
 		ok(body.includes("Asked by: autonomy level (auto-edit)"), body.join("\n"));
 	});
 
+	it("carries the invoke toolCallId on permission-required metadata", async () => {
+		const registry = registryAt("auto-edit");
+		const metas: Array<{ toolCallId?: string }> = [];
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			metas.push({ ...(meta.toolCallId !== undefined ? { toolCallId: meta.toolCallId } : {}) });
+			registry.cancelParkedCalls("test done");
+		});
+		// With a provider tool-call id: the meta correlates the park to its
+		// transcript segment. Without one: the field stays absent, never "".
+		await registry.invoke(bashCall("echo hello"), { toolCallId: "call-77" });
+		await registry.invoke(bashCall("echo hello again"));
+		deepStrictEqual(metas, [{ toolCallId: "call-77" }, {}]);
+	});
+
 	it("a safety-net confirm rail names its rule as the asking axis even at full-auto", async () => {
 		const registry = registryAt("full-auto");
 		const asks: SafetyDecision[] = [];

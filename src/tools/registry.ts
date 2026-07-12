@@ -234,6 +234,14 @@ export interface OneShotGrant {
 export interface PermissionRequiredMeta {
 	requestId: string;
 	axis: string;
+	/**
+	 * Provider tool-call id carried on the parked call's invoke options, when
+	 * one exists. The interactive layer uses it to correlate the park to its
+	 * transcript tool segment so a parked call renders as awaiting approval
+	 * instead of running. Purely descriptive: park/resume semantics never
+	 * read it.
+	 */
+	toolCallId?: string;
 }
 
 export interface ToolRegistry {
@@ -634,6 +642,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const meta: PermissionRequiredMeta = {
 					requestId: nextApprovalRequestId(),
 					axis: outcome.axis,
+					...(options?.toolCallId !== undefined && options.toolCallId.length > 0 ? { toolCallId: options.toolCallId } : {}),
 				};
 				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", { requestId: meta.requestId });
 				const parkedCall: ParkedCall = { call: admissionCall, decision: outcome.decision, meta, resolve };

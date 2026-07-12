@@ -363,6 +363,23 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 }
 
 /**
+ * Marker for a call parked at admission awaiting operator approval. Rendered
+ * in place of the elapsed counter so a parked call never reads as executing
+ * work; the ⏸ glyph matches the footer's blocked phase.
+ */
+const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${dim(" awaiting approval")}`;
+
+/**
+ * Subline for an in-flight call whose body is parked at the permission gate.
+ * No elapsed counter (nothing is running) and no status glyph (nothing has
+ * finished): the awaiting-approval tail is the segment's whole state.
+ */
+export function renderToolAwaitingApproval(call: ToolExecutionStart, width: number): string[] {
+	const parts = sublineParts({ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args }, undefined, {});
+	return wrapSublineWithTail(parts.lead, AWAITING_APPROVAL_TAIL, width);
+}
+
+/**
  * Header status: `undefined` when the call is still in flight (no glyph),
  * `"ok"` for success (green check), `"error"` for failure (red cross). The
  * glyph hangs off the right of the header line so the tool name + args read
