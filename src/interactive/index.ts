@@ -2085,6 +2085,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					requestedBy: "tool",
 					at: Date.now(),
 				});
+				// The grant covers exactly this parked call: flip its segment back to
+				// the running style before the body executes so the approval gap
+				// never renders as lingering "awaiting approval" on live work.
+				if (permission.meta?.toolCallId !== undefined) {
+					chatRenderer.applyEvent({
+						type: "tool_approval_state",
+						toolCallId: permission.meta.toolCallId,
+						state: "resumed",
+					});
+				}
 				void deps.toolRegistry?.resumeParkedCalls({
 					actionClass: permission.decision.classification.actionClass,
 					...(permission.meta ? { requestId: permission.meta.requestId } : {}),
@@ -2400,6 +2410,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			if (shouldAnnouncePermissionRequest(announcedPermissionRequestIds, meta.requestId)) {
 				const parkedNotice = approvalParkedNotice(call.tool, decision, currentAutonomy());
 				appendNotice(parkedNotice.level, parkedNotice.text, busNoticeSink);
+			}
+			// Restyle the parked call's transcript segment: pi already emitted its
+			// tool_execution_start, so without this the segment counts as running
+			// while the body sits at the gate. Idempotent under renotifyHead.
+			if (meta.toolCallId !== undefined) {
+				chatRenderer.applyEvent({ type: "tool_approval_state", toolCallId: meta.toolCallId, state: "awaiting-approval" });
 			}
 			openPermissionOverlay(call, decision, meta);
 		}) ?? (() => {});

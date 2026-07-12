@@ -270,6 +270,80 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		ok(!rendered.includes("9999"), rendered);
 	});
 
+	it("renders a permission-parked tool segment as awaiting approval, not running", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		// Streamed text first: the segment starts collapsed, so the running form
+		// carries the counting elapsed subline the awaiting state must replace.
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "Dispatching." } as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "park1",
+			toolName: "dispatch",
+			args: { tasks: ["fix the flaky test"] },
+		} as ChatLoopEvent);
+		clock = 1500;
+		// pi emitted tool_execution_start before admission parked the body: the
+		// raw segment renders the counting running form.
+		let rendered = strip(panel.render(80).join("\n"));
+		ok(!rendered.includes("awaiting approval"), rendered);
+		ok(rendered.includes("500ms"), `pre-park the segment counts elapsed, got: ${rendered}`);
+
+		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park1", state: "awaiting-approval" } as ChatLoopEvent);
+		clock = 2500;
+		rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("⏸ awaiting approval"), `a parked call renders the awaiting marker, got: ${rendered}`);
+		ok(!rendered.includes("1.5s"), `a parked call must not keep counting elapsed, got: ${rendered}`);
+		ok(!rendered.includes("✓") && !rendered.includes("✗"), rendered);
+
+		// The operator grants the call: the segment returns to the running form
+		// before its body executes, then finishes normally.
+		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park1", state: "resumed" } as ChatLoopEvent);
+		rendered = strip(panel.render(80).join("\n"));
+		ok(!rendered.includes("awaiting approval"), `a resumed call sheds the awaiting marker, got: ${rendered}`);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "park1",
+			toolName: "dispatch",
+			result: "dispatch (parallel) total=1 failed=0",
+			isError: false,
+			durationMs: 2100,
+		} as ChatLoopEvent);
+		rendered = strip(panel.render(80).join("\n"));
+		ok(rendered.includes("✓"), `the granted call settles as ordinary success, got: ${rendered}`);
+		ok(!rendered.includes("awaiting approval"), rendered);
+	});
+
+	it("settles an approval-parked segment as blocked on operator cancel", () => {
+		let clock = 1000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "park2",
+			toolName: "bash",
+			args: { command: "rm -rf build" },
+		} as ChatLoopEvent);
+		panel.applyEvent({ type: "tool_approval_state", toolCallId: "park2", state: "awaiting-approval" } as ChatLoopEvent);
+		ok(strip(panel.render(80).join("\n")).includes("⏸ awaiting approval"));
+		// Operator cancel: the registry resolves the parked promise blocked and
+		// the segment settles through its ordinary tool_execution_end.
+		clock = 1600;
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "park2",
+			toolName: "bash",
+			result: "User cancelled this tool call from the permission confirmation prompt.",
+			isError: true,
+			durationMs: 600,
+		} as ChatLoopEvent);
+		const atEnd = strip(panel.render(80).join("\n"));
+		ok(!atEnd.includes("awaiting approval"), `a denied park sheds the awaiting marker, got: ${atEnd}`);
+		ok(atEnd.includes("✗"), `a denied park settles as a blocked error line, got: ${atEnd}`);
+		// The settled line is time-invariant: no lingering spinner keeps counting.
+		clock = 100_000;
+		strictEqual(strip(panel.render(80).join("\n")), atEnd);
+	});
+
 	it("settles a prior same-id segment when the model reuses a tool-call id", () => {
 		let clock = 1000;
 		const panel = createChatPanel({ now: () => clock });

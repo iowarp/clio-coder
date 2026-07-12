@@ -178,13 +178,30 @@ export interface QueuedMessagesSnapshot {
 	followUp: ReadonlyArray<string>;
 }
 
+/**
+ * Approval-lifecycle signal for a tool call that pi already started
+ * (`tool_execution_start` fires before admission parks the body). The
+ * interactive composition root emits it from the registry's
+ * permission-required signal ("awaiting-approval") and from the operator's
+ * one-shot grant ("resumed") so the chat panel can restyle the exact parked
+ * segment instead of leaving a counting running line. Deny/cancel needs no
+ * state here: the parked promise resolves blocked and the segment settles
+ * through its ordinary `tool_execution_end`.
+ */
+export interface ToolApprovalStateEvent {
+	type: "tool_approval_state";
+	toolCallId: string;
+	state: "awaiting-approval" | "resumed";
+}
+
 export type ChatLoopEvent =
 	| AgentEvent
 	| AssistantDeltaEvent
 	| RetryStatusEvent
 	| QueueUpdateEvent
 	| ChatNoticeEvent
-	| AgentStatusEvent;
+	| AgentStatusEvent
+	| ToolApprovalStateEvent;
 
 export interface ChatSubmitOptions {
 	images?: ReadonlyArray<ImageContent>;
