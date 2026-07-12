@@ -24,6 +24,8 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import {
 	GUARDRAIL_DEFAULTS,
 	resolveGuardrail,
+	workerSynthesisReserveBlockReason,
+	workerSynthesisReserveDirective,
 	workerToolCallCapExceededReason,
 	workerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
@@ -306,6 +308,15 @@ export interface CreateLoopGuardRegistrationOptions {
 	 */
 	toolCallCap?: number;
 	/**
+	 * Worker only: calls held back from the tail of {@link toolCallCap} for
+	 * verification reads and synthesis. Entering the window annotates one tool
+	 * result with a one-shot reserve directive and blocks further non-read
+	 * calls; reads still flow through the repetition and stagnation detectors.
+	 * Inactive when absent, zero, or not smaller than the cap, so existing
+	 * small-cap deployments and tests keep their exact behavior.
+	 */
+	toolCallReserve?: number;
+	/**
 	 * Orchestrator only: soft/hard per-turn tool-call budget. Crossing the soft
 	 * budget blocks this and every further call in the turn with a
 	 * stop-and-summarize directive; the hard ceiling additionally interrupts
@@ -346,6 +357,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const cap = options.toolCallCap;
 	const turnBudget = options.turnToolCallBudget;
 	const synthesisLockout = options.turnSynthesisLockout === true;
+	// Reserve window bounds. Active only when a cap exists and is strictly
+	// larger than the reserve; a call is inside the window when its attempt
+	// ordinal exceeds this threshold but has not passed the cap itself.
+	const reserve = options.toolCallReserve ?? 0;
+	const reserveThreshold = cap !== undefined && reserve > 0 && cap > reserve ? cap - reserve : null;
+	let reserveDirectiveEmitted = false;
 	const blocksByTurn = new Map<string, number>();
 	const callsByTurn = new Map<string, number>();
 	/**
@@ -651,7 +668,25 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (input.hook === "after_tool") {
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
-				return crossArgumentResultEffects(input);
+				const effects = [...crossArgumentResultEffects(input)];
+				// One-shot reserve directive: the first executed call inside the
+				// reserve window carries the steering annotation, so the model is
+				// told about the reserve without a blocked call spending budget.
+				if (
+					reserveThreshold !== null &&
+					cap !== undefined &&
+					!reserveDirectiveEmitted &&
+					count > reserveThreshold &&
+					count <= cap
+				) {
+					reserveDirectiveEmitted = true;
+					effects.push({
+						kind: "annotate_tool_result",
+						message: workerSynthesisReserveDirective(Math.max(0, cap - count), cap),
+						severity: "warn",
+					});
+				}
+				return effects;
 			}
 			const now = options.now?.() ?? Date.now();
 			count += 1;
@@ -706,6 +741,25 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					return [{ kind: "block_tool", reason: synthesisBackstopReason(lockout.tool), severity: "hard-block" }];
 				}
 				return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
+			}
+
+			// Synthesis reserve (workers): the tail of the lifetime cap is held for
+			// verification reads and synthesis. Non-read calls bounce with a
+			// steering reason that never carries the cap's machine prefix, so cap
+			// telemetry, worker aborts, and A2's cap-exhaustion notice stay
+			// untouched; reads keep flowing through the repetition and stagnation
+			// detectors below. A model that keeps trying blocked calls burns
+			// attempts toward the unchanged hard cap, which remains the bound.
+			if (reserveThreshold !== null && cap !== undefined && count > reserveThreshold) {
+				if (input.metadata?.actionClass !== "read") {
+					return [
+						{
+							kind: "block_tool",
+							reason: workerSynthesisReserveBlockReason(input.toolName ?? "unknown", Math.max(1, cap - count + 1), cap),
+							severity: "hard-block",
+						},
+					];
+				}
 			}
 
 			// Identical-repeat detection runs BEFORE the volume budget so verbatim

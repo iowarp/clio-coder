@@ -367,6 +367,108 @@ describe("contracts/chat-loop compaction and terminal notices", () => {
 	});
 });
 
+describe("contracts/chat-loop synthesis lock release on continuation", () => {
+	it("clears the lock for the middleware continuation and chains its tool calls to the new user turn", async () => {
+		const entries: SessionEntry[] = [];
+		const bus = createSafeEventBus();
+		type OnPayload = (payload: Record<string, unknown>, model: unknown) => Promise<Record<string, unknown> | undefined>;
+		let capturedOnPayload: OnPayload | null = null;
+		let turnIndex = 0;
+		const baseFactory = createFakeAgentFactory(async (agent) => {
+			turnIndex += 1;
+			const callId = `call-t${turnIndex}`;
+			await agent.emit({
+				type: "tool_execution_start",
+				toolCallId: callId,
+				toolName: "read",
+				args: { path: `t${turnIndex}.md` },
+			} as AgentEvent);
+			await agent.emit({
+				type: "tool_execution_end",
+				toolCallId: callId,
+				toolName: "read",
+				result: "contents",
+				isError: false,
+			} as AgentEvent);
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: `turn ${turnIndex} answer` }],
+				stopReason: "stop",
+				timestamp: Date.now(),
+			} as unknown as AgentMessage;
+			agent.state.messages.push(message);
+			await agent.emit({ type: "message_end", message } as AgentEvent);
+			await agent.emit({ type: "agent_end", messages: [message] } as AgentEvent);
+		});
+		const factory = ((options: FakeAgentOptions & { onPayload?: OnPayload }) => {
+			capturedOnPayload = options.onPayload ?? null;
+			return (baseFactory as unknown as (o: FakeAgentOptions) => unknown)(options);
+		}) as never;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			bus,
+			createAgent: factory,
+		} as never);
+
+		await loop.submit("explore the repo");
+		ok(capturedOnPayload !== null, "the chat loop hands createAgent its payload hook");
+		const onPayload = capturedOnPayload as OnPayload;
+		const model = {
+			id: "model",
+			api: "openai-completions",
+			provider: "fake-runtime",
+			reasoning: false,
+		} as never;
+
+		// The loop guard locks the turn to synthesis: the next provider payload
+		// must be text-only.
+		bus.emit(BusChannels.LoopBlocked, {
+			tool: "read",
+			repeatCount: 5,
+			blocksThisTurn: 2,
+			budget: 2,
+			interrupted: false,
+			disposition: "lockout",
+			at: Date.now(),
+		} as LoopBlockedPayload);
+		const locked = await onPayload({ tools: [{ name: "read" }], messages: [] }, model);
+		strictEqual(locked?.tool_choice, "none", "a locked turn forces tool_choice none");
+
+		// The middleware continuation (open-tasks/detached-dispatch nudge shape)
+		// submits a fresh synthetic user turn. The M1 Phase C finding: this new
+		// turn must NOT inherit the disabled tools.
+		await loop.submit("", { requestContinuation: true });
+		const unlocked = await onPayload({ tools: [{ name: "read" }], messages: [] }, model);
+		ok(unlocked?.tool_choice !== "none", "the continuation turn regains tool use");
+
+		// And the continuation's tool call chains to the NEW user turn id, not
+		// the locked turn's lineage.
+		const userTurns = entries.filter(
+			(entry): entry is Extract<SessionEntry, { kind: "message" }> => entry.kind === "message" && entry.role === "user",
+		);
+		strictEqual(userTurns.length, 2, "one real prompt plus one synthetic continuation turn");
+		const syntheticTurn = userTurns[1];
+		ok(syntheticTurn);
+		strictEqual((syntheticTurn.payload as { synthetic?: boolean }).synthetic, true);
+		const continuationToolCall = entries.find(
+			(entry) =>
+				entry.kind === "message" &&
+				entry.role === "tool_call" &&
+				(entry.payload as { toolCallId?: string }).toolCallId === "call-t2",
+		);
+		ok(continuationToolCall && continuationToolCall.kind === "message");
+		strictEqual(
+			continuationToolCall.parentTurnId,
+			syntheticTurn.turnId,
+			"the continuation's tool call parents on the new user turn",
+		);
+	});
+});
+
 describe("contracts/chat-loop loop-guard interrupt", () => {
 	it("stops with a durable closing turn and suppresses the empty aborted turn", async () => {
 		const entries: SessionEntry[] = [];

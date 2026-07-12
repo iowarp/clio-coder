@@ -6,9 +6,13 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import {
 	configureGuardrails,
 	GUARDRAIL_DEFAULTS,
+	isWorkerSynthesisReserveBlockReason,
 	isWorkerToolCallCapExceededReason,
 	isWorkerToolCallCapSynthesisReason,
+	mentionsWorkerToolCallCap,
 	resolveGuardrail,
+	workerSynthesisReserveBlockReason,
+	workerSynthesisReserveDirective,
 	workerToolCallCapSynthesisReason,
 } from "../../src/core/guardrails.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
@@ -874,6 +878,152 @@ describe("worker synthesis lockout", () => {
 			),
 			false,
 		);
+	});
+});
+
+describe("synthesis reserve at the cap tail", () => {
+	/**
+	 * Safety stub that classifies "unknown" so each registered spec's
+	 * baseActionClass drives metadata.actionClass: the reserve distinguishes
+	 * reads from non-reads exactly the way production admission labels them.
+	 */
+	function unknownClassSafety(): SafetyContract {
+		let loopState = createLoopState();
+		return {
+			classify: () => ({ actionClass: "unknown", reasons: [] }),
+			evaluate: () => ({ kind: "allow", classification: { actionClass: "unknown", reasons: [] } }),
+			observeLoop(key, now) {
+				const [next, verdict] = observe(loopState, key, now ?? Date.now());
+				loopState = next;
+				return verdict;
+			},
+			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+			isSubset: () => true,
+			audit: { recordCount: () => 0 },
+		};
+	}
+
+	function mockWriteSpec(): ToolSpec {
+		return {
+			name: ToolNames.Write,
+			description: "test write tool",
+			parameters: Type.Object({}),
+			baseActionClass: "write",
+			run: async () => ({ kind: "ok", output: "written" }),
+		};
+	}
+
+	function reserveRegistry(cap: number, reserve: number) {
+		const safety = unknownClassSafety();
+		const guard = createLoopGuardRegistration({
+			safety,
+			toolCallCap: cap,
+			toolCallReserve: reserve,
+			turnSynthesisLockout: true,
+		});
+		const bundle = createMiddlewareBundle({ registrations: [guard] });
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		registry.register(mockWriteSpec());
+		return registry;
+	}
+
+	it("annotates exactly one result with the reserve directive when entering the window", async () => {
+		const registry = reserveRegistry(8, 3);
+		for (let i = 0; i < 5; i++) {
+			const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path: `pre-${i}.md` } });
+			ok(
+				verdict.kind === "ok" && verdict.result.kind === "ok" && !verdict.result.output.includes("budget reserve"),
+				`call ${i + 1} carries no directive`,
+			);
+		}
+		const entering = await registry.invoke({ tool: ToolNames.Read, args: { path: "entering.md" } });
+		ok(entering.kind === "ok", "the read that enters the window still executes");
+		ok(
+			entering.kind === "ok" &&
+				entering.result.kind === "ok" &&
+				entering.result.output.includes("budget reserve: only 2 of your 8 tool calls remain"),
+			"the first in-window result carries the one-shot directive",
+		);
+		const next = await registry.invoke({ tool: ToolNames.Read, args: { path: "next.md" } });
+		ok(
+			next.kind === "ok" && next.result.kind === "ok" && !next.result.output.includes("budget reserve"),
+			"the directive is one-shot",
+		);
+	});
+
+	it("blocks non-read calls in the window with a steering reason that never carries the cap prefix", async () => {
+		const registry = reserveRegistry(6, 3);
+		for (let i = 0; i < 3; i++) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: `pre-${i}.md` } })).kind, "ok");
+		}
+		const blockedWrite = await registry.invoke({ tool: ToolNames.Write, args: { path: "late-edit.md" } });
+		strictEqual(blockedWrite.kind, "blocked");
+		if (blockedWrite.kind === "blocked") {
+			ok(isWorkerSynthesisReserveBlockReason(blockedWrite.reason), blockedWrite.reason);
+			ok(blockedWrite.reason.includes("reserved for verification reads and synthesis"));
+			// Reserve steering must never read as cap exhaustion: A2's notice,
+			// the worker abort seam, and receipt telemetry key on that prefix.
+			strictEqual(mentionsWorkerToolCallCap(blockedWrite.reason), false);
+			strictEqual(isWorkerToolCallCapSynthesisReason(blockedWrite.reason), false);
+			strictEqual(isWorkerToolCallCapExceededReason(blockedWrite.reason), false);
+		}
+		// Verification reads keep flowing inside the window.
+		const read = await registry.invoke({ tool: ToolNames.Read, args: { path: "verify-citation.md" } });
+		strictEqual(read.kind, "ok");
+	});
+
+	it("keeps the hard cap and bounded backstop intact through the reserve window", async () => {
+		const cap = 5;
+		const registry = reserveRegistry(cap, 2);
+		for (let i = 0; i < cap; i++) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: `r-${i}.md` } })).kind, "ok");
+		}
+		const capCrossing = await registry.invoke({ tool: ToolNames.Read, args: { path: "over.md" } });
+		ok(
+			capCrossing.kind === "blocked" && isWorkerToolCallCapSynthesisReason(capCrossing.reason),
+			"crossing the cap still enters the unchanged cap lockout",
+		);
+		for (let i = 0; i < LOOP_SYNTHESIS_BACKSTOP_DENIALS; i++) {
+			const denied = await registry.invoke({ tool: ToolNames.Read, args: { path: `post-${i}.md` } });
+			ok(denied.kind === "blocked" && isWorkerToolCallCapSynthesisReason(denied.reason));
+		}
+		const stopped = await registry.invoke({ tool: ToolNames.Read, args: { path: "still-calling.md" } });
+		ok(stopped.kind === "blocked" && isLoopGuardSynthesisBackstopReason(stopped.reason), "the backstop still lands");
+	});
+
+	it("still trips the identical-call detector on reads inside the window", async () => {
+		const registry = reserveRegistry(20, 15);
+		// Enter the window immediately (threshold 5), then loop one read.
+		for (let i = 0; i < 5; i++) {
+			strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: `warm-${i}.md` } })).kind, "ok");
+		}
+		const call = { tool: ToolNames.Read, args: { path: "same.md" } };
+		let loopBlocked = false;
+		for (let i = 0; i < LOOP_THRESHOLD + 1; i++) {
+			const verdict = await registry.invoke(call, { turnId: "t1" });
+			if (verdict.kind === "blocked" && verdict.reason.includes("loop detected")) {
+				loopBlocked = true;
+				break;
+			}
+		}
+		ok(loopBlocked, "reserve reads still reach the repetition detector");
+	});
+
+	it("does not activate when the cap is not larger than the reserve", async () => {
+		const registry = reserveRegistry(3, 5);
+		// A write executes normally: no reserve window exists on a tiny cap.
+		strictEqual((await registry.invoke({ tool: ToolNames.Read, args: { path: "a.md" } })).kind, "ok");
+		strictEqual((await registry.invoke({ tool: ToolNames.Write, args: { path: "b.md" } })).kind, "ok");
+		const third = await registry.invoke({ tool: ToolNames.Read, args: { path: "c.md" } });
+		ok(third.kind === "ok" && third.result.kind === "ok" && !third.result.output.includes("budget reserve"));
+	});
+
+	it("keeps the reserve predicate mutually exclusive with the cap vocabulary", () => {
+		const reason = workerSynthesisReserveBlockReason("bash", 3, 50);
+		strictEqual(isWorkerSynthesisReserveBlockReason(reason), true);
+		strictEqual(mentionsWorkerToolCallCap(reason), false);
+		strictEqual(isWorkerSynthesisReserveBlockReason(workerToolCallCapSynthesisReason(50)), false);
+		ok(workerSynthesisReserveDirective(5, 50).startsWith("budget reserve: only 5 of your 50 tool calls remain"));
 	});
 });
 
