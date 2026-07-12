@@ -210,7 +210,9 @@ function runCli(args, timeoutMs) {
 }
 
 const startedAt = Date.now();
-console.log(`Running bounded reconnaissance live suite (target=${targetId}, model=${model}, maxCostUsd=$${maxCostUsd})...`);
+console.log(
+	`Running bounded reconnaissance live suite (target=${targetId}, model=${model}, maxCostUsd=$${maxCostUsd})...`,
+);
 const run = await runCli(["eval", "run", "--suite", suitePath], 420_000);
 const durationMs = Date.now() - startedAt;
 process.stdout.write(run.stdout);
