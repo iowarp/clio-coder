@@ -263,4 +263,18 @@ describe("contracts/agents", () => {
 		});
 		strictEqual(failures.join("\n"), "");
 	});
+
+	it("gives Scout the exact bounded split-recommendation protocol", () => {
+		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
+		const scout = loadRecipesFromDir({ dir: builtinDir, source: "builtin" }).find((recipe) => recipe.id === "scout");
+		ok(scout, "shipped Scout recipe is missing");
+		const protocol = [
+			"When and only when the task cannot be grounded within budget or spans multiple independent domains, emit as the first non-empty lines of the final message:",
+			"`SPLIT RECOMMENDATION: <one-line rationale, 1..200 bytes>`",
+			"`- <scoped subtask with entry file(s), 1..120 bytes>`",
+			"Use 1..4 contiguous bullet lines and keep the whole block within the first 800 bytes (all limits UTF-8).",
+		].join("\n");
+		ok(scout.body.includes(protocol), scout.body);
+		strictEqual(scout.body.match(/SPLIT RECOMMENDATION/g)?.length, 1);
+	});
 });

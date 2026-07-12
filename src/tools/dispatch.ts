@@ -57,6 +57,7 @@ import {
 } from "./dispatch-plan.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
+import { parseScoutSplitRecommendation, type ScoutSplitRecommendation } from "./scout-split-recommendation.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import { workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
@@ -337,10 +338,18 @@ function textFromContent(content: unknown): string {
  * Shared with the headless `clio run --agent` path so both surfaces extract
  * the final answer from the same event shape.
  */
-export function assistantTextFromEvent(event: unknown): string {
+function rawAssistantTextFromEvent(event: unknown): string {
 	if (!isRecord(event) || event.type !== "message_end" || !isRecord(event.message)) return "";
 	if (event.message.role !== "assistant") return "";
-	return textFromContent(event.message.content).trim();
+	return textFromContent(event.message.content);
+}
+
+export function assistantTextFromEvent(event: unknown): string {
+	return rawAssistantTextFromEvent(event).trim();
+}
+
+function normalizedAssistantText(summary: EventSummary): string {
+	return summary.lastAssistantText.trim();
 }
 
 async function consumeDispatchEvents(
@@ -354,8 +363,8 @@ async function consumeDispatchEvents(
 		summary.count += 1;
 		const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
 		summary.types.push(type);
-		const text = assistantTextFromEvent(event);
-		if (text.length > 0) summary.lastAssistantText = text;
+		const text = rawAssistantTextFromEvent(event);
+		if (text.trim().length > 0) summary.lastAssistantText = text;
 		recordRunEvent(runId, agentId, event);
 		if (type !== "heartbeat") {
 			bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
@@ -379,8 +388,8 @@ async function consumeBatchEvents(
 		summary.count += 1;
 		const type = isRecord(inner) && typeof inner.type === "string" ? inner.type : "unknown";
 		summary.types.push(type);
-		const text = assistantTextFromEvent(inner);
-		if (text.length > 0) summary.lastAssistantText = text;
+		const text = rawAssistantTextFromEvent(inner);
+		if (text.trim().length > 0) summary.lastAssistantText = text;
 		summaries.set(runId, summary);
 		recordRunEvent(runId, agentId, inner);
 		if (type !== "heartbeat") {
@@ -557,7 +566,8 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 			const integritySuffix = run.integrity.ok ? "" : ` receipt-integrity=FAILED (${run.integrity.reason})`;
 			// The live summary is preferred; the receipt's durable bounded output
 			// covers runs whose event stream nobody consumed.
-			const answerText = summary.lastAssistantText.length > 0 ? summary.lastAssistantText : (receipt.output?.text ?? "");
+			const liveAnswerText = normalizedAssistantText(summary);
+			const answerText = liveAnswerText.length > 0 ? liveAnswerText : (receipt.output?.text ?? "");
 			const output =
 				answerText.length > 0
 					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
@@ -575,11 +585,28 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 
 function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolResultDetails {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
+	let splitRecommendation: ScoutSplitRecommendation | null = null;
+	for (const run of runs) {
+		// Receipt integrity authenticates the Scout identity. The recommendation
+		// itself remains transient advisory state and is never written back to the
+		// receipt or allowed to affect outcome/control flow.
+		if (!run.integrity.ok || run.receipt.agentId !== "scout") continue;
+		const parsed = parseScoutSplitRecommendation(run.summary.lastAssistantText);
+		if (parsed === null) continue;
+		// The top-level shape is singular. Multiple valid Scout envelopes in one
+		// dispatch are ambiguous, so fail closed instead of silently selecting one.
+		if (splitRecommendation !== null) {
+			splitRecommendation = null;
+			break;
+		}
+		splitRecommendation = parsed;
+	}
 	return {
 		mode,
 		runIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
+		...(splitRecommendation !== null ? { splitRecommendation } : {}),
 		runs: runs.map(({ receipt, receiptPath, summary, integrity }) => {
 			// Additive provenance keys only; folded in when the receipt carries the
 			// field so a run entry without them keeps its exact shape.
@@ -743,7 +770,7 @@ async function runReviewGated(
 					cycle: request.gate.cycle,
 					subjects: request.gate.subjects ?? [],
 					deciderRunId: handle.runId,
-					finalOutput: summary.lastAssistantText,
+					finalOutput: normalizedAssistantText(summary),
 					terminalCycle: request.gate.cycle === review.maxCycles,
 				});
 			} catch (error) {
@@ -813,7 +840,11 @@ async function runReviewGated(
 				systemPrompt: REVIEWER_GATE_PROMPT,
 				autonomy: "read-only",
 				gate: { role: "reviewer", group, cycle, subjects: [subjectRef(builder.receipt)] },
-				pipelineInput: { fromRunId: builder.receipt.runId, position: cycle, text: builder.summary.lastAssistantText },
+				pipelineInput: {
+					fromRunId: builder.receipt.runId,
+					position: cycle,
+					text: normalizedAssistantText(builder.summary),
+				},
 				...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
 				...(review.node !== undefined ? { node: review.node } : {}),
 				...(review.model !== undefined ? { model: review.model } : {}),
@@ -847,7 +878,7 @@ async function runReviewGated(
 					needsDecision: `reviewer run ${reviewer.receipt.runId} ended ${pipelineFailureReason(reviewer.receipt)} in cycle ${cycle}`,
 				};
 			}
-			const verdict = parseReviewVerdict(reviewer.summary.lastAssistantText);
+			const verdict = parseReviewVerdict(normalizedAssistantText(reviewer.summary));
 			if (verdict === "pass" || verdict === "fail") {
 				recordDecision(
 					{
@@ -879,7 +910,7 @@ async function runReviewGated(
 			const pendingExhaustion =
 				exhaustionDraft === null
 					? null
-					: stagePendingGateDecision(exhaustionDraft, { finalOutput: reviewer.summary.lastAssistantText });
+					: stagePendingGateDecision(exhaustionDraft, { finalOutput: normalizedAssistantText(reviewer.summary) });
 			recordDecision(
 				{
 					group,
@@ -902,7 +933,7 @@ async function runReviewGated(
 					needsDecision: `review gate exhausted after ${review.maxCycles} cycle(s) without a pass; the operator decides whether to accept, retry, or revert`,
 				};
 			}
-			findings = { reviewer, text: reviewer.summary.lastAssistantText };
+			findings = { reviewer, text: normalizedAssistantText(reviewer.summary) };
 		}
 		throw new Error("review gate exhausted without terminal decision evidence");
 	} finally {
@@ -1284,7 +1315,7 @@ async function runCompete(
 								cycle: request.gate.cycle,
 								subjects: request.gate.subjects ?? [],
 								deciderRunId: handle.runId,
-								finalOutput: summary.lastAssistantText,
+								finalOutput: normalizedAssistantText(summary),
 								...(request.cwd !== undefined ? { resourceRoot: request.cwd } : {}),
 							})
 						: undefined;
@@ -1487,7 +1518,7 @@ async function runCompete(
 					needsDecision: `judge run ${judgeReceipt.runId} ended ${pipelineFailureReason(judgeReceipt)}; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly`,
 				};
 			}
-			const pick = parseJudgeWinner(judgeSummary.lastAssistantText, compete.candidates);
+			const pick = parseJudgeWinner(normalizedAssistantText(judgeSummary), compete.candidates);
 			if (pick === null) {
 				recordDecision(
 					{
@@ -2549,7 +2580,7 @@ async function runPipeline(
 					[...runs],
 				);
 			}
-			previous = { runId: receipt.runId, text: summary.lastAssistantText };
+			previous = { runId: receipt.runId, text: normalizedAssistantText(summary) };
 		}
 		return runs;
 	} finally {

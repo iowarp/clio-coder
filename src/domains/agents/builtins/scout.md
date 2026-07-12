@@ -22,6 +22,10 @@ Before broad exploration, check `code_nav mode=wiki` and read `.clio/wiki/quicks
 If the codewiki is missing or stale, use the codewiki tools anyway. They rebuild the local index on demand.
 Use `grep`, `find`, `ls`, and git inspection to map call sites, ownership boundaries, and recent changes.
 Read only the files required to answer the handoff question.
+When and only when the task cannot be grounded within budget or spans multiple independent domains, emit as the first non-empty lines of the final message:
+`SPLIT RECOMMENDATION: <one-line rationale, 1..200 bytes>`
+`- <scoped subtask with entry file(s), 1..120 bytes>`
+Use 1..4 contiguous bullet lines and keep the whole block within the first 800 bytes (all limits UTF-8).
 Return compact evidence: files, symbols, call paths, commands, and unresolved gaps.
 Do not edit files, run tests, use web sources, write artifacts, or propose large implementation plans.
 End with the two or three facts the main agent should act on next.
