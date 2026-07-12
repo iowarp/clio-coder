@@ -33,10 +33,52 @@ export async function runEvalSuiteV2(
 	const started = now();
 	const evalId = createEvalId(started, loaded.hash);
 	const results: EvalArtifactResultV2[] = [];
+	const maxCostUsd = loaded.suite.matrix.maxCostUsd;
+	let spentUsd = 0;
 	for (const item of expandEvalMatrix(loaded.suite)) {
-		results.push(await runMatrixItem(loaded, item.task, item.target, item.repeatIndex, options.clioEntry));
+		// The cost ceiling bounds the whole matrix: once known receipt cost
+		// exceeds it, remaining items fail closed instead of running. A live
+		// suite can therefore never keep spending past its declared budget.
+		if (maxCostUsd !== undefined && spentUsd > maxCostUsd) {
+			results.push(budgetExhaustedResult(item.task.id, item.target, item.repeatIndex, spentUsd, maxCostUsd));
+			continue;
+		}
+		const result = await runMatrixItem(loaded, item.task, item.target, item.repeatIndex, options.clioEntry);
+		spentUsd += resultCostUsd(result);
+		results.push(result);
 	}
 	return buildArtifact(loaded, evalId, results, options.clioEntry);
+}
+
+/** Known receipt cost of one finished matrix item; unpriced runs count zero. */
+export function resultCostUsd(result: Pick<EvalArtifactResultV2, "metrics">): number {
+	const value = result.metrics["cost.usd"];
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function budgetExhaustedResult(
+	taskId: string,
+	target: EvalSuiteTargetV2,
+	repeatIndex: number,
+	spentUsd: number,
+	maxCostUsd: number,
+): EvalArtifactResultV2 {
+	return {
+		taskId,
+		repeatIndex,
+		target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
+		pass: false,
+		failureClass: "budget_exhausted",
+		metrics: {
+			"result.pass": false,
+			"result.failureClass": "budget_exhausted",
+			"verifier.exitCode": 1,
+			"latency.wallMs": 0,
+		},
+		artifacts: {
+			error: `matrix cost budget exhausted: spent $${spentUsd.toFixed(4)} of max $${maxCostUsd.toFixed(4)} before this item`,
+		},
+	};
 }
 
 async function runMatrixItem(

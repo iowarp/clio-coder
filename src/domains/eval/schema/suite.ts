@@ -33,6 +33,15 @@ export const CANONICAL_METRICS = [
 	"patch.testFilesModified",
 	"result.pass",
 	"result.failureClass",
+	// Receipt-derived evidence metrics. Sourced only from the sealed receipt
+	// (never dispatch/monitor prose labels); absent receipt leaves them
+	// unresolved so gates fail closed.
+	"evidence.verification",
+	"evidence.firstPassSuccess",
+	"cost.usd",
+	// Behavioral checkpoints for the bounded reconnaissance live suite.
+	"dispatch.count",
+	"wiki.staleAcknowledged",
 ] as const;
 
 export type EvalMetricName = (typeof CANONICAL_METRICS)[number];
@@ -63,6 +72,14 @@ export interface EvalSuiteTargetV2 {
 export interface EvalSuiteMatrixV2 {
 	targets: EvalSuiteTargetV2[];
 	repeats: number;
+	/**
+	 * Cumulative receipt-cost ceiling in USD for the whole matrix. Once the
+	 * summed `cost.usd` of finished items exceeds it, remaining items fail
+	 * closed as budget_exhausted instead of running. Runs without a receipt
+	 * contribute zero; the ceiling bounds known cost, it does not price
+	 * unpriced runs.
+	 */
+	maxCostUsd?: number;
 }
 
 export interface EvalWorkspaceV2 {
@@ -77,6 +94,13 @@ export interface EvalWorkspaceV2 {
 export interface EvalRunnerV2 {
 	kind: EvalRunnerKind;
 	prompt?: string;
+	/**
+	 * Fleet agent recipe id for the clio-run runner. When set the runner
+	 * invokes `clio run --agent <id> --json`, whose stream ends with the full
+	 * sealed RunReceipt, so receipt-derived evidence metrics resolve. Without
+	 * it the main-agent headless path runs and emits no receipt.
+	 */
+	agent?: string;
 	command?: string;
 	commands?: string[];
 	args?: string[];
