@@ -64,6 +64,47 @@ export const GUARDRAIL_ENV_VARS: Readonly<Record<keyof GuardrailValues, string>>
 	internalDispatchTimeoutMs: "CLIO_INTERNAL_DISPATCH_TIMEOUT_MS",
 };
 
+/**
+ * Tool calls held back from the tail of a worker's lifetime cap for
+ * verification reads and synthesis. Inside this reserve window the loop guard
+ * emits a one-shot directive and blocks non-read calls, so a worker (scout
+ * especially) still has budget to re-read the locations it will cite instead
+ * of exhausting the cap mid-exploration and reporting citation-free leads.
+ * Inactive when the effective cap is not larger than the reserve.
+ */
+export const WORKER_SYNTHESIS_RESERVE_CALLS = 5;
+
+/**
+ * One-shot annotation attached to the first tool result inside the reserve
+ * window. Advisory: the call that carried it still ran; only subsequent
+ * non-read calls are blocked.
+ */
+export function workerSynthesisReserveDirective(remaining: number, cap: number): string {
+	return (
+		`budget reserve: only ${remaining} of your ${cap} tool calls remain, and they are reserved for verification ` +
+		"reads and synthesis. Stop broad exploration now: re-read the locations you will cite, then answer in prose. " +
+		"Calls that are not reads will be blocked."
+	);
+}
+
+/**
+ * Block reason for a non-read call inside the reserve window. Deliberately
+ * does NOT start with the `workerToolCallCap reached (` machine prefix:
+ * reserve blocks are steering, not cap exhaustion, and must never trip
+ * {@link mentionsWorkerToolCallCap} or the worker abort predicates.
+ */
+export function workerSynthesisReserveBlockReason(tool: string, remaining: number, cap: number): string {
+	return (
+		`workerToolCallReserve: only ${remaining} of ${cap} tool calls remain and they are reserved for verification ` +
+		`reads and synthesis; ${tool} is not a read. Re-read any locations you will cite, then answer in prose from ` +
+		"what you have gathered."
+	);
+}
+
+export function isWorkerSynthesisReserveBlockReason(reason: string): boolean {
+	return /^workerToolCallReserve: only [1-9]\d* of [1-9]\d* tool calls remain/.test(reason);
+}
+
 export function workerToolCallCapExceededReason(cap: number): string {
 	return `workerToolCallCap reached (${cap}); abort run`;
 }

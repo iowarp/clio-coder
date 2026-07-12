@@ -14,6 +14,7 @@ import {
 	configureGuardrails,
 	isWorkerToolCallCapExceededReason,
 	isWorkerToolCallCapSynthesisReason,
+	WORKER_SYNTHESIS_RESERVE_CALLS,
 } from "../core/guardrails.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
@@ -314,6 +315,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			createLoopGuardRegistration({
 				safety,
 				toolCallCap: readWorkerToolCallCap(),
+				// Hold the tail of the cap for verification reads and synthesis so a
+				// reconnaissance worker never exhausts its budget mid-exploration and
+				// reports citation-free leads (inactive when the cap is that small).
+				toolCallReserve: WORKER_SYNTHESIS_RESERVE_CALLS,
 				turnSynthesisLockout: true,
 				// Once locked, the next model round is forced text-only at the
 				// request level (tool_choice none in onPayload below): the lockout
