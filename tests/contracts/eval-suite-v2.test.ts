@@ -238,6 +238,19 @@ describe("contracts/eval suite v2", { concurrency: false }, () => {
 			strictEqual(gateThresholdFail.code, 1, `stderr=${gateThresholdFail.stderr}`);
 			ok(gateThresholdFail.stdout.includes("summary.passRate"));
 
+			// A receipt-derived evidence metric on a suite that produced no
+			// receipt is unresolved and fails the gate closed: evidence can never
+			// be asserted from absence (T20).
+			const evidenceThresholds = join(scratch.dir, "evidence-thresholds.yaml");
+			writeFileSync(evidenceThresholds, 'fail:\n  - metric: evidence.verification\n    op: neq\n    value: "verified"\n');
+			const gateEvidenceUnresolved = await runCli(
+				["eval", "gate", passEvalId, "--baseline", passEvalId, "--thresholds", evidenceThresholds],
+				{ env: scratch.env },
+			);
+			strictEqual(gateEvidenceUnresolved.code, 1, `stderr=${gateEvidenceUnresolved.stderr}`);
+			ok(gateEvidenceUnresolved.stdout.includes("evidence.verification"));
+			ok(gateEvidenceUnresolved.stdout.includes("unresolved metric"));
+
 			// An unresolvable metric fails closed instead of silently passing.
 			const unknownThresholds = join(scratch.dir, "unknown-thresholds.yaml");
 			writeFileSync(unknownThresholds, "fail:\n  - metric: summary.doesNotExist\n    op: gt\n    value: 0\n");

@@ -1,3 +1,9 @@
+import {
+	dispatchCountFromJsonl,
+	evidenceMetricsFromReceipt,
+	receiptFromRunJsonStdout,
+	wikiStaleAcknowledgedFromJsonl,
+} from "../metrics/evidence.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
 import { type EvalRunnerOutput, runShellCommand, shellQuote } from "./external-command.js";
 
@@ -13,6 +19,7 @@ export async function runClioRunRunner(
 		shellQuote(clioEntry),
 		"run",
 		"--json",
+		...(runner.agent === undefined ? [] : ["--agent", shellQuote(runner.agent)]),
 		"--target",
 		shellQuote(target.id),
 		...(target.model === undefined ? [] : ["--model", shellQuote(target.model)]),
@@ -22,6 +29,10 @@ export async function runClioRunRunner(
 	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs);
 	const tokens = tokensFromJsonl(result.stdout);
 	const tools = toolCallMetricsFromJsonl(result.stdout);
+	// Evidence metrics resolve only from the sealed receipt the --agent path
+	// prints; a runner without a receipt leaves them absent so any gate on
+	// them fails closed instead of reading prose labels.
+	const receipt = receiptFromRunJsonStdout(result.stdout);
 	return {
 		exitCode: result.exitCode,
 		stdout: result.stdout,
@@ -38,8 +49,15 @@ export async function runClioRunRunner(
 			"tools.failed": tools.failed,
 			"tools.blocked": tools.blocked,
 			"verifier.exitCode": result.exitCode,
+			"dispatch.count": dispatchCountFromJsonl(result.stdout),
+			"wiki.staleAcknowledged": wikiStaleAcknowledgedFromJsonl(result.stdout),
+			...(receipt === null ? {} : evidenceMetricsFromReceipt(receipt)),
 		},
-		artifacts: { stdout: result.stdout, stderr: result.stderr },
+		artifacts: {
+			stdout: result.stdout,
+			stderr: result.stderr,
+			...(receipt === null ? {} : { receipt: JSON.stringify(receipt) }),
+		},
 	};
 }
 

@@ -87,7 +87,12 @@ function readMatrix(value: unknown, path: string, issues: EvalValidationIssue[])
 		];
 	});
 	if (repeats === null || targets.length === 0) return null;
-	return { targets, repeats };
+	const maxCostUsd = value.maxCostUsd;
+	if (maxCostUsd !== undefined && (typeof maxCostUsd !== "number" || !Number.isFinite(maxCostUsd) || maxCostUsd < 0)) {
+		issues.push({ path: `${path}.maxCostUsd`, message: "expected non-negative number" });
+		return null;
+	}
+	return { targets, repeats, ...(maxCostUsd === undefined ? {} : { maxCostUsd }) };
 }
 
 function readTasks(value: unknown, path: string, issues: EvalValidationIssue[]): EvalSuiteTaskV2[] | null {
@@ -171,10 +176,15 @@ function readRunner(
 		return null;
 	}
 	const prompt = optionalString(value, "prompt");
+	const agent = optionalString(value, "agent");
+	if (agent !== undefined && kind !== "clio-run") {
+		issues.push({ path: `${path}.agent`, message: "agent is only valid on the clio-run runner" });
+	}
 	const command = optionalString(value, "command");
 	return {
 		kind: kind as EvalRunnerKind,
 		...(prompt === undefined ? {} : { prompt }),
+		...(agent === undefined ? {} : { agent }),
 		...(command === undefined ? {} : { command }),
 		commands: readOptionalStringArray(value, "commands", `${path}.commands`, issues),
 		args: readOptionalStringArray(value, "args", `${path}.args`, issues),

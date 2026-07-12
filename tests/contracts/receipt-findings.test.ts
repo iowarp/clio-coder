@@ -134,12 +134,21 @@ describe("contracts/receipt findings summary", () => {
 	});
 
 	it("does not mark a succeeded first attempt as first-pass without validation evidence", () => {
-		const summary = computeReceiptFindingsSummary(draft({ toolStats: [] }), envelope());
+		const zeroTool = draft({ toolStats: [] });
+		const summary = computeReceiptFindingsSummary(zeroTool, envelope());
 
 		deepStrictEqual(summary, {
 			tags: [],
 			firstPassSuccess: false,
 			findingCount: 0,
+		});
+		// The zero-tool eval scenario is fully expressible deterministically:
+		// the derived verification state and the first-pass verdict agree that
+		// an exit-0 run with no observed work is not evidence. No live model
+		// adds signal here (Decision 4).
+		deepStrictEqual(deriveReceiptVerification(zeroTool), {
+			state: "unverified",
+			basis: "no-validation-tool",
 		});
 	});
 
@@ -161,19 +170,24 @@ describe("contracts/receipt findings summary", () => {
 	});
 
 	it("keeps validation failures out of first-pass and records the failure cause", () => {
-		const summary = computeReceiptFindingsSummary(
-			draft({
-				exitCode: 1,
-				outcome: "failed",
-				toolStats: [toolStat({ tool: "pytest", ok: 0, errors: 1 })],
-			}),
-			envelope({ exitCode: 1, outcome: "failed" }),
-		);
+		const failedWorker = draft({
+			exitCode: 1,
+			outcome: "failed",
+			toolStats: [toolStat({ tool: "pytest", ok: 0, errors: 1 })],
+		});
+		const summary = computeReceiptFindingsSummary(failedWorker, envelope({ exitCode: 1, outcome: "failed" }));
 
 		deepStrictEqual(summary, {
 			tags: ["test-failure"],
 			firstPassSuccess: false,
 			findingCount: 1,
+		});
+		// The failed-worker eval scenario is likewise deterministic: a failing
+		// validation tool never derives verified, and the execution outcome
+		// alone carries the failure. No live model adds signal here.
+		deepStrictEqual(deriveReceiptVerification(failedWorker), {
+			state: "unverified",
+			basis: "no-validation-tool",
 		});
 	});
 });
