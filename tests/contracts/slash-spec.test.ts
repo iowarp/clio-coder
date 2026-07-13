@@ -89,6 +89,7 @@ describe("contracts/slash-spec", () => {
 			openContextView: () => opened.push("context"),
 			openFleet: () => opened.push("fleet"),
 			openTasks: () => opened.push("tasks"),
+			openMemory: () => opened.push("memory"),
 			openView: (filter) => opened.push(filter ? `view:${filter}` : "view"),
 			openThinking: () => opened.push("thinking"),
 			openModel: () => opened.push("model"),
@@ -112,12 +113,12 @@ describe("contracts/slash-spec", () => {
 			render: () => undefined,
 		};
 
-		for (const input of ["/help routing", "/settings", "/targets", "/model", "/models", "/view run-123"]) {
+		for (const input of ["/help routing", "/settings", "/targets", "/model", "/models", "/memory", "/view run-123"]) {
 			dispatchSlashCommand(parseSlashCommand(input), ctx);
 		}
 		dispatchSlashCommand(parseSlashCommand("/not-a-command"), ctx);
 
-		deepStrictEqual(opened, ["help:routing", "settings", "targets", "model", "model", "view:run-123"]);
+		deepStrictEqual(opened, ["help:routing", "settings", "targets", "model", "model", "memory", "view:run-123"]);
 		deepStrictEqual(submitted, ["/not-a-command"]);
 	});
 
@@ -333,6 +334,8 @@ describe("contracts/slash-spec", () => {
 			["/context query", { kind: "unknown", text: "/context query" }],
 			["/fleet query", { kind: "unknown", text: "/fleet query" }],
 			["/tasks query", { kind: "unknown", text: "/tasks query" }],
+			["/memory", { kind: "memory" }],
+			["/memory query", { kind: "unknown", text: "/memory query" }],
 			["/thinking query", { kind: "unknown", text: "/thinking query" }],
 			["/scoped-models query", { kind: "unknown", text: "/scoped-models query" }],
 			["/settings query", { kind: "unknown", text: "/settings query" }],
@@ -404,6 +407,7 @@ describe("contracts/slash-spec", () => {
 			"context",
 			"fleet",
 			"tasks",
+			"memory",
 			"view",
 			"thinking",
 			"output",

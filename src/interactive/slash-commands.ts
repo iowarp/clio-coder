@@ -44,6 +44,7 @@ type SlashCommandVariant =
 	| { kind: "context-view" }
 	| { kind: "fleet" }
 	| { kind: "tasks" }
+	| { kind: "memory" }
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
 	| { kind: "view-usage" }
@@ -232,6 +233,8 @@ export interface SlashCommandContext {
 	openFleet: () => void;
 	/** Open the read-only `/tasks` overlay: the session task board with receipts. */
 	openTasks: () => void;
+	/** Open the read-only `/memory` overlay: approved lessons and the live task bank. */
+	openMemory: () => void;
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
 	openThinking: () => void;
@@ -694,6 +697,16 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUnknown({ kind: "tasks" }),
 		handle(_command, ctx) {
 			ctx.openTasks();
+		},
+	},
+	{
+		name: "memory",
+		description: "Inspect approved lessons and the live session task-memory bank",
+		kinds: ["memory"],
+		args: {},
+		fromArgs: fromArgsOrUnknown({ kind: "memory" }),
+		handle(_command, ctx) {
+			ctx.openMemory();
 		},
 	},
 	{

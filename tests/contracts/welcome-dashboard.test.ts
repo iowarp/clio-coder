@@ -207,6 +207,31 @@ describe("welcome-dashboard and footer integration tests", () => {
 		ok(joined.includes("gemini-3.5-flash"), `model label should keep its version suffix, got: ${joined}`);
 	});
 
+	it("shows truthful proactive-memory status and drops narrow facts whole", () => {
+		const bank = { version: 1 as const, status: null, knowledge: [], procedural: [] };
+		const stats = deriveWelcomeDashboardStats({
+			providers: mockProviders,
+			observability: mockObservability,
+			getSettings: () => mockSettings,
+			getTaskMemoryStatus: () => ({
+				enabled: true,
+				tier: "llm",
+				size: 3,
+				lastDecision: "injected",
+				bank,
+			}),
+		});
+
+		const wide = strippedDashboardRow(stats, 100, "Memory:");
+		ok(wide.includes("Memory:   on · tier LLM · bank 3"), wide);
+		const narrow = buildWelcomeDashboardLines(stats, 30)
+			.map(stripAnsi)
+			.find((line) => line.includes("Memory: on"));
+		ok(narrow, "expected a narrow memory status row");
+		ok(narrow.includes("Memory: on · tier LLM …"), narrow);
+		ok(!narrow.includes("ban"), `a bank fact must be retained whole or dropped: ${narrow}`);
+	});
+
 	it("renders a no-wiki dashboard row when codewiki exists without Markdown wiki", async () => {
 		const cwd = scratchDashboardProject();
 		await writeDashboardCodewiki(cwd);
@@ -340,10 +365,18 @@ describe("welcome-dashboard and footer integration tests", () => {
 			getSessionInfo: () => ({ id: "session-1", name: "default", turns: 5 }),
 			getExtensionStats: () => ({ active: 1, installed: 2 }),
 			getContextState: () => ({ clioMd: "ok", memoryCount: 5 }),
+			getTaskMemoryStatus: () => ({
+				enabled: true,
+				tier: "rules",
+				size: 2,
+				lastDecision: "silent",
+				bank: { version: 1, status: null, knowledge: [], procedural: [] },
+			}),
 		});
 
 		const lines = footer.statusLines(120);
 		const joined = lines.join("\n");
+		const narrowJoined = stripAnsi(footer.statusLines(79).join("\n"));
 
 		ok(joined.includes("SESSION"));
 		ok(joined.includes("CONTEXT"));
@@ -352,5 +385,6 @@ describe("welcome-dashboard and footer integration tests", () => {
 
 		// Target should be formatted inside the Session facts
 		ok(joined.includes("mock-target"));
+		match(narrowJoined, /memory\s+on · tier rules · bank 2/u);
 	});
 });

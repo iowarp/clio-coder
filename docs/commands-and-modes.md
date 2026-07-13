@@ -118,6 +118,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/context` | `/ctx` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
+| `/memory` | - | `/memory` | Inspect approved lessons and the live session task-memory bank |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | - | `/thinking` | Open thinking-level selector |
 | `/output` | - | `/output [verbosity]` | Set transcript detail: minimal, default, or verbose |
@@ -152,6 +153,12 @@ it was completed, and the reason recorded when it was blocked or dropped. The
 board persists in the session ledger as `taskLedger` entries, so it survives
 `/resume` and `/fork` and can be audited from the JSONL alone.
 
+The read-only `/memory` overlay keeps durable and session memory attributable
+in one place. It lists approved evidence-backed lessons, then the live task
+bank by private status, knowledge, and procedural class, including each
+entry's injection count and the last memory-step outcome. The welcome island
+and expanded dashboard summarize whether intervention is on, its rules or LLM
+tier, and current bank size.
 
 ## Keybindings
 

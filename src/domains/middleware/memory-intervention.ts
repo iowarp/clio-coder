@@ -83,6 +83,8 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 	runPromptedStep(input: MemoryPromptedStepInput): Promise<MemoryPromptedStepResult>;
 	/** Consume the orchestrator loop guard's already-computed verdict. */
 	signalLoop(): void;
+	/** Most recent completed memory-policy outcome for read-only operator surfaces. */
+	lastDecision(): TaskMemoryPolicyResult["decision"] | null;
 }
 
 /**
@@ -102,6 +104,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let consecutiveErrors = 0;
 	let lastPromptedBoundary: string | null = null;
 	let lastInjectedMessage: string | null = null;
+	let lastDecision: TaskMemoryPolicyResult["decision"] | null = null;
 	const pendingTriggers = new Set<MemoryInterventionTriggerReason>();
 
 	return {
@@ -140,13 +143,17 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			pendingTriggers.clear();
 			toolsSinceMemoryStep = 0;
 			consecutiveErrors = 0;
+			const synchronousMemoryReminder =
+				context?.priorEffects.some((effect) => effect.kind === "inject_reminder" && effect.message.startsWith("Memory:")) ??
+				false;
 			const result = await runPromptedStep({
 				deterministicTrigger: triggers.some((trigger) => trigger !== "interval"),
-				suppressIntervention:
-					context?.priorEffects.some(
-						(effect) => effect.kind === "inject_reminder" && effect.message.startsWith("Memory:"),
-					) ?? false,
+				suppressIntervention: synchronousMemoryReminder,
 			});
+			// A rules-only reminder can win the visible boundary while the optional
+			// background route resolves to null. Preserve the operator-visible
+			// injected outcome instead of overwriting it with that no-client silence.
+			if (synchronousMemoryReminder && result.decision === "silent") lastDecision = "injected";
 			if (result.reminder !== null) lastInjectedMessage = result.reminder;
 			return result.effects;
 		},
@@ -154,6 +161,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		signalLoop(): void {
 			if (settings().enabled) pendingTriggers.add("loop_signal");
 		},
+		lastDecision: () => lastDecision,
 	};
 
 	function settings(): MemoryInterventionSettings {
@@ -180,10 +188,18 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			effects: NO_EFFECTS,
 		});
 		const live = settings();
-		if (!live.enabled || deps.getModelClient === undefined) return silent();
+		if (!live.enabled || deps.getModelClient === undefined) {
+			const result = silent();
+			lastDecision = result.decision;
+			return result;
+		}
 		try {
 			const client = deps.getModelClient();
-			if (client === null) return silent();
+			if (client === null) {
+				const result = silent();
+				lastDecision = result.decision;
+				return result;
+			}
 			const result = await runTaskMemoryPolicy(deps.bank, client, {
 				task: input.task?.trim() || currentTask,
 				trajectory: [...trajectory],
@@ -193,6 +209,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				previousReminder: lastInjectedMessage,
 				timeoutMs: live.timeoutMs,
 			});
+			lastDecision = result.decision;
 			return {
 				...result,
 				effects:
@@ -201,7 +218,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						: [{ kind: "inject_reminder", message: result.reminder, severity: "advisory" }],
 			};
 		} catch {
-			return silent();
+			const result = silent();
+			lastDecision = result.decision;
+			return result;
 		}
 	}
 
@@ -292,9 +311,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				if (message.length === 0) return NO_EFFECTS;
 				lastInjectedFingerprint = step.fingerprint;
 				lastInjectedMessage = message;
+				lastDecision = "injected";
 				deps.bank.recordInjection([failure.entryId]);
 				return [{ kind: "inject_reminder", message, severity: "advisory" }];
 			}
+			lastDecision = "silent";
 			return NO_EFFECTS;
 		} finally {
 			lastTurnEndStep = toolStep;
@@ -308,12 +329,19 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const maxTokens = settings().maxTokens;
 		const prefixTokens = ceilChars(prefix.length);
 		const rendered = deps.bank.render(Math.max(0, maxTokens - prefixTokens), ["knowledge"]);
-		if (rendered.length === 0) return NO_EFFECTS;
+		if (rendered.length === 0) {
+			lastDecision = "silent";
+			return NO_EFFECTS;
+		}
 		const message = boundedReminder(`${prefix}${rendered}`, maxTokens);
-		if (message.length === 0) return NO_EFFECTS;
+		if (message.length === 0) {
+			lastDecision = "silent";
+			return NO_EFFECTS;
+		}
 		const citedIds = [...message.matchAll(/\[([^\]]+)\]/gu)].map((match) => match[1]).filter((id) => id !== undefined);
 		deps.bank.recordInjection(citedIds);
 		lastInjectedMessage = message;
+		lastDecision = "injected";
 		return [{ kind: "inject_reminder", message, severity: "advisory" }];
 	}
 }

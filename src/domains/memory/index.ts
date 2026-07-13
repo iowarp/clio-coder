@@ -61,6 +61,11 @@ export {
 	type TaskMemoryPolicyResult,
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
+export {
+	type TaskMemoryOperatorStatus,
+	type TaskMemoryTier,
+	taskMemoryBankSize,
+} from "./task-memory-status.js";
 export type {
 	MemoryProposalResult,
 	MemoryPruneResult,

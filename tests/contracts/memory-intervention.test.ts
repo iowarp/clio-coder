@@ -58,6 +58,7 @@ describe("contracts/memory intervention rules tier", () => {
 		const effect = effects[0];
 		ok(effect?.kind === "inject_reminder");
 		strictEqual(effect.severity, "advisory");
+		strictEqual(registration.lastDecision(), "injected");
 		ok(effect.message.startsWith(`Memory: [${snapshot.procedural[0]?.id}]`));
 		match(effect.message, /already tried .* at step 1 and it failed with fixture was missing/u);
 		deepStrictEqual(registration.evaluate({ hook: "turn_end" }), [], "the same reminder is not emitted twice");
@@ -70,6 +71,7 @@ describe("contracts/memory intervention rules tier", () => {
 		execute(registration, 2, { command: "npm run lint" });
 
 		deepStrictEqual(registration.evaluate({ hook: "turn_end" }), []);
+		strictEqual(registration.lastDecision(), "silent");
 		deepStrictEqual(bank.snapshot().procedural, []);
 	});
 
@@ -158,6 +160,23 @@ describe("contracts/memory intervention rules tier", () => {
 			outputTokens: 0,
 			effects: [],
 		});
+		strictEqual(registration.lastDecision(), "silent");
+	});
+
+	it("preserves an injected rules outcome when the optional background route is unset", async () => {
+		const bank = new TaskMemoryBank();
+		const registration = createMemoryInterventionRegistration({ bank, getModelClient: () => null });
+		const args = { command: "same failing command" };
+		execute(registration, 1, args, "error", "failed");
+		execute(registration, 2, args, "error", "failed");
+		const effects = registration.evaluate({ hook: "turn_end", turnId: "rules-turn" });
+
+		strictEqual(effects[0]?.kind, "inject_reminder");
+		deepStrictEqual(
+			await registration.evaluateAsync({ hook: "turn_end", turnId: "rules-turn" }, { priorEffects: effects }),
+			[],
+		);
+		strictEqual(registration.lastDecision(), "injected");
 	});
 
 	it("fires the interval floor only after N completed tools and resets the cadence", async () => {

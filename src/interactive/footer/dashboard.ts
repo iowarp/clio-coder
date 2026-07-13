@@ -1,6 +1,7 @@
 import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ContextState } from "../../domains/context/index.js";
+import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
 import {
 	type CostAggregate,
 	formatCostAggregate,
@@ -88,6 +89,7 @@ export interface FooterDashboardDeps {
 	getContextLedger?: () => ContextLedger;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	getContextActivity?: () => {
 		message: string;
 		detail: string | null;
@@ -371,6 +373,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const contextUsage = deps.getContextUsage?.();
 		const contextLedger = deps.getContextLedger?.() ?? null;
 		const settings = deps.getSettings?.();
+		const taskMemory = deps.getTaskMemoryStatus?.() ?? null;
 		const sessionInfo = deps.getSessionInfo?.() ?? { id: null, name: null, turns: null };
 		const contextState = deps.getContextState?.() ?? null;
 		const tokensLabel = tokens || (usage?.totalTokens ? `Σ${formatFooterTokens(usage.totalTokens)}` : null);
@@ -423,6 +426,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				safety,
 				toolProfile,
 				outputVerbosity: settings?.terminal.outputVerbosity ?? "default",
+				memoryIntervention: taskMemory
+					? { enabled: taskMemory.enabled, tier: taskMemory.tier, size: taskMemory.size }
+					: null,
 			},
 			context: {
 				label: null,
