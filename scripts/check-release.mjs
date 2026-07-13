@@ -40,6 +40,7 @@ const FORBIDDEN = [
 const REQUIRED_FILES = [
 	...ENTRIES,
 	"src/domains/prompts/fragments/identity/clio.md",
+	"src/domains/prompts/fragments/identity/clio-worker.md",
 	"assets/clio-coder-logo-128.webp",
 	"docs/html/index.html",
 	"damage-control-rules.yaml",

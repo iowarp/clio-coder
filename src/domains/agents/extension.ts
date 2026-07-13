@@ -56,6 +56,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 				tags: ["delegation", "acp"],
 				skills: [],
 				output: null,
+				budget: null,
 				body: "",
 			}));
 			return [...specs, ...delegationSpecs];
@@ -81,6 +82,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					tags: ["delegation", "acp"],
 					skills: [],
 					output: null,
+					budget: null,
 					body: "",
 				};
 			}

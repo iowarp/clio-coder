@@ -37,6 +37,12 @@ Design decisions that shape everything else:
   (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_ANNOUNCE=1`); the orchestrator's
   `process.env` never crosses the wire.
 
+## Worker prompt and budget admission
+
+Dispatch resolves the recipe, target, effective autonomy, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), safety for the enforced autonomy, and the recipe or bounded override persona. Project context, memory, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes.
+
+Recipes may declare `budget: {toolCalls, readReserve, synthesis}`. `toolCalls` is the admitted-call phase boundary; the final `readReserve` slots accept only canonical `read`; `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `guardrails.workerToolCallCap` is transported separately as a hard attempt ceiling and always wins when lower. Native workers and Claude SDK enforce this policy. Claude Code and Antigravity reject explicit-budget recipes because their black-box loops cannot provide equivalent per-call mediation; custom recipes without a budget retain the legacy runtime-default route.
+
 ## Node setup
 
 Fleet nodes are declared under `fleet.nodes` in `settings.yaml`. The implicit

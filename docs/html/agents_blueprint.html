@@ -704,6 +704,10 @@ category: implement
 capabilityClass: workspace-edit
 latencyClass: balanced
 audience: base
+budget:
+  toolCalls: 50
+  readReserve: 5
+  synthesis: true
 ---
 You are Coder. Implement clean code changes...`,
       architect: `---
@@ -734,6 +738,10 @@ category: explore
 capabilityClass: read-only
 latencyClass: fast
 audience: shadow
+budget:
+  toolCalls: 18
+  readReserve: 4
+  synthesis: true
 ---
 You are Scout. Map symbols and indices...`
     };

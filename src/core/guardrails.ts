@@ -65,16 +65,6 @@ export const GUARDRAIL_ENV_VARS: Readonly<Record<keyof GuardrailValues, string>>
 };
 
 /**
- * Tool calls held back from the tail of a worker's lifetime cap for
- * verification reads and synthesis. Inside this reserve window the loop guard
- * emits a one-shot directive and blocks non-read calls, so a worker (scout
- * especially) still has budget to re-read the locations it will cite instead
- * of exhausting the cap mid-exploration and reporting citation-free leads.
- * Inactive when the effective cap is not larger than the reserve.
- */
-export const WORKER_SYNTHESIS_RESERVE_CALLS = 5;
-
-/**
  * One-shot annotation attached to the first tool result inside the reserve
  * window. Advisory: the call that carried it still ran; only subsequent
  * non-read calls are blocked.

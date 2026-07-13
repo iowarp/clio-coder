@@ -57,6 +57,11 @@ export interface EvaluateClaudeToolPermissionInput {
 	 * SDK/CLI allow options. Absent means no surface check (legacy callers).
 	 */
 	allowedTools?: ReadonlySet<string>;
+	/** Optional canonical per-call budget gate used by mediated SDK workers. */
+	budgetGate?: {
+		attempt(canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string };
+		admit(canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string };
+	};
 }
 
 export interface EmitClaudeToolPermissionInput extends EvaluateClaudeToolPermissionInput {
@@ -115,6 +120,13 @@ const CLAUDE_TOOL_TO_CLIO: Readonly<Record<string, string>> = {
 	// is narrowed away exactly when the profile lacks tasks.
 	TodoWrite: ToolNames.Tasks,
 };
+
+const CLAUDE_CANONICAL_TOOLS = new Set(Object.values(CLAUDE_TOOL_TO_CLIO));
+
+/** Whether the Claude preset exposes at least one vendor alias for this canonical Clio tool. */
+export function isClaudeCanonicalTool(name: string): boolean {
+	return CLAUDE_CANONICAL_TOOLS.has(name);
+}
 
 /**
  * Claude preset tool names whose Clio builtin is not in the worker's allowed
@@ -184,9 +196,38 @@ function rejectionText(decision: SafetyDecision): string {
 	return decision.rejection.short;
 }
 
+function budgetDenial(
+	input: EvaluateClaudeToolPermissionInput,
+	mapped: MappedClaudeToolCall,
+	call: ClassifierCall,
+	reason: string,
+): ClaudeToolPermissionDecision {
+	const classification = input.safety.classify(call);
+	const rejection: RejectionMessage = { short: reason, detail: reason, hints: [] };
+	const blocked: SafetyDecision = { kind: "block", classification, rejection };
+	input.safety.audit.recordToolCall?.({
+		tool: mapped.clioToolName,
+		classification,
+		decision: "denied",
+		args: mapped.args,
+		reasons: [reason],
+		reasonCode: "worker-budget",
+	});
+	return {
+		kind: "deny",
+		mapped,
+		decision: blocked,
+		reason,
+		reasonCode: "worker-budget",
+		permissionRequired: false,
+	};
+}
+
 export function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput): ClaudeToolPermissionDecision {
 	const mapped = mapClaudeToolCall(input.toolName, input.input, input.cwd);
 	const call: ClassifierCall = { tool: mapped.clioToolName, args: mapped.args };
+	const attempt = input.budgetGate?.attempt(mapped.clioToolName);
+	if (attempt?.kind === "deny") return budgetDenial(input, mapped, call, attempt.reason);
 	// Tool-profile / admitted-surface gate. This is the authoritative narrowing
 	// enforcement for SDK workers: it runs before the safety net so an
 	// out-of-profile tool (e.g. bash under minimal-local) is denied regardless
@@ -242,6 +283,8 @@ export function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermission
 		executeRecognized: decision.policy?.execRecognition !== "unrecognized",
 	});
 	if (disposition === "allow") {
+		const admission = input.budgetGate?.admit(mapped.clioToolName);
+		if (admission?.kind === "deny") return budgetDenial(input, mapped, call, admission.reason);
 		return { kind: "allow", mapped, decision, reason: decision.policy?.reasonCode ?? "allowed" };
 	}
 	if (disposition === "deny") {

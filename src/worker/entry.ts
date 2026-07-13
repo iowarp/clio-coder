@@ -42,7 +42,7 @@ async function main(): Promise<number> {
 	// the remote pid for its kill fallback. The transport consumes this event;
 	// local workers never emit it, keeping the local stream byte-identical.
 	if (process.env.CLIO_WORKER_ANNOUNCE === "1") {
-		emitEvent({ type: "worker_announce", pid: process.pid, host: hostname() });
+		emitEvent({ type: "worker_announce", pid: process.pid, host: hostname(), specVersion: spec.specVersion });
 	}
 	// The worker has no settings view of its own; the dispatcher copied the
 	// operator's configured model ids onto the spec so this process protects
@@ -73,6 +73,7 @@ async function main(): Promise<number> {
 		runtime,
 		wireModelId: spec.wireModelId,
 		allowedTools: spec.allowedTools,
+		...(spec.budget !== undefined ? { budget: spec.budget } : {}),
 		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
 		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),
 		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),

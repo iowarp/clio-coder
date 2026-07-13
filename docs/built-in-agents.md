@@ -84,8 +84,16 @@ latencyClass: balanced             # fast | balanced | deep
 tags: [implementation, repair]    # short lowercase routing hints for catalog display
 skills: []                        # knowledge attachments; requiring the context tool, never expands tool authority
 output: null                      # optional expected artifact name (e.g. PLAN.md)
+budget:                           # optional strict worker-loop phase policy
+  toolCalls: 50                   # admitted calls before final response handling
+  readReserve: 5                  # final admitted slots reserved for canonical read
+  synthesis: true                 # true: text-only final round; false: stop immediately
 ---
 ```
+
+`budget` is optional for backward compatibility. When omitted, dispatch derives the generic policy from the operator's current `guardrails.workerToolCallCap`. When present it must be a non-null YAML object containing exactly `toolCalls`, `readReserve`, and `synthesis`: the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
+
+The operator cap is independent and cannot be widened by a recipe. Dispatch clamps `toolCalls` to that cap and clamps `readReserve` to zero when canonical `read` is absent after tool admission. Reserve slots admit only `read`, not every read-class tool. Blocked non-read attempts do not consume admitted reserve slots, but they still count toward the operator attempt ceiling.
 
 ### Skills
 Skills are knowledge attachments declared under `skills: [...]` in the YAML frontmatter.
@@ -120,6 +128,8 @@ In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://a
 - **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. It integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) alongside Clio's native subagent workers (like a local [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or [SGLang](https://github.com/sgl-project/sglang) fleet) to execute tasks under a Claude subscription. Every tool call is mediated by Clio (`canUseTool` plus a `PreToolUse` hook): the safety net and autonomy matrix apply, and the run's admitted tool surface, which is narrowed by any `tool_profile`, is enforced authoritatively. Consequently, an out-of-profile tool (for example `bash` under `minimal-local`) is denied even though the underlying preset offers it. The narrowed surface is also translated into the SDK's `disallowedTools` option as defense in depth. Because it routes tool calls through Clio safety, it behaves as a native worker.
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes. It is a black box: tool calls run inside the `claude` process and are not routed through Clio's per-tool mediation, so Clio cannot enforce a per-tool profile on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
 - **`antigravity-code` (Antigravity CLI):** Runs an Antigravity CLI subprocess as a subscription worker target for fleet dispatch. Like `claude-code`, it is a black box with no per-tool mediation and no per-tool allowlist, so a narrowing `tool_profile` is refused rather than silently ignored.
+
+Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. `claude-code` and `antigravity-code` reject recipes that explicitly declare `budget`, because silently ignoring numeric bounds would be unsafe; legacy custom recipes without the field retain their prior runtime-default compatibility path. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
 
 Interactive TUI:
 

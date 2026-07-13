@@ -15,6 +15,9 @@
 
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { RunReceiptReproducibility } from "../../src/domains/dispatch/types.js";
+import { compileWorker } from "../../src/domains/prompts/compiler.js";
+import type { PromptsContract } from "../../src/domains/prompts/contract.js";
+import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type { SafetyPolicyMetadata } from "../../src/domains/safety/policy-engine.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "./scratch-env.js";
 
@@ -42,7 +45,22 @@ export function makeDispatchBundle(
 	ctx: Parameters<typeof createDispatchBundle>[0],
 	options: Parameters<typeof createDispatchBundle>[1] = {},
 ): ReturnType<typeof createDispatchBundle> {
-	return createDispatchBundle(ctx, { collectReproducibility: fastReproducibility, ...options });
+	const promptTable = loadFragments();
+	const prompts: PromptsContract = {
+		compileSessionPrompt: async () => {
+			throw new Error("dispatch test harness does not compile session prompts");
+		},
+		compileWorkerPrompt: async (input) => compileWorker(promptTable, input),
+		reload() {},
+	};
+	const context = {
+		bus: ctx.bus,
+		getContract<T extends object>(name: string): T | undefined {
+			if (name === "prompts") return prompts as T;
+			return ctx.getContract<T>(name);
+		},
+	};
+	return createDispatchBundle(context, { collectReproducibility: fastReproducibility, ...options });
 }
 
 let isolated: IsolatedClioEnv | null = null;

@@ -9,6 +9,55 @@ import type {
 
 export type RecipeThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+/** Authored worker-loop phase policy carried by an agent recipe. */
+export interface AgentBudget {
+	/** Admitted tool-call boundary before the final-response phase. */
+	toolCalls: number;
+	/** Tail of the admitted boundary reserved for canonical `read` calls. */
+	readReserve: number;
+	/** Whether reaching the boundary transitions to text-only synthesis. */
+	synthesis: boolean;
+}
+
+const AGENT_BUDGET_KEYS = ["toolCalls", "readReserve", "synthesis"] as const;
+
+/** Strict parser shared by built-in, user, and project recipes. */
+export function parseAgentBudget(value: unknown, sourcePath: string): AgentBudget | undefined {
+	if (value === undefined) return undefined;
+	const prefix = `agent budget: ${sourcePath}: budget`;
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error(`${prefix} must be a non-null YAML object`);
+	}
+
+	const record = value as Record<string, unknown>;
+	for (const key of Object.keys(record)) {
+		if (!(AGENT_BUDGET_KEYS as ReadonlyArray<string>).includes(key)) {
+			throw new Error(`${prefix}.${key} is unknown`);
+		}
+	}
+	for (const key of AGENT_BUDGET_KEYS) {
+		if (!Object.hasOwn(record, key)) throw new Error(`${prefix}.${key} is required`);
+	}
+
+	const toolCalls = record.toolCalls;
+	if (typeof toolCalls !== "number" || !Number.isSafeInteger(toolCalls)) {
+		throw new Error(`${prefix}.toolCalls must be a finite safe integer`);
+	}
+	if (toolCalls <= 0) throw new Error(`${prefix}.toolCalls must be greater than 0`);
+
+	const readReserve = record.readReserve;
+	if (typeof readReserve !== "number" || !Number.isSafeInteger(readReserve)) {
+		throw new Error(`${prefix}.readReserve must be a finite safe integer`);
+	}
+	if (readReserve < 0) throw new Error(`${prefix}.readReserve must be greater than or equal to 0`);
+	if (readReserve >= toolCalls) throw new Error(`${prefix}.readReserve must be less than budget.toolCalls`);
+
+	const synthesis = record.synthesis;
+	if (typeof synthesis !== "boolean") throw new Error(`${prefix}.synthesis must be a boolean`);
+
+	return { toolCalls, readReserve, synthesis };
+}
+
 export interface AgentRecipe {
 	id: string;
 	name: string;
@@ -17,6 +66,7 @@ export interface AgentRecipe {
 	model?: string;
 	target?: string;
 	thinkingLevel?: RecipeThinkingLevel;
+	budget?: AgentBudget;
 	/** Legacy recipe hint only; dispatch target selection comes from configured worker targets/profiles. */
 	runtime?: "native" | "cli";
 	skills?: ReadonlyArray<string>;

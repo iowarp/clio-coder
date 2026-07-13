@@ -14,7 +14,6 @@ import {
 	configureGuardrails,
 	isWorkerToolCallCapExceededReason,
 	isWorkerToolCallCapSynthesisReason,
-	WORKER_SYNTHESIS_RESERVE_CALLS,
 } from "../core/guardrails.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
@@ -46,6 +45,7 @@ import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	WORKER_EXIT_PERMISSION_REQUIRED,
+	type WorkerBudget,
 	type WorkerEscalationConfig,
 	type WorkerPromptMessage,
 	type WorkerProtectedArtifactState,
@@ -67,8 +67,6 @@ import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
 
 /** Scout exploration attempts before a guaranteed text-only synthesis phase. */
-export const SCOUT_EXPLORATION_TOOL_CALL_LIMIT = 18;
-export const SCOUT_LIVE_READ_RESERVE_CALLS = 4;
 export const SCOUT_SYNTHESIS_CORRECTION_LIMIT = 2;
 export const SCOUT_SYNTHESIS_CORRECTION_MESSAGE =
 	"Your previous response was not a final Scout handoff: it announced more tool work or omitted live path:line citations. Tool use is over. Return compact final findings now from evidence already gathered, cite every source claim as path:line, and put uncertainties under `Unresolved gaps:`. If the task truly cannot fit, return the bounded `SPLIT RECOMMENDATION:` protocol instead. Do not describe future actions.";
@@ -94,6 +92,8 @@ export interface WorkerRunInput {
 	runtimeResolution?: RuntimeTargetSnapshot;
 	/** Tool ids the worker is allowed to expose for this run. */
 	allowedTools: ReadonlyArray<ToolName>;
+	/** Dispatch-resolved agent phase policy and independent hard attempt cap. */
+	budget?: WorkerBudget;
 	/**
 	 * Dispatch-time tool profile that narrowed `allowedTools`. Carried so
 	 * black-box external CLI runtimes (claude-code, antigravity) that cannot
@@ -292,6 +292,25 @@ function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 }
 
 /**
+ * Resolve the effective runtime budget for an admitted worker spec.
+ *
+ * Current v2 specs always take the first branch. An accepted legacy v1 spec
+ * intentionally arrives without `budget`; preserve its historical runtime
+ * policy by deriving the agent boundary from the operator-owned worker cap
+ * and reserving up to five final slots for canonical reads.
+ */
+export function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "allowedTools" | "budget">): WorkerBudget {
+	if (input.budget !== undefined) return input.budget;
+	const hardCap = readWorkerToolCallCap();
+	return {
+		toolCalls: hardCap,
+		readReserve: input.allowedTools.includes(ToolNames.Read) ? Math.min(5, Math.max(0, hardCap - 1)) : 0,
+		synthesis: true,
+		hardCap,
+	};
+}
+
+/**
  * Spin up a pi-agent-core Agent for the worker subprocess. Subscribes an event
  * sink that forwards every AgentEvent to `emit`. Starts one run via
  * `agent.prompt(task)`. Returns a handle with the final promise and an abort
@@ -356,6 +375,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// Flipped by the loop guard's lockout callback; read by onPayload below to
 	// force the remaining model rounds text-only via tool_choice none.
 	let synthesisToolLock = false;
+	let workerBoundFailure: string | null = null;
+	let workerBoundAborted = false;
+	let abortWorkerForBound: (() => void) | null = null;
+	// For synthesis:false, the loop guard records the final admitted call while
+	// rejecting later siblings immediately. The runtime stops only after pi has
+	// emitted that call's tool-result message, so a slow tool is never aborted
+	// merely because its before_tool admission reached the agent boundary.
+	let stopAfterToolResultCallId: string | null = null;
+	const workerBudget = resolveWorkerRuntimeBudget(input);
+	const readReserve = input.allowedTools.includes(ToolNames.Read) ? workerBudget.readReserve : 0;
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	// Tool calls emitted by one provider response share this correlation. The
 	// loop guard counts synthesis-lock noncompliance by model round, preventing
@@ -381,22 +410,33 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		[
 			createLoopGuardRegistration({
 				safety,
-				toolCallCap: readWorkerToolCallCap(),
-				...(input.agentId === "scout" ? { toolCallSoftLimit: SCOUT_EXPLORATION_TOOL_CALL_LIMIT } : {}),
-				...(input.agentId === "scout" ? { toolCallSoftReadReserve: SCOUT_LIVE_READ_RESERVE_CALLS } : {}),
-				// Hold the tail of the cap for verification reads and synthesis so a
-				// reconnaissance worker never exhausts its budget mid-exploration and
-				// reports citation-free leads (inactive when the cap is that small).
-				toolCallReserve: WORKER_SYNTHESIS_RESERVE_CALLS,
-				turnSynthesisLockout: true,
+				toolCallCap: workerBudget.hardCap,
+				toolCallSoftLimit: workerBudget.toolCalls,
+				toolCallSoftReadReserve: readReserve,
+				turnSynthesisLockout: workerBudget.synthesis,
 				// Once locked, the next model round is forced text-only at the
 				// request level (tool_choice none in onPayload below): the lockout
 				// directive alone relies on model compliance, and measured local
 				// models kept calling tools until the backstop aborted the run.
 				onSynthesisLockout: () => {
-					synthesisToolLock = true;
+					if (workerBudget.synthesis) {
+						synthesisToolLock = true;
+					}
 				},
-				...(input.agentId === "scout"
+				...(!workerBudget.synthesis
+					? {
+							onSoftLimitFinalCallAdmitted: (toolCallId: string | undefined) => {
+								if (workerBoundFailure === null) {
+									workerBoundFailure = `worker agent budget reached (${workerBudget.toolCalls}); synthesis is disabled`;
+								}
+								// Native agent tool calls carry a stable provider id. The empty
+								// sentinel keeps even an invariant violation on the post-result
+								// path instead of reintroducing a before_tool abort.
+								stopAfterToolResultCallId = toolCallId ?? "";
+							},
+						}
+					: {}),
+				...(readReserve > 0
 					? {
 							onSoftReadReserve: () => {
 								middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Read }]);
@@ -413,12 +453,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.autonomy,
 		(effects) => middlewareToolChoice.apply(effects),
 	);
-	let workerBoundFailure: string | null = null;
-	let workerBoundAborted = false;
 	let scoutSynthesisCorrectionsQueued = 0;
 	const pendingScoutReadCitations = new Map<string, string>();
 	const successfulScoutReadCitations: string[] = [];
-	let abortWorkerForBound: (() => void) | null = null;
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });
@@ -539,6 +576,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 		}
 		emit(event);
+		if (
+			stopAfterToolResultCallId !== null &&
+			event.type === "message_end" &&
+			event.message.role === "toolResult" &&
+			(stopAfterToolResultCallId.length === 0 || event.message.toolCallId === stopAfterToolResultCallId)
+		) {
+			stopAfterToolResultCallId = null;
+			workerBoundAborted = true;
+			abortWorkerForBound?.();
+		}
 	});
 
 	// Non-stall guarantee (Symphony §10.5): a dispatched worker has no

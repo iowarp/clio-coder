@@ -5,12 +5,18 @@ import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claud
 import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { buildAgyArgs } from "../../src/engine/antigravity/subprocess-runtime.js";
-import { claudeSdkPermissionModeForAutonomy, claudeSdkToolsForAutonomy } from "../../src/engine/claude/sdk-runtime.js";
+import {
+	claudeSdkPermissionModeForAutonomy,
+	claudeSdkToolsForAutonomy,
+	createClaudeWorkerBudgetGate,
+	decideClaudeSdkToolUseOnce,
+} from "../../src/engine/claude/sdk-runtime.js";
 import {
 	buildClaudeCodeArgs,
 	claudeSubprocessPermissionConfigForAutonomy,
 } from "../../src/engine/claude/subprocess-runtime.js";
 import {
+	type ClaudeToolPermissionDecision,
 	claudeToolsOutsideProfile,
 	type EvaluateClaudeToolPermissionInput,
 	emitClaudeToolPermissionDecision,
@@ -284,7 +290,172 @@ describe("contracts/external CLI worker tool-profile enforcement", () => {
 		ok(Array.isArray(buildClaudeCodeArgs(base)));
 		ok(Array.isArray(buildAgyArgs({ ...base, toolProfile: "full-agent" })));
 	});
+
+	it("enforces canonical SDK budget counting, read reserve, and synthesis transition", () => {
+		let boundaries = 0;
+		let hardCaps = 0;
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 4, readReserve: 2, synthesis: true, hardCap: 6 },
+			() => {
+				boundaries += 1;
+			},
+			() => {
+				hardCaps += 1;
+			},
+		);
+		strictEqual(gate.attempt("grep").kind, "allow");
+		strictEqual(gate.admit("grep").kind, "allow");
+		strictEqual(gate.attempt("find").kind, "allow");
+		strictEqual(gate.admit("find").kind, "allow");
+		matchBudgetDeny(gate.attempt("bash"), /read reserve/);
+		strictEqual(gate.attempt("read").kind, "allow");
+		strictEqual(gate.admit("read").kind, "allow");
+		strictEqual(gate.attempt("read").kind, "allow");
+		strictEqual(gate.admit("read").kind, "allow");
+		strictEqual(gate.phaseReached(), true);
+		strictEqual(boundaries, 1);
+		matchBudgetDeny(gate.attempt("read"), /worker agent budget reached/);
+		matchBudgetDeny(gate.attempt("read"), /workerToolCallCap reached/);
+		strictEqual(hardCaps, 1);
+	});
+
+	it("does not spend a one-call agent budget on an out-of-profile denial", () => {
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 3 },
+			() => {},
+			() => {},
+		);
+		const denied = evaluateClaudeToolPermission({
+			toolName: "Bash",
+			input: { command: "pwd" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "full-auto",
+			allowedTools: new Set(["read"]),
+			budgetGate: gate,
+		});
+		strictEqual(denied.kind, "deny");
+		strictEqual(denied.reasonCode, "tool-profile");
+		const allowed = evaluateClaudeToolPermission({
+			toolName: "Read",
+			input: { file_path: "README.md" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "read-only",
+			allowedTools: new Set(["read"]),
+			budgetGate: gate,
+		});
+		strictEqual(allowed.kind, "allow");
+		strictEqual(gate.phaseReached(), true);
+	});
+
+	it("does not spend a one-call agent budget on a safety denial", () => {
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 3 },
+			() => {},
+			() => {},
+		);
+		const denied = evaluateClaudeToolPermission({
+			toolName: "Read",
+			input: { file_path: "credentials.yaml" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "read-only",
+			allowedTools: new Set(["read"]),
+			budgetGate: gate,
+		});
+		strictEqual(denied.kind, "deny");
+		strictEqual(denied.decision.kind, "block");
+		const allowed = evaluateClaudeToolPermission({
+			toolName: "Read",
+			input: { file_path: "README.md" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "read-only",
+			allowedTools: new Set(["read"]),
+			budgetGate: gate,
+		});
+		strictEqual(allowed.kind, "allow");
+	});
+
+	it("does not spend a one-call agent budget on an autonomy denial", () => {
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 3 },
+			() => {},
+			() => {},
+		);
+		const denied = evaluateClaudeToolPermission({
+			toolName: "Write",
+			input: { file_path: "tmp/claude-test.txt", content: "x" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "read-only",
+			allowedTools: new Set(["write", "read"]),
+			budgetGate: gate,
+		});
+		strictEqual(denied.kind, "deny");
+		strictEqual(denied.reasonCode, "autonomy:read-only");
+		const allowed = evaluateClaudeToolPermission({
+			toolName: "Read",
+			input: { file_path: "README.md" },
+			safety: createWorkerSafety({ cwd: process.cwd() }),
+			cwd: process.cwd(),
+			autonomy: "read-only",
+			allowedTools: new Set(["write", "read"]),
+			budgetGate: gate,
+		});
+		strictEqual(allowed.kind, "allow");
+	});
+
+	it("reserve denials preserve admitted read slots while still consuming hard attempts", () => {
+		let hardCaps = 0;
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 2, readReserve: 1, synthesis: true, hardCap: 3 },
+			() => {},
+			() => {
+				hardCaps += 1;
+			},
+		);
+		strictEqual(gate.attempt("grep").kind, "allow");
+		strictEqual(gate.admit("grep").kind, "allow");
+		matchBudgetDeny(gate.attempt("bash"), /read reserve/);
+		strictEqual(gate.attempt("read").kind, "allow");
+		strictEqual(gate.admit("read").kind, "allow");
+		strictEqual(gate.phaseReached(), true);
+		matchBudgetDeny(gate.attempt("read"), /workerToolCallCap reached/);
+		strictEqual(hardCaps, 1);
+	});
+
+	it("counts duplicate PreToolUse and canUseTool mediation as one logical attempt", () => {
+		const gate = createClaudeWorkerBudgetGate(
+			{ toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 1 },
+			() => {},
+			() => {},
+		);
+		const handled = new Map<string, ClaudeToolPermissionDecision>();
+		let evaluations = 0;
+		const decide = () => {
+			evaluations += 1;
+			return evaluateClaudeToolPermission({
+				toolName: "Read",
+				input: { file_path: "README.md" },
+				safety: createWorkerSafety({ cwd: process.cwd() }),
+				cwd: process.cwd(),
+				autonomy: "read-only",
+				allowedTools: new Set(["read"]),
+				budgetGate: gate,
+			});
+		};
+		strictEqual(decideClaudeSdkToolUseOnce(handled, "tool-1", decide).kind, "allow");
+		strictEqual(decideClaudeSdkToolUseOnce(handled, "tool-1", decide).kind, "allow");
+		strictEqual(evaluations, 1);
+	});
 });
+
+function matchBudgetDeny(value: { kind: string; reason?: string }, pattern: RegExp): void {
+	strictEqual(value.kind, "deny");
+	ok(pattern.test(value.reason ?? ""));
+}
 
 describe("contracts/claude subprocess permission gate", () => {
 	it("only opens dangerous bypass under full-auto plus the explicit environment gate", () => {

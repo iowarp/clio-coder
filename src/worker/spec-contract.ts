@@ -15,7 +15,10 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 
-export const WORKER_SPEC_VERSION = 1;
+/** Budget-free compatibility document accepted from pre-budget dispatchers. */
+export const LEGACY_WORKER_SPEC_VERSION = 1;
+/** Current budget-bearing dispatch document emitted by this release. */
+export const WORKER_SPEC_VERSION = 2;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -40,8 +43,19 @@ export interface WorkerProtectedArtifactState {
 	artifacts: ReadonlyArray<ProtectedArtifact>;
 }
 
-export interface WorkerSpec {
-	specVersion: typeof WORKER_SPEC_VERSION;
+/** Concrete dispatch-time budget after recipe policy and operator clamping. */
+export interface WorkerBudget {
+	/** Agent phase boundary before synthesis or bounded termination. */
+	toolCalls: number;
+	/** Tail of toolCalls reserved for canonical read calls. */
+	readReserve: number;
+	/** True enters text-only synthesis; false ends at the phase boundary. */
+	synthesis: boolean;
+	/** Independent operator-owned attempt ceiling; recipes cannot widen it. */
+	hardCap: number;
+}
+
+interface WorkerSpecFields {
 	systemPrompt: string;
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	promptSignature?: string;
@@ -115,6 +129,20 @@ export interface WorkerSpec {
 	 */
 	writeRoots?: ReadonlyArray<string>;
 }
+
+/** Budget-free compatibility shape used only by pre-v2 dispatchers. */
+export type LegacyWorkerSpec = WorkerSpecFields & {
+	specVersion: typeof LEGACY_WORKER_SPEC_VERSION;
+	budget?: never;
+};
+
+/** Current wire shape. Every v2 document carries its concrete admitted budget. */
+export type CurrentWorkerSpec = WorkerSpecFields & {
+	specVersion: typeof WORKER_SPEC_VERSION;
+	budget: WorkerBudget;
+};
+
+export type WorkerSpec = LegacyWorkerSpec | CurrentWorkerSpec;
 
 export interface WorkerPromptMessage {
 	id: string;
@@ -333,6 +361,31 @@ function validateAllowedTools(value: unknown): void {
 	}
 }
 
+function validateWorkerBudget(value: unknown): void {
+	if (value === undefined) return;
+	const budget = readRecord(value, "WorkerSpec.budget");
+	const expected = ["hardCap", "readReserve", "synthesis", "toolCalls"];
+	const actual = Object.keys(budget).sort();
+	if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+		throw new Error(`WorkerSpec.budget must contain exactly: ${expected.join(", ")}`);
+	}
+	for (const key of ["toolCalls", "readReserve", "hardCap"] as const) {
+		const value = budget[key];
+		if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+			throw new Error(`WorkerSpec.budget.${key} must be a safe integer`);
+		}
+	}
+	if ((budget.toolCalls as number) <= 0) throw new Error("WorkerSpec.budget.toolCalls must be greater than zero");
+	if ((budget.hardCap as number) <= 0) throw new Error("WorkerSpec.budget.hardCap must be greater than zero");
+	if ((budget.toolCalls as number) > (budget.hardCap as number)) {
+		throw new Error("WorkerSpec.budget.toolCalls must not exceed WorkerSpec.budget.hardCap");
+	}
+	if ((budget.readReserve as number) < 0 || (budget.readReserve as number) >= (budget.toolCalls as number)) {
+		throw new Error("WorkerSpec.budget.readReserve must be an integer in [0, toolCalls)");
+	}
+	if (typeof budget.synthesis !== "boolean") throw new Error("WorkerSpec.budget.synthesis must be a boolean");
+}
+
 function validateRuntimeCapabilityDecision(value: unknown, source: string): void {
 	const caps = readRecord(value, source);
 	for (const key of ["chat", "tools", "reasoning", "vision", "streaming"] as const) {
@@ -434,8 +487,16 @@ function validateProtectedArtifactState(value: unknown): void {
 
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
-	if (spec.specVersion !== WORKER_SPEC_VERSION) {
-		throw new Error(`WorkerSpec version ${String(spec.specVersion)} is unsupported; expected ${WORKER_SPEC_VERSION}`);
+	if (spec.specVersion !== LEGACY_WORKER_SPEC_VERSION && spec.specVersion !== WORKER_SPEC_VERSION) {
+		throw new Error(
+			`WorkerSpec version ${String(spec.specVersion)} is unsupported; expected ${LEGACY_WORKER_SPEC_VERSION} or ${WORKER_SPEC_VERSION}`,
+		);
+	}
+	if (spec.specVersion === LEGACY_WORKER_SPEC_VERSION && spec.budget !== undefined) {
+		throw new Error("WorkerSpec version 1 is the budget-free legacy compatibility form and must not include budget");
+	}
+	if (spec.specVersion === WORKER_SPEC_VERSION && spec.budget === undefined) {
+		throw new Error(`WorkerSpec version ${WORKER_SPEC_VERSION} requires budget`);
 	}
 	const runtime = readRecord(spec.runtime, "WorkerSpec.runtime");
 	if (runtime.version !== WORKER_RUNTIME_DESCRIPTOR_VERSION) {
@@ -479,6 +540,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		}
 	}
 	validateAllowedTools(spec.allowedTools);
+	validateWorkerBudget(spec.budget);
 	readOptionalStringArray(spec, "protectedModels", "WorkerSpec");
 	validateRuntimeResolution(spec.runtimeResolution);
 	if (spec.middlewareSnapshot !== undefined) validateMiddlewareSnapshot(spec.middlewareSnapshot);

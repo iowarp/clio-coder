@@ -1,3 +1,5 @@
+import type { ToolName } from "../../core/tool-names.js";
+import type { AutonomyLevel } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
@@ -41,6 +43,29 @@ export interface CompileInputs {
 	safety: string;
 	sessionInputs: SessionPromptInputs;
 	additionalFragments?: ReadonlyArray<RenderedPromptFragment>;
+}
+
+/** Stable inputs for one mediated fleet worker's canonical system prompt. */
+export interface WorkerPromptInputs {
+	/** The autonomy level already clamped by dispatch admission. */
+	autonomy: AutonomyLevel;
+	/**
+	 * Whether the selected target can attach canonical Clio tool schemas.
+	 * `null` means the delegated target's inventory is not observable.
+	 */
+	providerSupportsTools: boolean | null;
+	/** Final canonical names used to attach worker schemas. */
+	toolNames: ReadonlyArray<ToolName>;
+	/** Registry-owned guidance for the final canonical toolkit. */
+	toolPromptHints: ReadonlyArray<ToolPromptHint>;
+	/** Whether canonical `context` is present in the final attached schema surface. */
+	hasCanonicalContext: boolean;
+	/** True only when dispatch has explicitly harness-activated recipe-bound skills. */
+	hasBoundSkills: boolean;
+	/** Effective approval routing for this worker run. */
+	onPermission: "deny" | "fail" | "escalate";
+	/** One stable persona: the recipe body or bounded override, including bound-skill mechanics. */
+	persona: RenderedPromptFragment;
 }
 
 export interface FragmentManifestEntry {
@@ -166,6 +191,148 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	return lines.join("\n");
 }
 
+function canonicalWorkerTools(inputs: WorkerPromptInputs): string[] {
+	return [...new Set(inputs.toolNames.map((name) => name.trim()).filter((name) => name.length > 0))].sort();
+}
+
+function workerPermissionSentence(mode: WorkerPromptInputs["onPermission"]): string {
+	switch (mode) {
+		case "escalate":
+			return "Approval-required calls pause for a bounded operator decision before execution.";
+		case "deny":
+			return "Approval-required calls are denied immediately; they are not parked for an operator.";
+		case "fail":
+			return "An approval-required call fails and ends the worker run; it is not parked for an operator.";
+	}
+}
+
+function renderWorkerOperatingContract(operatingContract: LoadedFragment, inputs: WorkerPromptInputs): string {
+	const skillsHeading = "\n# Skills\n";
+	const skillsAt = operatingContract.body.indexOf(skillsHeading);
+	const withoutSkills = skillsAt >= 0 ? operatingContract.body.slice(0, skillsAt) : operatingContract.body;
+	const skillAwareBody = inputs.hasCanonicalContext && !inputs.hasBoundSkills ? operatingContract.body : withoutSkills;
+	const operatingPermission =
+		inputs.autonomy === "read-only"
+			? "This read-only worker denies mutating calls without requesting approval."
+			: workerPermissionSentence(inputs.onPermission);
+	const workerBody = skillAwareBody.replace(
+		/Safety policy is authoritative[\s\S]*?Do not retry the same blocked\naction through another tool\./,
+		[
+			"Safety policy is authoritative for every tool call. Allow decisions run normally.",
+			operatingPermission,
+			"Hard blocks (destructive git, protected artifacts, project or path policy violations) remain hard blocks. When a call is blocked, pivot to a safer approach or explain the blocker. Do not retry the same blocked action through another tool.",
+		].join("\n"),
+	);
+	return [
+		workerBody.trim(),
+		"# Assigned Task Contract",
+		"The assigned task is authoritative. Role guidance is a persona, not a replacement task.",
+		"Do not invent a different task, source tree, file path, or implementation plan.",
+		"If the assigned task asks for an exact response, a direct answer, or no tool use, answer it directly without tool calls.",
+		"Use tools only when necessary for the assigned task and admitted by the worker tool contract.",
+	].join("\n\n");
+}
+
+function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
+	if (inputs.providerSupportsTools === false) {
+		return [
+			"# Tool Contract",
+			"Canonical Clio tool calls are unavailable on this target.",
+			"Answer from the assigned task and dynamic messages only; do not claim that inspection or changes were performed.",
+		].join("\n");
+	}
+	if (inputs.providerSupportsTools === null) {
+		return [
+			"# Tool Contract",
+			"This delegated target's tool inventory is unknown to the Clio harness.",
+			"Use only tools the target actually exposes and only when the assigned task requires them; do not infer a complete tool surface from this prompt.",
+		].join("\n");
+	}
+
+	const names = canonicalWorkerTools(inputs);
+	if (names.length === 0) {
+		return [
+			"# Tool Contract",
+			"No canonical tools are admitted for this worker.",
+			"Answer the assigned task directly without tool calls.",
+		].join("\n");
+	}
+
+	const lines = [
+		"# Tool Contract",
+		"The attached schemas are this worker's complete canonical tool surface; follow each schema exactly.",
+		`Admitted canonical tools: ${names.map((name) => `\`${name}\``).join(", ")}.`,
+		"Tool authority is limited to this list. Persona and bound-skill instructions never add tools.",
+		"Call tools only for concrete inspection or changes the assigned task requires. If the task requests an exact or tool-free response, answer without calling tools.",
+	];
+	const admitted = new Set(names);
+	const seen = new Set<string>();
+	const hints = [...inputs.toolPromptHints]
+		.map((entry) => ({ tool: entry.tool.trim(), hint: entry.hint.trim() }))
+		.filter((entry) => admitted.has(entry.tool) && entry.hint.length > 0)
+		.sort((a, b) => {
+			if (a.tool !== b.tool) return a.tool < b.tool ? -1 : 1;
+			return a.hint < b.hint ? -1 : a.hint > b.hint ? 1 : 0;
+		});
+	for (const entry of hints) {
+		if (seen.has(entry.tool)) continue;
+		seen.add(entry.tool);
+		lines.push(entry.hint);
+	}
+	return lines.join("\n");
+}
+
+/** Worker-specific autonomy directive that reflects permission routing without changing session prompt policy. */
+export function workerSafetyOneLiner(level: AutonomyLevel, mode: WorkerPromptInputs["onPermission"]): string {
+	if (level === "read-only") return safetyOneLiner(level);
+	const posture = workerPermissionSentence(mode);
+	switch (level) {
+		case "suggest":
+			return `read calls run freely; every non-read action requires approval. ${posture}`;
+		case "auto-edit":
+			return `workspace edits and recognized commands run; other commands require approval. ${posture}`;
+		case "full-auto":
+			return `act without asking except for safety-classified approval-required calls. ${posture}`;
+	}
+}
+
+function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: WorkerPromptInputs): string {
+	const heading = safetyFragment.body.trim().split("\n", 1)[0] ?? "# Safety";
+	const lines = [
+		`Autonomy: ${inputs.autonomy}. ${workerSafetyOneLiner(inputs.autonomy, inputs.onPermission)}`,
+		"",
+		heading,
+	];
+	switch (inputs.autonomy) {
+		case "read-only":
+			lines.push(
+				"Admitted read-class tools run freely. Every mutating call is denied by the harness, and no approval prompt appears.",
+				"When a change is needed, propose it concretely instead of attempting it.",
+			);
+			break;
+		case "suggest":
+			lines.push(
+				"Admitted read-class tools run freely. Every non-read call is approval-required.",
+				workerPermissionSentence(inputs.onPermission),
+			);
+			break;
+		case "auto-edit":
+			lines.push(
+				"Workspace edits and recognized commands run. Other commands and system modifications are approval-required.",
+				workerPermissionSentence(inputs.onPermission),
+			);
+			break;
+		case "full-auto":
+			lines.push(
+				"Writes, dispatches, and ordinary commands run. System modifications and opaque command substitutions remain approval-required.",
+				workerPermissionSentence(inputs.onPermission),
+			);
+			break;
+	}
+	lines.push("Destructive git and other hard safety blocks remain denied at every autonomy level.");
+	return lines.join("\n");
+}
+
 function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
@@ -245,6 +412,63 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			dynamic: fragment.dynamic,
 		});
 	}
+
+	return {
+		systemPrompt,
+		systemPromptHash: sha256(systemPrompt),
+		tokenEstimate: estimatePromptTokens(systemPrompt),
+		sections,
+		fragmentManifest,
+	};
+}
+
+/**
+ * Compile the canonical stable prompt for one mediated fleet worker.
+ * Dynamic task, project, memory, pipeline, and per-run posture messages do
+ * not belong here. The section order is a protocol invariant.
+ */
+export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs): CompiledSessionPrompt {
+	if (inputs.persona.dynamic) {
+		throw new Error("prompts/compiler: worker persona must be a stable fragment");
+	}
+	if (inputs.persona.body.trim().length === 0) {
+		throw new Error("prompts/compiler: worker persona must not be empty");
+	}
+	const contextIsAttached = inputs.providerSupportsTools === true && canonicalWorkerTools(inputs).includes("context");
+	if (inputs.hasCanonicalContext !== contextIsAttached) {
+		throw new Error("prompts/compiler: hasCanonicalContext must match the final attached canonical tool surface");
+	}
+	if (inputs.hasBoundSkills && !inputs.hasCanonicalContext) {
+		throw new Error("prompts/compiler: bound skills require canonical context in the final attached tool surface");
+	}
+	const identity = lookupFragment(table, "identity.clio-worker", "worker identity");
+	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
+	const safety = lookupFragment(table, `safety.${inputs.autonomy}`, "safety");
+
+	const parts: string[] = [];
+	const sections: PromptSection[] = [];
+	const push = (id: string, body: string): void => {
+		const trimmed = body.trim();
+		if (trimmed.length === 0) return;
+		parts.push(trimmed);
+		sections.push({ id, tokenEstimate: estimatePromptTokens(trimmed) });
+	};
+
+	push("identity", identity.body);
+	push("operating-contract", renderWorkerOperatingContract(operatingContract, inputs));
+	push("tool-contract", renderWorkerToolContractBlock(inputs));
+	push("safety", renderWorkerSafetySection(safety, inputs));
+	push("persona", inputs.persona.body);
+
+	const systemPrompt = parts.join("\n\n");
+	const fragmentManifest: FragmentManifestEntry[] = [identity, operatingContract, safety, inputs.persona].map(
+		(fragment) => ({
+			id: fragment.id,
+			relPath: fragment.relPath,
+			contentHash: fragment.contentHash,
+			dynamic: fragment.dynamic,
+		}),
+	);
 
 	return {
 		systemPrompt,

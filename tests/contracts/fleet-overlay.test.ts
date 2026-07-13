@@ -163,6 +163,7 @@ function spec(id: string, audience: AgentSpec["audience"]): AgentSpec {
 		tags: [],
 		skills: [],
 		output: null,
+		budget: null,
 		body: "",
 	};
 }

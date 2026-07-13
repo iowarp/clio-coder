@@ -6,6 +6,10 @@ audience: base
 category: implement
 capabilityClass: workspace-edit
 latencyClass: balanced
+budget:
+  toolCalls: 50
+  readReserve: 5
+  synthesis: true
 tags: [implementation, repair, refactor]
 model: null
 provider: null

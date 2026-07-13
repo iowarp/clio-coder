@@ -374,6 +374,14 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * LoopBlocked "lockout" bus event instead.
 	 */
 	onSynthesisLockout?: () => void;
+	/**
+	 * Worker only: invoked when the final call allowed by the soft agent budget
+	 * is admitted. The callback identifies the call whose completed tool-result
+	 * message forms the post-execution boundary for a synthesis-disabled run.
+	 * The guard locks later (including parallel sibling) calls before invoking
+	 * this callback; callers must not stop the active call from this hook.
+	 */
+	onSoftLimitFinalCallAdmitted?: (toolCallId: string | undefined) => void;
 	/** Invoked once when the soft-limit live-read reserve opens. */
 	onSoftReadReserve?: () => void;
 	now?: () => number;
@@ -391,7 +399,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		options.toolCallSoftLimit !== undefined &&
 		Number.isSafeInteger(options.toolCallSoftLimit) &&
 		options.toolCallSoftLimit > 0 &&
-		(cap === undefined || options.toolCallSoftLimit < cap)
+		(cap === undefined || options.toolCallSoftLimit <= cap)
 			? options.toolCallSoftLimit
 			: undefined;
 	const turnBudget = options.turnToolCallBudget;
@@ -782,6 +790,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
 			}
 			if (softLockout !== null && softLimit !== undefined) {
+				count += 1;
+				if (cap !== undefined && count > cap) {
+					return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
+				}
 				if (reachesLockoutBackstop(softLockout, input)) {
 					return [
 						{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
@@ -795,6 +807,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// lifetime-cap failure before the model gets its synthesis round.
 			const lockout = synthesisLockout ? lockoutByTurn.get(turnKey) : undefined;
 			if (lockout !== undefined) {
+				count += 1;
+				if (cap !== undefined && count > cap) {
+					return [{ kind: "block_tool", reason: workerToolCallCapExceededReason(cap), severity: "hard-block" }];
+				}
 				if (reachesLockoutBackstop(lockout, input)) {
 					emitLoopBlocked(
 						input,
@@ -840,6 +856,14 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						options.onSynthesisLockout?.();
 						return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
 					}
+					if (count === softLimit) {
+						softLockout = {
+							denials: 0,
+							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+						};
+						options.onSynthesisLockout?.();
+						options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
+					}
 				} else {
 					if (softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
 					if (softAdmittedCount >= softLimit) {
@@ -850,7 +874,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						options.onSynthesisLockout?.();
 						return [{ kind: "block_tool", reason: workerExplorationSynthesisDirective(softLimit), severity: "hard-block" }];
 					}
-					if (softAdmittedCount >= softReadReserveThreshold && input.metadata?.actionClass !== "read") {
+					if (softAdmittedCount >= softReadReserveThreshold && input.toolName !== ToolNames.Read) {
 						return [
 							{
 								kind: "block_tool",
@@ -867,6 +891,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 							...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
 						};
 						options.onSynthesisLockout?.();
+						options.onSoftLimitFinalCallAdmitted?.(input.toolCallId);
 					}
 				}
 			}
@@ -879,7 +904,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// detectors below. A model that keeps trying blocked calls burns
 			// attempts toward the unchanged hard cap, which remains the bound.
 			if (reserveThreshold !== null && cap !== undefined && count > reserveThreshold) {
-				if (input.metadata?.actionClass !== "read") {
+				if (input.toolName !== ToolNames.Read) {
 					return [
 						{
 							kind: "block_tool",

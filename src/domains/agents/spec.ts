@@ -1,6 +1,6 @@
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { type ActionClass, classify } from "../safety/action-classifier.js";
-import type { AgentRecipe } from "./recipe.js";
+import type { AgentBudget, AgentRecipe } from "./recipe.js";
 
 export type AgentCategory =
 	| "explore"
@@ -78,6 +78,8 @@ export interface AgentSpec {
 	tags: ReadonlyArray<string>;
 	skills: ReadonlyArray<string>;
 	output: string | null;
+	/** Declared phase policy, or null when runtime/operator defaults apply. */
+	budget: AgentBudget | null;
 	body: string;
 }
 
@@ -198,6 +200,7 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		tags: recipe.tags ?? [],
 		skills: recipe.skills ?? [],
 		output: recipe.output ?? null,
+		budget: recipe.budget ?? null,
 		body: recipe.body,
 	};
 }

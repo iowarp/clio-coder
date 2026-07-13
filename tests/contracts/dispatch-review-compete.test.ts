@@ -12,6 +12,7 @@ import {
 	stagePendingGateOutput,
 	verifyGateDecisionArtifact,
 } from "../../src/domains/dispatch/gate-decisions.js";
+import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -288,6 +289,8 @@ describe("reviewer-gated dispatch", () => {
 			// The reviewer ran read-only regardless of the session level.
 			const reviewerSpawn = fabric.spawns.find((entry) => entry.spec.task.startsWith("Review the work"));
 			strictEqual(reviewerSpawn?.spec.autonomy, "read-only");
+			ok(reviewerSpawn?.spec.systemPrompt.startsWith("# Identity\n\nYou are Clio"));
+			ok(reviewerSpawn?.spec.systemPrompt.endsWith(REVIEWER_GATE_PROMPT));
 			match(reviewerSpawn?.spec.task ?? "", new RegExp(builder?.runId ?? "missing-builder-run"));
 			strictEqual(reviewerSpawn?.spec.task.includes("plan-builder-"), false);
 			// Both receipts still verify against their ledger rows.
@@ -877,6 +880,9 @@ describe("compete dispatch", () => {
 			match(result.output, /compete winner candidate 2 applied/);
 			const judgeSpawn = fabric.spawns.find((entry) => entry.spec.task.startsWith("Rank "));
 			ok(judgeSpawn, "judge receives the runtime ranking task");
+			strictEqual(judgeSpawn?.spec.autonomy, "read-only");
+			ok(judgeSpawn?.spec.systemPrompt.startsWith("# Identity\n\nYou are Clio"));
+			ok(judgeSpawn?.spec.systemPrompt.endsWith(JUDGE_GATE_PROMPT));
 			strictEqual(judgeSpawn?.spec.task.includes("Plan-time capability check"), false);
 			// The winner's work landed in the repository working tree.
 			const applied = readFileSync(join(repo, "answer.txt"), "utf8");

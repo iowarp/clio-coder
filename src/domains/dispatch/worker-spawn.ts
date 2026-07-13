@@ -58,6 +58,7 @@ export interface SpawnOptions {
 export interface WorkerAnnounce {
 	pid: number | null;
 	host: string | null;
+	specVersion: WorkerSpec["specVersion"];
 }
 
 export interface WorkerProcessOptions {
@@ -89,7 +90,9 @@ export interface WorkerProcessOptions {
 const DEFAULT_SHUTDOWN_GRACE_MS = 500;
 const STDERR_TAIL_BYTES = 4096;
 
-function isWorkerAnnounce(value: unknown): value is { type: "worker_announce"; pid?: unknown; host?: unknown } {
+function isWorkerAnnounce(
+	value: unknown,
+): value is { type: "worker_announce"; pid?: unknown; host?: unknown; specVersion?: unknown } {
 	return (
 		typeof value === "object" &&
 		value !== null &&
@@ -156,6 +159,23 @@ export function spawnWorkerProcess(
 	}
 
 	let sawSpawnError = false;
+	let announceAccepted = false;
+	let announceFailed = false;
+
+	function failAnnounceHandshake(message: string): void {
+		if (announceFailed) return;
+		announceFailed = true;
+		appendStderr(`[worker] ${message}\n`);
+		// A peer that did not prove the dispatched wire contract must not execute.
+		// Terminate authoritatively instead of offering a catchable grace signal.
+		if (!child.killed) {
+			try {
+				child.kill("SIGKILL");
+			} catch {
+				// The close handler still converts a clean pre-announce exit to failure.
+			}
+		}
+	}
 	child.once("error", (err) => {
 		sawSpawnError = true;
 		push({
@@ -182,13 +202,34 @@ export function spawnWorkerProcess(
 			if (trimmed.length === 0) return;
 			try {
 				const value = JSON.parse(trimmed) as unknown;
-				if (opts?.onAnnounce && isWorkerAnnounce(value)) {
-					heartbeatAt.current = Date.now();
-					opts.onAnnounce({
-						pid: typeof value.pid === "number" && Number.isFinite(value.pid) ? value.pid : null,
-						host: typeof value.host === "string" && value.host.length > 0 ? value.host : null,
-					});
-					return;
+				if (opts?.onAnnounce) {
+					if (announceFailed) return;
+					if (!announceAccepted && !isWorkerAnnounce(value)) {
+						failAnnounceHandshake(
+							`Missing worker_announce handshake: first protocol event was ${
+								typeof value === "object" && value !== null && "type" in value
+									? String((value as { type?: unknown }).type)
+									: typeof value
+							}; expected specVersion ${spec.specVersion}`,
+						);
+						return;
+					}
+					if (isWorkerAnnounce(value)) {
+						heartbeatAt.current = Date.now();
+						if (value.specVersion !== spec.specVersion) {
+							failAnnounceHandshake(
+								`WorkerSpec version mismatch: dispatched ${spec.specVersion}, remote announced ${String(value.specVersion)}`,
+							);
+							return;
+						}
+						announceAccepted = true;
+						opts.onAnnounce({
+							pid: typeof value.pid === "number" && Number.isFinite(value.pid) ? value.pid : null,
+							host: typeof value.host === "string" && value.host.length > 0 ? value.host : null,
+							specVersion: spec.specVersion,
+						});
+						return;
+					}
 				}
 				push(value);
 			} catch {
@@ -229,6 +270,16 @@ export function spawnWorkerProcess(
 			end();
 			if (sawSpawnError) {
 				resolve({ exitCode: null, signal: null, ...diagnostics() });
+				return;
+			}
+			if (opts?.onAnnounce && !announceAccepted && !announceFailed) {
+				announceFailed = true;
+				appendStderr(
+					`[worker] Missing worker_announce handshake: peer exited before announcing specVersion ${spec.specVersion}\n`,
+				);
+			}
+			if (announceFailed) {
+				resolve({ exitCode: code !== null && code !== 0 ? code : 1, signal: signal ?? null, ...diagnostics() });
 				return;
 			}
 			resolve({ exitCode: code ?? 0, signal: signal ?? null, ...diagnostics() });

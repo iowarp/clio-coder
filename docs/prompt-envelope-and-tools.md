@@ -25,6 +25,14 @@ Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user
 
 Providers that cannot call tools receive no schemas, and the prompt tells the model to proceed without tool calls.
 
+## Canonical worker harness
+
+Native and mediated dispatch workers use a separate prompts-domain compiler over the same loaded fragment table. Its stable system prompt has exactly five sections: identity-lite, the shared operating contract plus assigned-task rules, a tool contract sliced to the final canonical toolkit, safety for the single effective autonomy, and one final persona. A request persona override replaces only the recipe body; eligible bound-skill instructions are composed inside that same final persona and never widen tools.
+
+The compiler runs after target capability and tool-profile admission. Its canonical tool names are the same names transported in `WorkerSpec.allowedTools` and attached as schemas; routine non-Scout work removes `code_nav`, narrow profiles remove their excluded schemas and guidance, tool-incapable targets get an explicit no-tools contract, and Claude SDK aliases are filtered from the same canonical set. ACP's external inventory is unknown, so ACP bounded-role admission continues to validate the unchanged raw persona rather than fabricating a complete native schema list.
+
+Project context, memory, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. They do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
+
 ## Seven planes, nineteen tools
 
 The builtin surface is 19 registered tools organized in seven planes. Each plane is one policy unit: its tools share an action class, a size posture, a details schema, and a concurrency rule. `src/tools/policy.ts` asserts these invariants at bootstrap, so drift between the plane design, the safety classifier, and the registered specs fails loudly instead of shipping a surface that behaves differently from what the policy engine assumes.

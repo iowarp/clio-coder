@@ -14,6 +14,7 @@ import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModelIds } from "../../core/residency-protection.js";
@@ -27,12 +28,15 @@ import {
 } from "../../engine/acp/adapter.js";
 import { antigravitySubprocessConfigForAutonomy } from "../../engine/antigravity/subprocess-runtime.js";
 import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude/subprocess-runtime.js";
+import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
+import { toolPromptHintsForNames } from "../../tools/bootstrap.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import {
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
 	WORKER_SPEC_VERSION,
+	type WorkerBudget,
 	type WorkerPromptMessage,
 } from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
@@ -48,7 +52,8 @@ import {
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract, ProjectStructuredContext } from "../context/contract.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
-import { safetyOneLiner } from "../prompts/compiler.js";
+import { workerSafetyOneLiner } from "../prompts/compiler.js";
+import type { PromptsContract } from "../prompts/contract.js";
 import {
 	type CapabilityFlags,
 	canonicalizeWireModelId,
@@ -496,14 +501,6 @@ function mergeRouteWarningDetail(routeWarning: string | undefined, base: string 
 	return base !== null && base.length > 0 ? `${routeWarning}; ${base}` : routeWarning;
 }
 
-const DISPATCH_TASK_CONTRACT = [
-	"# Dispatch Task Contract",
-	"The assigned task is authoritative. The role guidance below is not itself a task.",
-	"Do not invent a different task, source tree, file path, or implementation plan.",
-	"If the assigned task asks for an exact response, a direct answer, or says not to inspect files or use tools, answer directly without tool calls.",
-	"Use tools only when they are necessary for the assigned task and allowed by the configured tool profile.",
-].join("\n");
-
 export function pickOrchestratorScope(safety: SafetyContract): ScopeSpec {
 	return safety.scopes.workspace;
 }
@@ -524,25 +521,29 @@ export function deriveRequestedActions(
 	return [...actions].sort();
 }
 
-export function buildStableSystemPrompt(req: DispatchRequest, recipe: AgentRecipe | null): string {
-	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
-	const skillBlock = recipe && req.noSkills !== true ? renderAgentSkillPrompt(recipe) : "";
-	const body = [base, skillBlock].filter((part) => part.trim().length > 0).join("\n\n");
-	const guardedBase = body.length > 0 ? `${DISPATCH_TASK_CONTRACT}\n\n${body}` : DISPATCH_TASK_CONTRACT;
-	return guardedBase;
-}
-
-function renderAgentSkillPrompt(recipe: AgentRecipe): string {
+function renderBoundSkillBlock(recipe: AgentRecipe): string {
 	const skills = recipe.skills ?? [];
 	if (skills.length === 0) return "";
 	const skillList = skills.map((skill) => `\`${skill}\``).join(", ");
 	return [
 		"# Agent-Bound Skills",
-		`This run binds these skills: ${skillList}. context(scope=skills) admits exactly these names and rejects any other.`,
+		`The harness explicitly activates these recipe-bound skills for this run: ${skillList}. The operator does not need to repeat a skill name.`,
+		`Canonical context(scope=skills) admits exactly these names and rejects any other; recipe binding never widens tool authority.`,
 		'Load a bound skill with `context` (scope="skills", name=<skill>) when it matches the assigned task, then follow its workflow.',
 		"Skills provide reusable know-how and resources; they never expand your tool authority.",
 		"If a bound skill fails to load, continue with the assigned task and report the missing skill.",
 	].join("\n");
+}
+
+function workerPersonaBody(
+	req: DispatchRequest,
+	recipe: AgentRecipe | null,
+	allowedTools: ReadonlyArray<ToolName>,
+): string {
+	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
+	const skillBlock =
+		recipe && req.noSkills !== true && allowedTools.includes(ToolNames.Context) ? renderBoundSkillBlock(recipe) : "";
+	return [base, skillBlock].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
 /** Total budget for the worker project-context message body. */
@@ -644,7 +645,9 @@ export interface WorkerDynamicContext {
 	/** Effective project-context tier; the project message renders only when "bounded". */
 	projectContextTier?: AgentProjectContextTier | null;
 	/** Effective autonomy the worker spec will carry; renders the safety-posture line. */
-	autonomy?: string | null;
+	autonomy?: AutonomyLevel | null;
+	/** Effective approval routing; defaults to deny for legacy direct callers. */
+	onPermission?: WorkerPermissionMode | null;
 	/** Structured CLIO.md fields; null when CLIO.md is absent or malformed. */
 	project?: ProjectStructuredContext | null;
 }
@@ -712,9 +715,10 @@ export function buildDynamicPromptMessages(
 			messages.push({ id: "dispatch-project-context", body, contentHash: sha256(body) });
 		}
 	}
-	const autonomy = dynamicContext.autonomy?.trim() ?? "";
-	if (autonomy.length > 0) {
-		const body = `Safety posture: autonomy ${autonomy}. ${safetyOneLiner(autonomy)}`;
+	const autonomy = dynamicContext.autonomy;
+	if (autonomy) {
+		const permission = dynamicContext.onPermission ?? "deny";
+		const body = `Safety posture: autonomy ${autonomy}. ${workerSafetyOneLiner(autonomy, permission)} Worker permission routing: ${permission}.`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
 	}
 	const memory = req.memorySection?.trim() ?? "";
@@ -802,6 +806,8 @@ interface DispatchWorkerSpecInput {
 	apiKey: string | undefined;
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
 	protectedArtifactState?: ProtectedArtifactState;
+	effectiveAutonomy: AutonomyLevel;
+	budget: WorkerBudget;
 	/** Effective settings snapshot for this run; falls back to config.get(). */
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 }
@@ -828,6 +834,8 @@ interface DispatchLifecycleStage {
 	pipeline: RunPipelineProvenance | null;
 	personaOverride: RunPersonaOverride | null;
 	projectContext: RunProjectContextProvenance;
+	effectiveAutonomy: AutonomyLevel;
+	budget: WorkerBudget;
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
 }
 
@@ -935,6 +943,53 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	throw new Error(
 		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
 	);
+}
+
+function assertWorkerBudgetEnforceable(runtime: RuntimeDescriptor, hasDeclaredBudget: boolean): void {
+	if (!hasDeclaredBudget || runtime.kind !== "subprocess") return;
+	throw new Error(
+		`dispatch: runtime '${runtime.id}' cannot enforce an explicit agent budget because subprocess workers do not expose per-tool mediation; choose a native or claude-sdk worker`,
+	);
+}
+
+function targetToolCapability(target: ResolvedTarget): boolean {
+	return target.modelCapabilities?.tools ?? target.runtime.defaultCapabilities.tools === true;
+}
+
+function effectiveWorkerToolNames(
+	allowedTools: ReadonlyArray<ToolName>,
+	target: ResolvedTarget,
+): ReadonlyArray<ToolName> {
+	if (!targetToolCapability(target)) return [];
+	const names = allowedTools.filter(
+		(tool): tool is ToolName =>
+			isBuiltinToolName(tool) &&
+			tool !== ToolNames.AskUser &&
+			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
+	);
+	return [...new Set(names)].sort();
+}
+
+function resolveEffectiveWorkerBudget(input: {
+	declared: ReturnType<typeof normalizeAgentSpec>["budget"];
+	allowedTools: ReadonlyArray<ToolName>;
+	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+}): WorkerBudget {
+	const rawEnvCap = process.env.CLIO_WORKER_TOOL_CALL_CAP?.trim();
+	const parsedEnvCap = rawEnvCap && /^[1-9]\d*$/.test(rawEnvCap) ? Number(rawEnvCap) : Number.NaN;
+	const hardCap = Number.isSafeInteger(parsedEnvCap)
+		? parsedEnvCap
+		: (input.settings?.guardrails.workerToolCallCap ?? GUARDRAIL_DEFAULTS.workerToolCallCap);
+	const declared = input.declared ?? {
+		toolCalls: hardCap,
+		readReserve: Math.min(5, Math.max(0, hardCap - 1)),
+		synthesis: true,
+	};
+	const toolCalls = Math.min(declared.toolCalls, hardCap);
+	const readReserve = input.allowedTools.includes(ToolNames.Read)
+		? Math.min(declared.readReserve, Math.max(0, toolCalls - 1))
+		: 0;
+	return { toolCalls, readReserve, synthesis: declared.synthesis, hardCap };
 }
 
 function frozenProtectedArtifactState(state: ProtectedArtifactState | undefined): ProtectedArtifactState {
@@ -1136,6 +1191,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		wireModelId: input.target.wireModelId,
 		thinkingLevel: input.target.thinkingLevel,
 		allowedTools: input.admission.allowedTools,
+		budget: input.budget,
 		middlewareSnapshot: input.middlewareSnapshot,
 	};
 	const protectedArtifactState = frozenProtectedArtifactState(input.protectedArtifactState);
@@ -1207,7 +1263,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	// does, with asks resolving through onPermission above. A request-level
 	// autonomy can only narrow (reviewer/judge runs pin read-only); a worker
 	// never exceeds the orchestrator's authority.
-	spec.autonomy = clampWorkerAutonomy(settings?.autonomy ?? "auto-edit", input.req.autonomy);
+	spec.autonomy = input.effectiveAutonomy;
 	return spec;
 }
 
@@ -1654,16 +1710,19 @@ export function createDispatchBundle(
 	const maybeProviders = context.getContract<ProvidersContract>("providers");
 	const maybeMiddleware = context.getContract<MiddlewareContract>("middleware");
 	const maybeScheduling = context.getContract<SchedulingContract>("scheduling");
+	const maybePrompts = context.getContract<PromptsContract>("prompts");
 	if (!maybeSafety) throw new Error("dispatch domain requires 'safety' contract");
 	if (!maybeAgents) throw new Error("dispatch domain requires 'agents' contract");
 	if (!maybeProviders) throw new Error("dispatch domain requires 'providers' contract");
 	if (!maybeMiddleware) throw new Error("dispatch domain requires 'middleware' contract");
 	if (!maybeScheduling) throw new Error("dispatch domain requires 'scheduling' contract");
+	if (!maybePrompts) throw new Error("dispatch domain requires 'prompts' contract");
 	const safety: SafetyContract = maybeSafety;
 	const agents: AgentsContract = maybeAgents;
 	const providers: ProvidersContract = maybeProviders;
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const scheduling: SchedulingContract = maybeScheduling;
+	const prompts: PromptsContract = maybePrompts;
 	const config = context.getContract<ConfigContract>("config");
 	const getEffectiveSettings = (): Readonly<ReturnType<ConfigContract["get"]>> | undefined =>
 		options?.getSettings?.() ?? config?.get();
@@ -2116,9 +2175,39 @@ export function createDispatchBundle(
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
+		assertWorkerBudgetEnforceable(target.runtime, spec.budget !== null);
 
 		const cwd = req.cwd ?? process.cwd();
-		const systemPrompt = buildStableSystemPrompt(req, recipe);
+		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
+		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
+		const effectiveTools = effectiveWorkerToolNames(admission.allowedTools, target);
+		const effectiveAdmission: DispatchAdmissionStage = {
+			...admission,
+			allowedTools: effectiveTools,
+		};
+		const personaBody = workerPersonaBody(req, recipe, effectiveTools);
+		const compiledWorkerPrompt = await prompts.compileWorkerPrompt({
+			autonomy: effectiveAutonomy,
+			providerSupportsTools: target.runtime.kind === "subprocess" ? null : targetToolCapability(target),
+			toolNames: effectiveTools,
+			toolPromptHints: toolPromptHintsForNames(effectiveTools),
+			hasCanonicalContext: effectiveTools.includes(ToolNames.Context),
+			hasBoundSkills:
+				effectiveTools.includes(ToolNames.Context) &&
+				recipe.skills !== undefined &&
+				recipe.skills.length > 0 &&
+				req.noSkills !== true,
+			onPermission: settings?.workers.onPermission ?? "deny",
+			persona: {
+				id: `persona.${recipe.id}`,
+				relPath: recipe.filepath,
+				body: personaBody,
+				contentHash: sha256(personaBody),
+				dynamic: false,
+			},
+		});
+		const systemPrompt = compiledWorkerPrompt.systemPrompt;
+		const budget = resolveEffectiveWorkerBudget({ declared: spec.budget, allowedTools: effectiveTools, settings });
 		// Fetch structured project context only for tiers that receive it, so
 		// read-only scouts never pay the CLIO.md read. The tier is spec policy
 		// (capability-class default, recipe frontmatter override).
@@ -2127,7 +2216,8 @@ export function createDispatchBundle(
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			capabilityClass: spec.capabilityClass,
 			projectContextTier: tier,
-			autonomy: settings?.autonomy ?? "auto-edit",
+			autonomy: effectiveAutonomy,
+			onPermission: settings?.workers.onPermission ?? "deny",
 			project,
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
@@ -2137,7 +2227,7 @@ export function createDispatchBundle(
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
 		const personaOverride = personaOverrideFor(req, staticCompositionHash);
-		const currentToolSignature = toolSignature(admission.allowedTools);
+		const currentToolSignature = toolSignature(effectiveTools);
 		const auth = targetRequiresAuth(target.target, target.runtime)
 			? await providers.auth.resolveForTarget(target.target, target.runtime)
 			: null;
@@ -2151,7 +2241,7 @@ export function createDispatchBundle(
 		const limitations = runtimeLimitations(runtimeKind, target.runtime.id);
 		return {
 			recipe,
-			admission,
+			admission: effectiveAdmission,
 			target,
 			cwd,
 			systemPrompt,
@@ -2171,6 +2261,8 @@ export function createDispatchBundle(
 			pipeline: pipelineProvenanceFor(req),
 			personaOverride,
 			projectContext: projectContextProvenance,
+			effectiveAutonomy,
+			budget,
 			...(settings ? { settings } : {}),
 		};
 	}
@@ -2215,7 +2307,10 @@ export function createDispatchBundle(
 			);
 		}
 		const cwd = req.cwd ?? process.cwd();
-		const systemPrompt = buildStableSystemPrompt(req, null);
+		const personaBody = workerPersonaBody(req, null, []);
+		// ACP owns an unknown external tool inventory, so it receives the raw
+		// bounded persona rather than a native Clio schema-harness claim.
+		const systemPrompt = personaBody;
 		// ACP delegation defaults to no project context: repo conventions and
 		// invariants never leave the machine unless this agent's config opts in
 		// with projectContext: "bounded". No recipe means no capability class,
@@ -3010,6 +3105,8 @@ export function createDispatchBundle(
 				middlewareSnapshot: middleware.snapshot(),
 				protectedArtifactState,
 				apiKey: lifecycle.apiKey,
+				effectiveAutonomy: lifecycle.effectiveAutonomy,
+				budget: lifecycle.budget,
 				...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 			},
 			config ?? undefined,

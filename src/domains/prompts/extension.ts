@@ -12,8 +12,8 @@ import {
 	renderOperatorProfile,
 	selectActiveRules,
 } from "../context/index.js";
-import { compile, type RenderedPromptFragment } from "./compiler.js";
-import type { CompileSessionPromptInput, PromptsContract } from "./contract.js";
+import { compile, compileWorker, type RenderedPromptFragment } from "./compiler.js";
+import type { CompileSessionPromptInput, CompileWorkerPromptInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
 import { classifyProjectPreload, type ProjectPreloadClass } from "./preload.js";
@@ -96,6 +96,13 @@ export function createPromptsBundle(
 				],
 			});
 			return { ...compiled, projectPreload };
+		},
+		async compileWorkerPrompt(input: CompileWorkerPromptInput) {
+			if (!table) throw new Error("prompts domain not started");
+			if (table.byId.size === 0) {
+				throw new Error("prompts: no fragments loaded, check startup logs");
+			}
+			return compileWorker(table, input);
 		},
 		reload,
 	};

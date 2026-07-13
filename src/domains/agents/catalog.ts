@@ -27,7 +27,7 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 	const shadowSpecs = specs.filter((spec) => spec.audience === "shadow");
 
 	const lines: string[] = [
-		"Clio manages a small fleet of coding agents. Recipes are Markdown files; normalized specs carry audience, category, capability, tools, skills, and latency hints.",
+		"Clio manages a small fleet of coding agents. Recipes are Markdown files; normalized specs carry audience, category, capability, tools, skills, latency, and worker-budget hints.",
 		"Use the `dispatch` tool to invoke one by `agent_id` when delegation helps.",
 		`Default dispatch agent: ${DEFAULT_DISPATCH_AGENT_ID}.`,
 		"User-facing agents are base/custom. Shadow agents are internal helpers for context, research, and provenance; do not recommend them as normal `/run` choices.",
@@ -59,7 +59,10 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 function formatSpecLine(spec: AgentSpec, suffix: string): string {
 	const tags = spec.tags.length > 0 ? `, tags=${spec.tags.join("/")}` : "";
 	const skills = spec.skills.length > 0 ? `, skills=${spec.skills.join("/")}` : "";
-	return `- ${spec.id} (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.source}${tags}${skills})${suffix}`;
+	const budget = spec.budget
+		? `, budget=${spec.budget.toolCalls}/${spec.budget.readReserve}/${spec.budget.synthesis ? "synthesize" : "stop"}`
+		: ", budget=operator-default";
+	return `- ${spec.id} (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.source}${tags}${skills}${budget})${suffix}`;
 }
 
 export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string {
