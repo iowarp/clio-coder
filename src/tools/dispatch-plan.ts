@@ -24,6 +24,8 @@ export interface DispatchPlanTaskView {
 	agent: string;
 	/** Exact bounded task being approved, sanitized only when rendered. */
 	task: string;
+	/** Exact canonical bounded briefing approved for this task. */
+	briefing?: string;
 	model?: string;
 	node?: string;
 	/** Effective transport identity; host is authenticated for SSH placement. */
@@ -62,7 +64,7 @@ export interface ResolvedDispatchPlanArtifact {
 	tasks: Array<
 		Required<Pick<DispatchPlanTaskView, "agent" | "task" | "model" | "node" | "target">> &
 			Required<Pick<DispatchPlanTaskView, "nodeKind">> &
-			Pick<DispatchPlanTaskView, "nodeHost" | "role" | "position">
+			Pick<DispatchPlanTaskView, "briefing" | "nodeHost" | "role" | "position">
 	>;
 	costCeilingUsd: number;
 	confirmation?: { branch: string; group: string; index: number };
@@ -99,6 +101,8 @@ function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 			agent: str(record.agent) ?? str(record.agent_id) ?? sharedAgent,
 			task: str(item) ?? str(record.task) ?? "(invalid task)",
 		};
+		const briefing = "briefing" in record ? str(record.briefing) : str(args.briefing);
+		if (briefing !== undefined) view.briefing = briefing;
 		const model = str(record.model) ?? sharedModel;
 		if (model !== undefined) view.model = model;
 		const node = str(record.node) ?? sharedNode;
@@ -145,6 +149,11 @@ function renderPlanText(
 		lines.push(
 			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node} task=${JSON.stringify(safeField(task.task))}`,
 		);
+		if (task.briefing !== undefined) {
+			lines.push(
+				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing))}`,
+			);
+		}
 	}
 	return lines.join("\n");
 }
@@ -166,6 +175,8 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	if (value.nodeKind === "ssh" && (typeof value.nodeHost !== "string" || value.nodeHost.trim().length === 0))
 		return false;
 	if (value.nodeKind === "local" && value.nodeHost !== undefined) return false;
+	if (value.briefing !== undefined && (typeof value.briefing !== "string" || value.briefing.trim().length === 0))
+		return false;
 	return [value.agent, value.task, value.model, value.node, value.target].every(
 		(candidate) => typeof candidate === "string" && candidate.trim().length > 0,
 	);
@@ -214,6 +225,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 		tasks: value.tasks.map((task) => ({
 			agent: task.agent.trim(),
 			task: task.task.trim(),
+			...(task.briefing !== undefined ? { briefing: task.briefing.trim() } : {}),
 			model: task.model.trim(),
 			node: task.node.trim(),
 			nodeKind: task.nodeKind,

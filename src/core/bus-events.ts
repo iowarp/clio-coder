@@ -19,6 +19,7 @@ import type {
 	RunKind,
 	RunLineage,
 	RunOutcome,
+	RunOutcomeCode,
 	ToolActivitySummary,
 } from "../domains/dispatch/types.js";
 import type { MiddlewareHook } from "../domains/middleware/types.js";
@@ -502,6 +503,7 @@ export interface DispatchTerminalStats {
 export interface DispatchCompletedPayload extends DispatchRunIdentity, DispatchTerminalStats {
 	requestOrigin: DispatchRequestOrigin;
 	outcome: RunOutcome;
+	outcomeCode: RunOutcomeCode | null;
 	outcomeDetail: string | null;
 	/**
 	 * Worker skill activations collected into the run receipt. Present only
@@ -520,6 +522,7 @@ export interface DispatchCompletedPayload extends DispatchRunIdentity, DispatchT
  */
 export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<DispatchTerminalStats> {
 	outcome: RunOutcome;
+	outcomeCode?: RunOutcomeCode | null;
 	outcomeDetail: string | null;
 	reason: RunOutcome | "retry_denied";
 }

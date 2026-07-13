@@ -234,6 +234,7 @@ Arguments:
 - `thinking_level` (optional). One of `off|minimal|low|medium|high|xhigh`, applied to all items.
 - `cwd` (optional). Default agent working directory.
 - `timeout_ms` (optional). Aborts the whole dispatch; in sequential mode remaining tasks are skipped and the skip is reported.
+- `briefing` (optional string, top-level default or per-task override). Parent-composed context/data, trimmed and omitted when blank; rejected above 12,000 UTF-8 bytes. It is sent as its own delimited untrusted dynamic message, pinned into plan approval, and retained in receipts only as byte/hash provenance.
 - `max_output_bytes` (optional). Summary byte budget; default 20000, split across runs with at least 1024 bytes each.
 
 Argument tolerance: `tasks` sent as a JSON string is parsed, a single object or bare string is wrapped into an array, and a top-level `task` with no `tasks` becomes a one-element array.

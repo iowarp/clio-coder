@@ -102,14 +102,14 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
-3. **Verify Integrity**: Recomputes the SHA256 digest over every `RunReceiptDraft` field and the reconstructible ledger fields. A receipt declaring any integrity version other than the current one fails verification.
+3. **Verify Integrity**: Recomputes the SHA-256 digest over the version-authenticated receipt and reconstructible ledger fields. New v5 receipts cover briefing provenance and `outcomeCode`; the frozen v4 verifier covers only the historical v4 field set and rejects a v4 receipt or ledger row carrying either v5-only property, including explicit null or undefined values. Versions other than 4 and 5 fail verification.
 4. **Report Result**: The viewer reports `ok` or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 
 ## Receipt Fields for Dispatch Provenance
 
-A receipt carries optional provenance and context field sets that answer "what happened" for a chained (pipeline), composed (persona override), escalated, or external run. Each set is folded onto the receipt only when the run actually exercised the feature, so a run that used none of them produces a receipt byte-identical to a pre-0.2.8 receipt. Automation consumers must treat every field below as optional and absent by default.
+A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, or external run. Those optional blocks remain absent when unused. New v5 receipts nevertheless are not byte-identical to older receipts: they carry the v5 integrity shape and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
@@ -121,6 +121,9 @@ All sets are new in v0.2.8 and are labeled `experimental`: their shapes are froz
 | `pipeline.position` | `number` | Pipeline step after the first | 1-based index of this step in the chain | experimental |
 | `pipeline.inputBytes` | `number` | Pipeline step after the first | UTF-8 byte length of the threaded upstream text before the 12000-char cap | experimental |
 | `pipeline.inputTruncated` | `boolean` | Pipeline step after the first | `true` when the 12000-char cap clipped the threaded input | experimental |
+| `briefing.bytes` | `number` | A bounded parent briefing was sent | UTF-8 byte count of the exact canonical briefing content | experimental |
+| `briefing.contentHash` | `string` | A bounded parent briefing was sent | SHA-256 of exact canonical briefing content; prose is not copied into the receipt | experimental |
+| `outcomeCode` | four-value stable string union or `null` | Every new v5 terminal receipt | Non-null only for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, or `scout_synthesis_contract_exhausted`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
 | `personaOverride.promptHash` | `string` | Ad-hoc specialist whose persona replaced the recipe body | Hash of the composed static prompt; equals `staticCompositionHash` for the run | experimental |
 | `safety.decisions.escalationRequested` | `number` | Run saw at least one permission escalation | Parked permission asks handed to the operator | experimental |
 | `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |
@@ -130,6 +133,8 @@ All sets are new in v0.2.8 and are labeled `experimental`: their shapes are froz
 | `autonomyEnforcement.autonomy` | `number` | Always in v0.2.8 | The exact numeric autonomy dial value | experimental |
 | `autonomyEnforcement.externalMode` | `string` | When running external worker | The execution mode of the external worker runtime | experimental |
 | `autonomyEnforcement.dangerousBypass` | `boolean` | When running external worker | Whether a safety bypass was explicitly activated | experimental |
+
+Only Clio-owned native/SSH worker wrappers and the Claude SDK path may transport these outcome events. ACP and black-box subprocess output cannot self-assert an outcome code; they remain null unless Clio classifies a condition at a trusted coordinator seam.
 | `projectContext.clioMdHash` | `string` | Always in v0.2.8 | SHA-256 hash of active `CLIO.md` when the run started | experimental |
 | `projectContext.gitSha` | `string` | Always in v0.2.8 | Active git commit hash when the run started | experimental |
 

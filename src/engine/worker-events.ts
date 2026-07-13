@@ -5,6 +5,7 @@
  * events without disturbing pi-agent-core consumers.
  */
 
+import type { RunOutcomeCode } from "../domains/dispatch/types.js";
 import type { ToolFinishEvent, ToolStartEvent } from "./worker-tools.js";
 
 export interface ClioToolStartEvent {
@@ -80,9 +81,16 @@ export interface ClioSteerReceivedEvent {
 	};
 }
 
+/** Machine-readable terminal classification, emitted where the condition is known. */
+export interface ClioRunOutcomeEvent {
+	type: "clio_run_outcome";
+	payload: { outcomeCode: RunOutcomeCode };
+}
+
 export type ClioWorkerEvent =
 	| ClioToolStartEvent
 	| ClioToolFinishEvent
 	| ClioPermissionResolvedEvent
 	| ClioPermissionEscalatedEvent
-	| ClioSteerReceivedEvent;
+	| ClioSteerReceivedEvent
+	| ClioRunOutcomeEvent;

@@ -20,6 +20,9 @@ import type {
 
 export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+/** Maximum UTF-8 size of caller-supplied parent-to-worker briefing data. */
+export const DISPATCH_BRIEFING_MAX_BYTES = 12_000;
+
 /**
  * Data threaded from one pipeline step to the next. `fromRunId` is the source
  * run (null when unknown), `position` is the 1-based index of the receiving
@@ -41,6 +44,8 @@ export interface ProtectedArtifactPathRemap {
 export interface JobSpec {
 	agentId: string;
 	task: string;
+	/** Bounded parent-composed context delivered as untrusted dynamic task data. */
+	briefing?: string;
 	workerProfile?: string;
 	workerRuntime?: string;
 	delegationAgentId?: string;
@@ -107,6 +112,7 @@ type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
 const KNOWN_KEYS = new Set([
 	"agentId",
 	"task",
+	"briefing",
 	"workerProfile",
 	"workerRuntime",
 	"delegationAgentId",
@@ -161,6 +167,23 @@ export function validateJobSpec(spec: unknown): Validated {
 	const task = spec.task;
 	if (typeof task !== "string" || task.length === 0) {
 		errors.push("task must be a non-empty string");
+	}
+
+	let briefing: string | undefined;
+	if ("briefing" in spec && spec.briefing !== undefined) {
+		if (typeof spec.briefing !== "string") {
+			errors.push("briefing must be a string");
+		} else {
+			const normalized = spec.briefing.trim();
+			if (normalized.length > 0) {
+				const bytes = Buffer.byteLength(normalized, "utf8");
+				if (bytes > DISPATCH_BRIEFING_MAX_BYTES) {
+					errors.push(`briefing must be ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes or fewer`);
+				} else {
+					briefing = normalized;
+				}
+			}
+		}
 	}
 
 	if ("target" in spec && spec.target !== undefined) {
@@ -358,6 +381,7 @@ export function validateJobSpec(spec: unknown): Validated {
 		agentId: agentId as string,
 		task: task as string,
 	};
+	if (briefing !== undefined) out.briefing = briefing;
 	if (typeof spec.workerProfile === "string") out.workerProfile = spec.workerProfile;
 	if (typeof spec.workerRuntime === "string") out.workerRuntime = spec.workerRuntime;
 	if (typeof spec.delegationAgentId === "string") out.delegationAgentId = spec.delegationAgentId;

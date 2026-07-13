@@ -39,7 +39,7 @@ Design decisions that shape everything else:
 
 ## Worker prompt and budget admission
 
-Dispatch resolves the recipe, target, effective autonomy, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), safety for the enforced autonomy, and the recipe or bounded override persona. Project context, memory, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes.
+Dispatch resolves the recipe, target, effective autonomy, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), safety for the enforced autonomy, and the recipe or bounded override persona. Project context, memory, bounded briefing, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes. Briefing is explicitly untrusted task data and does not transport conversation or session history.
 
 Recipes may declare `budget: {toolCalls, readReserve, synthesis}`. `toolCalls` is the admitted-call phase boundary; the final `readReserve` slots accept only canonical `read`; `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `guardrails.workerToolCallCap` is transported separately as a hard attempt ceiling and always wins when lower. Native workers and Claude SDK enforce this policy. Claude Code and Antigravity reject explicit-budget recipes because their black-box loops cannot provide equivalent per-call mediation; custom recipes without a budget retain the legacy runtime-default route.
 
@@ -100,8 +100,10 @@ failure never holds capacity. The order is deterministic:
 3. The least-loaded eligible remote node; declaration order breaks ties.
 4. The local node.
 
-With no fleet configured and nothing requested, placement resolves to null
-and receipts stay byte-identical to pre-fleet Clio.
+With no fleet configured and nothing requested, placement resolves to null and
+the optional node provenance remains absent. New v5 receipt fields and
+digest/version semantics still apply, so the complete receipt is not
+byte-identical to a pre-v5 receipt.
 
 ## Failure semantics
 
@@ -194,10 +196,7 @@ as it denies every non-read action.
 
 ## Receipts
 
-Receipts use a single integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 4`)
-that authenticates the complete receipt and reconstructible ledger provenance
-surface. A receipt sealed under any other version fails verification; there is
-no partial or legacy tier. The fleet provenance fields covered by the digest
+New receipts use integrity v5 (`RUN_RECEIPT_INTEGRITY_VERSION = 5`), which authenticates the complete receipt and reconstructible ledger provenance surface. Verification retains an exact, dedicated v4 path for already sealed historical receipts; versions other than 4 and 5 remain invalid. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`).

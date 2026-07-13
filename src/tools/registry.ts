@@ -21,7 +21,7 @@ import {
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
-import { describeDispatchPlan, isPlanScaleDispatchArgs } from "./dispatch-plan.js";
+import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import { shapeToolResult } from "./result-shaping.js";
 
 /**
@@ -110,6 +110,8 @@ export interface ToolSpec {
 	 * exact immutable artifact that admission and execution will share.
 	 */
 	prepareAdmissionArguments?(args: Record<string, unknown>): Record<string, unknown>;
+	/** Trusted admission artifact renderer used by policy after preparation. */
+	describeDispatchPlan?(args: Record<string, unknown>): DispatchPlanView;
 	/** Execute the tool. Only called after admission. */
 	run(args: Record<string, unknown>, options?: ToolInvokeOptions): Promise<ToolResult>;
 }
@@ -467,7 +469,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// decides run / ask / deny per action class. Plan-scale dispatch calls
 		// (multi-task, compete, remote node) carry the plan flag so supervised
 		// levels route them through one plan approval.
-		const planScale = call.tool === ToolNames.Dispatch && isPlanScaleDispatchArgs(call.args);
+		const dispatchPlan =
+			call.tool === ToolNames.Dispatch
+				? (spec.describeDispatchPlan?.(call.args ?? {}) ?? describeDispatchPlan(call.args))
+				: null;
+		const planScale = dispatchPlan?.planScale === true;
 		const disposition = mapAutonomy(level, actionClass, {
 			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
 			...(planScale ? { dispatchPlanScale: true } : {}),
@@ -479,9 +485,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return { kind: "terminal", verdict };
 		}
 		if (disposition === "ask") {
-			const askDecision = planScale
-				? toDispatchPlanAskDecision(decision, level, call)
-				: toAutonomyAskDecision(decision, level, call.tool, actionClass);
+			const askDecision =
+				planScale && dispatchPlan !== null
+					? toDispatchPlanAskDecision(decision, level, dispatchPlan)
+					: toAutonomyAskDecision(decision, level, call.tool, actionClass);
 			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
 		}
 		recordRegistryDisposition(call, decision, "allowed");
@@ -900,9 +907,8 @@ function toAutonomyAskDecision(
 function toDispatchPlanAskDecision(
 	decision: SafetyDecision,
 	level: AutonomyLevel,
-	call: ClassifierCall,
+	plan: DispatchPlanView,
 ): SafetyDecision {
-	const plan = describeDispatchPlan(call.args);
 	return {
 		kind: "ask",
 		classification: decision.classification,

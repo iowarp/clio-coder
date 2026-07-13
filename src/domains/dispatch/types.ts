@@ -30,6 +30,22 @@ export type RunOutcome =
 	| "denied_by_policy" // admission, budget, scope, or cooldown rejection
 	| "spawn_failed"; // process never reached a live session
 
+/** Stable machine classifications for terminal conditions that drive policy. */
+export type RunOutcomeCode =
+	| "vram_capacity_fit_failure"
+	| "worker_tool_call_cap_exhausted"
+	| "loop_guard_tools_disabled_exhausted"
+	| "scout_synthesis_contract_exhausted";
+
+export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
+	return (
+		value === "vram_capacity_fit_failure" ||
+		value === "worker_tool_call_cap_exhausted" ||
+		value === "loop_guard_tools_disabled_exhausted" ||
+		value === "scout_synthesis_contract_exhausted"
+	);
+}
+
 export const RETRYABLE_OUTCOMES: ReadonlySet<RunOutcome> = new Set(["failed", "timed_out", "stalled", "spawn_failed"]);
 
 /**
@@ -67,6 +83,12 @@ export interface RunPipelineProvenance {
 	position: number; // 1-based index of this step in the chain
 	inputBytes: number; // UTF-8 byte length of the upstream text before capping
 	inputTruncated: boolean; // true when the 12000-char cap clipped the input
+}
+
+/** Integrity-covered proof of the exact bounded briefing content sent to a worker. */
+export interface RunBriefingProvenance {
+	bytes: number;
+	contentHash: string;
 }
 
 /**
@@ -195,7 +217,7 @@ export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 export interface RunReceiptIntegrity {
-	version: 4;
+	version: 4 | 5;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -222,6 +244,8 @@ export interface RunEnvelope {
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
+	/** Present only when a bounded parent briefing was sent as dynamic task data. */
+	briefing?: RunBriefingProvenance;
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
@@ -232,6 +256,7 @@ export interface RunEnvelope {
 	/** Terminal outcome; null until the run finalizes. Absent on pre-taxonomy rows. */
 	outcome?: RunOutcome | null;
 	outcomeDetail?: string | null;
+	outcomeCode?: RunOutcomeCode | null;
 	lineage?: RunLineage;
 	identity?: RunIdentity;
 	/** Fleet node placement; absent when no fleet placement resolved this run. */
@@ -455,6 +480,8 @@ export interface RunReceipt {
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
+	/** Proof of briefing content without copying its prose into the receipt. */
+	briefing?: RunBriefingProvenance;
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
@@ -464,6 +491,7 @@ export interface RunReceipt {
 	/** Terminal outcome; present on every receipt written after the taxonomy landed. */
 	outcome?: RunOutcome;
 	outcomeDetail?: string | null;
+	outcomeCode?: RunOutcomeCode | null;
 	lineage?: RunLineage;
 	identity?: RunIdentity;
 	/** Fleet node placement; absent when no fleet placement resolved this run. */

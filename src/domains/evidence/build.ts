@@ -1314,7 +1314,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		toolStats: readToolStats(value, source, "toolStats"),
 		sessionId: readNullableString(value, source, "sessionId"),
 		integrity: {
-			version: readNumber(integrity, `${source}.integrity`, "version") as 4,
+			version: readNumber(integrity, `${source}.integrity`, "version") as 4 | 5,
 			algorithm: readString(integrity, `${source}.integrity`, "algorithm") as "sha256",
 			digest: readString(integrity, `${source}.integrity`, "digest"),
 		},

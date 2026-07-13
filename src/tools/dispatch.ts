@@ -25,7 +25,7 @@ import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gat
 import { readReceiptVerification } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
-import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
+import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import {
@@ -112,8 +112,12 @@ function withResolvedTaskPin(
 	options: { pinTask?: boolean } = {},
 ): DispatchRequest {
 	if (task === undefined) return request;
+	// Omit the raw briefing before restoring the approved value. With exact
+	// optional properties, approved absence means the field must be absent—not
+	// present as undefined—and must clear any untrusted raw default.
+	const { briefing: _untrustedBriefing, ...requestWithoutBriefing } = request;
 	return {
-		...request,
+		...requestWithoutBriefing,
 		agentId: task.agent,
 		// Primary builder/candidate/task text comes from operator-controlled
 		// arguments and must be restored from the approved artifact. Reviewer and
@@ -121,6 +125,7 @@ function withResolvedTaskPin(
 		// stats; for those roles the artifact pins the route while the coordinator
 		// retains the freshly generated task.
 		task: options.pinTask === false ? request.task : task.task,
+		...(task.briefing !== undefined ? { briefing: task.briefing } : {}),
 		target: task.target,
 		model: task.model,
 		node: task.node,
@@ -373,6 +378,14 @@ function dispatchRequestFromArgs(
 		agentId: stringArg(args, "agent", "agent_id") ?? DEFAULT_AGENT_ID,
 		task,
 	};
+	if ("briefing" in args && args.briefing !== undefined) {
+		if (typeof args.briefing !== "string") return { ok: false, message: "briefing must be a string" };
+		const briefing = args.briefing.trim();
+		if (Buffer.byteLength(briefing, "utf8") > DISPATCH_BRIEFING_MAX_BYTES) {
+			return { ok: false, message: `briefing must be ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes or fewer` };
+		}
+		if (briefing.length > 0) request.briefing = briefing;
+	}
 
 	const target = stringArg(args, "target");
 	if (target) request.target = target;
@@ -2065,7 +2078,28 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	// recomputed. Parked calls retain object identity, so approval and execution
 	// consume the same immutable resolution even if settings/capacity drift.
 	const preparedAdmissionArgs = new WeakSet<Record<string, unknown>>();
+	const trustedResolvedPlans = new WeakMap<Record<string, unknown>, ResolvedDispatchPlanArtifact>();
+	const deepFreeze = <T>(value: T): T => {
+		if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+		for (const child of Object.values(value)) deepFreeze(child);
+		return Object.freeze(value);
+	};
 	const markPrepared = (args: Record<string, unknown>): Record<string, unknown> => {
+		const exposed = resolvedDispatchPlanFromArgs(args);
+		if (exposed !== null) {
+			// The WeakMap snapshot is the execution authority. The separately
+			// cloned/frozen hidden value remains available to generic registry policy
+			// rendering, but cannot be mutated or replaced after preparation.
+			const trusted = deepFreeze(structuredClone(exposed));
+			const policyView = deepFreeze(structuredClone(exposed));
+			trustedResolvedPlans.set(args, trusted);
+			Object.defineProperty(args, RESOLVED_DISPATCH_PLAN_ARGUMENT, {
+				value: policyView,
+				enumerable: true,
+				configurable: false,
+				writable: false,
+			});
+		}
 		preparedAdmissionArgs.add(args);
 		return args;
 	};
@@ -2091,6 +2125,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		return {
 			agent: resolution.agentId,
 			task: request.task,
+			...(request.briefing !== undefined ? { briefing: request.briefing } : {}),
 			target: resolution.targetId,
 			model: resolution.wireModelId,
 			node: resolution.node.id,
@@ -2249,6 +2284,11 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 						Type.String(),
 						Type.Object({
 							task: Type.String({ description: "Concrete agent task with expected output and constraints." }),
+							briefing: Type.Optional(
+								Type.String({
+									description: `Per-task parent context/data override, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
+								}),
+							),
 							agent: Type.Optional(Type.String({ description: "Agent recipe id (default coder)." })),
 							persona: Type.Optional(
 								Type.String({
@@ -2329,6 +2369,11 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				),
 			),
 			agent: Type.Optional(Type.String({ description: "Default agent recipe for string tasks (default coder)." })),
+			briefing: Type.Optional(
+				Type.String({
+					description: `Default bounded parent context/data for tasks, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
+				}),
+			),
 			persona: Type.Optional(
 				Type.String({
 					description: "Default ad-hoc specialist persona for dispatched tasks, max 8000 chars.",
@@ -2349,6 +2394,10 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		executionMode: "sequential",
 		prepareAdmissionArguments,
 		prepareArguments: prepareExecutionArguments,
+		describeDispatchPlan: (args) => {
+			const trusted = trustedResolvedPlans.get(args);
+			return describeDispatchPlan(trusted === undefined ? args : { ...args, [RESOLVED_DISPATCH_PLAN_ARGUMENT]: trusted });
+		},
 		async run(rawArgs, options): Promise<ToolResult> {
 			const args = prepareExecutionArguments(rawArgs);
 			const preparationError = args[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT];
@@ -2430,8 +2479,14 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			// same plan hash into its receipt.
 			const autonomy = deps.getAutonomy?.() ?? "auto-edit";
 			const authenticatedApproval = options?.approval?.actionClass === "dispatch" ? options.approval : undefined;
-			const planView = describeDispatchPlan(args);
-			const resolvedPlan = resolvedDispatchPlanFromArgs(args);
+			const trustedResolvedPlan = trustedResolvedPlans.get(args) ?? null;
+			const planArgs =
+				trustedResolvedPlan === null ? args : { ...args, [RESOLVED_DISPATCH_PLAN_ARGUMENT]: trustedResolvedPlan };
+			const planView = describeDispatchPlan(planArgs);
+			// Production preparation always registers the authoritative snapshot.
+			// The parser remains available in dispatch-plan.ts for direct utility
+			// tests/tools, but a hidden model-supplied field is never execution trust.
+			const resolvedPlan = trustedResolvedPlan;
 			let requests = parsed.requests;
 			if (planView.planScale && deps.dispatch.preview !== undefined && resolvedPlan === null) {
 				return { kind: "error", message: "dispatch: resolved plan is missing after admission" };

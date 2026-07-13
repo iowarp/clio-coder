@@ -29,6 +29,9 @@ async function main(): Promise<number> {
 	// reconciliation parity with the interactive path.
 	setResidencyNoticeSink((notice) => {
 		process.stderr.write(`[worker] residency ${notice.kind}: ${notice.message}\n`);
+		if (notice.kind === "will-not-fit") {
+			emitEvent({ type: "clio_run_outcome", payload: { outcomeCode: "vram_capacity_fit_failure" } });
+		}
 	});
 	const demux = createWorkerStdinDemux();
 	process.stdin.setEncoding("utf8");

@@ -29,6 +29,7 @@ const plan: RunPlanProvenance = {
 	approvalRequestedBy: "operator-test",
 	costCeilingUsd: 5,
 };
+const briefing = { bytes: 17, contentHash: "c".repeat(64) };
 
 function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProvenance }): {
 	runId: string;
@@ -38,6 +39,7 @@ function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProven
 	const envelope = ledger.create({
 		agentId: "coder",
 		task: "orphan provenance task",
+		briefing,
 		targetId: "default",
 		wireModelId: "model",
 		runtimeId: "openai",
@@ -50,6 +52,7 @@ function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProven
 		status: "completed",
 		outcome: "succeeded",
 		outcomeDetail: null,
+		outcomeCode: "worker_tool_call_cap_exhausted",
 		lineage,
 		identity,
 		...(provenance.gate !== undefined ? { gate: provenance.gate } : {}),
@@ -76,6 +79,8 @@ function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProven
 		runtimeKind: "http",
 		outcome: "succeeded",
 		outcomeDetail: null,
+		outcomeCode: "worker_tool_call_cap_exhausted",
+		briefing,
 		lineage,
 		identity,
 		...(provenance.gate !== undefined ? { gate: provenance.gate } : {}),
@@ -122,7 +127,81 @@ function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProven
 }
 
 describe("orphan provenance recovery", () => {
-	it("adopts gate-only, plan-only, and combined v4 receipts from the receipt-written crash window", () => {
+	it("quarantines a v4 orphan before it can adopt an injected v5-only field", () => {
+		const isolated = isolateClioEnv("clio-orphan-v4-injection-");
+		try {
+			// Let the ledger resolve the repository-scoped state directory, then
+			// replace its orphan artifact with a v4 artifact carrying an injected
+			// field. The dedicated integrity contract test retains the genuine
+			// hard-coded historical digest fixture.
+			const orphan = sealOrphan({});
+			const runId = orphan.runId;
+			const receiptPath = orphan.receiptPath;
+			const receipt = {
+				runId,
+				agentId: "coder",
+				task: "historical v4",
+				targetId: "local",
+				wireModelId: "model-a",
+				runtimeId: "openai",
+				runtimeKind: "http",
+				startedAt: "2026-07-01T00:00:00.000Z",
+				endedAt: "2026-07-01T00:00:01.000Z",
+				outcome: "succeeded",
+				outcomeDetail: null,
+				exitCode: 0,
+				tokenCount: 3,
+				inputTokenCount: 2,
+				outputTokenCount: 1,
+				cacheReadTokenCount: 0,
+				cacheWriteTokenCount: 0,
+				reasoningTokenCount: 0,
+				costUsd: 0,
+				compiledPromptHash: null,
+				staticCompositionHash: null,
+				staticShellHash: null,
+				sessionShellHash: null,
+				dynamicHash: null,
+				clioVersion: "0.2.8",
+				piMonoVersion: "0.80.3",
+				platform: "linux",
+				nodeVersion: "v22.19.0",
+				toolCalls: 0,
+				toolStats: [],
+				reproducibility: {
+					cwd: "/workspace",
+					git: { branch: null, commit: null, dirty: null, dirtyEntries: null, statusHash: null },
+					safetyPolicy: {
+						version: 1,
+						rulePackHash: null,
+						rulePackVersion: null,
+						projectPolicyPath: null,
+						projectPolicyHash: null,
+						projectPolicyValid: null,
+					},
+				},
+				sessionId: null,
+				briefing: null,
+				integrity: {
+					version: 4,
+					algorithm: "sha256",
+					digest: "d3d3f9258807a23b0b895bd540aaefe4297bbe4dbbd2cc3ca10997f112ded052",
+				},
+			};
+			writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
+
+			const reopened = openLedger({ maxRuns: 20 });
+			const summary = recoverOrphanReceipts(reopened);
+			strictEqual(summary.recovered, 0);
+			strictEqual(summary.corrupt, 1);
+			strictEqual(reopened.get(runId), null);
+			ok(existsSync(`${receiptPath}.corrupt`));
+		} finally {
+			isolated.restore();
+		}
+	});
+
+	it("adopts gate-only, plan-only, and combined v5 receipts from the receipt-written crash window", () => {
 		const isolated = isolateClioEnv("clio-orphan-matrix-");
 		try {
 			const gateOnly = sealOrphan({ gate });
@@ -138,12 +217,14 @@ describe("orphan provenance recovery", () => {
 			strictEqual(reopened.get(planOnly.runId)?.gate, undefined);
 			deepStrictEqual(reopened.get(combined.runId)?.gate, gate);
 			deepStrictEqual(reopened.get(combined.runId)?.plan, plan);
+			deepStrictEqual(reopened.get(combined.runId)?.briefing, briefing);
+			strictEqual(reopened.get(combined.runId)?.outcomeCode, "worker_tool_call_cap_exhausted");
 		} finally {
 			isolated.restore();
 		}
 	});
 
-	it("quarantines a shape-valid v4 orphan whose authenticated provenance was tampered", () => {
+	it("quarantines a shape-valid v5 orphan whose authenticated provenance was tampered", () => {
 		const isolated = isolateClioEnv("clio-orphan-tamper-");
 		try {
 			const orphan = sealOrphan({ gate, plan });

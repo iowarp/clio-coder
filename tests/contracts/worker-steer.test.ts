@@ -814,6 +814,21 @@ describe("contracts/worker-steer", () => {
 					const capBlocks = reasons.filter((reason) => reason.startsWith("workerToolCallCap reached (3); abort run"));
 					strictEqual(capBlocks.length, 1, "the first post-boundary attempt crosses the independent hard cap");
 					strictEqual(finishes.length, 4, "three admitted attempts plus one hard-cap noncompliance block");
+					strictEqual(
+						events.some(
+							(event) =>
+								typeof event === "object" &&
+								event !== null &&
+								"type" in event &&
+								event.type === "clio_run_outcome" &&
+								"payload" in event &&
+								typeof event.payload === "object" &&
+								event.payload !== null &&
+								"outcomeCode" in event.payload &&
+								event.payload.outcomeCode === "worker_tool_call_cap_exhausted",
+						),
+						true,
+					);
 				} finally {
 					unregister();
 				}
@@ -1094,6 +1109,21 @@ describe("contracts/worker-steer", () => {
 					"only the bounded number of corrective provider rounds is admitted",
 				);
 				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "ok").length, SCOUT_TOOL_CALLS);
+				strictEqual(
+					events.some(
+						(event) =>
+							typeof event === "object" &&
+							event !== null &&
+							"type" in event &&
+							event.type === "clio_run_outcome" &&
+							"payload" in event &&
+							typeof event.payload === "object" &&
+							event.payload !== null &&
+							"outcomeCode" in event.payload &&
+							event.payload.outcomeCode === "scout_synthesis_contract_exhausted",
+					),
+					true,
+				);
 			} finally {
 				unregister();
 				rmSync(scratch, { recursive: true, force: true });

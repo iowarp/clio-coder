@@ -134,6 +134,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				...(input.agentAudience !== undefined ? { agentAudience: input.agentAudience } : {}),
 				...(input.requestOrigin !== undefined ? { requestOrigin: input.requestOrigin } : {}),
 				task: input.task,
+				...(input.briefing !== undefined ? { briefing: structuredClone(input.briefing) } : {}),
 				targetId: input.targetId,
 				wireModelId: input.wireModelId,
 				runtimeId: input.runtimeId,
@@ -200,7 +201,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				throw new Error(`dispatch ledger missing run for receipt '${id}'`);
 			}
 			// Fold the durable findings summary onto the draft before sealing so both
-			// the ACP and worker finalizers get it for free and the v3 integrity
+			// the ACP and worker finalizers get it for free and receipt integrity
 			// digest covers it. Computed cheaply from in-memory fields; never reads
 			// disk or calls buildEvidence.
 			const draft: RunReceiptDraft =

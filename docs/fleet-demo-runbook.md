@@ -136,10 +136,12 @@ clio evidence inspect <evidenceId>
 `clio evidence build` recomputes the receipt's integrity digest against the
 run ledger; a tampered or mismatched receipt fails the build with the field
 that diverged. The receipts of the remote runs verify on zbook because the
-ledger and receipts live on the shared filesystem. Current v4 receipts have
-full field coverage. A valid v1-v3 receipt is readable but reported as partial;
-the result lists fields outside that version's historical digest projection,
-and evidence does not use those fields as verified provenance.
+ledger and receipts live on the shared filesystem. New receipts use v5 and
+authenticate all current receipt and reconstructed-ledger fields. Genuine
+historical v4 receipts verify with the frozen v4 field set; a v4 receipt or
+ledger row carrying `briefing` or `outcomeCode` fails verification, including
+explicit null values. Versions v1-v3 and every version other than v4/v5 are
+rejected rather than reported as partial.
 
 ## Provenance walkthrough: what a PI can verify from receipts alone
 
@@ -169,8 +171,10 @@ reconstruct:
    complete receipt schema and its stable ledger row. `clio evidence build
    --run <id>` recomputes and cross-checks it; `verifyReceiptIntegrity` in
    `src/domains/dispatch/receipt-integrity.ts` is the reference
-   implementation. A receipt declaring any other integrity version fails
-   verification.
+	implementation. New receipts use v5; genuine historical v4 receipts use a
+	frozen compatibility verifier, and every other version fails verification.
+	A v4 receipt or corresponding ledger row carrying either v5-only field
+	(`briefing` or `outcomeCode`) fails verification.
 
 The walkthrough for an audience is three commands: `clio evidence build
 --run <id>` (it verifies), open the receipt JSON (read `node`, `gate`,
