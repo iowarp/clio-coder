@@ -393,6 +393,7 @@ export interface KeyBindingDeps {
 	dismissNotifications: () => void;
 	toggleToolExpansion: () => void;
 	toggleAllToolExpansion: () => void;
+	toggleLiveToolOutput: () => void;
 	toggleThinkingExpansion: () => void;
 	toggleAllThinkingExpansion: () => void;
 	openExternalEditor: () => void;
@@ -553,6 +554,12 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 		case "clio.tool.expand":
 			deps.toggleToolExpansion();
 			return true;
+		case "clio.tool.expandAll":
+			deps.toggleAllToolExpansion();
+			return true;
+		case "clio.tool.liveOutput":
+			deps.toggleLiveToolOutput();
+			return true;
 		case "clio.editor.external":
 			deps.openExternalEditor();
 			return true;
@@ -564,6 +571,9 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 			return true;
 		case "clio.thinking.expand":
 			deps.toggleThinkingExpansion();
+			return true;
+		case "clio.thinking.expandAll":
+			deps.toggleAllThinkingExpansion();
 			return true;
 		case "clio.status.toggle":
 			deps.toggleStatus();
@@ -1024,6 +1034,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			const first = keys[0];
 			return typeof first === "string" && first.length > 0 ? first : undefined;
 		},
+		getOutputVerbosity: () => deps.getSettings?.().terminal.outputVerbosity ?? "default",
 	});
 	const followUpQueuePanel = createFollowUpQueuePanel({
 		getDequeueKey: () => {
@@ -1593,6 +1604,21 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openTasks: () => openTasksOverlayState(),
 		openView: (filter) => openViewOverlayState(filter),
 		openThinking: () => openThinkingOverlayState(),
+		setOutputVerbosity: (verbosity) => {
+			if (!verbosity || !deps.getSettings || !deps.writeSettings) {
+				appendCommandNotice("info", "usage: /output minimal|default|verbose");
+				return;
+			}
+			const next = structuredClone(deps.getSettings()) as ClioSettings;
+			if (verbosity !== "minimal" && verbosity !== "default" && verbosity !== "verbose") {
+				appendCommandNotice("error", "usage: /output minimal|default|verbose");
+				return;
+			}
+			next.terminal.outputVerbosity = verbosity;
+			deps.writeSettings(next);
+			appendCommandNotice("success", `output detail: ${verbosity}`);
+			tui.requestRender();
+		},
 		openModel: () => openModelOverlayState(),
 		providers: deps.providers,
 		applyModelRef: (ref) => {
@@ -3327,6 +3353,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		toggleAllToolExpansion: () => {
 			if (chatPanel.toggleAllToolsExpanded()) tui.requestRender();
 		},
+		toggleLiveToolOutput: () => {
+			chatPanel.toggleLiveToolOutput();
+			tui.requestRender();
+		},
 		toggleThinkingExpansion: () => {
 			const nowMs = Date.now();
 			const isDoubleTap = lastThinkingExpandAtMs > 0 && nowMs - lastThinkingExpandAtMs <= CTRL_C_DOUBLE_TAP_MS;
@@ -3483,10 +3513,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			for (const id of [
 				"clio.notifications.dismiss",
 				"clio.tool.expand",
+				"clio.tool.expandAll",
+				"clio.tool.liveOutput",
 				"clio.editor.external",
 				"clio.message.followUp",
 				"clio.message.dequeue",
 				"clio.thinking.expand",
+				"clio.thinking.expandAll",
 			] as const) {
 				if (keybindings.matches(data, id)) {
 					dispatchInteractiveAction(id, keyActionDeps());

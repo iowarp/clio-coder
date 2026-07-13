@@ -242,6 +242,11 @@ describe("contracts/settings center", () => {
 				value: "true",
 				assert: (s) => strictEqual(s.terminal.showTerminalProgress, true),
 			},
+			{
+				id: "terminal.outputVerbosity",
+				value: "verbose",
+				assert: (s) => strictEqual(s.terminal.outputVerbosity, "verbose"),
+			},
 			{ id: "identity", value: "atlas", assert: (s) => strictEqual(s.identity, "atlas") },
 			{
 				id: "runtimePlugins",

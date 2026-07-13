@@ -173,8 +173,8 @@ function latestUsableAssistantUsage(messages: ReadonlyArray<AgentMessage>): { in
 	return null;
 }
 
-function finitePositive(value: unknown): number | null {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+function finiteNonNegative(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function nestedNumber(root: unknown, path: ReadonlyArray<string>): number | null {
@@ -183,13 +183,21 @@ function nestedNumber(root: unknown, path: ReadonlyArray<string>): number | null
 		if (!isRecord(current)) return null;
 		current = current[key];
 	}
-	return finitePositive(current);
+	return finiteNonNegative(current);
+}
+
+/** Approximate reasoning tokens from visible thinking text; never a provider attestation. */
+export function estimateReasoningTextTokens(text: string): number | null {
+	if (typeof text !== "string" || text.trim().length === 0) return null;
+	return Math.max(1, Math.round(text.length / TOKEN_CHARS));
 }
 
 export function extractReasoningTokens(usage: unknown): number | null {
 	if (!isRecord(usage)) return null;
 	const direct =
-		finitePositive(usage.reasoningTokens) ?? finitePositive(usage.reasoning_tokens) ?? finitePositive(usage.reasoning);
+		finiteNonNegative(usage.reasoningTokens) ??
+		finiteNonNegative(usage.reasoning_tokens) ??
+		finiteNonNegative(usage.reasoning);
 	if (direct !== null) return direct;
 	const paths = [
 		["outputDetails", "reasoningTokens"],

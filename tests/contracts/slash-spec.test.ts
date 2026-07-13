@@ -406,6 +406,7 @@ describe("contracts/slash-spec", () => {
 			"tasks",
 			"view",
 			"thinking",
+			"output",
 			"model",
 			"scoped-models",
 			"settings",

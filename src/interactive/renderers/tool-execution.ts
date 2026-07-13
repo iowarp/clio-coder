@@ -65,6 +65,8 @@ export interface ToolExecutionFinished {
 	durationMs?: number | undefined;
 	/** Persisted summary (bytes, truncated, offloadPath, observation counts). */
 	resultSummary?: Record<string, unknown> | undefined;
+	/** Honest terminal outcome for synthetic/or permission-blocked calls. */
+	outcome?: "blocked" | "aborted" | "orphaned" | undefined;
 }
 
 export interface ToolBodyRenderOptions {
@@ -97,10 +99,56 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const SECRET_KEY_RE =
+	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
+const ENV_KEY_RE = /^env(?:ironment)?$/iu;
+const SECRET_STRING_RE = /(https?:\/\/[^\s/@]+:)[^\s/@]+@/giu;
+const SECRET_URL_PARAM_RE =
+	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)[^&#\s]+/giu;
+const SECRET_ASSIGNMENT_RE =
+	/(?<![A-Z0-9_])((?:[A-Z0-9_]*(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS(?:WORD)?|PRIVATE|SECRET|TOKEN)[A-Z0-9_]*)=)[^\s;&|]+/giu;
+const SECRET_FLAG_RE =
+	/(--?(?:[a-z0-9-]*(?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[a-z0-9-]*))(=|\s+)([^\s;&|]+)/giu;
+
+function redactSecretString(value: string): string {
+	return value
+		.replace(SECRET_STRING_RE, "$1[redacted]@")
+		.replace(SECRET_URL_PARAM_RE, "$1[redacted]")
+		.replace(SECRET_ASSIGNMENT_RE, "$1[redacted]")
+		.replace(SECRET_FLAG_RE, "$1$2[redacted]");
+}
+
+function redactEnvironmentValue(value: unknown, depth: number): unknown {
+	if (depth > 8) return "[redacted nested values]";
+	if (typeof value === "string") return "[redacted]";
+	if (Array.isArray(value)) return value.map((item) => redactEnvironmentValue(item, depth + 1));
+	if (!isPlainObject(value)) return value;
+	const out: Record<string, unknown> = {};
+	for (const [childKey, childValue] of Object.entries(value)) {
+		out[childKey] = redactEnvironmentValue(childValue, depth + 1);
+	}
+	return out;
+}
+
+/** Project tool arguments for display only; execution and receipts retain the original values. */
+export function redactToolArgs(value: unknown, key = "", depth = 0): unknown {
+	if (SECRET_KEY_RE.test(key)) return "[redacted]";
+	if (ENV_KEY_RE.test(key)) return redactEnvironmentValue(value, depth);
+	if (typeof value === "string") return redactSecretString(value);
+	if (depth > 8) return "[redacted nested values]";
+	if (Array.isArray(value)) return value.map((item) => redactToolArgs(item, key, depth + 1));
+	if (!isPlainObject(value)) return value;
+	const out: Record<string, unknown> = {};
+	for (const [childKey, childValue] of Object.entries(value)) {
+		out[childKey] = redactToolArgs(childValue, childKey, depth + 1);
+	}
+	return out;
+}
+
 function readStringField(args: unknown, key: string): string | null {
 	if (!isPlainObject(args)) return null;
 	const value = args[key];
-	return typeof value === "string" ? value : null;
+	return typeof value === "string" ? redactSecretString(value) : null;
 }
 
 function isEmptyArgs(args: unknown): boolean {
@@ -217,10 +265,11 @@ function summarizeWebFetchArgs(args: unknown): string {
 
 function summarizeArgs(toolName: string, args: unknown): string {
 	if (isEmptyArgs(args)) return "";
-	if (toolName === "web_fetch") return summarizeWebFetchArgs(args);
+	const safeArgs = redactToolArgs(args);
+	if (toolName === "web_fetch") return summarizeWebFetchArgs(safeArgs);
 	const primary = capturedPrimaryArg(toolName, args);
 	if (primary !== null) return truncate(displayArg(toolName, primary), ARG_PREVIEW_LIMIT);
-	return truncate(jsonStringifySafe(args), ARG_PREVIEW_LIMIT);
+	return truncate(jsonStringifySafe(safeArgs), ARG_PREVIEW_LIMIT);
 }
 
 /**
@@ -391,6 +440,7 @@ type HeaderStatus = "ok" | "error" | undefined;
 interface StatusMeta {
 	durationMs?: number | undefined;
 	exitCode?: string | null;
+	outcome?: ToolExecutionFinished["outcome"];
 }
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
@@ -399,7 +449,8 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	const durationSuffix = duration ? dim(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
 	const exitSuffix = meta.exitCode ? dim(` (exit ${meta.exitCode})`) : "";
-	return ` ${red(STATUS_ERROR_GLYPH)}${exitSuffix}${durationSuffix}`;
+	const outcomeSuffix = meta.outcome ? dim(` ${meta.outcome}`) : "";
+	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${exitSuffix}${durationSuffix}`;
 }
 
 function headerLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
@@ -633,7 +684,7 @@ function renderArgsBody(args: unknown, width: number, isError: boolean): string[
 	if (isEmptyArgs(args)) return [];
 	const out: string[] = [];
 	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-	const lines = tryRenderJson(args, bodyWidth, { lineLimit: ARGS_BODY_LINE_LIMIT });
+	const lines = tryRenderJson(redactToolArgs(args), bodyWidth, { lineLimit: ARGS_BODY_LINE_LIMIT });
 	if (!lines) return [];
 	for (const raw of lines) {
 		out.push(...indentAndWrap(raw, width, isError));
@@ -795,7 +846,7 @@ function asBashArgs(args: unknown): BashArgs | null {
 	if (!isPlainObject(args)) return null;
 	const command = args.command;
 	if (typeof command !== "string") return null;
-	return { command };
+	return { command: redactSecretString(command) };
 }
 
 /**
@@ -848,6 +899,19 @@ export function renderToolCallHeader(call: ToolExecutionStart, width: number): s
 	return wrap(headerLine(call.toolName, call.args, undefined), width);
 }
 
+/** Running-only footer used when an operator pauses live output; execution continues. */
+export function renderToolRunningStatus(call: ToolExecutionStart, width: number): string[] {
+	const elapsed = optionalCompactMs(call.elapsedMs);
+	return [
+		...renderToolCallHeader(call, width),
+		...indentAndWrap(
+			dim(elapsed ? `(running... ${elapsed}; live output hidden)` : "(running; live output hidden)"),
+			width,
+			false,
+		),
+	];
+}
+
 function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): HeaderStatus {
 	// Discriminate on `result` rather than `isError`: only `ToolExecutionFinished`
 	// carries a `result` field, so a `ToolExecutionStart` with a stray
@@ -884,6 +948,7 @@ export function renderToolSubline(
 			? {
 					durationMs: call.durationMs,
 					exitCode: call.toolName === "bash" && call.isError ? bashExitCodeFromResult(call.result) : null,
+					outcome: call.outcome,
 				}
 			: {};
 	const parts = sublineParts(call, status, meta);
@@ -908,6 +973,7 @@ export function renderToolExecution(
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
 		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
+		outcome: finished.outcome,
 	};
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, finished.args, status, statusMeta), width));
@@ -918,7 +984,7 @@ export function renderToolExecution(
 	// sees `▸ edit(<path>)`, and the args body is suppressed because echoing
 	// both strings would just duplicate what the diff already shows.
 	if (finished.toolName === "edit" && finished.isError === false) {
-		const editArgs = asEditDiffArgs(finished.args);
+		const editArgs = asEditDiffArgs(redactToolArgs(finished.args));
 		if (editArgs !== null) {
 			out.push(...renderEditDiffBlock(editArgs, width));
 			return out;
@@ -930,7 +996,7 @@ export function renderToolExecution(
 	// above its output. Failures use the red rail and expose the parsed exit
 	// code in the header when the result includes one.
 	if (finished.toolName === "bash") {
-		const bashArgs = asBashArgs(finished.args);
+		const bashArgs = asBashArgs(redactToolArgs(finished.args));
 		if (bashArgs !== null) {
 			out.push(...renderBashResultBlock(bashArgs, finished.result, width, finished.isError, opts));
 			return out;
@@ -963,6 +1029,7 @@ export function renderToolResultOnly(
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
 		exitCode: finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null,
+		outcome: finished.outcome,
 	};
 	const out: string[] = [];
 	out.push(...wrap(headerLine(finished.toolName, undefined, status, statusMeta), width));

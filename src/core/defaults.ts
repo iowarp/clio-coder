@@ -95,8 +95,12 @@ export interface RetrySettings {
 	maxDelayMs: number;
 }
 
+export type OutputVerbosity = "minimal" | "default" | "verbose";
+
 export interface TerminalSettings {
 	showTerminalProgress: boolean;
+	/** Transcript detail: collapsed, balanced, or fully transparent. */
+	outputVerbosity: OutputVerbosity;
 }
 
 export interface ModelSelectorSettings {
@@ -232,6 +236,7 @@ export const DEFAULT_SETTINGS = {
 	theme: "default",
 	terminal: {
 		showTerminalProgress: false,
+		outputVerbosity: "default",
 	} as TerminalSettings,
 	skills: {
 		trustProjectCompatRoots: false,
@@ -416,6 +421,8 @@ terminal:
   # OSC 9;4 terminal progress badges are opt-in; some terminals surface these
   # in taskbars/tabs and keep them visible for long-running agent work.
   showTerminalProgress: false
+  # Transcript detail: minimal, default, or verbose. Also changeable with /output.
+  outputVerbosity: default
 
 # Skills are local prompt resources. Project-local compatibility roots such as
 # .agents/skills, .claude/skills, .codex/skills, .github/skills, and

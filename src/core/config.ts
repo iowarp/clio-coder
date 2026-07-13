@@ -945,10 +945,15 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.terminal)) {
 			issues.add("terminal", `expected a map, got ${describe(raw.terminal)}`);
 		} else {
-			issues.unknownKeys("terminal", raw.terminal, ["showTerminalProgress"]);
+			issues.unknownKeys("terminal", raw.terminal, ["showTerminalProgress", "outputVerbosity"]);
 			if ("showTerminalProgress" in raw.terminal) {
 				const v = expectBoolean(issues, "terminal.showTerminalProgress", raw.terminal.showTerminalProgress);
 				if (v !== undefined) settings.terminal.showTerminalProgress = v;
+			}
+			if ("outputVerbosity" in raw.terminal) {
+				const v = expectString(issues, "terminal.outputVerbosity", raw.terminal.outputVerbosity);
+				if (v === "minimal" || v === "default" || v === "verbose") settings.terminal.outputVerbosity = v;
+				else if (v !== undefined) issues.add("terminal.outputVerbosity", "expected minimal, default, or verbose");
 			}
 		}
 	}

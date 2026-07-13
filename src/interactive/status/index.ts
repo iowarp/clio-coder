@@ -7,6 +7,7 @@ export {
 	type AgentStatusChangedPayload,
 	type AgentStatusEvent,
 	INITIAL_STATUS,
+	type ReasoningTokenProvenance,
 	type StatusPhase,
 	type TurnStopReason,
 	type TurnSummary,

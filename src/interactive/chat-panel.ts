@@ -1,3 +1,6 @@
+import { performance } from "node:perf_hooks";
+import type { OutputVerbosity } from "../core/defaults.js";
+import { estimateReasoningTextTokens, extractReasoningTokens } from "../domains/session/context-accounting.js";
 import { type Component, Markdown, truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { codeInk } from "./renderers/code-ink.js";
@@ -8,6 +11,7 @@ import {
 	renderToolAwaitingApproval,
 	renderToolCallHeader,
 	renderToolExecution,
+	renderToolRunningStatus,
 	renderToolStreamingExecution,
 	renderToolSubline,
 	unwrapResultEnvelope,
@@ -51,6 +55,23 @@ const USER_GLYPH = GLYPH.user;
  * through the Markdown renderer. Partial markdown (unclosed fence, half-typed
  * bullet) would otherwise paint garbage at ~60 fps under streaming.
  */
+export type ReasoningTokenProvenance = "provider" | "estimated" | "mixed";
+
+export interface ChatPanelTurnUsage {
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	reasoningTokens?: number;
+	reasoningTokenProvenance?: ReasoningTokenProvenance;
+}
+
+export interface ChatPanelRenderMetrics {
+	durationMs: number;
+	cacheHit: boolean;
+	entriesRendered: number;
+}
+
 type TextSegment = {
 	kind: "text";
 	text: string;
@@ -106,6 +127,7 @@ type ToolSegment = {
 	 * while `!finished`.
 	 */
 	awaitingApproval?: boolean | undefined;
+	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
 };
 /**
  * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
@@ -149,6 +171,7 @@ type TranscriptEntry =
 			pending: boolean;
 			statusLine?: AssistantStatusLine | null | undefined;
 			isError: boolean;
+			turnUsage?: ChatPanelTurnUsage;
 	  }
 	| { role: "replayBlock"; renderBlock: ReplayBlockRenderer };
 
@@ -174,6 +197,8 @@ export interface ChatPanel extends Component {
 	 */
 	toggleLastThinking(): boolean;
 	toggleAllThinking(): boolean;
+	/** Toggle whether expanded live tool bodies include cumulative partial output. */
+	toggleLiveToolOutput(): boolean;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
@@ -188,6 +213,10 @@ export interface ChatPanelOptions {
 	 * per render so live keybinding changes flow through.
 	 */
 	getToolExpandKey?: () => string | undefined;
+	/** Live transcript detail mode. Settings changes take effect on the next frame. */
+	getOutputVerbosity?: () => OutputVerbosity;
+	/** Receives measured panel render cost; no FPS claim is made by the panel. */
+	onRenderMetrics?: (metrics: ChatPanelRenderMetrics) => void;
 	/** Clock injection for deterministic duration tests. Defaults to Date.now. */
 	now?: () => number;
 	/**
@@ -218,6 +247,65 @@ function extractAssistantThinking(message: unknown): string {
 		)
 		.map((item) => item.thinking)
 		.join("");
+}
+
+function finiteToken(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
+	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
+	const record = message as Record<string, unknown>;
+	const usage = record.usage && typeof record.usage === "object" ? (record.usage as Record<string, unknown>) : undefined;
+	const thinking = extractAssistantThinking(message);
+	const reportedReasoning = usage ? extractReasoningTokens(usage) : null;
+	const estimatedReasoning = reportedReasoning === null ? estimateReasoningTextTokens(thinking) : null;
+	const inputTokens = finiteToken(usage?.input);
+	const outputTokens = finiteToken(usage?.output);
+	const cacheReadTokens = finiteToken(usage?.cacheRead);
+	const cacheWriteTokens = finiteToken(usage?.cacheWrite);
+	if (
+		inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens === 0 &&
+		reportedReasoning === null &&
+		estimatedReasoning === null
+	) {
+		return undefined;
+	}
+	const turnUsage: ChatPanelTurnUsage = { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
+	if (reportedReasoning !== null) {
+		turnUsage.reasoningTokens = reportedReasoning;
+		turnUsage.reasoningTokenProvenance = "provider";
+	} else if (estimatedReasoning !== null) {
+		turnUsage.reasoningTokens = estimatedReasoning;
+		turnUsage.reasoningTokenProvenance = "estimated";
+	}
+	return turnUsage;
+}
+
+function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefined {
+	if (!Array.isArray(messages)) return undefined;
+	const total: ChatPanelTurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+	let found = false;
+	let provider = false;
+	let estimated = false;
+	for (const message of messages) {
+		const usage = assistantUsage(message);
+		if (!usage) continue;
+		found = true;
+		total.inputTokens += usage.inputTokens;
+		total.outputTokens += usage.outputTokens;
+		total.cacheReadTokens += usage.cacheReadTokens;
+		total.cacheWriteTokens += usage.cacheWriteTokens;
+		if (usage.reasoningTokens !== undefined) {
+			total.reasoningTokens = (total.reasoningTokens ?? 0) + usage.reasoningTokens;
+			if (usage.reasoningTokenProvenance === "provider") provider = true;
+			else estimated = true;
+		}
+	}
+	if (!found) return undefined;
+	if (provider || estimated)
+		total.reasoningTokenProvenance = provider && estimated ? "mixed" : provider ? "provider" : "estimated";
+	return total;
 }
 
 function extractAssistantTerminalError(message: unknown): string {
@@ -339,7 +427,17 @@ const THINKING_LINE_LIMIT = 12;
 const REASONING_CHARS_PER_TOKEN = 4;
 
 function estimateThinkingTokens(thinking: string): number {
-	return Math.max(1, Math.round(thinking.length / REASONING_CHARS_PER_TOKEN));
+	return estimateReasoningTextTokens(thinking) ?? Math.max(1, Math.round(thinking.length / REASONING_CHARS_PER_TOKEN));
+}
+
+function reasoningDisplay(usage: ChatPanelTurnUsage | undefined, thinking: string): { tokens: number; marker: string } {
+	if (usage?.reasoningTokens !== undefined) {
+		return {
+			tokens: usage.reasoningTokens,
+			marker: usage.reasoningTokenProvenance === "provider" ? "provider-reported" : "mixed/estimated",
+		};
+	}
+	return { tokens: estimateThinkingTokens(thinking), marker: "estimated" };
 }
 
 /**
@@ -349,12 +447,21 @@ function estimateThinkingTokens(thinking: string): number {
  * tail `... N more lines hidden` overflow message. Mirrors the tool toggle's
  * lab-notebook minimalism: no colored glyphs, no boxes.
  */
-function renderThinkingLines(thinking: string, expanded: boolean, width: number, streaming: boolean): string[] {
+function renderThinkingLines(
+	thinking: string,
+	expanded: boolean,
+	width: number,
+	streaming: boolean,
+	usage?: ChatPanelTurnUsage,
+): string[] {
 	if (thinking.length === 0) return [];
 	const dimWrap = (s: string): string => `${DIM}${s}${RESET}`;
 	if (!expanded) {
 		const lineBudget = Math.max(1, width);
-		const label = streaming ? `Thinking (${estimateThinkingTokens(thinking)} tokens)…` : THINKING_HIDDEN_LABEL;
+		const display = reasoningDisplay(usage, thinking);
+		const label = streaming
+			? `Thinking (${display.tokens} tokens)${display.marker === "provider-reported" ? "" : " ≈ estimated"}…`
+			: THINKING_HIDDEN_LABEL;
 		return [dimWrap(truncateToWidth(label, lineBudget, "...", false))];
 	}
 	const splitLines = thinking.split("\n");
@@ -383,6 +490,21 @@ function renderThinkingLines(thinking: string, expanded: boolean, width: number,
 	return out;
 }
 
+function renderTurnUsageLine(usage: ChatPanelTurnUsage, width: number): string[] {
+	const reason =
+		usage.reasoningTokens !== undefined
+			? ` reason${usage.reasoningTokenProvenance === "provider" ? "" : "≈"}${usage.reasoningTokens}${usage.reasoningTokenProvenance === "provider" ? " provider" : " estimated"}`
+			: "";
+	const cache =
+		usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0
+			? ` cache ${usage.cacheReadTokens}/${usage.cacheWriteTokens}`
+			: "";
+	return wrapTextWithAnsi(
+		`${DIM}  turn · in ${usage.inputTokens} · out ${usage.outputTokens}${cache}${reason} · reasoning text is a UI excerpt, not a verification${RESET}`,
+		width,
+	);
+}
+
 function styleStatusVerb(text: string, toneHint: VerbRender["toneHint"]): string {
 	if (toneHint === "error") return `${RED_CRIT}${text}${RESET}`;
 	if (toneHint === "warn") return `${AMBER}${text}${RESET}`;
@@ -397,8 +519,11 @@ function renderToolSegmentLines(
 	latestHintToolId: string | null,
 	nowMs: number,
 	unboundedToolBodies: boolean,
+	verbosity: OutputVerbosity,
+	liveToolOutput: boolean,
 ): string[] {
 	const hintKey = seg.id === latestHintToolId ? expandKey : undefined;
+	const expanded = verbosity === "verbose" || (verbosity !== "minimal" && seg.expanded);
 	const elapsedMs = seg.startedAtMs !== undefined ? Math.max(0, nowMs - seg.startedAtMs) : undefined;
 	// A parked call is not executing: the awaiting-approval line replaces the
 	// counting elapsed spinner in both collapsed and expanded form (there is no
@@ -406,7 +531,7 @@ function renderToolSegmentLines(
 	if (!seg.finished && seg.awaitingApproval === true) {
 		return renderToolAwaitingApproval({ toolCallId: seg.id, toolName: seg.name, args: seg.args }, width);
 	}
-	if (!seg.expanded) {
+	if (!expanded) {
 		return renderToolSubline(
 			seg.finished
 				? {
@@ -417,6 +542,7 @@ function renderToolSegmentLines(
 						isError: seg.isError,
 						durationMs: seg.durationMs,
 						resultSummary: seg.resultSummary,
+						outcome: seg.settlement,
 					}
 				: { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs },
 			width,
@@ -424,14 +550,15 @@ function renderToolSegmentLines(
 		);
 	}
 	if (!seg.finished) {
-		if (seg.partialOutput !== undefined) {
+		if (liveToolOutput && seg.partialOutput !== undefined) {
 			return renderToolStreamingExecution(
 				{ toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs },
 				width,
 				seg.partialOutput,
 			);
 		}
-		return renderToolCallHeader({ toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs }, width);
+		const call = { toolCallId: seg.id, toolName: seg.name, args: seg.args, elapsedMs };
+		return liveToolOutput ? renderToolCallHeader(call, width) : renderToolRunningStatus(call, width);
 	}
 	return renderToolExecution(
 		{
@@ -442,6 +569,7 @@ function renderToolSegmentLines(
 			isError: seg.isError,
 			durationMs: seg.durationMs,
 			resultSummary: seg.resultSummary,
+			outcome: seg.settlement,
 		},
 		width,
 		{ unbounded: unboundedToolBodies },
@@ -455,6 +583,8 @@ function renderEntryLines(
 	latestHintToolId: string | null,
 	nowMs: number,
 	unboundedToolBodies: boolean,
+	verbosity: OutputVerbosity,
+	liveToolOutput: boolean,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width);
@@ -474,13 +604,32 @@ function renderEntryLines(
 	// The generic "thinking" status verb is suppressed while this marker is
 	// active so only one indicator shows (see `shouldRenderStatus` below).
 	if (entry.thinking.length > 0) {
-		lines.push(...renderThinkingLines(entry.thinking, entry.expandedThinking === true, width, entry.pending));
+		lines.push(
+			...renderThinkingLines(
+				entry.thinking,
+				verbosity === "verbose" || (verbosity !== "minimal" && entry.expandedThinking === true),
+				width,
+				entry.pending,
+				entry.turnUsage,
+			),
+		);
 	}
 	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	let labeled = false;
 	for (const seg of entry.segments) {
 		if (seg.kind === "tool") {
-			lines.push(...renderToolSegmentLines(seg, width, expandKey, latestHintToolId, nowMs, unboundedToolBodies));
+			lines.push(
+				...renderToolSegmentLines(
+					seg,
+					width,
+					expandKey,
+					latestHintToolId,
+					nowMs,
+					unboundedToolBodies,
+					verbosity,
+					liveToolOutput,
+				),
+			);
 			continue;
 		}
 		// Text and error segments share the reply-prefix bookkeeping: the first
@@ -495,6 +644,7 @@ function renderEntryLines(
 			lines.push(...rendered);
 		}
 	}
+	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width));
 	const shouldRenderStatus =
 		entry.pending &&
 		entry.statusLine !== null &&
@@ -518,11 +668,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
 	let cachedExpandKey: string | undefined;
+	let cachedVerbosity: OutputVerbosity | undefined;
+	let cachedLiveToolOutput: boolean | undefined;
+	const entryRenderCache = new Map<TranscriptEntry, { key: string; lines: string[] }>();
+	const MAX_ENTRY_RENDER_CACHE = 256;
 	let thinkingExpanded = false;
+	let liveToolOutput = true;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
 
 	const markDirty = (): void => {
 		dirty = true;
+	};
+	const invalidateEntryCache = (entry: TranscriptEntry): void => {
+		entryRenderCache.delete(entry);
 	};
 
 	const resolveExpandKey = (): string | undefined => {
@@ -541,7 +699,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * its OWN elapsed gives it the same visual grammar as any other error
 	 * (`✗ · <ms>`), so a blocked call reads like the failure it is.
 	 */
-	const settleUnfinishedToolSegment = (seg: ToolSegment): void => {
+	const settleUnfinishedToolSegment = (seg: ToolSegment, settlement: "aborted" | "orphaned" = "orphaned"): void => {
 		if (seg.finished) return;
 		seg.finished = true;
 		seg.isError = true;
@@ -549,7 +707,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (seg.durationMs === undefined && seg.startedAtMs !== undefined) {
 			seg.durationMs = Math.max(1, now() - seg.startedAtMs);
 		}
-		if (seg.result === undefined) seg.result = "(no result: the call did not complete)";
+		if (seg.result === undefined)
+			seg.result = "(no result: the call did not complete; execution was aborted, blocked, or orphaned)";
+		seg.settlement = settlement;
 		seg.partialOutput = undefined;
 		seg.awaitingApproval = undefined;
 	};
@@ -597,6 +757,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	const appendTextDelta = (entry: Extract<TranscriptEntry, { role: "assistant" }>, delta: string): void => {
 		if (delta.length === 0) return;
+		invalidateEntryCache(entry);
 		const tail = entry.segments[entry.segments.length - 1];
 		if (tail && tail.kind === "text" && !tail.finalized) {
 			tail.text += delta;
@@ -658,21 +819,66 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	const render = (width: number): string[] => {
+		const startedAt = performance.now();
 		const expandKey = resolveExpandKey();
-		if (!dirty && cachedWidth === width && cachedExpandKey === expandKey) return cachedLines;
 		const out: string[] = [];
 		const latestHintToolId = latestCollapsedFinishedToolId();
 		const nowMs = now();
+		const verbosity = options.getOutputVerbosity?.() ?? "default";
+		if (
+			!dirty &&
+			cachedWidth === width &&
+			cachedExpandKey === expandKey &&
+			cachedVerbosity === verbosity &&
+			cachedLiveToolOutput === liveToolOutput
+		) {
+			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
+			return cachedLines;
+		}
+		let entriesRendered = 0;
 		for (let i = 0; i < transcript.length; i += 1) {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (i > 0) out.push("");
-			out.push(...renderEntryLines(entry, width, expandKey, latestHintToolId, nowMs, unboundedToolBodies));
+			const cacheKey = `${width}|${expandKey ?? ""}|${latestHintToolId ?? ""}|${verbosity}|${liveToolOutput}`;
+			const cached = entryRenderCache.get(entry);
+			const cacheable =
+				i >= transcript.length - MAX_ENTRY_RENDER_CACHE &&
+				entry.role !== "replayBlock" &&
+				(entry.role !== "assistant" ||
+					(!entry.pending && !entry.segments.some((segment) => segment.kind === "tool" && !segment.finished)));
+			if (cacheable && cached?.key === cacheKey) {
+				out.push(...cached.lines);
+				continue;
+			}
+			entriesRendered += 1;
+			const renderedEntry = renderEntryLines(
+				entry,
+				width,
+				expandKey,
+				latestHintToolId,
+				nowMs,
+				unboundedToolBodies,
+				verbosity,
+				liveToolOutput,
+			);
+			out.push(...renderedEntry);
+			if (cacheable) {
+				entryRenderCache.set(entry, { key: cacheKey, lines: renderedEntry });
+				while (entryRenderCache.size > MAX_ENTRY_RENDER_CACHE) {
+					const oldest = entryRenderCache.keys().next().value;
+					if (oldest === undefined) break;
+					entryRenderCache.delete(oldest);
+				}
+			}
 		}
 		cachedLines = out;
 		cachedWidth = width;
 		cachedExpandKey = expandKey;
+		cachedVerbosity = verbosity;
+		cachedLiveToolOutput = liveToolOutput;
 		dirty = false;
+		options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: false, entriesRendered });
 		return out;
 	};
 
@@ -693,6 +899,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					const seg = entry.segments[segIndex];
 					if (seg?.kind !== "tool") continue;
 					seg.expanded = !seg.expanded;
+					entryRenderCache.clear();
 					markDirty();
 					return true;
 				}
@@ -710,6 +917,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (tools.length === 0) return false;
 			const expand = tools.some((seg) => !seg.expanded);
 			for (const seg of tools) seg.expanded = expand;
+			entryRenderCache.clear();
 			markDirty();
 			return true;
 		},
@@ -720,6 +928,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					if (seg.kind === "tool") seg.expanded = false;
 				}
 			}
+			entryRenderCache.clear();
 			markDirty();
 		},
 		toggleLastThinking(): boolean {
@@ -729,6 +938,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (entry.thinking.length === 0) continue;
 				entry.expandedThinking = entry.expandedThinking !== true;
 				thinkingExpanded = entry.expandedThinking === true;
+				entryRenderCache.clear();
 				markDirty();
 				return true;
 			}
@@ -747,8 +957,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const expand = entries.some((entry) => entry.expandedThinking !== true);
 			for (const entry of entries) entry.expandedThinking = expand;
 			thinkingExpanded = expand;
+			entryRenderCache.clear();
 			markDirty();
 			return true;
+		},
+		toggleLiveToolOutput(): boolean {
+			liveToolOutput = !liveToolOutput;
+			markDirty();
+			return liveToolOutput;
 		},
 		reset(): void {
 			transcript.length = 0;
@@ -809,6 +1025,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_approval_state") {
+				entryRenderCache.clear();
 				const tool = findToolSegment(event.toolCallId);
 				if (tool && !tool.finished) {
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
@@ -817,6 +1034,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_update") {
+				entryRenderCache.clear();
 				// pi-agent emits `partialResult` as a cumulative tool-result envelope
 				// (the bash tool concatenates its rolling tail buffer on every tick).
 				// Unwrap with the same helper the finished-result path uses, then
@@ -833,10 +1051,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "tool_execution_end") {
+				entryRenderCache.clear();
 				const tool = findToolSegment(event.toolCallId);
 				if (tool) {
 					tool.result = event.result;
 					tool.isError = event.isError;
+					tool.settlement =
+						event.isError && /\b(?:blocked|denied|cancel(?:led|ed)|permission)\b/i.test(previewResult(event.result))
+							? "blocked"
+							: event.isError && /\babort(?:ed)?\b/i.test(previewResult(event.result))
+								? "aborted"
+								: undefined;
 					tool.finished = true;
 					// The true result replaces a synthetic settle; from here on the
 					// segment is model-finished and immutable to later end events.
@@ -870,6 +1095,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "message_end") {
+				entryRenderCache.clear();
 				const text = extractAssistantText(event.message);
 				const thinking = extractAssistantThinking(event.message);
 				const extractedTerminalError = extractAssistantTerminalError(event.message);
@@ -878,8 +1104,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					current?.role === "assistant"
 						? scopeTerminalErrorAfterSuccessfulTool(current, extractedTerminalError)
 						: extractedTerminalError;
-				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0) return;
+				const usage = assistantUsage(event.message);
+				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && usage === undefined) return;
 				const assistant = ensureAssistant();
+				if (usage !== undefined) assistant.turnUsage = usage;
 				if (terminalError.length > 0) assistant.isError = true;
 				if (thinking.length > 0) {
 					assistant.thinking = thinking;
@@ -905,6 +1133,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				return;
 			}
 			if (event.type === "agent_end") {
+				entryRenderCache.clear();
+				const runUsage = aggregateAssistantUsage(event.messages);
+				if (runUsage !== undefined) {
+					for (let index = transcript.length - 1; index >= 0; index -= 1) {
+						const entry = transcript[index];
+						if (entry?.role === "assistant") {
+							entry.turnUsage = runUsage;
+							break;
+						}
+					}
+				}
 				// The run is over: no tool can still be executing anywhere in the
 				// transcript, not just in the tail entry (a mid-turn notice splits
 				// entries). Settle any tool segment whose `tool_execution_end` never
@@ -912,10 +1151,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// ledger never leaves a running line counting past the turn's end,
 				// and clear `pending` everywhere so no earlier entry keeps rendering
 				// live thinking or status.
+				const runWasAborted =
+					Array.isArray(event.messages) &&
+					event.messages.some(
+						(message) =>
+							message && typeof message === "object" && (message as { stopReason?: unknown }).stopReason === "aborted",
+					);
 				for (const entry of transcript) {
 					if (entry.role !== "assistant") continue;
 					for (const seg of entry.segments) {
-						if (seg.kind === "tool" && !seg.finished) settleUnfinishedToolSegment(seg);
+						if (seg.kind === "tool" && !seg.finished)
+							settleUnfinishedToolSegment(seg, runWasAborted ? "aborted" : "orphaned");
 					}
 					if (entry.pending) {
 						entry.pending = false;

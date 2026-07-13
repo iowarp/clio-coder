@@ -27,7 +27,10 @@ export interface ClioAppKeybindings {
 	"clio.model.cycleForward": true;
 	"clio.model.cycleBackward": true;
 	"clio.tool.expand": true;
+	"clio.tool.expandAll": true;
+	"clio.tool.liveOutput": true;
 	"clio.thinking.expand": true;
+	"clio.thinking.expandAll": true;
 	"clio.editor.external": true;
 	"clio.message.followUp": true;
 	"clio.message.dequeue": true;
@@ -97,9 +100,25 @@ export const CLIO_APP_KEYBINDINGS = {
 		defaultKeys: "alt+o",
 		description: "Toggle the most recent tool segment between collapsed subline and full body",
 	},
+	"clio.tool.expandAll": {
+		// Alt+Shift+letter is commonly consumed by OS keyboard-layout switching.
+		// Keep it discoverable, but pair it with the legacy-safe Ctrl+Alt form.
+		defaultKeys: ["ctrl+alt+o", "alt+shift+o"],
+		description: "Toggle all tool segments between collapsed sublines and full bodies",
+	},
+	"clio.tool.liveOutput": {
+		defaultKeys: "alt+p",
+		description: "Toggle streaming partial tool output in expanded tool bodies",
+	},
 	"clio.thinking.expand": {
 		defaultKeys: "alt+r",
-		description: "Toggle thinking blocks between hidden marker and full body",
+		description: "Toggle the latest thinking block between hidden marker and full body",
+	},
+	"clio.thinking.expandAll": {
+		// Ctrl+Alt+R is the fallback for terminals/OSes that do not forward
+		// Alt+Shift+R as a distinct key event.
+		defaultKeys: ["ctrl+alt+r", "alt+shift+r"],
+		description: "Toggle all thinking blocks between hidden markers and full bodies",
 	},
 	"clio.editor.external": {
 		defaultKeys: "alt+g",
