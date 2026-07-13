@@ -42,7 +42,7 @@ export interface RunCliArgs {
 	diagnostics: CliArgDiagnostic[];
 }
 
-const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	const parsed: RunCliArgs = {
@@ -102,7 +102,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 				else
 					parsed.diagnostics.push({
 						type: "error",
-						message: "--thinking must be one of: off|minimal|low|medium|high|xhigh",
+						message: "--thinking must be one of: off|minimal|low|medium|high|xhigh|max",
 					});
 			}
 			continue;

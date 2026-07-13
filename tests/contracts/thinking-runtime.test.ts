@@ -50,14 +50,14 @@ describe("contracts/thinking-runtime", () => {
 		strictEqual(resolved.request.budgetTokens, 7168);
 	});
 
-	it("uses cataloged Anthropic adaptive-thinking metadata for xhigh effort", () => {
+	it("uses cataloged Anthropic adaptive-thinking metadata for xhigh and max effort", () => {
 		const opus = engineAi.getModel("anthropic", "claude-opus-4-7");
 		ok(opus, "pi-ai catalog should include claude-opus-4-7");
 
 		const resolved = resolveModelRuntimeCapabilitiesForModel(opus, "xhigh");
 
 		strictEqual(resolved.capabilities.thinkingFormat, "anthropic-extended");
-		deepStrictEqual(resolved.thinking.supportedLevels, ["off", "minimal", "low", "medium", "high", "xhigh"]);
+		deepStrictEqual(resolved.thinking.supportedLevels, ["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 		strictEqual(resolved.thinking.effectiveLevel, "xhigh");
 		strictEqual(resolved.thinking.mechanism, "effort-levels");
 		strictEqual(resolved.request.reasoningEffort, "xhigh");

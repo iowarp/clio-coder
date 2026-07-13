@@ -18,7 +18,7 @@ import type {
 	RunPlanProvenance,
 } from "./types.js";
 
-export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type JobThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Maximum UTF-8 size of caller-supplied parent-to-worker briefing data. */
 export const DISPATCH_BRIEFING_MAX_BYTES = 12_000;

@@ -44,7 +44,7 @@ Run one headless main-agent turn. Fleet dispatch is explicit with --agent.
 Flags:
   --target <id>             one-run main-agent or dispatch target override
   --model <wireId>          one-run model override
-  --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh
+  --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
   --autonomy <level>        one-run autonomy: read-only|suggest|auto-edit|full-auto
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
   --top-p <N>               one-run nucleus sampling override (0..1)
