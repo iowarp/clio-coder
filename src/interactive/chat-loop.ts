@@ -382,6 +382,8 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: () => string;
+	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
+	getTaskMemoryHandoffSource?: () => string;
 	/** True when an interactive TUI can handle Esc cancellation notices. */
 	interactiveTui?: boolean;
 }
@@ -2257,7 +2259,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Pending skill requests are plain visible text in the user message
 			// itself: persisted in the ledger, no hidden prompt machinery.
 			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
-			const submittedText = [reminderBlock, skillPreamble, text].filter((part) => part.length > 0).join("\n\n");
+			let taskMemoryHandoffSource = "";
+			if (pendingSkillRequests.some((request) => request.name.trim() === "context-handoff")) {
+				try {
+					taskMemoryHandoffSource = deps.getTaskMemoryHandoffSource?.() ?? "";
+				} catch {
+					// Handoff export is supplemental; a snapshot failure must not block
+					// the explicitly requested skill turn.
+				}
+			}
+			const submittedText = [reminderBlock, skillPreamble, taskMemoryHandoffSource, text]
+				.filter((part) => part.length > 0)
+				.join("\n\n");
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";

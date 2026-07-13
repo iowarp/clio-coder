@@ -900,6 +900,50 @@ describe("contracts/chat-loop pending skill tool surface", () => {
 			rmSync(scratch, { recursive: true, force: true });
 		}
 	});
+
+	it("supplies structured task memory only to an explicit context-handoff request", async () => {
+		const entries: SessionEntry[] = [];
+		let sourceReads = 0;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			getTaskMemoryHandoffSource: () => {
+				sourceReads += 1;
+				return '[Task memory handoff source]\n```clio-task-memory\n{"version":1,"knowledge":[],"procedural":[]}\n```';
+			},
+			createAgent: createFakeAgentFactory(async (agent, input) => {
+				const incoming = inputMessages(input);
+				agent.state.messages.push(...incoming);
+				const message = {
+					role: "assistant",
+					content: [{ type: "text", text: "done" }],
+					stopReason: "stop",
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(message);
+				await agent.emit({ type: "message_end", message } as never);
+				await agent.emit({ type: "agent_end", messages: [message] } as never);
+			}),
+		} as never);
+
+		await loop.submit("write a handoff", {
+			pendingSkillRequests: [{ name: "context-handoff", args: "", source: "slash-command", installed: true }],
+		});
+		await loop.submit("ordinary follow-up");
+
+		strictEqual(sourceReads, 1);
+		const userText = entries
+			.filter(
+				(entry): entry is Extract<SessionEntry, { kind: "message" }> => entry.kind === "message" && entry.role === "user",
+			)
+			.map((entry) => (entry.payload as { text?: string }).text ?? "");
+		ok(userText[0]?.includes("Task memory handoff source"));
+		ok(userText[0]?.includes("clio-task-memory"));
+		ok(!userText[1]?.includes("Task memory handoff source"));
+	});
 });
 
 describe("contracts/chat-loop locked-turn markup sanitation", () => {

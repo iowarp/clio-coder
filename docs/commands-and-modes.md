@@ -118,7 +118,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/context` | `/ctx` | `/context compact [instructions] \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, init, refresh, and reset |
 | `/fleet` | - | `/fleet` | Show in-process dispatch running/retry status |
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
-| `/memory` | - | `/memory` | Inspect approved lessons and the live session task-memory bank |
+| `/memory` | - | `/memory seed` | Inspect task memory or seed it from the newest handoff |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | - | `/thinking` | Open thinking-level selector |
 | `/output` | - | `/output [verbosity]` | Set transcript detail: minimal, default, or verbose |
@@ -159,6 +159,9 @@ bank by private status, knowledge, and procedural class, including each
 entry's injection count and the last memory-step outcome. The welcome island
 and expanded dashboard summarize whether intervention is on, its rules or LLM
 tier, and current bank size.
+After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
+structured snapshot. Seeding is explicit, deduplicated, and unavailable while
+`memory.intervention.enabled` is off.
 
 ## Keybindings
 

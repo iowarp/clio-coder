@@ -13,8 +13,8 @@ skills:
     version: 0.1.2
     sha256: 4c03bf20bb4ce8b476adbb3f82c55075ba3c2be8582c80b2d49f581ee1fffe1d
   - name: context-handoff
-    version: 0.2.1
-    sha256: 9486da61a872838c8bd3d89160d4b017995fe8e96e6a5c074233faed46f30316
+    version: 0.3.0
+    sha256: c2360f3e1aedbe783811e8cc2bd259c9b40472e7e27df726281be98791b9ec34
   - name: context-prime
     version: 0.2.1
     sha256: fc3595dd4296148d45e34a1471e4eef80b85818c8320d567ac7319f6970b58c1

@@ -48,6 +48,24 @@ export {
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
 export {
+	parseTaskMemoryHandoffSnapshot,
+	readNewestTaskMemoryHandoff,
+	renderTaskMemoryHandoffSnapshot,
+	renderTaskMemoryHandoffSource,
+	seedTaskMemoryBank,
+	seedTaskMemoryFromNewestHandoff,
+	TASK_MEMORY_HANDOFF_LANGUAGE,
+	TASK_MEMORY_HANDOFF_VERSION,
+	type TaskMemoryHandoffArtifact,
+	type TaskMemoryHandoffEntry,
+	type TaskMemoryHandoffOffer,
+	type TaskMemoryHandoffSeedOutcome,
+	type TaskMemoryHandoffSeedResult,
+	type TaskMemoryHandoffSnapshot,
+	taskMemoryHandoffSeedOffer,
+	taskMemoryHandoffSnapshot,
+} from "./task-memory-handoff.js";
+export {
 	parseTaskMemoryPolicyResponse,
 	runTaskMemoryPolicy,
 	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,

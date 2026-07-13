@@ -70,9 +70,10 @@ describe("contracts/slash-spec", () => {
 	it("routes typed slash commands through the registry to the interactive overlay actions", () => {
 		const opened: string[] = [];
 		const submitted: string[] = [];
+		const notices: string[] = [];
 		const ctx: SlashCommandContext = {
 			io: { stdout: () => undefined, stderr: () => undefined },
-			notice: () => undefined,
+			notice: (_level, text) => notices.push(text),
 			dispatch: {} as DispatchContract,
 			bus: createSafeEventBus(),
 			workerDefault: () => undefined,
@@ -90,6 +91,7 @@ describe("contracts/slash-spec", () => {
 			openFleet: () => opened.push("fleet"),
 			openTasks: () => opened.push("tasks"),
 			openMemory: () => opened.push("memory"),
+			seedTaskMemory: () => ({ status: "seeded", seeded: 2, skipped: 1, source: "handoff-latest.md" }),
 			openView: (filter) => opened.push(filter ? `view:${filter}` : "view"),
 			openThinking: () => opened.push("thinking"),
 			openModel: () => opened.push("model"),
@@ -116,10 +118,12 @@ describe("contracts/slash-spec", () => {
 		for (const input of ["/help routing", "/settings", "/targets", "/model", "/models", "/memory", "/view run-123"]) {
 			dispatchSlashCommand(parseSlashCommand(input), ctx);
 		}
+		dispatchSlashCommand(parseSlashCommand("/memory seed"), ctx);
 		dispatchSlashCommand(parseSlashCommand("/not-a-command"), ctx);
 
 		deepStrictEqual(opened, ["help:routing", "settings", "targets", "model", "model", "memory", "view:run-123"]);
 		deepStrictEqual(submitted, ["/not-a-command"]);
+		ok(notices.some((notice) => notice.includes("seeded 2 entries from handoff-latest.md; skipped 1 duplicate")));
 	});
 
 	it("parses all slash commands according to the v0.2.3 registry contract", () => {
@@ -335,6 +339,7 @@ describe("contracts/slash-spec", () => {
 			["/fleet query", { kind: "unknown", text: "/fleet query" }],
 			["/tasks query", { kind: "unknown", text: "/tasks query" }],
 			["/memory", { kind: "memory" }],
+			["/memory seed", { kind: "memory-seed" }],
 			["/memory query", { kind: "unknown", text: "/memory query" }],
 			["/thinking query", { kind: "unknown", text: "/thinking query" }],
 			["/scoped-models query", { kind: "unknown", text: "/scoped-models query" }],
