@@ -1124,9 +1124,13 @@ export async function syncCodewiki(
 	const readFile = options.readFile ?? defaultReadFile;
 	const currentPaths = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
 	const currentFiles = new Map<string, string>();
+	const currentTexts = new Map<string, string>();
 	for (const relPath of currentPaths) {
 		const text = readFile(join(cwd, relPath));
-		if (text !== null) currentFiles.set(relPath, contentHash(text));
+		if (text !== null) {
+			currentFiles.set(relPath, contentHash(text));
+			currentTexts.set(relPath, text);
+		}
 	}
 	const indexedFiles = new Map(codewiki.files.map((file) => [file.path, file] as const));
 	const changedPaths = new Set<string>();
@@ -1137,7 +1141,11 @@ export async function syncCodewiki(
 		if (!currentFiles.has(relPath)) changedPaths.add(relPath);
 	}
 	if (changedPaths.size === 0) return codewiki;
-	return updateCodewikiPaths(cwd, codewiki, [...changedPaths], options);
+	const syncOptions: CodewikiBuildOptions = {
+		...options,
+		readFile: (path) => currentTexts.get(normalizeRel(cwd, path)) ?? readFile(path),
+	};
+	return updateCodewikiPaths(cwd, codewiki, [...changedPaths], syncOptions);
 }
 
 export function codewikiPath(cwd: string): string {
