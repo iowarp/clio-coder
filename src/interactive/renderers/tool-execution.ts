@@ -12,6 +12,7 @@
  * two surfaces stay byte-identical.
  */
 
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
 import { type DiffRenderInput, renderUnifiedDiff } from "./diff.js";
@@ -434,6 +435,39 @@ function buildFieldSublineBody(
 	return `${lead}${preview}`;
 }
 
+function dispatchSublineBody(args: unknown): string | null {
+	if (!isPlainObject(args)) return null;
+	if (args.list === true) return "listing fleet agents";
+	const sharedAgent =
+		(typeof args.agent === "string" && args.agent.trim()) ||
+		(typeof args.agent_id === "string" && args.agent_id.trim()) ||
+		"coder";
+	let rawTasks: unknown = args.tasks;
+	if (typeof rawTasks === "string") {
+		const trimmed = rawTasks.trim();
+		if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+			try {
+				rawTasks = JSON.parse(trimmed) as unknown;
+			} catch {
+				// Keep the string as one plain task; dispatch itself reports malformed JSON.
+			}
+		}
+	}
+	const tasks = Array.isArray(rawTasks) ? rawTasks : rawTasks === undefined ? [] : [rawTasks];
+	if (tasks.length === 0) return null;
+	const first = tasks[0];
+	const record = isPlainObject(first) ? first : null;
+	const agent =
+		(record && typeof record.agent === "string" && record.agent.trim()) ||
+		(record && typeof record.agent_id === "string" && record.agent_id.trim()) ||
+		sharedAgent;
+	const taskText = typeof first === "string" ? first : record && typeof record.task === "string" ? record.task : "";
+	const taskPreview = truncate(sanitizeCallTargetText(taskText), ARG_PREVIEW_LIMIT);
+	const more = tasks.length > 1 ? ` +${tasks.length - 1} more` : "";
+	if (taskPreview.length === 0) return `dispatching ${tasks.length} task${tasks.length === 1 ? "" : "s"}${more}`;
+	return `dispatching ${agent}: ${taskPreview}${more}`;
+}
+
 const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string | null>> = {
 	read: (args) => buildFieldSublineBody(args, "path", "reading "),
 	edit: (args) => buildFieldSublineBody(args, "path", "editing "),
@@ -473,11 +507,7 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 		const id = readStringField(args, "id");
 		return id === null ? `tasks ${action}` : `tasks ${action} ${id}`;
 	},
-	dispatch: (args) => {
-		if (!isPlainObject(args) || !Array.isArray(args.tasks)) return null;
-		const count = args.tasks.length;
-		return `dispatching ${count} task${count === 1 ? "" : "s"}`;
-	},
+	dispatch: dispatchSublineBody,
 };
 
 /**

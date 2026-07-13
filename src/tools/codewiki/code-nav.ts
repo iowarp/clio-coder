@@ -273,6 +273,14 @@ function resolveFile(index: NavIndex, query: string): CodewikiFile | { error: st
 		if (file) return file;
 	}
 	if (matches.length > 1) {
+		const directoryPrefix = `${query.replace(/\/+$/u, "")}/`;
+		if (matches.every((path) => path.startsWith(directoryPrefix))) {
+			return {
+				error:
+					`path '${query}' is a directory-like prefix, but deps/dependents/outline require one indexed file. ` +
+					`Use mode=path query=${query} to list files, then pass an exact file path to this mode.`,
+			};
+		}
 		return { error: `ambiguous path '${query}' matched ${matches.length} files; use an exact indexed path` };
 	}
 	// Point-of-failure redirect: measured on a live coder worker, symbol names

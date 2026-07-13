@@ -1,3 +1,4 @@
+import type { SafeEventBus } from "../../core/event-bus.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
@@ -43,6 +44,7 @@ export interface DispatchSnapshot {
 	running: Array<{
 		runId: string;
 		agentId: string;
+		task?: string;
 		runtimeKind: string;
 		outcomePhase: string;
 		heartbeat: "alive" | "stale" | "dead" | "n/a";
@@ -55,7 +57,7 @@ export interface DispatchSnapshot {
 		/** Fleet node this run was placed on; null means the local node. */
 		node: RunNodeIdentity | null;
 	}>;
-	retrying: Array<{ runId: string; agentId: string; attempt: number; dueAt: string; reason: string }>;
+	retrying: Array<{ runId: string; agentId: string; task?: string; attempt: number; dueAt: string; reason: string }>;
 	totals: {
 		inputTokens: number;
 		outputTokens: number;
@@ -91,6 +93,10 @@ export interface DetachedBatchesContract {
 }
 
 export interface DispatchContract {
+	/** True when the domain event pump publishes DispatchProgress itself. */
+	readonly publishesProgress?: boolean;
+	/** Whether `bus` is the same bus already owned by the domain progress pump. */
+	ownsProgressBus?(bus: SafeEventBus | undefined): boolean;
 	/**
 	 * Resolve effective agent/target/model/node without launching or acquiring a
 	 * slot. Callers pin this result into the approved request; later placement

@@ -19,6 +19,8 @@ import {
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
+import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
+import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
 import type {
 	CapabilityFlags,
 	RuntimeDescriptor,
@@ -38,6 +40,8 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import type { ToolProfileName } from "../tools/profiles.js";
+import { parseScoutSplitRecommendation } from "../tools/scout-split-recommendation.js";
+import { hasVerifiedScoutGrounding, quarantineUnverifiedScoutBullets } from "../tools/worker-evidence.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -61,6 +65,16 @@ import { patchWorkerRequestPayload } from "./provider-payload.js";
 import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Model } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
+
+/** Scout exploration attempts before a guaranteed text-only synthesis phase. */
+export const SCOUT_EXPLORATION_TOOL_CALL_LIMIT = 18;
+export const SCOUT_LIVE_READ_RESERVE_CALLS = 4;
+export const SCOUT_SYNTHESIS_CORRECTION_LIMIT = 2;
+export const SCOUT_SYNTHESIS_CORRECTION_MESSAGE =
+	"Your previous response was not a final Scout handoff: it announced more tool work or omitted live path:line citations. Tool use is over. Return compact final findings now from evidence already gathered, cite every source claim as path:line, and put uncertainties under `Unresolved gaps:`. If the task truly cannot fit, return the bounded `SPLIT RECOMMENDATION:` protocol instead. Do not describe future actions.";
+const SCOUT_SYNTHESIS_FINAL_CORRECTION_MESSAGE =
+	"FINAL HANDOFF REQUIRED IN THIS RESPONSE. Start with `Findings:` and write the cited findings themselves; every bullet must contain a path:line citation from evidence already gathered. End with `Unresolved gaps:`. Do not say that you will read, compile, prepare, or produce the answer later. If no valid cited report is possible, output only a valid bounded `SPLIT RECOMMENDATION:` block.";
+const SCOUT_CITATION_ANCHOR_LIMIT = 12;
 
 export interface WorkerRunInput {
 	sessionId?: string;
@@ -156,6 +170,54 @@ function getTerminalAgentError(messages: AgentMessage[]): string | null {
 		return typeof message.errorMessage === "string" ? message.errorMessage : "";
 	}
 	return null;
+}
+
+function assistantMessageText(message: AgentMessage | undefined): string | null {
+	if (!isAssistantMessage(message) || !Array.isArray(message.content)) return null;
+	return message.content
+		.filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string")
+		.map((block) => block.text)
+		.join("")
+		.trim();
+}
+
+function replaceAssistantMessageText(message: AgentMessage | undefined, text: string): void {
+	if (!isAssistantMessage(message) || !Array.isArray(message.content)) return;
+	let replaced = false;
+	for (const block of message.content as Array<{ type?: unknown; text?: unknown }>) {
+		if (block.type !== "text" || typeof block.text !== "string") continue;
+		block.text = replaced ? "" : text;
+		replaced = true;
+	}
+}
+
+function scoutSynthesisNeedsCorrection(
+	message: AgentMessage | undefined,
+	successfulLiveReadCitations: ReadonlyArray<string>,
+): boolean {
+	if (!isAssistantMessage(message)) return false;
+	const text = assistantMessageText(message);
+	if (text === null || text.length === 0) return true;
+	if (parseScoutSplitRecommendation(text) !== null) return false;
+	const stopReason = message.stopReason;
+	const announcesMoreWork = shouldRequestStalledTurnContinuation({
+		hook: "turn_end",
+		text,
+		metadata: {
+			turnToolCalls: 0,
+			...(typeof stopReason === "string" ? { stopReason } : {}),
+		},
+	});
+	return announcesMoreWork || !hasVerifiedScoutGrounding(text, successfulLiveReadCitations);
+}
+
+function scoutSynthesisCorrectionMessage(attempt: number, citations: ReadonlyArray<string>): string {
+	const directive = attempt === 1 ? SCOUT_SYNTHESIS_CORRECTION_MESSAGE : SCOUT_SYNTHESIS_FINAL_CORRECTION_MESSAGE;
+	if (citations.length === 0) return directive;
+	return `${directive}\n\nVerified live-read anchors (copy the relevant exact path:line forms into your findings):\n${citations
+		.slice(-SCOUT_CITATION_ANCHOR_LIMIT)
+		.map((citation) => `- ${citation}`)
+		.join("\n")}`;
 }
 
 class NullKnowledgeBase implements KnowledgeBase {
@@ -294,6 +356,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// Flipped by the loop guard's lockout callback; read by onPayload below to
 	// force the remaining model rounds text-only via tool_choice none.
 	let synthesisToolLock = false;
+	const middlewareToolChoice = createMiddlewareToolChoiceControl();
+	// Tool calls emitted by one provider response share this correlation. The
+	// loop guard counts synthesis-lock noncompliance by model round, preventing
+	// one wide parallel batch from consuming the entire denial backstop.
+	let workerModelRound = 0;
 	const registry = createWorkerToolRegistry(
 		input.middlewareSnapshot,
 		safety,
@@ -315,6 +382,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			createLoopGuardRegistration({
 				safety,
 				toolCallCap: readWorkerToolCallCap(),
+				...(input.agentId === "scout" ? { toolCallSoftLimit: SCOUT_EXPLORATION_TOOL_CALL_LIMIT } : {}),
+				...(input.agentId === "scout" ? { toolCallSoftReadReserve: SCOUT_LIVE_READ_RESERVE_CALLS } : {}),
 				// Hold the tail of the cap for verification reads and synthesis so a
 				// reconnaissance worker never exhausts its budget mid-exploration and
 				// reports citation-free leads (inactive when the cap is that small).
@@ -327,6 +396,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				onSynthesisLockout: () => {
 					synthesisToolLock = true;
 				},
+				...(input.agentId === "scout"
+					? {
+							onSoftReadReserve: () => {
+								middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Read }]);
+							},
+						}
+					: {}),
 			}),
 			createProtectedArtifactsRegistration({
 				...(input.protectedArtifactState !== undefined
@@ -335,9 +411,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}),
 		],
 		input.autonomy,
+		(effects) => middlewareToolChoice.apply(effects),
 	);
 	let workerBoundFailure: string | null = null;
 	let workerBoundAborted = false;
+	let scoutSynthesisCorrectionsQueued = 0;
+	const pendingScoutReadCitations = new Map<string, string>();
+	const successfulScoutReadCitations: string[] = [];
 	let abortWorkerForBound: (() => void) | null = null;
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
@@ -377,7 +457,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		agentId: input.agentId,
 		task: input.task,
 		includeInteractiveTools: false,
-		...(agentSkillPolicy ? { invokeOptions: () => ({ pendingSkillPolicy: agentSkillPolicy }) } : {}),
+		invokeOptions: () => ({
+			correlationId: `worker-model-round-${workerModelRound}`,
+			...(agentSkillPolicy ? { pendingSkillPolicy: agentSkillPolicy } : {}),
+		}),
 	});
 	if (tools.length === 0 && activeWorkerTools.length > 0) {
 		process.stderr.write(`[worker] warning: no tools resolved for allowed=[${activeWorkerTools.join(",")}]\n`);
@@ -396,11 +479,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			messages: [],
 		},
 		onPayload: async (payload, currentModel) => {
+			const middlewareChoice = middlewareToolChoice.current();
 			return patchWorkerRequestPayload(payload, currentModel as Model<never>, {
 				runtimeId: input.runtime.id,
 				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
-				toolChoiceNone: synthesisToolLock,
+				toolChoiceNone: synthesisToolLock || middlewareChoice.kind === "none",
+				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
 			});
 		},
 		getApiKey: async () => input.apiKey,
@@ -410,6 +495,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const agent = new Agent(options);
 	abortWorkerForBound = () => agent.abort();
 	const unsubscribe = agent.subscribe(async (event) => {
+		if (event.type === "turn_start") workerModelRound += 1;
+		if (event.type === "tool_execution_start") middlewareToolChoice.toolStarted(event.toolName);
+		if (input.agentId === "scout" && event.type === "tool_execution_start" && event.toolName === ToolNames.Read) {
+			const args = event.args as Record<string, unknown>;
+			const path = typeof args.path === "string" ? args.path.trim() : "";
+			const offset =
+				typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : 1;
+			if (path.length > 0 && args.tail === undefined) pendingScoutReadCitations.set(event.toolCallId, `${path}:${offset}`);
+		}
+		if (input.agentId === "scout" && event.type === "tool_execution_end" && event.toolName === ToolNames.Read) {
+			const citation = pendingScoutReadCitations.get(event.toolCallId);
+			pendingScoutReadCitations.delete(event.toolCallId);
+			if (citation !== undefined && event.isError !== true && !successfulScoutReadCitations.includes(citation)) {
+				successfulScoutReadCitations.push(citation);
+			}
+		}
 		// Synthesis-locked run: a model that ignores tool_choice none emits its
 		// chat template's tool-call syntax as plain text. Sanitize the finished
 		// message in place before it hits stdout; pi stores this same object in
@@ -417,6 +518,25 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// reconstruction, and any later provider round all see the same text.
 		if (synthesisToolLock && event.type === "message_end") {
 			sanitizeLockedSynthesisMessage(event.message);
+			if (input.agentId === "scout") {
+				const text = assistantMessageText(event.message);
+				if (text !== null && parseScoutSplitRecommendation(text) === null) {
+					const grounded = quarantineUnverifiedScoutBullets(text, successfulScoutReadCitations);
+					if (grounded !== text) replaceAssistantMessageText(event.message, grounded);
+				}
+			}
+			if (input.agentId === "scout" && scoutSynthesisNeedsCorrection(event.message, successfulScoutReadCitations)) {
+				if (scoutSynthesisCorrectionsQueued < SCOUT_SYNTHESIS_CORRECTION_LIMIT) {
+					scoutSynthesisCorrectionsQueued += 1;
+					agent.followUp(
+						taskMessage(scoutSynthesisCorrectionMessage(scoutSynthesisCorrectionsQueued, successfulScoutReadCitations)),
+					);
+				} else if (workerBoundFailure === null) {
+					workerBoundFailure =
+						"Scout synthesis contract failed: two bounded corrective rounds still announced tool work or omitted verified live-read path:line citations";
+					process.stderr.write(`[worker] ${workerBoundFailure}\n`);
+				}
+			}
 		}
 		emit(event);
 	});

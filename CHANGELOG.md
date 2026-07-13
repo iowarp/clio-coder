@@ -16,6 +16,7 @@ still change interfaces.
 - Made protected-artifact boundaries durable across session append, synchronous flush, reload, reset, restart, local/shared-filesystem dispatch, and compete worktrees with a write-ahead recovery journal, merge-time protected-diff check, and fail-closed degraded mode.
 - Made iterative compaction cumulative, surfaced compaction failures distinctly from legitimate no-ops, and isolated repository-scoped memory by canonical repository identity in interactive and headless agent prompts.
 - Made compete worktree ownership transactional and segment-safe, with all admitted workers settled before cleanup, durable coordinator/worker process leases, PID-reuse-resistant termination of hard-crash orphans at orchestrator startup, and restart preservation of a pending or recovered winner while losers are removed.
+- Made broad repository exploration Scout-first and mechanically bounded: the chat harness invokes one admitted Scout dispatch before a tool-free main-model synthesis round, failed Scout runs no longer open a manual scan loop, Scout transitions from an 18-call exploration phase to guaranteed synthesis, and tool-use preambles/invisible semantic retries can no longer masquerade as results. The task-aware Fleet Runs UI now exposes live tools, tokens, priced cost, retries, steering acknowledgements, and per-run cancellation.
 
 ## 0.2.8 - 2026-07-07
 

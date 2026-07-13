@@ -2,6 +2,7 @@ import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import type {
 	ObservabilityNotice,
 	ObservabilityRunSummary,
@@ -15,7 +16,10 @@ import {
 	deriveRunEvidenceState,
 	dispatchStatusPresentation,
 	formatTaskIslandLines,
+	isDispatchBoardRowCancellable,
+	isDispatchBoardRowSteerable,
 	renderDispatchCard,
+	sanitizeDispatchTaskSummary,
 	TASK_ISLAND_WIDTH,
 } from "../../src/interactive/dispatch-board.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
@@ -94,9 +98,9 @@ function hasTruncatedAnsi(text: string): boolean {
 const stripSgr = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 
 describe("dispatch board island frames", () => {
-	it("opens the task island with the canonical ┌─ Tasks ─ fill ┐ recipe", () => {
+	it("opens the fleet-run island with the canonical framed title", () => {
 		const top = stripSgr(formatTaskIslandLines([makeRow()])[0] ?? "");
-		strictEqual(/^┌─ Tasks ─+┐$/.test(top), true, `task island top border "${top}"`);
+		strictEqual(/^┌─ Fleet runs ─+┐$/.test(top), true, `fleet-run island top border "${top}"`);
 	});
 
 	it("separates island rows with a full-width inner divider", () => {
@@ -167,6 +171,14 @@ describe("dispatch board task island", () => {
 		const island = formatTaskIslandLines([makeRow()]).join("\n");
 		ok(!island.includes("•"), "island must not render the retired • bullet");
 		ok(stripSgr(island).includes("·"), "island should separate chips with the · middot");
+	});
+
+	it("renders a bounded task summary beneath the selected worker identity", () => {
+		const rendered = stripSgr(
+			formatTaskIslandLines([makeRow({ taskSummary: "Map the dispatch lifecycle and report control gaps" })]).join("\n"),
+		);
+		ok(rendered.includes("Map the dispatch lifecycle and report"), rendered);
+		ok(rendered.includes("Fleet runs"), rendered);
 	});
 });
 
@@ -246,6 +258,33 @@ describe("dispatch board card", () => {
 		).join("\n");
 		ok(!rendered.includes("/s)"), "a queued card shows no (N/s) throughput");
 	});
+
+	it("renders task identity, run id, and a selection cursor without breaking width", () => {
+		const lines = renderDispatchCard(
+			makeRow({ runId: "run-task-123", taskSummary: "Audit worker cancellation semantics" }),
+			76,
+			undefined,
+			{ selected: true },
+		);
+		const rendered = lines.map(stripSgr).join("\n");
+		ok(rendered.includes(`${GLYPH.cursor} alpha`), rendered);
+		ok(rendered.includes("Audit worker cancellation semantics"), rendered);
+		ok(rendered.includes("run-task-123"), rendered);
+		for (const line of lines) strictEqual(visibleWidth(line), 76);
+	});
+});
+
+describe("dispatch task summary safety", () => {
+	it("strips terminal controls, collapses whitespace, and bounds lifecycle task text", () => {
+		const esc = String.fromCharCode(27);
+		const summary = sanitizeDispatchTaskSummary(`${esc}[31mred${esc}[0m\n\tmap ${"repository ".repeat(40)}`);
+		ok(summary);
+		ok(!summary.includes(esc), summary);
+		ok(!summary.includes("\n"), summary);
+		ok(summary.startsWith("red map repository"), summary);
+		ok(visibleWidth(summary) <= 240, summary);
+		ok(summary.endsWith("…"), summary);
+	});
 });
 
 describe("dispatch status presentation", () => {
@@ -254,6 +293,13 @@ describe("dispatch status presentation", () => {
 		// queued work rather than the old teal-running/orange-queued split.
 		strictEqual(dispatchStatusPresentation("running").token, "action");
 		strictEqual(dispatchStatusPresentation("enqueued").token, "action");
+	});
+
+	it("distinguishes cancellation and retry transitions from running work", () => {
+		strictEqual(dispatchStatusPresentation("cancelling").label, "cancelling");
+		strictEqual(dispatchStatusPresentation("cancelling").token, "warning");
+		strictEqual(dispatchStatusPresentation("retrying").glyph, GLYPH.phaseRetry);
+		strictEqual(dispatchStatusPresentation("retrying").token, "warning");
 	});
 
 	it("keeps every terminal and attention outcome in its own status token", () => {
@@ -271,6 +317,26 @@ describe("dispatch status presentation", () => {
 		strictEqual(dispatchStatusPresentation("failed").glyph, GLYPH.error);
 		strictEqual(dispatchStatusPresentation("aborted").glyph, GLYPH.cancelled);
 		strictEqual(dispatchStatusPresentation("stale").glyph, GLYPH.warnInline);
+	});
+});
+
+describe("dispatch board operator capabilities", () => {
+	it("offers steering only for live native rows", () => {
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "running" })), true);
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "stale" })), true);
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "enqueued" })), true);
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "running", runtimeKind: "acp-delegation" })), false);
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "retrying" })), false);
+		strictEqual(isDispatchBoardRowSteerable(makeRow({ status: "completed" })), false);
+	});
+
+	it("offers cancellation for active workers and retry timers, never history", () => {
+		for (const status of ["running", "stale", "enqueued", "retrying"] as const) {
+			strictEqual(isDispatchBoardRowCancellable(makeRow({ status })), true, status);
+		}
+		for (const status of ["cancelling", "completed", "failed", "dead", "aborted"] as const) {
+			strictEqual(isDispatchBoardRowCancellable(makeRow({ status })), false, status);
+		}
 	});
 });
 
@@ -373,6 +439,248 @@ describe("dispatch board terminal taxonomy", () => {
 			const row = store.rows()[0];
 			strictEqual(row?.status, "dead");
 			strictEqual(row?.outcomeDetail, "exit code 1");
+		} finally {
+			store.unsubscribe();
+		}
+	});
+});
+
+describe("dispatch board operator lifecycle", () => {
+	it("projects sanitized task identity from lifecycle events", () => {
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus);
+		try {
+			const esc = String.fromCharCode(27);
+			bus.emit(BusChannels.DispatchStarted, {
+				runId: "run-task",
+				agentId: "coder",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				requestOrigin: "user",
+				pid: 1,
+				task: `${esc}[31mInspect\n cancellation${esc}[0m`,
+			} as never);
+			strictEqual(store.rows()[0]?.taskSummary, "Inspect cancellation");
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("shows cancelling immediately when RunAborted arrives", () => {
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus);
+		try {
+			bus.emit(BusChannels.DispatchStarted, {
+				runId: "run-cancel",
+				agentId: "coder",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				requestOrigin: "user",
+				pid: 1,
+			} as never);
+			bus.emit(BusChannels.RunAborted, {
+				source: "dispatch_abort",
+				runId: "run-cancel",
+				startedAt: new Date().toISOString(),
+				elapsedMs: 10,
+				reason: "operator cancel",
+			});
+			const row = store.rows()[0];
+			strictEqual(row?.status, "cancelling");
+			ok(stripSgr(renderDispatchCard(row as DispatchBoardRow, 76).join("\n")).includes("cancelling"));
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("clears an in-flight tool on every terminal lifecycle path", () => {
+		for (const terminal of [BusChannels.DispatchCompleted, BusChannels.DispatchFailed] as const) {
+			const bus = createSafeEventBus();
+			const store = createDispatchBoardStore(bus);
+			try {
+				bus.emit(BusChannels.DispatchStarted, {
+					runId: `run-${terminal}`,
+					agentId: "coder",
+					targetId: "default",
+					wireModelId: "model",
+					runtimeId: "runtime",
+					runtimeKind: "http",
+					requestOrigin: "user",
+					pid: 1,
+				} as never);
+				bus.emit(BusChannels.DispatchProgress, {
+					runId: `run-${terminal}`,
+					agentId: "coder",
+					event: { type: "clio_tool_start", payload: { tool: "edit" } },
+				});
+				strictEqual(store.rows()[0]?.currentTool, "edit");
+				bus.emit(terminal, {
+					runId: `run-${terminal}`,
+					agentId: "coder",
+					targetId: "default",
+					wireModelId: "model",
+					runtimeId: "runtime",
+					runtimeKind: "http",
+					requestOrigin: "user",
+					...(terminal === BusChannels.DispatchFailed
+						? { reason: "failed", outcome: "failed", outcomeDetail: "boom" }
+						: { outcome: "succeeded", outcomeDetail: null }),
+				} as never);
+				strictEqual(store.rows()[0]?.currentTool, null);
+			} finally {
+				store.unsubscribe();
+			}
+		}
+	});
+
+	it("folds worker steer delivery acknowledgements into the run card", () => {
+		const bus = createSafeEventBus();
+		const store = createDispatchBoardStore(bus);
+		try {
+			bus.emit(BusChannels.DispatchStarted, {
+				runId: "run-steer",
+				agentId: "coder",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				requestOrigin: "user",
+				pid: 1,
+			} as never);
+			bus.emit(BusChannels.DispatchProgress, {
+				runId: "run-steer",
+				agentId: "coder",
+				event: { type: "clio_steer_received", payload: { chars: 42 } },
+			});
+			const row = store.rows()[0];
+			strictEqual(row?.steerAcknowledgement?.chars, 42);
+			ok(stripSgr(renderDispatchCard(row as DispatchBoardRow, 76).join("\n")).includes("steer received"));
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("overlays retry attempt and countdown from dispatch.snapshot and keeps it active", () => {
+		const bus = createSafeEventBus();
+		let retrying: DispatchSnapshot["retrying"] = [
+			{
+				runId: "run-retry",
+				agentId: "coder",
+				task: "Retry the worker with bounded context",
+				attempt: 2,
+				dueAt: new Date(Date.now() + 30_000).toISOString(),
+				reason: "worker exited",
+			},
+		];
+		const snapshot = (): DispatchSnapshot => ({ retrying }) as DispatchSnapshot;
+		const store = createDispatchBoardStore(bus, snapshot);
+		try {
+			bus.emit(BusChannels.DispatchFailed, {
+				runId: "run-retry",
+				agentId: "coder",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				reason: "failed",
+				outcome: "failed",
+				outcomeDetail: "worker exited",
+			} as never);
+			const retryRow = store.activeRows()[0];
+			strictEqual(retryRow?.status, "retrying");
+			strictEqual(retryRow?.retry?.attempt, 2);
+			strictEqual(retryRow?.taskSummary, "Retry the worker with bounded context");
+			const rendered = stripSgr(renderDispatchCard(retryRow as DispatchBoardRow, 76).join("\n"));
+			ok(rendered.includes("attempt 2"), rendered);
+			ok(rendered.includes("worker exited"), rendered);
+
+			retrying = [];
+			bus.emit(BusChannels.RunAborted, {
+				source: "dispatch_abort",
+				runId: "run-retry",
+				startedAt: null,
+				elapsedMs: null,
+				reason: "scheduled retry 2 canceled by operator",
+			});
+			strictEqual(store.activeRows().length, 0);
+			strictEqual(store.rows()[0]?.status, "aborted");
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("projects live worker tokens and priced cost from dispatch.snapshot", () => {
+		const bus = createSafeEventBus();
+		const snapshot = (): DispatchSnapshot =>
+			({
+				running: [
+					{
+						runId: "run-live-cost",
+						agentId: "scout",
+						outcomePhase: "running",
+						tokens: { input: 1200, output: 300, total: 1500 },
+						costUsd: 0.075,
+						costProvenance: "estimated",
+					},
+				],
+				retrying: [],
+			}) as unknown as DispatchSnapshot;
+		const store = createDispatchBoardStore(bus, snapshot);
+		try {
+			bus.emit(BusChannels.DispatchStarted, {
+				runId: "run-live-cost",
+				agentId: "scout",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				requestOrigin: "agent",
+				pid: 1,
+			} as never);
+			const row = store.rows()[0];
+			strictEqual(row?.inputTokens, 1200);
+			strictEqual(row?.outputTokens, 300);
+			strictEqual(row?.tokenCount, 1500);
+			strictEqual(row?.costUsd, 0.075);
+			strictEqual(row?.costProvenance, "estimated");
+			ok(stripSgr(renderDispatchCard(row as DispatchBoardRow, 76).join("\n")).includes("~$0.07 est"));
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("does not leave a parent attempt retrying after its timer leaves the queue", () => {
+		const bus = createSafeEventBus();
+		let retrying: DispatchSnapshot["retrying"] = [
+			{
+				runId: "run-parent",
+				agentId: "scout",
+				attempt: 1,
+				dueAt: new Date(Date.now() + 1000).toISOString(),
+				reason: "transient failure",
+			},
+		];
+		const store = createDispatchBoardStore(bus, () => ({ retrying }) as DispatchSnapshot);
+		try {
+			bus.emit(BusChannels.DispatchFailed, {
+				runId: "run-parent",
+				agentId: "scout",
+				targetId: "default",
+				wireModelId: "model",
+				runtimeId: "runtime",
+				runtimeKind: "http",
+				reason: "failed",
+				outcome: "failed",
+				outcomeDetail: "transient failure",
+			} as never);
+			strictEqual(store.activeRows()[0]?.status, "retrying");
+			retrying = [];
+			strictEqual(store.activeRows().length, 0);
+			strictEqual(store.rows()[0]?.status, "failed");
 		} finally {
 			store.unsubscribe();
 		}
@@ -575,7 +883,7 @@ describe("dispatch board live view", () => {
 			view
 				.render(76)
 				.map(stripSgr)
-				.some((line) => line.includes("No active dispatches")),
+				.some((line) => line.includes("No fleet runs yet")),
 			"empty store renders the empty state",
 		);
 
@@ -584,5 +892,30 @@ describe("dispatch board live view", () => {
 		const rendered = view.render(76).map(stripSgr).join("\n");
 		ok(rendered.includes("prover"), `a row added after construction renders: ${rendered}`);
 		ok(rendered.includes("evidence:EV1"), `the live observability snapshot supplies proof state: ${rendered}`);
+	});
+
+	it("selects rows with wrapping navigation and retains selection across reorder", () => {
+		const first = makeRow({ runId: "run-a", agentId: "alpha" });
+		const second = makeRow({ runId: "run-b", agentId: "beta" });
+		let rows = [first, second];
+		const view = createDispatchBoardView(
+			() => rows,
+			() => undefined,
+		);
+
+		strictEqual(view.selectedRow()?.runId, "run-a");
+		view.selectNext();
+		strictEqual(view.selectedRow()?.runId, "run-b");
+		ok(view.render(76).map(stripSgr).join("\n").includes(`${GLYPH.cursor} beta`));
+
+		rows = [second, first];
+		strictEqual(view.selectedRow()?.runId, "run-b", "run-id selection survives lifecycle sorting");
+		view.selectNext();
+		strictEqual(view.selectedRow()?.runId, "run-a");
+		view.selectNext();
+		strictEqual(view.selectedRow()?.runId, "run-b", "selection wraps at the end");
+
+		rows = [first];
+		strictEqual(view.selectedRow()?.runId, "run-a", "removing the selected row selects the first remaining row");
 	});
 });

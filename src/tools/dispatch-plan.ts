@@ -22,6 +22,8 @@ export type DispatchPlanTopology = "parallel" | "sequential" | "pipeline" | "rev
 
 export interface DispatchPlanTaskView {
 	agent: string;
+	/** Exact bounded task being approved, sanitized only when rendered. */
+	task: string;
 	model?: string;
 	node?: string;
 	/** Effective transport identity; host is authenticated for SSH placement. */
@@ -58,7 +60,7 @@ export interface ResolvedDispatchPlanArtifact {
 	version: 1;
 	topology: DispatchPlanTopology;
 	tasks: Array<
-		Required<Pick<DispatchPlanTaskView, "agent" | "model" | "node" | "target">> &
+		Required<Pick<DispatchPlanTaskView, "agent" | "task" | "model" | "node" | "target">> &
 			Required<Pick<DispatchPlanTaskView, "nodeKind">> &
 			Pick<DispatchPlanTaskView, "nodeHost" | "role" | "position">
 	>;
@@ -93,7 +95,10 @@ function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 	const sharedTarget = str(args.target);
 	return tasks.map((item) => {
 		const record = isRecord(item) ? item : {};
-		const view: DispatchPlanTaskView = { agent: str(record.agent) ?? str(record.agent_id) ?? sharedAgent };
+		const view: DispatchPlanTaskView = {
+			agent: str(record.agent) ?? str(record.agent_id) ?? sharedAgent,
+			task: str(item) ?? str(record.task) ?? "(invalid task)",
+		};
 		const model = str(record.model) ?? sharedModel;
 		if (model !== undefined) view.model = model;
 		const node = str(record.node) ?? sharedNode;
@@ -137,7 +142,9 @@ function renderPlanText(
 		}${task.nodeHost !== undefined ? ` host=${safeField(task.nodeHost)}` : ""}`;
 		const role =
 			task.role !== undefined ? ` role=${task.role}${task.position !== undefined ? `#${task.position}` : ""}` : "";
-		lines.push(`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}`);
+		lines.push(
+			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node} task=${JSON.stringify(safeField(task.task))}`,
+		);
 	}
 	return lines.join("\n");
 }
@@ -159,7 +166,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	if (value.nodeKind === "ssh" && (typeof value.nodeHost !== "string" || value.nodeHost.trim().length === 0))
 		return false;
 	if (value.nodeKind === "local" && value.nodeHost !== undefined) return false;
-	return [value.agent, value.model, value.node, value.target].every(
+	return [value.agent, value.task, value.model, value.node, value.target].every(
 		(candidate) => typeof candidate === "string" && candidate.trim().length > 0,
 	);
 }
@@ -206,6 +213,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 		topology: value.topology,
 		tasks: value.tasks.map((task) => ({
 			agent: task.agent.trim(),
+			task: task.task.trim(),
 			model: task.model.trim(),
 			node: task.node.trim(),
 			nodeKind: task.nodeKind,

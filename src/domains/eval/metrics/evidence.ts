@@ -101,6 +101,46 @@ export function dispatchCountFromJsonl(stdout: string): number {
 	return sawCanonicalFinishEvent ? canonicalFinishes : executionEnds;
 }
 
+/** Count model-authored dispatch calls whose normalized task set includes Scout. */
+export function scoutDispatchCountFromJsonl(stdout: string): number {
+	const seen = new Set<string>();
+	let count = 0;
+	for (const event of jsonlEvents(stdout)) {
+		if (event.type !== "tool_execution_start" || stringField(event, "toolName") !== "dispatch") continue;
+		if (!isRecord(event.args) || !dispatchArgsIncludeAgent(event.args, "scout")) continue;
+		const callId = stringField(event, "toolCallId");
+		if (callId !== undefined) {
+			if (seen.has(callId)) continue;
+			seen.add(callId);
+		}
+		count += 1;
+	}
+	return count;
+}
+
+function dispatchArgsIncludeAgent(args: Record<string, unknown>, expectedAgent: string): boolean {
+	const sharedAgent = stringField(args, "agent") ?? stringField(args, "agent_id") ?? stringField(args, "agentId");
+	let tasks: unknown = args.tasks;
+	if (typeof tasks === "string") {
+		const trimmed = tasks.trim();
+		if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+			try {
+				tasks = JSON.parse(trimmed) as unknown;
+			} catch {
+				// A plain task string keeps using the shared agent below.
+			}
+		}
+	}
+	const taskList: unknown[] = Array.isArray(tasks) ? tasks : tasks === undefined ? [{ task: args.task }] : [tasks];
+	return taskList.some((task: unknown) => {
+		if (typeof task === "string") return sharedAgent?.toLowerCase() === expectedAgent;
+		if (!isRecord(task)) return false;
+		const agent =
+			stringField(task, "agent") ?? stringField(task, "agent_id") ?? stringField(task, "agentId") ?? sharedAgent;
+		return agent?.toLowerCase() === expectedAgent;
+	});
+}
+
 /**
  * Stale-wiki behavioral checkpoint: true when the stream shows a live source
  * read (read/grep start) AFTER a `code_nav mode=wiki` start, i.e. the model

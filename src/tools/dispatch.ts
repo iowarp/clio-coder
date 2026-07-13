@@ -7,6 +7,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AbortReason, DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import {
 	finalizePendingGateDecision,
 	type GateDecisionArtifact,
@@ -103,11 +104,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 type ResolvedPlanTask = ResolvedDispatchPlanArtifact["tasks"][number];
 
-function withResolvedTaskPin(request: DispatchRequest, task: ResolvedPlanTask | undefined): DispatchRequest {
+function withResolvedTaskPin(
+	request: DispatchRequest,
+	task: ResolvedPlanTask | undefined,
+	options: { pinTask?: boolean } = {},
+): DispatchRequest {
 	if (task === undefined) return request;
 	return {
 		...request,
 		agentId: task.agent,
+		// Primary builder/candidate/task text comes from operator-controlled
+		// arguments and must be restored from the approved artifact. Reviewer and
+		// judge text is synthesized later from sealed run ids, receipts, and diff
+		// stats; for those roles the artifact pins the route while the coordinator
+		// retains the freshly generated task.
+		task: options.pinTask === false ? request.task : task.task,
 		target: task.target,
 		model: task.model,
 		node: task.node,
@@ -320,28 +331,13 @@ export function prepareDispatchArguments(args: Record<string, unknown>): Record<
 	return next;
 }
 
-function textFromContent(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.map((block) => {
-			if (typeof block === "string") return block;
-			if (!isRecord(block)) return "";
-			const text = block.text;
-			return typeof text === "string" ? text : "";
-		})
-		.join("");
-}
-
 /**
  * The worker's answer is the text of the last assistant `message_end` event.
  * Shared with the headless `clio run --agent` path so both surfaces extract
  * the final answer from the same event shape.
  */
 function rawAssistantTextFromEvent(event: unknown): string {
-	if (!isRecord(event) || event.type !== "message_end" || !isRecord(event.message)) return "";
-	if (event.message.role !== "assistant") return "";
-	return textFromContent(event.message.content);
+	return durableAssistantTextFromEvent(event);
 }
 
 export function assistantTextFromEvent(event: unknown): string {
@@ -425,7 +421,11 @@ async function runDetached(
 		runId,
 		agentId: requests[index]?.agentId ?? "unknown",
 	}));
-	void consumeBatchEvents(handle.batchId, handle.events, deps.bus).catch(() => {});
+	void consumeBatchEvents(
+		handle.batchId,
+		handle.events,
+		deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
+	).catch(() => {});
 	handle.finalPromise.catch(() => {});
 	try {
 		await detached.register({ batchId: handle.batchId, runs, sessionId });
@@ -756,7 +756,12 @@ async function runReviewGated(
 		}
 		const handle = await deps.dispatch.dispatch(request);
 		activeRunId = handle.runId;
-		const summary = await consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus);
+		const summary = await consumeDispatchEvents(
+			handle.runId,
+			request.agentId,
+			handle.events,
+			deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
+		);
 		let pendingGate: PendingGateDecisionHandle | undefined;
 		if (request.gate?.role === "reviewer") {
 			try {
@@ -851,6 +856,7 @@ async function runReviewGated(
 				withResolvedTaskPin(
 					reviewerRequest,
 					review.resolvedTasks?.find((task) => task.role === "reviewer" && task.position === cycle),
+					{ pinTask: false },
 				),
 			);
 			if (isPipelineStepFailure(reviewer.receipt)) {
@@ -1301,23 +1307,26 @@ async function runCompete(
 		handle: Awaited<ReturnType<DispatchContract["dispatch"]>>,
 		request: DispatchRequest,
 	): Promise<CompletedRun> => {
-		const summaryPromise = consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus).then(
-			(summary) => {
-				const pendingGate =
-					request.gate?.role === "judge"
-						? stagePendingGateOutput({
-								group: request.gate.group,
-								topology: "compete",
-								cycle: request.gate.cycle,
-								subjects: request.gate.subjects ?? [],
-								deciderRunId: handle.runId,
-								finalOutput: normalizedAssistantText(summary),
-								...(request.cwd !== undefined ? { resourceRoot: request.cwd } : {}),
-							})
-						: undefined;
-				return { summary, pendingGate };
-			},
-		);
+		const summaryPromise = consumeDispatchEvents(
+			handle.runId,
+			request.agentId,
+			handle.events,
+			deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
+		).then((summary) => {
+			const pendingGate =
+				request.gate?.role === "judge"
+					? stagePendingGateOutput({
+							group: request.gate.group,
+							topology: "compete",
+							cycle: request.gate.cycle,
+							subjects: request.gate.subjects ?? [],
+							deciderRunId: handle.runId,
+							finalOutput: normalizedAssistantText(summary),
+							...(request.cwd !== undefined ? { resourceRoot: request.cwd } : {}),
+						})
+					: undefined;
+			return { summary, pendingGate };
+		});
 		const [summaryResult, receiptResult] = await Promise.allSettled([summaryPromise, handle.finalPromise]);
 		const failures = rejectedReasons([summaryResult, receiptResult]);
 		if (failures.length > 0) {
@@ -1484,6 +1493,7 @@ async function runCompete(
 				withResolvedTaskPin(
 					judgeRequest,
 					compete.resolvedTasks?.find((task) => task.role === "judge"),
+					{ pinTask: false },
 				),
 				"judge",
 			);
@@ -1961,6 +1971,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 		if (resolution === undefined) throw new Error("dispatch preview is unavailable");
 		return {
 			agent: resolution.agentId,
+			task: request.task,
 			target: resolution.targetId,
 			model: resolution.wireModelId,
 			node: resolution.node.id,
@@ -2494,7 +2505,12 @@ async function runSequential(
 			}
 			const handle = await deps.dispatch.dispatch(request);
 			activeRunId = handle.runId;
-			const summary = await consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus);
+			const summary = await consumeDispatchEvents(
+				handle.runId,
+				request.agentId,
+				handle.events,
+				deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
+			);
 			const receipt = await handle.finalPromise;
 			activeRunId = null;
 			runs.push(completeRun(deps, receipt, summary));
@@ -2565,7 +2581,12 @@ async function runPipeline(
 					: { ...base, pipelineInput: { fromRunId: previous.runId, position: index + 1, text: previous.text } };
 			const handle = await deps.dispatch.dispatch(request);
 			activeRunId = handle.runId;
-			const summary = await consumeDispatchEvents(handle.runId, request.agentId, handle.events, deps.bus);
+			const summary = await consumeDispatchEvents(
+				handle.runId,
+				request.agentId,
+				handle.events,
+				deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
+			);
 			const receipt = await handle.finalPromise;
 			activeRunId = null;
 			runs.push(completeRun(deps, receipt, summary));
@@ -2602,7 +2623,11 @@ async function runBatch(
 	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
-		const summaries = await consumeBatchEvents(handle.batchId, handle.events, deps.bus);
+		const summaries = await consumeBatchEvents(
+			handle.batchId,
+			handle.events,
+			deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
+		);
 		const receipts = await handle.finalPromise;
 		return receipts.map((receipt) =>
 			completeRun(deps, receipt, summaries.get(receipt.runId) ?? { count: 0, types: [], lastAssistantText: "" }),

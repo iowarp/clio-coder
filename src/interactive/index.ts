@@ -85,7 +85,13 @@ import {
 } from "./context-activity.js";
 import { openContextOverlay } from "./context-overlay.js";
 import { openCostOverlay } from "./cost-overlay.js";
-import { createDispatchBoardStore, createDispatchBoardView, formatTaskIslandLines } from "./dispatch-board.js";
+import {
+	createDispatchBoardStore,
+	createDispatchBoardView,
+	formatTaskIslandLines,
+	isDispatchBoardRowCancellable,
+	isDispatchBoardRowSteerable,
+} from "./dispatch-board.js";
 import { bashExecutionEntryInput, parseEditorBashCommand } from "./editor-bash.js";
 import {
 	type EditorSteerMention,
@@ -422,6 +428,10 @@ export interface PermissionOverlayKeyDeps {
 
 export interface DispatchBoardOverlayKeyDeps {
 	closeOverlay: () => void;
+	selectPreviousDispatch: () => void;
+	selectNextDispatch: () => void;
+	steerSelectedDispatch: () => void;
+	cancelSelectedDispatch: () => void;
 }
 
 export interface StatusOverlayKeyDeps {
@@ -640,6 +650,23 @@ export function routePermissionOverlayKey(data: string, deps: PermissionOverlayK
 export function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
+		return true;
+	}
+	if (isKeyRelease(data)) return false;
+	if (matchesKey(data, "up") || matchesKey(data, "k")) {
+		deps.selectPreviousDispatch();
+		return true;
+	}
+	if (matchesKey(data, "down") || matchesKey(data, "j")) {
+		deps.selectNextDispatch();
+		return true;
+	}
+	if (matchesKey(data, "s")) {
+		deps.steerSelectedDispatch();
+		return true;
+	}
+	if (matchesKey(data, "x")) {
+		deps.cancelSelectedDispatch();
 		return true;
 	}
 	return false;
@@ -892,8 +919,8 @@ export function routeOverlayKey(
 		// here closed filtered overlays immediately (bt-06 finding 2).
 		return false;
 	}
-	// Dispatch-board branch (fall-through). The overlay has no focused
-	// child that needs arrow/Enter, so Esc closes via routeDispatchBoardOverlayKey.
+	// Dispatch-board branch (fall-through). Selection and operator actions are
+	// app-owned because the rendered board has no focused child component.
 	routeDispatchBoardOverlayKey(data, deps);
 	return true;
 }
@@ -1004,7 +1031,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		bus: deps.bus,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
-	const dispatchBoardStore = createDispatchBoardStore(deps.bus);
+	const dispatchBoardStore = createDispatchBoardStore(deps.bus, () => deps.dispatch.snapshot());
 	const contextActivityStore = createContextActivityStore(deps.bus);
 	const footerToolCounts = new Map<string, number>();
 	const footerActiveTools = new Set<string>();
@@ -1767,8 +1794,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			try {
 				deps.dispatch.steer(resolution.run.runId, mention.text);
 				notify(
-					"success",
-					`steer sent to ${resolution.run.agentId} (${resolution.run.runId})`,
+					"info",
+					`steer queued for ${resolution.run.agentId} (${resolution.run.runId}); awaiting worker acknowledgement`,
 					`steer:${resolution.run.runId}`,
 				);
 			} catch (err) {
@@ -2007,7 +2034,8 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const startContextIslandTicker = (): void => {
 		stopContextIslandTicker();
 		contextIslandTicker = setInterval(() => {
-			if (!contextActivityStore.active() && !contextIslandVisible) return;
+			const fleetActive = dispatchBoardStore.activeRows().length > 0;
+			if (!contextActivityStore.active() && !contextIslandVisible && !fleetActive) return;
 			renderContextIsland();
 			renderTaskIsland();
 			tui.requestRender();
@@ -2126,6 +2154,59 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		renderContextIsland();
 		renderTaskIsland();
 		tui.requestRender();
+	};
+
+	const steerSelectedDispatch = (): void => {
+		const row = dispatchBoard.selectedRow();
+		if (!row) {
+			notify("warning", "no fleet run is selected", "dispatch-board:steer");
+			return;
+		}
+		if (row.runtimeKind === "acp-delegation") {
+			notify(
+				"warning",
+				`run ${row.runId} uses ACP delegation and cannot accept live steering`,
+				`dispatch-board:steer:${row.runId}`,
+			);
+			return;
+		}
+		if (!isDispatchBoardRowSteerable(row)) {
+			notify(
+				"warning",
+				`run ${row.runId} is ${row.status} and cannot accept steering`,
+				`dispatch-board:steer:${row.runId}`,
+			);
+			return;
+		}
+		const prefix = `@${row.runId} `;
+		const draft = editor.getText();
+		closeOverlay();
+		editor.setText(draft.length > 0 ? `${prefix}${draft}` : prefix);
+		editor.focused = true;
+		tui.requestRender();
+	};
+
+	const cancelSelectedDispatch = (): void => {
+		const row = dispatchBoard.selectedRow();
+		if (!row) {
+			notify("warning", "no fleet run is selected", "dispatch-board:cancel");
+			return;
+		}
+		if (row.status === "cancelling") {
+			notify("info", `cancellation is already in progress for ${row.runId}`, `dispatch-board:cancel:${row.runId}`);
+			return;
+		}
+		if (!isDispatchBoardRowCancellable(row)) {
+			notify("warning", `run ${row.runId} is ${row.status} and cannot be cancelled`, `dispatch-board:cancel:${row.runId}`);
+			return;
+		}
+		try {
+			deps.dispatch.abort(row.runId);
+			notify("info", `cancellation requested for ${row.agentId} (${row.runId})`, `dispatch-board:cancel:${row.runId}`);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			notify("error", `could not cancel ${row.runId}: ${msg}`, `dispatch-board:cancel:${row.runId}`);
+		}
 	};
 
 	const cancelActiveRun = (): void => {
@@ -3064,12 +3145,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		}
 		if (overlayState !== "closed") return;
 		overlayState = "dispatch-board";
+		dispatchBoard.resetSelection();
 		// Size to the terminal at open: near-full width on narrow screens, capped
 		// at 96 columns so ultrawide terminals keep readable cards. pi clamps the
 		// overlay if the terminal shrinks and the live board re-renders to fit.
 		overlayHandle = showClioOverlayFrame(tui, dispatchBoard, {
-			title: "Dispatch Board",
-			footerHint: buildHint("browse", []),
+			title: "Fleet Runs",
+			footerHint: () => {
+				const row = dispatchBoard.selectedRow();
+				const entries = [{ key: "↑↓", verb: "select" }];
+				if (row && isDispatchBoardRowSteerable(row)) {
+					entries.push({ key: "s", verb: "steer" });
+				}
+				if (row && isDispatchBoardRowCancellable(row)) {
+					entries.push({ key: "x", verb: "cancel" });
+				}
+				return buildHint("browse", entries);
+			},
 			anchor: "center",
 			width: Math.max(44, Math.min(96, terminal.columns - 4)),
 		});
@@ -3256,7 +3348,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			renderTaskIsland();
 			tui.requestRender();
 		}),
-		deps.bus.on(BusChannels.DispatchProgress, () => {
+		deps.bus.on(BusChannels.DispatchProgress, (payload) => {
+			const workerEvent = payload.event as { type?: unknown } | null | undefined;
+			if (workerEvent?.type === "clio_steer_received") {
+				notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
+			}
+			footer.refresh();
+			renderTaskIsland();
+			tui.requestRender();
+		}),
+		deps.bus.on(BusChannels.RunAborted, () => {
 			footer.refresh();
 			renderTaskIsland();
 			tui.requestRender();
@@ -3311,6 +3412,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					tui.requestRender();
 				},
 				closeOverlay,
+				selectPreviousDispatch: () => {
+					dispatchBoard.selectPrevious();
+					tui.requestRender();
+				},
+				selectNextDispatch: () => {
+					dispatchBoard.selectNext();
+					tui.requestRender();
+				},
+				steerSelectedDispatch,
+				cancelSelectedDispatch,
 				cancelAskUser: () => {
 					pendingAskUserCancel?.();
 				},

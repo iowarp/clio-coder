@@ -143,7 +143,7 @@ there is deliberately no `/context clear`. The retired spellings `/compact`,
 
 The `/targets` hub is the only interactive target command. Use `j`/`k` or the arrow keys to browse targets, `Enter` to expand or collapse details, `u` to use the selected target for chat, `f` to set the selected target as the fleet default, `c` to connect, `r` to probe the selected target, and `R` to probe all targets. Worker-only targets such as `claude-sdk` and `claude-code` are selected for dispatch through fleet defaults or profiles, not through the chat target action.
 
-The `/fleet` overlay displays live running, retrying, and completed fleet dispatch subagents in the current TUI process. It includes three distinct tabs: Status, Profiles, and Bindings. You can cycle between these tabs by pressing `Tab`. The Status tab shows active runs, their execution stats, and scheduled retries with backoff times. The Profiles tab allows creating, editing, renaming, and deleting worker profiles. The Bindings tab supports binding or unbinding specific agents to profiles.
+The `/fleet` overlay displays current running and retrying fleet state. It includes four tabs: Status, Nodes, Profiles, and Bindings; cycle with `Tab`. Status shows active runs, aggregate execution stats, and scheduled retries with backoff times. Nodes shows fleet placement health. Profiles supports creating, editing, renaming, and deleting worker profiles. Bindings supports binding or unbinding agents to profiles. Recent terminal run cards live in the `Alt+W` Fleet Runs board.
 
 The `/tasks` overlay shows the session task board the agent maintains through
 the `tasks` tool: every task with its status, the evidence note recorded when
@@ -167,7 +167,7 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+U` | Toggle the footer dashboard between compact and expanded layouts. |
 | `Alt+L` | Open the model and targets selector. |
 | `Alt+J` / `Alt+K` | Cycle through the scoped model set. |
-| `Alt+W` | Toggle the dispatch board overlay. |
+| `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
 | `Alt+O` | Toggle the most recent tool segment between collapsed and full body. |
 | `Alt+R` | Toggle thinking blocks between hidden marker and full body. |
 | `Alt+G` | Open the current input in an external editor. |
@@ -198,6 +198,13 @@ Clio resolves the token to an exact agent id first, then to a run-id prefix,
 and forwards the text to the native worker's steering channel. File-looking
 tokens such as `@package.json` are rejected so ordinary repository references
 do not accidentally become steering requests.
+
+The `Alt+W` Fleet Runs board makes this control path discoverable: use
+Up/Down or `j`/`k` to select a run, `s` to close the board and prefill its
+exact `@<runId> ` steering prefix, and `x` to cancel a live worker or queued
+retry. A steer first reports `queued`; only the worker's
+`clio_steer_received` acknowledgement reports `received`. ACP delegation
+runs do not expose a native steering channel and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 

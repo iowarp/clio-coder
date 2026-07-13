@@ -163,6 +163,14 @@ describe("contracts/code_nav", () => {
 		ok(result.kind === "error" && result.message.includes("grep/read"));
 	});
 
+	it("redirects a directory fed to outline toward path mode and an exact file", async () => {
+		const result = await codeNavTool.run({ mode: "outline", query: "src" });
+		strictEqual(result.kind, "error");
+		ok(result.kind === "error" && result.message.includes("directory-like prefix"));
+		ok(result.kind === "error" && result.message.includes("mode=path query=src"));
+		ok(result.kind === "error" && result.message.includes("exact file path"));
+	});
+
 	it("reloads stale codewiki before serving symbol results", async () => {
 		const workerPath = join(scratch, "src", "worker.ts");
 		writeFileSync(workerPath, "export const freshWorker = 2;\n", "utf8");

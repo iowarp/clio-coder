@@ -2,6 +2,7 @@ import {
 	dispatchCountFromJsonl,
 	evidenceMetricsFromReceipt,
 	receiptFromRunJsonStdout,
+	scoutDispatchCountFromJsonl,
 	wikiStaleAcknowledgedFromJsonl,
 } from "../metrics/evidence.js";
 import type { EvalRunnerV2, EvalSuiteTargetV2 } from "../schema/suite.js";
@@ -28,7 +29,8 @@ export async function runClioRunRunner(
 	];
 	const result = await runShellCommand(`${process.execPath} ${args.join(" ")}`, cwd, runner.timeoutMs ?? timeoutMs);
 	const tokens = tokensFromJsonl(result.stdout);
-	const tools = toolCallMetricsFromJsonl(result.stdout);
+	const toolMetricStream = result.metricJsonl.length > 0 ? result.metricJsonl : result.stdout;
+	const tools = toolCallMetricsFromJsonl(toolMetricStream);
 	// Evidence metrics resolve only from the sealed receipt the --agent path
 	// prints; a runner without a receipt leaves them absent so any gate on
 	// them fails closed instead of reading prose labels.
@@ -49,8 +51,9 @@ export async function runClioRunRunner(
 			"tools.failed": tools.failed,
 			"tools.blocked": tools.blocked,
 			"verifier.exitCode": result.exitCode,
-			"dispatch.count": dispatchCountFromJsonl(result.stdout),
-			"wiki.staleAcknowledged": wikiStaleAcknowledgedFromJsonl(result.stdout),
+			"dispatch.count": dispatchCountFromJsonl(toolMetricStream),
+			"dispatch.scoutCount": scoutDispatchCountFromJsonl(toolMetricStream),
+			"wiki.staleAcknowledged": wikiStaleAcknowledgedFromJsonl(toolMetricStream),
 			...(receipt === null ? {} : evidenceMetricsFromReceipt(receipt)),
 		},
 		artifacts: {

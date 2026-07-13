@@ -124,6 +124,11 @@ describe("contracts/observability-snapshot wiring", { concurrency: false }, () =
 			allKnownFree: false,
 		});
 		strictEqual(snap.session.tokens.totalTokens, 800);
+		strictEqual(snap.session.tokens.input, 600);
+		strictEqual(snap.session.tokens.output, 200);
+		strictEqual(snap.session.tokens.cacheRead, 0);
+		strictEqual(snap.session.tokens.cacheWrite, 0);
+		strictEqual(snap.session.tokens.reasoningTokens, 15);
 		strictEqual(snap.metrics.dispatchesCompleted, 1);
 		strictEqual(snap.metrics.totalTokens, 800);
 		const run = snap.runs.find((r) => r.runId === runId);

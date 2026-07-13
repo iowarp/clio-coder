@@ -821,6 +821,90 @@ describe("worker synthesis lockout", () => {
 		strictEqual(lockouts, 1, "parallel crossings do not fire a second transition");
 	});
 
+	it("counts synthesis noncompliance by provider round instead of parallel sibling call", async () => {
+		const safety = testSafety();
+		const cap = 2;
+		const bundle = createMiddlewareBundle({
+			registrations: [createLoopGuardRegistration({ safety, toolCallCap: cap, turnSynthesisLockout: true })],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		for (let i = 0; i < cap; i++) {
+			strictEqual(
+				(await registry.invoke({ tool: ToolNames.Read, args: { path: `round-one-${i}.md` } }, { correlationId: "round-1" }))
+					.kind,
+				"ok",
+			);
+		}
+		const crossing = await registry.invoke(
+			{ tool: ToolNames.Read, args: { path: "round-one-crossing.md" } },
+			{ correlationId: "round-1" },
+		);
+		ok(crossing.kind === "blocked" && isWorkerToolCallCapSynthesisReason(crossing.reason));
+		for (let sibling = 0; sibling < 12; sibling += 1) {
+			const denied = await registry.invoke(
+				{ tool: ToolNames.Read, args: { path: `round-one-sibling-${sibling}.md` } },
+				{ correlationId: "round-1" },
+			);
+			ok(
+				denied.kind === "blocked" && isWorkerToolCallCapSynthesisReason(denied.reason),
+				"one wide batch must not consume the backstop",
+			);
+		}
+		for (const round of [2, 3]) {
+			const denied = await registry.invoke(
+				{ tool: ToolNames.Read, args: { path: `round-${round}.md` } },
+				{ correlationId: `round-${round}` },
+			);
+			ok(denied.kind === "blocked" && isWorkerToolCallCapSynthesisReason(denied.reason));
+		}
+		const stopped = await registry.invoke(
+			{ tool: ToolNames.Read, args: { path: "round-four.md" } },
+			{ correlationId: "round-4" },
+		);
+		ok(stopped.kind === "blocked" && isLoopGuardSynthesisBackstopReason(stopped.reason));
+	});
+
+	it("transitions a soft exploration budget to synthesis without using the hard-cap reason", async () => {
+		const safety = testSafety();
+		let lockouts = 0;
+		const bundle = createMiddlewareBundle({
+			registrations: [
+				createLoopGuardRegistration({
+					safety,
+					toolCallCap: 50,
+					toolCallSoftLimit: 2,
+					turnSynthesisLockout: true,
+					onSynthesisLockout: () => {
+						lockouts += 1;
+					},
+				}),
+			],
+		});
+		const registry = guardedRegistry({ safety, middleware: bundle.contract });
+		for (let i = 0; i < 2; i += 1) {
+			strictEqual(
+				(await registry.invoke({ tool: ToolNames.Read, args: { path: `soft-${i}.md` } }, { correlationId: "round-1" }))
+					.kind,
+				"ok",
+			);
+		}
+		const crossing = await registry.invoke(
+			{ tool: ToolNames.Read, args: { path: "soft-crossing.md" } },
+			{ correlationId: "round-1" },
+		);
+		ok(crossing.kind === "blocked" && crossing.reason.startsWith("worker exploration budget reached (2)"));
+		strictEqual(lockouts, 1);
+		strictEqual(crossing.kind === "blocked" && mentionsWorkerToolCallCap(crossing.reason), false);
+		for (let sibling = 0; sibling < 10; sibling += 1) {
+			const denied = await registry.invoke(
+				{ tool: ToolNames.Read, args: { path: `soft-sibling-${sibling}.md` } },
+				{ correlationId: "round-1" },
+			);
+			ok(denied.kind === "blocked" && denied.reason.startsWith("worker exploration budget reached (2)"));
+		}
+		strictEqual(lockouts, 1);
+	});
+
 	it("caps a noncompliant model with the bounded backstop after the cap lockout", async () => {
 		const safety = testSafety();
 		const cap = 2;

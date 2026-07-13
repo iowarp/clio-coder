@@ -124,6 +124,34 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
   wait-timeout copy leads with continuation, and batch nudges report
   terminal-state breakdowns derived from ledger envelopes instead of
   claiming success.
+- **Proactive, enforced Scout routing.** Explicit broad repository/codebase
+	 exploration is routed by the chat harness through one admitted Scout
+	 dispatch before the main-model round; the model is not asked to choose the
+	 route. The normal dispatch events, Fleet Runs UI, and sealed receipt remain
+	 visible, then the main model receives that receipt in a tool-free synthesis
+	 round. A failed Scout is reported instead of opening a manual scan loop.
+	 Listing the fleet, dispatching the wrong agent, a blocked/error call, or a
+	 mixed batch cannot satisfy the route. Terminating artifacts now fire the
+	 real `turn_end` boundary.
+- **Bounded Scout synthesis rather than cap failure.** Scout gets an 18-call
+  exploration phase and then a text-only synthesis phase. Lockout
+  noncompliance is counted by provider round, so a wide parallel batch cannot
+  spend the entire denial backstop. Tool-use planning preambles are no longer
+  sealed or rendered as final output, and semantic cap exhaustion no longer
+  launches an invisible background retry.
+- **Controllable, task-aware Fleet Runs UI.** Dispatch lifecycle events carry
+  the bounded task, and the domain event pump publishes live worker progress
+  exactly once for attached, detached, batched, and retry runs. The Fleet Runs
+  island/board shows task, run ID, active tools, tokens, priced cost, retry
+  countdown, and terminal history. Operators can select, steer, and cancel a
+  native worker or retry timer; steering distinguishes queued from worker
+  acknowledgement, and cancellation immediately renders `cancelling`.
+- **Transcript-shaped live eval gate.** The bounded recon suite now runs the
+  natural “explore this repo and context” request and requires an authored
+  Scout dispatch, while the eval output buffer preserves its terminal tail
+  under verbose JSONL. Approval artifacts include and cryptographically bind
+  each dispatched task, so routing-only plans can no longer hide the work an
+  operator is approving.
 
 ## 0.2.8 - 2026-07-07
 

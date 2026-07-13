@@ -144,6 +144,14 @@ export interface RegistryDeps {
 	 */
 	middleware?: MiddlewareContract;
 	/**
+	 * Provider-routing effects emitted by tool hooks apply to the next model
+	 * round. The registry owns those hook calls, so it forwards the complete
+	 * effect batch to the composition root after evaluation. Consumers may only
+	 * narrow routing (`require_tool` / `lock_tools`); admission still happens
+	 * through this registry on the resulting call.
+	 */
+	onMiddlewareEffects?: (effects: ReadonlyArray<MiddlewareEffect>, input: MiddlewareHookInput) => void;
+	/**
 	 * Live autonomy level (sd-01 §2.2). Read per admission so hot-reloaded
 	 * settings apply to the next call. The orchestrator wires this to current
 	 * settings; workers wire it to the level carried on their WorkerSpec.
@@ -379,7 +387,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		result?: ToolResult,
 	): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
-		return deps.middleware.runHook(buildToolHookInput(hook, spec, call, decision, "operating", options, result)).effects;
+		const input = buildToolHookInput(hook, spec, call, decision, "operating", options, result);
+		const effects = deps.middleware.runHook(input).effects;
+		try {
+			deps.onMiddlewareEffects?.(effects, input);
+		} catch {
+			// A provider-routing sink is advisory to this call. It may narrow the
+			// next request, but it must never throw through tool admission.
+		}
+		return effects;
 	};
 
 	type AdmitOutcome =

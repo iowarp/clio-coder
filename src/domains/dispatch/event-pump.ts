@@ -37,6 +37,8 @@ export interface StartDispatchEventPumpOptions {
 	limit?: number;
 	/** Invoked for fold or source-iteration failures; ingestion continues where possible. */
 	onError?: (error: unknown) => void;
+	/** Domain-owned live projection invoked once for every consumer-visible event. */
+	onEvent?: (event: unknown) => void;
 }
 
 /**
@@ -78,15 +80,24 @@ export function startDispatchEventPump(
 			waiters.shift()?.({ value: undefined, done: true });
 		}
 	};
+	const notify = (event: unknown): void => {
+		try {
+			options.onEvent?.(event);
+		} catch (error) {
+			options.onError?.(error);
+		}
+	};
 
 	const done = (async (): Promise<void> => {
 		try {
+			for (const event of options.prelude ?? []) notify(event);
 			for await (const event of source) {
 				try {
 					fold(event);
 				} catch (error) {
 					options.onError?.(error);
 				}
+				notify(event);
 				push(event);
 			}
 		} catch (error) {
@@ -151,6 +162,28 @@ function assistantTextFromContent(content: unknown): string {
 		.join("");
 }
 
+function isDurableAssistantMessage(message: Record<string, unknown>): boolean {
+	const stopReason = message.stopReason;
+	if (stopReason === "toolUse" || stopReason === "error" || stopReason === "aborted" || stopReason === "cancelled") {
+		return false;
+	}
+	if (!Array.isArray(message.content)) return true;
+	return !message.content.some((block) => isRecord(block) && block.type === "toolCall");
+}
+
+/**
+ * Extract text only from a completed, durable assistant answer. Tool-use
+ * preambles are intermediate even when an event projection has stripped the
+ * structured call block. Known failure messages are outcome detail, not a
+ * successful worker answer. All other terminal spellings (including ACP's
+ * `end_turn`) remain provider-compatible.
+ */
+export function durableAssistantTextFromEvent(event: unknown): string {
+	if (!isRecord(event) || event.type !== "message_end" || !isRecord(event.message)) return "";
+	if (event.message.role !== "assistant" || !isDurableAssistantMessage(event.message)) return "";
+	return assistantTextFromContent(event.message.content);
+}
+
 function boundedOutput(state: RunReceiptOutput["state"], text: string): RunReceiptOutput {
 	const bytes = Buffer.byteLength(text, "utf8");
 	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, WORKER_OUTPUT_TRUNCATION_MARKER);
@@ -160,7 +193,9 @@ function boundedOutput(state: RunReceiptOutput["state"], text: string): RunRecei
 /**
  * Fold assistant output out of a run's event stream so the receipt can carry
  * a durable, bounded copy. A completed assistant `message_end` becomes the
- * final answer; streaming `text_delta` fragments accumulate as the in-flight
+ * final answer only when it ended as normal text (`stop`/`length`, with no
+ * structured tool call). Tool-use preambles are intermediate and never enter
+ * durable output. Streaming `text_delta` fragments accumulate as the in-flight
  * partial and are discarded when their message completes. A run that ends
  * with unflushed deltas (abort, stall, kill mid-message) therefore snapshots
  * as `partial`, never as final. Accumulation is bounded in memory by the same
@@ -183,6 +218,7 @@ export function createWorkerOutputCapture(): WorkerOutputCapture {
 				partialBytes = 0;
 				partialStored = 0;
 				if (message === null || message.role !== "assistant") return;
+				if (!isDurableAssistantMessage(message)) return;
 				const text = assistantTextFromContent(message.content).trim();
 				if (text.length > 0) finalText = text;
 				return;

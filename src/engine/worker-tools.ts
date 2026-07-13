@@ -40,7 +40,13 @@ import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { registerAllTools } from "../tools/bootstrap.js";
 import { applyToolProfile, type ToolProfileName } from "../tools/profiles.js";
-import { createRegistry, type ToolInvokeOptions, type ToolRegistry, type ToolSpec } from "../tools/registry.js";
+import {
+	createRegistry,
+	type RegistryDeps,
+	type ToolInvokeOptions,
+	type ToolRegistry,
+	type ToolSpec,
+} from "../tools/registry.js";
 import { validateEngineToolArguments } from "./ai.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
@@ -350,6 +356,7 @@ export function createWorkerToolRegistry(
 	skillLoaderOptions?: { noSkills?: boolean; skillPaths?: string[]; trustProjectCompatRoots?: boolean },
 	hookRegistrations?: ReadonlyArray<MiddlewareHookRegistration>,
 	autonomy?: AutonomyLevel,
+	onMiddlewareEffects?: RegistryDeps["onMiddlewareEffects"],
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -361,7 +368,12 @@ export function createWorkerToolRegistry(
 	}
 	// The level is fixed for the lifetime of the worker run: it ships on the
 	// WorkerSpec at dispatch admission and never hot-reloads mid-run.
-	const registry = createRegistry({ safety, middleware, autonomy: () => autonomy ?? DEFAULT_AUTONOMY_LEVEL });
+	const registry = createRegistry({
+		safety,
+		middleware,
+		autonomy: () => autonomy ?? DEFAULT_AUTONOMY_LEVEL,
+		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),
+	});
 	registerAllTools(registry, {
 		getSkillLoaderOptions: () => ({
 			trustProjectCompatRoots: skillLoaderOptions?.trustProjectCompatRoots === true,

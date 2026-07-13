@@ -218,7 +218,9 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 
 	function applyTerminalTokens(summary: ObservabilityRunSummary, payload: Record<string, unknown>): void {
 		if (typeof payload.tokenCount === "number") summary.tokens.total = payload.tokenCount;
-		if (typeof payload.inputTokenCount === "number") summary.tokens.input = payload.inputTokenCount;
+		if (typeof payload.inputTokenCount === "number") {
+			summary.tokens.input = payload.inputTokenCount + num(payload.cacheReadTokenCount, 0);
+		}
 		if (typeof payload.outputTokenCount === "number") summary.tokens.output = payload.outputTokenCount;
 		if (typeof payload.reasoningTokenCount === "number") summary.tokens.reasoning = payload.reasoningTokenCount;
 		if (typeof payload.costUsd === "number") summary.costUsd = payload.costUsd;

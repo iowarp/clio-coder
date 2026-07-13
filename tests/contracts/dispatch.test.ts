@@ -441,6 +441,52 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("publishes domain-owned progress exactly once with task identity", async () => {
+		const context = stubContext();
+		const progress: Array<{ task: string | undefined; event: unknown }> = [];
+		const enqueuedTasks: string[] = [];
+		context.bus.on(BusChannels.DispatchProgress, (payload) => {
+			progress.push({ task: payload.task, event: payload.event });
+		});
+		context.bus.on(BusChannels.DispatchEnqueued, (payload) => {
+			if (payload.task !== undefined) enqueuedTasks.push(payload.task);
+		});
+		const sourceEvents = [
+			{ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "done" } },
+			{ type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } },
+			{ type: "message_end", message: { role: "assistant", stopReason: "stop", content: "done" } },
+		];
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 9998,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: (async function* () {
+					for (const event of sourceEvents) yield event;
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract, bus: context.bus });
+			const result = await tool.run({ tasks: ["central progress"] }, {});
+			strictEqual(result.kind, "ok");
+			deepStrictEqual(enqueuedTasks, ["central progress"]);
+			strictEqual(progress.length, sourceEvents.length, "the tool consumer must not duplicate domain events");
+			strictEqual(
+				progress.every((entry) => entry.task === "central progress"),
+				true,
+			);
+			deepStrictEqual(
+				progress.map((entry) => (entry.event as { type?: string }).type),
+				sourceEvents.map((event) => event.type),
+			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("freezes parent protected artifacts into local and SSH worker specs and receipts", async () => {
 		const protectedPath = join(process.cwd(), "PLAN.md");
 		for (const transport of ["local", "ssh"] as const) {
@@ -2007,11 +2053,13 @@ describe("contracts/dispatch", () => {
 
 	it("seals a cap-exhausted run with blocked telemetry, a failed outcome, and the synthesized durable output", async () => {
 		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.maxRetries = 1;
 		const capReason = workerToolCallCapSynthesisReason(3);
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => ({
 				pid: 1200,
-				promise: Promise.resolve({ exitCode: 1, signal: null }),
+				promise: Promise.resolve({ exitCode: 1, signal: null, stderrTail: `[worker] ${capReason}` }),
 				events: (async function* () {
 					yield {
 						type: "clio_tool_finish",
@@ -2041,6 +2089,11 @@ describe("contracts/dispatch", () => {
 			ok(
 				receipt.safety?.blockedAttempts.some((attempt) => attempt.reason === capReason),
 				"the receipt records that the cap was reached",
+			);
+			strictEqual(
+				bundle.contract.snapshot().retrying.length,
+				0,
+				"semantic cap exhaustion must not launch a hidden background retry",
 			);
 		} finally {
 			await bundle.extension.stop?.();
@@ -3035,6 +3088,9 @@ rl.once("line", () => {
 				true,
 			);
 			strictEqual(snapshot.retrying[0]?.attempt, 1);
+			strictEqual(snapshot.retrying[0]?.task, "fail for retry");
+			bundle.contract.abort(failed.runId);
+			strictEqual(bundle.contract.snapshot().retrying.length, 0, "abort cancels a queued retry as well as an active run");
 			runningExits[0]?.resolve({ exitCode: 0, signal: null });
 			runningExits[1]?.resolve({ exitCode: 0, signal: null });
 			await Promise.all([first.finalPromise, second.finalPromise]);

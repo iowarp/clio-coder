@@ -116,7 +116,22 @@ function readMiddlewareEffect(
 			return readProtectPath(value, path, issues);
 		case "request_continuation":
 			return readRequestContinuation(value, path, issues);
+		case "require_tool":
+			return readRequireTool(value, path, issues);
+		case "lock_tools":
+			rejectUnexpectedFields(value, path, ["kind"], issues);
+			return { kind: "lock_tools" };
 	}
+}
+
+function readRequireTool(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MiddlewareValidationIssue[],
+): MiddlewareEffect | null {
+	rejectUnexpectedFields(record, path, ["kind", "toolName"], issues);
+	const toolName = readRequiredString(record, `${path}.toolName`, issues);
+	return toolName === null ? null : { kind: "require_tool", toolName };
 }
 
 function readInjectReminder(

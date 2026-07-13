@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import type { MiddlewareDiagnostic } from "../../src/domains/middleware/runtime.js";
 import { createMiddlewareContractFromSnapshot } from "../../src/domains/middleware/snapshot.js";
+import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import { MIDDLEWARE_EFFECT_KINDS, MIDDLEWARE_HOOKS } from "../../src/domains/middleware/types.js";
 import { validateMiddlewareEffect, validateMiddlewareRule } from "../../src/domains/middleware/validate.js";
 import {
@@ -16,11 +17,46 @@ describe("contracts/middleware-cutover end-state enums", () => {
 		deepStrictEqual([...MIDDLEWARE_HOOKS], ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]);
 	});
 
-	it("the effect vocabulary is exactly the five consumed kinds", () => {
+	it("the effect vocabulary is exactly the seven consumed kinds", () => {
 		deepStrictEqual(
 			[...MIDDLEWARE_EFFECT_KINDS],
-			["inject_reminder", "annotate_tool_result", "block_tool", "protect_path", "request_continuation"],
+			[
+				"inject_reminder",
+				"annotate_tool_result",
+				"block_tool",
+				"protect_path",
+				"request_continuation",
+				"require_tool",
+				"lock_tools",
+			],
 		);
+	});
+
+	it("validates a named required-tool effect", () => {
+		const effect = validateMiddlewareEffect({ kind: "require_tool", toolName: "dispatch" });
+		deepStrictEqual(effect, { valid: true, effect: { kind: "require_tool", toolName: "dispatch" }, issues: [] });
+	});
+
+	it("validates a text-only tool lock", () => {
+		deepStrictEqual(validateMiddlewareEffect({ kind: "lock_tools" }), {
+			valid: true,
+			effect: { kind: "lock_tools" },
+			issues: [],
+		});
+	});
+
+	it("carries required tools across rounds and lets a text-only lock win", () => {
+		const control = createMiddlewareToolChoiceControl();
+		control.apply([{ kind: "require_tool", toolName: "dispatch" }]);
+		deepStrictEqual(control.current(), { kind: "required", toolName: "dispatch" });
+		control.toolStarted("context");
+		deepStrictEqual(control.current(), { kind: "required", toolName: "dispatch" });
+		control.toolStarted("dispatch");
+		deepStrictEqual(control.current(), { kind: "auto" });
+		control.apply([{ kind: "lock_tools" }, { kind: "require_tool", toolName: "read" }]);
+		deepStrictEqual(control.current(), { kind: "none" });
+		control.reset();
+		deepStrictEqual(control.current(), { kind: "auto" });
 	});
 
 	it("validates request_continuation effects and rules", () => {

@@ -1740,6 +1740,7 @@ export function createDispatchBundle(
 	interface RetryQueueEntry {
 		runId: string;
 		agentId: string;
+		task: string;
 		attempt: number;
 		dueAt: number;
 		reason: string;
@@ -1816,6 +1817,7 @@ export function createDispatchBundle(
 		const delayMs = Math.max(backoffDelayMs, cooldownRemainingMs > 0 ? cooldownRemainingMs + 250 : 0);
 		const attempt = run.lineage.attempt + 1;
 		const reason = detail !== null ? `${outcome}: ${detail}` : outcome;
+		const dueAt = now() + delayMs;
 		const timer = setTimeout(() => {
 			retryQueue.delete(run.runId);
 			void executeRetry(run, attempt, reason);
@@ -1824,10 +1826,23 @@ export function createDispatchBundle(
 		retryQueue.set(run.runId, {
 			runId: run.runId,
 			agentId: run.agentId,
+			task: run.task,
 			attempt,
-			dueAt: now() + delayMs,
+			dueAt,
 			reason,
 			timer,
+		});
+		context.bus.emit(BusChannels.DispatchProgress, {
+			runId: run.runId,
+			agentId: run.agentId,
+			task: run.task,
+			...(run.agentAudience !== undefined ? { agentAudience: run.agentAudience } : {}),
+			...(run.requestOrigin !== undefined ? { requestOrigin: run.requestOrigin } : {}),
+			targetId: run.targetId,
+			wireModelId: run.wireModelId,
+			runtimeId: run.runtimeId,
+			runtimeKind: run.runtimeKind,
+			event: { type: "retry_scheduled", attempt, dueAt: new Date(dueAt).toISOString(), reason },
 		});
 	}
 
@@ -1873,6 +1888,7 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchFailed, {
 				runId: run.runId,
 				agentId: run.agentId,
+				task: run.task,
 				...(run.requestOrigin !== undefined ? { requestOrigin: run.requestOrigin } : {}),
 				targetId: run.targetId,
 				wireModelId: run.wireModelId,
@@ -1952,6 +1968,7 @@ export function createDispatchBundle(
 		context.bus.emit(BusChannels.DispatchProgress, {
 			runId: run.runId,
 			agentId: run.agentId,
+			task: run.task,
 			targetId: run.targetId,
 			wireModelId: run.wireModelId,
 			runtimeId: run.runtimeId,
@@ -2454,6 +2471,7 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchEnqueued, {
 				runId: envelope.id,
 				agentId: req.agentId,
+				task: req.task,
 				requestOrigin: lifecycle.requestOrigin,
 				targetId,
 				wireModelId,
@@ -2463,6 +2481,7 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchStarted, {
 				runId: envelope.id,
 				agentId: req.agentId,
+				task: req.task,
 				requestOrigin: lifecycle.requestOrigin,
 				targetId,
 				wireModelId,
@@ -2485,6 +2504,20 @@ export function createDispatchBundle(
 		// contract state, permission audit events, and output capture fold in
 		// the pump; consumers get a bounded replay tee.
 		const eventPump = startDispatchEventPump(acp.events, foldAcpEvent, {
+			onEvent: (event) => {
+				if (isRecord(event) && event.type === "heartbeat") return;
+				context.bus.emit(BusChannels.DispatchProgress, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					task: req.task,
+					requestOrigin: lifecycle.requestOrigin,
+					targetId,
+					wireModelId,
+					runtimeId,
+					runtimeKind: "acp-delegation",
+					event,
+				});
+			},
 			onError: (error) => reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error),
 		});
 
@@ -2642,6 +2675,7 @@ export function createDispatchBundle(
 			const payload: DispatchCompletedPayload = {
 				runId: envelope.id,
 				agentId: req.agentId,
+				task: req.task,
 				requestOrigin: lifecycle.requestOrigin,
 				targetId,
 				wireModelId,
@@ -2764,7 +2798,12 @@ export function createDispatchBundle(
 				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				maybeScheduleRetry(activeRun, finalOutcome, finalDetail, failureMessage);
+				maybeScheduleRetry(
+					activeRun,
+					finalOutcome,
+					receipt.outcomeDetail ?? finalDetail,
+					receipt.failureMessage ?? failureMessage,
+				);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (ACP promise rejection, ledger or
@@ -2791,6 +2830,7 @@ export function createDispatchBundle(
 				context.bus.emit(BusChannels.DispatchFailed, {
 					runId: envelope.id,
 					agentId: req.agentId,
+					task: req.task,
 					requestOrigin: lifecycle.requestOrigin,
 					targetId,
 					wireModelId,
@@ -3231,6 +3271,7 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchEnqueued, {
 				runId: envelope.id,
 				agentId: req.agentId,
+				task: req.task,
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				targetId: lifecycle.target.target.id,
@@ -3242,6 +3283,7 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchStarted, {
 				runId: envelope.id,
 				agentId: req.agentId,
+				task: req.task,
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				targetId: lifecycle.target.target.id,
@@ -3271,6 +3313,21 @@ export function createDispatchBundle(
 			...(lifecycle.target.routeWarning !== undefined
 				? { prelude: [{ type: "route_warning", level: "warning", message: lifecycle.target.routeWarning }] }
 				: {}),
+			onEvent: (event) => {
+				if (isRecord(event) && event.type === "heartbeat") return;
+				context.bus.emit(BusChannels.DispatchProgress, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					task: req.task,
+					agentAudience: lifecycle.agentAudience,
+					requestOrigin: lifecycle.requestOrigin,
+					targetId: lifecycle.target.target.id,
+					wireModelId: lifecycle.target.wireModelId,
+					runtimeId: lifecycle.target.runtime.id,
+					runtimeKind: lifecycle.runtimeKind,
+					event,
+				});
+			},
 			onError: (error) => reportDispatchDiagnostic(`ingest events for run ${envelope.id}`, error),
 		});
 
@@ -3441,6 +3498,7 @@ export function createDispatchBundle(
 			const payload: DispatchCompletedPayload = {
 				runId: envelope.id,
 				agentId: req.agentId,
+				task: req.task,
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				targetId: lifecycle.target.target.id,
@@ -3574,7 +3632,12 @@ export function createDispatchBundle(
 				recordNodeChannelOutcome(activeRun, finalOutcome, result, finalDetail);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				maybeScheduleRetry(activeRun, finalOutcome, finalDetail, failureMessage);
+				maybeScheduleRetry(
+					activeRun,
+					finalOutcome,
+					receipt.outcomeDetail ?? finalDetail,
+					receipt.failureMessage ?? failureMessage,
+				);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (worker promise rejection, ledger or
@@ -3607,6 +3670,7 @@ export function createDispatchBundle(
 				context.bus.emit(BusChannels.DispatchFailed, {
 					runId: envelope.id,
 					agentId: req.agentId,
+					task: req.task,
 					agentAudience: lifecycle.agentAudience,
 					requestOrigin: lifecycle.requestOrigin,
 					targetId: lifecycle.target.target.id,
@@ -3893,6 +3957,7 @@ export function createDispatchBundle(
 			running.push({
 				runId: run.runId,
 				agentId: run.agentId,
+				task: run.task,
 				runtimeKind: run.runtimeKind,
 				outcomePhase: run.stallKilled ? "terminating" : run.aborted ? "aborting" : "running",
 				heartbeat,
@@ -3914,6 +3979,7 @@ export function createDispatchBundle(
 		const retrying = [...retryQueue.values()].map((entry) => ({
 			runId: entry.runId,
 			agentId: entry.agentId,
+			task: entry.task,
 			attempt: entry.attempt,
 			dueAt: new Date(entry.dueAt).toISOString(),
 			reason: entry.reason,
@@ -3952,6 +4018,8 @@ export function createDispatchBundle(
 	}
 
 	const contract: DispatchContract = {
+		publishesProgress: true,
+		ownsProgressBus: (bus) => bus === context.bus,
 		preview,
 		costCeilingUsd: () => scheduling.ceilingUsd(),
 		protectedArtifactState: () => getProtectedArtifactState(),
@@ -3967,7 +4035,26 @@ export function createDispatchBundle(
 		},
 		abort(runId, reason) {
 			const run = active.get(runId);
-			if (!run) return;
+			if (!run) {
+				const retry = retryQueue.get(runId);
+				if (!retry) return;
+				clearTimeout(retry.timer);
+				retryQueue.delete(runId);
+				context.bus.emit(BusChannels.RunAborted, {
+					source: "dispatch_abort",
+					runId,
+					startedAt: null,
+					elapsedMs: null,
+					reason: `scheduled retry ${retry.attempt} canceled by operator`,
+				});
+				context.bus.emit(BusChannels.DispatchProgress, {
+					runId,
+					agentId: retry.agentId,
+					task: retry.task,
+					event: { type: "retry_canceled", attempt: retry.attempt },
+				});
+				return;
+			}
 			emitRunAborted(run, "dispatch_abort");
 			run.aborted = true;
 			// A timeout kill rides the abort path but must not launder into an

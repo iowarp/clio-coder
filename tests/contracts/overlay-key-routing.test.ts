@@ -5,6 +5,7 @@ import {
 	isLiveWorkerEscalationRequest,
 	type OverlayKeyDeps,
 	type OverlayState,
+	routeDispatchBoardOverlayKey,
 	routeOverlayKey,
 	routePermissionOverlayKey,
 	shouldAnnouncePermissionRequest,
@@ -36,12 +37,20 @@ function makeDeps(): {
 	cancelledPermissions: () => number;
 	confirmedPermissions: () => number;
 	cancelledAskUser: () => number;
+	selectedPrevious: () => number;
+	selectedNext: () => number;
+	steeredDispatches: () => number;
+	cancelledDispatches: () => number;
 } {
 	let closeCount = 0;
 	let shutdownCount = 0;
 	let cancelPermissionCount = 0;
 	let confirmPermissionCount = 0;
 	let cancelAskUserCount = 0;
+	let selectPreviousCount = 0;
+	let selectNextCount = 0;
+	let steerDispatchCount = 0;
+	let cancelDispatchCount = 0;
 	const deps: OverlayKeyDeps = {
 		closeOverlay: () => {
 			closeCount += 1;
@@ -51,6 +60,18 @@ function makeDeps(): {
 		},
 		confirmPermission: () => {
 			confirmPermissionCount += 1;
+		},
+		selectPreviousDispatch: () => {
+			selectPreviousCount += 1;
+		},
+		selectNextDispatch: () => {
+			selectNextCount += 1;
+		},
+		steerSelectedDispatch: () => {
+			steerDispatchCount += 1;
+		},
+		cancelSelectedDispatch: () => {
+			cancelDispatchCount += 1;
 		},
 		cancelAskUser: () => {
 			cancelAskUserCount += 1;
@@ -66,6 +87,10 @@ function makeDeps(): {
 		cancelledPermissions: () => cancelPermissionCount,
 		confirmedPermissions: () => confirmPermissionCount,
 		cancelledAskUser: () => cancelAskUserCount,
+		selectedPrevious: () => selectPreviousCount,
+		selectedNext: () => selectNextCount,
+		steeredDispatches: () => steerDispatchCount,
+		cancelledDispatches: () => cancelDispatchCount,
 	};
 }
 
@@ -133,6 +158,30 @@ describe("list-overlay key routing", () => {
 			strictEqual(routeOverlayKey(KITTY_ESC, state, deps, neverMatches), true, state);
 			strictEqual(closed(), 1, state);
 		}
+	});
+
+	it("routes dispatch-board navigation, steer, and cancel actions", () => {
+		const board = makeDeps();
+		strictEqual(routeDispatchBoardOverlayKey("k", board.deps), true);
+		strictEqual(routeDispatchBoardOverlayKey("\x1b[A", board.deps), true);
+		strictEqual(routeDispatchBoardOverlayKey("j", board.deps), true);
+		strictEqual(routeDispatchBoardOverlayKey("\x1b[B", board.deps), true);
+		strictEqual(routeDispatchBoardOverlayKey("s", board.deps), true);
+		strictEqual(routeDispatchBoardOverlayKey("x", board.deps), true);
+
+		strictEqual(board.selectedPrevious(), 2);
+		strictEqual(board.selectedNext(), 2);
+		strictEqual(board.steeredDispatches(), 1);
+		strictEqual(board.cancelledDispatches(), 1);
+		strictEqual(board.closed(), 0);
+	});
+
+	it("does not invoke dispatch-board actions for key-release events", () => {
+		const board = makeDeps();
+		strictEqual(routeDispatchBoardOverlayKey("\x1b[115;1:3u", board.deps), false);
+		strictEqual(routeDispatchBoardOverlayKey(KITTY_ESC_RELEASE, board.deps), false);
+		strictEqual(board.steeredDispatches(), 0);
+		strictEqual(board.closed(), 0);
 	});
 
 	it("routes CSI-u Escape to permission and ask_user cancellation", () => {

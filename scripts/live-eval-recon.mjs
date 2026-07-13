@@ -9,9 +9,9 @@
  * not answer from the stale wiki alone. The final answer text is stored in
  * the eval artifact for manual review.
  *
- * L2 decomposition: a deliberately broad multi-domain survey of this repo
- * (temp copy). PASS iff the model fans out (metric `dispatch.count >= 1`)
- * instead of emitting one shallow repo-wide answer.
+ * L2 Scout routing: the natural transcript request against a temp copy of
+ * this repo. PASS iff the main model dispatches Scout specifically instead of
+ * performing repo-wide reads itself.
  *
  * Bounds: repeats=1, per-task timeouts, and a matrix maxCostUsd ceiling that
  * fails remaining items closed once known receipt cost exceeds it. Never runs
@@ -146,7 +146,7 @@ const suite = {
 		id: "recon-live",
 		title: "Bounded reconnaissance live suite",
 		visibility: "local",
-		description: "L1 stale-wiki grounding and L2 decomposition; env-gated, cost-bounded.",
+		description: "L1 stale-wiki grounding and L2 proactive Scout routing; env-gated, cost-bounded.",
 	},
 	matrix: { targets: [{ id: targetId, model }], repeats: 1, maxCostUsd },
 	tasks: [
@@ -166,7 +166,7 @@ const suite = {
 			timeoutMs: 120000,
 		},
 		{
-			id: "decomposition",
+			id: "scout-routing",
 			tags: ["live", "recon"],
 			workspace: {
 				kind: "temp-copy",
@@ -176,12 +176,17 @@ const suite = {
 			runner: {
 				kind: "clio-run",
 				prompt:
-					"Survey this codebase end to end and produce an orientation report covering four independent areas: the CLI commands, the dispatch domain, the eval domain, and the interactive TUI. For each area name the key entry files and their responsibilities. Cover all four thoroughly.",
+					"Let's just explore this repo and context. Give me a concise orientation to its structure and key entry points.",
 			},
 			verify: {
-				assertions: [{ metric: "dispatch.count", op: "gte", value: 1 }],
+				assertions: [
+					{ metric: "dispatch.count", op: "gte", value: 1 },
+					{ metric: "dispatch.scoutCount", op: "gte", value: 1 },
+				],
 			},
-			metrics: { collect: ["dispatch.count", "tools.totalCalls", "tokens.total", "cost.usd"] },
+			metrics: {
+				collect: ["dispatch.count", "dispatch.scoutCount", "tools.totalCalls", "tokens.total", "cost.usd"],
+			},
 			timeoutMs: 180000,
 		},
 	],
@@ -230,7 +235,8 @@ if (evalIdMatch) {
 			console.log(
 				`[recon-live] ${result.taskId}: pass=${result.pass} failureClass=${result.failureClass ?? "none"} ` +
 					`staleAcknowledged=${String(result.metrics?.["wiki.staleAcknowledged"] ?? "n/a")} ` +
-					`dispatchCount=${String(result.metrics?.["dispatch.count"] ?? "n/a")} costUsd=${cost}`,
+					`dispatchCount=${String(result.metrics?.["dispatch.count"] ?? "n/a")} ` +
+					`scoutDispatchCount=${String(result.metrics?.["dispatch.scoutCount"] ?? "n/a")} costUsd=${cost}`,
 			);
 		}
 		console.log(

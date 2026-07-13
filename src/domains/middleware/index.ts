@@ -25,15 +25,19 @@ export {
 export type { MiddlewareContract } from "./contract.js";
 export {
 	buildDetachedBatchesMessage,
+	buildProactiveScoutRoutingMessage,
 	buildReadOnlyExplorationMessage,
 	type CreateDetachedDispatchNudgeRegistrationOptions,
+	type CreateReadOnlyExplorationNudgeRegistrationOptions,
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
 	DETACHED_DISPATCH_NUDGE_REGISTRATION_ID,
 	type DetachedBatchNudgeView,
+	isExplicitBroadRepositoryExplorationRequest,
 	openDetachedBatchViews,
 	READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD,
 	READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
+	SCOUT_EXPLORATION_FALLBACK_CALL_LIMIT,
 } from "./dispatch-nudge.js";
 export type { MiddlewareBundleOptions } from "./extension.js";
 export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.js";
@@ -106,6 +110,11 @@ export {
 	createTaskNudgeRegistration,
 	TASK_NUDGE_REGISTRATION_ID,
 } from "./task-nudge.js";
+export {
+	createMiddlewareToolChoiceControl,
+	type MiddlewareToolChoice,
+	type MiddlewareToolChoiceControl,
+} from "./tool-choice-control.js";
 export type {
 	MiddlewareAnnotationSeverity,
 	MiddlewareEffect,

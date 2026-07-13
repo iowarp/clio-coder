@@ -422,6 +422,8 @@ export interface ProviderHealthPayload {
 export interface DispatchRunIdentity {
 	runId: string;
 	agentId: string;
+	/** Exact dispatched task. UI projections must sanitize and bound it before rendering. */
+	task?: string | undefined;
 	agentAudience?: AgentAudience | undefined;
 	requestOrigin?: DispatchRequestOrigin | undefined;
 	targetId: string;
@@ -450,9 +452,10 @@ export interface DispatchStartedPayload extends DispatchEnqueuedPayload {
 
 /**
  * Published on {@link BusChannels.DispatchProgress} for every non-heartbeat
- * worker/ACP event plus heartbeat status transitions. Only the run identity
- * core is guaranteed: the dispatch tool and slash commands relay events with
- * just runId/agentId, while the dispatch domain attaches full identity.
+ * worker/ACP event plus heartbeat status transitions. The dispatch domain
+ * owns publication so attached, detached, batched, and retry runs expose the
+ * same live stream exactly once. Lightweight contract fakes may still omit
+ * all identity fields except runId/agentId.
  *
  * `event` is intentionally untyped: it is the worker/ACP event stream, which
  * crosses a process boundary, so subscribers must validate its shape.
@@ -460,6 +463,7 @@ export interface DispatchStartedPayload extends DispatchEnqueuedPayload {
 export interface DispatchProgressPayload {
 	runId: string;
 	agentId: string;
+	task?: string | undefined;
 	agentAudience?: AgentAudience | undefined;
 	requestOrigin?: DispatchRequestOrigin | undefined;
 	targetId?: string | undefined;
