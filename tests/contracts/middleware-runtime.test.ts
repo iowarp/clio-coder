@@ -153,6 +153,74 @@ describe("middleware bundle registration seam", () => {
 		strictEqual(result.effects.length, 1);
 		deepStrictEqual(result.ruleIds, ["policy.dup"]);
 	});
+
+	it("awaits optional serialized phases in registration order without changing sync evaluation", async () => {
+		const bundle = createMiddlewareBundle();
+		const order: string[] = [];
+		bundle.contract.registerHook({
+			id: "observer.awaited-one",
+			description: "first awaited observer",
+			hooks: ["turn_end"],
+			evaluate: () => [],
+			async evaluateAsync(_input, context) {
+				await Promise.resolve();
+				order.push("one");
+				deepStrictEqual(context?.priorEffects, [{ kind: "inject_reminder", message: "sync" }]);
+				return [{ kind: "inject_reminder", message: "async-one" }];
+			},
+		});
+		bundle.contract.registerHook({
+			id: "observer.awaited-two",
+			description: "second awaited observer",
+			hooks: ["turn_end"],
+			evaluate: () => [],
+			async evaluateAsync(_input, context) {
+				order.push("two");
+				deepStrictEqual(context?.priorEffects, [
+					{ kind: "inject_reminder", message: "sync" },
+					{ kind: "inject_reminder", message: "async-one" },
+				]);
+				return [];
+			},
+		});
+
+		deepStrictEqual(bundle.contract.runHook({ hook: "turn_end" }).effects, []);
+		const result = await bundle.contract.runAsyncHook?.({ hook: "turn_end" }, [
+			{ kind: "inject_reminder", message: "sync" },
+		]);
+		deepStrictEqual(order, ["one", "two"]);
+		deepStrictEqual(result?.effects, [{ kind: "inject_reminder", message: "async-one" }]);
+		deepStrictEqual(result?.ruleIds, ["observer.awaited-one"]);
+	});
+
+	it("isolates a failed async phase and continues later registrations", async () => {
+		const diagnostics: string[] = [];
+		const bundle = createMiddlewareBundle({
+			onDiagnostic: (diagnostic) => diagnostics.push(`${diagnostic.kind}:${diagnostic.registrationId}`),
+		});
+		bundle.contract.registerHook({
+			id: "observer.awaited-failure",
+			description: "throws",
+			hooks: ["turn_end"],
+			evaluate: () => [],
+			async evaluateAsync() {
+				throw new Error("isolated");
+			},
+		});
+		bundle.contract.registerHook({
+			id: "observer.awaited-after",
+			description: "still runs",
+			hooks: ["turn_end"],
+			evaluate: () => [],
+			async evaluateAsync() {
+				return [{ kind: "inject_reminder", message: "after" }];
+			},
+		});
+
+		const result = await bundle.contract.runAsyncHook?.({ hook: "turn_end" });
+		deepStrictEqual(result?.effects, [{ kind: "inject_reminder", message: "after" }]);
+		deepStrictEqual(diagnostics, ["hook_failed:observer.awaited-failure"]);
+	});
 });
 
 describe("middleware effects through the tool registry", () => {

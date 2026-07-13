@@ -49,7 +49,6 @@ import {
 	buildMemoryPromptSection,
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
-	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
 	type TaskMemoryModelClient,
 } from "../domains/memory/index.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
@@ -275,6 +274,7 @@ const LOCAL_BACKGROUND_API_KEY_FALLBACK = "clio-local-target";
 function createBackgroundMemoryModelClient(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
+	timeoutMs: number,
 ): TaskMemoryModelClient | null {
 	const targetId = settings.background.target?.trim();
 	const wireModelId = settings.background.model?.trim();
@@ -311,7 +311,7 @@ function createBackgroundMemoryModelClient(
 				maxTokens: request.maxTokens,
 				thinkingLevel: refined.effectiveThinkingLevel,
 				signal: request.signal,
-				timeoutMs: TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
+				timeoutMs,
 				...(apiKey === undefined ? {} : { apiKey }),
 			});
 		},
@@ -846,15 +846,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// local models only comply when the instruction rides the user message.
 	middleware.registerHook(createTaskBoardReminderRegistration());
 	const taskMemoryBank = new TaskMemoryBank();
-	middleware.registerHook(
-		createMemoryInterventionRegistration({
-			bank: taskMemoryBank,
-			getModelClient: () => {
-				const settings = effectiveSettingsForDispatch?.();
-				return settings === undefined ? null : createBackgroundMemoryModelClient(providers, settings);
-			},
-		}),
-	);
+	const memorySettings = (config?.get() ?? readSettings()).memory.intervention;
+	const memoryIntervention = createMemoryInterventionRegistration({
+		bank: taskMemoryBank,
+		getSettings: () => effectiveSettingsForDispatch?.().memory.intervention ?? memorySettings,
+		getModelClient: () => {
+			const settings = effectiveSettingsForDispatch?.();
+			return settings === undefined
+				? null
+				: createBackgroundMemoryModelClient(providers, settings, settings.memory.intervention.timeoutMs);
+		},
+	});
+	middleware.registerHook(memoryIntervention);
+	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
+	termination.onDrain(() => unsubscribeMemoryLoop());
 	if (contextDomain) {
 		middleware.registerHook(
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),

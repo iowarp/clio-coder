@@ -32,6 +32,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"background.target",
 	"background.model",
 	"background.thinkingLevel",
+	"memory",
 	"workers.default.target",
 	"workers.default.model",
 	"workers.default.thinkingLevel",

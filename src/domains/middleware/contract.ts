@@ -1,8 +1,19 @@
 import type { MiddlewareDiagnosticSink, MiddlewareHookRegistration } from "./runtime.js";
-import type { MiddlewareHookInput, MiddlewareHookResult, MiddlewareRule, MiddlewareSnapshot } from "./types.js";
+import type {
+	MiddlewareEffect,
+	MiddlewareHookInput,
+	MiddlewareHookResult,
+	MiddlewareRule,
+	MiddlewareSnapshot,
+} from "./types.js";
 
 export interface MiddlewareContract {
 	runHook(input: MiddlewareHookInput): MiddlewareHookResult;
+	/** Await the optional serialized phase after `runHook`; never used by tool admission. */
+	runAsyncHook?(
+		input: MiddlewareHookInput,
+		priorEffects?: ReadonlyArray<MiddlewareEffect>,
+	): Promise<MiddlewareHookResult>;
 	listRules(): ReadonlyArray<MiddlewareRule>;
 	snapshot(): MiddlewareSnapshot;
 	/**

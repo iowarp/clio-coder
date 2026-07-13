@@ -42,6 +42,10 @@ export interface TaskMemoryPolicyInput {
 	deterministicTrigger: boolean;
 	maxTokens: number;
 	timeoutMs?: number;
+	/** Phase one still applies; phase two is suppressed when another memory reminder already won this boundary. */
+	suppressIntervention?: boolean;
+	/** Last visible memory reminder, used to keep repeated model output silent. */
+	previousReminder?: string | null;
 }
 
 export interface TaskMemoryPolicyResult {
@@ -122,6 +126,9 @@ export async function runTaskMemoryPolicy(
 		const reminder = withMemoryPrefix(parsed.context, input.maxTokens);
 		if (reminder.length === 0) {
 			return { decision: "malformed", bankOperations: parsed.operations.length, reminder: null, ...usage };
+		}
+		if (input.suppressIntervention === true || reminder === input.previousReminder) {
+			return { decision: "silent", bankOperations: parsed.operations.length, reminder: null, ...usage };
 		}
 		const citedIds = citedRenderableEntryIds(bank, reminder);
 		if (!input.deterministicTrigger && citedIds.length === 0) {
