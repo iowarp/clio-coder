@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +15,11 @@ import { resolveAgentTools } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { credentialPresentTool } from "../../src/tools/credential-present.js";
-import { createDispatchTool, runEventTail } from "../../src/tools/dispatch.js";
+import {
+	createDispatchRunEventRegistry,
+	createDispatchTool,
+	type DispatchRunEventRegistry,
+} from "../../src/tools/dispatch.js";
 import { editTool } from "../../src/tools/edit.js";
 import { findTool } from "../../src/tools/find.js";
 import { grepTool } from "../../src/tools/grep.js";
@@ -25,6 +29,7 @@ import { applyToolProfile } from "../../src/tools/profiles.js";
 import { readTool } from "../../src/tools/read.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
+import { createSteerTool } from "../../src/tools/steer.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
 
@@ -232,6 +237,35 @@ function runEnvelope(runId: string): RunEnvelope {
 		tokenCount: 0,
 		costUsd: 0,
 	};
+}
+
+function singleConsumerIterator(
+	events: ReadonlyArray<unknown>,
+	terminalError?: Error,
+): { iterator: AsyncIterableIterator<unknown>; consumers: () => number } {
+	let consumerCount = 0;
+	let index = 0;
+	let terminalThrown = false;
+	const iterator: AsyncIterableIterator<unknown> = {
+		[Symbol.asyncIterator]() {
+			consumerCount += 1;
+			if (consumerCount > 1) throw new Error("second iterator consumer claimed ownership");
+			return this;
+		},
+		async next() {
+			const event = events[index];
+			if (event !== undefined) {
+				index += 1;
+				return { done: false, value: event };
+			}
+			if (terminalError !== undefined && !terminalThrown) {
+				terminalThrown = true;
+				throw terminalError;
+			}
+			return { done: true, value: undefined };
+		},
+	};
+	return { iterator, consumers: () => consumerCount };
 }
 
 function assistantMessageEvents(text: string): AsyncIterableIterator<unknown> {
@@ -1021,7 +1055,8 @@ describe("contracts/tools dispatch run paths", () => {
 			drain: async () => {},
 		};
 
-		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const runEvents = createDispatchRunEventRegistry();
+		const tool = createDispatchTool({ dispatch: mockDispatch, runEvents });
 		const result = await tool.run({ task: "do work", agent_id: "coder" });
 
 		strictEqual(result.kind, "ok");
@@ -1032,6 +1067,305 @@ describe("contracts/tools dispatch run paths", () => {
 			ok(Array.isArray(details?.runIds) && details.runIds[0] === "run-123");
 			strictEqual(details?.receiptCount, 1);
 		}
+	});
+
+	it("consumes a synchronous single stream once and publishes each non-heartbeat progress event once", async () => {
+		const bus = createSafeEventBus();
+		let pulls = 0;
+		const progress: unknown[] = [];
+		bus.on(BusChannels.DispatchProgress, (payload) => {
+			progress.push(payload.event);
+		});
+		const events = [
+			{ type: "heartbeat" },
+			{ type: "clio_tool_finish", payload: { tool: "grep", outcome: "ok" } },
+			{ type: "message_end", message: { role: "assistant", content: "once only" } },
+		];
+		const mockDispatch: DispatchContract = {
+			dispatch: async () => ({
+				runId: "run-once",
+				events: (async function* () {
+					for (const event of events) {
+						pulls += 1;
+						yield event;
+					}
+				})(),
+				finalPromise: Promise.resolve(runReceipt("run-once", "once")),
+			}),
+			dispatchBatch: async () => {
+				throw new Error("dispatchBatch not used");
+			},
+			listRuns: () => [],
+			getRun: () => runEnvelope("run-once"),
+			abort: () => {},
+			steer: () => {},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+		const result = await createDispatchTool({ dispatch: mockDispatch, bus }).run({ task: "once" });
+		strictEqual(result.kind, "ok");
+		strictEqual(pulls, events.length, "the iterator has exactly one owner");
+		deepStrictEqual(
+			progress.map((event) => (event as { type: string }).type),
+			["clio_tool_finish", "message_end"],
+		);
+
+		const ownedEvent = { type: "message_end", message: { role: "assistant", content: "domain owned" } };
+		const ownedDispatch: DispatchContract = {
+			...mockDispatch,
+			ownsProgressBus: (candidate) => candidate === bus,
+			dispatch: async () => {
+				bus.emit(BusChannels.DispatchProgress, { runId: "run-owned", agentId: "coder", event: ownedEvent });
+				return {
+					runId: "run-owned",
+					events: (async function* () {
+						yield ownedEvent;
+					})(),
+					finalPromise: Promise.resolve(runReceipt("run-owned", "domain owned")),
+				};
+			},
+			getRun: () => runEnvelope("run-owned"),
+		};
+		const progressBeforeOwnedRun = progress.length;
+		strictEqual((await createDispatchTool({ dispatch: ownedDispatch, bus }).run({ task: "domain owned" })).kind, "ok");
+		strictEqual(progress.length, progressBeforeOwnedRun + 1, "the tool does not duplicate domain-owned progress");
+	});
+
+	it("rejects duplicate active registration before a second iterator consumer can claim ownership", async () => {
+		const runEvents = createDispatchRunEventRegistry();
+		const guarded = singleConsumerIterator([{ type: "message_end", message: { role: "assistant", content: "once" } }]);
+		let releaseReceipt!: () => void;
+		const finalPromise = new Promise<RunReceipt>((resolve) => {
+			releaseReceipt = () => resolve(runReceipt("run-owned-once", "owned once"));
+		});
+		const handle = { runId: "run-owned-once", events: guarded.iterator, finalPromise };
+		const first = runEvents.registerSingle(handle, "coder");
+
+		throws(() => runEvents.registerSingle(handle, "coder"), /run 'run-owned-once' is already registered/);
+		strictEqual(guarded.consumers(), 1, "only the first registration claims the iterator");
+
+		releaseReceipt();
+		await first.completion;
+	});
+
+	it("uses deterministic registry failure precedence and cleans active runs while retaining their tails", async () => {
+		const runEvents = createDispatchRunEventRegistry();
+		const terminal = { type: "message_end", message: { role: "assistant", content: "retained before failure" } };
+		const iteratorFailure = new Error("iterator failed");
+		const failedIterator = singleConsumerIterator([terminal], iteratorFailure);
+		const drainFailure = runEvents.registerSingle(
+			{
+				runId: "run-drain-failure",
+				events: failedIterator.iterator,
+				finalPromise: Promise.resolve(runReceipt("run-drain-failure", "drain failure")),
+			},
+			"coder",
+		);
+		await rejects(drainFailure.completion, (error: unknown) => error === iteratorFailure);
+		strictEqual(runEvents.eventTail("run-drain-failure")?.entries.at(-1)?.detail, "retained before failure");
+
+		// Re-registration after rejection proves the active-run claim was cleaned;
+		// the completed tail remains available until bounded pruning evicts it.
+		await runEvents.registerSingle(
+			{
+				runId: "run-drain-failure",
+				events: (async function* () {})(),
+				finalPromise: Promise.resolve(runReceipt("run-drain-failure", "retry")),
+			},
+			"coder",
+		).completion;
+		strictEqual(runEvents.eventTail("run-drain-failure")?.entries.at(-1)?.detail, "retained before failure");
+
+		const receiptFailure = new Error("receipt failed");
+		const finalFailure = runEvents.registerSingle(
+			{
+				runId: "run-final-failure",
+				events: (async function* () {})(),
+				finalPromise: Promise.reject(receiptFailure),
+			},
+			"coder",
+		);
+		await rejects(finalFailure.completion, (error: unknown) => error === receiptFailure);
+
+		const preferredIteratorFailure = new Error("preferred iterator failure");
+		const secondaryReceiptFailure = new Error("secondary receipt failure");
+		const bothFailure = runEvents.registerSingle(
+			{
+				runId: "run-both-failure",
+				events: singleConsumerIterator([], preferredIteratorFailure).iterator,
+				finalPromise: Promise.reject(secondaryReceiptFailure),
+			},
+			"coder",
+		);
+		await rejects(bothFailure.completion, (error: unknown) => error === preferredIteratorFailure);
+	});
+
+	it("protects active tails from bounded pruning and releases them after settlement", async () => {
+		const runEvents = createDispatchRunEventRegistry();
+		let releaseDrain!: () => void;
+		const drainGate = new Promise<void>((resolve) => {
+			releaseDrain = resolve;
+		});
+		const active = runEvents.registerSingle(
+			{
+				runId: "run-active-tail",
+				events: (async function* () {
+					yield { type: "message_end", message: { role: "assistant", content: "active tail" } };
+					await drainGate;
+				})(),
+				finalPromise: Promise.resolve(runReceipt("run-active-tail", "active")),
+			},
+			"coder",
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+		for (let index = 0; index < 70; index += 1) {
+			runEvents.recordEvent(`run-completed-before-${index}`, "coder", {
+				type: "message_end",
+				message: { role: "assistant", content: `before ${index}` },
+			});
+		}
+		ok(runEvents.eventTail("run-active-tail"), "active tail survives the completed-tail bound");
+
+		releaseDrain();
+		await active.completion;
+		for (let index = 0; index < 70; index += 1) {
+			runEvents.recordEvent(`run-completed-after-${index}`, "reviewer", {
+				type: "message_end",
+				message: { role: "assistant", content: `after ${index}` },
+			});
+		}
+		strictEqual(runEvents.eventTail("run-active-tail"), null, "settled tail becomes eligible for pruning");
+	});
+
+	it("attaches a direct rejection observer to detached background completion", async () => {
+		const baseRunEvents = createDispatchRunEventRegistry();
+		let rejectEvents!: (error: Error) => void;
+		const eventsGate = new Promise<never>((_resolve, reject) => {
+			rejectEvents = reject;
+		});
+		let catchCalls = 0;
+		let observedFailure: Promise<unknown> | undefined;
+		const observingRunEvents: DispatchRunEventRegistry = {
+			...baseRunEvents,
+			registerBatch(handle, agentIds, bus) {
+				const registered = baseRunEvents.registerBatch(handle, agentIds, bus);
+				observedFailure = registered.completion.then(
+					() => undefined,
+					(error: unknown) => error,
+				);
+				const originalCatch = registered.completion.catch.bind(registered.completion);
+				registered.completion.catch = ((onRejected) => {
+					catchCalls += 1;
+					return originalCatch(onRejected);
+				}) as typeof registered.completion.catch;
+				return registered;
+			},
+		};
+		const mockDispatch: DispatchContract = {
+			dispatch: async () => {
+				throw new Error("dispatch not used");
+			},
+			dispatchBatch: async () => ({
+				batchId: "batch-background-failure",
+				runIds: ["run-background-failure"],
+				events: {
+					[Symbol.asyncIterator]() {
+						return this;
+					},
+					async next() {
+						await eventsGate;
+						return { done: true, value: undefined };
+					},
+				},
+				finalPromise: Promise.resolve([runReceipt("run-background-failure", "background")]),
+			}),
+			listRuns: () => [],
+			getRun: () => null,
+			abort: () => {},
+			steer: () => {},
+			detached: {
+				register: async () => ({ batchId: "batch-background-failure" }) as never,
+				get: () => null,
+				list: () => [],
+				markCollected: async () => null,
+			},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+		const result = await createDispatchTool({ dispatch: mockDispatch, runEvents: observingRunEvents }).run(
+			{ tasks: ["background"], detach: true },
+			approvedDispatch,
+		);
+		strictEqual(result.kind, "ok");
+		strictEqual(catchCalls, 1, "detached dispatch observes the exact registered completion immediately");
+
+		const backgroundFailure = new Error("detached iterator failed");
+		rejectEvents(backgroundFailure);
+		strictEqual(await observedFailure, backgroundFailure);
+	});
+
+	it("keeps an operator-addressed in-flight synchronous ACP run non-steerable", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let active = false;
+		const runId = "run-acp-sync";
+		const mockDispatch: DispatchContract = {
+			dispatch: async () => {
+				active = true;
+				return {
+					runId,
+					events: (async function* () {
+						await gate;
+						yield { type: "message_end", message: { role: "assistant", content: "ACP done" } };
+					})(),
+					finalPromise: gate.then(() => {
+						active = false;
+						return runReceipt(runId, "ACP sync");
+					}),
+				};
+			},
+			dispatchBatch: async () => {
+				throw new Error("dispatchBatch not used");
+			},
+			listRuns: () => [],
+			getRun: () => ({ ...runEnvelope(runId), status: active ? "running" : "completed", runtimeKind: "acp-delegation" }),
+			abort: () => {},
+			steer: () => {
+				throw new Error(`dispatch: run '${runId}' has no input channel; only native workers can be steered`);
+			},
+			snapshot: () => ({
+				generatedAt: new Date().toISOString(),
+				running: [],
+				retrying: [],
+				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			}),
+			drain: async () => {},
+		};
+		// This direct concurrency exercises the operator/contract surface, not
+		// parent-model scheduling while the sequential dispatch tool is pending.
+		const pending = createDispatchTool({ dispatch: mockDispatch }).run({ task: "ACP sync" });
+		while (!active) await new Promise((resolve) => setImmediate(resolve));
+		const guided = await createSteerTool({ dispatch: mockDispatch }).run({
+			action: "guide",
+			run_id: runId,
+			message: "try to steer",
+		});
+		strictEqual(guided.kind, "error");
+		ok(guided.kind === "error" && guided.message.includes("no input channel"));
+		release();
+		strictEqual((await pending).kind, "ok");
 	});
 
 	it("task persona and tool_profile map onto dispatch request fields", async () => {
@@ -1464,17 +1798,41 @@ describe("contracts/tools dispatch run paths", () => {
 		}
 	});
 
-	it("publishes the inner worker event on DispatchProgress for attached batches", async () => {
+	it("routes an interleaved heterogeneous batch by run and agent while preserving receipt output order", async () => {
 		const bus = createSafeEventBus();
-		const progress: unknown[] = [];
+		const progress: Array<{ runId: string; agentId: string; type: string }> = [];
+		const runEvents = createDispatchRunEventRegistry();
 		bus.on(BusChannels.DispatchProgress, (payload) => {
-			progress.push(payload.event);
+			progress.push({
+				runId: payload.runId,
+				agentId: payload.agentId,
+				type: (payload.event as { type: string }).type,
+			});
 		});
-		const innerEvents = [
-			{ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "st" } },
-			{ type: "clio_tool_finish", payload: { tool: "grep", outcome: "ok" } },
-			{ type: "message_end", message: { role: "assistant", content: "batched done" } },
+		const wrappers = [
+			{
+				type: "batch_run_event",
+				batchId: "batch-board",
+				runId: "run-b2",
+				agentId: "reviewer",
+				event: { type: "clio_tool_finish", payload: { tool: "grep", outcome: "ok" } },
+			},
+			{
+				type: "batch_run_event",
+				batchId: "batch-board",
+				runId: "run-b1",
+				agentId: "coder",
+				event: { type: "message_end", message: { role: "assistant", content: "first done" } },
+			},
+			{
+				type: "batch_run_event",
+				batchId: "batch-board",
+				runId: "run-b2",
+				agentId: "reviewer",
+				event: { type: "message_end", message: { role: "assistant", content: "second done" } },
+			},
 		];
+		const guarded = singleConsumerIterator(wrappers);
 		const mockDispatch: DispatchContract = {
 			dispatch: async () => {
 				throw new Error("dispatch not used");
@@ -1482,12 +1840,11 @@ describe("contracts/tools dispatch run paths", () => {
 			dispatchBatch: async () => ({
 				batchId: "batch-board",
 				runIds: ["run-b1", "run-b2"],
-				events: (async function* () {
-					for (const event of innerEvents) {
-						yield { type: "batch_run_event", batchId: "batch-board", runId: "run-b1", agentId: "coder", event };
-					}
-				})(),
-				finalPromise: Promise.resolve([runReceipt("run-b1", "task 1"), runReceipt("run-b2", "task 2")]),
+				events: guarded.iterator,
+				finalPromise: Promise.resolve([
+					runReceipt("run-b1", "task 1"),
+					runReceipt("run-b2", "task 2", { agentId: "reviewer" }),
+				]),
 			}),
 			listRuns: () => [],
 			getRun: (runId: string) => runEnvelope(runId),
@@ -1501,27 +1858,44 @@ describe("contracts/tools dispatch run paths", () => {
 			}),
 			drain: async () => {},
 		};
-		const tool = createDispatchTool({ dispatch: mockDispatch, bus });
+		const tool = createDispatchTool({ dispatch: mockDispatch, bus, runEvents });
 		const result = await tool.run(
 			{
 				tasks: [
 					{ task: "task 1", agent_id: "coder" },
-					{ task: "task 2", agent_id: "coder" },
+					{ task: "task 2", agent_id: "reviewer" },
 				],
 			},
 			approvedDispatch,
 		);
 		strictEqual(result.kind, "ok");
-		const types = progress.map((event) => (event as { type?: string }).type);
+		strictEqual(guarded.consumers(), 1, "the merged batch iterator has one consumer");
+		deepStrictEqual(result.details?.runIds, ["run-b1", "run-b2"]);
+		deepStrictEqual(progress, [
+			{ runId: "run-b2", agentId: "reviewer", type: "clio_tool_finish" },
+			{ runId: "run-b1", agentId: "coder", type: "message_end" },
+			{ runId: "run-b2", agentId: "reviewer", type: "message_end" },
+		]);
+		strictEqual(runEvents.eventTail("run-b1")?.agentId, "coder");
 		deepStrictEqual(
-			types,
-			["message_update", "clio_tool_finish", "message_end"],
-			"the board receives direct worker event types, never the batch wrapper",
+			runEvents.eventTail("run-b1")?.entries.map((entry) => entry.detail),
+			["first done"],
 		);
+		strictEqual(runEvents.eventTail("run-b2")?.agentId, "reviewer");
+		deepStrictEqual(
+			runEvents.eventTail("run-b2")?.entries.map((entry) => entry.type),
+			["clio_tool_finish", "message_end"],
+		);
+		if (result.kind === "ok") {
+			const firstReceipt = result.output.indexOf("- run-b1 agent=coder");
+			const secondReceipt = result.output.indexOf("- run-b2 agent=reviewer");
+			ok(firstReceipt >= 0 && secondReceipt > firstReceipt, "receipt summaries preserve finalPromise order");
+		}
 	});
 
 	it("keeps the monitor tail useful under streaming floods: updates are skipped, tool and terminal events survive", async () => {
 		const runId = `run-flood-${Date.now()}`;
+		const runEvents = createDispatchRunEventRegistry();
 		const mockDispatch: DispatchContract = {
 			dispatch: async () => ({
 				runId,
@@ -1550,11 +1924,12 @@ describe("contracts/tools dispatch run paths", () => {
 			}),
 			drain: async () => {},
 		};
-		const tool = createDispatchTool({ dispatch: mockDispatch });
+		const tool = createDispatchTool({ dispatch: mockDispatch, runEvents });
 		const result = await tool.run({ task: "flood", agent_id: "coder" });
 		strictEqual(result.kind, "ok");
-		const tail = runEventTail(runId);
+		const tail = runEvents.eventTail(runId);
 		ok(tail !== null, "run tail exists");
+		strictEqual(createDispatchRunEventRegistry().eventTail(runId), null, "independent tool bundles do not share tails");
 		const types = tail?.entries.map((entry) => entry.type) ?? [];
 		ok(!types.includes("message_update"), "bare streaming updates must not flood the tail");
 		deepStrictEqual(types, ["clio_tool_start", "clio_tool_finish", "message_end"]);

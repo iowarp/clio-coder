@@ -73,6 +73,8 @@ const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 export interface DispatchToolDeps {
 	dispatch: DispatchContract;
 	bus?: SafeEventBus;
+	/** Instance-scoped owner for ordinary tool-owned run streams and monitor tails. */
+	runEvents?: DispatchRunEventRegistry;
 	/** Optional compete storage overrides for alternate backends and deterministic fault tests. */
 	competeWorktrees?: {
 		createCandidate?: typeof createCandidateWorktree;
@@ -150,22 +152,6 @@ interface RunTailState {
 	lastSeenAt: number;
 }
 
-const runTails = new Map<string, RunTailState>();
-
-function pruneRunTails(): void {
-	while (runTails.size > RUN_TAIL_RUN_LIMIT) {
-		let oldestKey: string | null = null;
-		let oldestSeen = Number.POSITIVE_INFINITY;
-		for (const [key, state] of runTails) {
-			if (state.lastSeenAt >= oldestSeen) continue;
-			oldestKey = key;
-			oldestSeen = state.lastSeenAt;
-		}
-		if (oldestKey === null) break;
-		runTails.delete(oldestKey);
-	}
-}
-
 function eventDetail(event: unknown): string | undefined {
 	const text = assistantTextFromEvent(event);
 	if (text.length > 0) return truncateUtf8(text, RUN_TAIL_TEXT_LIMIT, "...");
@@ -178,29 +164,185 @@ function eventDetail(event: unknown): string | undefined {
 	return undefined;
 }
 
-function recordRunEvent(runId: string, agentId: string, event: unknown): void {
-	const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
-	if (type === "heartbeat") return;
-	// Streaming deltas would flood the bounded tail with detail-less entries
-	// and evict the tool/terminal events peek exists to show. Skipped in the
-	// tail only; the bus path above still forwards every update (TTFT).
-	if (type === "message_update") return;
-	const state = runTails.get(runId) ?? { agentId, entries: [], lastSeenAt: Date.now() };
-	state.lastSeenAt = Date.now();
-	const entry: RunTailEntry = { at: new Date().toISOString(), type };
-	const detail = eventDetail(event);
-	if (detail !== undefined) entry.detail = detail;
-	state.entries.push(entry);
-	if (state.entries.length > RUN_TAIL_ENTRY_LIMIT) state.entries.splice(0, state.entries.length - RUN_TAIL_ENTRY_LIMIT);
-	runTails.set(runId, state);
-	pruneRunTails();
+interface RegisteredSingleDispatch {
+	runId: string;
+	completion: Promise<{ receipt: RunReceipt; summary: EventSummary }>;
 }
 
-/** Recent event tail for a run buffered in this process, newest last. */
-export function runEventTail(runId: string): { agentId: string; entries: ReadonlyArray<RunTailEntry> } | null {
-	const state = runTails.get(runId);
-	if (!state) return null;
-	return { agentId: state.agentId, entries: [...state.entries] };
+interface RegisteredBatchDispatch {
+	batchId: string;
+	runIds: ReadonlyArray<string>;
+	completion: Promise<{ receipts: ReadonlyArray<RunReceipt>; summaries: Map<string, EventSummary> }>;
+}
+
+/**
+ * Instance-scoped owner of ordinary model-facing dispatch iterators and their
+ * monitor tails. Registering a handle starts its sole drain immediately; sync
+ * callers await `completion` while detached callers retain that same drain.
+ *
+ * Review and compete coordinators are intentional exceptions: they drain each
+ * gate-sensitive iterator directly, stage reviewer/judge output, and only then
+ * await the receipt. They use `recordEvent` to retain monitor-tail projection
+ * without surrendering iterator ownership to this registry.
+ */
+export interface DispatchRunEventRegistry {
+	registerSingle(
+		handle: Awaited<ReturnType<DispatchContract["dispatch"]>>,
+		agentId: string,
+		bus?: SafeEventBus,
+	): RegisteredSingleDispatch;
+	registerBatch(
+		handle: Awaited<ReturnType<DispatchContract["dispatchBatch"]>>,
+		agentIds: ReadonlyArray<string>,
+		bus?: SafeEventBus,
+	): RegisteredBatchDispatch;
+	recordEvent(runId: string, agentId: string, event: unknown): void;
+	eventTail(runId: string): { agentId: string; entries: ReadonlyArray<RunTailEntry> } | null;
+}
+
+export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
+	const runTails = new Map<string, RunTailState>();
+	const activeRuns = new Set<string>();
+	const activeBatches = new Set<string>();
+
+	const pruneRunTails = (): void => {
+		while (runTails.size > RUN_TAIL_RUN_LIMIT) {
+			let oldestKey: string | null = null;
+			let oldestSeen = Number.POSITIVE_INFINITY;
+			for (const [key, state] of runTails) {
+				if (activeRuns.has(key) || state.lastSeenAt >= oldestSeen) continue;
+				oldestKey = key;
+				oldestSeen = state.lastSeenAt;
+			}
+			if (oldestKey === null) break;
+			runTails.delete(oldestKey);
+		}
+	};
+
+	const recordRunEvent = (runId: string, agentId: string, event: unknown): void => {
+		const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
+		if (type === "heartbeat" || type === "message_update") return;
+		const state = runTails.get(runId) ?? { agentId, entries: [], lastSeenAt: Date.now() };
+		state.lastSeenAt = Date.now();
+		const entry: RunTailEntry = { at: new Date().toISOString(), type };
+		const detail = eventDetail(event);
+		if (detail !== undefined) entry.detail = detail;
+		state.entries.push(entry);
+		if (state.entries.length > RUN_TAIL_ENTRY_LIMIT) {
+			state.entries.splice(0, state.entries.length - RUN_TAIL_ENTRY_LIMIT);
+		}
+		runTails.set(runId, state);
+		pruneRunTails();
+	};
+
+	const drainSingle = async (
+		runId: string,
+		agentId: string,
+		events: AsyncIterableIterator<unknown>,
+		bus: SafeEventBus | undefined,
+	): Promise<EventSummary> => {
+		const summary: EventSummary = { count: 0, types: [], lastAssistantText: "" };
+		for await (const event of events) {
+			summary.count += 1;
+			const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
+			summary.types.push(type);
+			const text = rawAssistantTextFromEvent(event);
+			if (text.trim().length > 0) summary.lastAssistantText = text;
+			recordRunEvent(runId, agentId, event);
+			if (type !== "heartbeat") bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
+		}
+		return summary;
+	};
+
+	const drainBatch = async (
+		batchId: string,
+		events: AsyncIterableIterator<unknown>,
+		bus: SafeEventBus | undefined,
+	): Promise<Map<string, EventSummary>> => {
+		const summaries = new Map<string, EventSummary>();
+		for await (const event of events) {
+			if (!isRecord(event) || event.type !== "batch_run_event") continue;
+			const runId = typeof event.runId === "string" ? event.runId : batchId;
+			const agentId = typeof event.agentId === "string" ? event.agentId : "batch";
+			const inner = event.event;
+			const summary = summaries.get(runId) ?? { count: 0, types: [], lastAssistantText: "" };
+			summary.count += 1;
+			const type = isRecord(inner) && typeof inner.type === "string" ? inner.type : "unknown";
+			summary.types.push(type);
+			const text = rawAssistantTextFromEvent(inner);
+			if (text.trim().length > 0) summary.lastAssistantText = text;
+			summaries.set(runId, summary);
+			recordRunEvent(runId, agentId, inner);
+			if (type !== "heartbeat") bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event: inner });
+		}
+		return summaries;
+	};
+
+	return {
+		registerSingle(handle, agentId, bus) {
+			if (activeRuns.has(handle.runId)) {
+				throw new Error(`dispatch event registry: run '${handle.runId}' is already registered`);
+			}
+			activeRuns.add(handle.runId);
+			const summaryPromise = drainSingle(handle.runId, agentId, handle.events, bus);
+			const completion = Promise.allSettled([summaryPromise, handle.finalPromise]).then(
+				([summaryResult, receiptResult]) => {
+					if (summaryResult.status === "rejected") throw summaryResult.reason;
+					if (receiptResult.status === "rejected") throw receiptResult.reason;
+					return { receipt: receiptResult.value, summary: summaryResult.value };
+				},
+			);
+			void completion
+				.finally(() => {
+					activeRuns.delete(handle.runId);
+					pruneRunTails();
+				})
+				.catch(() => {});
+			return { runId: handle.runId, completion };
+		},
+		registerBatch(handle, agentIds, bus) {
+			if (activeBatches.has(handle.batchId)) {
+				throw new Error(`dispatch event registry: batch '${handle.batchId}' is already registered`);
+			}
+			const duplicateRunId = handle.runIds.find((runId, index) => handle.runIds.slice(0, index).includes(runId));
+			if (duplicateRunId !== undefined) {
+				throw new Error(`dispatch event registry: batch '${handle.batchId}' repeats run '${duplicateRunId}'`);
+			}
+			const activeRunId = handle.runIds.find((runId) => activeRuns.has(runId));
+			if (activeRunId !== undefined) {
+				throw new Error(`dispatch event registry: run '${activeRunId}' is already registered`);
+			}
+			activeBatches.add(handle.batchId);
+			for (const runId of handle.runIds) activeRuns.add(runId);
+			const completion = Promise.allSettled([drainBatch(handle.batchId, handle.events, bus), handle.finalPromise]).then(
+				([summariesResult, receiptsResult]) => {
+					if (summariesResult.status === "rejected") throw summariesResult.reason;
+					if (receiptsResult.status === "rejected") throw receiptsResult.reason;
+					return { receipts: receiptsResult.value, summaries: summariesResult.value };
+				},
+			);
+			void completion
+				.finally(() => {
+					activeBatches.delete(handle.batchId);
+					for (const runId of handle.runIds) activeRuns.delete(runId);
+					pruneRunTails();
+				})
+				.catch(() => {});
+			// Seed agent routing even when a run completes before its first event.
+			for (const [index, runId] of handle.runIds.entries()) {
+				if (!runTails.has(runId)) {
+					runTails.set(runId, { agentId: agentIds[index] ?? "unknown", entries: [], lastSeenAt: Date.now() });
+				}
+			}
+			return { batchId: handle.batchId, runIds: handle.runIds, completion };
+		},
+		recordEvent: recordRunEvent,
+		eventTail(runId) {
+			const state = runTails.get(runId);
+			if (!state) return null;
+			return { agentId: state.agentId, entries: [...state.entries] };
+		},
+	};
 }
 
 function stringArg(args: Record<string, unknown>, ...names: string[]): string | undefined {
@@ -348,54 +490,35 @@ function normalizedAssistantText(summary: EventSummary): string {
 	return summary.lastAssistantText.trim();
 }
 
-async function consumeDispatchEvents(
+type RegisteredDispatchToolDeps = DispatchToolDeps & { runEvents: DispatchRunEventRegistry };
+
+function fallbackProgressBus(deps: DispatchToolDeps): SafeEventBus | undefined {
+	return deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus;
+}
+
+/**
+ * Gate-sensitive coordinator drain. Review and compete must finish this drain
+ * and stage pending decision output before awaiting the receipt-facing final
+ * promise; the ordinary registry's concurrent join cannot provide that edge.
+ */
+async function consumeGateSensitiveDispatchEvents(
+	deps: RegisteredDispatchToolDeps,
 	runId: string,
 	agentId: string,
 	events: AsyncIterableIterator<unknown>,
-	bus: SafeEventBus | undefined,
 ): Promise<EventSummary> {
 	const summary: EventSummary = { count: 0, types: [], lastAssistantText: "" };
+	const bus = fallbackProgressBus(deps);
 	for await (const event of events) {
 		summary.count += 1;
 		const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
 		summary.types.push(type);
 		const text = rawAssistantTextFromEvent(event);
 		if (text.trim().length > 0) summary.lastAssistantText = text;
-		recordRunEvent(runId, agentId, event);
-		if (type !== "heartbeat") {
-			bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
-		}
+		deps.runEvents.recordEvent(runId, agentId, event);
+		if (type !== "heartbeat") bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
 	}
 	return summary;
-}
-
-async function consumeBatchEvents(
-	batchId: string,
-	events: AsyncIterableIterator<unknown>,
-	bus: SafeEventBus | undefined,
-): Promise<Map<string, EventSummary>> {
-	const summaries = new Map<string, EventSummary>();
-	for await (const event of events) {
-		if (!isRecord(event) || event.type !== "batch_run_event") continue;
-		const runId = typeof event.runId === "string" ? event.runId : batchId;
-		const agentId = typeof event.agentId === "string" ? event.agentId : "batch";
-		const inner = event.event;
-		const summary = summaries.get(runId) ?? { count: 0, types: [], lastAssistantText: "" };
-		summary.count += 1;
-		const type = isRecord(inner) && typeof inner.type === "string" ? inner.type : "unknown";
-		summary.types.push(type);
-		const text = rawAssistantTextFromEvent(inner);
-		if (text.trim().length > 0) summary.lastAssistantText = text;
-		summaries.set(runId, summary);
-		recordRunEvent(runId, agentId, inner);
-		if (type !== "heartbeat") {
-			// The board folds direct worker event types (message_update,
-			// clio_tool_finish, ...); publish the inner event, not the
-			// batch_run_event wrapper.
-			bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event: inner });
-		}
-	}
-	return summaries;
 }
 
 /**
@@ -407,7 +530,7 @@ async function consumeBatchEvents(
  * mode="wait"/"collect", in this session or after a resume.
  */
 async function runDetached(
-	deps: DispatchToolDeps,
+	deps: RegisteredDispatchToolDeps,
 	requests: ReadonlyArray<DispatchRequest>,
 	sessionId: string | null,
 ): Promise<ToolResult> {
@@ -416,17 +539,17 @@ async function runDetached(
 		return { kind: "error", message: "dispatch: detach is not supported in this context" };
 	}
 	const handle = await deps.dispatch.dispatchBatch(requests);
+	const registered = deps.runEvents.registerBatch(
+		handle,
+		requests.map((request) => request.agentId),
+		fallbackProgressBus(deps),
+	);
 	// dispatchBatch admits requests in order, so runIds[i] belongs to requests[i].
 	const runs = handle.runIds.map((runId, index) => ({
 		runId,
 		agentId: requests[index]?.agentId ?? "unknown",
 	}));
-	void consumeBatchEvents(
-		handle.batchId,
-		handle.events,
-		deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
-	).catch(() => {});
-	handle.finalPromise.catch(() => {});
+	registered.completion.catch(() => {});
 	try {
 		await detached.register({ batchId: handle.batchId, runs, sessionId });
 	} catch (err) {
@@ -716,7 +839,7 @@ interface GateRunOutcome {
  * references the reviewer whose findings it received.
  */
 async function runReviewGated(
-	deps: DispatchToolDeps,
+	deps: RegisteredDispatchToolDeps,
 	base: DispatchRequest,
 	review: ReviewGateSettings,
 	timeoutMs: number | undefined,
@@ -756,12 +879,7 @@ async function runReviewGated(
 		}
 		const handle = await deps.dispatch.dispatch(request);
 		activeRunId = handle.runId;
-		const summary = await consumeDispatchEvents(
-			handle.runId,
-			request.agentId,
-			handle.events,
-			deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
-		);
+		const summary = await consumeGateSensitiveDispatchEvents(deps, handle.runId, request.agentId, handle.events);
 		let pendingGate: PendingGateDecisionHandle | undefined;
 		if (request.gate?.role === "reviewer") {
 			try {
@@ -1249,7 +1367,7 @@ function rejectedReasons(results: ReadonlyArray<PromiseSettledResult<unknown>>):
  * cleaned, including on abort and on any thrown error.
  */
 async function runCompete(
-	deps: DispatchToolDeps,
+	deps: RegisteredDispatchToolDeps,
 	base: DispatchRequest,
 	compete: CompeteSettings,
 	autonomy: AutonomyLevel,
@@ -1307,26 +1425,23 @@ async function runCompete(
 		handle: Awaited<ReturnType<DispatchContract["dispatch"]>>,
 		request: DispatchRequest,
 	): Promise<CompletedRun> => {
-		const summaryPromise = consumeDispatchEvents(
-			handle.runId,
-			request.agentId,
-			handle.events,
-			deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
-		).then((summary) => {
-			const pendingGate =
-				request.gate?.role === "judge"
-					? stagePendingGateOutput({
-							group: request.gate.group,
-							topology: "compete",
-							cycle: request.gate.cycle,
-							subjects: request.gate.subjects ?? [],
-							deciderRunId: handle.runId,
-							finalOutput: normalizedAssistantText(summary),
-							...(request.cwd !== undefined ? { resourceRoot: request.cwd } : {}),
-						})
-					: undefined;
-			return { summary, pendingGate };
-		});
+		const summaryPromise = consumeGateSensitiveDispatchEvents(deps, handle.runId, request.agentId, handle.events).then(
+			(summary) => {
+				const pendingGate =
+					request.gate?.role === "judge"
+						? stagePendingGateOutput({
+								group: request.gate.group,
+								topology: "compete",
+								cycle: request.gate.cycle,
+								subjects: request.gate.subjects ?? [],
+								deciderRunId: handle.runId,
+								finalOutput: normalizedAssistantText(summary),
+								...(request.cwd !== undefined ? { resourceRoot: request.cwd } : {}),
+							})
+						: undefined;
+				return { summary, pendingGate };
+			},
+		);
 		const [summaryResult, receiptResult] = await Promise.allSettled([summaryPromise, handle.finalPromise]);
 		const failures = rejectedReasons([summaryResult, receiptResult]);
 		if (failures.length > 0) {
@@ -1939,7 +2054,11 @@ function competeResult(outcome: CompeteOutcome, autonomy: AutonomyLevel, maxOutp
 	};
 }
 
-export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
+export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
+	const deps: RegisteredDispatchToolDeps = {
+		...inputDeps,
+		runEvents: inputDeps.runEvents ?? createDispatchRunEventRegistry(),
+	};
 	// A model can supply arbitrary JSON properties even when the schema omits
 	// them. Trust resolved artifacts only when this exact tool instance created
 	// the argument object at admission; a forged hidden field is stripped and
@@ -2121,7 +2240,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. detach:true returns immediately with a batch id while the runs continue in the background; gather them later with monitor mode=wait/collect. Call with list:true to see available agents. Sealed run receipts are the durable evidence; the worker's prose is an advisory claim until the receipt's verification state is verified or you spot-check the cited locations. Do not repeat an identical successful dispatch in the same user turn.",
+			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Ordinary calls auto-wait. Choose detach:true to return batch/run ids while work continues so the parent model can monitor or steer mid-run. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. Call with list:true to see available agents. Sealed run receipts are the durable evidence; the worker's prose is an advisory claim until the receipt's verification state is verified or you spot-check the cited locations. Do not repeat an identical successful dispatch in the same user turn.",
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
 			tasks: Type.Optional(
@@ -2473,7 +2592,7 @@ export function createDispatchTool(deps: DispatchToolDeps): ToolSpec {
  * either fires and the skip is reported through the thrown error.
  */
 async function runSequential(
-	deps: DispatchToolDeps,
+	deps: RegisteredDispatchToolDeps,
 	requests: ReadonlyArray<DispatchRequest>,
 	mode: string,
 	timeoutMs: number | undefined,
@@ -2505,13 +2624,8 @@ async function runSequential(
 			}
 			const handle = await deps.dispatch.dispatch(request);
 			activeRunId = handle.runId;
-			const summary = await consumeDispatchEvents(
-				handle.runId,
-				request.agentId,
-				handle.events,
-				deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
-			);
-			const receipt = await handle.finalPromise;
+			const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
+			const { receipt, summary } = await registered.completion;
 			activeRunId = null;
 			runs.push(completeRun(deps, receipt, summary));
 		}
@@ -2542,7 +2656,7 @@ function pipelineFailureReason(receipt: RunReceipt): string {
  * abort handling match runSequential.
  */
 async function runPipeline(
-	deps: DispatchToolDeps,
+	deps: RegisteredDispatchToolDeps,
 	requests: ReadonlyArray<DispatchRequest>,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
@@ -2581,13 +2695,8 @@ async function runPipeline(
 					: { ...base, pipelineInput: { fromRunId: previous.runId, position: index + 1, text: previous.text } };
 			const handle = await deps.dispatch.dispatch(request);
 			activeRunId = handle.runId;
-			const summary = await consumeDispatchEvents(
-				handle.runId,
-				request.agentId,
-				handle.events,
-				deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
-			);
-			const receipt = await handle.finalPromise;
+			const registered = deps.runEvents.registerSingle(handle, request.agentId, fallbackProgressBus(deps));
+			const { receipt, summary } = await registered.completion;
 			activeRunId = null;
 			runs.push(completeRun(deps, receipt, summary));
 			if (isPipelineStepFailure(receipt)) {
@@ -2607,12 +2716,17 @@ async function runPipeline(
 }
 
 async function runBatch(
-	deps: DispatchToolDeps,
+	deps: RegisteredDispatchToolDeps,
 	requests: ReadonlyArray<DispatchRequest>,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
 ): Promise<CompletedRun[]> {
 	const handle = await deps.dispatch.dispatchBatch(requests);
+	const registered = deps.runEvents.registerBatch(
+		handle,
+		requests.map((request) => request.agentId),
+		fallbackProgressBus(deps),
+	);
 	// The operator signal is a cancel; the timer is a timeout. The timeout
 	// carries a cause so each killed run's receipt names it.
 	const abort = (bySignal: boolean): void => {
@@ -2623,12 +2737,7 @@ async function runBatch(
 	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;
 	signal?.addEventListener("abort", onSignalAbort, { once: true });
 	try {
-		const summaries = await consumeBatchEvents(
-			handle.batchId,
-			handle.events,
-			deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus,
-		);
-		const receipts = await handle.finalPromise;
+		const { summaries, receipts } = await registered.completion;
 		return receipts.map((receipt) =>
 			completeRun(deps, receipt, summaries.get(receipt.runId) ?? { count: 0, types: [], lastAssistantText: "" }),
 		);

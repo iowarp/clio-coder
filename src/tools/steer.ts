@@ -54,9 +54,9 @@ export function createSteerTool(deps: SteerToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Steer,
 		description:
-			"Control a running dispatched worker: action=guide injects a steering message at its next turn boundary, action=cancel terminates the run cleanly.",
+			"Control a running native worker whose run id is already available. Parent-model mid-run control requires detach:true because ordinary dispatch auto-waits and dispatch/steer are sequential; the interactive operator/TUI may steer an active synchronous native run through the dispatch contract. ACP runs have no input channel.",
 		parameters: Type.Object({
-			run_id: Type.String({ description: "Run id from dispatch output." }),
+			run_id: Type.String({ description: "Run id from dispatch output or monitor list." }),
 			action: stringEnum(["guide", "cancel"], "What to do."),
 			message: Type.Optional(Type.String({ description: "action=guide: the steering message." })),
 		}),
