@@ -441,7 +441,7 @@ function dispatchRequestsFromArgs(
 			ok: false,
 			message:
 				args.tasks === undefined
-					? 'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task.'
+					? 'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task. Example: {"agent":"scout","task":"map the modules that read fleet config and cite file paths"}'
 					: "dispatch: tasks must be a non-empty array of task strings or {agent, task} objects",
 		};
 	}
