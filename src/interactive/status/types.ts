@@ -9,6 +9,7 @@ export type { AgentStatusChangedPayload, StatusPhase, WatchdogTier } from "../..
 export type ActiveStatusPhase = Exclude<StatusPhase, "idle" | "ended">;
 export type OverlayPhase = "tool_blocked" | "retrying" | "compacting" | "dispatching" | "stuck";
 export type TurnStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "cancelled";
+export type ReasoningTokenProvenance = "provider" | "estimated" | "mixed";
 
 export interface RetryOverlay {
 	attempt: number;
@@ -34,6 +35,8 @@ export interface TurnSummary {
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
 	reasoningTokens?: number | undefined;
+	/** Whether the reasoning total is provider-reported, estimated from text, or mixed. */
+	reasoningTokenProvenance?: ReasoningTokenProvenance | undefined;
 	toolCount: number;
 	toolErrorCount: number;
 	stopReason: TurnStopReason;

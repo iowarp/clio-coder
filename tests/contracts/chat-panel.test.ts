@@ -2,6 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { redactToolArgs } from "../../src/interactive/renderers/tool-execution.js";
 import { fgSequence, GLYPH } from "../../src/interactive/theme/index.js";
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
@@ -104,6 +105,17 @@ describe("chat-panel tool-body export rendering", () => {
 		ok(!rendered.includes("many.txt:150:"), "a central row is hidden by the middle-elision");
 	});
 
+	it("minimal output keeps tool calls collapsed while verbose output exposes the live body", () => {
+		let verbosity: "minimal" | "default" | "verbose" = "minimal";
+		const panel = createChatPanel({ getOutputVerbosity: () => verbosity });
+		feedLargeGrep(panel);
+		let rendered = panel.render(100).join("\\n");
+		ok(!rendered.includes("many.txt:150:"), "minimal output hides the tool body");
+		verbosity = "verbose";
+		rendered = panel.render(100).join("\\n");
+		ok(rendered.includes("many.txt:1:"), "verbose output exposes the tool body");
+	});
+
 	it("unboundedToolBodies renders the full expanded tool body with no middle-elision (for /export)", () => {
 		const panel = createChatPanel({ unboundedToolBodies: true });
 		feedLargeGrep(panel);
@@ -183,7 +195,7 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		clock = 2000;
 		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
 		const atEnd = strip(panel.render(100).join("\n"));
-		ok(atEnd.includes("✗"), `the stranded orphan settles to an error line, got: ${atEnd}`);
+		ok(atEnd.includes("✗ orphaned"), `the stranded orphan carries an explicit orphaned label, got: ${atEnd}`);
 		clock = 100_000;
 		strictEqual(strip(panel.render(100).join("\n")), atEnd, "the settled line does not keep counting");
 	});
@@ -242,6 +254,8 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		} as ChatLoopEvent);
 		clock = 1500;
 		panel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		// Populate the completed-entry cache before the late result arrives.
+		ok(strip(panel.render(100).join("\n")).includes("✗ orphaned"));
 		// The end event raced the settle and arrives after agent_end with the
 		// call's true outcome: the synthetic error line upgrades to the truth.
 		panel.applyEvent({
@@ -268,6 +282,21 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		rendered = strip(panel.render(100).join("\n"));
 		ok(rendered.includes("400ms"), `a duplicate end must not rewrite the finished segment, got: ${rendered}`);
 		ok(!rendered.includes("9999"), rendered);
+	});
+
+	it("labels an unfinished call aborted when the run reports an aborted assistant", () => {
+		const panel = createChatPanel();
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "abort-1",
+			toolName: "bash",
+			args: { command: "sleep 10" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "agent_end",
+			messages: [{ role: "assistant", content: [], stopReason: "aborted" }],
+		} as unknown as ChatLoopEvent);
+		ok(strip(panel.render(80).join("\n")).includes("✗ aborted"));
 	});
 
 	it("renders a permission-parked tool segment as awaiting approval, not running", () => {
@@ -338,7 +367,7 @@ describe("chat-panel settles blocked and orphaned tool calls", () => {
 		} as ChatLoopEvent);
 		const atEnd = strip(panel.render(80).join("\n"));
 		ok(!atEnd.includes("awaiting approval"), `a denied park sheds the awaiting marker, got: ${atEnd}`);
-		ok(atEnd.includes("✗"), `a denied park settles as a blocked error line, got: ${atEnd}`);
+		ok(atEnd.includes("✗ blocked"), `a denied park carries a blocked label, got: ${atEnd}`);
 		// The settled line is time-invariant: no lingering spinner keeps counting.
 		clock = 100_000;
 		strictEqual(strip(panel.render(80).join("\n")), atEnd);
@@ -555,5 +584,133 @@ describe("chat-panel edit diff block", () => {
 		ok(rendered.includes("line TWO"), "the diff still renders the actual change");
 		ok(rendered.includes("@@"), "the diff still renders its hunk header");
 		ok(!rendered.includes("No newline at end of file"), "the no-newline sentinel rows are filtered out");
+	});
+});
+
+describe("chat-panel reasoning provenance and renderer controls", () => {
+	it("shows provider reasoning totals distinctly from estimated totals", () => {
+		const providerPanel = createChatPanel();
+		const providerMessage = {
+			role: "assistant",
+			content: [{ type: "thinking", thinking: "provider reasoning body" }],
+			usage: { input: 11, output: 7, cacheRead: 3, cacheWrite: 1, reasoningTokens: 42 },
+			stopReason: "stop",
+		};
+		providerPanel.applyEvent({ type: "message_end", message: providerMessage } as unknown as ChatLoopEvent);
+		providerPanel.applyEvent({ type: "agent_end", messages: [providerMessage] } as unknown as ChatLoopEvent);
+		const providerText = strip(providerPanel.render(120).join("\\n"));
+		ok(providerText.includes("reason42 provider"), providerText);
+		ok(!providerText.includes("reason≈42"), providerText);
+		ok(providerText.includes("cache 3/1"), providerText);
+		ok(providerText.includes("not a verification"), providerText);
+
+		const estimatedPanel = createChatPanel();
+		estimatedPanel.applyEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "thinking", thinking: "estimated reasoning body" }],
+				stopReason: "stop",
+			},
+		} as ChatLoopEvent);
+		estimatedPanel.applyEvent({ type: "agent_end", messages: [] } as ChatLoopEvent);
+		const estimatedText = strip(estimatedPanel.render(120).join("\\n"));
+		ok(estimatedText.includes("reason≈"), estimatedText);
+		ok(estimatedText.includes("estimated"), estimatedText);
+	});
+
+	it("pauses and resumes cumulative live tool output without changing execution state", () => {
+		const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "live-1",
+			toolName: "bash",
+			args: { command: "printf hi" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_update",
+			toolCallId: "live-1",
+			partialResult: "partial hi",
+		} as ChatLoopEvent);
+		for (const width of [20, 40, 80, 120]) {
+			for (const line of panel.render(width)) {
+				ok(strip(line).length <= width, `running line overflows ${width}: ${line}`);
+			}
+		}
+		panel.toggleLiveToolOutput();
+		const paused = strip(panel.render(80).join("\\n"));
+		ok(!paused.includes("partial hi"), paused);
+		ok(paused.includes("running"), paused);
+		panel.toggleLiveToolOutput();
+		ok(strip(panel.render(80).join("\\n")).includes("partial hi"));
+	});
+
+	it("invalidates bounded render caches and keeps every line width-safe", () => {
+		const metrics: Array<{ cacheHit: boolean; entriesRendered: number }> = [];
+		const panel = createChatPanel({
+			onRenderMetrics: ({ cacheHit, entriesRendered }) => metrics.push({ cacheHit, entriesRendered }),
+		});
+		panel.appendUser("stable history");
+		panel.render(24);
+		panel.render(24);
+		ok(
+			metrics.some((metric) => metric.cacheHit),
+			JSON.stringify(metrics),
+		);
+		panel.appendUser("new history");
+		const lines = panel.render(12);
+		ok(metrics.at(-1)?.cacheHit === false, JSON.stringify(metrics));
+		for (const line of lines) ok(strip(line).length <= 12, `line exceeded narrow width: ${line}`);
+
+		const historyMetrics: Array<{ cacheHit: boolean; entriesRendered: number }> = [];
+		const history = createChatPanel({
+			onRenderMetrics: ({ cacheHit, entriesRendered }) => historyMetrics.push({ cacheHit, entriesRendered }),
+		});
+		for (let index = 0; index < 500; index += 1) history.appendUser(`stable entry ${index}`);
+		history.render(80);
+		history.appendUser("late result entry");
+		history.render(80);
+		ok((historyMetrics.at(-1)?.entriesRendered ?? Number.POSITIVE_INFINITY) <= 256, JSON.stringify(historyMetrics));
+	});
+
+	it("redacts URLs, flags, shell assignments, and nested environment values", () => {
+		const safe = redactToolArgs({
+			url: "https://alice:password@example.test/run?token=url-secret&keep=yes",
+			command: "export API_KEY=shell-secret SAFE=value --token flag-secret",
+			flags: ["--password=flag-secret-2"],
+			env: { NESTED: { SERVICE_TOKEN: "env-secret", SAFE: "also-secret" } },
+		});
+		const serialized = JSON.stringify(safe);
+		ok(!serialized.includes("password@example"), serialized);
+		ok(!serialized.includes("$1"), serialized);
+		ok(!serialized.includes("url-secret"), serialized);
+		ok(!serialized.includes("shell-secret"), serialized);
+		ok(!serialized.includes("flag-secret"), serialized);
+		ok(serialized.includes("SAFE=value"), serialized);
+		if (typeof safe !== "object" || safe === null || Array.isArray(safe)) throw new Error("expected object");
+		const env = (safe as { env?: unknown }).env;
+		ok(typeof env === "object" && env !== null && !Array.isArray(env), "nested env shape is retained");
+	});
+
+	it("redacts secret arguments and environment values while preserving tool structure", () => {
+		const panel = createChatPanel({ getOutputVerbosity: () => "verbose" });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "secret-1",
+			toolName: "custom_tool",
+			args: { apiKey: "super-secret-key", env: { SERVICE_TOKEN: "another-secret" }, command: "TOKEN=third-secret run" },
+		} as ChatLoopEvent);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "secret-1",
+			toolName: "custom_tool",
+			result: "done",
+			isError: false,
+		} as ChatLoopEvent);
+		const rendered = strip(panel.render(120).join("\\n"));
+		ok(!rendered.includes("super-secret-key"), rendered);
+		ok(!rendered.includes("another-secret"), rendered);
+		ok(!rendered.includes("third-secret"), rendered);
+		ok(rendered.includes("[redacted]"), rendered);
 	});
 });

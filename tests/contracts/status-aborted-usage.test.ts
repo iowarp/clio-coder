@@ -1,6 +1,8 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { AgentMessage } from "../../src/engine/types.js";
 import { type ReduceContext, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/state-machine.js";
+import { buildSummary } from "../../src/interactive/status/summary.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
 
 // Regression for the v0.2.8 demo session: a loop-guard abort ended a turn that
@@ -15,6 +17,46 @@ function ctx(now: number): ReduceContext {
 }
 
 describe("contracts/status aborted runs keep usage and abort provenance", () => {
+	it("preserves a provider-reported zero and labels a mixed reasoning total", () => {
+		const base = {
+			startedAt: 0,
+			endedAt: 1,
+			modelId: "m",
+			targetId: "t",
+			watchdogPeak: 0 as const,
+			cancelled: false,
+		};
+		const providerZero = buildSummary({
+			...base,
+			messages: [
+				{
+					role: "assistant",
+					content: [{ type: "thinking", thinking: "provider reported no hidden tokens" }],
+					usage: { reasoningTokens: 0 },
+				},
+			] as unknown as ReadonlyArray<AgentMessage>,
+		});
+		strictEqual(providerZero.reasoningTokens, 0);
+		strictEqual(providerZero.reasoningTokenProvenance, "provider");
+
+		const mixed = buildSummary({
+			...base,
+			messages: [
+				{
+					role: "assistant",
+					content: [{ type: "thinking", thinking: "provider turn" }],
+					usage: { reasoningTokens: 0 },
+				},
+				{
+					role: "assistant",
+					content: [{ type: "thinking", thinking: "unreported turn with enough text to estimate" }],
+				},
+			] as unknown as ReadonlyArray<AgentMessage>,
+		});
+		strictEqual(mixed.reasoningTokenProvenance, "mixed");
+		ok((mixed.reasoningTokens ?? 0) > 0, "the unreported thinking block contributes an estimate");
+	});
+
 	it("the settled agent_end after run_aborted carries the run's usage and keeps stopDetail", () => {
 		let status = { ...INITIAL_STATUS };
 		status = reduceStatus(status, { type: "agent_start", messages: [] } as unknown as StatusInputEvent, ctx(0));

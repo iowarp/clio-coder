@@ -408,6 +408,7 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		capabilities: ["tools", "reason", "vision", "ctx 262k"],
 		safety: "auto-edit",
 		toolProfile: "profile",
+		outputVerbosity: "minimal",
 	};
 
 	const context: ContextEngineFacts = {
@@ -539,6 +540,31 @@ describe("IT4 & IT5: Compact lines and responsiveness", () => {
 		);
 		ok(line.includes("git feature/main"), `git should remain visible, got "${line}"`);
 		ok(!line.includes("tools 99"), `badge should be dropped first, got "${line}"`);
+	});
+
+	it("shows the active output mode in both compact and expanded footer states", () => {
+		const compact = strip(
+			compactSecondaryLine(context, agent, 80, theme, { ...status, phase: "idle" }, null, null, null, "verbose"),
+		);
+		ok(compact.includes("out verbose"), compact);
+		const compactNarrow = strip(
+			compactSecondaryLine(context, agent, 20, theme, { ...status, phase: "idle" }, null, null, null, "verbose"),
+		);
+		ok(compactNarrow.includes("out:v"), compactNarrow);
+
+		const expanded = strip(
+			renderFooterStatusLines(
+				expandedRenderState({
+					workspace,
+					session: { ...session, outputVerbosity: "minimal" },
+					context,
+					agent: { ...agent, statusText: null, toolTally: "none · 0✗" },
+					status: { ...status, phase: "idle" },
+				}),
+				120,
+			).join("\n"),
+		);
+		ok(/output\s+minimal/.test(expanded), expanded);
 	});
 
 	it("keeps the context bar before metrics on narrow secondary lines", () => {

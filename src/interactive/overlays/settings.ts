@@ -99,6 +99,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"retry.baseDelayMs": "Base delay (ms)",
 	"retry.maxDelayMs": "Max delay (ms)",
 	"terminal.showTerminalProgress": "Terminal progress badges",
+	"terminal.outputVerbosity": "Output detail",
 	theme: "Theme",
 	identity: "Identity",
 	runtimePlugins: "Runtime plugins",
@@ -135,7 +136,7 @@ export const SETTINGS_SECTION_ROWS = {
 	budget: ["budget.sessionCeilingUsd", "defaults.maxTokens", "budget.concurrency"],
 	compaction: ["compaction.auto", "compaction.threshold", "compaction.excludeLastTurns"],
 	retry: ["retry.enabled", "retry.maxRetries", "retry.baseDelayMs", "retry.maxDelayMs"],
-	terminal: ["terminal.showTerminalProgress", "theme"],
+	terminal: ["terminal.showTerminalProgress", "terminal.outputVerbosity", "theme"],
 	advanced: [
 		"identity",
 		"runtimePlugins",
@@ -180,6 +181,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"retry.baseDelayMs": "Initial retry delay in milliseconds.",
 	"retry.maxDelayMs": "Maximum retry delay in milliseconds.",
 	"terminal.showTerminalProgress": "Emit OSC 9;4 progress badges during agent turns.",
+	"terminal.outputVerbosity": "How much reasoning, tool input, and live tool output appears in the transcript.",
 	theme: "Color palette. Clio ships a single tuned palette.",
 	identity: "Name Clio uses for itself in the system prompt.",
 	runtimePlugins: "npm packages exporting clioRuntimes: RuntimeDescriptor[].",
@@ -212,6 +214,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"clio-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
 	scope: "Comma-separated target or target/model refs. Alt+J / Alt+K step the chat target through this list.",
 	runtimePlugins: "Comma-separated package names, loaded at startup. Restart Clio after changing.",
+	keybindings:
+		"Renderer controls: Alt+O latest tool, Ctrl+Alt+O or Alt+Shift+O all tools, Alt+P live tool output, Alt+R latest reasoning, Ctrl+Alt+R or Alt+Shift+R all reasoning. Override these in settings.yaml or use /help.",
 };
 
 /** Per-value meaning, surfaced for the current value of an enum knob. */
@@ -250,6 +254,11 @@ const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<EditableSettingId, Record<string
 	"terminal.showTerminalProgress": {
 		true: "emit OSC 9;4 taskbar/tab progress badges during turns",
 		false: "no terminal progress badges",
+	},
+	"terminal.outputVerbosity": {
+		minimal: "quiet transcript; tools stay to one-line outcomes and reasoning stays folded",
+		default: "balanced transcript; expand the latest tool or reasoning block on demand",
+		verbose: "transparent transcript; reasoning, arguments, and live tool output stay visible",
 	},
 };
 
@@ -606,6 +615,9 @@ export function buildSettingItems(
 		settingItem("terminal.showTerminalProgress", String(terminal.showTerminalProgress), {
 			values: ["false", "true"],
 		}),
+		settingItem("terminal.outputVerbosity", terminal.outputVerbosity, {
+			values: ["minimal", "default", "verbose"],
+		}),
 		settingItem("theme", settings.theme, {
 			affordance: "single clio palette",
 			readOnly: true,
@@ -792,6 +804,9 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "terminal.showTerminalProgress":
 			if (value === "true" || value === "false") settings.terminal.showTerminalProgress = value === "true";
+			return;
+		case "terminal.outputVerbosity":
+			if (value === "minimal" || value === "default" || value === "verbose") settings.terminal.outputVerbosity = value;
 			return;
 		case "identity": {
 			const trimmed = value.trim();

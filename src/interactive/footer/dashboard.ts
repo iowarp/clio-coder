@@ -156,6 +156,7 @@ export function renderFooterCompactLines(state: FooterDashboardRenderState, widt
 			state.throughput,
 			state.sessionTokens,
 			state.sessionCost,
+			state.session.outputVerbosity,
 		),
 	].map((line) => fitDashboardLine(line, safeWidth));
 }
@@ -421,6 +422,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				capabilities,
 				safety,
 				toolProfile,
+				outputVerbosity: settings?.terminal.outputVerbosity ?? "default",
 			},
 			context: {
 				label: null,

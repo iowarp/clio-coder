@@ -171,6 +171,7 @@ defaults:
 theme: default
 terminal:
   showTerminalProgress: false
+  outputVerbosity: default
 skills:
   trustProjectCompatRoots: false
 delegation:
@@ -324,6 +325,7 @@ Label to config path mapping:
 | Base delay (ms) | `retry.baseDelayMs` |
 | Max delay (ms) | `retry.maxDelayMs` |
 | Terminal progress badges | `terminal.showTerminalProgress` |
+| Transcript output detail | `terminal.outputVerbosity` (`minimal`, `default`, or `verbose`) |
 
 ---
 

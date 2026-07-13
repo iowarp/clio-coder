@@ -1,3 +1,4 @@
+import type { OutputVerbosity } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	type CostAggregate,
@@ -55,6 +56,8 @@ export interface SessionFacts {
 	capabilities: string[] | null;
 	safety: string | null;
 	toolProfile: string | null;
+	/** Active transcript detail mode, shown in the dashboard so visibility is never implicit. */
+	outputVerbosity?: OutputVerbosity | null;
 }
 
 /** Context engine telemetry. */
@@ -328,6 +331,7 @@ export function compactSecondaryLine(
 	throughput: TokenThroughputSnapshot | null = null,
 	sessionTokens: UsageBreakdown | null = null,
 	sessionCost: CostAggregate | null = null,
+	outputVerbosity?: OutputVerbosity | null,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const barCells = compactContextBarWidth(safeWidth);
@@ -355,7 +359,15 @@ export function compactSecondaryLine(
 		context.used ?? undefined,
 		maxRightWidth,
 		compactMetricChipLimit(safeWidth),
+		outputVerbosity,
 	);
+	// At the smallest widths the context meter consumes the entire secondary
+	// row, so keep a compact mode marker on the left instead of silently hiding
+	// the active transcript setting.
+	if (outputVerbosity && visibleWidth(right) === 0) {
+		const marker = outputVerbosity === "minimal" ? "m" : outputVerbosity === "verbose" ? "v" : "d";
+		left = `${left}${theme.fg("dim", ` out:${marker}`)}`;
+	}
 	return joinColumns(left, right, safeWidth);
 }
 
@@ -440,6 +452,7 @@ export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantO
 		// value is a plain fact and reads muted like the other neutral values.
 		kv("autonomy", facts.safety),
 		kv("profile", facts.toolProfile),
+		kv("output", facts.outputVerbosity ?? "default", facts.outputVerbosity === "verbose" ? "accent" : "muted"),
 	]);
 }
 
@@ -617,8 +630,13 @@ export function formatLastTurn(theme: ClioTheme, summary: TurnSummary): string {
 		theme.fg(stop.token, `${stop.glyph} ${formatCompactMs(summary.elapsedMs)}`),
 		theme.fg("muted", `${GLYPH.up}${summary.inputTokens} ${GLYPH.down}${summary.outputTokens}`),
 	];
-	if (typeof summary.reasoningTokens === "number" && summary.reasoningTokens > 0) {
-		parts.push(theme.fg("reason", `r${summary.reasoningTokens}`));
+	if (typeof summary.reasoningTokens === "number") {
+		const marker =
+			summary.reasoningTokenProvenance === "estimated" || summary.reasoningTokenProvenance === "mixed" ? "≈" : "";
+		parts.push(theme.fg("reason", `r${marker}${summary.reasoningTokens}`));
+	}
+	if (summary.cacheReadTokens > 0 || summary.cacheWriteTokens > 0) {
+		parts.push(theme.fg("dim", `cache ${summary.cacheReadTokens}/${summary.cacheWriteTokens}`));
 	}
 	if (summary.toolCount > 0) {
 		const label = `${summary.toolCount} tool${summary.toolCount === 1 ? "" : "s"}`;
@@ -702,8 +720,17 @@ function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary): string {
 			"muted",
 			`${GLYPH.up}${formatFooterTokens(lastTurn.inputTokens)} ${GLYPH.down}${formatFooterTokens(lastTurn.outputTokens)}`,
 		),
-		finiteNonNegative(lastTurn.reasoningTokens) > 0
-			? theme.fg("reason", `r${formatFooterTokens(lastTurn.reasoningTokens ?? 0)}`)
+		lastTurn.reasoningTokens !== undefined
+			? theme.fg(
+					"reason",
+					`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens ?? 0)}`,
+				)
+			: null,
+		lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
+			? theme.fg(
+					"dim",
+					`cache ${formatFooterTokens(lastTurn.cacheReadTokens)}/${formatFooterTokens(lastTurn.cacheWriteTokens)}`,
+				)
 			: null,
 	];
 	if (lastTurn.toolCount > 0) {
@@ -914,6 +941,10 @@ function harnessBadge(
 	return badgeText ? ` ${theme.fg("dim", "·")} ${theme.fg("muted", badgeText)}` : "";
 }
 
+function outputVerbosityLabel(verbosity: OutputVerbosity): string {
+	return verbosity === "minimal" ? "min" : verbosity === "verbose" ? "verbose" : "default";
+}
+
 export function buildHarnessStatePill(
 	theme: ClioTheme,
 	status: AgentStatus,
@@ -945,13 +976,15 @@ export function buildMetricStrip(
 	liveInputTokens: number | null | undefined,
 	maxWidth: number,
 	maxChipsCount = 6,
+	outputVerbosity?: OutputVerbosity | null,
 ): string {
 	const safeMaxWidth = Math.max(0, Math.floor(maxWidth));
 	if (safeMaxWidth <= 0) return "";
 	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
-	if (!isStreaming && !lastTurn) return "";
+	if (!isStreaming && !lastTurn && !outputVerbosity) return "";
 
 	const candidates: Array<string | null> = [];
+	if (outputVerbosity) candidates.push(theme.fg("muted", `out ${outputVerbosityLabel(outputVerbosity)}`));
 	if (isStreaming) {
 		const tps = finiteNonNegative(throughput?.tokensPerSecond);
 		const rounded = tps > 0 ? (tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10) : null;
@@ -979,8 +1012,19 @@ export function buildMetricStrip(
 			),
 		);
 		candidates.push(
-			finiteNonNegative(lastTurn.reasoningTokens) > 0
-				? theme.fg("reason", `r${formatFooterTokens(lastTurn.reasoningTokens ?? 0)}`)
+			lastTurn.reasoningTokens !== undefined
+				? theme.fg(
+						"reason",
+						`r${lastTurn.reasoningTokenProvenance === "estimated" || lastTurn.reasoningTokenProvenance === "mixed" ? "≈" : ""}${formatFooterTokens(lastTurn.reasoningTokens ?? 0)}`,
+					)
+				: null,
+		);
+		candidates.push(
+			lastTurn.cacheReadTokens > 0 || lastTurn.cacheWriteTokens > 0
+				? theme.fg(
+						"dim",
+						`cache ${formatFooterTokens(lastTurn.cacheReadTokens)}/${formatFooterTokens(lastTurn.cacheWriteTokens)}`,
+					)
 				: null,
 		);
 		if (lastTurn.toolCount > 0) {

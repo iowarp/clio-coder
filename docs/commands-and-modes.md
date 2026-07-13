@@ -120,6 +120,7 @@ The registry table below lists the available interactive slash commands. The "Al
 | `/tasks` | - | `/tasks` | Show the session task board the agent tracks with the tasks tool |
 | `/view` | - | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/thinking` | - | `/thinking` | Open thinking-level selector |
+| `/output` | - | `/output [verbosity]` | Set transcript detail: minimal, default, or verbose |
 | `/model` | `/models` | `/model [pattern]` | Open model selector or set a model |
 | `/scoped-models` | - | `/scoped-models` | Edit the Alt+J / Alt+K model cycle set |
 | `/settings` | - | `/settings` | Open interactive settings |
@@ -168,8 +169,11 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+L` | Open the model and targets selector. |
 | `Alt+J` / `Alt+K` | Cycle through the scoped model set. |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). |
-| `Alt+O` | Toggle the most recent tool segment between collapsed and full body. |
-| `Alt+R` | Toggle thinking blocks between hidden marker and full body. |
+| `Alt+O` | Toggle the latest tool segment between collapsed and full body. |
+| `Ctrl+Alt+O` / `Alt+Shift+O` | Toggle all tool segments between collapsed and full bodies. |
+| `Alt+P` | Toggle live partial tool output in expanded tool bodies. |
+| `Alt+R` | Toggle the latest thinking block between hidden marker and full body. |
+| `Ctrl+Alt+R` / `Alt+Shift+R` | Toggle all thinking blocks between hidden markers and full bodies. |
 | `Alt+G` | Open the current input in an external editor. |
 | `Alt+X` | Dismiss footer notifications. |
 | `Alt+Enter` | Queue the current input as a follow-up message. |
@@ -385,8 +389,11 @@ substring match.
 Clio Coder features direct, interactive controls for model reasoning and thinking streams:
 
 - **Thinking Level (`Shift+Tab`):** Allows operators to cycle through available thinking configurations. This is useful for dialing model reasoning budgets up or down in real time.
-- **Thinking Blocks Toggle (`Alt+R`):** Toggles assistant thinking blocks between a compact, single-line folded marker and an expanded, full-body view.
-- **Live Streaming:** During active assistant turns, thinking increments stream live into the chat panel down a rail-prefixed segment.
+- **Thinking Blocks Toggle (`Alt+R`):** Toggles the latest assistant thinking block between a compact, single-line folded marker and an expanded, full-body view.
+- **All Thinking (`Ctrl+Alt+R` / `Alt+Shift+R`):** Toggles every thinking block in the transcript.
+- **Tool Body Toggle (`Alt+O`) / All Tools (`Ctrl+Alt+O` / `Alt+Shift+O`):** Expand the latest tool or every tool body.
+- **Live Tool Output (`Alt+P`):** Pause or resume cumulative partial tool output in expanded live tool bodies; the tool still executes.
+- **Live Streaming:** During active assistant turns, thinking increments stream live into the chat panel down a rail-prefixed segment. Reasoning totals marked `≈` are approximations from visible text; provider-reported totals are shown without that marker. Neither implies complete or cryptographically verified hidden reasoning.
 - **Thinking Replay:** When continuing a conversation, prior thinking is preserved and replayed in the history according to target-specific rules.
 
 ## TUI Surface Refinements

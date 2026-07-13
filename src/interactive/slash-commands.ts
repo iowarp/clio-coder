@@ -48,6 +48,7 @@ type SlashCommandVariant =
 	| { kind: "view-verify"; runId: string }
 	| { kind: "view-usage" }
 	| { kind: "thinking" }
+	| { kind: "output"; verbosity?: "minimal" | "default" | "verbose" }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
 	| { kind: "scoped-models" }
@@ -234,6 +235,7 @@ export interface SlashCommandContext {
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
 	openThinking: () => void;
+	setOutputVerbosity?: (verbosity?: "minimal" | "default" | "verbose") => void;
 	openModel: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
@@ -742,6 +744,20 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUnknown({ kind: "thinking" }),
 		handle(_command, ctx) {
 			ctx.openThinking();
+		},
+	},
+	{
+		name: "output",
+		description: "Set transcript detail: minimal, default, or verbose",
+		kinds: ["output"],
+		args: { positionals: [{ name: "verbosity", required: false }] },
+		fromArgs(parsed) {
+			const value = parsed.positionals[0];
+			return { kind: "output", ...(value ? { verbosity: value as "minimal" | "default" | "verbose" } : {}) };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "output") return;
+			ctx.setOutputVerbosity?.(command.verbosity);
 		},
 	},
 	{

@@ -1,5 +1,6 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import {
 	dispatchInteractiveAction,
 	isEscapeKey,
@@ -14,6 +15,7 @@ import {
 	routePermissionOverlayKey,
 	shouldAnnouncePermissionRequest,
 } from "../../src/interactive/index.js";
+import { createKeybindingManagerForTesting } from "../../src/interactive/keybinding-manager.js";
 
 const ESC = "\x1b";
 const KITTY_ESC = "\x1b[27u";
@@ -37,7 +39,6 @@ const LIST_OVERLAY_STATES: ReadonlyArray<OverlayState> = ["help", "agents", "pro
 function makeDeps(): {
 	deps: OverlayKeyDeps;
 	closed: () => number;
-	shutdowns: () => number;
 	cancelledPermissions: () => number;
 	confirmedPermissions: () => number;
 	cancelledAskUser: () => number;
@@ -47,7 +48,6 @@ function makeDeps(): {
 	cancelledDispatches: () => number;
 } {
 	let closeCount = 0;
-	let shutdownCount = 0;
 	let cancelPermissionCount = 0;
 	let confirmPermissionCount = 0;
 	let cancelAskUserCount = 0;
@@ -80,14 +80,10 @@ function makeDeps(): {
 		cancelAskUser: () => {
 			cancelAskUserCount += 1;
 		},
-		requestShutdown: () => {
-			shutdownCount += 1;
-		},
 	};
 	return {
 		deps,
 		closed: () => closeCount,
-		shutdowns: () => shutdownCount,
 		cancelledPermissions: () => cancelPermissionCount,
 		confirmedPermissions: () => confirmPermissionCount,
 		cancelledAskUser: () => cancelAskUserCount,
@@ -133,6 +129,39 @@ describe("modal precedence", () => {
 		strictEqual(shutdowns, 0);
 		strictEqual(dispatchInteractiveAction("clio.exit", { ...deps, canExit: () => true }), true);
 		strictEqual(shutdowns, 1);
+	});
+
+	it("keeps latest/all tool and reasoning controls bound and dispatchable", () => {
+		strictEqual(CLIO_APP_KEYBINDINGS["clio.tool.expand"].defaultKeys, "alt+o");
+		ok(
+			CLIO_APP_KEYBINDINGS["clio.tool.expandAll"].defaultKeys.includes("ctrl+alt+o"),
+			"all-tools has a Ctrl+Alt fallback",
+		);
+		strictEqual(CLIO_APP_KEYBINDINGS["clio.thinking.expand"].defaultKeys, "alt+r");
+		ok(
+			CLIO_APP_KEYBINDINGS["clio.thinking.expandAll"].defaultKeys.includes("ctrl+alt+r"),
+			"all-reasoning has a Ctrl+Alt fallback",
+		);
+		const manager = createKeybindingManagerForTesting();
+		strictEqual(manager.matches("\x1b\x0f", "clio.tool.expandAll"), true);
+		strictEqual(manager.matches("\x1b\x12", "clio.thinking.expandAll"), true);
+
+		const calls: string[] = [];
+		const deps = {
+			toggleToolExpansion: () => calls.push("tool"),
+			toggleAllToolExpansion: () => calls.push("tools"),
+			toggleThinkingExpansion: () => calls.push("thinking"),
+			toggleAllThinkingExpansion: () => calls.push("thinkings"),
+		} as unknown as KeyBindingDeps;
+		for (const [id, label] of [
+			["clio.tool.expand", "tool"],
+			["clio.tool.expandAll", "tools"],
+			["clio.thinking.expand", "thinking"],
+			["clio.thinking.expandAll", "thinkings"],
+		] as const) {
+			strictEqual(dispatchInteractiveAction(id, deps), true, id);
+			strictEqual(calls.at(-1), label, id);
+		}
 	});
 });
 

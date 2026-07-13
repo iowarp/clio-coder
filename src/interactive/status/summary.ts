@@ -1,6 +1,6 @@
-import { extractReasoningTokens } from "../../domains/session/context-accounting.js";
+import { estimateReasoningTextTokens, extractReasoningTokens } from "../../domains/session/context-accounting.js";
 import type { AgentMessage } from "../../engine/types.js";
-import type { TurnStopReason, TurnSummary, WatchdogTier } from "./types.js";
+import type { ReasoningTokenProvenance, TurnStopReason, TurnSummary, WatchdogTier } from "./types.js";
 
 export interface BuildSummaryInput {
 	startedAt: number;
@@ -18,6 +18,21 @@ interface UsageLike {
 	output?: number;
 	cacheRead?: number;
 	cacheWrite?: number;
+}
+
+function assistantThinkingText(message: AgentMessage): string {
+	const content = (message as { content?: unknown }).content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter(
+			(block): block is { type: "thinking"; thinking: string } =>
+				!!block &&
+				typeof block === "object" &&
+				(block as { type?: unknown }).type === "thinking" &&
+				typeof (block as { thinking?: unknown }).thinking === "string",
+		)
+		.map((block) => block.thinking)
+		.join("");
 }
 
 function finite(value: unknown): number {
@@ -44,7 +59,8 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 	let cacheReadTokens = 0;
 	let cacheWriteTokens = 0;
 	let reasoningTokens = 0;
-	let hadReasoningTokens = false;
+	let hadProviderReasoning = false;
+	let hadEstimatedReasoning = false;
 	let toolCount = 0;
 	let toolErrorCount = 0;
 	let stopReason: TurnStopReason = input.cancelled ? "cancelled" : "stop";
@@ -57,10 +73,19 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 				outputTokens += finite(usage.output);
 				cacheReadTokens += finite(usage.cacheRead);
 				cacheWriteTokens += finite(usage.cacheWrite);
-				const reasoning = extractReasoningTokens(usage);
-				if (reasoning !== null) {
-					reasoningTokens += reasoning;
-					hadReasoningTokens = true;
+			}
+			const reasoning = usage ? extractReasoningTokens(usage) : null;
+			if (reasoning !== null) {
+				reasoningTokens += reasoning;
+				hadProviderReasoning = true;
+			} else {
+				// Some providers emit thinking blocks without a usage object. Keep the
+				// fallback explicitly estimated so a run containing both shapes is
+				// reported as mixed rather than silently dropping the unreported block.
+				const estimated = estimateReasoningTextTokens(assistantThinkingText(message));
+				if (estimated !== null) {
+					reasoningTokens += estimated;
+					hadEstimatedReasoning = true;
 				}
 			}
 			const reason = assistantStopReason((message as { stopReason?: unknown }).stopReason);
@@ -86,7 +111,12 @@ export function buildSummary(input: BuildSummaryInput): TurnSummary {
 		watchdogPeak: input.watchdogPeak,
 		truncated: input.truncated === true,
 	};
-	if (hadReasoningTokens) summary.reasoningTokens = reasoningTokens;
+	if (hadProviderReasoning || hadEstimatedReasoning) {
+		summary.reasoningTokens = reasoningTokens;
+		const provenance: ReasoningTokenProvenance =
+			hadProviderReasoning && hadEstimatedReasoning ? "mixed" : hadProviderReasoning ? "provider" : "estimated";
+		summary.reasoningTokenProvenance = provenance;
+	}
 	return summary;
 }
 
