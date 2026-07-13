@@ -2034,10 +2034,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const startContextIslandTicker = (): void => {
 		stopContextIslandTicker();
 		contextIslandTicker = setInterval(() => {
+			dispatchBoardStore.reconcile();
+			renderTaskIsland();
 			const fleetActive = dispatchBoardStore.activeRows().length > 0;
 			if (!contextActivityStore.active() && !contextIslandVisible && !fleetActive) return;
 			renderContextIsland();
-			renderTaskIsland();
 			tui.requestRender();
 		}, 250);
 		contextIslandTicker.unref?.();
