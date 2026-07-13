@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
@@ -576,7 +576,7 @@ describe("dispatch board operator lifecycle", () => {
 				reason: "worker exited",
 			},
 		];
-		const snapshot = (): DispatchSnapshot => ({ retrying }) as DispatchSnapshot;
+		const snapshot = (): DispatchSnapshot => ({ running: [], retrying }) as unknown as DispatchSnapshot;
 		const store = createDispatchBoardStore(bus, snapshot);
 		try {
 			bus.emit(BusChannels.DispatchFailed, {
@@ -590,8 +590,10 @@ describe("dispatch board operator lifecycle", () => {
 				outcome: "failed",
 				outcomeDetail: "worker exited",
 			} as never);
+			store.reconcile();
 			const retryRow = store.activeRows()[0];
 			strictEqual(retryRow?.status, "retrying");
+			strictEqual(isDispatchBoardRowCancellable(retryRow as DispatchBoardRow), true);
 			strictEqual(retryRow?.retry?.attempt, 2);
 			strictEqual(retryRow?.taskSummary, "Retry the worker with bounded context");
 			const rendered = stripSgr(renderDispatchCard(retryRow as DispatchBoardRow, 76).join("\n"));
@@ -641,6 +643,7 @@ describe("dispatch board operator lifecycle", () => {
 				requestOrigin: "agent",
 				pid: 1,
 			} as never);
+			store.reconcile();
 			const row = store.rows()[0];
 			strictEqual(row?.inputTokens, 1200);
 			strictEqual(row?.outputTokens, 300);
@@ -653,34 +656,235 @@ describe("dispatch board operator lifecycle", () => {
 		}
 	});
 
-	it("does not leave a parent attempt retrying after its timer leaves the queue", () => {
+	it("reveals the authoritative failed or dead attempt after its retry leaves the queue", () => {
+		for (const scenario of [
+			{ runId: "run-failed-parent", reason: "failed", terminal: "failed" },
+			{ runId: "run-dead-parent", reason: "stalled", terminal: "dead" },
+		] as const) {
+			const bus = createSafeEventBus();
+			let retrying: DispatchSnapshot["retrying"] = [
+				{
+					runId: scenario.runId,
+					agentId: "scout",
+					attempt: 1,
+					dueAt: new Date(Date.now() + 1000).toISOString(),
+					reason: "transient failure",
+				},
+			];
+			const store = createDispatchBoardStore(bus, () => ({ running: [], retrying }) as unknown as DispatchSnapshot);
+			try {
+				bus.emit(BusChannels.DispatchFailed, {
+					runId: scenario.runId,
+					agentId: "scout",
+					reason: scenario.reason,
+					outcomeDetail: `${scenario.terminal} detail`,
+				} as never);
+				store.reconcile();
+				strictEqual(store.activeRows()[0]?.status, "retrying");
+				retrying = [];
+				store.reconcile();
+				strictEqual(store.activeRows().length, 0);
+				strictEqual(store.rows()[0]?.status, scenario.terminal);
+				strictEqual(store.rows()[0]?.outcomeDetail, `${scenario.terminal} detail`);
+			} finally {
+				store.unsubscribe();
+			}
+		}
+	});
+
+	it("keeps an aborted retry terminal while the snapshot still contains its timer", () => {
 		const bus = createSafeEventBus();
+		const snapshot = (): DispatchSnapshot =>
+			({
+				running: [],
+				retrying: [
+					{
+						runId: "run-aborted-retry",
+						agentId: "scout",
+						attempt: 2,
+						dueAt: new Date(Date.now() + 1000).toISOString(),
+						reason: "transient failure",
+					},
+				],
+			}) as unknown as DispatchSnapshot;
+		const store = createDispatchBoardStore(bus, snapshot);
+		try {
+			store.reconcile();
+			strictEqual(store.rows()[0]?.status, "retrying");
+
+			bus.emit(BusChannels.RunAborted, {
+				source: "dispatch_abort",
+				runId: "run-aborted-retry",
+				startedAt: null,
+				elapsedMs: null,
+				reason: "scheduled retry 2 canceled by operator",
+			});
+			store.reconcile();
+
+			const row = store.rows()[0];
+			strictEqual(row?.status, "aborted");
+			strictEqual(row?.retry, undefined);
+			const rendered = stripSgr(renderDispatchCard(row as DispatchBoardRow, 76).join("\n"));
+			ok(!rendered.includes("retrying"), rendered);
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("keeps an authoritative cancelling projection above a lagging retry snapshot", () => {
+		const bus = createSafeEventBus();
+		let aborting = false;
+		const snapshot = (): DispatchSnapshot =>
+			({
+				running: aborting
+					? [
+							{
+								runId: "run-cancelling-retry",
+								outcomePhase: "aborting",
+								tokens: { input: 20, output: 5, total: 25 },
+								costUsd: 0.01,
+								costProvenance: "known",
+							},
+						]
+					: [],
+				retrying: [
+					{
+						runId: "run-cancelling-retry",
+						agentId: "scout",
+						attempt: 2,
+						dueAt: new Date(Date.now() + 1000).toISOString(),
+						reason: "transient failure",
+					},
+				],
+			}) as unknown as DispatchSnapshot;
+		const store = createDispatchBoardStore(bus, snapshot);
+		try {
+			bus.emit(BusChannels.DispatchFailed, {
+				runId: "run-cancelling-retry",
+				agentId: "scout",
+				reason: "failed",
+			} as never);
+			store.reconcile();
+			strictEqual(store.rows()[0]?.status, "retrying");
+
+			aborting = true;
+			store.reconcile();
+
+			const row = store.rows()[0];
+			strictEqual(row?.status, "cancelling");
+			strictEqual(row?.retry, undefined);
+			strictEqual(row?.tokenCount, 25);
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("keeps the last retry projection across a failed snapshot and resumes after recovery", () => {
+		const bus = createSafeEventBus();
+		let shouldThrow = false;
 		let retrying: DispatchSnapshot["retrying"] = [
 			{
-				runId: "run-parent",
+				runId: "run-snapshot-recovery",
 				agentId: "scout",
-				attempt: 1,
+				attempt: 2,
 				dueAt: new Date(Date.now() + 1000).toISOString(),
 				reason: "transient failure",
 			},
 		];
-		const store = createDispatchBoardStore(bus, () => ({ retrying }) as DispatchSnapshot);
+		const store = createDispatchBoardStore(bus, () => {
+			if (shouldThrow) throw new Error("snapshot unavailable");
+			return { running: [], retrying } as unknown as DispatchSnapshot;
+		});
 		try {
 			bus.emit(BusChannels.DispatchFailed, {
-				runId: "run-parent",
+				runId: "run-snapshot-recovery",
 				agentId: "scout",
-				targetId: "default",
-				wireModelId: "model",
-				runtimeId: "runtime",
-				runtimeKind: "http",
 				reason: "failed",
-				outcome: "failed",
-				outcomeDetail: "transient failure",
 			} as never);
-			strictEqual(store.activeRows()[0]?.status, "retrying");
+			store.reconcile();
+			strictEqual(store.rows()[0]?.status, "retrying");
+
+			shouldThrow = true;
+			store.reconcile();
+			strictEqual(store.rows()[0]?.status, "retrying");
+
+			shouldThrow = false;
 			retrying = [];
-			strictEqual(store.activeRows().length, 0);
+			store.reconcile();
 			strictEqual(store.rows()[0]?.status, "failed");
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("does not reconcile from a structurally invalid snapshot collection", () => {
+		const bus = createSafeEventBus();
+		let malformed = false;
+		let retrying: DispatchSnapshot["retrying"] = [
+			{
+				runId: "run-malformed-snapshot",
+				agentId: "scout",
+				attempt: 2,
+				dueAt: new Date(Date.now() + 1000).toISOString(),
+				reason: "transient failure",
+			},
+		];
+		const store = createDispatchBoardStore(
+			bus,
+			() =>
+				({
+					running: [],
+					retrying: malformed ? {} : retrying,
+				}) as unknown as DispatchSnapshot,
+		);
+		try {
+			store.reconcile();
+			strictEqual(store.rows()[0]?.status, "retrying");
+
+			malformed = true;
+			store.reconcile();
+			strictEqual(store.rows()[0]?.status, "retrying");
+
+			malformed = false;
+			retrying = [];
+			store.reconcile();
+			strictEqual(store.rows()[0]?.status, "failed");
+		} finally {
+			store.unsubscribe();
+		}
+	});
+
+	it("keeps rows and activeRows pure between reconciliations", () => {
+		const bus = createSafeEventBus();
+		let snapshotCalls = 0;
+		const store = createDispatchBoardStore(bus, () => {
+			snapshotCalls += 1;
+			return {
+				running: [],
+				retrying: [
+					{
+						runId: "run-pure-read",
+						agentId: "scout",
+						attempt: 1,
+						dueAt: new Date(Date.now() + 1000).toISOString(),
+						reason: "transient failure",
+					},
+				],
+			} as unknown as DispatchSnapshot;
+		});
+		try {
+			store.reconcile();
+			const firstRows = store.rows();
+			const firstActiveRows = store.activeRows();
+			const firstElapsedMs = firstRows[0]?.elapsedMs;
+			const secondRows = store.rows();
+			const secondActiveRows = store.activeRows();
+
+			deepStrictEqual(secondRows, firstRows);
+			deepStrictEqual(secondActiveRows, firstActiveRows);
+			strictEqual(secondRows[0]?.elapsedMs, firstElapsedMs);
+			strictEqual(secondActiveRows[0]?.elapsedMs, firstElapsedMs);
+			strictEqual(snapshotCalls, 1);
 		} finally {
 			store.unsubscribe();
 		}

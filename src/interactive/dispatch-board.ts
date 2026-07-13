@@ -115,6 +115,7 @@ interface DispatchBoardEntry
 	lastContextTokens: number;
 	currentTool: string | null;
 	recentTools: string[];
+	retry?: DispatchRetryPresentation;
 }
 
 /** Bound on the recent-tool trail rendered on a card. */
@@ -543,9 +544,11 @@ export function formatDispatchBoardLines(
  * Live dispatch-board component. Cards render at the width the TUI actually
  * grants instead of a baked-in 76-column layout, so a narrow terminal no
  * longer clips telemetry mid-token and a wide one no longer wastes the frame.
- * Rows and the observability snapshot are read per render. The only local
- * state is the selected run id, kept stable across lifecycle-driven reorders;
- * the overlay ticker plus bus-driven requestRender calls drive repaints.
+ * Rows and the observability snapshot are read per render. The board is a pure
+ * consumer: its owner reconciles the store on the shared UI polling cycle.
+ * The only local state is the selected run id, kept stable across
+ * lifecycle-driven reorders; ticker plus bus-driven requestRender calls drive
+ * repaints.
  */
 export interface DispatchBoardView extends Component {
 	selectedRow(): DispatchBoardRow | null;
@@ -751,12 +754,11 @@ function parseRetrySnapshot(value: DispatchSnapshot["retrying"][number]): Dispat
 }
 
 function readRetrySnapshot(
-	snapshot: (() => DispatchSnapshot) | undefined,
+	snapshot: DispatchSnapshot,
 ): Map<string, { agentId: string; taskSummary?: string; retry: DispatchRetryPresentation }> {
 	const retrying = new Map<string, { agentId: string; taskSummary?: string; retry: DispatchRetryPresentation }>();
-	if (!snapshot) return retrying;
 	try {
-		for (const value of snapshot().retrying) {
+		for (const value of snapshot.retrying) {
 			const runId = parseRunId(value.runId);
 			const agentId = parseNonEmptyString(value.agentId);
 			const retry = parseRetrySnapshot(value);
@@ -775,7 +777,7 @@ function readRetrySnapshot(
 	return retrying;
 }
 
-function readRunningSnapshot(snapshot: (() => DispatchSnapshot) | undefined): Map<
+function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 	string,
 	{
 		inputTokens: number;
@@ -797,9 +799,8 @@ function readRunningSnapshot(snapshot: (() => DispatchSnapshot) | undefined): Ma
 			outcomePhase: string;
 		}
 	>();
-	if (!snapshot) return running;
 	try {
-		for (const value of snapshot().running) {
+		for (const value of snapshot.running) {
 			const runId = parseRunId(value.runId);
 			if (!runId) continue;
 			running.set(runId, {
@@ -824,7 +825,8 @@ function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
 	return Math.max(0, endMs - startedAtMs);
 }
 
-function toRow(entry: DispatchBoardEntry, now: number, retry?: DispatchRetryPresentation): DispatchBoardRow {
+function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
+	const retry = entry.retry;
 	return {
 		runId: entry.runId,
 		agentId: entry.agentId,
@@ -857,7 +859,9 @@ function toRow(entry: DispatchBoardEntry, now: number, retry?: DispatchRetryPres
 }
 
 function sortEntries(a: DispatchBoardEntry, b: DispatchBoardEntry): number {
-	const rank = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+	const aStatus = a.retry ? "retrying" : a.status;
+	const bStatus = b.retry ? "retrying" : b.status;
+	const rank = STATUS_ORDER[aStatus] - STATUS_ORDER[bStatus];
 	if (rank !== 0) return rank;
 	const aTime = a.finishedAtMs ?? a.startedAtMs ?? a.enqueuedAtMs;
 	const bTime = b.finishedAtMs ?? b.startedAtMs ?? b.enqueuedAtMs;
@@ -868,7 +872,7 @@ function sortEntries(a: DispatchBoardEntry, b: DispatchBoardEntry): number {
 function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 	if (entries.size <= MAX_DISPATCH_BOARD_ROWS) return;
 	const terminalEntries = [...entries.values()]
-		.filter((entry) => isTerminalStatus(entry.status))
+		.filter((entry) => !entry.retry && isTerminalStatus(entry.status))
 		.sort((a, b) => a.sequence - b.sequence);
 	const evictionQueue =
 		terminalEntries.length > 0 ? terminalEntries : [...entries.values()].sort((a, b) => a.sequence - b.sequence);
@@ -884,10 +888,12 @@ export function createDispatchBoardStore(
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
+	reconcile(): void;
 	unsubscribe(): void;
 } {
 	const entries = new Map<string, DispatchBoardEntry>();
 	let nextSequence = 0;
+	let reconciledAtMs = Date.now();
 
 	// Payloads arrive typed off the bus, but the board keeps its runtime
 	// parsing (parse* helpers) because events are not validated at runtime.
@@ -936,6 +942,7 @@ export function createDispatchBoardStore(
 			lastContextTokens: previous?.lastContextTokens ?? 0,
 			currentTool: previous?.currentTool ?? null,
 			recentTools: previous?.recentTools ?? [],
+			...(previous?.retry ? { retry: { ...previous.retry } } : {}),
 			...(previous?.steerAcknowledgement ? { steerAcknowledgement: { ...previous.steerAcknowledgement } } : {}),
 		};
 		entries.set(runId, entry);
@@ -945,7 +952,8 @@ export function createDispatchBoardStore(
 
 	const unsubscribers = [
 		bus.on(BusChannels.DispatchEnqueued, (raw) => {
-			upsertBase(raw ?? {}, "enqueued", Date.now());
+			const entry = upsertBase(raw ?? {}, "enqueued", Date.now());
+			if (entry) delete entry.retry;
 		}),
 		bus.on(BusChannels.DispatchStarted, (raw) => {
 			const now = Date.now();
@@ -954,6 +962,7 @@ export function createDispatchBoardStore(
 			entry.startedAtMs ??= now;
 			entry.finishedAtMs = null;
 			entry.durationMs = null;
+			delete entry.retry;
 		}),
 		bus.on(BusChannels.DispatchCompleted, (raw) => {
 			const now = Date.now();
@@ -968,6 +977,7 @@ export function createDispatchBoardStore(
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = null;
 			entry.currentTool = null;
+			delete entry.retry;
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);
 			}
@@ -992,6 +1002,7 @@ export function createDispatchBoardStore(
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
 			entry.currentTool = null;
+			delete entry.retry;
 			if (typeof payload.inputTokenCount === "number") {
 				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);
 			}
@@ -1004,14 +1015,16 @@ export function createDispatchBoardStore(
 			if (!runId) return;
 			const entry = entries.get(runId);
 			if (!entry) return;
-			if (entry.status === "retrying" && raw?.startedAt === null) {
+			const wasRetrying = entry.retry !== undefined;
+			delete entry.retry;
+			if (wasRetrying && raw?.startedAt === null) {
 				// Canceling a retry timer is synchronous: there is no worker left to
 				// wind down, so the history row can become terminal immediately.
 				entry.status = "aborted";
 				entry.finishedAtMs = Date.now();
 				entry.currentTool = null;
 			} else {
-				if (isTerminalStatus(entry.status)) return;
+				if (isTerminalStatus(entry.status) && !wasRetrying) return;
 				entry.status = "cancelling";
 			}
 			entry.outcomeDetail = parseOptionalDetail(raw?.reason) ?? entry.outcomeDetail ?? null;
@@ -1032,6 +1045,7 @@ export function createDispatchBoardStore(
 				if (status === "dead") {
 					entry.finishedAtMs ??= Date.now();
 					entry.currentTool = null;
+					delete entry.retry;
 				}
 				return;
 			}
@@ -1089,38 +1103,56 @@ export function createDispatchBoardStore(
 				entry.status = status;
 				entry.finishedAtMs ??= Date.now();
 				entry.currentTool = null;
+				delete entry.retry;
 			}
 		}),
 	];
 
 	let closed = false;
-	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
+	const reconcile = (): void => {
 		const now = Date.now();
-		const retrying = readRetrySnapshot(snapshot);
-		const running = readRunningSnapshot(snapshot);
+		if (!snapshot) {
+			reconciledAtMs = now;
+			return;
+		}
+		let currentSnapshot: DispatchSnapshot;
+		try {
+			currentSnapshot = snapshot();
+		} catch {
+			// Lifecycle and progress events remain authoritative if snapshot polling fails.
+			return;
+		}
+		if (!Array.isArray(currentSnapshot?.retrying) || !Array.isArray(currentSnapshot?.running)) return;
+		reconciledAtMs = now;
+		const retrying = readRetrySnapshot(currentSnapshot);
+		const running = readRunningSnapshot(currentSnapshot);
 		for (const entry of entries.values()) {
-			if (entry.status === "retrying" && !retrying.has(entry.runId)) {
+			if (entry.retry && !retrying.has(entry.runId)) {
 				// The timer left the queue (launched or was otherwise consumed). The
-				// parent attempt is terminal again; the successor gets its own row.
-				entry.status = "failed";
-				entry.finishedAtMs ??= now;
+				// parent attempt's original terminal state becomes visible again; the
+				// successor gets its own row.
+				delete entry.retry;
 			}
 		}
 		for (const [runId, projection] of retrying) {
+			const existing = entries.get(runId);
+			if (existing && existing.status !== "failed" && existing.status !== "dead") {
+				continue;
+			}
 			const entry =
-				entries.get(runId) ??
+				existing ??
 				upsertBase(
 					{
 						runId,
 						agentId: projection.agentId,
 						...(projection.taskSummary !== undefined ? { task: projection.taskSummary } : {}),
 					},
-					"retrying",
+					"failed",
 					now,
 				);
 			if (entry) {
-				entry.status = "retrying";
 				entry.currentTool = null;
+				entry.retry = { ...projection.retry };
 				if (entry.taskSummary === undefined && projection.taskSummary !== undefined) {
 					entry.taskSummary = projection.taskSummary;
 				}
@@ -1128,20 +1160,27 @@ export function createDispatchBoardStore(
 		}
 		for (const [runId, live] of running) {
 			const entry = entries.get(runId);
-			if (!entry || isTerminalStatus(entry.status)) continue;
+			if (!entry) continue;
+			if (isTerminalStatus(entry.status) && live.outcomePhase !== "aborting") continue;
 			entry.inputTokens = live.inputTokens;
 			entry.outputTokens = live.outputTokens;
 			entry.tokenCount = live.tokenCount;
 			entry.costUsd = live.costUsd;
 			entry.costProvenance = live.costProvenance;
-			if (live.outcomePhase === "aborting") entry.status = "cancelling";
+			if (live.outcomePhase === "aborting") {
+				if (entry.status !== "completed" && entry.status !== "aborted") {
+					entry.status = "cancelling";
+					delete entry.retry;
+				}
+			}
 		}
-		const rows = [...entries.values()]
+	};
+
+	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
+		return [...entries.values()]
 			.sort(sortEntries)
-			.map((entry) => toRow(entry, now, retrying.get(entry.runId)?.retry));
-		return rows
-			.filter((row) => !activeOnly || !isTerminalStatus(row.status))
-			.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+			.map((entry) => toRow(entry, reconciledAtMs))
+			.filter((row) => !activeOnly || !isTerminalStatus(row.status));
 	};
 
 	return {
@@ -1151,6 +1190,7 @@ export function createDispatchBoardStore(
 		activeRows() {
 			return projectRows(true);
 		},
+		reconcile,
 		unsubscribe() {
 			if (closed) return;
 			closed = true;
