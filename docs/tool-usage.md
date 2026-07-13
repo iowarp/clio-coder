@@ -224,7 +224,8 @@ Dispatches one or more tasks to Clio fleet agents and returns per-run receipt su
 
 Arguments:
 
-- `tasks` (required unless `list:true`). Array of task strings or `{task, agent, target, model, cwd}` objects. Per-item fields override the top-level defaults below.
+- `task` (required for the singular form unless `list:true`). One worker assignment/instruction string. It is distinct from briefing.
+- `tasks` (required for the batch form unless `list:true`). Array of task strings or `{task, agent, target, model, cwd, briefing}` objects. Per-item fields override the top-level defaults below. Supplying both `task` and `tasks` is an error.
 - `mode` (optional). `parallel` (default) runs items concurrently; `sequential` runs them one at a time, each completing before the next dispatches. A single task always runs down the sequential path.
 - `detach` (optional boolean). For parallel fan-out, returns the durable batch id and run ids after registration while the shared event consumer continues in the background. This is the parent model's route to mid-run monitor/steer; ordinary synchronous, sequential, and pipeline calls auto-wait.
 - `list` (optional boolean). Returns the agent catalog instead of dispatching.
@@ -234,19 +235,22 @@ Arguments:
 - `thinking_level` (optional). One of `off|minimal|low|medium|high|xhigh`, applied to all items.
 - `cwd` (optional). Default agent working directory.
 - `timeout_ms` (optional). Aborts the whole dispatch; in sequential mode remaining tasks are skipped and the skip is reported.
-- `briefing` (optional string, top-level default or per-task override). Parent-composed context/data, trimmed and omitted when blank; rejected above 12,000 UTF-8 bytes. It is sent as its own delimited untrusted dynamic message, pinned into plan approval, and retained in receipts only as byte/hash provenance.
+- `briefing` (optional string, top-level default or per-task override). Parent-composed context/data, not worker instructions: it cannot replace `task`. It is trimmed and omitted when blank, rejected above 12,000 UTF-8 bytes, sent as its own delimited untrusted dynamic message, and retained only as byte/hash provenance. The shared value applies to string tasks and object tasks without an override; an object-level briefing wins.
 - `max_output_bytes` (optional). Summary byte budget; default 20000, split across runs with at least 1024 bytes each.
 
-Argument tolerance: `tasks` sent as a JSON string is parsed, a single object or bare string is wrapped into an array, and a top-level `task` with no `tasks` becomes a one-element array.
+Argument tolerance: `tasks` sent as a JSON string is parsed and a single object or bare string is wrapped into an array. The top-level singular `task` is first-class. Briefing-only calls fail with guidance that briefing is context and cannot replace a task.
 
 Output is one batch-shaped summary even for a single task: a header `dispatch (<mode>) total=N failed=M`, the run id list, then one receipt line per run (run id, agent, exit code, target, model, tokens, receipt path, verification state, failure message if any) followed by the worker's final assistant text. `details = {mode, runIds, receiptCount, failedCount, runs[]}`, and each `runs[]` entry carries the structured `verification` state and the `receiptIntegrity` check result. Any run with a nonzero exit turns the whole result into an error carrying the same summary. A run that succeeded without a single successful tool call carries a `note=` marker; do not treat such a run as validated work.
 
-The summary separates three things that must never be conflated. Sealed receipt integrity is checked against the ledger for every run; a tampered or unverifiable receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner even when the process outcome succeeded. The receipt's verification state labels the worker's text block: `verified` renders as tool-verified worker output, `unverified` as worker claims in unverified prose, `not_applicable` as reconnaissance leads rather than validation evidence, and `unknown` (including legacy receipts without the field) as claims whose validation is not observable at this layer. Deterministic non-evidence notices flag failed runs, cap-exhausted runs, runs with zero successful tool calls, and citation-free reconnaissance.
+The summary separates four things that must never be conflated: `receipt_integrity=verified/v6/sha256` comes only from verification against the ledger; `evidence_verification=<state>/<basis>` describes validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
 
-Sealed receipts are the durable evidence; the worker's prose is an advisory claim until its verification state is verified or you spot-check it. When a run's claims are unverified or unknown, the summary leads with the exact spot-check guidance: `Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.` Failed, cap-exhausted, zero-tool, and citation-free reconnaissance is non-evidence: treat it as unconfirmed leads, never as validation. Do not repeat an identical successful dispatch in the same user turn. For parent-model mid-run follow-up, choose `detach:true`, then use `monitor` for status, event tails, and receipts and `steer` to guide or cancel a running native worker.
+Exit zero is insufficient without a durable deliverable. A successful native or ACP run must seal a nonempty `output.state="final"`. Otherwise it fails with `worker_final_output_missing`; any unfinished text remains partial diagnostics and automatic retry is suppressed. Live tool-use preambles never replace a missing receipt answer.
+
+Sealed receipts are the durable evidence; worker prose remains advisory until verified or spot-checked. Treat a successful reconnaissance receipt as an index and normally spot-check no more than six risk-weighted citations. Parent spot-checking is not independent specialist confirmation. For detached work, `wait` only observes; `collect` closes the batch and is required before final synthesis. A successful steer records ordered byte/hash/timestamp and acknowledgement provenance without storing prose. After a loop guard blocks a repeated call, do not retry the same call or a syntactic variant. When a report is requested but file modification is forbidden, answer in the final assistant response rather than creating `REPORT.md`.
 
 ```text
 dispatch(list=true)
+dispatch(agent="debugger", task="Adversarially verify the v4/v5 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
 dispatch(tasks=["Run the contract tests in tests/contracts/dispatch.test.ts and report each failure with its assertion"])
 dispatch(tasks=[
   {agent: "researcher", task: "Map every caller of finalizeObservation and summarize the envelope shapes"},

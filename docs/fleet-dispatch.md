@@ -22,6 +22,14 @@ with distance. Transport is a ladder: `local` and `ssh` exist today; a future
 container or cloud tier implements the same `WorkerTransport` interface
 (`src/domains/dispatch/transport.ts`) without touching the protocol.
 
+Both local and SSH native workers must emit `worker_announce` as their first
+protocol event. The transport consumes it, checks the dispatched WorkerSpec
+version, and accepts ordinary events only after that check. This is a
+wire-contract initialization boundary: it proves that the expected worker
+entry parsed the spec and speaks the dispatched protocol version. It is not
+cryptographic process identity authentication; the child supplies its own
+announcement. SSH also uses the announced remote pid for its kill fallback.
+
 Design decisions that shape everything else:
 
 - Per-node inference targets, no central proxy. Target URLs resolve on the
@@ -40,6 +48,15 @@ Design decisions that shape everything else:
 ## Worker prompt and budget admission
 
 Dispatch resolves the recipe, target, effective autonomy, and final canonical toolkit before compiling one stable Clio worker harness. The harness contains identity-lite, the shared operating contract, the exact native tool surface (or honest no-tools wording), safety for the enforced autonomy, and the recipe or bounded override persona. Project context, memory, bounded briefing, pipeline input, task text, and run posture remain dynamic messages and therefore do not churn stable hashes. Briefing is explicitly untrusted task data and does not transport conversation or session history.
+
+One run has a first-class singular shape: `task` is the worker assignment and
+`briefing` is separate bounded context/data. Briefing never replaces task,
+never gets copied into the receipt task, and remains a separately delimited
+dynamic prompt message. `tasks` is the batch form. A shared top-level briefing
+applies to string tasks and task objects without an override; an object-level
+briefing wins. Supplying both `task` and `tasks` fails instead of choosing one.
+After approval, execution consumes only the registry-owned resolved plan, so
+later mutation of raw arguments cannot change either field.
 
 Recipes may declare `budget: {toolCalls, readReserve, synthesis}`. `toolCalls` is the admitted-call phase boundary; the final `readReserve` slots accept only canonical `read`; `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `guardrails.workerToolCallCap` is transported separately as a hard attempt ceiling and always wins when lower. Native workers and Claude SDK enforce this policy. Claude Code and Antigravity reject explicit-budget recipes because their black-box loops cannot provide equivalent per-call mediation; custom recipes without a budget retain the legacy runtime-default route.
 
@@ -101,9 +118,9 @@ failure never holds capacity. The order is deterministic:
 4. The local node.
 
 With no fleet configured and nothing requested, placement resolves to null and
-the optional node provenance remains absent. New v5 receipt fields and
+the optional node provenance remains absent. Current v6 receipt fields and
 digest/version semantics still apply, so the complete receipt is not
-byte-identical to a pre-v5 receipt.
+byte-identical to a historical v4 or v5 receipt.
 
 ## Failure semantics
 
@@ -129,6 +146,7 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 
 | Topology | Invocation | Semantics |
 | --- | --- | --- |
+| Singular | `task: "..."` | One assignment, with optional separate `briefing`. |
 | Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. |
 | Sequential | `mode: "sequential"` | One at a time, stop reporting on timeout/abort. |
 | Pipeline | `mode: "pipeline"` | Each step receives the previous step's output as data. |
@@ -146,6 +164,8 @@ time (it never cancels the run; `steer` with `action="cancel"` stops one);
 `mode="collect"` is the barrier over a batch id or run-id list; a
 pending snapshot while runs are in flight, full results once all are
 terminal. Collecting marks the batch so the turn-end nudge stops firing.
+`wait` observes without collecting; `collect` is the authoritative terminal
+batch operation. Collect every detached batch before final synthesis.
 
 ### Review gate
 
@@ -196,7 +216,7 @@ as it denies every non-read action.
 
 ## Receipts
 
-New receipts use integrity v5 (`RUN_RECEIPT_INTEGRITY_VERSION = 5`), which authenticates the complete receipt and reconstructible ledger provenance surface. Verification retains an exact, dedicated v4 path for already sealed historical receipts; versions other than 4 and 5 remain invalid. The fleet provenance fields covered by the digest
+New receipts use integrity v6 (`RUN_RECEIPT_INTEGRITY_VERSION = 6`), which authenticates the complete receipt and reconstructible ledger provenance surface. Verification retains exact, dedicated v4 and v5 paths for already sealed historical receipts; their canonical projections are frozen. A v4 artifact cannot carry v5/v6-only own-properties, and a v5 artifact cannot carry the v6-only steering field, even when an injected value is null or undefined. Versions other than 4, 5, and 6 remain invalid. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`).
@@ -205,6 +225,29 @@ include:
   their receipt digests, and the verdict that caused a revise builder).
 - `plan`: plan-approval provenance (hash, topology, task count, cost ceiling,
   approval kind, and the registry approval identity when supervised).
+- `briefing`: byte count and SHA-256 of the exact canonical parent briefing;
+  the prose is not retained and is distinct from bounded project context.
+- `steering`: ordered byte/hash/timestamp and acknowledgement provenance for
+  successfully written steers; steering prose is never stored.
+- `outcomeCode`: the stable terminal classifier, including
+  `worker_final_output_missing` when an otherwise successful worker exits
+  without a nonempty receipt-sealed final answer.
+
+Process exit zero is not a delegated deliverable. Native and ACP runs succeed
+only when the drained event stream yields a nonempty receipt output with
+`state: "final"`. A missing final answer fails with
+`outcomeCode: "worker_final_output_missing"`; any captured unfinished text is
+retained only as `state: "partial"` diagnostics and automatic retry is
+suppressed. Dispatch, monitor, ledger, receipt, terminal bus event, and retry
+policy all consume that same final classification.
+
+Receipt integrity and evidence verification are separate axes. Integrity says
+that the sealed receipt matches its ledger envelope; evidence verification
+says whether the worker ran an applicable validation tool. A read-only Scout
+can therefore report `receipt_integrity=verified/v6/sha256` alongside
+`evidence_verification=not_applicable/read-only-agent`. Briefing provenance and
+bounded `project_context` provenance are also rendered independently; neither
+hash substitutes for the other.
 
 Gate references point backward: a reviewer references the builder it
 reviewed, a revise builder references the reviewer whose findings it
@@ -259,3 +302,18 @@ Remote workers default to residency observe: the SSH transport exports
 (for example a GPU box running the operator's inference server) never evicts
 them. A node opts into management explicitly with `residency: manage` in its
 fleet entry.
+
+## Opt-in live regression
+
+After `npm run build`, an operator with a configured model target can run the
+single-turn, read-only fleet lifecycle check explicitly:
+
+```bash
+CLIO_LIVE_EVAL=1 npm run test:live-eval:fleet-dispatch
+```
+
+It is not part of deterministic CI. The script copies the repository into an
+isolated committed workspace, sandboxes all Clio config/state/data/cache,
+exercises Scout, bounded spot-checking, detached Debugger briefing, steering,
+wait, and collect, and fails if any workspace content changes. Failures retain
+their isolated artifacts for diagnosis.

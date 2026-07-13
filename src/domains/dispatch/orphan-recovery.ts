@@ -53,6 +53,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 		...(receipt.requestOrigin !== undefined ? { requestOrigin: receipt.requestOrigin } : {}),
 		task: receipt.task,
 		...(receipt.briefing !== undefined ? { briefing: receipt.briefing } : {}),
+		...(receipt.steering !== undefined ? { steering: receipt.steering } : {}),
 		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
 		runtimeId: receipt.runtimeId,

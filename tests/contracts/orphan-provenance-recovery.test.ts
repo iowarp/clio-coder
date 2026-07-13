@@ -9,6 +9,7 @@ import type {
 	RunPlanProvenance,
 	RunReceipt,
 	RunReceiptDraft,
+	RunSteeringProvenance,
 } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -30,8 +31,22 @@ const plan: RunPlanProvenance = {
 	costCeilingUsd: 5,
 };
 const briefing = { bytes: 17, contentHash: "c".repeat(64) };
+const steering: ReadonlyArray<RunSteeringProvenance> = [
+	{
+		sequence: 1,
+		bytes: 19,
+		contentHash: "d".repeat(64),
+		sentAt: "2026-07-10T12:00:00.500Z",
+		acknowledged: true,
+		acknowledgedAt: "2026-07-10T12:00:00.600Z",
+	},
+];
 
-function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProvenance }): {
+function sealOrphan(provenance: {
+	gate?: RunGateProvenance;
+	plan?: RunPlanProvenance;
+	steering?: ReadonlyArray<RunSteeringProvenance>;
+}): {
 	runId: string;
 	receiptPath: string;
 } {
@@ -53,6 +68,7 @@ function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProven
 		outcome: "succeeded",
 		outcomeDetail: null,
 		outcomeCode: "worker_tool_call_cap_exhausted",
+		...(provenance.steering !== undefined ? { steering: provenance.steering } : {}),
 		lineage,
 		identity,
 		...(provenance.gate !== undefined ? { gate: provenance.gate } : {}),
@@ -81,6 +97,7 @@ function sealOrphan(provenance: { gate?: RunGateProvenance; plan?: RunPlanProven
 		outcomeDetail: null,
 		outcomeCode: "worker_tool_call_cap_exhausted",
 		briefing,
+		...(provenance.steering !== undefined ? { steering: provenance.steering } : {}),
 		lineage,
 		identity,
 		...(provenance.gate !== undefined ? { gate: provenance.gate } : {}),
@@ -201,12 +218,12 @@ describe("orphan provenance recovery", () => {
 		}
 	});
 
-	it("adopts gate-only, plan-only, and combined v5 receipts from the receipt-written crash window", () => {
+	it("adopts gate-only, plan-only, and combined v6 receipts from the receipt-written crash window", () => {
 		const isolated = isolateClioEnv("clio-orphan-matrix-");
 		try {
 			const gateOnly = sealOrphan({ gate });
 			const planOnly = sealOrphan({ plan });
-			const combined = sealOrphan({ gate, plan });
+			const combined = sealOrphan({ gate, plan, steering });
 			const reopened = openLedger({ maxRuns: 20 });
 			const summary = recoverOrphanReceipts(reopened);
 			strictEqual(summary.recovered, 3);
@@ -218,18 +235,19 @@ describe("orphan provenance recovery", () => {
 			deepStrictEqual(reopened.get(combined.runId)?.gate, gate);
 			deepStrictEqual(reopened.get(combined.runId)?.plan, plan);
 			deepStrictEqual(reopened.get(combined.runId)?.briefing, briefing);
+			deepStrictEqual(reopened.get(combined.runId)?.steering, steering);
 			strictEqual(reopened.get(combined.runId)?.outcomeCode, "worker_tool_call_cap_exhausted");
 		} finally {
 			isolated.restore();
 		}
 	});
 
-	it("quarantines a shape-valid v5 orphan whose authenticated provenance was tampered", () => {
+	it("quarantines a shape-valid v6 orphan whose authenticated steering provenance was tampered", () => {
 		const isolated = isolateClioEnv("clio-orphan-tamper-");
 		try {
-			const orphan = sealOrphan({ gate, plan });
+			const orphan = sealOrphan({ gate, plan, steering });
 			const receipt = JSON.parse(readFileSync(orphan.receiptPath, "utf8")) as Record<string, unknown>;
-			receipt.plan = { ...plan, taskCount: 99 };
+			receipt.steering = [{ ...steering[0], acknowledged: false }];
 			writeFileSync(orphan.receiptPath, JSON.stringify(receipt, null, 2));
 			const reopened = openLedger({ maxRuns: 20 });
 			const summary = recoverOrphanReceipts(reopened);

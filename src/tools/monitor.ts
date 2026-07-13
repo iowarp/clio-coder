@@ -15,7 +15,7 @@ import type { DispatchRunEventRegistry } from "./dispatch.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
-import { workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
+import { receiptEvidenceLabels, workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
 
 /**
  * The monitor tool: read-only visibility into known synchronous and detached
@@ -171,10 +171,33 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 		};
 	}
 	const body = truncateUtf8(raw, RECEIPT_MAX_BYTES, `\n[receipt truncated; read ${run.receiptPath} for the rest]`);
+	let receipt: RunReceipt | null = null;
+	let receiptIntegrity: ReceiptIntegrityResult;
+	try {
+		receipt = JSON.parse(raw) as RunReceipt;
+		receiptIntegrity = verifyReceiptIntegrity(receipt, run);
+	} catch (err) {
+		receiptIntegrity = {
+			ok: false,
+			reason: `receipt invalid: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
 	return {
 		kind: "ok",
 		output: body,
-		details: { mode: "receipt", runId, receiptPath: run.receiptPath },
+		details: {
+			mode: "receipt",
+			runId,
+			receiptPath: run.receiptPath,
+			receiptIntegrity,
+			...(receipt !== null && receiptIntegrity.ok
+				? {
+						evidenceVerification: readReceiptVerification(receipt),
+						briefing: receipt.briefing ?? null,
+						projectContext: receipt.projectContext ?? null,
+					}
+				: {}),
+		},
 	};
 }
 
@@ -184,15 +207,17 @@ interface DurableRunEvidence {
 	verification: RunReceiptVerification;
 	integrity: ReceiptIntegrityResult;
 	integrityNote: string | null;
+	integrityFailure: boolean;
 }
 
-function unavailableRunEvidence(reason: string, note: string): DurableRunEvidence {
+function unavailableRunEvidence(reason: string, note: string, integrityFailure = false): DurableRunEvidence {
 	return {
 		receipt: null,
 		output: null,
 		verification: readReceiptVerification({}),
 		integrity: { ok: false, reason },
 		integrityNote: note,
+		integrityFailure,
 	};
 }
 
@@ -233,12 +258,14 @@ function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
 		return unavailableRunEvidence(
 			`receipt invalid: ${detail}`,
 			`receipt integrity failed: invalid receipt (${detail}); worker text is withheld as untrusted and validation is unknown.`,
+			true,
 		);
 	}
 	if (!integrity.ok) {
 		return unavailableRunEvidence(
 			integrity.reason,
 			`receipt integrity failed: ${integrity.reason}; worker text is withheld as untrusted and validation is unknown.`,
+			true,
 		);
 	}
 	return {
@@ -247,6 +274,7 @@ function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
 		verification: readReceiptVerification(receipt),
 		integrity,
 		integrityNote: null,
+		integrityFailure: false,
 	};
 }
 
@@ -304,6 +332,10 @@ interface CollectedRunRow extends CollectRow {
 	evidence: DurableRunEvidence;
 }
 
+function failedIntegrityReason(integrity: ReceiptIntegrityResult): string {
+	return integrity.ok ? "verification result unavailable" : integrity.reason;
+}
+
 function collectRunLine(row: CollectedRunRow): string[] {
 	const run = row.run;
 	const lines = run
@@ -311,8 +343,22 @@ function collectRunLine(row: CollectedRunRow): string[] {
 				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 			]
 		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; receipt may still exist)`];
-	lines.push(`  ${workerTextLabel(row.evidence.verification)}`);
+	if (row.evidence.receipt !== null) {
+		lines.push(
+			...receiptEvidenceLabels(row.evidence.receipt, row.evidence.verification, row.evidence.integrity).map(
+				(label) => `  ${label}`,
+			),
+		);
+	} else {
+		const reason = failedIntegrityReason(row.evidence.integrity);
+		lines.push(
+			row.evidence.integrityFailure
+				? `  RECEIPT INTEGRITY FAILED for ${row.runId} (${reason}); stored receipt fields and worker text are untrusted.`
+				: `  receipt_integrity=unavailable reason=${JSON.stringify(reason)}`,
+		);
+	}
 	if (row.evidence.integrityNote) lines.push(`  ${row.evidence.integrityNote}`);
+	lines.push(`  ${workerTextLabel(row.evidence.verification)}`);
 	const output = row.evidence.output;
 	if (output) {
 		const capped = truncateUtf8(output.text, COLLECT_TEXT_BYTES, "...");
@@ -431,6 +477,10 @@ async function runCollect(
 					state: row.run === null ? "missing" : (row.run.outcome ?? row.run.status),
 					exitCode: row.run?.exitCode ?? null,
 					receiptPath: row.run?.receiptPath ?? null,
+					receiptIntegrity: row.evidence.integrity,
+					evidenceVerification: row.evidence.verification,
+					briefing: row.evidence.receipt?.briefing ?? null,
+					projectContext: row.evidence.receipt?.projectContext ?? null,
 					...(output ? { output: { state: output.state, bytes: output.bytes, truncated: output.truncated } } : {}),
 				};
 			}),
@@ -442,7 +492,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Monitor,
 		description:
-			"Inspect known dispatched runs. Parent-model mid-run observation requires detach:true because ordinary dispatch auto-waits; the interactive operator/TUI can inspect an active synchronous run through the dispatch contract. mode=list enumerates known runs, status reports one run, peek shows recent events, receipt returns the stored receipt, wait observes one run to a bounded timeout without canceling it, and collect gathers detached results.",
+			"Inspect known dispatched runs. Parent-model mid-run observation requires detach:true because ordinary dispatch auto-waits. wait observes without collecting. collect is the authoritative terminal batch operation; collect detached runs before final synthesis. receipt exposes stored evidence. Receipt integrity, evidence verification, briefing provenance, and project-context provenance are separate fields.",
 		parameters: Type.Object({
 			run_id: Type.Optional(
 				Type.String({ description: "Run id from dispatch output or monitor list; omit with mode=list." }),

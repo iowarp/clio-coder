@@ -61,7 +61,12 @@ import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { parseScoutSplitRecommendation, type ScoutSplitRecommendation } from "./scout-split-recommendation.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
-import { SPOT_CHECK_GUIDANCE, workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
+import {
+	receiptEvidenceLabels,
+	SPOT_CHECK_GUIDANCE,
+	workerTextLabel,
+	workerTextNonEvidenceNotices,
+} from "./worker-evidence.js";
 
 const DEFAULT_AGENT_ID = "coder";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
@@ -427,11 +432,17 @@ function dispatchRequestFromArgs(
 function dispatchRequestsFromArgs(
 	args: Record<string, unknown>,
 ): { ok: true; requests: DispatchRequest[] } | { ok: false; message: string } {
+	if (Object.hasOwn(args, "task") && Object.hasOwn(args, "tasks")) {
+		return { ok: false, message: "dispatch: pass either task for one run or tasks for a batch, not both" };
+	}
 	const tasks = args.tasks;
 	if (!Array.isArray(tasks) || tasks.length === 0) {
 		return {
 			ok: false,
-			message: "dispatch: tasks must be a non-empty array of task strings or {agent, task} objects",
+			message:
+				args.tasks === undefined
+					? 'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task.'
+					: "dispatch: tasks must be a non-empty array of task strings or {agent, task} objects",
 		};
 	}
 	const shared = { ...args };
@@ -676,7 +687,7 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
 		"",
 		...runs.flatMap((run, index) => {
-			const { receipt, receiptPath, summary } = run;
+			const { receipt, receiptPath } = run;
 			const note = successNote(receipt);
 			const noteSuffix = note !== null ? ` note=${note}` : "";
 			// A non-success outcome is load-bearing evidence (a timeout has no
@@ -693,19 +704,26 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
 			// Evidence confidence comes from the sealed receipt; a legacy receipt
 			// without the field reads unknown/legacy-receipt, never verified.
-			const verification = readReceiptVerification(receipt);
-			const verificationSuffix = ` verification=${verification.state}/${verification.basis}`;
-			const integritySuffix = run.integrity.ok ? "" : ` receipt-integrity=FAILED (${run.integrity.reason})`;
-			// The live summary is preferred; the receipt's durable bounded output
-			// covers runs whose event stream nobody consumed.
-			const liveAnswerText = normalizedAssistantText(summary);
-			const answerText = liveAnswerText.length > 0 ? liveAnswerText : (receipt.output?.text ?? "");
+			const verification = run.integrity.ok ? readReceiptVerification(receipt) : readReceiptVerification({});
+			const evidenceSuffix = ` ${receiptEvidenceLabels(receipt, verification, run.integrity).join(" ")}${
+				run.integrity.ok ? "" : " evidence_verification=unknown/receipt-integrity-failed"
+			}`;
+			// The sealed receipt is authoritative. Live summaries remain useful for
+			// monitoring but can contain transient tool-use prose and never override
+			// a missing, partial, or integrity-invalid durable answer.
+			const answerText =
+				run.integrity.ok &&
+				(receipt.output?.state === "final" || (receipt.outcome !== undefined && receipt.outcome !== "succeeded"))
+					? (receipt.output?.text ?? "")
+					: "";
 			const output =
 				answerText.length > 0
 					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
-					: "(no assistant text captured)";
+					: run.integrity.ok
+						? "(no receipt-sealed assistant text captured)"
+						: "(worker text withheld because receipt integrity failed)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${verificationSuffix}${integritySuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}`,
 				`  ${workerTextLabel(verification)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(receipt, verification, answerText).map((notice) => `  ${notice}`),
@@ -719,11 +737,18 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	let splitRecommendation: ScoutSplitRecommendation | null = null;
 	for (const run of runs) {
-		// Receipt integrity authenticates the Scout identity. The recommendation
-		// itself remains transient advisory state and is never written back to the
-		// receipt or allowed to affect outcome/control flow.
-		if (!run.integrity.ok || run.receipt.agentId !== "scout") continue;
-		const parsed = parseScoutSplitRecommendation(run.summary.lastAssistantText);
+		// Receipt integrity authenticates both the Scout identity and the sealed
+		// final output used for this advisory recommendation. Transient event text
+		// is never written back to the receipt or allowed to affect control flow.
+		if (
+			!run.integrity.ok ||
+			run.receipt.agentId !== "scout" ||
+			run.receipt.output?.state !== "final" ||
+			run.receipt.output.text.trim().length === 0
+		) {
+			continue;
+		}
+		const parsed = parseScoutSplitRecommendation(run.receipt.output.text);
 		if (parsed === null) continue;
 		// The top-level shape is singular. Multiple valid Scout envelopes in one
 		// dispatch are ambiguous, so fail closed instead of silently selecting one.
@@ -752,7 +777,7 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 				// Structured evidence state for downstream consumers: mirrors the
 				// sealed receipt read-only (legacy receipts read unknown), plus the
 				// integrity check so a tampered receipt is machine-visible here too.
-				verification: readReceiptVerification(receipt),
+				verification: integrity.ok ? readReceiptVerification(receipt) : readReceiptVerification({}),
 				receiptIntegrity: integrity,
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
@@ -2275,9 +2300,15 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Dispatch,
 		description:
-			"Dispatch bounded tasks to Clio fleet agents: tasks is an array of task strings or {agent, task} objects, mode=parallel (default), sequential, or pipeline. Ordinary calls auto-wait. Choose detach:true to return batch/run ids while work continues so the parent model can monitor or steer mid-run. Task objects may include persona and tool_profile to compose a bounded ad-hoc specialist with narrowed tools. In pipeline mode tasks run one at a time and each step receives the previous step's final output as input data. Call with list:true to see available agents. Sealed run receipts are the durable evidence; the worker's prose is an advisory claim until the receipt's verification state is verified or you spot-check the cited locations. Do not repeat an identical successful dispatch in the same user turn.",
+			'Dispatch one bounded task with task, or a batch with tasks (never both). Singular example: {agent:"debugger", task:"Verify the receipt boundary", briefing:"Prior receipt evidence...", detach:true}. task is the worker assignment; briefing is separate bounded parent context/data and cannot replace task. Ordinary calls auto-wait; detach:true returns ids for monitoring/steering, and collect is the authoritative terminal batch operation before final synthesis. Batch modes are parallel (default), sequential, pipeline, or compete. Task objects may include persona and tool_profile. Sealed receipts are durable evidence; report receipt integrity, evidence verification, briefing provenance, and project-context provenance separately. Call with list:true to see agents. Do not repeat an identical successful dispatch in the same user turn.',
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
+			task: Type.Optional(
+				Type.String({
+					description:
+						"Singular worker assignment/instructions. Use tasks instead for a batch; briefing is separate context and cannot replace task.",
+				}),
+			),
 			tasks: Type.Optional(
 				Type.Array(
 					Type.Union([
@@ -2371,7 +2402,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			agent: Type.Optional(Type.String({ description: "Default agent recipe for string tasks (default coder)." })),
 			briefing: Type.Optional(
 				Type.String({
-					description: `Default bounded parent context/data for tasks, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
+					description: `Separate bounded parent context/data for task, or the shared default for tasks; never worker instructions and never a task replacement. Max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
 				}),
 			),
 			persona: Type.Optional(
@@ -2761,7 +2792,10 @@ async function runPipeline(
 					[...runs],
 				);
 			}
-			previous = { runId: receipt.runId, text: normalizedAssistantText(summary) };
+			previous = {
+				runId: receipt.runId,
+				text: receipt.output?.state === "final" ? receipt.output.text : "",
+			};
 		}
 		return runs;
 	} finally {

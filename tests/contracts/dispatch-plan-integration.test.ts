@@ -201,7 +201,7 @@ describe("resolved dispatch plan admission", () => {
 					costCeilingUsd: 0.01,
 				};
 				const args: Record<string, unknown> = {
-					tasks: ["perform the approved task"],
+					task: "perform the approved task",
 					briefing: "approved parent context",
 					[RESOLVED_DISPATCH_PLAN_ARGUMENT]: forged,
 					...(placementCase === "explicit" ? { target: "primary", model: "explicit-model", node: "blade" } : {}),

@@ -1144,7 +1144,12 @@ const readline = require("readline");
 const rl = readline.createInterface({ input: process.stdin });
 let sawSpec = false;
 rl.on("line", (line) => {
-	if (!sawSpec) { sawSpec = true; return; }
+	if (!sawSpec) {
+		sawSpec = true;
+		const spec = JSON.parse(line);
+		process.stdout.write(JSON.stringify({ type: "worker_announce", pid: process.pid, host: "test", specVersion: spec.specVersion }) + "\\n");
+		return;
+	}
 	process.stdout.write(JSON.stringify({ type: "stub_echo", line: JSON.parse(line) }) + "\\n");
 	process.exit(0);
 });
@@ -1254,7 +1259,9 @@ rl.on("line", (line) => {
 				throws(() => bundle.contract.steer(handle.runId, "hello"), /no longer accepts input/);
 
 				exit.resolve({ exitCode: 0, signal: null });
-				await handle.finalPromise;
+				const receipt = await handle.finalPromise;
+				strictEqual(receipt.steering, undefined, "rejected steer is not persisted as sent");
+				strictEqual(JSON.stringify(receipt).includes("hello"), false);
 				throws(() => bundle.contract.steer(handle.runId, "hello"), /not active/);
 			} finally {
 				await bundle.extension.stop?.();

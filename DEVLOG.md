@@ -12,17 +12,21 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
 
 ### Added
 
-- **Bounded dispatch briefing and structured terminal outcomes.** Dispatch validates at most 12,000 UTF-8 bytes of parent-composed briefing data, renders it separately between memory and pipeline input, and pins the exact canonical value in a registry-owned, deeply frozen approval artifact; execution and retries consume that trusted snapshot and receipts seal only byte/hash provenance. Retry suppression consumes only a nullable four-code terminal classification from trusted Clio-owned native/SSH worker and Claude SDK seams, never ACP or black-box subprocess assertions and never diagnostic prose. Non-null codes denote deterministic failure and cannot accompany a succeeded receipt. New receipts seal v5. The frozen v4 verifier preserves the historical field set, rejects v4 receipts or ledger rows carrying `briefing` or `outcomeCode` (including null or undefined), and rejects v1-v3 and all other versions.
+- **Singular dispatch, briefing separation, and structured terminal outcomes.** `task` is now a first-class singular assignment alongside batch `tasks`; supplying both fails, and briefing-only calls explain that context cannot replace an assignment. Shared and per-task briefing precedence remains explicit, the 12,000-byte canonical value is pinned in the immutable approved plan, and execution ignores later raw-argument mutation. A fifth deterministic outcome code, `worker_final_output_missing`, fails an otherwise successful native or ACP run when event draining produces no nonempty receipt-sealed final output. Partial deltas remain diagnostics and this code suppresses automatic retries without parsing prose.
+- **Receipt-integrity v6 and steering provenance.** Successfully written native steers record stable sequence, UTF-8 bytes, SHA-256, send time, and observed acknowledgement without retaining message text. Operator/TUI and model steering share the dispatch-contract path; ACP remains non-steerable. New receipts seal v6. Dedicated literal v4 and v5 projections and digests remain frozen, downgrade-shaped own-properties fail even when null or undefined, ledger mismatch checks include steering, and orphan recovery adopts only integrity-valid v6 provenance.
 - **Canonical worker prompt compiler and agent-owned loop budgets.** Native dispatch now resolves effective autonomy and the final canonical toolkit once, then compiles identity-lite, the shared operating/task contract, sliced tool guidance, matching safety, and one recipe/override persona through the prompts domain. Dynamic project, memory, briefing, pipeline, task, and run-posture messages remain outside stable hashes. Recipe parsing strictly validates the exact `budget: {toolCalls, readReserve, synthesis}` object for built-in, user, and project agents; Scout declares `18/4/true`, Coder `50/5/true`, and missing custom budgets retain operator-default behavior. Dispatch transports the clamped phase policy plus the independent operator attempt cap through `WorkerSpec`; native and Claude SDK enforce canonical counting/read reserve/synthesis, coincident Coder `50/50` completes call 50 before graceful synthesis, and Claude Code/Antigravity reject explicit budgets they cannot mediate. Scout citation quarantine, split recommendations, and two corrective provider rounds remain role-specific.
 
-- **Worker transport seam with an SSH tier.** Worker spawning is
+- **Worker transport seam with local/SSH initialization parity.** Worker spawning is
   transport-neutral: the WorkerSpec/stdin + NDJSON/stdout protocol crosses
   the wire unchanged through `ssh -T` with a whitelisted environment
   (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_ANNOUNCE=1`); the orchestrator's
   environment never crosses. Workers announce pid/host for a remote kill
   fallback, and a stdin-EOF monitor aborts and force-exits an orphaned
-  remote worker so no process is ever stranded. Internal `clio worker`
-  subcommand is the default remote invocation.
+  remote worker so no process is ever stranded. Local and SSH native workers
+  both force and consume `worker_announce` as the first event, rejecting a
+  missing or mismatched WorkerSpec version before ordinary events. This is a
+  wire-contract initialization check, not cryptographic identity
+  authentication. Internal `clio worker` is the default remote invocation.
 
 - **Deterministic node registry, placement, failover, and doctor
   preflight.** `fleet.nodes` in settings declares SSH nodes; a registry
@@ -44,7 +48,19 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
   gains `mode=wait` (single-run block with a monotonic-clock timeout) and
   `mode=collect` (batch barrier: pending snapshot in flight, full results
   once terminal, batch marked collected). A turn-end nudge surfaces
-  completed uncollected batches and goes silent after collection.
+  completed uncollected batches and goes silent after collection. `wait`
+  observes without collecting; collect is the authoritative terminal batch
+  operation and the parent contract requires it before synthesis.
+
+- **Truthful terminal evidence rendering and orchestration guidance.** Dispatch
+  and monitor now render positive verified receipt integrity separately from
+  evidence verification, and render briefing separately from bounded project
+  context. A successful Scout receipt is an index: the parent normally spends
+  no more than six risk-weighted spot-check calls, never calls those checks an
+  independent specialist confirmation, and puts receipt-derived context in
+  `briefing`. Loop-guard rejections are not retried syntactically, detached
+  batches are collected before synthesis, and read-only report requests end in
+  the assistant response rather than an artifact.
 
 - **One ordinary dispatch consumer; synchronous dispatch is auto-wait.**
   Every ordinary single or batch handle launched by the dispatch tool is

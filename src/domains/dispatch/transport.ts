@@ -24,7 +24,13 @@
 import { spawn } from "node:child_process";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
-import { type SpawnedWorker, type SpawnOptions, spawnNativeWorker, spawnWorkerProcess } from "./worker-spawn.js";
+import {
+	announceEnabledWorkerEnvironment,
+	type SpawnedWorker,
+	type SpawnOptions,
+	spawnNativeWorker,
+	spawnWorkerProcess,
+} from "./worker-spawn.js";
 
 export type WorkerTransportKind = "local" | "ssh";
 
@@ -100,7 +106,8 @@ export function shellQuote(value: string): string {
  */
 function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	const residency = node.residency ?? "observe";
-	return `CLIO_RESIDENCY=${residency} CLIO_WORKER_ANNOUNCE=1`;
+	const env = announceEnabledWorkerEnvironment({ CLIO_RESIDENCY: residency });
+	return `CLIO_RESIDENCY=${env.CLIO_RESIDENCY} CLIO_WORKER_ANNOUNCE=${env.CLIO_WORKER_ANNOUNCE}`;
 }
 
 export function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {

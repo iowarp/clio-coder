@@ -135,6 +135,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				...(input.requestOrigin !== undefined ? { requestOrigin: input.requestOrigin } : {}),
 				task: input.task,
 				...(input.briefing !== undefined ? { briefing: structuredClone(input.briefing) } : {}),
+				...(input.steering !== undefined ? { steering: structuredClone(input.steering) } : {}),
 				targetId: input.targetId,
 				wireModelId: input.wireModelId,
 				runtimeId: input.runtimeId,

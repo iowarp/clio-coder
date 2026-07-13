@@ -96,7 +96,9 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		);
 		const continuation = effects[0];
 		ok(continuation?.kind === "request_continuation");
-		match(continuation.message, /read-only exploration calls without a successful Scout dispatch/);
+		match(continuation.message, /This continuation used/);
+		match(continuation.message, /without a successful Scout dispatch in this continuation/);
+		strictEqual(continuation.message.includes("This turn"), false, continuation.message);
 		match(continuation.message, /Scout/);
 
 		deepStrictEqual(
@@ -217,6 +219,7 @@ describe("contracts/detached dispatch nudge outcome copy", () => {
 			[],
 		);
 		match(message, /batch batch-ok: 2\/2 run\(s\) done/);
+		match(message, /Collect each .* before final synthesis/);
 		strictEqual(message.includes("run(s) terminal"), false, message);
 	});
 

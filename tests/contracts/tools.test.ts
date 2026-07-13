@@ -297,7 +297,21 @@ function fakeSequentialDispatch(
 			index += 1;
 			inFlight = true;
 			capturedRequests.push(req);
-			const finalPromise = Promise.resolve(runReceipt(step.runId, req.task, step.receipt)).finally(() => {
+			const finalPromise = Promise.resolve(
+				runReceipt(step.runId, req.task, {
+					...(step.assistantText.length > 0
+						? {
+								output: {
+									state: "final" as const,
+									text: step.assistantText,
+									bytes: Buffer.byteLength(step.assistantText, "utf8"),
+									truncated: false,
+								},
+							}
+						: {}),
+					...(step.receipt ?? {}),
+				}),
+			).finally(() => {
 				inFlight = false;
 			});
 			return {
@@ -1000,6 +1014,76 @@ describe("contracts/tools result shaping and truncation", () => {
 });
 
 describe("contracts/tools dispatch run paths", () => {
+	it("advertises the first-class singular task schema", () => {
+		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
+		const schema = tool.parameters as { properties?: Record<string, unknown> };
+		ok(schema.properties?.task, "dispatch TypeBox schema must advertise top-level task");
+		ok(
+			tool.description.includes('task:"Verify the receipt boundary"'),
+			"description includes a compact singular example",
+		);
+	});
+
+	it("keeps singular task and briefing separate in the dispatched request", async () => {
+		const captured: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch([{ runId: "run-singular", assistantText: "bounded answer" }], captured),
+		});
+		const result = await tool.run({
+			agent: "debugger",
+			task: "Adversarially verify the receipt boundary.",
+			briefing: "Prior receipt R1 left one unresolved claim.",
+		});
+		strictEqual(result.kind, "ok");
+		strictEqual(captured.length, 1);
+		strictEqual(captured[0]?.agentId, "debugger");
+		strictEqual(captured[0]?.task, "Adversarially verify the receipt boundary.");
+		strictEqual(captured[0]?.briefing, "Prior receipt R1 left one unresolved claim.");
+	});
+
+	it("applies shared briefing to batch tasks unless a task object overrides it", async () => {
+		const captured: DispatchRequest[] = [];
+		const tool = createDispatchTool({
+			dispatch: fakeSequentialDispatch(
+				[
+					{ runId: "run-shared-string", assistantText: "one" },
+					{ runId: "run-shared-object", assistantText: "two" },
+					{ runId: "run-override", assistantText: "three" },
+				],
+				captured,
+			),
+		});
+		const result = await tool.run(
+			{
+				mode: "sequential",
+				tasks: ["string task", { task: "object task" }, { task: "override task", briefing: "task context" }],
+				briefing: "shared context",
+			},
+			approvedDispatch,
+		);
+		strictEqual(result.kind, "ok");
+		deepStrictEqual(
+			captured.map((request) => request.briefing),
+			["shared context", "shared context", "task context"],
+		);
+	});
+
+	it("rejects ambiguous task plus tasks and explains that briefing cannot replace a task", async () => {
+		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
+		const ambiguous = await tool.run({ task: "one", tasks: ["two"] });
+		strictEqual(ambiguous.kind, "error");
+		if (ambiguous.kind === "error") match(ambiguous.message, /either task .* or tasks .* not both/);
+
+		const briefingOnly = await tool.run({ briefing: "context without an assignment" });
+		strictEqual(briefingOnly.kind, "error");
+		if (briefingOnly.kind === "error") {
+			strictEqual(
+				briefingOnly.message,
+				'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task.',
+			);
+		}
+	});
+
 	it("keeps dispatch target schema examples environment-neutral", () => {
 		const tool = createDispatchTool({ dispatch: {} as DispatchContract });
 		const schemaText = JSON.stringify(tool.parameters);
@@ -1506,7 +1590,14 @@ describe("contracts/tools dispatch run paths", () => {
 							},
 						};
 					})(),
-					finalPromise: Promise.resolve([runReceipt("run-1", "task 1"), runReceipt("run-2", "task 2")]),
+					finalPromise: Promise.resolve([
+						runReceipt("run-1", "task 1", {
+							output: { state: "final", text: "first scout finding", bytes: 19, truncated: false },
+						}),
+						runReceipt("run-2", "task 2", {
+							output: { state: "final", text: "second scout finding", bytes: 20, truncated: false },
+						}),
+					]),
 				};
 			},
 			listRuns: () => [],
@@ -2059,7 +2150,19 @@ describe("contracts/tools dispatch evidence labeling", () => {
 		return createDispatchTool({
 			dispatch: {
 				dispatch: async (req: DispatchRequest) => {
-					const sealed = runReceipt(runId, req.task, receipt);
+					const sealed = runReceipt(runId, req.task, {
+						...(assistantText.length > 0
+							? {
+									output: {
+										state: "final" as const,
+										text: assistantText,
+										bytes: Buffer.byteLength(assistantText, "utf8"),
+										truncated: false,
+									},
+								}
+							: {}),
+						...(receipt ?? {}),
+					});
 					return {
 						runId,
 						events: assistantMessageEvents(assistantText),
@@ -2098,7 +2201,7 @@ describe("contracts/tools dispatch evidence labeling", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind === "ok") {
 			ok(result.output.includes("RECEIPT INTEGRITY FAILED for run-tamper (integrity mismatch)"), result.output);
-			ok(result.output.includes("receipt-integrity=FAILED (integrity mismatch)"), result.output);
+			ok(result.output.includes('receipt_integrity=FAILED reason="integrity mismatch"'), result.output);
 			const details = result.details as { runs?: Array<{ receiptIntegrity?: { ok?: boolean; reason?: string } }> };
 			deepStrictEqual(details.runs?.[0]?.receiptIntegrity, { ok: false, reason: "integrity mismatch" });
 		}

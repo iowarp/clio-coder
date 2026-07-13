@@ -106,6 +106,15 @@ function emptyEvents(): AsyncIterableIterator<unknown> {
 	return (async function* () {})();
 }
 
+function finalEvents(text = "done"): AsyncIterableIterator<unknown> {
+	return (async function* () {
+		yield {
+			type: "message_end",
+			message: { role: "assistant", stopReason: "stop", content: text, usage: { input: 1, output: 1 } },
+		};
+	})();
+}
+
 function successfulAcpHandle(): AcpDelegationRunHandle {
 	return {
 		pid: 4242,
@@ -454,7 +463,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 9999,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents("single dispatch done"),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -754,7 +763,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 9999,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents("toolkit check done"),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -797,7 +806,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 9998,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents(`completed ${spec.task}`),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -869,7 +878,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 9911 + captured.length,
 					promise: Promise.resolve({ exitCode: 0, signal: null }),
-					events: emptyEvents(),
+					events: finalEvents("toolkit check done"),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -934,7 +943,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 9999,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents(`completed ${spec.task}`),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -1125,7 +1134,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 8000 + spawnedTasks.length,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents(`completed ${spec.task}`),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -1246,7 +1255,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 7777,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents("shadow reconnaissance done"),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -1932,7 +1941,7 @@ describe("contracts/dispatch", () => {
 				return {
 					pid: 7410 + capturedPrompts.length,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents(`completed ${spec.task}`),
 					abort: () => {},
 					heartbeatAt: { current: Date.now() },
 				};
@@ -2163,6 +2172,8 @@ describe("contracts/dispatch", () => {
 			strictEqual(receipt.inputTokenCount, 3);
 			strictEqual(receipt.outputTokenCount, 4);
 			strictEqual(receipt.tokenCount, 7);
+			strictEqual(receipt.outcome, "succeeded");
+			strictEqual(receipt.outcomeCode, null);
 			deepStrictEqual(receipt.output, { state: "final", text: "fast answer", bytes: 11, truncated: false });
 			// The bounded tee still replays the events for a late consumer.
 			const replayed = await drainEvents(handle.events);
@@ -2170,6 +2181,181 @@ describe("contracts/dispatch", () => {
 				replayed.some((event) => (event as { type?: string }).type === "message_end"),
 				"late consumers still see the buffered stream",
 			);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("fails an exit-zero worker that used tools but sealed no final assistant output", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (configContract) configContract.get().workers.maxRetries = 1;
+		const completed: unknown[] = [];
+		const failed: unknown[] = [];
+		const unsubscribeCompleted = context.bus.on(BusChannels.DispatchCompleted, (payload) => {
+			completed.push(payload);
+		});
+		const unsubscribeFailed = context.bus.on(BusChannels.DispatchFailed, (payload) => {
+			failed.push(payload);
+		});
+		const bundle = makeDispatchBundle(context, {
+			resilienceCooldownMs: 0,
+			spawnWorker: () => ({
+				pid: 1011,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: (async function* () {
+					yield {
+						type: "clio_tool_finish",
+						payload: { tool: "read", durationMs: 1, outcome: "ok", decision: "allowed" },
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "read without synthesis" });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.outcomeCode, "worker_final_output_missing");
+			strictEqual(receipt.exitCode, 1);
+			strictEqual(receipt.output, undefined);
+			strictEqual(receipt.outcomeDetail, "worker exited successfully without a receipt-sealed final assistant output");
+			strictEqual(bundle.contract.getRun(handle.runId)?.outcome, receipt.outcome);
+			strictEqual(bundle.contract.getRun(handle.runId)?.outcomeCode, receipt.outcomeCode);
+			strictEqual(completed.length, 0);
+			strictEqual(failed.length, 1);
+			deepStrictEqual(
+				{
+					outcome: (failed[0] as { outcome?: unknown }).outcome,
+					outcomeCode: (failed[0] as { outcomeCode?: unknown }).outcomeCode,
+					exitCode: (failed[0] as { exitCode?: unknown }).exitCode,
+				},
+				{ outcome: receipt.outcome, outcomeCode: receipt.outcomeCode, exitCode: receipt.exitCode },
+			);
+			strictEqual(bundle.contract.snapshot().retrying.length, 0, "the structured deterministic code suppresses retry");
+		} finally {
+			unsubscribeCompleted();
+			unsubscribeFailed();
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("does not promote a tool-use preamble into a successful final answer", async () => {
+		const context = stubContext();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1012,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: (async function* () {
+					yield {
+						type: "message_end",
+						message: {
+							role: "assistant",
+							stopReason: "toolUse",
+							content: [
+								{ type: "text", text: "I will inspect one more file." },
+								{ type: "toolCall", name: "read", arguments: { path: "src/index.ts" } },
+							],
+						},
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const receipt = await (await bundle.contract.dispatch({ agentId: "coder", task: "preamble only" })).finalPromise;
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.outcomeCode, "worker_final_output_missing");
+			strictEqual(receipt.output, undefined);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("keeps unflushed deltas as partial diagnostics while failing exit-zero completion", async () => {
+		const context = stubContext();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 1013,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events: (async function* () {
+					yield {
+						type: "message_update",
+						assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "unfinished answer" },
+					};
+				})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const receipt = await (await bundle.contract.dispatch({ agentId: "coder", task: "unflushed" })).finalPromise;
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.outcomeCode, "worker_final_output_missing");
+			deepStrictEqual(receipt.output, {
+				state: "partial",
+				text: "unfinished answer",
+				bytes: 17,
+				truncated: false,
+			});
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("applies the same missing-final requirement to an exit-zero ACP delegation", async () => {
+		const context = stubContext();
+		const configContract = context.getContract<ConfigContract>("config");
+		if (!configContract) throw new Error("test requires config contract");
+		const settings = configContract.get() as ClioSettings;
+		settings.delegation.agents = [{ id: "silent-acp", command: "silent-acp", args: [], toolGovernance: "clio-policy" }];
+		const bundle = makeDispatchBundle(context, {
+			startAcpDelegationRun: () => ({
+				pid: 4244,
+				heartbeatAt: { current: Date.now() },
+				abort: () => {},
+				kill: () => {},
+				toolCallLog: () => [],
+				events: emptyEvents() as AcpDelegationRunHandle["events"],
+				promise: Promise.resolve({
+					messages: [],
+					exitCode: 0,
+					stopReason: "end_turn",
+					usage: {
+						inputTokens: 0,
+						outputTokens: 0,
+						cacheReadTokens: 0,
+						cacheWriteTokens: 0,
+						reasoningTokens: 0,
+					},
+					delegation: {
+						acpSessionId: "sess-silent",
+						initialize: null,
+						toolCallsRequested: 0,
+						toolCallsApproved: 0,
+						toolCallsDenied: 0,
+					},
+				}),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const receipt = await (
+				await bundle.contract.dispatch({
+					agentId: "silent-acp",
+					delegationAgentId: "silent-acp",
+					task: "return a final answer",
+				})
+			).finalPromise;
+			strictEqual(receipt.runtimeKind, "acp-delegation");
+			strictEqual(receipt.outcome, "failed");
+			strictEqual(receipt.outcomeCode, "worker_final_output_missing");
+			strictEqual(receipt.exitCode, 1);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -2851,7 +3037,9 @@ describe("contracts/dispatch", () => {
 			`
 const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin });
-rl.once("line", () => {
+rl.once("line", (line) => {
+	const spec = JSON.parse(line);
+	process.stdout.write(JSON.stringify({ type: "worker_announce", pid: process.pid, host: "test", specVersion: spec.specVersion }) + "\\n");
 	process.stdout.write("not json\\n");
 	process.stderr.write("x".repeat(5000) + "\\n[worker] fatal: expected diagnostic\\n");
 	process.exit(1);
@@ -2901,13 +3089,16 @@ rl.once("line", () => {
 		const bundle = makeDispatchBundle(context, {
 			now: () => now,
 			resilienceCooldownMs: 500,
-			spawnWorker: () => ({
-				pid: 3001 + spawnCount,
-				promise: (spawnCount++ === 0 ? firstExit : secondExit).promise,
-				events: emptyEvents(),
-				abort: () => {},
-				heartbeatAt: { current: Date.now() },
-			}),
+			spawnWorker: () => {
+				const index = spawnCount++;
+				return {
+					pid: 3001 + index,
+					promise: (index === 0 ? firstExit : secondExit).promise,
+					events: index === 0 ? emptyEvents() : finalEvents("retry after cooldown done"),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
 		});
 		await bundle.extension.start();
 		try {
@@ -2945,7 +3136,9 @@ rl.once("line", () => {
 			`
 const readline = require("readline");
 const rl = readline.createInterface({ input: process.stdin });
-rl.once("line", () => {
+rl.once("line", (line) => {
+	const spec = JSON.parse(line);
+	process.stdout.write(JSON.stringify({ type: "worker_announce", pid: process.pid, host: "test", specVersion: spec.specVersion }) + "\\n");
 	process.stdout.write(JSON.stringify({ type: "clio_tool_approval_request", payload: { requestId: "abc" } }) + "\\n");
 	process.exit(0);
 });
@@ -3390,7 +3583,7 @@ rl.once("line", () => {
 				return {
 					pid: 7200 + idx,
 					promise: exit.promise,
-					events: emptyEvents(),
+					events: finalEvents(`batch ${idx} done`),
 					heartbeatAt: { current: Date.now() },
 					abort: () => exit.resolve({ exitCode: 1, signal: "SIGTERM" }),
 				};
@@ -4222,6 +4415,10 @@ rl.once("line", () => {
 								reason: "permission denied",
 							},
 						};
+						yield {
+							type: "message_end",
+							message: { role: "assistant", stopReason: "stop", content: "permission denial handled" },
+						};
 					})(),
 				};
 			},
@@ -4666,7 +4863,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 		return {
 			pid: 8100,
 			promise: Promise.resolve({ exitCode: 0, signal: null }),
-			events: emptyEvents(),
+			events: finalEvents("completed without tool calls"),
 			abort: () => {},
 			heartbeatAt: { current: Date.now() },
 		};
@@ -4791,6 +4988,10 @@ describe("contracts/dispatch tool activity honesty", () => {
 					yield {
 						type: "clio_tool_finish",
 						payload: { tool: "read", durationMs: 2, outcome: "ok", decision: "allowed" },
+					};
+					yield {
+						type: "message_end",
+						message: { role: "assistant", stopReason: "stop", content: "read completed" },
 					};
 				})(),
 			}),
@@ -4965,6 +5166,10 @@ describe("contracts/dispatch tool activity honesty", () => {
 					yield {
 						type: "clio_tool_finish",
 						payload: { tool: "bash", durationMs: 1, outcome: "blocked", decision: "blocked" },
+					};
+					yield {
+						type: "message_end",
+						message: { role: "assistant", stopReason: "stop", content: "attempts completed" },
 					};
 				})(),
 			}),

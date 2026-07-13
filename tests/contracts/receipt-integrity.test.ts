@@ -106,12 +106,31 @@ describe("contracts/receipt-integrity", () => {
 		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
 	});
 
+	it("integrity-covers the worker_final_output_missing outcome code", () => {
+		const envelope: RunEnvelope = {
+			...fixtureEnvelope("run-final-output-missing"),
+			outcome: "failed",
+			outcomeCode: "worker_final_output_missing",
+		};
+		const receipt = withReceiptIntegrity(
+			{
+				...fixtureReceiptDraft(envelope),
+				outcome: "failed",
+				outcomeCode: "worker_final_output_missing",
+			},
+			envelope,
+		);
+		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+		strictEqual(verifyReceiptIntegrity({ ...receipt, outcomeCode: null }, envelope).ok, false);
+		strictEqual(verifyReceiptIntegrity(receipt, { ...envelope, outcomeCode: null }).ok, false);
+	});
+
 	it("rejects receipts sealed under retired integrity versions", () => {
 		const envelope = fixtureEnvelope("run-retired-version");
 		const draft = fixtureReceiptDraft(envelope);
 		const current = computeReceiptIntegrity(draft, envelope);
 
-		for (const version of [1, 2, 3, 6]) {
+		for (const version of [1, 2, 3, 7]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -191,19 +210,138 @@ describe("contracts/receipt-integrity", () => {
 			},
 		};
 		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
-		const injectedValues: ReadonlyArray<["briefing" | "outcomeCode", unknown]> = [
+		const injectedValues: ReadonlyArray<["briefing" | "outcomeCode" | "steering", unknown]> = [
 			["briefing", { bytes: 1, contentHash: "f".repeat(64) }],
 			["briefing", null],
 			["briefing", undefined],
 			["outcomeCode", "worker_tool_call_cap_exhausted"],
 			["outcomeCode", null],
 			["outcomeCode", undefined],
+			["steering", null],
+			["steering", undefined],
+			["steering", []],
+			[
+				"steering",
+				[
+					{
+						sequence: 1,
+						bytes: 5,
+						contentHash: "e".repeat(64),
+						sentAt: "2026-07-10T00:00:00.500Z",
+						acknowledged: false,
+					},
+				],
+			],
 		];
 		for (const [field, value] of injectedValues) {
 			const injectedReceipt = Object.assign({}, receipt, { [field]: value }) as RunReceipt;
 			strictEqual(verifyReceiptIntegrity(injectedReceipt, envelope).ok, false, `receipt own ${field} must fail`);
 			const injectedLedger = Object.assign({}, envelope, { [field]: value }) as RunEnvelope;
 			strictEqual(verifyReceiptIntegrity(receipt, injectedLedger).ok, false, `ledger own ${field} must fail`);
+		}
+	});
+
+	it("verifies a genuine historical v5 digest and rejects injected v6 steering", () => {
+		const envelope: RunEnvelope = {
+			id: "legacy-v5-run",
+			agentId: "coder",
+			task: "historical v5",
+			targetId: "local",
+			wireModelId: "model-a",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			startedAt: "2026-07-10T00:00:00.000Z",
+			endedAt: "2026-07-10T00:00:01.000Z",
+			status: "completed",
+			outcome: "succeeded",
+			outcomeDetail: null,
+			outcomeCode: null,
+			exitCode: 0,
+			pid: null,
+			heartbeatAt: null,
+			receiptPath: null,
+			sessionId: null,
+			cwd: "/workspace",
+			tokenCount: 3,
+			inputTokenCount: 2,
+			outputTokenCount: 1,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 0,
+			reasoningTokenCount: 0,
+			staticShellHash: null,
+			sessionShellHash: null,
+			dynamicHash: null,
+			costUsd: 0,
+		};
+		const draft: RunReceiptDraft = {
+			runId: envelope.id,
+			agentId: envelope.agentId,
+			task: envelope.task,
+			targetId: envelope.targetId,
+			wireModelId: envelope.wireModelId,
+			runtimeId: envelope.runtimeId,
+			runtimeKind: envelope.runtimeKind,
+			startedAt: envelope.startedAt,
+			endedAt: envelope.endedAt ?? envelope.startedAt,
+			outcome: "succeeded",
+			outcomeDetail: null,
+			outcomeCode: null,
+			exitCode: 0,
+			tokenCount: 3,
+			inputTokenCount: 2,
+			outputTokenCount: 1,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 0,
+			reasoningTokenCount: 0,
+			costUsd: 0,
+			compiledPromptHash: null,
+			staticCompositionHash: null,
+			staticShellHash: null,
+			sessionShellHash: null,
+			dynamicHash: null,
+			clioVersion: "0.2.8",
+			piMonoVersion: "0.80.3",
+			platform: "linux",
+			nodeVersion: "v22.19.0",
+			toolCalls: 0,
+			toolStats: [],
+			sessionId: null,
+		};
+		const receipt: RunReceipt = {
+			...draft,
+			integrity: {
+				version: 5,
+				algorithm: "sha256",
+				digest: "9b6cd563e45af706527adf80c502223ba9f7be08f6a0fb6b1d39eb1d76aa4b99",
+			},
+		};
+		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+
+		const injectedValues: ReadonlyArray<unknown> = [
+			null,
+			undefined,
+			[],
+			[
+				{
+					sequence: 1,
+					bytes: 5,
+					contentHash: "e".repeat(64),
+					sentAt: "2026-07-10T00:00:00.500Z",
+					acknowledged: false,
+				},
+			],
+		];
+		for (const value of injectedValues) {
+			const injectedReceipt = Object.assign({}, receipt, { steering: value }) as RunReceipt;
+			deepStrictEqual(verifyReceiptIntegrity(injectedReceipt, envelope), {
+				ok: false,
+				reason: "integrity invalid: v5 contains unauthenticated steering",
+			});
+			const injectedLedger = Object.assign({}, envelope, { steering: value }) as RunEnvelope;
+			deepStrictEqual(verifyReceiptIntegrity(receipt, injectedLedger), {
+				ok: false,
+				reason: "integrity invalid: v5 contains unauthenticated steering",
+			});
 		}
 	});
 
@@ -232,6 +370,16 @@ describe("contracts/receipt-integrity", () => {
 			},
 			personaOverride: { promptHash: "c".repeat(64) },
 			briefing: { bytes: 12, contentHash: "9".repeat(64) },
+			steering: [
+				{
+					sequence: 1,
+					bytes: 12,
+					contentHash: "8".repeat(64),
+					sentAt: "2026-06-25T12:00:02.000Z",
+					acknowledged: true,
+					acknowledgedAt: "2026-06-25T12:00:02.100Z",
+				},
+			],
 			outcomeCode: "worker_tool_call_cap_exhausted",
 			promptSignature: "prompt-signature",
 			toolSignature: "tool-signature",
@@ -249,6 +397,7 @@ describe("contracts/receipt-integrity", () => {
 			plan: required(envelope.plan, "plan"),
 			personaOverride: required(envelope.personaOverride, "personaOverride"),
 			briefing: required(envelope.briefing, "briefing"),
+			steering: required(envelope.steering, "steering"),
 			outcomeCode: required(envelope.outcomeCode, "outcomeCode"),
 			projectContext: {
 				tier: "bounded",
@@ -389,6 +538,44 @@ describe("contracts/receipt-integrity", () => {
 			false,
 		);
 		strictEqual(verifyReceiptIntegrity(receipt, { ...envelope, outcomeCode: null }).ok, false);
+		strictEqual(verifyReceiptIntegrity(receipt, { ...envelope, steering: [] }).ok, false);
+	});
+
+	it("integrity-covers every steering provenance value and its ledger copy", () => {
+		const steering = [
+			{
+				sequence: 1,
+				bytes: 13,
+				contentHash: "a".repeat(64),
+				sentAt: "2026-06-25T12:00:02.000Z",
+				acknowledged: true,
+				acknowledgedAt: "2026-06-25T12:00:02.050Z",
+			},
+			{
+				sequence: 2,
+				bytes: 17,
+				contentHash: "b".repeat(64),
+				sentAt: "2026-06-25T12:00:03.000Z",
+				acknowledged: false,
+			},
+		] as const;
+		const envelope: RunEnvelope = { ...fixtureEnvelope("run-steering-tamper"), steering };
+		const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), steering }, envelope);
+		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+
+		const first = steering[0];
+		const tampers: ReadonlyArray<NonNullable<RunReceipt["steering"]>> = [
+			[{ ...first, sequence: 9 }, steering[1]],
+			[{ ...first, bytes: 99 }, steering[1]],
+			[{ ...first, contentHash: "c".repeat(64) }, steering[1]],
+			[{ ...first, sentAt: "2026-06-25T12:00:04.000Z" }, steering[1]],
+			[{ ...first, acknowledged: false }, steering[1]],
+			[{ ...first, acknowledgedAt: "2026-06-25T12:00:05.000Z" }, steering[1]],
+		];
+		for (const tampered of tampers) {
+			strictEqual(verifyReceiptIntegrity({ ...receipt, steering: tampered }, envelope).ok, false);
+			strictEqual(verifyReceiptIntegrity(receipt, { ...envelope, steering: tampered }).ok, false);
+		}
 	});
 
 	it("detects tampering with every durable output field on a sealed receipt", () => {

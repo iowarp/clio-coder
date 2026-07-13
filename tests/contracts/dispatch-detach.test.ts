@@ -1,7 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { after, beforeEach, describe, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -210,6 +214,68 @@ describe("detached dispatch + collect", () => {
 		}
 	});
 
+	it("classifies the same missing-final event stream identically for synchronous and detached dispatch", async () => {
+		const missingFinalWorker = (): SpawnedWorker => ({
+			pid: 103,
+			promise: Promise.resolve({ exitCode: 0, signal: null }),
+			events: (async function* () {
+				yield {
+					type: "message_end",
+					message: {
+						role: "assistant",
+						stopReason: "toolUse",
+						content: [
+							{ type: "text", text: "I will inspect one more file." },
+							{ type: "toolCall", name: "read", arguments: { path: "README.md" } },
+						],
+					},
+				};
+			})(),
+			abort: () => {},
+			heartbeatAt: { current: Date.now() },
+		});
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: missingFinalWorker,
+			resilienceCooldownMs: 0,
+		});
+		await bundle.extension.start();
+		try {
+			const runEvents = createDispatchRunEventRegistry();
+			const dispatch = createDispatchTool({ dispatch: bundle.contract, runEvents });
+			const synchronous = (await dispatch.run({ task: "synchronous missing final" }, approvedDispatch)) as ToolRunResult;
+			strictEqual(synchronous.kind, "error");
+			ok(synchronous.kind === "error");
+			const synchronousRunId = (synchronous.details?.runIds as string[] | undefined)?.[0];
+			ok(synchronousRunId);
+			const synchronousRow = bundle.contract.getRun(synchronousRunId);
+			strictEqual(synchronousRow?.outcome, "failed");
+			strictEqual(synchronousRow?.outcomeCode, "worker_final_output_missing");
+			ok(!synchronous.message.includes("I will inspect one more file."), "transient preamble is not a successful answer");
+
+			const detached = (await dispatch.run(
+				{ tasks: ["detached missing final"], detach: true },
+				{ sessionId: "session-missing-final", ...approvedDispatch },
+			)) as ToolRunResult;
+			ok(detached.kind === "ok", detached.kind === "error" ? detached.message : "detached dispatch failed");
+			const batchId = detached.details?.batchId as string;
+			const detachedRunId = (detached.details?.runIds as string[])[0];
+			ok(detachedRunId);
+			await waitFor(() => bundle.contract.getRun(detachedRunId)?.status === "failed", "detached run classified");
+			const detachedRow = bundle.contract.getRun(detachedRunId);
+			strictEqual(detachedRow?.outcome, synchronousRow?.outcome);
+			strictEqual(detachedRow?.outcomeCode, synchronousRow?.outcomeCode);
+
+			const monitor = createMonitorTool({ dispatch: bundle.contract, runEvents });
+			const collected = (await monitor.run({ mode: "collect", batch_id: batchId }, {})) as ToolRunResult;
+			strictEqual(collected.kind, "ok");
+			ok(collected.kind === "ok");
+			match(collected.output, /collect complete .*failed=1/);
+			ok(!collected.output.includes("I will inspect one more file."), "collect exposes no transient preamble");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("the dispatch contract lets an interactive operator monitor and steer an in-flight synchronous native run", async () => {
 		const gated = steerableGatedWorker();
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => gated.worker });
@@ -235,7 +301,15 @@ describe("detached dispatch + collect", () => {
 				approvedDispatch,
 			)) as ToolRunResult;
 			strictEqual(guided.kind, "ok");
-			deepStrictEqual(gated.sent, [{ type: "steer", text: "focus on tests" }]);
+			const guidedAgain = (await steer.run(
+				{ action: "guide", run_id: active.id, message: "  verify café  " },
+				approvedDispatch,
+			)) as ToolRunResult;
+			strictEqual(guidedAgain.kind, "ok");
+			deepStrictEqual(gated.sent, [
+				{ type: "steer", text: "focus on tests" },
+				{ type: "steer", text: "verify café" },
+			]);
 			await waitFor(
 				() => runEvents.eventTail(active.id)?.entries.some((entry) => entry.type === "clio_steer_received") === true,
 				"steer acknowledgement reached the registered sync tail",
@@ -248,6 +322,38 @@ describe("detached dispatch + collect", () => {
 			const completed = (await syncResult) as ToolRunResult;
 			strictEqual(completed.kind, "ok");
 			ok(completed.kind === "ok" && completed.output.includes("steered sync done"));
+			const terminal = bundle.contract.getRun(active.id);
+			ok(terminal?.receiptPath);
+			const receipt = JSON.parse(readFileSync(terminal.receiptPath, "utf8")) as RunReceipt;
+			deepStrictEqual(
+				receipt.steering?.map(({ sequence, bytes, contentHash, acknowledged }) => ({
+					sequence,
+					bytes,
+					contentHash,
+					acknowledged,
+				})),
+				[
+					{
+						sequence: 1,
+						bytes: Buffer.byteLength("focus on tests", "utf8"),
+						contentHash: createHash("sha256").update("focus on tests", "utf8").digest("hex"),
+						acknowledged: true,
+					},
+					{
+						sequence: 2,
+						bytes: Buffer.byteLength("verify café", "utf8"),
+						contentHash: createHash("sha256").update("verify café", "utf8").digest("hex"),
+						acknowledged: true,
+					},
+				],
+			);
+			ok(receipt.steering?.every((entry) => entry.sentAt.length > 0 && entry.acknowledgedAt !== undefined));
+			deepStrictEqual(terminal.steering, receipt.steering);
+			deepStrictEqual(verifyReceiptIntegrity(receipt, terminal), { ok: true });
+			strictEqual(JSON.stringify(receipt).includes("focus on tests"), false);
+			strictEqual(JSON.stringify(receipt).includes("verify café"), false);
+			strictEqual(JSON.stringify(terminal).includes("focus on tests"), false);
+			strictEqual(JSON.stringify(terminal).includes("verify café"), false);
 		} finally {
 			await bundle.extension.stop?.();
 		}
