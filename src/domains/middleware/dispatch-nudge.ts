@@ -245,16 +245,21 @@ function newExplorationTurnState(explicitBroadRequest = false): ExplorationTurnS
 
 function markScoutSuccess(state: ExplorationTurnState): void {
 	state.scoutAttemptPending = false;
+	if (state.scoutSucceeded) return;
 	state.scoutSucceeded = true;
 	state.scoutFailed = false;
-	state.spotCheckCallsRemaining = 0;
+	// Policy today is sealed synthesis: the limit is 0, so no post-Scout
+	// spot-check reads are admitted. Raising the constant is the one knob.
+	state.spotCheckCallsRemaining = SCOUT_EXPLORATION_SPOT_CHECK_CALL_LIMIT;
 }
 
 function markScoutFailure(state: ExplorationTurnState): void {
 	state.scoutAttemptPending = false;
 	if (state.scoutFailed) return;
 	state.scoutFailed = true;
-	state.fallbackCallsRemaining = 0;
+	// Policy today is report-not-replace: the limit is 0, so a failed Scout
+	// never opens a manual fallback scan. Raising the constant is the one knob.
+	state.fallbackCallsRemaining = SCOUT_EXPLORATION_FALLBACK_CALL_LIMIT;
 }
 
 /**
