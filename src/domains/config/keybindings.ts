@@ -67,7 +67,7 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio.exit": {
 		defaultKeys: "ctrl+d",
-		description: "Exit the TUI",
+		description: "Exit when the editor is empty",
 	},
 	"clio.status.toggle": {
 		defaultKeys: "alt+u",

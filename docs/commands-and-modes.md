@@ -175,9 +175,9 @@ key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
 | `Alt+Enter` | Queue the current input as a follow-up message. |
 | `Alt+Up` | Restore queued follow-up messages to the editor. |
 | `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
-| `Ctrl+C` | Cancel a stream, clear input, or press twice to exit. |
-| `Ctrl+D` | Exit. |
-| `Esc` | Cancel a stream, close an active overlay, or collapse the dashboard. |
+| `Ctrl+C` | With no overlay, cancel a stream, clear input, or press twice to exit. With an overlay open, close/cancel that overlay only. |
+| `Ctrl+D` | Exit when the editor is empty; otherwise delete the next character (pi-compatible). It never exits from inside an overlay. |
+| `Esc` | With an overlay open, stays inside it (list filters clear first, then close). With no overlay, cancel a stream/bash operation or collapse the dashboard. |
 
 When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
 
