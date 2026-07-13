@@ -155,6 +155,7 @@ import {
 	parseSlashCommand,
 	type RunIo,
 	type SlashCommandContext,
+	type TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
 import { createStatusController, resolveInlineVerb, spinnerFrame, type TurnSummary } from "./status/index.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
@@ -232,6 +233,10 @@ export interface InteractiveDeps {
 	getTaskBoard?: () => TaskBoardSnapshot | null;
 	/** Live, read-only task-memory state for status surfaces and the /memory overlay. */
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
+	/** Newest structured handoff available for an opt-in seed, when enabled. */
+	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
+	/** Merge the newest structured handoff into the current task bank. */
+	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	/** XDG state dir (clioStateDir()). `/view verify` reads from <stateDir>/receipts/<id>.json. */
 	stateDir: string;
 	/** XDG data dir (clioDataDir()). `/view` reads durable evidence bundles from <dataDir>/evidence/. */
@@ -1086,6 +1091,15 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	const notify = (level: TargetsHubNoticeLevel, text: string, key?: string): void => {
 		notifications.add(key ? { level, text, key } : { level, text });
 	};
+	const announceTaskMemorySeedOffer = (): void => {
+		const offer = deps.getTaskMemorySeedOffer?.() ?? null;
+		if (!offer || offer.count === 0) return;
+		notify(
+			"info",
+			`task memory: ${offer.count} handoff entr${offer.count === 1 ? "y" : "ies"} available from ${offer.source}; run /memory seed to import`,
+			"memory:seed-offer",
+		);
+	};
 	const dismissContextBootstrapNotices = (): void => {
 		for (const notice of notifications.list()) {
 			if (/^clio: (No CLIO\.md detected|malformed CLIO\.md ignored|Imported agent context changed)/.test(notice.text)) {
@@ -1614,6 +1628,12 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openFleet: () => openFleetOverlayState(),
 		openTasks: () => openTasksOverlayState(),
 		openMemory: () => openMemoryOverlayState(),
+		seedTaskMemory: () => {
+			const result = deps.seedTaskMemory?.() ?? { status: "not-found" as const };
+			footer.refresh();
+			tui.requestRender();
+			return result;
+		},
 		openView: (filter) => openViewOverlayState(filter),
 		openThinking: () => openThinkingOverlayState(),
 		setOutputVerbosity: (verbosity) => {
@@ -2974,6 +2994,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					io.stderr(`[/resume] transcript replay failed: ${msg}\n`);
+				}
+				if (sessionContract.current()?.id === sessionId && sessionId !== preResumeSessionId) {
+					announceTaskMemorySeedOffer();
 				}
 				footer.refresh();
 				tui.requestRender();

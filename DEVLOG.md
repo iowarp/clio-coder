@@ -3415,3 +3415,17 @@ you need a stable target.
   verified the existing middleware-reminder ledger path in a scripted session.
   Added contracts for overlay contents, read-only Escape behavior, real-width
   fitting, slash-command discovery, status rendering, and outcome tracking.
+
+# 2026-07-13 — Proactive memory WS5: handoff continuity
+
+- Added a strict `clio-task-memory` handoff payload for knowledge and procedural
+  entries. Export excludes private status, redacts secret-shaped values at the
+  artifact boundary, rejects malformed or oversized payloads, and reads only
+  the newest project handoff.
+- Supplies that structured source only when `context-handoff` is explicitly
+  requested. The updated skill copies the fenced payload as untrusted data into
+  its ignored `.clio/handoffs/` artifact; ordinary turns receive no snapshot.
+- On session changes the heap bank resets. After `/resume`, Clio offers explicit
+  `/memory seed` when the newest handoff contains a snapshot; import is
+  deduplicated and the master intervention switch disables both the offer and
+  all seed writes. No worker-side intervention was added.

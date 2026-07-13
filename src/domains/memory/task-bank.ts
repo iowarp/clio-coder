@@ -81,6 +81,14 @@ export class TaskMemoryBank {
 		return this.#knowledge.delete(id) || this.#procedural.delete(id);
 	}
 
+	/** Reset execution state when the composition root switches sessions. */
+	clear(): void {
+		this.#status = null;
+		this.#knowledge.clear();
+		this.#procedural.clear();
+		this.#nextId = 1;
+	}
+
 	/** Record attribution after an entry has contributed to a visible reminder. */
 	recordInjection(ids: ReadonlyArray<string>): void {
 		for (const id of new Set(ids)) {

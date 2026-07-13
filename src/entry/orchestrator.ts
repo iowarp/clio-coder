@@ -49,8 +49,11 @@ import {
 	buildMemoryPromptSection,
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
+	renderTaskMemoryHandoffSource,
+	seedTaskMemoryFromNewestHandoff,
 	type TaskMemoryModelClient,
 	taskMemoryBankSize,
+	taskMemoryHandoffSeedOffer,
 } from "../domains/memory/index.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import {
@@ -717,9 +720,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const resumeId = process.env.CLIO_RESUME_SESSION_ID?.trim();
+	let resumedSessionAtBoot = false;
 	if (resumeId && session) {
 		try {
 			session.resume(resumeId);
+			resumedSessionAtBoot = true;
 		} catch (err) {
 			process.stderr.write(
 				`Clio Coder: failed to resume session ${resumeId}: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -847,10 +852,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// local models only comply when the instruction rides the user message.
 	middleware.registerHook(createTaskBoardReminderRegistration());
 	const taskMemoryBank = new TaskMemoryBank();
+	let taskMemorySessionId = session?.current()?.id ?? null;
+	const ensureTaskMemorySession = (): void => {
+		const currentSessionId = session?.current()?.id ?? null;
+		if (currentSessionId === taskMemorySessionId) return;
+		taskMemoryBank.clear();
+		taskMemorySessionId = currentSessionId;
+	};
 	const memorySettings = (config?.get() ?? readSettings()).memory.intervention;
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
-		getSettings: () => effectiveSettingsForDispatch?.().memory.intervention ?? memorySettings,
+		getSettings: () => {
+			ensureTaskMemorySession();
+			return effectiveSettingsForDispatch?.().memory.intervention ?? memorySettings;
+		},
 		getModelClient: () => {
 			const settings = effectiveSettingsForDispatch?.();
 			return settings === undefined
@@ -1013,6 +1028,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return applySessionRouting(applyOverrides(config?.get() ?? readSettings(), sessionOverrides), sessionRouting);
 	};
 	effectiveSettingsForDispatch = getCurrentSettings;
+	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
+		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().memory.intervention.enabled);
+	};
+	const seedCurrentTaskMemoryFromHandoff = () => {
+		ensureTaskMemorySession();
+		return seedTaskMemoryFromNewestHandoff(
+			taskMemoryBank,
+			process.cwd(),
+			getCurrentSettings().memory.intervention.enabled,
+		);
+	};
+	if (resumedSessionAtBoot) {
+		const offer = getTaskMemorySeedOffer();
+		if (offer && offer.count > 0) {
+			initialNotices.push(
+				`task memory: ${offer.count} handoff entr${offer.count === 1 ? "y" : "ies"} available from ${offer.source}; run /memory seed to import`,
+			);
+		}
+	}
 	// Residency protection follows the live effective settings: the models the
 	// operator's config references (orchestrator, worker default/profiles,
 	// target defaults) may never be evicted by another Clio stream, and a
@@ -1179,6 +1213,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				return "";
 			}
 		},
+		getTaskMemoryHandoffSource: () => {
+			ensureTaskMemorySession();
+			return renderTaskMemoryHandoffSource(taskMemoryBank.snapshot());
+		},
 		...(session
 			? {
 					readSessionEntries: readCurrentSessionEntries,
@@ -1320,6 +1358,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		getTaskBoard: () => taskBoard.snapshot(),
 		getTaskMemoryStatus: () => {
+			ensureTaskMemorySession();
 			const settings = getCurrentSettings();
 			const bank = taskMemoryBank.snapshot();
 			return {
@@ -1330,6 +1369,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				bank,
 			};
 		},
+		getTaskMemorySeedOffer,
+		seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
 		stateDir: clioStateDir(),
 		dataDir: clioDataDir(),
 		cacheDir: clioCacheDir(),
@@ -1471,7 +1512,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			? {
 					onResumeSession: (sessionId) => {
 						try {
+							const previousSessionId = session.current()?.id ?? null;
 							session.resume(sessionId);
+							if (previousSessionId !== sessionId) ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(
 								`[/resume] failed to resume ${sessionId}: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -1480,10 +1523,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					},
 					onNewSession: () => {
 						session.create({ cwd: process.cwd() });
+						ensureTaskMemorySession();
 					},
 					onForkSession: (parentTurnId) => {
 						try {
 							session.fork(parentTurnId);
+							ensureTaskMemorySession();
 						} catch (err) {
 							process.stderr.write(
 								`[/fork] failed at turn ${parentTurnId}: ${err instanceof Error ? err.message : String(err)}\n`,

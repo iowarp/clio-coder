@@ -10,6 +10,8 @@ Expected:
 - Produces the template sections, including the exact pick-up point for the WIP.
 - Writes to `.clio/handoffs/handoff-<date>.md` (uses `scripts/new-handoff.sh`).
 - Confirms the path and names `context-prime` as the next step.
+- Copies a supplied `clio-task-memory` fence verbatim under `## Task memory
+  snapshot`; omits the section when no structured source is present.
 
 ## H2 — secrets in context
 Setup: the conversation contains an API key and a personal email. Prompt:

@@ -45,6 +45,7 @@ type SlashCommandVariant =
 	| { kind: "fleet" }
 	| { kind: "tasks" }
 	| { kind: "memory" }
+	| { kind: "memory-seed" }
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
 	| { kind: "view-usage" }
@@ -71,6 +72,11 @@ export interface RunIo {
 	stdout: (s: string) => void;
 	stderr: (s: string) => void;
 }
+
+export type TaskMemorySeedCommandResult =
+	| { status: "seeded"; seeded: number; skipped: number; source: string }
+	| { status: "disabled" }
+	| { status: "not-found" };
 
 export type InitCommandOptions = ContextInitOptions;
 
@@ -235,6 +241,8 @@ export interface SlashCommandContext {
 	openTasks: () => void;
 	/** Open the read-only `/memory` overlay: approved lessons and the live task bank. */
 	openMemory: () => void;
+	/** Opt-in import from the newest structured handoff; absent when the host has no task bank. */
+	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	/** Open `/view`, the full observability artifact viewer. */
 	openView: (filter?: string) => void;
 	openThinking: () => void;
@@ -701,12 +709,34 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "memory",
-		description: "Inspect approved lessons and the live session task-memory bank",
-		kinds: ["memory"],
-		args: {},
-		fromArgs: fromArgsOrUnknown({ kind: "memory" }),
-		handle(_command, ctx) {
-			ctx.openMemory();
+		description: "Inspect task memory or seed it from the newest handoff",
+		kinds: ["memory", "memory-seed"],
+		subcommandDescriptions: { seed: "Seed the task bank from the newest handoff" },
+		args: { subcommands: { seed: {} } },
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return { kind: "unknown", text: trimmed };
+			return parsed.subcommand === "seed" ? { kind: "memory-seed" } : { kind: "memory" };
+		},
+		handle(command, ctx) {
+			if (command.kind === "memory") {
+				ctx.openMemory();
+				return;
+			}
+			if (command.kind !== "memory-seed") return;
+			const result = ctx.seedTaskMemory?.() ?? { status: "not-found" as const };
+			switch (result.status) {
+				case "seeded":
+					ctx.notice(
+						"success",
+						`task memory seeded ${result.seeded} entr${result.seeded === 1 ? "y" : "ies"} from ${result.source}${result.skipped > 0 ? `; skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}`,
+					);
+					return;
+				case "disabled":
+					ctx.notice("warn", "task memory is disabled; enable memory.intervention before seeding");
+					return;
+				case "not-found":
+					ctx.notice("info", "no structured task-memory snapshot found in the newest handoff");
+			}
 		},
 	},
 	{
