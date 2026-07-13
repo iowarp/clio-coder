@@ -48,6 +48,7 @@ import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
 	buildMemoryPromptSection,
 	canonicalMemoryRepositoryIdentity,
+	createTaskMemoryTelemetrySink,
 	loadMemoryRecordsSync,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
@@ -862,6 +863,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memorySettings = (config?.get() ?? readSettings()).memory.intervention;
 	const memoryIntervention = createMemoryInterventionRegistration({
 		bank: taskMemoryBank,
+		telemetry: createTaskMemoryTelemetrySink(),
 		getSettings: () => {
 			ensureTaskMemorySession();
 			return effectiveSettingsForDispatch?.().memory.intervention ?? memorySettings;
