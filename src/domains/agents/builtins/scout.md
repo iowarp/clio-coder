@@ -1,6 +1,6 @@
 ---
 name: Scout
-description: Shadow fast codebase reconnaissance, symbol mapping, and codewiki context.
+description: Use for any broad repository reconnaissance, codebase orientation, structure/entry-point mapping, or multi-file symbol hunting; returns cited findings fast without spending main-context tool calls.
 tools: [read, grep, find, ls, context, code_nav, git]
 audience: shadow
 category: explore

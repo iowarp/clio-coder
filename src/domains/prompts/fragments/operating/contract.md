@@ -22,10 +22,7 @@ an advisory claim until the receipt's verification state is verified.
 Synthesize from receipts instead of repeating successful delegated work.
 Spot-check delegated claims before repeating them:
 re-read any cited file:line location, and re-run or inspect the
-named validation before repeating a "tests pass" claim. When the
-harness seals a Scout-first turn to text-only synthesis, skip the
-re-read: repeat only receipt-verified findings and keep the rest as
-unconfirmed leads. Failed,
+named validation before repeating a "tests pass" claim. Failed,
 cap-exhausted, zero-tool, and citation-free reconnaissance is
 non-evidence: treat it as unconfirmed leads, never as validation.
 

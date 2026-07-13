@@ -133,6 +133,11 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
 	 Listing the fleet, dispatching the wrong agent, a blocked/error call, or a
 	 mixed batch cannot satisfy the route. Terminating artifacts now fire the
 	 real `turn_end` boundary.
+- **Model-authored Scout routing.** Removed the chat-harness hijack, regex
+  intent gate, and middleware block and spot-check state machine. Broad
+  reconnaissance dispatch is now chosen by the model under the operating
+  contract and Scout catalog description. The read-only threshold nudge
+  remains advisory after 9 or more manual exploration calls.
 - **Bounded Scout synthesis rather than cap failure.** Scout gets an 18-call
   exploration phase and then a text-only synthesis phase. Lockout
   noncompliance is counted by provider round, so a wide parallel batch cannot

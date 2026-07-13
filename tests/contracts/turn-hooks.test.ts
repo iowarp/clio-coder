@@ -3,10 +3,6 @@ import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import {
-	buildProactiveScoutRoutingMessage,
-	createReadOnlyExplorationNudgeRegistration,
-} from "../../src/domains/middleware/dispatch-nudge.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { runMiddlewareHook, runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import {
@@ -227,7 +223,7 @@ function assistantStopMessage(text: string): AgentMessage {
 	} as unknown as AgentMessage;
 }
 
-function dispatchOnlyRegistry(invokedArgs?: unknown[]): unknown {
+function dispatchOnlyRegistry(invocations?: unknown[]): unknown {
 	const spec = {
 		name: ToolNames.Dispatch,
 		description: "dispatch test tool",
@@ -238,9 +234,9 @@ function dispatchOnlyRegistry(invokedArgs?: unknown[]): unknown {
 	return {
 		listRegistered: () => [ToolNames.Dispatch],
 		get: (name: string) => (name === ToolNames.Dispatch ? spec : undefined),
-		invoke: async (request: { args?: unknown }) => {
-			invokedArgs?.push(request.args);
-			return { kind: "ok", result: { kind: "ok", output: "sealed Scout receipt" }, decision: {} };
+		invoke: async (request: unknown) => {
+			invocations?.push(request);
+			return { kind: "ok", result: { kind: "ok", output: "unused" }, decision: {} };
 		},
 	};
 }
@@ -336,16 +332,16 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		ok(userEntry && JSON.stringify(userEntry).includes("system-reminder"));
 	});
 
-	it("puts the Scout routing reminder in the literal broad-exploration request", async () => {
-		const middleware = createMiddlewareBundle().contract;
-		middleware.registerHook(createReadOnlyExplorationNudgeRegistration({ canRouteScout: () => true }));
+	it("sends literal broad-repository exploration through the normal model turn without forced Scout routing", async () => {
+		const prompt = "let’s just explore this repo and context";
 		const prompts: string[] = [];
 		const entries: SessionEntry[] = [];
-		const invokedArgs: unknown[] = [];
+		const invocations: unknown[] = [];
 		type OnPayload = (payload: Record<string, unknown>, model: unknown) => Promise<Record<string, unknown> | undefined>;
 		let capturedOnPayload: OnPayload | null = null;
-		const baseFactory = createFakeAgentFactory(async (_agent, input) => {
+		const baseFactory = createFakeAgentFactory(async (agent, input) => {
 			prompts.push(String(input));
+			await emitAssistantTurn(agent, assistantStopMessage("Here is the model-authored response."));
 		}, []);
 		const factory = ((options: { onPayload?: OnPayload }) => {
 			capturedOnPayload = options.onPayload ?? null;
@@ -357,31 +353,30 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			knownTargets: () => new Set(["test-target"]),
 			session: createSession(entries),
 			readSessionEntries: () => entries,
-			middleware,
-			toolRegistry: dispatchOnlyRegistry(invokedArgs),
+			middleware: createMiddlewareBundle().contract,
+			toolRegistry: dispatchOnlyRegistry(invocations),
 			createAgent: factory,
 		} as never);
 
-		await loop.submit("let’s just explore this repo and context");
+		await loop.submit(prompt);
 
-		strictEqual(prompts.length, 1);
-		const prompt = prompts[0] ?? "";
-		ok(prompt.startsWith(`<system-reminder>\n${buildProactiveScoutRoutingMessage()}\n</system-reminder>`));
-		ok(prompt.includes("let’s just explore this repo and context"));
-		ok(prompt.includes("The harness already ran Scout for this request"));
-		ok(prompt.includes("sealed Scout receipt"));
-		// The routed task carries the operator's request, not a canned tour.
-		strictEqual(invokedArgs.length, 1);
-		const routedTask = (invokedArgs[0] as { tasks: Array<{ agent: string; task: string }> }).tasks[0];
-		strictEqual(routedTask?.agent, "scout");
-		ok(routedTask.task.includes("let’s just explore this repo and context"));
+		deepStrictEqual(prompts, [prompt], "the literal request reaches the normal model prompt unchanged");
+		deepStrictEqual(invocations, [], "the chat harness does not invoke dispatch automatically");
+		const persisted = JSON.stringify(entries);
+		for (const deletedRoutingText of [
+			"Route this explicit broad repository exploration to Scout now",
+			"The harness already ran Scout for this request",
+			"sealed Scout receipt",
+		]) {
+			strictEqual(prompts[0]?.includes(deletedRoutingText), false, deletedRoutingText);
+			strictEqual(persisted.includes(deletedRoutingText), false, deletedRoutingText);
+		}
+
 		ok(capturedOnPayload !== null);
-		const onPayload = capturedOnPayload as OnPayload;
-		const patched = await onPayload(
-			{ tools: [{ type: "function", function: { name: ToolNames.Dispatch } }] },
-			{ api: "openai-completions" },
-		);
-		strictEqual(patched?.tool_choice, "none");
+		const payload = { tools: [{ type: "function", function: { name: ToolNames.Dispatch } }] };
+		const patched = await (capturedOnPayload as OnPayload)(payload, { api: "openai-completions" });
+		const effectivePayload: Record<string, unknown> = patched ?? payload;
+		strictEqual(effectivePayload.tool_choice, undefined, "the request does not force none or a named tool choice");
 	});
 
 	it("fires terminal turn_end from a terminating artifact result with the synthetic evidence boundary", async () => {
