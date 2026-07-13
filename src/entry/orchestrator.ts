@@ -50,6 +50,7 @@ import {
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
 	type TaskMemoryModelClient,
+	taskMemoryBankSize,
 } from "../domains/memory/index.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import {
@@ -1318,6 +1319,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		getTaskBoard: () => taskBoard.snapshot(),
+		getTaskMemoryStatus: () => {
+			const settings = getCurrentSettings();
+			const bank = taskMemoryBank.snapshot();
+			return {
+				enabled: settings.memory.intervention.enabled,
+				tier: settings.background.target && settings.background.model ? "llm" : "rules",
+				size: taskMemoryBankSize(bank),
+				lastDecision: memoryIntervention.lastDecision(),
+				bank,
+			};
+		},
 		stateDir: clioStateDir(),
 		dataDir: clioDataDir(),
 		cacheDir: clioCacheDir(),

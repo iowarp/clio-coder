@@ -3401,3 +3401,17 @@ you need a stable target.
 - Preserved one visible memory reminder per boundary: a prompted step may still
   apply phase-one bank writes when a synchronous reminder already won, while
   its phase-two output yields silently. Repeated model reminders are deduped.
+
+# 2026-07-13 — Proactive memory WS4: operator visibility
+
+- Added a read-only `/memory` overlay that places approved durable lessons and
+  the active session task bank in one operator surface. The bank is grouped by
+  private status, knowledge, and procedural class, with stable ids, injection
+  counts, and the last completed memory-policy outcome.
+- Added a shared live status projection to the welcome island and expanded
+  session dashboard: intervention on/off, rules or LLM tier, and bank size.
+  Responsive rows retain whole facts and drop overflow behind an ellipsis.
+- Kept every visible intervention attributable with the `Memory:` prefix and
+  verified the existing middleware-reminder ledger path in a scripted session.
+  Added contracts for overlay contents, read-only Escape behavior, real-width
+  fitting, slash-command discovery, status rendering, and outcome tracking.

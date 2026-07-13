@@ -23,6 +23,7 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
+import { loadMemoryRecordsSync, type MemoryRecord, type TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
 import {
 	getRuntimeRegistry,
@@ -113,6 +114,7 @@ import {
 	toolBudgetAuditReason,
 	toolBudgetStopReason,
 } from "./loop-guard-interrupt.js";
+import { openMemoryOverlay } from "./memory-overlay.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
 import { openAskUserOverlay } from "./overlays/ask-user.js";
@@ -228,6 +230,8 @@ export interface InteractiveDeps {
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Live session task board for the footer tasks row and the /tasks overlay. */
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	/** Live, read-only task-memory state for status surfaces and the /memory overlay. */
+	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	/** XDG state dir (clioStateDir()). `/view verify` reads from <stateDir>/receipts/<id>.json. */
 	stateDir: string;
 	/** XDG data dir (clioDataDir()). `/view` reads durable evidence bundles from <dataDir>/evidence/. */
@@ -357,6 +361,7 @@ export type OverlayState =
 	| "context-reset"
 	| "fleet"
 	| "tasks"
+	| "memory"
 	| "view"
 	| "thinking"
 	| "model"
@@ -885,6 +890,10 @@ export function routeOverlayKey(
 		// Read-only board view; the overlay body owns Esc (close).
 		return false;
 	}
+	if (overlayState === "memory") {
+		// Read-only memory view; the overlay body owns Esc (close).
+		return false;
+	}
 	if (overlayState === "view") {
 		// The viewer owns Esc, filter editing, pane focus, verification, and pager keys.
 		return false;
@@ -1022,6 +1031,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getContextUsage: () => deps.chat.contextUsage(),
 		getWorkspaceSnapshot: () => deps.session?.current()?.workspace ?? bootWorkspace,
 		getExtensionStats,
+		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
 	const chatPanel = createChatPanel({
@@ -1100,6 +1110,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
+		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		getContextActivity: () => contextActivityStore.current(),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),
@@ -1602,6 +1613,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		openContextView: () => openContextViewOverlayState(),
 		openFleet: () => openFleetOverlayState(),
 		openTasks: () => openTasksOverlayState(),
+		openMemory: () => openMemoryOverlayState(),
 		openView: (filter) => openViewOverlayState(filter),
 		openThinking: () => openThinkingOverlayState(),
 		setOutputVerbosity: (verbosity) => {
@@ -2756,6 +2768,23 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		overlayHandle = openTasksOverlay(tui, () => deps.getTaskBoard?.() ?? null, {
 			onClose: () => closeOverlay(),
 		});
+		tui.requestRender();
+	};
+
+	const openMemoryOverlayState = (): void => {
+		if (overlayState !== "closed" || !deps.getTaskMemoryStatus) return;
+		let records: MemoryRecord[] = [];
+		try {
+			records = loadMemoryRecordsSync(deps.dataDir);
+		} catch (error) {
+			notify(
+				"warning",
+				`memory: durable lessons unavailable: ${error instanceof Error ? error.message : String(error)}`,
+				"memory:durable-read",
+			);
+		}
+		overlayState = "memory";
+		overlayHandle = openMemoryOverlay(tui, deps.getTaskMemoryStatus, () => records, { onClose: () => closeOverlay() });
 		tui.requestRender();
 	};
 

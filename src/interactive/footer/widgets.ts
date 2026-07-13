@@ -18,6 +18,7 @@ import {
 	type ClioTheme,
 	type ClioToken,
 	clioTheme,
+	fitUnits,
 	formatCompactMs,
 	formatContextPercent,
 	GLYPH,
@@ -58,6 +59,8 @@ export interface SessionFacts {
 	toolProfile: string | null;
 	/** Active transcript detail mode, shown in the dashboard so visibility is never implicit. */
 	outputVerbosity?: OutputVerbosity | null;
+	/** Proactive-memory status; kept as one atomic fact row in the expanded dashboard. */
+	memoryIntervention?: { enabled: boolean; tier: "rules" | "llm"; size: number } | null;
 }
 
 /** Context engine telemetry. */
@@ -440,9 +443,22 @@ function capabilitiesValue(theme: ClioTheme, capabilities: string[] | null): str
 	);
 }
 
-export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantOptions = {}): string[] {
+export function sessionQuadrant(facts: SessionFacts, options: ExpandedQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
 	const identity = sessionIdentity(facts);
+	const memory = facts.memoryIntervention;
+	const memoryValue = memory
+		? fitUnits(
+				theme,
+				"",
+				[
+					theme.fg(memory.enabled ? "success" : "dim", memory.enabled ? "on" : "off"),
+					theme.fg(memory.tier === "llm" ? "reason" : "muted", `tier ${memory.tier === "llm" ? "LLM" : "rules"}`),
+					theme.fg("muted", `bank ${memory.size}`),
+				],
+				Math.max(1, (options.width ?? Number.POSITIVE_INFINITY) - 9),
+			)
+		: null;
 	return dashboardBlock(theme, "Session", [
 		kv(identity.key, identity.value, "accent"),
 		kv("target", facts.target, "accent"),
@@ -453,6 +469,7 @@ export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantO
 		kv("autonomy", facts.safety),
 		kv("profile", facts.toolProfile),
 		kv("output", facts.outputVerbosity ?? "default", facts.outputVerbosity === "verbose" ? "accent" : "muted"),
+		styledKv("memory", memoryValue),
 	]);
 }
 

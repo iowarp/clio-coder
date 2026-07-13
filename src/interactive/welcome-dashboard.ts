@@ -9,6 +9,7 @@ import {
 	validateWikiLayout,
 	wikiStaleness,
 } from "../domains/context/index.js";
+import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import {
 	type CapabilityFlags,
@@ -29,6 +30,7 @@ export interface WelcomeDashboardDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	getExtensionStats?: () => { active: number; installed: number };
+	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 }
 
 export interface WelcomeDashboardStats {
@@ -54,6 +56,7 @@ export interface WelcomeDashboardStats {
 	wikiDigestExcerpt: string[];
 	handoffCount: number;
 	handoffFreshness: string;
+	taskMemory: TaskMemoryOperatorStatus | null;
 }
 
 function activeStatus(status: TargetStatus): boolean {
@@ -248,6 +251,7 @@ export function deriveWelcomeDashboardStats(deps: WelcomeDashboardDeps): Welcome
 		wikiDigestExcerpt,
 		handoffCount,
 		handoffFreshness,
+		taskMemory: deps.getTaskMemoryStatus?.() ?? null,
 	};
 }
 
@@ -334,6 +338,16 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		`${theme.fg("accent", "/context init")} to bootstrap`,
 		`${theme.fg("accent", "Alt+U")} to toggle dashboard`,
 	];
+	const memoryUnits = stats.taskMemory
+		? [
+				theme.fg(stats.taskMemory.enabled ? "success" : "dim", stats.taskMemory.enabled ? "on" : "off"),
+				theme.fg(
+					stats.taskMemory.tier === "llm" ? "reason" : "muted",
+					`tier ${stats.taskMemory.tier === "llm" ? "LLM" : "rules"}`,
+				),
+				theme.fg("muted", `bank ${stats.taskMemory.size}`),
+			]
+		: [];
 
 	// The wiki and hint rows are the lines long enough to overflow. fitUnits
 	// drops whole ` · `-separated units and closes with a dim ellipsis instead of
@@ -344,12 +358,20 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		const contextLine = `  ${theme.fg("muted", "Context:")}  ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
 		const wikiLine = fitUnits(theme, `  ${theme.fg("muted", "Wiki:")}     `, wikiUnits, contentWidth);
 		const settingsLine = `  ${theme.fg("muted", "Config:")}   ${safetyStr} · ${profileStr} · ${compactStr}`;
+		const memoryLine = fitUnits(theme, `  ${theme.fg("muted", "Memory:")}   `, memoryUnits, contentWidth);
 		const hintLine = fitUnits(theme, `  ${theme.fg("muted", "Hint:")}     `, hintUnits, contentWidth);
 
 		return frame(
 			theme,
 			title,
-			[targetLine, contextLine, ...(stats.hasCodewiki ? [wikiLine] : []), settingsLine, hintLine],
+			[
+				targetLine,
+				contextLine,
+				...(stats.hasCodewiki ? [wikiLine] : []),
+				settingsLine,
+				...(memoryUnits.length > 0 ? [memoryLine] : []),
+				hintLine,
+			],
 			safeWidth,
 		);
 	} else if (safeWidth >= MID_MIN) {
@@ -357,12 +379,20 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 		const contextLine = `  ${theme.fg("muted", "Context:")} ${clioMdStr} · ${codewikiStr} · ${handoffStr}`;
 		const wikiLine = fitUnits(theme, `  ${theme.fg("muted", "Wiki:")}    `, wikiUnits, contentWidth);
 		const configLine = `  ${theme.fg("muted", "Config:")}  ${safetyStr} · ${profileStr}`;
+		const memoryLine = fitUnits(theme, `  ${theme.fg("muted", "Memory:")}  `, memoryUnits, contentWidth);
 		const hintLine = fitUnits(theme, `  ${theme.fg("muted", "Hint:")}    `, hintUnits, contentWidth);
 
 		return frame(
 			theme,
 			title,
-			[targetLine, contextLine, ...(stats.hasCodewiki ? [wikiLine] : []), configLine, hintLine],
+			[
+				targetLine,
+				contextLine,
+				...(stats.hasCodewiki ? [wikiLine] : []),
+				configLine,
+				...(memoryUnits.length > 0 ? [memoryLine] : []),
+				hintLine,
+			],
 			safeWidth,
 		);
 	} else {
@@ -372,6 +402,7 @@ export function buildWelcomeDashboardLines(stats: WelcomeDashboardStats, width: 
 			`  ${clioMdStr} · ${codewikiStr}`,
 			...(stats.hasCodewiki ? [`  wiki ${stats.wikiStatus}`] : []),
 			`  ${safetyStr} · ${theme.fg("accent", "Alt+U")} toggle`,
+			...(memoryUnits.length > 0 ? [fitUnits(theme, "  Memory: ", memoryUnits, safeWidth)] : []),
 		].map((line) => truncateToWidth(line, safeWidth, "", true));
 	}
 }
