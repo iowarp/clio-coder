@@ -34,6 +34,19 @@ export {
 	sortMemoryRecords,
 	writeMemoryRecords,
 } from "./store.js";
+export {
+	type SaveTaskMemoryOptions,
+	TASK_MEMORY_CONTENT_MAX_CHARS,
+	TASK_MEMORY_DEFAULT_KNOWLEDGE_CAP,
+	TASK_MEMORY_DEFAULT_PROCEDURAL_CAP,
+	TASK_MEMORY_VERSION,
+	TaskMemoryBank,
+	type TaskMemoryBankOptions,
+	type TaskMemoryClass,
+	type TaskMemoryEntry,
+	type TaskMemoryRenderableClass,
+	type TaskMemorySnapshot,
+} from "./task-bank.js";
 export type {
 	MemoryProposalResult,
 	MemoryPruneResult,

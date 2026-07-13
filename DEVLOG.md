@@ -3338,3 +3338,15 @@ you need a stable target.
 
 - `npm run ci` gates typecheck, lint, unit/integration/boundary tests,
   production build, and e2e spawn + pty tests.
+
+# 2026-07-13 — Proactive memory WS0: session task bank
+
+- Added a bounded, in-memory task bank with private status, knowledge, and
+  procedural entries; stable IDs on updates; oldest-untouched eviction; compact
+  budgeted rendering; injection attribution; and detached JSON snapshots.
+- Kept the execution-state bank separate from durable approved memory and the
+  repository context engine. It performs no disk writes and has no approval or
+  repository-identity fields.
+- Added contract coverage for all bank operations, caps and eviction order,
+  rendering limits, status privacy, content normalization, injection counts, and
+  snapshot isolation.
