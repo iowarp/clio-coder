@@ -31,6 +31,7 @@ import {
 import {
 	getModels,
 	getProviders,
+	completeSimple as piCompleteSimple,
 	getModel as piGetModel,
 	stream as piStream,
 	registerBuiltInApiProviders,
@@ -40,6 +41,52 @@ import {
 export { fauxAssistantMessage, fauxToolCall, registerFauxProvider };
 
 export const stream = piStream;
+
+export interface EngineTextCompletionInput {
+	model: Model<never>;
+	systemPrompt: string;
+	userPrompt: string;
+	maxTokens: number;
+	thinkingLevel: ModelThinkingLevel;
+	signal: AbortSignal;
+	timeoutMs: number;
+	apiKey?: string;
+}
+
+export interface EngineTextCompletionResult {
+	text: string;
+	inputTokens: number;
+	outputTokens: number;
+}
+
+/** Run one tool-free completion while keeping pi message types at the engine boundary. */
+export async function completeEngineText(input: EngineTextCompletionInput): Promise<EngineTextCompletionResult> {
+	const response = await piCompleteSimple(
+		input.model,
+		{
+			systemPrompt: input.systemPrompt,
+			messages: [{ role: "user", content: input.userPrompt, timestamp: Date.now() }],
+		},
+		{
+			maxTokens: input.maxTokens,
+			signal: input.signal,
+			timeoutMs: input.timeoutMs,
+			...(input.thinkingLevel === "off" ? {} : { reasoning: input.thinkingLevel }),
+			...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+		},
+	);
+	if (response.stopReason === "error" || response.stopReason === "aborted") {
+		throw new Error(response.errorMessage ?? `model completion ${response.stopReason}`);
+	}
+	return {
+		text: response.content
+			.filter((block): block is Extract<(typeof response.content)[number], { type: "text" }> => block.type === "text")
+			.map((block) => block.text)
+			.join(""),
+		inputTokens: response.usage.input,
+		outputTokens: response.usage.output,
+	};
+}
 
 export interface EngineAi {
 	listProviders(): KnownProvider[];

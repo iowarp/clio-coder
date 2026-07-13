@@ -68,6 +68,11 @@ describe("contracts/config", () => {
 				model: "stale-model",
 				thinkingLevel: "xhigh",
 			},
+			background: {
+				target: "hosted-target",
+				model: "worker-model",
+				thinkingLevel: "low",
+			},
 			workers: {
 				default: {
 					target: "hosted-target",
@@ -84,6 +89,9 @@ describe("contracts/config", () => {
 		// Dangling routing references are normalized away, not aliased.
 		strictEqual(settings.orchestrator.target, null);
 		strictEqual(settings.orchestrator.model, null);
+		strictEqual(settings.background.target, "hosted-target");
+		strictEqual(settings.background.model, "worker-model");
+		strictEqual(settings.background.thinkingLevel, "low");
 		strictEqual(settings.workers.default.target, "hosted-target");
 		strictEqual(settings.workers.default.model, "primary-model");
 		strictEqual(settings.skills.trustProjectCompatRoots, false);

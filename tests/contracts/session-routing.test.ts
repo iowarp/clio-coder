@@ -40,6 +40,7 @@ function settingsWithTargets(): ClioSettings {
 		{ id: "target-b", runtime: "openai-compat", url: "http://localhost:2222", defaultModel: "model-b" },
 	];
 	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.background = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.scope = ["target-a/model-a", "target-b/model-b"];
 	return settings;
@@ -78,6 +79,7 @@ describe("contracts/session-routing", () => {
 		const saved = settingsWithTargets();
 		const routing = seedSessionRouting(saved);
 		deepStrictEqual(routing.orchestrator, { target: "target-a", model: "model-a", thinkingLevel: "off" });
+		deepStrictEqual(routing.background, { target: "target-a", model: "model-a", thinkingLevel: "off" });
 		deepStrictEqual(routing.workersDefault, { target: "target-a", model: "model-a", thinkingLevel: "off" });
 		deepStrictEqual(routing.scope, ["target-a/model-a", "target-b/model-b"]);
 
@@ -115,6 +117,13 @@ describe("contracts/session-routing", () => {
 		sessionB.updateRouting({ workersDefault: { target: "target-b", model: "model-b" } });
 		strictEqual(sessionA.view().workers.default.target, "target-a");
 		strictEqual(sessionB.view().workers.default.target, "target-b");
+
+		// Background routing is a third independent role, not an alias for chat
+		// or the fleet default.
+		sessionB.updateRouting({ background: { target: "target-b", model: "model-b" } });
+		strictEqual(sessionA.view().background.target, "target-a");
+		strictEqual(sessionB.view().background.target, "target-b");
+		strictEqual(sessionB.view().orchestrator.target, "target-b");
 
 		// Session B narrows the Alt+J / Alt+K cycle set; A keeps its own.
 		sessionB.updateRouting({ scope: ["target-b/model-b"] });
@@ -383,7 +392,7 @@ describe("contracts/session-routing overrides", () => {
 	});
 
 	it("marks only the routing surface as routing paths", () => {
-		for (const path of ["orchestrator.target", "workers.default.model", "scope"]) {
+		for (const path of ["orchestrator.target", "background.model", "workers.default.model", "scope"]) {
 			ok(isRoutingPath(path), `${path} is routing`);
 		}
 		for (const path of ["workers.maxRetries", "budget.concurrency", "compaction.auto", "autonomy"]) {
@@ -418,6 +427,13 @@ describe("contracts/session-routing overrides", () => {
 		});
 		deepStrictEqual(routingPatchForId("orchestrator.thinkingLevel", settings), {
 			orchestrator: { thinkingLevel: "high" },
+		});
+		settings.background = { target: "target-b", model: "model-b", thinkingLevel: "medium" };
+		deepStrictEqual(routingPatchForId("background.target", settings), {
+			background: { target: "target-b", model: "model-b" },
+		});
+		deepStrictEqual(routingPatchForId("background.thinkingLevel", settings), {
+			background: { thinkingLevel: "medium" },
 		});
 		deepStrictEqual(routingPatchForId("scope", settings), { scope: settings.scope });
 		strictEqual(routingPatchForId("autonomy", settings), null);

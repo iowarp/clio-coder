@@ -47,6 +47,20 @@ export {
 	type TaskMemoryRenderableClass,
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
+export {
+	parseTaskMemoryPolicyResponse,
+	runTaskMemoryPolicy,
+	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
+	TASK_MEMORY_POLICY_MAX_OPERATIONS,
+	TASK_MEMORY_POLICY_MODEL_MAX_OUTPUT_TOKENS,
+	type TaskMemoryModelClient,
+	type TaskMemoryModelRequest,
+	type TaskMemoryModelResponse,
+	type TaskMemoryPolicyDecision,
+	type TaskMemoryPolicyInput,
+	type TaskMemoryPolicyResult,
+	type TaskMemoryTrajectoryStep,
+} from "./task-memory-policy.js";
 export type {
 	MemoryProposalResult,
 	MemoryPruneResult,

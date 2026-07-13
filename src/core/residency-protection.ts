@@ -16,6 +16,7 @@ export function protectedResidencyModelIds(settings: ClioSettings): string[] {
 		if (trimmed) ids.add(trimmed);
 	};
 	add(settings.orchestrator.model);
+	add(settings.background.model);
 	add(settings.workers.default.model);
 	for (const profile of Object.values(settings.workers.profiles ?? {})) add(profile.model);
 	for (const target of settings.targets) add(target.defaultModel);

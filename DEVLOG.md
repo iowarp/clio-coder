@@ -3364,3 +3364,21 @@ you need a stable target.
   effects and zero bank writes.
 - Extended reminder severity with the additive, non-blocking `advisory` value so
   memory attribution remains literal in middleware effects and ledger entries.
+
+# 2026-07-13 — Proactive memory WS2: background model plane
+
+- Added an explicitly optional `background` session-routing role across saved
+  settings, live routing, Settings, the Targets Hub, and CLI target setup. It
+  remains unset by default, and ordinary chat/fleet target selection never opts
+  the operator into model-backed memory.
+- Added the compact two-phase memory prompt and strict full-response parser.
+  Valid output applies a prevalidated operation list atomically and in order,
+  then either stays silent or emits one capped reminder. Malformed output applies
+  nothing; spontaneous uncited reminders are gated while deterministic triggers
+  retain authority.
+- Added a lazy provider adapter for the selected background target plus a narrow,
+  tool-free engine completion boundary. An unset role constructs no client and
+  makes no call; model failures and hard timeouts collapse to silence.
+- Added focused contracts for routing isolation, explicit opt-in surfaces,
+  operation ordering, citation gating, parser atomicity, timeouts, client
+  failures, and engine-boundary prompt assembly.

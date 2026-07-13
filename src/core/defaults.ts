@@ -200,6 +200,13 @@ export const DEFAULT_SETTINGS = {
 		model: null as string | null,
 		thinkingLevel: "off" as ThinkingLevel,
 	},
+	// Optional small-model plane for task-memory maintenance. An unset target
+	// keeps proactive memory in its deterministic rules-only tier.
+	background: {
+		target: null as string | null,
+		model: null as string | null,
+		thinkingLevel: "off" as ThinkingLevel,
+	},
 	workers: {
 		default: {
 			target: null as string | null,
@@ -338,6 +345,13 @@ runtimePlugins: []
 # targets[].id; \`model\` is the wire model id to request.
 # Keep thinkingLevel off unless a target/model supports explicit reasoning levels.
 orchestrator:
+  target: null
+  model: null
+  thinkingLevel: off
+
+# Optional background target for proactive task memory. Leave unset for the
+# zero-cost rules-only tier; setting it opts this session into LLM memory steps.
+background:
   target: null
   model: null
   thinkingLevel: off

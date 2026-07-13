@@ -49,6 +49,8 @@ import {
 	buildMemoryPromptSection,
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
+	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
+	type TaskMemoryModelClient,
 } from "../domains/memory/index.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import {
@@ -76,10 +78,13 @@ import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	applyModelCapabilityPatch,
+	firstRuntimeResolutionError,
 	isOrchestratorEligibleRuntime,
 	ProvidersDomainModule,
+	refineRuntimeTargetWithModelHints,
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
+	resolveRuntimeTarget,
 	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
@@ -121,6 +126,7 @@ import {
 	createStdioServerTransport,
 	type StdioServerTransportOptions,
 } from "../engine/acp/transport.js";
+import { completeEngineText } from "../engine/ai.js";
 import { setProtectedModelsProvider } from "../engine/apis/residency.js";
 import {
 	createLoopGuardRegistration,
@@ -262,6 +268,54 @@ async function resolveApiKeyForTarget(
 	if (!targetRequiresAuth(target, runtime)) return undefined;
 	const resolved = await providers.auth.resolveForTarget(target, runtime);
 	return resolved.apiKey;
+}
+
+const LOCAL_BACKGROUND_API_KEY_FALLBACK = "clio-local-target";
+
+function createBackgroundMemoryModelClient(
+	providers: ProvidersContract,
+	settings: Readonly<ClioSettings>,
+): TaskMemoryModelClient | null {
+	const targetId = settings.background.target?.trim();
+	const wireModelId = settings.background.model?.trim();
+	if (!targetId || !wireModelId) return null;
+	const resolved = resolveRuntimeTarget(providers, {
+		targetId,
+		wireModelId,
+		requestedThinkingLevel: settings.background.thinkingLevel,
+		use: "orchestrator",
+		requireTools: false,
+		requireOutputBudget: true,
+	});
+	if (!resolved.ok) {
+		const detail = firstRuntimeResolutionError(resolved.diagnostics) ?? "background target resolution failed";
+		throw new Error(detail);
+	}
+	const kbHit = providers.knowledgeBase?.lookup(resolved.target.wireModelId) ?? null;
+	const model = resolved.target.runtime.synthesizeModel(
+		resolved.target.target,
+		resolved.target.wireModelId,
+		kbHit,
+	) as unknown as Model<never>;
+	const refined = refineRuntimeTargetWithModelHints(resolved.target, model, providers.knowledgeBase);
+	applyModelCapabilityPatch(model, refined.capabilities);
+	return {
+		async complete(request) {
+			const apiKey = targetRequiresAuth(refined.target, refined.runtime)
+				? (await providers.auth.resolveForTarget(refined.target, refined.runtime)).apiKey
+				: LOCAL_BACKGROUND_API_KEY_FALLBACK;
+			return completeEngineText({
+				model,
+				systemPrompt: request.systemPrompt,
+				userPrompt: request.userPrompt,
+				maxTokens: request.maxTokens,
+				thinkingLevel: refined.effectiveThinkingLevel,
+				signal: request.signal,
+				timeoutMs: TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
+				...(apiKey === undefined ? {} : { apiKey }),
+			});
+		},
+	};
 }
 
 export function synthesizeOrchestratorModel(
@@ -792,7 +846,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// local models only comply when the instruction rides the user message.
 	middleware.registerHook(createTaskBoardReminderRegistration());
 	const taskMemoryBank = new TaskMemoryBank();
-	middleware.registerHook(createMemoryInterventionRegistration({ bank: taskMemoryBank }));
+	middleware.registerHook(
+		createMemoryInterventionRegistration({
+			bank: taskMemoryBank,
+			getModelClient: () => {
+				const settings = effectiveSettingsForDispatch?.();
+				return settings === undefined ? null : createBackgroundMemoryModelClient(providers, settings);
+			},
+		}),
+	);
 	if (contextDomain) {
 		middleware.registerHook(
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),

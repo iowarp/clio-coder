@@ -11,8 +11,10 @@ import type {
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { applySettingChange } from "../../src/interactive/overlays/settings.js";
 import {
+	applyTargetsHubBackgroundAction,
 	applyTargetsHubUseAction,
 	buildTargetAuthMap,
+	buildTargetHubBackgroundSettings,
 	buildTargetHubUseSettings,
 	formatProbeAllNotice,
 	formatProbeNotice,
@@ -292,6 +294,27 @@ describe("contracts/targets hub", () => {
 		ok(written);
 		strictEqual(written.orchestrator.target, "target-b");
 		strictEqual(written.orchestrator.model, "model-b");
+	});
+
+	it("offers an explicit background-memory target action without changing chat or fleet routing", () => {
+		const current = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
+		current.targets = [{ id: "target-a", runtime: "openai-compat", url: "http://a.test", defaultModel: "model-a" }];
+		const expected = structuredClone(current) as ClioSettings;
+		applySettingChange(expected, "background.target", "target-a");
+
+		deepStrictEqual(buildTargetHubBackgroundSettings(current, "target-a"), expected);
+		const writes: ClioSettings[] = [];
+		const returned = applyTargetsHubBackgroundAction("target-a", {
+			getSettings: () => current,
+			writeSettings: (next) => writes.push(next),
+		});
+
+		deepStrictEqual(writes, [expected]);
+		deepStrictEqual(returned, expected);
+		strictEqual(returned?.background.target, "target-a");
+		strictEqual(returned?.background.model, "model-a");
+		deepStrictEqual(returned?.orchestrator, current.orchestrator);
+		deepStrictEqual(returned?.workers, current.workers);
 	});
 
 	it("formats probe completion notices with health and latency, and probe-all with target count", () => {

@@ -27,7 +27,7 @@ List and manage configured model targets.
 Usage:
   clio targets [--json] [--probe] [--target <id>]
   clio targets add [configure flags]
-  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]
+  clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-model <id>]
   clio targets fleet [--json]
   clio targets profile list [--json]
   clio targets profile set <name> <id> [--model <id>] [--thinking <level>]
@@ -53,6 +53,7 @@ interface UseArgs {
 	id: string;
 	model?: string;
 	orchestratorModel?: string;
+	backgroundModel?: string;
 	workerModel?: string;
 }
 
@@ -207,6 +208,10 @@ function parseUseArgs(args: ReadonlyArray<string>): UseArgs | null {
 			parsed.orchestratorModel = need();
 			continue;
 		}
+		if (arg === "--background-model") {
+			parsed.backgroundModel = need();
+			continue;
+		}
 		if (arg === "--fleet-model" || arg === "--worker-model") {
 			parsed.workerModel = need();
 			continue;
@@ -226,7 +231,9 @@ function runUse(args: ReadonlyArray<string>): number {
 		return 2;
 	}
 	if (!parsed) {
-		printError("usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--fleet-model <id>]");
+		printError(
+			"usage: clio targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-model <id>]",
+		);
 		return 2;
 	}
 	ensureClioState();
@@ -254,6 +261,7 @@ function runUse(args: ReadonlyArray<string>): number {
 	const sharedModel = parsed.model ?? target.defaultModel ?? null;
 	const orchestratorModel = parsed.orchestratorModel ?? sharedModel;
 	const workerModel = parsed.workerModel ?? sharedModel;
+	const backgroundModel = parsed.backgroundModel;
 	// Locked read-modify-write so a concurrent session's field-level
 	// write-through (Shift+Tab, Alt+L, …) cannot be lost between our read
 	// above and this save.
@@ -262,8 +270,14 @@ function runUse(args: ReadonlyArray<string>): number {
 		fresh.orchestrator.model = orchestratorModel;
 		fresh.workers.default.target = target.id;
 		fresh.workers.default.model = workerModel;
+		if (backgroundModel !== undefined) {
+			fresh.background.target = target.id;
+			fresh.background.model = backgroundModel;
+		}
 	});
-	printOk(`using target ${target.id} for chat and fleet dispatch`);
+	printOk(
+		`using target ${target.id} for chat and fleet dispatch${backgroundModel === undefined ? "" : " and background memory"}`,
+	);
 	return 0;
 }
 

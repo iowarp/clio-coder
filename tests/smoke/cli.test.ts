@@ -388,6 +388,9 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 					"--set-orchestrator",
 					"--orchestrator-model",
 					"fixture-alpha",
+					"--set-background",
+					"--background-model",
+					"fixture-beta",
 					"--set-fleet-default",
 					"--fleet-model",
 					"fixture-beta",
@@ -421,6 +424,8 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 			strictEqual("endpoints" in afterConfigure, false, "settings must use target vocabulary, not legacy endpoints");
 			strictEqual((afterConfigure.orchestrator as Record<string, unknown>).target, "fixture-openai");
 			strictEqual((afterConfigure.orchestrator as Record<string, unknown>).model, "fixture-alpha");
+			strictEqual((afterConfigure.background as Record<string, unknown>).target, "fixture-openai");
+			strictEqual((afterConfigure.background as Record<string, unknown>).model, "fixture-beta");
 			strictEqual(
 				((afterConfigure.workers as Record<string, unknown>).default as Record<string, unknown>).target,
 				"fixture-openai",

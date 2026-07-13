@@ -43,6 +43,7 @@ Non-interactive flags:
   --url <host>                     target base URL (http(s):// or ws://)
   --model <wireModelId>            default model id for this target
   --orchestrator-model <id>        model to use when setting chat default
+  --background-model <id>          model to use for proactive task memory
   --fleet-model <id>               model to use when setting fleet default
                                    (mutually exclusive with --agent-profile)
   --agent-profile <name>           save this target as a named fleet profile
@@ -54,6 +55,7 @@ Non-interactive flags:
   --lifecycle <user-managed|clio-managed>
                                   resident model lifecycle policy
   --set-orchestrator               use this target for chat
+  --set-background                 use this target for proactive task memory
   --set-fleet-default              use this target for the fleet default
   --context-window <N>             capability override
   --max-tokens <N>                 output token capability override
@@ -89,6 +91,7 @@ interface ParsedArgs {
 	url?: string;
 	model?: string;
 	orchestratorModel?: string;
+	backgroundModel?: string;
 	workerModel?: string;
 	workerProfile?: string;
 	workerProfileModel?: string;
@@ -98,6 +101,7 @@ interface ParsedArgs {
 	gateway: boolean;
 	lifecycle?: TargetDescriptor["lifecycle"];
 	setOrchestrator: boolean;
+	setBackground: boolean;
 	setWorkerDefault: boolean;
 	contextWindow?: number;
 	maxTokens?: number;
@@ -113,6 +117,7 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		force: false,
 		gateway: false,
 		setOrchestrator: false,
+		setBackground: false,
 		setWorkerDefault: false,
 	};
 	for (let i = 0; i < argv.length; i++) {
@@ -156,6 +161,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			case "--orchestrator-model":
 				out.orchestratorModel = need();
 				break;
+			case "--background-model":
+				out.backgroundModel = need();
+				break;
 			case "--fleet-model":
 			case "--worker-model":
 				out.workerModel = need();
@@ -190,6 +198,9 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			}
 			case "--set-orchestrator":
 				out.setOrchestrator = true;
+				break;
+			case "--set-background":
+				out.setBackground = true;
 				break;
 			case "--set-fleet-default":
 			case "--set-worker-default":
@@ -410,16 +421,28 @@ function setWorkerDefaultPointer(settings: ClioSettings, descriptor: TargetDescr
 	settings.workers.default.model = model ?? descriptor.defaultModel ?? null;
 }
 
+function setBackgroundPointer(settings: ClioSettings, descriptor: TargetDescriptor, model?: string | null): void {
+	const runtime = getRuntimeRegistry().get(descriptor.runtime);
+	if (!runtime || !isOrchestratorEligibleRuntime(runtime)) {
+		throw new Error(
+			`cannot use target '${descriptor.id}' as background target because runtime '${descriptor.runtime}' is not an HTTP/native runtime`,
+		);
+	}
+	settings.background.target = descriptor.id;
+	settings.background.model = model ?? descriptor.defaultModel ?? null;
+}
+
 function assertOrchestratorReplacementEligible(settings: ClioSettings, descriptor: TargetDescriptor): void {
-	if (settings.orchestrator.target !== descriptor.id) return;
+	if (settings.orchestrator.target !== descriptor.id && settings.background.target !== descriptor.id) return;
+	const role = settings.orchestrator.target === descriptor.id ? "orchestrator" : "background";
 	const runtime = getRuntimeRegistry().get(descriptor.runtime);
 	if (!runtime) {
 		throw new Error(
-			`cannot update orchestrator target '${descriptor.id}' because runtime '${descriptor.runtime}' is not registered`,
+			`cannot update ${role} target '${descriptor.id}' because runtime '${descriptor.runtime}' is not registered`,
 		);
 	}
 	if (!isOrchestratorEligibleRuntime(runtime)) {
-		throw new Error(`cannot update orchestrator target '${descriptor.id}' to non-HTTP/native runtime '${runtime.id}'`);
+		throw new Error(`cannot update ${role} target '${descriptor.id}' to non-HTTP/native runtime '${runtime.id}'`);
 	}
 }
 
@@ -452,6 +475,7 @@ function printSummary(settings: ClioSettings, descriptor: TargetDescriptor, prob
 		process.stdout.write(`  ${line}\n`);
 	}
 	if (settings.orchestrator.target === descriptor.id) process.stdout.write("  orchestrator target\n");
+	if (settings.background.target === descriptor.id) process.stdout.write("  background memory target\n");
 	if (settings.workers.default.target === descriptor.id) process.stdout.write("  fleet default\n");
 	for (const [name, profile] of Object.entries(settings.workers.profiles)) {
 		if (profile.target === descriptor.id) process.stdout.write(`  fleet profile ${name}\n`);
@@ -675,9 +699,10 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 	});
 	const setOrchestrator = args.setOrchestrator || args.orchestratorModel !== undefined;
-	if (setOrchestrator && !isOrchestratorEligibleRuntime(runtime)) {
+	const setBackground = args.setBackground || args.backgroundModel !== undefined;
+	if ((setOrchestrator || setBackground) && !isOrchestratorEligibleRuntime(runtime)) {
 		printError(
-			`cannot use target '${descriptor.id}' as orchestrator target because runtime '${runtime.id}' is not an HTTP/native runtime`,
+			`cannot use target '${descriptor.id}' as a chat or background target because runtime '${runtime.id}' is not an HTTP/native runtime`,
 		);
 		return 1;
 	}
@@ -696,6 +721,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		applyTarget(target, descriptor);
 		if (setOrchestrator)
 			setOrchestratorPointer(target, descriptor, args.orchestratorModel ?? descriptor.defaultModel ?? null);
+		if (setBackground) setBackgroundPointer(target, descriptor, args.backgroundModel ?? descriptor.defaultModel ?? null);
 		if (setWorkerDefault)
 			setWorkerDefaultPointer(target, descriptor, args.workerModel ?? descriptor.defaultModel ?? null);
 		if (args.workerProfile !== undefined) {
@@ -1161,6 +1187,11 @@ async function runInteractive(
 	const setWorkerDefault = defaults.setWorkerDefault
 		? true
 		: await askYesNo(rl, "use as fleet default?", !settings.workers.default.target);
+	const setBackground = !isOrchestratorEligibleRuntime(runtime)
+		? false
+		: defaults.setBackground
+			? true
+			: await askYesNo(rl, "use as background memory target?", false);
 	const orchestratorModel = setOrchestrator
 		? (defaults.orchestratorModel ??
 			(await askModelChoice(
@@ -1181,10 +1212,21 @@ async function runInteractive(
 			)))
 		: undefined;
 	if (workerModel === null) return 0;
+	const backgroundModel = setBackground
+		? (defaults.backgroundModel ??
+			(await askModelChoice(
+				rl,
+				"Background memory model",
+				wireModels,
+				settings.background.target === targetId ? (settings.background.model ?? model) : model,
+			)))
+		: undefined;
+	if (backgroundModel === null) return 0;
 
 	const applyWizardChoice = (target: ClioSettings): void => {
 		applyTarget(target, descriptor);
 		if (setOrchestrator) setOrchestratorPointer(target, descriptor, orchestratorModel);
+		if (setBackground) setBackgroundPointer(target, descriptor, backgroundModel);
 		if (setWorkerDefault) setWorkerDefaultPointer(target, descriptor, workerModel);
 	};
 	applyWizardChoice(settings);
@@ -1205,6 +1247,10 @@ export function runTargetRemove(id: string): number {
 		if (settings.orchestrator.target === id) {
 			settings.orchestrator.target = null;
 			settings.orchestrator.model = null;
+		}
+		if (settings.background.target === id) {
+			settings.background.target = null;
+			settings.background.model = null;
 		}
 		if (settings.workers.default.target === id) {
 			settings.workers.default.target = null;
@@ -1241,6 +1287,7 @@ export function runTargetRename(oldId: string, newId: string): number {
 		if (!target) return;
 		target.id = newId;
 		if (settings.orchestrator.target === oldId) settings.orchestrator.target = newId;
+		if (settings.background.target === oldId) settings.background.target = newId;
 		if (settings.workers.default.target === oldId) settings.workers.default.target = newId;
 		for (const profile of Object.values(settings.workers.profiles)) {
 			if (profile.target === oldId) profile.target = newId;
