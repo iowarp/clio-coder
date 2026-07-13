@@ -1062,15 +1062,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	middleware.registerHook(
-		createReadOnlyExplorationNudgeRegistration({
-			canRouteScout: (task) => {
-				if (!dispatch.preview) return false;
-				const route = dispatch.preview({ agentId: "scout", task });
-				return route.agentId.trim().toLowerCase() === "scout";
-			},
-		}),
-	);
+	middleware.registerHook(createReadOnlyExplorationNudgeRegistration());
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
 	);

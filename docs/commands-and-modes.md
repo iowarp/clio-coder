@@ -246,6 +246,10 @@ clio run --agent verifier "Run tests and confirm the build passes."
 Shadow agents (`scout`, `researcher`, `provenance`) are internal orchestration
 helpers. They appear in `clio agents --all` and the main prompt catalog, but
 user-origin `/run` and `clio run --agent` requests are rejected for them.
+For broad repository reconnaissance, the operating contract and Scout catalog
+description steer the model to author a Scout dispatch. The chat harness does
+not mechanically route the request. A threshold nudge advises Scout delegation
+after 9 or more manual read-only exploration calls in one turn.
 
 Agent recipes are the Markdown source files. The normalized agent spec is the
 catalog/runtime view: category, capability class, latency class, tags, mode, and

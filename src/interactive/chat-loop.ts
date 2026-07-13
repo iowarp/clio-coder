@@ -8,8 +8,7 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy } from "../core/skill-activation.js";
-import { type ToolName, ToolNames } from "../core/tool-names.js";
-import { isExplicitBroadRepositoryExplorationRequest } from "../domains/middleware/dispatch-nudge.js";
+import type { ToolName } from "../core/tool-names.js";
 import {
 	createMiddlewareToolChoiceControl,
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
@@ -468,7 +467,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const persistedUserEchoes: string[] = [];
 	const toolStartTimes = new Map<string, number>();
 	let turnToolCalls = 0;
-	let harnessToolCallCounter = 0;
 	let stalledTurnNudgeSpent = false;
 	let pendingRequestContinuation = false;
 	let currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
@@ -768,80 +766,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			payload,
 		});
 		lastTurnId = turn.id;
-	};
-
-	/**
-	 * Deterministic broad-reconnaissance route. This is harness policy, not a
-	 * model suggestion: invoke the normal admitted dispatch tool, emit the same
-	 * live tool events/ledger rows as an agent-authored call, then hand the
-	 * sealed result to a text-only synthesis round. The routed task carries the
-	 * operator's request verbatim so Scout explores what was actually asked,
-	 * not a fixed orientation tour.
-	 */
-	const runHarnessScoutDispatch = async (requestText: string): Promise<string | null> => {
-		const registry = deps.toolRegistry;
-		if (!registry?.get(ToolNames.Dispatch)) return null;
-		const condensedRequest = requestText.replace(/\s+/g, " ").trim().slice(0, 280);
-		const args = {
-			tasks: [
-				{
-					agent: "scout",
-					task:
-						`Bounded reconnaissance for this operator request: "${condensedRequest}". ` +
-						"Explore this repository to answer it: identify the structure, the key entry points, and the subsystems the request names. " +
-						"Return at most 8 concise findings; every finding must cite a path:line from a live read in this run. " +
-						"Put everything not confirmed by those reads under Unresolved gaps.",
-				},
-			],
-		};
-		const toolCallId = `clio-scout-route-${Date.now().toString(36)}-${++harnessToolCallCounter}`;
-		const startedAt = Date.now();
-		const startEvent = {
-			type: "tool_execution_start",
-			toolCallId,
-			toolName: ToolNames.Dispatch,
-			args,
-		} as Extract<AgentEvent, { type: "tool_execution_start" }>;
-		turnToolCalls += 1;
-		emit(startEvent);
-		appendToolCallTurn(startEvent);
-		let text: string;
-		let details: Record<string, unknown> = {};
-		let isError = false;
-		try {
-			const invokeOptions = { ...currentToolInvokeOptions(), toolCallId };
-			const verdict = await registry.invoke({ tool: ToolNames.Dispatch, args }, invokeOptions);
-			if (verdict.kind !== "ok") {
-				text = verdict.reason;
-				isError = true;
-			} else if (verdict.result.kind === "error") {
-				text = verdict.result.message;
-				details = verdict.result.details ?? {};
-				isError = true;
-			} else {
-				text = verdict.result.output;
-				details = verdict.result.details ?? {};
-			}
-		} catch (error) {
-			text = error instanceof Error ? error.message : String(error);
-			isError = true;
-		}
-		const result = { content: [{ type: "text", text }], details: { ...details, kind: isError ? "error" : "ok" } };
-		const endEvent = {
-			type: "tool_execution_end",
-			toolCallId,
-			toolName: ToolNames.Dispatch,
-			result,
-			isError,
-			durationMs: Math.max(0, Date.now() - startedAt),
-			resultSummary: toolResultSummary(result),
-		} as Extract<AgentEvent, { type: "tool_execution_end" }> & {
-			durationMs: number;
-			resultSummary: Record<string, unknown>;
-		};
-		emit(endEvent);
-		appendToolResultTurn(endEvent);
-		return text;
 	};
 
 	/**
@@ -2320,7 +2244,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// itself: persisted in the ledger, no hidden prompt machinery.
 			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
 			const submittedText = [reminderBlock, skillPreamble, text].filter((part) => part.length > 0).join("\n\n");
-			const harnessScoutRoute = options.requestContinuation !== true && isExplicitBroadRepositoryExplorationRequest(text);
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
@@ -2430,20 +2353,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			streaming = true;
-			let runtimePromptText = submittedText;
+			const runtimePromptText = submittedText;
 			const priorPendingSkillPolicy = currentPendingSkillPolicy;
 			const priorAskUserPolicy = currentAskUserPolicy;
 			currentPendingSkillPolicy = pendingSkillPolicy;
 			currentAskUserPolicy = askUserPolicy;
 			try {
-				if (harnessScoutRoute) {
-					const scoutResult = await runHarnessScoutDispatch(text);
-					if (scoutResult !== null) {
-						middlewareToolChoice.reset();
-						synthesisToolLock = true;
-						runtimePromptText = `${submittedText}\n\n<system-reminder>\n[Clio Coder] The harness already ran Scout for this request. Do not suggest or load a skill, do not call any tool, and do not start a manual repository tour. Answer the user's exploration request now from the sealed dispatch result below. Repeat only grounded findings; keep unverified leads under Unresolved gaps. If Scout failed, state that plainly and summarize only whatever the receipt labels as grounded.\n\n${scoutResult}\n</system-reminder>`;
-					}
-				}
 				await markPersistedUserEcho(runtimePromptText, () => agentRuntime.agent.prompt(runtimePromptText, images));
 				// pi-agent-core does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and

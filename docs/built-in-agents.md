@@ -58,7 +58,7 @@ Internal orchestration helpers. They are hidden from default displays (but visib
 
 | Agent ID | Primary tools | Purpose | Capability | Latency |
 | --- | --- | --- | --- | --- |
-| `scout` | read, grep, find, ls, context, code_nav, git | Shadow fast codebase reconnaissance, symbol mapping, and codewiki context. | `read-only` | `fast` |
+| `scout` | read, grep, find, ls, context, code_nav, git | Broad repository reconnaissance, codebase orientation, structure and entry-point mapping, and multi-file symbol hunting. | `read-only` | `fast` |
 | `researcher` | read, web_fetch, context | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
 
@@ -99,7 +99,7 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 
 *   **Visibility**: Normal `clio agents` lists user-visible (base/custom) agents. The `/agents` slash command shows both Clio fleet agents and ACP delegation agents. The command `clio agents --all` includes shadow/internal specs reserved for Clio orchestration.
 *   **Invocation limits**: User-origin `/run` and `clio run --agent` **cannot** invoke shadow/internal agents.
-*   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool. For an explicit broad repository/codebase exploration request, the chat harness itself invokes one bounded Scout task through normal admission and live dispatch events, then gives the sealed result to a tool-free main-model synthesis round. Scout failure is reported rather than replaced by a direct scan. Narrow file/symbol inspection remains local to the main agent.
+*   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool. The operating contract and Scout's catalog description steer the model to dispatch Scout for broad repository reconnaissance, while narrow file or symbol inspection remains local to the main agent. If a turn reaches 9 or more manual read-only exploration calls without completing Scout dispatch, a threshold nudge advises delegation on the continuation.
 *   **TUI rendering and control**: Shadow dispatch rows are marked with an `sh:` prefix. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select a native run to steer it or cancel an active worker/retry timer.
 *   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
 
