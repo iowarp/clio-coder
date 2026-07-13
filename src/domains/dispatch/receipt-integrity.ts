@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } from "./types.js";
 
-/** New receipts use v5; verification retains the exact historical v4 contract. */
-export const RUN_RECEIPT_INTEGRITY_VERSION = 5;
-export type ReceiptIntegrityVersion = 4 | typeof RUN_RECEIPT_INTEGRITY_VERSION;
+/** New receipts use v6; verification retains the exact historical v4/v5 contracts. */
+export const RUN_RECEIPT_INTEGRITY_VERSION = 6;
+export type ReceiptIntegrityVersion = 4 | 5 | typeof RUN_RECEIPT_INTEGRITY_VERSION;
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
@@ -121,13 +121,19 @@ const V4_RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	sessionId: true,
 } as const;
 
-export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
+const V5_RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	...V4_RECEIPT_INTEGRITY_FIELD_COVERAGE,
 	briefing: true,
 	outcomeCode: true,
+} as const;
+
+export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
+	...V5_RECEIPT_INTEGRITY_FIELD_COVERAGE,
+	steering: true,
 } as const satisfies Record<ReceiptIntegrityField, true>;
 
 const V4_RECEIPT_FIELDS = Object.keys(V4_RECEIPT_INTEGRITY_FIELD_COVERAGE);
+const V5_RECEIPT_FIELDS = Object.keys(V5_RECEIPT_INTEGRITY_FIELD_COVERAGE);
 const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];
 
 function selectedReceiptFields(
@@ -148,9 +154,17 @@ function receiptDigestFieldsV4(receipt: RunReceipt | RunReceiptDraft): Record<st
 }
 
 function receiptDigestFieldsV5(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
+	const result = selectedReceiptFields(receipt, V5_RECEIPT_FIELDS);
+	result.briefing = receipt.briefing ?? null;
+	result.outcomeCode = receipt.outcomeCode ?? null;
+	return result;
+}
+
+function receiptDigestFieldsV6(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
 	const result = selectedReceiptFields(receipt, RECEIPT_FIELDS);
 	result.briefing = receipt.briefing ?? null;
 	result.outcomeCode = receipt.outcomeCode ?? null;
+	result.steering = receipt.steering ?? null;
 	return result;
 }
 
@@ -205,6 +219,13 @@ function ledgerDigestFieldsV5(envelope: RunEnvelope): Record<string, unknown> {
 	};
 }
 
+function ledgerDigestFieldsV6(envelope: RunEnvelope): Record<string, unknown> {
+	return {
+		...ledgerDigestFieldsV5(envelope),
+		steering: envelope.steering ?? null,
+	};
+}
+
 function integrityPayloadV4(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		contract: "clio.runReceipt.integrity",
@@ -218,10 +239,20 @@ function integrityPayloadV4(receipt: RunReceipt | RunReceiptDraft, envelope: Run
 function integrityPayloadV5(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		contract: "clio.runReceipt.integrity",
-		version: RUN_RECEIPT_INTEGRITY_VERSION,
+		version: 5,
 		sources: ["receipt", "run-ledger"],
 		receipt: receiptDigestFieldsV5(receipt),
 		ledger: ledgerDigestFieldsV5(envelope),
+	};
+}
+
+function integrityPayloadV6(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
+	return {
+		contract: "clio.runReceipt.integrity",
+		version: 6,
+		sources: ["receipt", "run-ledger"],
+		receipt: receiptDigestFieldsV6(receipt),
+		ledger: ledgerDigestFieldsV6(envelope),
 	};
 }
 
@@ -233,6 +264,14 @@ function computeReceiptIntegrityV4(receipt: RunReceipt, envelope: RunEnvelope): 
 	};
 }
 
+function computeReceiptIntegrityV5(receipt: RunReceipt, envelope: RunEnvelope): RunReceiptIntegrity {
+	return {
+		version: 5,
+		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
+		digest: sha256(canonicalJson(integrityPayloadV5(receipt, envelope))),
+	};
+}
+
 export function computeReceiptIntegrity(
 	receipt: RunReceipt | RunReceiptDraft,
 	envelope: RunEnvelope,
@@ -240,7 +279,7 @@ export function computeReceiptIntegrity(
 	return {
 		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayloadV5(receipt, envelope))),
+		digest: sha256(canonicalJson(integrityPayloadV6(receipt, envelope))),
 	};
 }
 
@@ -255,7 +294,7 @@ export function isReceiptIntegrity(value: unknown): value is RunReceiptIntegrity
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
 	return (
-		(candidate.version === 4 || candidate.version === RUN_RECEIPT_INTEGRITY_VERSION) &&
+		(candidate.version === 4 || candidate.version === 5 || candidate.version === RUN_RECEIPT_INTEGRITY_VERSION) &&
 		candidate.algorithm === RUN_RECEIPT_INTEGRITY_ALGORITHM &&
 		typeof candidate.digest === "string" &&
 		/^[0-9a-f]{64}$/.test(candidate.digest)
@@ -303,29 +342,45 @@ function firstLedgerMismatchV5(receipt: RunReceipt, envelope: RunEnvelope): stri
 	return null;
 }
 
+function firstLedgerMismatchV6(receipt: RunReceipt, envelope: RunEnvelope): string | null {
+	const mismatch = firstLedgerMismatchV5(receipt, envelope);
+	if (mismatch !== null) return mismatch;
+	if (canonicalJson(receipt.steering ?? null) !== canonicalJson(envelope.steering ?? null)) return "steering";
+	return null;
+}
+
 export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelope): ReceiptIntegrityResult {
 	if (!isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
 	if (receipt.integrity.version === 4) {
-		// v4 never authenticated these v5 additions. Reject the property shape
+		// v4 never authenticated these later additions. Reject the property shape
 		// itself (including explicit null/undefined) so callers cannot mistake
 		// unauthenticated data for verified provenance after a successful check.
-		for (const field of ["briefing", "outcomeCode"] as const) {
+		for (const field of ["briefing", "outcomeCode", "steering"] as const) {
 			if (Object.hasOwn(receipt, field) || Object.hasOwn(envelope, field)) {
 				return { ok: false, reason: `integrity invalid: v4 contains unauthenticated ${field}` };
 			}
 		}
 	}
+	if (receipt.integrity.version === 5 && (Object.hasOwn(receipt, "steering") || Object.hasOwn(envelope, "steering"))) {
+		return { ok: false, reason: "integrity invalid: v5 contains unauthenticated steering" };
+	}
 	const mismatch =
-		receipt.integrity.version === 4 ? firstLedgerMismatch(receipt, envelope) : firstLedgerMismatchV5(receipt, envelope);
+		receipt.integrity.version === 4
+			? firstLedgerMismatch(receipt, envelope)
+			: receipt.integrity.version === 5
+				? firstLedgerMismatchV5(receipt, envelope)
+				: firstLedgerMismatchV6(receipt, envelope);
 	if (mismatch) {
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };
 	}
 	const expected =
 		receipt.integrity.version === 4
 			? computeReceiptIntegrityV4(receipt, envelope)
-			: computeReceiptIntegrity(receipt, envelope);
+			: receipt.integrity.version === 5
+				? computeReceiptIntegrityV5(receipt, envelope)
+				: computeReceiptIntegrity(receipt, envelope);
 	if (expected.digest !== receipt.integrity.digest) {
 		return { ok: false, reason: "integrity mismatch" };
 	}

@@ -82,6 +82,7 @@
 		"ci:release": "npm run ci && node scripts/check-release.mjs",
 		"test:live": "node scripts/live-smoke.mjs",
 		"test:live-eval": "node scripts/live-eval-recon.mjs",
+		"test:live-eval:fleet-dispatch": "node scripts/live-eval-fleet-dispatch.mjs",
 		"bench:swe": "python3 benchmarks/community/swe-bench-lite/swebench_clio.py",
 		"bench:scicode": "python3 benchmarks/community/scicode/scicode_clio.py",
 		"bench:tb": "python3 benchmarks/community/clio_fleet.py",

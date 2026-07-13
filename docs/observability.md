@@ -102,18 +102,28 @@ Pressing `v` on a selected receipt or running `/view verify <runId>` performs cr
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
-3. **Verify Integrity**: Recomputes the SHA-256 digest over the version-authenticated receipt and reconstructible ledger fields. New v5 receipts cover briefing provenance and `outcomeCode`; the frozen v4 verifier covers only the historical v4 field set and rejects a v4 receipt or ledger row carrying either v5-only property, including explicit null or undefined values. Versions other than 4 and 5 fail verification.
+3. **Verify Integrity**: Recomputes the SHA-256 digest over the version-authenticated receipt and reconstructible ledger fields. New v6 receipts add prose-free steering provenance to v5's briefing and `outcomeCode` coverage. The v4 and v5 canonical projections remain frozen: v4 rejects any v5/v6-only own-property and v5 rejects the v6-only `steering` property, including explicit null or undefined values. Versions other than 4, 5, and 6 fail verification.
 4. **Report Result**: The viewer reports `ok` or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 
 ## Receipt Fields for Dispatch Provenance
 
-A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, or external run. Those optional blocks remain absent when unused. New v5 receipts nevertheless are not byte-identical to older receipts: they carry the v5 integrity shape and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable.
+A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, or external run. Those optional blocks remain absent when unused. New v6 receipts are not byte-identical to older receipts: they carry the v6 integrity shape and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable.
+
+Receipt integrity verification and evidence verification are independent.
+`receipt_integrity=verified/v6/sha256` means Clio called the receipt verifier
+against the ledger envelope; merely finding an embedded digest is not enough.
+`evidence_verification=<verified|unverified|not_applicable|unknown>/<basis>`
+describes validation evidence inside that verified receipt. Likewise,
+`briefing` authenticates parent-supplied dispatch data, while
+`project_context` authenticates the separately rendered bounded project
+message. Model-facing dispatch and collect output name all four concepts
+separately and never substitute one hash for another.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
-All sets are new in v0.2.8 and are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
+The base provenance sets entered in v0.2.8; steering provenance and integrity v6 enter in v0.2.9. These fields are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
 
 | Field path | Type | When present | Meaning | Status |
 | --- | --- | --- | --- | --- |
@@ -123,7 +133,16 @@ All sets are new in v0.2.8 and are labeled `experimental`: their shapes are froz
 | `pipeline.inputTruncated` | `boolean` | Pipeline step after the first | `true` when the 12000-char cap clipped the threaded input | experimental |
 | `briefing.bytes` | `number` | A bounded parent briefing was sent | UTF-8 byte count of the exact canonical briefing content | experimental |
 | `briefing.contentHash` | `string` | A bounded parent briefing was sent | SHA-256 of exact canonical briefing content; prose is not copied into the receipt | experimental |
-| `outcomeCode` | four-value stable string union or `null` | Every new v5 terminal receipt | Non-null only for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, or `scout_synthesis_contract_exhausted`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
+| `projectContext.tier` | `"none" \| "bounded"` | Current receipts | Effective project-context policy | experimental |
+| `projectContext.chars` | `number` | Bounded project context | Character count of the rendered project-context message | experimental |
+| `projectContext.contentHash` | `string` | Nonempty bounded project context | SHA-256 of the rendered project-context message | experimental |
+| `steering[].sequence` | `number` | A steer was successfully written | Stable 1-based order within the run | experimental |
+| `steering[].bytes` | `number` | A steer was successfully written | UTF-8 bytes of the exact canonical trimmed steer | experimental |
+| `steering[].contentHash` | `string` | A steer was successfully written | SHA-256 of the canonical steer; prose is not persisted | experimental |
+| `steering[].sentAt` | `string` | A steer was successfully written | Write timestamp | experimental |
+| `steering[].acknowledged` | `boolean` | A steer was successfully written | Whether a worker acknowledgement was actually observed | experimental |
+| `steering[].acknowledgedAt` | `string` | Acknowledgement was observed | Acknowledgement timestamp | experimental |
+| `outcomeCode` | five-value stable string union or `null` | Every new v6 terminal receipt | Non-null for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `scout_synthesis_contract_exhausted`, or `worker_final_output_missing`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
 | `personaOverride.promptHash` | `string` | Ad-hoc specialist whose persona replaced the recipe body | Hash of the composed static prompt; equals `staticCompositionHash` for the run | experimental |
 | `safety.decisions.escalationRequested` | `number` | Run saw at least one permission escalation | Parked permission asks handed to the operator | experimental |
 | `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |
@@ -134,9 +153,7 @@ All sets are new in v0.2.8 and are labeled `experimental`: their shapes are froz
 | `autonomyEnforcement.externalMode` | `string` | When running external worker | The execution mode of the external worker runtime | experimental |
 | `autonomyEnforcement.dangerousBypass` | `boolean` | When running external worker | Whether a safety bypass was explicitly activated | experimental |
 
-Only Clio-owned native/SSH worker wrappers and the Claude SDK path may transport these outcome events. ACP and black-box subprocess output cannot self-assert an outcome code; they remain null unless Clio classifies a condition at a trusted coordinator seam.
-| `projectContext.clioMdHash` | `string` | Always in v0.2.8 | SHA-256 hash of active `CLIO.md` when the run started | experimental |
-| `projectContext.gitSha` | `string` | Always in v0.2.8 | Active git commit hash when the run started | experimental |
+Only Clio-owned native/SSH worker wrappers and the Claude SDK path may transport worker-authored outcome events. ACP and black-box subprocess output cannot self-assert an outcome code; Clio may still assign `worker_final_output_missing` at its trusted finalization seam.
 
 The escalation counters appear together and only when `escalationRequested` is present (at least one escalation occurred), so a deny-all or non-escalating run keeps its `safety.decisions` block unchanged.
 

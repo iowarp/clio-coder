@@ -1,4 +1,5 @@
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
+import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
 
 /** Matches a source citation the parent can independently spot-check. */
@@ -99,6 +100,38 @@ export function quarantineUnverifiedScoutBullets(text: string, liveReadAnchors: 
  */
 export const SPOT_CHECK_GUIDANCE =
 	'Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.';
+
+/**
+ * Model-facing receipt facts. The positive integrity label is reachable only
+ * when the caller supplies the result of a successful integrity verification;
+ * an embedded digest by itself is never described as verified. Briefing and
+ * project context stay separate, and neither line includes prompt prose.
+ */
+export function receiptEvidenceLabels(
+	receipt: RunReceipt,
+	verification: RunReceiptVerification,
+	integrity: ReceiptIntegrityResult,
+): string[] {
+	if (!integrity.ok) return [`receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
+	const briefing =
+		receipt.briefing === undefined
+			? "briefing=none"
+			: `briefing=bytes:${receipt.briefing.bytes} sha256:${receipt.briefing.contentHash}`;
+	let projectContext = "project_context=absent";
+	if (receipt.projectContext?.tier === "none") {
+		projectContext = "project_context=none";
+	} else if (receipt.projectContext?.tier === "bounded") {
+		projectContext = `project_context=bounded chars:${receipt.projectContext.chars ?? 0}${
+			receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""
+		}`;
+	}
+	return [
+		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
+		`evidence_verification=${verification.state}/${verification.basis}`,
+		briefing,
+		projectContext,
+	];
+}
 
 /**
  * Header for delegated worker text, keyed only on integrity-checked receipt

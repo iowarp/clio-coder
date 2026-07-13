@@ -41,9 +41,10 @@ async function main(): Promise<number> {
 	process.stdin.resume();
 
 	const spec = await demux.readSpec();
-	// Remote transports set CLIO_WORKER_ANNOUNCE=1 so the orchestrator learns
-	// the remote pid for its kill fallback. The transport consumes this event;
-	// local workers never emit it, keeping the local stream byte-identical.
+	// Native transports set CLIO_WORKER_ANNOUNCE=1 and consume this first event.
+	// It proves that the expected worker entry parsed the spec and speaks the
+	// dispatched wire version before normal events are accepted. SSH also uses
+	// the announced remote pid for its kill fallback; this is not identity auth.
 	if (process.env.CLIO_WORKER_ANNOUNCE === "1") {
 		emitEvent({ type: "worker_announce", pid: process.pid, host: hostname(), specVersion: spec.specVersion });
 	}

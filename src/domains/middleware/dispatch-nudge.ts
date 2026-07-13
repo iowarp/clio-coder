@@ -47,7 +47,7 @@ interface ExplorationTurnState {
 }
 
 export function buildReadOnlyExplorationMessage(): string {
-	return `[Clio Coder] This turn used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without a successful Scout dispatch; delegate broad repository reconnaissance to Scout.`;
+	return `[Clio Coder] This continuation used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without a successful Scout dispatch in this continuation; delegate broad repository reconnaissance to Scout.`;
 }
 
 function stringValue(value: unknown): string | null {
@@ -313,7 +313,7 @@ export function buildDetachedBatchesMessage(
 	return (
 		`[Clio Coder] ${ready.length} detached dispatch batch(es) finished and are uncollected:\n` +
 		`${rows.join("\n")}\n` +
-		`Collect each with monitor mode="collect" batch_id=<id> and act on the results. ` +
+		`Collect each with monitor mode="collect" batch_id=<id> before final synthesis and act on the results. ` +
 		`A batch stays open (and keeps nudging) until it is collected.${runningNote}`
 	);
 }

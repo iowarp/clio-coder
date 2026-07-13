@@ -42,6 +42,9 @@ let specSeen = false;
 let eofExit = true;
 
 function announce() {
+	if (scenario === "require-announce-env" && process.env.CLIO_WORKER_ANNOUNCE !== "1") {
+		process.exit(0);
+	}
 	const value = { type: "worker_announce", pid: process.pid, host: "fake-node", specVersion: scenario === "version-skew" ? 1 : 2 };
 	if (scenario === "missing-announce-version") delete value.specVersion;
 	emit(value);
@@ -64,12 +67,18 @@ rl.on("line", (line) => {
 		if (scenario === "no-announce-exit0") {
 			process.exit(0);
 		}
+		if (scenario === "malformed-first-event") {
+			process.stdout.write("{not-json\\n");
+			setTimeout(() => announce(), 25);
+			setInterval(() => {}, 1000);
+			return;
+		}
 		announce();
 		if (scenario === "version-skew" || scenario === "missing-announce-version") {
 			setTimeout(() => assistant("must not execute"), 50);
 			return;
 		}
-		if (scenario === "ok") {
+		if (scenario === "ok" || scenario === "require-announce-env") {
 			assistant("remote ok");
 			process.exit(0);
 		}

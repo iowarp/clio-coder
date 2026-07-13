@@ -69,8 +69,9 @@ export interface WorkerProcessOptions {
 	 * Capture-and-consume `worker_announce` events. Remote transports use the
 	 * announced remote pid for a kill fallback when the channel-close signal is
 	 * not honored. When set, announce events are delivered here and never
-	 * yielded on the event stream; when unset they pass through untouched
-	 * (local workers never emit them).
+	 * yielded on the event stream. Both local and remote native transports set
+	 * this callback so ordinary events are accepted only after the worker entry
+	 * parsed the spec and announced the dispatched wire version.
 	 */
 	onAnnounce?: (announce: WorkerAnnounce) => void;
 	/**
@@ -89,6 +90,15 @@ export interface WorkerProcessOptions {
  */
 const DEFAULT_SHUTDOWN_GRACE_MS = 500;
 const STDERR_TAIL_BYTES = 4096;
+
+/**
+ * Force the native worker's wire-initialization announcement on top of a
+ * caller-provided environment. The final property is deliberate: callers may
+ * add environment values, but cannot disable the protocol boundary.
+ */
+export function announceEnabledWorkerEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	return { ...env, CLIO_WORKER_ANNOUNCE: "1" };
+}
 
 function isWorkerAnnounce(
 	value: unknown,
@@ -218,7 +228,7 @@ export function spawnWorkerProcess(
 						heartbeatAt.current = Date.now();
 						if (value.specVersion !== spec.specVersion) {
 							failAnnounceHandshake(
-								`WorkerSpec version mismatch: dispatched ${spec.specVersion}, remote announced ${String(value.specVersion)}`,
+								`WorkerSpec version mismatch: dispatched ${spec.specVersion}, worker announced ${String(value.specVersion)}`,
 							);
 							return;
 						}
@@ -234,6 +244,11 @@ export function spawnWorkerProcess(
 				push(value);
 			} catch {
 				malformedStdoutLines += 1;
+				if (opts?.onAnnounce && !announceAccepted && !announceFailed) {
+					failAnnounceHandshake(
+						`Missing worker_announce handshake: first protocol event was malformed JSON; expected specVersion ${spec.specVersion}`,
+					);
+				}
 			}
 		});
 	}
@@ -345,7 +360,10 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
 	return spawnWorkerProcess(process.execPath, [workerEntry], spec, {
 		...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
-		env: opts?.env ?? process.env,
+		env: announceEnabledWorkerEnvironment(opts?.env),
 		...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
+		// Validation and consumption happen inside spawnWorkerProcess. The local
+		// child pid is already known, so no post-validation metadata is needed.
+		onAnnounce: () => {},
 	});
 }

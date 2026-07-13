@@ -131,8 +131,10 @@ import {
 	type RunReceipt,
 	type RunReceiptAutonomyEnforcement,
 	type RunReceiptDraft,
+	type RunReceiptOutput,
 	type RunReceiptUpstreamResponse,
 	type RunStatus,
+	type RunSteeringProvenance,
 	type SafetyBlockedAttempt,
 	type ToolCallStat,
 } from "./types.js";
@@ -454,6 +456,12 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
 ];
+
+const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker exited successfully without a receipt-sealed final assistant output";
+
+function hasDurableFinalOutput(output: RunReceiptOutput | undefined): boolean {
+	return output?.state === "final" && output.text.trim().length > 0;
+}
 
 /**
  * Resolve trusted worker classifications independently of event order.
@@ -2469,7 +2477,7 @@ export function createDispatchBundle(
 		let finishContractAssistantText = "";
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
-		const outcomeCode: RunOutcomeCode | null = null;
+		let outcomeCode: RunOutcomeCode | null = null;
 		let reportedSpoofedOutcome = false;
 		let runIdForPermissionAudit: string | null = null;
 		const outputCapture = createWorkerOutputCapture();
@@ -2715,6 +2723,7 @@ export function createDispatchBundle(
 			status: RunStatus,
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
+			capturedOutput: RunReceiptOutput | undefined,
 		): RunReceiptDraft => {
 			// The adapter's aggregate usage is authoritative; event metering saw
 			// the same messages, so adding both would double-count. Event-metered
@@ -2735,7 +2744,6 @@ export function createDispatchBundle(
 			const init = result.delegation.initialize;
 			const agentInfo = init?.agentInfo;
 			const finalFailureMessage = result.failureMessage ?? failureMessage;
-			const capturedOutput = outputCapture.snapshot();
 			const finalToolStats = snapshotToolStats(toolStats);
 			return {
 				runId: envelope.id,
@@ -2926,8 +2934,15 @@ export function createDispatchBundle(
 					finalDetail = "high-rigor finish gate: unvalidated mutation";
 					failureMessage = finalDetail;
 				}
+				const capturedOutput = outputCapture.snapshot();
+				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput)) {
+					finalOutcome = "failed";
+					outcomeCode = "worker_final_output_missing";
+					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
+					failureMessage = finalDetail;
+				}
 				const status = runStatusForOutcome(finalOutcome);
-				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail);
+				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
@@ -3180,7 +3195,34 @@ export function createDispatchBundle(
 		const pid = worker.pid;
 		const abort = () => worker.abort();
 		const sendToWorker = worker.send?.bind(worker);
-		const steer = sendToWorker ? (text: string) => sendToWorker({ type: "steer", text }) : undefined;
+		const steeringProvenance: RunSteeringProvenance[] = [];
+		let steeringProvenanceClosed = false;
+		const steer = sendToWorker
+			? (text: string): boolean => {
+					if (steeringProvenanceClosed) return false;
+					const canonicalText = text.trim();
+					if (canonicalText.length === 0 || !sendToWorker({ type: "steer", text: canonicalText })) return false;
+					steeringProvenance.push({
+						sequence: steeringProvenance.length + 1,
+						bytes: Buffer.byteLength(canonicalText, "utf8"),
+						contentHash: sha256(canonicalText),
+						sentAt: new Date().toISOString(),
+						acknowledged: false,
+					});
+					return true;
+				}
+			: undefined;
+		const acknowledgeOldestSteer = (): void => {
+			if (steeringProvenanceClosed) return;
+			const pending = steeringProvenance.find((entry) => !entry.acknowledged);
+			if (pending === undefined) return;
+			pending.acknowledged = true;
+			pending.acknowledgedAt = new Date().toISOString();
+		};
+		const snapshotSteeringProvenance = (): ReadonlyArray<RunSteeringProvenance> => {
+			steeringProvenanceClosed = true;
+			return steeringProvenance.map((entry) => ({ ...entry }));
+		};
 		const resolvePermission = sendToWorker
 			? (requestId: string, decision: "approve" | "deny") =>
 					sendToWorker({ type: "permission_decision", requestId, decision })
@@ -3244,7 +3286,12 @@ export function createDispatchBundle(
 					source?: "operator" | "timeout" | "policy";
 				};
 			};
-			if (event.type === "clio_run_outcome" && isRunOutcomeCode(event.payload?.outcomeCode)) {
+			if (event.type === "clio_steer_received") acknowledgeOldestSteer();
+			if (
+				event.type === "clio_run_outcome" &&
+				isRunOutcomeCode(event.payload?.outcomeCode) &&
+				event.payload.outcomeCode !== "worker_final_output_missing"
+			) {
 				if (acceptsOutcomeCodeEvents) {
 					trustedOutcomeCodes.add(event.payload.outcomeCode);
 				} else if (!reportedUntrustedOutcome) {
@@ -3552,6 +3599,8 @@ export function createDispatchBundle(
 			status: RunStatus,
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
+			capturedOutput: RunReceiptOutput | undefined,
+			steering: ReadonlyArray<RunSteeringProvenance>,
 		): RunReceiptDraft => {
 			// A canceled run seals status "interrupted" and must not report exit 0:
 			// the terminal state disagrees with a success code. This mirrors the ACP
@@ -3580,7 +3629,6 @@ export function createDispatchBundle(
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
-			const capturedOutput = outputCapture.snapshot();
 			const finalToolStats = snapshotToolStats(toolStats);
 			return {
 				runId: envelope.id,
@@ -3602,6 +3650,7 @@ export function createDispatchBundle(
 					: {}),
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
+				...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
 				...(lifecycle.personaOverride ? { personaOverride: lifecycle.personaOverride } : {}),
@@ -3782,13 +3831,32 @@ export function createDispatchBundle(
 					finalDetail = [finalDetail, `deterministic worker failure: ${outcomeCode}`].filter(Boolean).join("; ");
 					failureMessage = finalDetail;
 				}
+				// Close steering provenance before taking receipt snapshots. A late
+				// acknowledgement after the bounded drain cannot race the sealed facts.
+				const steering = snapshotSteeringProvenance();
+				const capturedOutput = outputCapture.snapshot();
+				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput)) {
+					finalOutcome = "failed";
+					outcomeCode = "worker_final_output_missing";
+					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
+					failureMessage = finalDetail;
+				}
 				const status = runStatusForOutcome(finalOutcome);
-				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail);
+				const receiptDraft = buildReceiptDraft(
+					result,
+					endedAt,
+					status,
+					finalOutcome,
+					finalDetail,
+					capturedOutput,
+					steering,
+				);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
 					outcomeCode,
 					outcomeDetail: receiptDraft.outcomeDetail ?? finalDetail,
+					...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					tokenCount: receiptDraft.tokenCount,

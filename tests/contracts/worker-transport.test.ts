@@ -161,7 +161,7 @@ describe("ssh worker transport channel contract", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, remote announced 1/);
+		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced 1/);
 	});
 
 	it("rejects a worker announce with no specVersion", async () => {
@@ -171,7 +171,7 @@ describe("ssh worker transport channel contract", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, remote announced undefined/);
+		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced undefined/);
 	});
 
 	it("fails closed when the first remote protocol event is not an announce", async () => {
@@ -257,23 +257,120 @@ describe("ssh worker transport channel contract", () => {
 });
 
 describe("local worker transport", () => {
-	it("delegates to the native subprocess spawner with an unchanged channel", async () => {
+	let fake: FakeSsh;
+
+	before(() => {
+		fake = installFakeSsh();
+	});
+	after(() => {
+		rmSync(fake.dir, { recursive: true, force: true });
+	});
+
+	function localWorker(scenario: string, env: NodeJS.ProcessEnv = process.env): SpawnedWorker {
+		return createLocalWorkerTransport({
+			workerEntryPath: fake.binary,
+			env: {
+				...env,
+				FAKE_SSH_SCENARIO: scenario,
+				FAKE_SSH_ARGV_LOG: fake.argvLog,
+			},
+		}).spawn(TEST_SPEC, { cwd: fake.dir });
+	}
+
+	it("requires and consumes a correct announce before yielding ordinary events", async () => {
+		const worker = localWorker("ok");
+		const events = await drain(worker.events);
+		strictEqual((await worker.promise).exitCode, 0);
+		deepStrictEqual(eventTypes(events), ["message_end"]);
+		strictEqual(
+			events.some((event) => (event as { type?: unknown }).type === "worker_announce"),
+			false,
+		);
+	});
+
+	it("forces CLIO_WORKER_ANNOUNCE=1 over a caller-supplied disabling value", async () => {
+		const worker = localWorker("require-announce-env", { ...process.env, CLIO_WORKER_ANNOUNCE: "0" });
+		const events = await drain(worker.events);
+		strictEqual((await worker.promise).exitCode, 0);
+		deepStrictEqual(eventTypes(events), ["message_end"]);
+	});
+
+	it("fails closed when the first local protocol event is not announce", async () => {
+		const worker = localWorker("no-announce-event");
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /Missing worker_announce handshake: first protocol event was message_end/);
+	});
+
+	it("fails closed when the first local protocol event is malformed JSON", async () => {
+		const worker = localWorker("malformed-first-event");
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /first protocol event was malformed JSON/);
+		strictEqual(result.malformedStdoutLines, 1);
+	});
+
+	it("fails closed on local announce version mismatch", async () => {
+		const worker = localWorker("version-skew");
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced 1/);
+	});
+
+	it("fails closed when the local announce omits specVersion", async () => {
+		const worker = localWorker("missing-announce-version");
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced undefined/);
+	});
+
+	it("fails closed when a local worker exits before announce", async () => {
+		const worker = localWorker("no-announce-exit0");
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, null);
+		match(result.stderrTail ?? "", /Missing worker_announce handshake: peer exited before announcing specVersion 2/);
+	});
+
+	it("keeps local stdin steering operational after announce", async () => {
+		const worker = localWorker("steer");
+		strictEqual(worker.send?.({ type: "steer", text: "focus on local tests" }), true);
+		const events = await drain(worker.events);
+		strictEqual((await worker.promise).exitCode, 0);
+		deepStrictEqual(eventTypes(events), ["clio_steer_received", "message_end"]);
+		const steer = events[0] as { payload?: { text?: string } };
+		strictEqual(steer.payload?.text, "focus on local tests");
+	});
+
+	it("keeps the local transport identity unchanged", () => {
+		const transport = createLocalWorkerTransport({ workerEntryPath: fake.binary });
+		strictEqual(transport.kind, "local");
+		deepStrictEqual(transport.node, { id: "local", kind: "local" });
+	});
+
+	it("does not weaken the existing SSH announce contract", async () => {
 		const fake = installFakeSsh();
 		try {
-			// The fake shim speaks the same protocol regardless of argv, so it can
-			// stand in for a worker entry as well: local transport passes it as
-			// the entry script under the real node binary.
 			process.env.FAKE_SSH_SCENARIO = "ok";
 			process.env.FAKE_SSH_ARGV_LOG = fake.argvLog;
-			const transport = createLocalWorkerTransport({ workerEntryPath: fake.binary });
-			strictEqual(transport.kind, "local");
-			deepStrictEqual(transport.node, { id: "local", kind: "local" });
-			const worker = transport.spawn(TEST_SPEC, { cwd: fake.dir });
+			const worker = createSshWorkerTransport(SSH_NODE, { sshBinary: fake.binary }).spawn(TEST_SPEC, { cwd: "/w" });
 			const events = await drain(worker.events);
 			strictEqual((await worker.promise).exitCode, 0);
-			// No announce filter on the local tier: the announce event (emitted
-			// here because the shim always announces) passes through verbatim.
-			deepStrictEqual(eventTypes(events), ["worker_announce", "message_end"]);
+			deepStrictEqual(eventTypes(events), ["message_end"]);
 		} finally {
 			rmSync(fake.dir, { recursive: true, force: true });
 		}

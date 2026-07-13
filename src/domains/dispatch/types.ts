@@ -35,14 +35,16 @@ export type RunOutcomeCode =
 	| "vram_capacity_fit_failure"
 	| "worker_tool_call_cap_exhausted"
 	| "loop_guard_tools_disabled_exhausted"
-	| "scout_synthesis_contract_exhausted";
+	| "scout_synthesis_contract_exhausted"
+	| "worker_final_output_missing";
 
 export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
 	return (
 		value === "vram_capacity_fit_failure" ||
 		value === "worker_tool_call_cap_exhausted" ||
 		value === "loop_guard_tools_disabled_exhausted" ||
-		value === "scout_synthesis_contract_exhausted"
+		value === "scout_synthesis_contract_exhausted" ||
+		value === "worker_final_output_missing"
 	);
 }
 
@@ -89,6 +91,20 @@ export interface RunPipelineProvenance {
 export interface RunBriefingProvenance {
 	bytes: number;
 	contentHash: string;
+}
+
+/**
+ * Integrity-covered proof that one canonical steering message was written to
+ * the native worker channel, without retaining the steering prose itself.
+ * Acknowledgements are matched to sent entries in stable sequence order.
+ */
+export interface RunSteeringProvenance {
+	sequence: number;
+	bytes: number;
+	contentHash: string;
+	sentAt: string;
+	acknowledged: boolean;
+	acknowledgedAt?: string;
 }
 
 /**
@@ -217,7 +233,7 @@ export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
 export interface RunReceiptIntegrity {
-	version: 4 | 5;
+	version: 4 | 5 | 6;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -246,6 +262,8 @@ export interface RunEnvelope {
 	task: string;
 	/** Present only when a bounded parent briefing was sent as dynamic task data. */
 	briefing?: RunBriefingProvenance;
+	/** Sent steering provenance in stable per-run sequence order; prose is never persisted. */
+	steering?: ReadonlyArray<RunSteeringProvenance>;
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
@@ -482,6 +500,8 @@ export interface RunReceipt {
 	task: string;
 	/** Proof of briefing content without copying its prose into the receipt. */
 	briefing?: RunBriefingProvenance;
+	/** Sent steering provenance in stable per-run sequence order; prose is never persisted. */
+	steering?: ReadonlyArray<RunSteeringProvenance>;
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;

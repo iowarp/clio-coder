@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +64,9 @@ function envelopeFor(draft: RunReceiptDraft, receiptPath: string): RunEnvelope {
 		status: "completed",
 		outcome: draft.outcome ?? null,
 		outcomeDetail: draft.outcomeDetail ?? null,
+		outcomeCode: draft.outcomeCode ?? null,
+		...(draft.briefing !== undefined ? { briefing: draft.briefing } : {}),
+		...(draft.steering !== undefined ? { steering: draft.steering } : {}),
 		exitCode: draft.exitCode,
 		pid: null,
 		heartbeatAt: null,
@@ -123,17 +126,25 @@ describe("contracts/monitor collect evidence labeling", () => {
 		const envelopes = [
 			writeSealedReceipt(
 				root,
-				receiptDraft("run-verified", { verification: { state: "verified", basis: "validation-tool" } }),
+				receiptDraft("run-verified", {
+					verification: { state: "verified", basis: "validation-tool" },
+					briefing: { bytes: 12, contentHash: "a".repeat(64) },
+				}),
 			),
 			writeSealedReceipt(
 				root,
-				receiptDraft("run-unverified", { verification: { state: "unverified", basis: "no-validation-tool" } }),
+				receiptDraft("run-unverified", {
+					verification: { state: "unverified", basis: "no-validation-tool" },
+					projectContext: { tier: "bounded", chars: 639, contentHash: "b".repeat(64) },
+				}),
 			),
 			writeSealedReceipt(
 				root,
 				receiptDraft("run-recon", {
 					agentId: "scout",
 					verification: { state: "not_applicable", basis: "read-only-agent" },
+					briefing: { bytes: 24, contentHash: "c".repeat(64) },
+					projectContext: { tier: "bounded", chars: 412, contentHash: "d".repeat(64) },
 					output: {
 						state: "final",
 						text: "Lead in src/tools/monitor.ts:250.",
@@ -190,10 +201,33 @@ describe("contracts/monitor collect evidence labeling", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 
-		match(runBlock(result.output, "run-verified"), /worker output \(tool-verified\):/);
-		match(runBlock(result.output, "run-unverified"), /worker claims \(unverified prose\):/);
-		match(runBlock(result.output, "run-recon"), /reconnaissance output \(advisory leads, not validation evidence\):/);
-		match(runBlock(result.output, "run-unknown"), /worker claims \(validation not observable at this layer\):/);
+		const verified = runBlock(result.output, "run-verified");
+		match(verified, /receipt_integrity=verified\/v6\/sha256/);
+		match(verified, /evidence_verification=verified\/validation-tool/);
+		match(verified, new RegExp(`briefing=bytes:12 sha256:${"a".repeat(64)}`));
+		match(verified, /project_context=absent/);
+		match(verified, /worker output \(tool-verified\):/);
+
+		const unverified = runBlock(result.output, "run-unverified");
+		match(unverified, /receipt_integrity=verified\/v6\/sha256/);
+		match(unverified, /evidence_verification=unverified\/no-validation-tool/);
+		match(unverified, /briefing=none/);
+		match(unverified, new RegExp(`project_context=bounded chars:639 sha256:${"b".repeat(64)}`));
+		match(unverified, /worker claims \(unverified prose\):/);
+
+		const recon = runBlock(result.output, "run-recon");
+		match(recon, /receipt_integrity=verified\/v6\/sha256/);
+		match(recon, /evidence_verification=not_applicable\/read-only-agent/);
+		match(recon, new RegExp(`briefing=bytes:24 sha256:${"c".repeat(64)}`));
+		match(recon, new RegExp(`project_context=bounded chars:412 sha256:${"d".repeat(64)}`));
+		match(recon, /reconnaissance output \(advisory leads, not validation evidence\):/);
+
+		const unknown = runBlock(result.output, "run-unknown");
+		match(unknown, /receipt_integrity=verified\/v6\/sha256/);
+		match(unknown, /evidence_verification=unknown\/acp-external-unobserved/);
+		match(unknown, /briefing=none/);
+		match(unknown, /project_context=absent/);
+		match(unknown, /worker claims \(validation not observable at this layer\):/);
 		match(runBlock(result.output, "run-legacy"), /worker claims \(validation not observable at this layer\):/);
 
 		const canceled = runBlock(result.output, "run-canceled");
@@ -203,6 +237,7 @@ describe("contracts/monitor collect evidence labeling", () => {
 
 		const tampered = runBlock(result.output, "run-tampered");
 		match(tampered, /worker claims \(validation not observable at this layer\):/);
+		match(tampered, /RECEIPT INTEGRITY FAILED/);
 		match(tampered, /receipt integrity failed: integrity mismatch/);
 		strictEqual(tampered.includes("output run-tampered"), false, tampered);
 		strictEqual(tampered.includes("worker output (tool-verified):"), false, tampered);
@@ -228,5 +263,34 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(pruned, /worker claims \(validation not observable at this layer\):/);
 		match(pruned, /receipt integrity unavailable: the run ledger envelope is missing/);
 		strictEqual(pruned.includes("worker output (tool-verified):"), false, pruned);
+	});
+
+	it("keeps receipt mode raw JSON while exposing integrity and evidence state in details", async () => {
+		const root = scratchDir();
+		const envelope = writeSealedReceipt(
+			root,
+			receiptDraft("run-receipt-details", {
+				verification: { state: "unverified", basis: "no-validation-tool" },
+				briefing: { bytes: 7, contentHash: "e".repeat(64) },
+				projectContext: { tier: "none" },
+			}),
+		);
+		const monitor = createMonitorTool({ dispatch: monitorContract([envelope]) });
+		match(monitor.description, /wait observes without collecting/);
+		match(monitor.description, /collect is the authoritative terminal batch operation/);
+		match(monitor.description, /collect detached runs before final synthesis/);
+		match(monitor.description, /receipt exposes stored evidence/);
+		match(monitor.description, /Briefing provenance, and project-context provenance are separate fields/i);
+		const result = await monitor.run({ mode: "receipt", run_id: envelope.id }, {});
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(JSON.parse(result.output).runId, envelope.id, "receipt output remains raw JSON");
+		deepStrictEqual(result.details?.receiptIntegrity, { ok: true });
+		deepStrictEqual(result.details?.evidenceVerification, {
+			state: "unverified",
+			basis: "no-validation-tool",
+		});
+		deepStrictEqual(result.details?.briefing, { bytes: 7, contentHash: "e".repeat(64) });
+		deepStrictEqual(result.details?.projectContext, { tier: "none" });
 	});
 });

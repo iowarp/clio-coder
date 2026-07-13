@@ -571,14 +571,29 @@ describe("contracts/prompts compiler logic", () => {
 			sessionInputs: { provider: "p", model: "m" },
 		});
 		const flat = result.systemPrompt.replace(/\s+/g, " ");
-		// Sealed receipts are the durable evidence; raw worker prose is never
-		// called evidence without qualification.
-		ok(flat.includes("A sealed run receipt is the durable evidence for delegated work"));
-		ok(flat.includes("the worker's prose is an advisory claim until the receipt's verification state is verified"));
+		// Receipt integrity and evidence verification are separate; raw worker
+		// prose is never called verified evidence without qualification.
+		ok(flat.includes("A sealed run receipt is the durable record for delegated work"));
+		ok(flat.includes("Receipt integrity verifies that record; evidence verification separately describes validation"));
+		ok(flat.includes("The worker's prose remains an advisory claim unless its evidence is verified"));
 		strictEqual(flat.includes("synthesize returned evidence"), false);
 		// The parent spot-check discipline is the exact sentence dispatch renders
 		// head-anchored in its summary; every surface teaches the same bytes.
 		ok(flat.includes(SPOT_CHECK_GUIDANCE));
+		ok(flat.includes("A successful reconnaissance receipt is an index"));
+		ok(flat.includes("normally no more than six parent read/search calls"));
+		ok(flat.includes("Parent spot-checking is not independent specialist confirmation"));
+		ok(flat.includes("Use the dispatch briefing field for receipt-derived context/data"));
+		ok(flat.includes("Collect detached runs before final synthesis"));
+		ok(
+			flat.includes(
+				"Report receipt integrity, evidence verification, briefing provenance, and project-context provenance separately",
+			),
+		);
+		ok(flat.includes("When a final report is requested but file modification is forbidden"));
+		ok(flat.includes("do not create a report artifact"));
+		ok(flat.includes("do not retry it or a syntactic variant"));
+		ok(flat.includes("synthesize, delegate narrowly, use another source, or mark the claim unverified"));
 	});
 
 	it("includes the recon-nonevidence qualifier in the operating contract prompt", () => {
