@@ -424,7 +424,7 @@ describe("contracts/model residency reconciler", () => {
 });
 
 describe("contracts/residency-protection settings extraction", () => {
-	it("collects orchestrator, worker default/profile, and target default model ids", () => {
+	it("collects orchestrator, background, worker, and target default model ids", () => {
 		const settings = {
 			...DEFAULT_SETTINGS,
 			targets: [
@@ -432,6 +432,7 @@ describe("contracts/residency-protection settings extraction", () => {
 				{ id: "dynamo", runtime: "lmstudio-native" },
 			],
 			orchestrator: { ...DEFAULT_SETTINGS.orchestrator, target: "mini", model: "Qwopus3.6-35B" },
+			background: { ...DEFAULT_SETTINGS.background, target: "dynamo", model: "memory-small" },
 			workers: {
 				...DEFAULT_SETTINGS.workers,
 				default: { target: "dynamo", model: "qwopus3.6-27b-coder-mtp", thinkingLevel: "off" as const },
@@ -442,6 +443,11 @@ describe("contracts/residency-protection settings extraction", () => {
 			},
 		};
 
-		deepStrictEqual(protectedResidencyModelIds(settings), ["Qwopus3.6-35B", "qwopus3.6-27b-coder-mtp", "MiniCPM5-1B"]);
+		deepStrictEqual(protectedResidencyModelIds(settings), [
+			"Qwopus3.6-35B",
+			"memory-small",
+			"qwopus3.6-27b-coder-mtp",
+			"MiniCPM5-1B",
+		]);
 	});
 });

@@ -122,4 +122,28 @@ describe("contracts/memory intervention rules tier", () => {
 		execute(bounded, 4, { command: "healthy two" });
 		deepStrictEqual(bounded.evaluate({ hook: "turn_end" }), []);
 	});
+
+	it("stays rules-only without constructing a model client when the background role is unset", async () => {
+		const bank = new TaskMemoryBank();
+		let routeResolutions = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getModelClient: () => {
+				routeResolutions += 1;
+				return null;
+			},
+		});
+
+		const result = await registration.runPromptedStep({ deterministicTrigger: true, task: "test task" });
+
+		strictEqual(routeResolutions, 1);
+		deepStrictEqual(result, {
+			decision: "silent",
+			bankOperations: 0,
+			reminder: null,
+			inputTokens: 0,
+			outputTokens: 0,
+			effects: [],
+		});
+	});
 });

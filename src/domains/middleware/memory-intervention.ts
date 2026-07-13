@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank } from "../memory/task-bank.js";
+import {
+	runTaskMemoryPolicy,
+	type TaskMemoryModelClient,
+	type TaskMemoryPolicyResult,
+	type TaskMemoryTrajectoryStep,
+} from "../memory/task-memory-policy.js";
 import { hashToolCall } from "../safety/loop-detector.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
@@ -21,11 +27,7 @@ interface PendingToolStep {
 	callDescription: string;
 }
 
-interface TrajectoryStep extends PendingToolStep {
-	step: number;
-	outcome: ToolOutcome;
-	resultDigest: string;
-}
+type TrajectoryStep = TaskMemoryTrajectoryStep;
 
 interface FailedAttempt {
 	entryId: string;
@@ -40,13 +42,31 @@ export interface MemoryInterventionDeps {
 	enabled?: boolean;
 	windowSteps?: number;
 	maxTokens?: number;
+	timeoutMs?: number;
+	/** Lazily resolves the explicitly configured background role. Null means rules-only. */
+	getModelClient?: () => TaskMemoryModelClient | null;
+}
+
+export interface MemoryPromptedStepInput {
+	deterministicTrigger: boolean;
+	/** Overrides the most recent turn-start task text when supplied. */
+	task?: string;
+}
+
+export interface MemoryPromptedStepResult extends TaskMemoryPolicyResult {
+	effects: ReadonlyArray<MiddlewareEffect>;
+}
+
+export interface MemoryInterventionRegistration extends MiddlewareHookRegistration {
+	/** Serialized model step; the composition root decides which awaited boundary invokes it. */
+	runPromptedStep(input: MemoryPromptedStepInput): Promise<MemoryPromptedStepResult>;
 }
 
 /**
  * Rules-only proactive-memory policy. It observes bounded tool history and
  * emits only cited, advisory reminders through the existing visible channel.
  */
-export function createMemoryInterventionRegistration(deps: MemoryInterventionDeps): MiddlewareHookRegistration {
+export function createMemoryInterventionRegistration(deps: MemoryInterventionDeps): MemoryInterventionRegistration {
 	const enabled = deps.enabled ?? true;
 	const windowSteps = positiveInteger(deps.windowSteps, MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS);
 	const maxTokens = positiveInteger(deps.maxTokens, MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS);
@@ -57,6 +77,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let lastTurnEndStep = 0;
 	let reactivateAfterCompaction = false;
 	let lastInjectedFingerprint: string | null = null;
+	let currentTask = "(current task unavailable)";
 
 	return {
 		id: MEMORY_INTERVENTION_REGISTRATION_ID,
@@ -78,10 +99,42 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						reactivateAfterCompaction = true;
 						return NO_EFFECTS;
 					case "turn_start":
+						if (input.text?.trim()) currentTask = shortText(input.text, 2_000);
 						return reactivateKnowledge();
 				}
 			} catch {
 				return NO_EFFECTS;
+			}
+		},
+		async runPromptedStep(input): Promise<MemoryPromptedStepResult> {
+			const silent = (): MemoryPromptedStepResult => ({
+				decision: "silent",
+				bankOperations: 0,
+				reminder: null,
+				inputTokens: 0,
+				outputTokens: 0,
+				effects: NO_EFFECTS,
+			});
+			if (!enabled || deps.getModelClient === undefined) return silent();
+			try {
+				const client = deps.getModelClient();
+				if (client === null) return silent();
+				const result = await runTaskMemoryPolicy(deps.bank, client, {
+					task: input.task?.trim() || currentTask,
+					trajectory: [...trajectory],
+					deterministicTrigger: input.deterministicTrigger,
+					maxTokens,
+					...(deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }),
+				});
+				return {
+					...result,
+					effects:
+						result.reminder === null
+							? NO_EFFECTS
+							: [{ kind: "inject_reminder", message: result.reminder, severity: "advisory" }],
+				};
+			} catch {
+				return silent();
 			}
 		},
 	};

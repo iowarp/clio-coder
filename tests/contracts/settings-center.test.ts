@@ -40,6 +40,7 @@ function settingsWithTargets(): ClioSettings {
 	];
 	settings.autonomy = "auto-edit";
 	settings.orchestrator = { target: "target-a", model: "model-a", thinkingLevel: "off" };
+	settings.background = { target: null, model: null, thinkingLevel: "off" };
 	settings.workers.default = { target: "target-a", model: "model-a", thinkingLevel: "off" };
 	settings.workers.profiles.fast = { target: "target-b", model: "model-b", thinkingLevel: "off" };
 	settings.workers.agentBindings.scout = "fast";
@@ -184,6 +185,24 @@ describe("contracts/settings center", () => {
 				id: "orchestrator.model",
 				value: "model-custom",
 				assert: (s) => strictEqual(s.orchestrator.model, "model-custom"),
+			},
+			{
+				id: "background.target",
+				value: "target-b",
+				assert: (s) => {
+					strictEqual(s.background.target, "target-b");
+					strictEqual(s.background.model, "model-b");
+				},
+			},
+			{
+				id: "background.model",
+				value: "memory-custom",
+				assert: (s) => strictEqual(s.background.model, "memory-custom"),
+			},
+			{
+				id: "background.thinkingLevel",
+				value: "low",
+				assert: (s) => strictEqual(s.background.thinkingLevel, "low"),
 			},
 			{
 				id: "workers.default.target",

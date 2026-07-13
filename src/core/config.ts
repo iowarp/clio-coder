@@ -681,6 +681,7 @@ const TOP_LEVEL_KEYS = [
 	"targets",
 	"runtimePlugins",
 	"orchestrator",
+	"background",
 	"workers",
 	"fleet",
 	"scope",
@@ -765,6 +766,15 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			"orchestrator",
 			raw.orchestrator,
 			settings.orchestrator,
+			settings.targets,
+		);
+	}
+	if ("background" in raw) {
+		settings.background = validateWorkerTarget(
+			issues,
+			"background",
+			raw.background,
+			settings.background,
 			settings.targets,
 		);
 	}

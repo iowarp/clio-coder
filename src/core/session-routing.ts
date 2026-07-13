@@ -28,6 +28,7 @@ export interface SessionRoutingTarget {
 
 export interface SessionRoutingState {
 	orchestrator: SessionRoutingTarget;
+	background: SessionRoutingTarget;
 	workersDefault: SessionRoutingTarget;
 	scope: string[];
 }
@@ -39,6 +40,7 @@ export interface SessionRoutingState {
  */
 export interface RoutingPatch {
 	orchestrator?: Partial<SessionRoutingTarget>;
+	background?: Partial<SessionRoutingTarget>;
 	workersDefault?: Partial<SessionRoutingTarget>;
 	scope?: string[];
 }
@@ -58,6 +60,7 @@ function targetFrom(source: {
 export function seedSessionRouting(saved: Readonly<ClioSettings>): SessionRoutingState {
 	return {
 		orchestrator: targetFrom(saved.orchestrator),
+		background: targetFrom(saved.background),
 		workersDefault: targetFrom(saved.workers.default),
 		scope: [...(saved.scope ?? [])],
 	};
@@ -73,6 +76,9 @@ export function applySessionRouting(saved: Readonly<ClioSettings>, routing: Sess
 	view.orchestrator.target = routing.orchestrator.target;
 	view.orchestrator.model = routing.orchestrator.model;
 	view.orchestrator.thinkingLevel = routing.orchestrator.thinkingLevel;
+	view.background.target = routing.background.target;
+	view.background.model = routing.background.model;
+	view.background.thinkingLevel = routing.background.thinkingLevel;
 	view.workers.default.target = routing.workersDefault.target;
 	view.workers.default.model = routing.workersDefault.model;
 	view.workers.default.thinkingLevel = routing.workersDefault.thinkingLevel;
@@ -82,6 +88,7 @@ export function applySessionRouting(saved: Readonly<ClioSettings>, routing: Sess
 
 export function applyRoutingPatch(routing: SessionRoutingState, patch: RoutingPatch): void {
 	if (patch.orchestrator) Object.assign(routing.orchestrator, patch.orchestrator);
+	if (patch.background) Object.assign(routing.background, patch.background);
 	if (patch.workersDefault) Object.assign(routing.workersDefault, patch.workersDefault);
 	if (patch.scope) routing.scope = [...patch.scope];
 }
@@ -100,7 +107,12 @@ export type SessionOverrides = Map<string, unknown>;
 
 /** True for the dotted paths owned by the session routing state (never overrides). */
 export function isRoutingPath(path: string): boolean {
-	return path === "scope" || path.startsWith("orchestrator.") || path.startsWith("workers.default.");
+	return (
+		path === "scope" ||
+		path.startsWith("orchestrator.") ||
+		path.startsWith("background.") ||
+		path.startsWith("workers.default.")
+	);
 }
 
 /** Read a leaf from a settings blob by dotted object path. Missing ⇒ undefined. */
@@ -148,6 +160,7 @@ export function applyOverrides(base: Readonly<ClioSettings>, overrides: SessionO
 /** Write-through of a routing patch onto a (cloned) saved-settings blob. */
 export function mergeRoutingPatchIntoSettings(settings: ClioSettings, patch: RoutingPatch): void {
 	if (patch.orchestrator) Object.assign(settings.orchestrator, patch.orchestrator);
+	if (patch.background) Object.assign(settings.background, patch.background);
 	if (patch.workersDefault) Object.assign(settings.workers.default, patch.workersDefault);
 	if (patch.scope) settings.scope = [...patch.scope];
 }
@@ -169,6 +182,12 @@ export function routingPatchForId(path: string, settings: Readonly<ClioSettings>
 			return { orchestrator: { model: settings.orchestrator.model } };
 		case "orchestrator.thinkingLevel":
 			return { orchestrator: { thinkingLevel: settings.orchestrator.thinkingLevel } };
+		case "background.target":
+			return { background: { target: settings.background.target, model: settings.background.model } };
+		case "background.model":
+			return { background: { model: settings.background.model } };
+		case "background.thinkingLevel":
+			return { background: { thinkingLevel: settings.background.thinkingLevel } };
 		case "workers.default.target":
 			return { workersDefault: { target: settings.workers.default.target, model: settings.workers.default.model } };
 		case "workers.default.model":
@@ -207,6 +226,8 @@ export function diffRouting(prev: Readonly<ClioSettings>, next: Readonly<ClioSet
 	const patch: RoutingPatch = {};
 	const orchestrator = diffTarget(prev.orchestrator, next.orchestrator);
 	if (orchestrator) patch.orchestrator = orchestrator;
+	const background = diffTarget(prev.background, next.background);
+	if (background) patch.background = background;
 	const workersDefault = diffTarget(prev.workers.default, next.workers.default);
 	if (workersDefault) patch.workersDefault = workersDefault;
 	if (!scopeEquals(prev.scope ?? [], next.scope ?? [])) patch.scope = [...(next.scope ?? [])];
@@ -223,6 +244,9 @@ export function restoreRoutingFields(target: ClioSettings, source: Readonly<Clio
 	target.orchestrator.target = source.orchestrator.target;
 	target.orchestrator.model = source.orchestrator.model;
 	target.orchestrator.thinkingLevel = source.orchestrator.thinkingLevel;
+	target.background.target = source.background.target;
+	target.background.model = source.background.model;
+	target.background.thinkingLevel = source.background.thinkingLevel;
 	target.workers.default.target = source.workers.default.target;
 	target.workers.default.model = source.workers.default.model;
 	target.workers.default.thinkingLevel = source.workers.default.thinkingLevel;
@@ -237,6 +261,9 @@ const ROUTING_FIELD_LABELS: ReadonlyArray<{
 	{ field: "orchestrator.target", label: "chat target", read: (s) => s.orchestrator.target ?? null },
 	{ field: "orchestrator.model", label: "chat model", read: (s) => s.orchestrator.model ?? null },
 	{ field: "orchestrator.thinkingLevel", label: "chat thinking", read: (s) => s.orchestrator.thinkingLevel ?? "off" },
+	{ field: "background.target", label: "background target", read: (s) => s.background.target ?? null },
+	{ field: "background.model", label: "background model", read: (s) => s.background.model ?? null },
+	{ field: "background.thinkingLevel", label: "background thinking", read: (s) => s.background.thinkingLevel ?? "off" },
 	{ field: "workers.default.target", label: "fleet target", read: (s) => s.workers.default.target ?? null },
 	{ field: "workers.default.model", label: "fleet model", read: (s) => s.workers.default.model ?? null },
 	{

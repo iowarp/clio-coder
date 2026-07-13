@@ -383,6 +383,12 @@ export function buildTargetHubFleetSettings(settings: Readonly<ClioSettings>, ta
 	return next;
 }
 
+export function buildTargetHubBackgroundSettings(settings: Readonly<ClioSettings>, targetId: string): ClioSettings {
+	const next = structuredClone(settings) as ClioSettings;
+	applySettingChange(next, "background.target", targetId);
+	return next;
+}
+
 export function applyTargetsHubUseAction(targetId: string, deps: TargetsHubUseDeps): ClioSettings | null {
 	const current = deps.getSettings();
 	if (!current) return null;
@@ -395,6 +401,14 @@ export function applyTargetsHubFleetAction(targetId: string, deps: TargetsHubUse
 	const current = deps.getSettings();
 	if (!current) return null;
 	const next = buildTargetHubFleetSettings(current, targetId);
+	deps.writeSettings(next);
+	return next;
+}
+
+export function applyTargetsHubBackgroundAction(targetId: string, deps: TargetsHubUseDeps): ClioSettings | null {
+	const current = deps.getSettings();
+	if (!current) return null;
+	const next = buildTargetHubBackgroundSettings(current, targetId);
 	deps.writeSettings(next);
 	return next;
 }
@@ -590,6 +604,34 @@ export function openProvidersOverlay(
 			refreshState();
 			tui.requestRender();
 		},
+		backgroundSelected: () => {
+			const status = selectedStatus();
+			if (!status) return;
+			if (!options?.getSettings || !options.writeSettings) {
+				options?.notice?.("warning", "targets: settings writer unavailable", "targets:background");
+				return;
+			}
+			if (!status.runtime || !isOrchestratorEligibleRuntime(status.runtime)) {
+				options?.notice?.(
+					"warning",
+					`targets: ${status.target.id} is not an eligible background memory target`,
+					`targets:background:${status.target.id}`,
+				);
+				return;
+			}
+			const next = applyTargetsHubBackgroundAction(status.target.id, {
+				getSettings: options.getSettings,
+				writeSettings: options.writeSettings,
+			});
+			const model = next?.background.model ?? "(no model)";
+			options.notice?.(
+				"success",
+				`background memory ${status.target.id} (${model})`,
+				`targets:background:${status.target.id}`,
+			);
+			refreshState();
+			tui.requestRender();
+		},
 		connectSelected: () => {
 			const status = selectedStatus();
 			if (!status) return;
@@ -646,6 +688,10 @@ export function openProvidersOverlay(
 				keys.fleetSelected();
 				return;
 			}
+			if (data === "b") {
+				keys.backgroundSelected();
+				return;
+			}
 			if (data === "c") {
 				keys.connectSelected();
 				return;
@@ -670,6 +716,7 @@ export function openProvidersOverlay(
 			{ key: "Enter", verb: "detail" },
 			{ key: "u", verb: "use" },
 			{ key: "f", verb: "fleet" },
+			{ key: "b", verb: "memory" },
 			{ key: "c", verb: "connect" },
 			{ key: "r", verb: "probe" },
 			{ key: "R", verb: "probe all" },
@@ -722,6 +769,7 @@ interface ProvidersOverlayKeys {
 	toggleDetail(): void;
 	useSelected(): void;
 	fleetSelected(): void;
+	backgroundSelected(): void;
 	connectSelected(): void;
 	probeSelected(): void;
 	probeAll(): void;

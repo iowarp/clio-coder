@@ -79,6 +79,9 @@ export const SETTINGS_LABELS_BY_ID = {
 	"orchestrator.thinkingLevel": "Thinking level",
 	"orchestrator.target": "Target",
 	"orchestrator.model": "Model",
+	"background.target": "Memory target",
+	"background.model": "Memory model",
+	"background.thinkingLevel": "Memory thinking level",
 	"workers.default.target": "Default target",
 	"workers.default.model": "Default model",
 	"workers.default.thinkingLevel": "Default thinking level",
@@ -123,7 +126,14 @@ export const SETTINGS_SECTION_ROWS = {
 		"skills.trustProjectCompatRoots",
 		"safetyNet",
 	],
-	orchestrator: ["orchestrator.thinkingLevel", "orchestrator.target", "orchestrator.model"],
+	orchestrator: [
+		"orchestrator.thinkingLevel",
+		"orchestrator.target",
+		"orchestrator.model",
+		"background.target",
+		"background.model",
+		"background.thinkingLevel",
+	],
 	fleet: [
 		"workers.default.target",
 		"workers.default.model",
@@ -161,6 +171,9 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"orchestrator.thinkingLevel": "Reasoning budget for the chat loop.",
 	"orchestrator.target": "Active chat target id.",
 	"orchestrator.model": "Active chat wire model id.",
+	"background.target": "Optional target for LLM memory steps; unset keeps rules-only memory.",
+	"background.model": "Wire model id used only for proactive task memory.",
+	"background.thinkingLevel": "Reasoning budget for the background memory model.",
 	"workers.default.target": "Default /run target id.",
 	"workers.default.model": "Default /run wire model id.",
 	"workers.default.thinkingLevel": "Reasoning budget for dispatched workers.",
@@ -364,6 +377,23 @@ export function selectTargetSubmenu(providers: ProvidersContract): SettingSubmen
 	};
 }
 
+function selectOptionalBackgroundTargetSubmenu(providers: ProvidersContract): SettingSubmenuBuilder {
+	return (_currentValue: string, done: (val?: string) => void) => {
+		const statuses = providers.list();
+		const items = [
+			{ value: "(unset)", label: "(unset — rules-only)" },
+			...statuses.map((status) => ({
+				value: status.target.id,
+				label: `${status.target.id} (${status.target.url ?? "no url"})`,
+			})),
+		];
+		const list = new SelectList(items, Math.min(10, items.length), DEFAULT_SELECT_THEME);
+		list.onSelect = (item) => done(item.value);
+		list.onCancel = () => done();
+		return new SubmenuWrapper("Select memory target", list, undefined, "Unset keeps the zero-cost rules-only tier.");
+	};
+}
+
 export function selectModelSubmenu(
 	providers: ProvidersContract,
 	getActiveTarget: () => string | undefined,
@@ -508,6 +538,12 @@ export function buildSettingItems(
 		settings.workers.default.model,
 		settings.workers.default.thinkingLevel,
 	);
+	const backgroundThinking = thinkingChoices(
+		options?.providers,
+		settings.background.target,
+		settings.background.model,
+		settings.background.thinkingLevel,
+	);
 	const profileCount = Object.keys(settings.workers.profiles ?? {}).length;
 	const bindingCount = Object.keys(settings.workers.agentBindings ?? {}).length;
 	const targetSubmenu = options?.providers ? selectTargetSubmenu(options.providers) : editTextSubmenu("Type target id");
@@ -517,6 +553,12 @@ export function buildSettingItems(
 	const workerModelSubmenu = options?.providers
 		? selectModelSubmenu(options.providers, () => live().workers.default.target ?? undefined)
 		: editTextSubmenu("Type model name");
+	const backgroundTargetSubmenu = options?.providers
+		? selectOptionalBackgroundTargetSubmenu(options.providers)
+		: editTextSubmenu("Type memory target id", "Leave blank for rules-only memory.");
+	const backgroundModelSubmenu = options?.providers
+		? selectModelSubmenu(options.providers, () => live().background.target ?? undefined)
+		: editTextSubmenu("Type memory model name");
 	const favorites = settings.modelSelector?.favorites ?? [];
 	const agents = settings.delegation?.agents ?? [];
 	const keybindingCount = Object.keys(settings.keybindings ?? {}).length;
@@ -547,6 +589,17 @@ export function buildSettingItems(
 		settingItem("orchestrator.model", settings.orchestrator.model ?? "(unset)", {
 			submenu: orchestratorModelSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
+		}),
+		settingItem("background.target", settings.background.target ?? "(unset — rules-only)", {
+			submenu: backgroundTargetSubmenu,
+			affordance: options?.providers ? "opens picker" : "free text",
+		}),
+		settingItem("background.model", settings.background.model ?? "(unset)", {
+			submenu: backgroundModelSubmenu,
+			affordance: options?.providers ? "opens picker" : "free text",
+		}),
+		settingItem("background.thinkingLevel", backgroundThinking.display, {
+			values: backgroundThinking.values,
 		}),
 		settingItem("workers.default.target", settings.workers.default.target ?? "(unset)", {
 			submenu: targetSubmenu,
@@ -730,6 +783,9 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		case "orchestrator.thinkingLevel":
 			settings.orchestrator.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.orchestrator.thinkingLevel;
 			return;
+		case "background.thinkingLevel":
+			settings.background.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.background.thinkingLevel;
+			return;
 		case "workers.default.thinkingLevel":
 			settings.workers.default.thinkingLevel =
 				thinkingLevelFromChoiceLabel(value) ?? settings.workers.default.thinkingLevel;
@@ -847,6 +903,19 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 		}
 		case "orchestrator.model":
 			settings.orchestrator.model = value === "(unset)" || value === "" ? null : value;
+			return;
+		case "background.target": {
+			const target = value.startsWith("(unset") || value === "" ? null : value;
+			if (target !== settings.background.target) {
+				settings.background.model = target
+					? (settings.targets.find((entry) => entry.id === target)?.defaultModel ?? null)
+					: null;
+			}
+			settings.background.target = target;
+			return;
+		}
+		case "background.model":
+			settings.background.model = value === "(unset)" || value === "" ? null : value;
 			return;
 		case "workers.default.target": {
 			const target = value === "(unset)" || value === "" ? null : value;
