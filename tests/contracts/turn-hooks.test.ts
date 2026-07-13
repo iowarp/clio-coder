@@ -227,7 +227,7 @@ function assistantStopMessage(text: string): AgentMessage {
 	} as unknown as AgentMessage;
 }
 
-function dispatchOnlyRegistry(): unknown {
+function dispatchOnlyRegistry(invokedArgs?: unknown[]): unknown {
 	const spec = {
 		name: ToolNames.Dispatch,
 		description: "dispatch test tool",
@@ -238,7 +238,10 @@ function dispatchOnlyRegistry(): unknown {
 	return {
 		listRegistered: () => [ToolNames.Dispatch],
 		get: (name: string) => (name === ToolNames.Dispatch ? spec : undefined),
-		invoke: async () => ({ kind: "ok", result: { kind: "ok", output: "sealed Scout receipt" }, decision: {} }),
+		invoke: async (request: { args?: unknown }) => {
+			invokedArgs?.push(request.args);
+			return { kind: "ok", result: { kind: "ok", output: "sealed Scout receipt" }, decision: {} };
+		},
 	};
 }
 
@@ -338,6 +341,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		middleware.registerHook(createReadOnlyExplorationNudgeRegistration({ canRouteScout: () => true }));
 		const prompts: string[] = [];
 		const entries: SessionEntry[] = [];
+		const invokedArgs: unknown[] = [];
 		type OnPayload = (payload: Record<string, unknown>, model: unknown) => Promise<Record<string, unknown> | undefined>;
 		let capturedOnPayload: OnPayload | null = null;
 		const baseFactory = createFakeAgentFactory(async (_agent, input) => {
@@ -354,7 +358,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			session: createSession(entries),
 			readSessionEntries: () => entries,
 			middleware,
-			toolRegistry: dispatchOnlyRegistry(),
+			toolRegistry: dispatchOnlyRegistry(invokedArgs),
 			createAgent: factory,
 		} as never);
 
@@ -366,6 +370,11 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		ok(prompt.includes("let’s just explore this repo and context"));
 		ok(prompt.includes("The harness already ran Scout for this request"));
 		ok(prompt.includes("sealed Scout receipt"));
+		// The routed task carries the operator's request, not a canned tour.
+		strictEqual(invokedArgs.length, 1);
+		const routedTask = (invokedArgs[0] as { tasks: Array<{ agent: string; task: string }> }).tasks[0];
+		strictEqual(routedTask?.agent, "scout");
+		ok(routedTask.task.includes("let’s just explore this repo and context"));
 		ok(capturedOnPayload !== null);
 		const onPayload = capturedOnPayload as OnPayload;
 		const patched = await onPayload(

@@ -774,17 +774,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * Deterministic broad-reconnaissance route. This is harness policy, not a
 	 * model suggestion: invoke the normal admitted dispatch tool, emit the same
 	 * live tool events/ledger rows as an agent-authored call, then hand the
-	 * sealed result to a text-only synthesis round.
+	 * sealed result to a text-only synthesis round. The routed task carries the
+	 * operator's request verbatim so Scout explores what was actually asked,
+	 * not a fixed orientation tour.
 	 */
-	const runHarnessScoutDispatch = async (): Promise<string | null> => {
+	const runHarnessScoutDispatch = async (requestText: string): Promise<string | null> => {
 		const registry = deps.toolRegistry;
 		if (!registry?.get(ToolNames.Dispatch)) return null;
+		const condensedRequest = requestText.replace(/\s+/g, " ").trim().slice(0, 280);
 		const args = {
 			tasks: [
 				{
 					agent: "scout",
 					task:
-						"Read these files directly (do not call ls, context, code_nav, grep, find, or git): CLIO.md, package.json, src/cli/index.ts, src/entry/orchestrator.ts, src/domains/agents/index.ts, and src/domains/dispatch/index.ts. Return at most 8 concise findings; every finding must cite a path:line from those live reads. Put everything not confirmed by those reads under Unresolved gaps.",
+						`Bounded reconnaissance for this operator request: "${condensedRequest}". ` +
+						"Explore this repository to answer it: identify the structure, the key entry points, and the subsystems the request names. " +
+						"Return at most 8 concise findings; every finding must cite a path:line from a live read in this run. " +
+						"Put everything not confirmed by those reads under Unresolved gaps.",
 				},
 			],
 		};
@@ -2431,7 +2437,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			currentAskUserPolicy = askUserPolicy;
 			try {
 				if (harnessScoutRoute) {
-					const scoutResult = await runHarnessScoutDispatch();
+					const scoutResult = await runHarnessScoutDispatch(text);
 					if (scoutResult !== null) {
 						middlewareToolChoice.reset();
 						synthesisToolLock = true;
