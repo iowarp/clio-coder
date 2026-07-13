@@ -21,7 +21,7 @@ export const MIDDLEWARE_EFFECT_KINDS = [
 
 export type MiddlewareEffectKind = (typeof MIDDLEWARE_EFFECT_KINDS)[number];
 
-export const MIDDLEWARE_REMINDER_SEVERITIES = ["info", "warn", "hard-block"] as const;
+export const MIDDLEWARE_REMINDER_SEVERITIES = ["info", "advisory", "warn", "hard-block"] as const;
 
 export type MiddlewareReminderSeverity = (typeof MIDDLEWARE_REMINDER_SEVERITIES)[number];
 

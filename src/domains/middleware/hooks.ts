@@ -185,7 +185,7 @@ function normalizePromptSpec(raw: Record<string, unknown>, issues: string[]): No
 	let severity: MiddlewareReminderSeverity = "info";
 	if (raw.severity !== undefined) {
 		if (typeof raw.severity !== "string" || !isMiddlewareReminderSeverity(raw.severity)) {
-			issues.push("prompt.severity must be info, warn, or hard-block");
+			issues.push("prompt.severity must be info, advisory, warn, or hard-block");
 			return null;
 		}
 		severity = raw.severity;

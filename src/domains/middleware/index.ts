@@ -70,6 +70,13 @@ export {
 	spawnSyncCommandRunner,
 } from "./hooks-io.js";
 export { MiddlewareManifest } from "./manifest.js";
+export {
+	createMemoryInterventionRegistration,
+	MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS,
+	MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS,
+	MEMORY_INTERVENTION_REGISTRATION_ID,
+	type MemoryInterventionDeps,
+} from "./memory-intervention.js";
 export { BUILTIN_MIDDLEWARE_RULE_IDS, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 export type {
 	MiddlewareDiagnostic,

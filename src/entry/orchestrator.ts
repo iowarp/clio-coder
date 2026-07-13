@@ -50,6 +50,7 @@ import {
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecordsSync,
 } from "../domains/memory/index.js";
+import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
@@ -65,6 +66,7 @@ import {
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
+import { createMemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
@@ -789,6 +791,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// static routing line and tasks hint ask for the same board; battery-tested
 	// local models only comply when the instruction rides the user message.
 	middleware.registerHook(createTaskBoardReminderRegistration());
+	const taskMemoryBank = new TaskMemoryBank();
+	middleware.registerHook(createMemoryInterventionRegistration({ bank: taskMemoryBank }));
 	if (contextDomain) {
 		middleware.registerHook(
 			createFileMutationObserver(coalescePathSink((paths) => contextDomain.noteFileChanges(paths))),
