@@ -12,7 +12,7 @@ import { bashTool } from "./bash.js";
 import { codeNavTool } from "./codewiki/code-nav.js";
 import { createContextTool } from "./context/index.js";
 import { credentialPresentTool } from "./credential-present.js";
-import { createDispatchTool } from "./dispatch.js";
+import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
@@ -385,8 +385,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		}),
 	});
 	if (deps.dispatch) {
+		const dispatchRunEvents = createDispatchRunEventRegistry();
 		const dispatchToolDeps = {
 			dispatch: deps.dispatch,
+			runEvents: dispatchRunEvents,
 			...(deps.bus ? { bus: deps.bus } : {}),
 			...(deps.getAgentCatalog ? { getAgentCatalog: deps.getAgentCatalog } : {}),
 			...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
@@ -399,7 +401,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			}),
 		});
 		registry.register({
-			...builtin(createMonitorTool({ dispatch: deps.dispatch }), {
+			...builtin(createMonitorTool({ dispatch: deps.dispatch, runEvents: dispatchRunEvents }), {
 				path: "src/tools/monitor.ts",
 				scope: "core",
 			}),

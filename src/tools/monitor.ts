@@ -11,15 +11,18 @@ import {
 	type RunReceiptVerification,
 } from "../domains/dispatch/types.js";
 import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
-import { runEventTail } from "./dispatch.js";
+import type { DispatchRunEventRegistry } from "./dispatch.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import { workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
 
 /**
- * The monitor tool: read-only visibility into dispatched runs, plus the
- * gather half of detached dispatch. mode=list enumerates known runs (this
+ * The monitor tool: read-only visibility into known synchronous and detached
+ * dispatched runs. The interactive operator/TUI can inspect an active sync
+ * run through the dispatch contract; parent-model mid-run observation requires
+ * detach because a sequential synchronous dispatch call auto-waits. mode=list
+ * enumerates known runs (this
  * session first), status reports one run's state and progress counters, peek
  * returns the bounded tail of a run's recent events buffered in this process,
  * receipt returns the stored receipt, wait observes one run for a bounded
@@ -42,6 +45,7 @@ const COLLECT_TIMEOUT_NOTICE = 'collect never blocks; timeout_ms is ignored — 
 
 export interface MonitorToolDeps {
 	dispatch: DispatchContract;
+	runEvents?: Pick<DispatchRunEventRegistry, "eventTail">;
 }
 
 function runLine(run: RunEnvelope): string {
@@ -120,7 +124,7 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 
 function runPeek(deps: MonitorToolDeps, runId: string): ToolResult {
 	const run = deps.dispatch.getRun(runId);
-	const tail = runEventTail(runId);
+	const tail = deps.runEvents?.eventTail(runId) ?? null;
 	if (!tail || tail.entries.length === 0) {
 		if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
 		return {
@@ -438,9 +442,11 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 	return {
 		name: ToolNames.Monitor,
 		description:
-			"Inspect dispatched runs: mode=list enumerates known runs, status (default) reports one run's state, peek shows its recent output/events, receipt returns the stored receipt, wait observes one run for a bounded time until it finishes or timeout_ms elapses (it never cancels the run; use steer action=cancel to stop one), collect gathers a detached batch (batch_id) or run-id list: a pending snapshot while runs are in flight, full results once all are done.",
+			"Inspect known dispatched runs. Parent-model mid-run observation requires detach:true because ordinary dispatch auto-waits; the interactive operator/TUI can inspect an active synchronous run through the dispatch contract. mode=list enumerates known runs, status reports one run, peek shows recent events, receipt returns the stored receipt, wait observes one run to a bounded timeout without canceling it, and collect gathers detached results.",
 		parameters: Type.Object({
-			run_id: Type.Optional(Type.String({ description: "Run id from dispatch output; omit with mode=list." })),
+			run_id: Type.Optional(
+				Type.String({ description: "Run id from dispatch output or monitor list; omit with mode=list." }),
+			),
 			mode: Type.Optional(
 				stringEnum(["status", "peek", "receipt", "list", "wait", "collect"], "What to return (default status)."),
 			),

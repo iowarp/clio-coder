@@ -226,6 +226,7 @@ Arguments:
 
 - `tasks` (required unless `list:true`). Array of task strings or `{task, agent, target, model, cwd}` objects. Per-item fields override the top-level defaults below.
 - `mode` (optional). `parallel` (default) runs items concurrently; `sequential` runs them one at a time, each completing before the next dispatches. A single task always runs down the sequential path.
+- `detach` (optional boolean). For parallel fan-out, returns the durable batch id and run ids after registration while the shared event consumer continues in the background. This is the parent model's route to mid-run monitor/steer; ordinary synchronous, sequential, and pipeline calls auto-wait.
 - `list` (optional boolean). Returns the agent catalog instead of dispatching.
 - `agent` (optional). Default agent recipe for items that do not name one; default `coder`. `agent_id` is accepted as an alias inside items.
 - `target` (optional). Default configured target id.
@@ -241,7 +242,7 @@ Output is one batch-shaped summary even for a single task: a header `dispatch (<
 
 The summary separates three things that must never be conflated. Sealed receipt integrity is checked against the ledger for every run; a tampered or unverifiable receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner even when the process outcome succeeded. The receipt's verification state labels the worker's text block: `verified` renders as tool-verified worker output, `unverified` as worker claims in unverified prose, `not_applicable` as reconnaissance leads rather than validation evidence, and `unknown` (including legacy receipts without the field) as claims whose validation is not observable at this layer. Deterministic non-evidence notices flag failed runs, cap-exhausted runs, runs with zero successful tool calls, and citation-free reconnaissance.
 
-Sealed receipts are the durable evidence; the worker's prose is an advisory claim until its verification state is verified or you spot-check it. When a run's claims are unverified or unknown, the summary leads with the exact spot-check guidance: `Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.` Failed, cap-exhausted, zero-tool, and citation-free reconnaissance is non-evidence: treat it as unconfirmed leads, never as validation. Do not repeat an identical successful dispatch in the same user turn. Follow up with `monitor` for status, event tails, and receipts, and `steer` to guide or cancel a running worker.
+Sealed receipts are the durable evidence; the worker's prose is an advisory claim until its verification state is verified or you spot-check it. When a run's claims are unverified or unknown, the summary leads with the exact spot-check guidance: `Spot-check delegated claims before repeating them: re-read any cited file:line location, and re-run or inspect the named validation before repeating a "tests pass" claim.` Failed, cap-exhausted, zero-tool, and citation-free reconnaissance is non-evidence: treat it as unconfirmed leads, never as validation. Do not repeat an identical successful dispatch in the same user turn. For parent-model mid-run follow-up, choose `detach:true`, then use `monitor` for status, event tails, and receipts and `steer` to guide or cancel a running native worker.
 
 ```text
 dispatch(list=true)
@@ -394,12 +395,12 @@ web_fetch(url="https://example.com", format="raw")
 
 ## monitor: inspect dispatched runs
 
-Read-only visibility into dispatched runs, built on the dispatch domain's ledger, live snapshot, and the event stream the dispatch tool consumes. Source: `src/tools/monitor.ts`. Read class; runs in parallel with other reads.
+Read-only visibility into known synchronous and detached dispatched runs, built on the dispatch domain's ledger, live snapshot, and instance-scoped event tails. Synchronous dispatch auto-waits. The interactive operator/TUI can inspect an active synchronous run through the dispatch contract, but the parent model cannot schedule monitor while its sequential synchronous dispatch call is pending; it must choose `detach:true` to receive ids first. Source: `src/tools/monitor.ts`. Read class; runs in parallel with other reads.
 
 Arguments:
 
-- `run_id` (optional). A run id from dispatch output.
-- `mode` (optional). `list`, `status`, `peek`, or `receipt`. Default is `status` when `run_id` is given, `list` otherwise.
+- `run_id` (optional). A run id from dispatch output or `monitor(mode="list")`.
+- `mode` (optional). `list`, `status`, `peek`, `receipt`, `wait`, or `collect`. Default is `status` when `run_id` is given, `list` otherwise.
 
 Modes:
 
@@ -407,8 +408,10 @@ Modes:
 - `status`: one run's state and outcome, target/model/runtime, start/end times, exit code, tokens, cost, and receipt path. A still-running run adds a live line with phase, heartbeat, elapsed seconds, and token count.
 - `peek`: the bounded tail of the run's recent events buffered in this process (an in-process ring of 100 events per run across at most 64 runs, heartbeats excluded, 8KB output with the oldest entries trimmed first). Runs dispatched by another process, or before this process started, have no tail; monitor says so and points at `mode="receipt"` or `mode="status"`.
 - `receipt`: the stored receipt JSON, truncated at 14KB with a note naming the receipt path so you can read the rest.
+- `wait`: bounded observation of one run until it becomes terminal or the timeout elapses; timeout never cancels the run.
+- `collect`: a non-blocking barrier snapshot for a detached `batch_id` or explicit `run_ids`, returning full results once all are terminal.
 
-Use monitor to check on parallel workers without interrupting them; pair with steer when a run needs correction.
+Use monitor to check on detached parallel workers without interrupting them; pair with steer when a native run needs correction.
 
 ```text
 monitor(mode="list")
@@ -419,11 +422,11 @@ monitor(run_id="run-01H...", mode="receipt")
 
 ## steer: guide or cancel a running worker
 
-Controls a running dispatched worker. Source: `src/tools/steer.ts`. Dispatch class; sequential.
+Controls a running dispatched worker whose id is already available. Parent-model mid-run control requires detached dispatch because dispatch and steer are sequential; the interactive operator/TUI can steer an active synchronous native run through the dispatch contract. Source: `src/tools/steer.ts`. Dispatch class; sequential.
 
 Arguments:
 
-- `run_id` (required). A run id from dispatch output.
+- `run_id` (required). A run id from dispatch output or `monitor(mode="list")`.
 - `action` (required). `guide` or `cancel`.
 - `message` (required for `guide`). The steering text.
 

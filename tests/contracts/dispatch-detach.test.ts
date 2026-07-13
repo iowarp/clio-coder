@@ -9,8 +9,9 @@ import {
 	openDetachedBatchViews,
 } from "../../src/domains/middleware/dispatch-nudge.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
-import { createDispatchTool, runEventTail } from "../../src/tools/dispatch.js";
+import { createDispatchRunEventRegistry, createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
+import { createSteerTool } from "../../src/tools/steer.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -60,6 +61,60 @@ function gatedWorker(): { worker: SpawnedWorker; finish: (exitCode: number) => v
 	};
 }
 
+function steerableGatedWorker(): {
+	worker: SpawnedWorker;
+	finish: () => void;
+	sent: unknown[];
+} {
+	let settle!: (result: SpawnedWorkerResult) => void;
+	const promise = new Promise<SpawnedWorkerResult>((resolve) => {
+		settle = resolve;
+	});
+	const queued: unknown[] = [];
+	const readers: Array<(event: unknown) => void> = [];
+	let ended = false;
+	const emit = (event: unknown): void => {
+		const reader = readers.shift();
+		if (reader) reader(event);
+		else queued.push(event);
+	};
+	const events = (async function* (): AsyncIterableIterator<unknown> {
+		while (!ended || queued.length > 0) {
+			const event = queued.shift() ?? (await new Promise<unknown>((resolve) => readers.push(resolve)));
+			yield event;
+		}
+	})();
+	const sent: unknown[] = [];
+	return {
+		worker: {
+			pid: 102,
+			promise,
+			events,
+			abort: () => {
+				ended = true;
+				emit({ type: "clio_worker_aborted" });
+				settle({ exitCode: null, signal: "SIGTERM" });
+			},
+			heartbeatAt: { current: Date.now() },
+			send: (value: unknown) => {
+				sent.push(value);
+				emit({ type: "clio_steer_received", payload: { text: "focus on tests" } });
+				return true;
+			},
+		},
+		finish: () => {
+			emit({
+				type: "message_end",
+				message: { role: "assistant", content: "steered sync done", usage: { input: 1, output: 1 } },
+			});
+			ended = true;
+			emit({ type: "clio_worker_complete" });
+			settle({ exitCode: 0, signal: null });
+		},
+		sent,
+	};
+}
+
 function turnEndInput(overrides: Partial<MiddlewareHookInput> = {}): MiddlewareHookInput {
 	return {
 		hook: "turn_end",
@@ -93,7 +148,8 @@ describe("detached dispatch + collect", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker() });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const runEvents = createDispatchRunEventRegistry();
+			const tool = createDispatchTool({ dispatch: bundle.contract, runEvents });
 			const sequential = (await tool.run({ tasks: ["a"], detach: true, mode: "sequential" }, {})) as ToolRunResult;
 			strictEqual(sequential.kind, "error");
 			ok(sequential.kind === "error" && sequential.message.includes("parallel"));
@@ -109,7 +165,8 @@ describe("detached dispatch + collect", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => okWorker() });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const runEvents = createDispatchRunEventRegistry();
+			const tool = createDispatchTool({ dispatch: bundle.contract, runEvents });
 			const result = (await tool.run(
 				{ tasks: ["task one", "task two"], detach: true },
 				{ sessionId: "session-detach", ...approvedDispatch },
@@ -139,15 +196,98 @@ describe("detached dispatch + collect", () => {
 			// The drain also feeds the in-process tails (it can land a tick after
 			// finalization), so peek works.
 			await waitFor(
-				() => runIds.every((runId) => (runEventTail(runId)?.entries.length ?? 0) >= 1),
+				() => runIds.every((runId) => (runEvents.eventTail(runId)?.entries.length ?? 0) >= 1),
 				"run tails buffered in the background",
 			);
-			const monitor = createMonitorTool({ dispatch: bundle.contract });
+			const monitor = createMonitorTool({ dispatch: bundle.contract, runEvents });
 			const firstRunId = runIds[0];
 			ok(firstRunId !== undefined);
 			const peek = (await monitor.run({ mode: "peek", run_id: firstRunId }, {})) as ToolRunResult;
 			strictEqual(peek.kind, "ok");
 			ok(peek.kind === "ok" && (peek.details?.eventCount as number) >= 1, "run tail buffered for peek");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("the dispatch contract lets an interactive operator monitor and steer an in-flight synchronous native run", async () => {
+		const gated = steerableGatedWorker();
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => gated.worker });
+		await bundle.extension.start();
+		try {
+			const runEvents = createDispatchRunEventRegistry();
+			const tool = createDispatchTool({ dispatch: bundle.contract, runEvents });
+			const monitor = createMonitorTool({ dispatch: bundle.contract, runEvents });
+			const steer = createSteerTool({ dispatch: bundle.contract });
+			// Direct concurrent ToolSpec calls emulate operator/TUI contract access;
+			// they do not imply that the sequential parent-model tool scheduler can
+			// interleave monitor or steer while synchronous dispatch is pending.
+			const syncResult = tool.run({ task: "stay active for guidance", agent_id: "coder" }, approvedDispatch);
+			await waitFor(() => bundle.contract.listRuns().some((run) => run.status === "running"), "sync run admitted");
+			const active = bundle.contract.listRuns().find((run) => run.status === "running");
+			ok(active, "the synchronous run is operator-addressable through the dispatch contract");
+
+			const status = (await monitor.run({ mode: "status", run_id: active.id }, {})) as ToolRunResult;
+			strictEqual(status.kind, "ok");
+			strictEqual(status.details?.running, true);
+			const guided = (await steer.run(
+				{ action: "guide", run_id: active.id, message: "focus on tests" },
+				approvedDispatch,
+			)) as ToolRunResult;
+			strictEqual(guided.kind, "ok");
+			deepStrictEqual(gated.sent, [{ type: "steer", text: "focus on tests" }]);
+			await waitFor(
+				() => runEvents.eventTail(active.id)?.entries.some((entry) => entry.type === "clio_steer_received") === true,
+				"steer acknowledgement reached the registered sync tail",
+			);
+			const peek = (await monitor.run({ mode: "peek", run_id: active.id }, {})) as ToolRunResult;
+			strictEqual(peek.kind, "ok");
+			ok(peek.kind === "ok" && peek.output.includes("clio_steer_received"));
+
+			gated.finish();
+			const completed = (await syncResult) as ToolRunResult;
+			strictEqual(completed.kind, "ok");
+			ok(completed.kind === "ok" && completed.output.includes("steered sync done"));
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("reports detached registration failure honestly while the registered live drain continues", async () => {
+		const gated = gatedWorker();
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: () => gated.worker });
+		await bundle.extension.start();
+		try {
+			const detached = bundle.contract.detached;
+			ok(detached);
+			const failingContract = {
+				...bundle.contract,
+				detached: {
+					...detached,
+					register: async () => {
+						throw new Error("batch store unavailable");
+					},
+				},
+			};
+			const runEvents = createDispatchRunEventRegistry();
+			const tool = createDispatchTool({ dispatch: failingContract, runEvents });
+			const result = (await tool.run({ tasks: ["already live"], detach: true }, approvedDispatch)) as ToolRunResult;
+			strictEqual(result.kind, "error");
+			ok(result.kind === "error" && result.message.includes("detached runs started"));
+			ok(result.kind === "error" && result.message.includes("batch store unavailable"));
+			const runId = (result.details?.runIds as string[])[0];
+			ok(runId);
+			strictEqual(bundle.contract.getRun(runId)?.status, "running");
+
+			gated.finish(0);
+			await waitFor(
+				() => bundle.contract.getRun(runId)?.status === "completed",
+				"live run completed after register failure",
+			);
+			await waitFor(
+				() => runEvents.eventTail(runId)?.entries.some((entry) => entry.type === "message_end") === true,
+				"registered drain retained the terminal event after register failure",
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}

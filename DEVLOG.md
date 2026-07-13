@@ -45,6 +45,23 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
   once terminal, batch marked collected). A turn-end nudge surfaces
   completed uncollected batches and goes silent after collection.
 
+- **One ordinary dispatch consumer; synchronous dispatch is auto-wait.**
+  Every ordinary single or batch handle launched by the dispatch tool is
+  registered immediately with one instance-scoped event owner. That owner
+  drains the iterator exactly once, maintains bounded per-run monitor tails,
+  publishes fallback progress only when the dispatch domain does not own the
+  bus, and exposes one stream-plus-receipt completion promise. Synchronous and
+  pipeline paths await completion; detached dispatch returns after durable
+  batch registration while the same consumer continues, including when
+  registration fails after runs are live. Review and compete intentionally
+  retain direct coordinator drains: reviewer/judge output is staged before the
+  receipt-facing await so crash recovery keeps its write-ahead edge. The
+  interactive operator/TUI can inspect and steer an active synchronous native
+  run through the dispatch contract. Because dispatch and steer are sequential
+  model tools, the parent model gets mid-run monitor/steer control by choosing
+  detached dispatch and using its returned ids. ACP delegation remains
+  monitorable but non-steerable because it has no stdin channel.
+
 - **Review gate, compete topology, and plan approval.** `review:{reviewer?,
   max_cycles?}` runs a builder, then a reviewer pinned read-only through a
   new request-level autonomy narrowing (admission clamps to the lower of the
@@ -725,7 +742,9 @@ layer under `.clio/wiki/`.
   (`peek`) and the stored receipt JSON (`receipt`, 14KB cap).
   `steer(run_id, action=guide|cancel)` sends mid-run guidance over the
   dispatch contract's stdin steer channel (native workers) or aborts a run,
-  with `outcome=canceled` recorded on the receipt.
+  with `outcome=canceled` recorded on the receipt. Parent-model mid-run use
+  requires detached dispatch ids; the operator/TUI can address an active
+  synchronous native run directly through the dispatch contract.
 - **Observation envelope.** All six sized OBSERVE tools report truncation
   through one notice line with an exact continuation call
   (`[grep: 100/1000+ matches shown (16.0KB of 120KB) | full: <path> |
