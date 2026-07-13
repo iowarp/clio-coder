@@ -3490,8 +3490,24 @@ rl.once("line", (line) => {
 				conflict: false,
 			},
 			{
-				name: "impossible conflict",
+				name: "scout exhaustion followed by the loop-guard backstop",
 				codes: ["loop_guard_tools_disabled_exhausted", "scout_synthesis_contract_exhausted"] as const,
+				expected: "scout_synthesis_contract_exhausted" as const,
+				conflict: false,
+			},
+			{
+				name: "full loop degeneration",
+				codes: [
+					"worker_tool_call_cap_exhausted",
+					"loop_guard_tools_disabled_exhausted",
+					"scout_synthesis_contract_exhausted",
+				] as const,
+				expected: "scout_synthesis_contract_exhausted" as const,
+				conflict: false,
+			},
+			{
+				name: "impossible cross-family conflict",
+				codes: ["vram_capacity_fit_failure", "scout_synthesis_contract_exhausted"] as const,
 				expected: "scout_synthesis_contract_exhausted" as const,
 				conflict: true,
 			},
