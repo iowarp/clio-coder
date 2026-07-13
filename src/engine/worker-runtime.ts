@@ -468,6 +468,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// synthesis tool lock, so the next model round runs text-only and the
 			// synthesized answer still reaches message_end and the receipt.
 			if (isWorkerToolCallCapSynthesisReason(event.reason)) {
+				emit({ type: "clio_run_outcome", payload: { outcomeCode: "worker_tool_call_cap_exhausted" } });
 				if (workerBoundFailure === null) {
 					workerBoundFailure = event.reason;
 					process.stderr.write(`[worker] ${event.reason}\n`);
@@ -479,6 +480,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// after the lock. Both end the run; the first recorded bound wins the
 			// receipt diagnostic.
 			if (isWorkerToolCallCapExceededReason(event.reason) || isLoopGuardSynthesisBackstopReason(event.reason)) {
+				emit({
+					type: "clio_run_outcome",
+					payload: {
+						outcomeCode: isLoopGuardSynthesisBackstopReason(event.reason)
+							? "loop_guard_tools_disabled_exhausted"
+							: "worker_tool_call_cap_exhausted",
+					},
+				});
 				if (workerBoundAborted) return;
 				workerBoundAborted = true;
 				if (workerBoundFailure === null) workerBoundFailure = event.reason;
@@ -571,6 +580,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				} else if (workerBoundFailure === null) {
 					workerBoundFailure =
 						"Scout synthesis contract failed: two bounded corrective rounds still announced tool work or omitted verified live-read path:line citations";
+					emit({
+						type: "clio_run_outcome",
+						payload: { outcomeCode: "scout_synthesis_contract_exhausted" },
+					});
 					process.stderr.write(`[worker] ${workerBoundFailure}\n`);
 				}
 			}

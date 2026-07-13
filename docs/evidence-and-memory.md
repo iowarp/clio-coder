@@ -135,14 +135,12 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ### Computation and Lifecycle
 - **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
-- **Cryptographic Coverage**: The `findingsSummary` and the complete receipt provenance surface are protected under the single receipt integrity digest version (`RUN_RECEIPT_INTEGRITY_VERSION = 4`). Any field alteration invalidates verification, and a receipt declaring any other integrity version fails verification outright. Registering every receipt field in the digest coverage map is a compile-time requirement, so a new field can never ship outside integrity coverage.
+- **Cryptographic Coverage**: New receipts use v5 and authenticate every current receipt field, including normalized briefing provenance and `outcomeCode`, against the reconstructed ledger. The frozen v4 verifier authenticates only the historical v4 field set. A v4 receipt or corresponding ledger row that carries an own `briefing` or `outcomeCode` property fails verification, even when the value is `null` or `undefined`. Versions v1-v3 and every version other than v4/v5 are rejected.
 
-| Receipt integrity version | Fields added to the authenticated receipt projection | Current fields outside that projection |
+| Version | Verification policy | Fields outside its authenticated projection |
 |---|---|---|
-| v1 | Base identity, runtime, timing, token/cost, prompt hashes, tools, safety, reproducibility, runtime resolution, and session fields | `outcome`, `outcomeDetail`, `lineage`, `identity`, `node`, `reroutes`, `pipeline`, `gate`, `plan`, `personaOverride`, `projectContext`, `promptSignature`, `toolSignature`, `autonomyEnforcement`, `delegation`, `findingsSummary` |
-| v2 | `outcome`, `outcomeDetail`, `lineage`, `identity` | `node`, `reroutes`, `pipeline`, `gate`, `plan`, `personaOverride`, `projectContext`, `promptSignature`, `toolSignature`, `autonomyEnforcement`, `delegation`, `findingsSummary` |
-| v3 | `node`, `reroutes`, `gate`, `plan`, `autonomyEnforcement`, `findingsSummary` | `pipeline`, `personaOverride`, `projectContext`, `promptSignature`, `toolSignature`, `delegation` |
-| v4 | Every `RunReceiptDraft` field | None |
+| v4 | Frozen historical canonical projection and mismatch rules | `briefing`, `outcomeCode`; either property is forbidden on a v4 receipt or corresponding ledger row |
+| v5 | Current canonical projection, including normalized briefing provenance and `outcomeCode` on receipt and ledger surfaces | None |
 
 
 ---

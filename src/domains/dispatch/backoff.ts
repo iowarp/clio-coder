@@ -1,3 +1,5 @@
+import type { RunOutcomeCode } from "./types.js";
+
 /**
  * Exponential backoff state, pure. `nextDelay` returns the delay that should
  * be used BEFORE the next attempt, along with the updated state. The returned
@@ -45,16 +47,12 @@ export function reset(opts?: BackoffOptions): BackoffState {
 	return { attempts: 0, nextDelayMs: baseMs };
 }
 
-/**
- * Worker failures that retrying with identical parameters cannot heal. These
- * include model-residency verdicts and semantic loop-guard exhaustion. The
- * receipt already carries the useful failure; an identical background rerun
- * would only delay or hide it from the original caller.
- */
-const DETERMINISTIC_FAILURE_PATTERN =
-	/of VRAM but only .* is available|VRAM fit check failed|workerToolCallCap reached|loop guard: tool calls stayed disabled|Scout synthesis contract failed/i;
-
-export function isDeterministicWorkerFailure(message: string | null | undefined): boolean {
-	if (!message || message.length === 0) return false;
-	return DETERMINISTIC_FAILURE_PATTERN.test(message);
+/** True only for typed terminal conditions that retrying unchanged cannot heal. */
+export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefined): boolean {
+	return (
+		code === "vram_capacity_fit_failure" ||
+		code === "worker_tool_call_cap_exhausted" ||
+		code === "loop_guard_tools_disabled_exhausted" ||
+		code === "scout_synthesis_contract_exhausted"
+	);
 }

@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -109,6 +110,14 @@ describe("resolved dispatch plan admission", () => {
 		strictEqual(first.hash === second.hash, false, "changing only the approved task must change the plan hash");
 	});
 
+	it("binds briefing presence, bytes, hash, and a bounded preview into approval", () => {
+		const first = describeDispatchPlan({ tasks: [{ task: "inspect", briefing: "Prior finding: src/a.ts:12" }] });
+		const second = describeDispatchPlan({ tasks: [{ task: "inspect", briefing: "Different finding" }] });
+		match(first.text, /briefing_bytes=26 briefing_sha256=[0-9a-f]{64} briefing_preview=/);
+		strictEqual(first.tasks[0]?.briefing, "Prior finding: src/a.ts:12");
+		strictEqual(first.hash === second.hash, false, "changing only briefing must change the approval hash");
+	});
+
 	it("shows, approves once, pins, executes, and receipts explicit/profile/automatic placements", async () => {
 		for (const placementCase of ["explicit", "profile", "automatic"] as const) {
 			const settings = baseSettings();
@@ -193,6 +202,7 @@ describe("resolved dispatch plan admission", () => {
 				};
 				const args: Record<string, unknown> = {
 					tasks: ["perform the approved task"],
+					briefing: "approved parent context",
 					[RESOLVED_DISPATCH_PLAN_ARGUMENT]: forged,
 					...(placementCase === "explicit" ? { target: "primary", model: "explicit-model", node: "blade" } : {}),
 				};
@@ -207,6 +217,7 @@ describe("resolved dispatch plan admission", () => {
 				strictEqual(plan.taskCount, 1);
 				strictEqual(plan.tasks[0]?.agent, "coder");
 				strictEqual(plan.tasks[0]?.task, "perform the approved task");
+				strictEqual(plan.tasks[0]?.briefing, "approved parent context");
 				strictEqual(plan.tasks[0]?.target, "primary");
 				strictEqual(plan.tasks[0]?.model, expectedModel);
 				strictEqual(plan.tasks[0]?.node, expectedNode);
@@ -227,9 +238,10 @@ describe("resolved dispatch plan admission", () => {
 				})
 					.render(120)
 					.join("\n");
+				const compactOverlay = overlay.replace(/\s+/gu, "");
 				for (const line of plan.text.split("\n")) {
 					for (const field of line.trim().split(/\s+/u)) {
-						ok(overlay.includes(field), `${placementCase}: missing overlay field ${field}`);
+						ok(overlay.includes(field) || compactOverlay.includes(field), `${placementCase}: missing overlay field ${field}`);
 					}
 				}
 
@@ -241,6 +253,20 @@ describe("resolved dispatch plan admission", () => {
 				// argument object is changed while parked, execution restores the task
 				// the operator actually reviewed.
 				ask.args.tasks = ["substituted after approval"];
+				ask.args.briefing = "substituted briefing after approval";
+				const hidden = ask.args[RESOLVED_DISPATCH_PLAN_ARGUMENT] as {
+					tasks: Array<{ briefing?: string }>;
+				};
+				const hiddenTask = hidden.tasks[0];
+				ok(hiddenTask);
+				strictEqual(Reflect.set(hiddenTask, "briefing", "nested artifact substitution after approval"), false);
+				strictEqual(
+					Reflect.set(ask.args, RESOLVED_DISPATCH_PLAN_ARGUMENT, {
+						...hidden,
+						tasks: [{ ...hiddenTask, briefing: "replacement artifact substitution after approval" }],
+					}),
+					false,
+				);
 				await registry.resumeParkedCalls({
 					actionClass: "dispatch",
 					requestId: ask.requestId,
@@ -253,9 +279,16 @@ describe("resolved dispatch plan admission", () => {
 				strictEqual(asks.length, 1, `${placementCase}: one approval covers the complete plan`);
 				strictEqual(fabric.spawns.length, 1);
 				strictEqual(placementRequests[0], expectedNode, `${placementCase}: execution uses approved node pin`);
-				strictEqual(fabric.spawns[0]?.spec.target.id, "primary");
-				strictEqual(fabric.spawns[0]?.spec.wireModelId, expectedModel);
-				strictEqual(fabric.spawns[0]?.spec.task, "perform the approved task");
+				const firstSpawn = fabric.spawns[0];
+				ok(firstSpawn);
+				strictEqual(firstSpawn.spec.target.id, "primary");
+				strictEqual(firstSpawn.spec.wireModelId, expectedModel);
+				strictEqual(firstSpawn.spec.task, "perform the approved task");
+				const briefingMessage = (firstSpawn.spec.dynamicPromptMessages ?? []).find(
+					(message) => message.id === "dispatch-briefing",
+				);
+				ok(briefingMessage?.body.includes("approved parent context"));
+				strictEqual(briefingMessage?.body.includes("substituted briefing"), false);
 
 				const runs = (verdict.result.details?.runs ?? []) as Array<{ runId: string }>;
 				strictEqual(runs.length, 1);
@@ -266,6 +299,10 @@ describe("resolved dispatch plan admission", () => {
 				strictEqual(receipt.node?.host, `${expectedNode}.example.test`);
 				strictEqual(receipt.targetId, "primary");
 				strictEqual(receipt.wireModelId, expectedModel);
+				deepStrictEqual(receipt.briefing, {
+					bytes: Buffer.byteLength("approved parent context", "utf8"),
+					contentHash: createHash("sha256").update("approved parent context", "utf8").digest("hex"),
+				});
 				strictEqual(receipt.plan?.hash, plan.hash);
 				strictEqual(receipt.plan?.costCeilingUsd, plan.costCeilingUsd);
 				strictEqual(receipt.plan?.approval, "operator");

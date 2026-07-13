@@ -52,6 +52,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 		...(receipt.agentAudience !== undefined ? { agentAudience: receipt.agentAudience } : {}),
 		...(receipt.requestOrigin !== undefined ? { requestOrigin: receipt.requestOrigin } : {}),
 		task: receipt.task,
+		...(receipt.briefing !== undefined ? { briefing: receipt.briefing } : {}),
 		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
 		runtimeId: receipt.runtimeId,
@@ -82,6 +83,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 		envelope.outcome = receipt.outcome;
 		envelope.outcomeDetail = receipt.outcomeDetail ?? null;
 	}
+	if (receipt.outcomeCode !== undefined) envelope.outcomeCode = receipt.outcomeCode;
 	if (receipt.lineage !== undefined) envelope.lineage = receipt.lineage;
 	if (receipt.identity !== undefined) envelope.identity = receipt.identity;
 	if (receipt.node !== undefined) envelope.node = receipt.node;

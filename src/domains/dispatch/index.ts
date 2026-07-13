@@ -25,11 +25,13 @@ export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
 export type {
 	ReceiptVerificationState,
+	RunBriefingProvenance,
 	RunEnvelope,
 	RunKind,
+	RunOutcomeCode,
 	RunReceipt,
 	RunReceiptVerification,
 	RunStatus,
 	ToolCallStat,
 } from "./types.js";
-export type { JobSpec } from "./validation.js";
+export { DISPATCH_BRIEFING_MAX_BYTES, type JobSpec } from "./validation.js";

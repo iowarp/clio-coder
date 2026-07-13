@@ -1,26 +1,21 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isDeterministicWorkerFailure } from "../../src/domains/dispatch/backoff.js";
+import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
+import type { RunOutcomeCode } from "../../src/domains/dispatch/types.js";
 
 describe("contracts/dispatch retry fail-fast classifier", () => {
-	it("matches the reconciler's will-not-fit message shapes", () => {
-		ok(
-			isDeterministicWorkerFailure(
-				"'qwopus3.6-27b' needs ~24.1 GiB of VRAM but only 9.3 GiB is available on 'dynamo-fleet' at context 262144. Lower the context window, use a smaller KV-cache quant, or pick a smaller model or tier.",
-			),
-		);
-		ok(isDeterministicWorkerFailure("model load failed: VRAM fit check failed"));
-		ok(isDeterministicWorkerFailure("workerToolCallCap reached (50); tool calls are now disabled"));
-		ok(isDeterministicWorkerFailure("loop guard: tool calls stayed disabled and read was called again"));
-		ok(isDeterministicWorkerFailure("Scout synthesis contract failed: omitted path:line citations"));
+	it("suppresses every typed deterministic terminal condition", () => {
+		const codes: RunOutcomeCode[] = [
+			"vram_capacity_fit_failure",
+			"worker_tool_call_cap_exhausted",
+			"loop_guard_tools_disabled_exhausted",
+			"scout_synthesis_contract_exhausted",
+		];
+		for (const code of codes) strictEqual(isDeterministicOutcomeCode(code), true);
 	});
 
-	it("leaves transient and unknown failures retryable", () => {
-		strictEqual(isDeterministicWorkerFailure("connection refused"), false);
-		strictEqual(isDeterministicWorkerFailure("rate limited: 429"), false);
-		strictEqual(isDeterministicWorkerFailure("exit code 1"), false);
-		strictEqual(isDeterministicWorkerFailure(""), false);
-		strictEqual(isDeterministicWorkerFailure(null), false);
-		strictEqual(isDeterministicWorkerFailure(undefined), false);
+	it("does not classify absent or unrelated values", () => {
+		strictEqual(isDeterministicOutcomeCode(null), false);
+		strictEqual(isDeterministicOutcomeCode(undefined), false);
 	});
 });
