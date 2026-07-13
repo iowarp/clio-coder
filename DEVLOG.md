@@ -12,6 +12,8 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
 
 ### Added
 
+- **Canonical worker prompt compiler and agent-owned loop budgets.** Native dispatch now resolves effective autonomy and the final canonical toolkit once, then compiles identity-lite, the shared operating/task contract, sliced tool guidance, matching safety, and one recipe/override persona through the prompts domain. Dynamic project, memory, pipeline, task, and run-posture messages remain outside stable hashes. Recipe parsing strictly validates the exact `budget: {toolCalls, readReserve, synthesis}` object for built-in, user, and project agents; Scout declares `18/4/true`, Coder `50/5/true`, and missing custom budgets retain operator-default behavior. Dispatch transports the clamped phase policy plus the independent operator attempt cap through `WorkerSpec`; native and Claude SDK enforce canonical counting/read reserve/synthesis, coincident Coder `50/50` completes call 50 before graceful synthesis, and Claude Code/Antigravity reject explicit budgets they cannot mediate. Scout citation quarantine, split recommendations, and two corrective provider rounds remain role-specific.
+
 - **Worker transport seam with an SSH tier.** Worker spawning is
   transport-neutral: the WorkerSpec/stdin + NDJSON/stdout protocol crosses
   the wire unchanged through `ssh -T` with a whitelisted environment

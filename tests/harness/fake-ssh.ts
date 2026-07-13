@@ -42,7 +42,9 @@ let specSeen = false;
 let eofExit = true;
 
 function announce() {
-	emit({ type: "worker_announce", pid: process.pid, host: "fake-node" });
+	const value = { type: "worker_announce", pid: process.pid, host: "fake-node", specVersion: scenario === "version-skew" ? 1 : 2 };
+	if (scenario === "missing-announce-version") delete value.specVersion;
+	emit(value);
 }
 
 function assistant(text) {
@@ -53,7 +55,20 @@ rl.on("line", (line) => {
 	if (line.trim().length === 0) return;
 	if (!specSeen) {
 		specSeen = true;
+		if (scenario === "no-announce-event") {
+			assistant("must not be accepted");
+			setTimeout(() => assistant("must not be accepted later"), 50);
+			setInterval(() => {}, 1000);
+			return;
+		}
+		if (scenario === "no-announce-exit0") {
+			process.exit(0);
+		}
 		announce();
+		if (scenario === "version-skew" || scenario === "missing-announce-version") {
+			setTimeout(() => assistant("must not execute"), 50);
+			return;
+		}
 		if (scenario === "ok") {
 			assistant("remote ok");
 			process.exit(0);

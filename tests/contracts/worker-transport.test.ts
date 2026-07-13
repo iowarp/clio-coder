@@ -25,11 +25,12 @@ import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { type FakeSsh, installFakeSsh } from "../harness/fake-ssh.js";
 
 const TEST_SPEC = {
-	specVersion: 1,
+	specVersion: WORKER_SPEC_VERSION,
 	systemPrompt: "",
 	agentId: "coder",
 	task: "transport test",
@@ -38,6 +39,7 @@ const TEST_SPEC = {
 	runtimeId: "openai",
 	wireModelId: "gpt-4o",
 	allowedTools: ["read"],
+	budget: { toolCalls: 18, readReserve: 4, synthesis: true, hardCap: 50 },
 } as unknown as WorkerSpec;
 
 const SSH_NODE = {
@@ -150,6 +152,46 @@ describe("ssh worker transport channel contract", () => {
 		const result: SpawnedWorkerResult = await two.promise;
 		strictEqual(result.exitCode, 2);
 		match(result.stderrTail ?? "", /fake runtime exploded/);
+	});
+
+	it("fails remote WorkerSpec version skew before accepting execution events", async () => {
+		const worker = transport("version-skew").spawn(TEST_SPEC, { cwd: "/w" });
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, remote announced 1/);
+	});
+
+	it("rejects a worker announce with no specVersion", async () => {
+		const worker = transport("missing-announce-version").spawn(TEST_SPEC, { cwd: "/w" });
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, remote announced undefined/);
+	});
+
+	it("fails closed when the first remote protocol event is not an announce", async () => {
+		const worker = transport("no-announce-event").spawn(TEST_SPEC, { cwd: "/w" });
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /Missing worker_announce handshake: first protocol event was message_end/);
+	});
+
+	it("fails closed when the remote peer exits cleanly without an announce", async () => {
+		const worker = transport("no-announce-exit0").spawn(TEST_SPEC, { cwd: "/w" });
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, []);
+		strictEqual(result.exitCode, 1);
+		strictEqual(result.signal, null);
+		match(result.stderrTail ?? "", /Missing worker_announce handshake: peer exited before announcing specVersion 2/);
 	});
 
 	it("round-trips a steer line over the channel", async () => {

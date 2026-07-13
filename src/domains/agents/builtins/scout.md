@@ -6,6 +6,10 @@ audience: shadow
 category: explore
 capabilityClass: read-only
 latencyClass: fast
+budget:
+  toolCalls: 18
+  readReserve: 4
+  synthesis: true
 tags: [codewiki, reconnaissance, symbols]
 model: null
 provider: null

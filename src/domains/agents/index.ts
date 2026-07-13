@@ -19,6 +19,7 @@ export { listFleetContracts, loadFleetContract, parseFleetContract, renderFleetP
 export type { Fleet, FleetStep } from "./fleet-parser.js";
 export { parseFleet } from "./fleet-parser.js";
 export { AgentsManifest } from "./manifest.js";
-export type { AgentRecipe, RecipeSource } from "./recipe.js";
+export type { AgentBudget, AgentRecipe, RecipeSource } from "./recipe.js";
+export { parseAgentBudget } from "./recipe.js";
 export type { AgentCapabilityClass, AgentCategory, AgentLatencyClass, AgentSpec } from "./spec.js";
 export { agentSpecPolicyErrors, assertAgentSpecPolicy, normalizeAgentSpec } from "./spec.js";

@@ -1,5 +1,5 @@
 import type { SafeEventBus } from "../core/event-bus.js";
-import { ToolNames } from "../core/tool-names.js";
+import { type ToolName, ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -276,6 +276,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 };
+
+/** Canonical, registry-owned prompt hints for an already-admitted tool set. */
+export function toolPromptHintsForNames(names: ReadonlyArray<ToolName>): ReadonlyArray<{ tool: string; hint: string }> {
+	const seen = new Set<string>();
+	const hints: Array<{ tool: string; hint: string }> = [];
+	for (const name of [...names].sort()) {
+		if (seen.has(name)) continue;
+		seen.add(name);
+		const hint = TOOL_METADATA[name]?.promptHint?.trim();
+		if (hint) hints.push({ tool: name, hint });
+	}
+	return hints;
+}
 
 function withBuiltinMetadata<T extends ToolSpec>(spec: T): T {
 	const metadata = TOOL_METADATA[spec.name];

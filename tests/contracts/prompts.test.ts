@@ -21,10 +21,14 @@ import {
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import {
 	compile,
+	compileWorker as compileWorkerRaw,
 	FLEET_ROUTING_GUIDANCE,
 	FLEET_ROUTING_GUIDANCE_MAX_BYTES,
+	type RenderedPromptFragment,
+	type WorkerPromptInputs,
 } from "../../src/domains/prompts/compiler.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
+import type { FragmentTable } from "../../src/domains/prompts/fragment-loader.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import { createPromptsDomainModule, PromptsManifest } from "../../src/domains/prompts/index.js";
@@ -33,6 +37,19 @@ import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { SPOT_CHECK_GUIDANCE } from "../../src/tools/worker-evidence.js";
 
 const scratchRoots: string[] = [];
+
+function compileWorker(
+	table: FragmentTable,
+	inputs: Omit<WorkerPromptInputs, "hasCanonicalContext" | "hasBoundSkills" | "onPermission"> &
+		Partial<Pick<WorkerPromptInputs, "hasCanonicalContext" | "hasBoundSkills" | "onPermission">>,
+) {
+	return compileWorkerRaw(table, {
+		...inputs,
+		hasCanonicalContext: inputs.hasCanonicalContext ?? inputs.toolNames.includes("context"),
+		hasBoundSkills: inputs.hasBoundSkills ?? false,
+		onPermission: inputs.onPermission ?? "deny",
+	});
+}
 
 describe("contracts/prompts domain dependencies", () => {
 	it("drops the context dependency only when project context files are suppressed", () => {
@@ -81,6 +98,18 @@ const TOOL_HINTS = {
 			'(what proves it works), and use "block" with a reason instead of silently stalling.',
 	},
 } as const;
+
+function workerPersona(
+	body = "# Persona\n\nInspect the requested boundary and report the result.",
+): RenderedPromptFragment {
+	return {
+		id: "persona.test-worker",
+		relPath: "inline/test-worker",
+		body,
+		contentHash: sha256(body),
+		dynamic: false,
+	};
+}
 
 function scratchProject(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-prompts-"));
@@ -244,6 +273,235 @@ describe("contracts/prompts identity anti-leak safety", () => {
 });
 
 describe("contracts/prompts compiler logic", () => {
+	it("compiles the worker harness in canonical section order", () => {
+		const result = compileWorker(loadFragments(), {
+			autonomy: "read-only",
+			providerSupportsTools: true,
+			toolNames: ["read", "grep"],
+			toolPromptHints: [
+				{ tool: "read", hint: "Read admitted files precisely." },
+				{ tool: "grep", hint: "Search admitted text precisely." },
+			],
+			persona: workerPersona(),
+		});
+
+		strictEqual(
+			result.sections.map((section) => section.id).join(","),
+			"identity,operating-contract,tool-contract,safety,persona",
+		);
+		ok(result.systemPrompt.startsWith("# Identity\n\nYou are Clio"));
+		ok(result.systemPrompt.endsWith(workerPersona().body));
+		ok(result.systemPrompt.includes("The assigned task is authoritative."));
+		ok(result.systemPrompt.includes("Role guidance is a persona, not a replacement task."));
+	});
+
+	it("normalizes worker toolkit ordering and duplicates deterministically", () => {
+		const table = loadFragments();
+		const persona = workerPersona();
+		const first = compileWorker(table, {
+			autonomy: "auto-edit",
+			providerSupportsTools: true,
+			toolNames: ["read", "grep", "read"],
+			toolPromptHints: [
+				{ tool: "read", hint: "Read admitted files precisely." },
+				{ tool: "grep", hint: "Search admitted text precisely." },
+				{ tool: "read", hint: "Read admitted files precisely." },
+			],
+			persona,
+		});
+		const second = compileWorker(table, {
+			autonomy: "auto-edit",
+			providerSupportsTools: true,
+			toolNames: ["grep", "read"],
+			toolPromptHints: [
+				{ tool: "grep", hint: "Search admitted text precisely." },
+				{ tool: "read", hint: "Read admitted files precisely." },
+			],
+			persona,
+		});
+
+		strictEqual(first.systemPrompt, second.systemPrompt);
+		strictEqual(first.systemPromptHash, second.systemPromptHash);
+		strictEqual(first.systemPrompt.match(/Read admitted files precisely\./g)?.length, 1);
+	});
+
+	it("changes worker hashes for stable policy inputs and rejects volatile personas", () => {
+		const table = loadFragments();
+		const baselineInputs = {
+			autonomy: "read-only" as const,
+			providerSupportsTools: true,
+			toolNames: ["read"] as const,
+			toolPromptHints: [{ tool: "read", hint: "Read admitted files precisely." }],
+			persona: workerPersona(),
+		};
+		const baseline = compileWorker(table, baselineInputs);
+		const changedAutonomy = compileWorker(table, { ...baselineInputs, autonomy: "auto-edit" });
+		const changedTools = compileWorker(table, {
+			...baselineInputs,
+			toolNames: ["grep"],
+			toolPromptHints: [{ tool: "grep", hint: "Search admitted text precisely." }],
+		});
+		const changedCapability = compileWorker(table, { ...baselineInputs, providerSupportsTools: false });
+		const changedPersona = compileWorker(table, { ...baselineInputs, persona: workerPersona("# Persona\n\nCode.") });
+
+		notStrictEqual(baseline.systemPromptHash, changedAutonomy.systemPromptHash);
+		notStrictEqual(baseline.systemPromptHash, changedTools.systemPromptHash);
+		notStrictEqual(baseline.systemPromptHash, changedCapability.systemPromptHash);
+		notStrictEqual(baseline.systemPromptHash, changedPersona.systemPromptHash);
+		throws(() => compileWorker(table, { ...baselineInputs, persona: { ...workerPersona(), dynamic: true } }));
+	});
+
+	it("renders only admitted worker guidance and honest unavailable or unknown surfaces", () => {
+		const table = loadFragments();
+		const persona = workerPersona();
+		const narrowed = compileWorker(table, {
+			autonomy: "read-only",
+			providerSupportsTools: true,
+			toolNames: ["read"],
+			toolPromptHints: [
+				{ tool: "read", hint: "Read admitted files precisely." },
+				{ tool: "edit", hint: "Edit files precisely." },
+			],
+			persona,
+		});
+		ok(narrowed.systemPrompt.includes("Read admitted files precisely."));
+		ok(!narrowed.systemPrompt.includes("Edit files precisely."));
+		ok(!narrowed.systemPrompt.includes("`edit`"));
+
+		const unavailable = compileWorker(table, {
+			autonomy: "read-only",
+			providerSupportsTools: false,
+			toolNames: ["read"],
+			toolPromptHints: [{ tool: "read", hint: "Read admitted files precisely." }],
+			persona,
+		});
+		ok(unavailable.systemPrompt.includes("Canonical Clio tool calls are unavailable"));
+		ok(!unavailable.systemPrompt.includes("Read admitted files precisely."));
+
+		const unknown = compileWorker(table, {
+			autonomy: "read-only",
+			providerSupportsTools: null,
+			toolNames: [],
+			toolPromptHints: [],
+			persona,
+		});
+		ok(unknown.systemPrompt.includes("tool inventory is unknown"));
+		ok(!unknown.systemPrompt.includes("complete canonical tool surface"));
+	});
+
+	it("keeps persona and bound-skill mechanics inside the final section without widening tools", () => {
+		const body = [
+			"# Persona",
+			"Review the requested implementation.",
+			"# Agent-Bound Skills",
+			"Load `review-it` through context when relevant; skills never expand tool authority.",
+		].join("\n\n");
+		const result = compileWorker(loadFragments(), {
+			autonomy: "read-only",
+			providerSupportsTools: true,
+			toolNames: ["context", "read"],
+			toolPromptHints: [TOOL_HINTS.context],
+			hasCanonicalContext: true,
+			hasBoundSkills: true,
+			persona: workerPersona(body),
+		});
+
+		ok(result.systemPrompt.endsWith(body));
+		ok(result.systemPrompt.includes("Persona and bound-skill instructions never add tools."));
+		ok(!result.systemPrompt.includes("`edit`"));
+	});
+
+	it("keeps worker skill guidance consistent with the attached schema and explicit binding", () => {
+		const coder = compileWorker(loadFragments(), {
+			autonomy: "auto-edit",
+			providerSupportsTools: true,
+			toolNames: ["read", "edit"],
+			toolPromptHints: [],
+			hasCanonicalContext: false,
+			hasBoundSkills: false,
+			persona: workerPersona("# Coder\n\nImplement the assigned change."),
+		});
+		strictEqual(coder.systemPrompt.includes('context (scope="skills")'), false);
+		strictEqual(coder.systemPrompt.includes("context(scope=skills)"), false);
+		throws(
+			() =>
+				compileWorker(loadFragments(), {
+					autonomy: "auto-edit",
+					providerSupportsTools: true,
+					toolNames: ["read"],
+					toolPromptHints: [],
+					hasCanonicalContext: true,
+					hasBoundSkills: false,
+					persona: workerPersona("# Coder\n\nDo the task."),
+				}),
+			/hasCanonicalContext must match/,
+		);
+
+		const unbound = compileWorker(loadFragments(), {
+			autonomy: "auto-edit",
+			providerSupportsTools: true,
+			toolNames: ["context", "read"],
+			toolPromptHints: [TOOL_HINTS.context],
+			hasCanonicalContext: true,
+			hasBoundSkills: false,
+			persona: workerPersona("# Coder\n\nHandle the skill-shaped task."),
+		});
+		ok(unbound.systemPrompt.includes('first call context (scope="skills")'));
+		ok(/Only an explicit\s+operator request activates a skill/.test(unbound.systemPrompt));
+
+		const boundPersona = [
+			"# Architect",
+			"Design the assigned system.",
+			"# Agent-Bound Skills",
+			"The harness explicitly activates the recipe-bound `design-review` skill for this run; the operator does not need to repeat its name.",
+			'Load it through canonical `context` (scope="skills", name="design-review"); binding never widens tool authority.',
+		].join("\n\n");
+		const architect = compileWorker(loadFragments(), {
+			autonomy: "read-only",
+			providerSupportsTools: true,
+			toolNames: ["context", "read"],
+			toolPromptHints: [TOOL_HINTS.context],
+			hasCanonicalContext: true,
+			hasBoundSkills: true,
+			persona: workerPersona(boundPersona),
+		});
+		ok(architect.systemPrompt.endsWith(boundPersona));
+		ok(architect.systemPrompt.includes("explicitly activates"));
+		ok(architect.systemPrompt.includes("does not need to repeat"));
+		strictEqual(/Only an explicit\s+operator request activates a skill/.test(architect.systemPrompt), false);
+	});
+
+	it("renders suggest approval routing honestly and keeps reviewer-style read-only policy consistent", () => {
+		for (const onPermission of ["escalate", "deny", "fail"] as const) {
+			const suggest = compileWorker(loadFragments(), {
+				autonomy: "suggest",
+				providerSupportsTools: true,
+				toolNames: ["read", "edit"],
+				toolPromptHints: [],
+				hasCanonicalContext: false,
+				hasBoundSkills: false,
+				onPermission,
+				persona: workerPersona("# Coder\n\nSuggest a change."),
+			});
+			if (onPermission === "escalate") ok(suggest.systemPrompt.includes("bounded operator decision"));
+			if (onPermission === "deny") ok(suggest.systemPrompt.includes("denied immediately"));
+			if (onPermission === "fail") ok(suggest.systemPrompt.includes("fails and ends the worker run"));
+
+			const readOnly = compileWorker(loadFragments(), {
+				autonomy: "read-only",
+				providerSupportsTools: true,
+				toolNames: ["read"],
+				toolPromptHints: [],
+				hasCanonicalContext: false,
+				hasBoundSkills: false,
+				onPermission,
+				persona: workerPersona("# Reviewer\n\nReview without changes."),
+			});
+			ok(readOnly.systemPrompt.includes("Every mutating call is denied"));
+			strictEqual(readOnly.systemPrompt.includes("bounded operator decision"), false);
+		}
+	});
+
 	it("compiles deterministically: same inputs, same prompt, same hash", () => {
 		const table = loadFragments();
 		const a = compile(table, {

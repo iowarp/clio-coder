@@ -21,7 +21,6 @@ import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../.
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "../../src/engine/ai.js";
 import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import {
-	SCOUT_EXPLORATION_TOOL_CALL_LIMIT,
 	SCOUT_SYNTHESIS_CORRECTION_LIMIT,
 	startWorkerRun,
 	type WorkerRunHandle,
@@ -30,6 +29,9 @@ import {
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+
+const SCOUT_TOOL_CALLS = 18;
+const SCOUT_BUDGET = { toolCalls: 18, readReserve: 4, synthesis: true, hardCap: 50 } as const;
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -83,6 +85,7 @@ const MINIMAL_SPEC_LINE = `${JSON.stringify({
 	target: { id: "e", runtime: "x" },
 	wireModelId: "m",
 	allowedTools: ["bash"],
+	budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
 })}\n`;
 
 type PermissionDecision = "approve" | "deny";
@@ -747,11 +750,10 @@ describe("contracts/worker-steer", () => {
 			return "";
 		}
 
-		it("gives a cap-exhausted run one text-only synthesis round instead of aborting", async () => {
-			// With cap=3, three tool calls execute; the fourth attempt is blocked
-			// before its body runs and flips the request-level tool lock; the next
-			// scripted response is plain text, which must reach message_end while
-			// the run still exits non-clean (the cap was a real bound).
+		it("gives a coincident agent boundary and hard cap one graceful synthesis round", async () => {
+			// The final admitted call may complete. Because the agent phase boundary
+			// and hard cap coincide, the phase transition wins before an over-cap
+			// attempt is needed and the following provider round is text-only.
 			await withWorkerCap(3, async () => {
 				const scratch = mkdtempSync(join(tmpdir(), "clio-cap-synthesis-"));
 				const events: unknown[] = [];
@@ -763,26 +765,18 @@ describe("contracts/worker-steer", () => {
 					});
 				};
 				const { input, unregister } = fauxRuntimeInput(
-					[
-						readCall(1),
-						readCall(2),
-						readCall(3),
-						readCall(4),
-						fauxAssistantMessage("synthesized after cap from gathered context"),
-					],
+					[readCall(1), readCall(2), readCall(3), fauxAssistantMessage("synthesized after cap from gathered context")],
 					{ allowedTools: [ToolNames.Read], task: "summarize the scratch files" },
 				);
 				try {
 					const result = await startWorkerRun(input, (event) => events.push(event)).promise;
 					const finishes = toolFinishes(events);
-					strictEqual(result.exitCode, 1, "a cap-exhausted run must not present as an unconstrained success");
+					strictEqual(result.exitCode, 0, "a graceful phase transition is not hard-cap exhaustion");
 					strictEqual(finishes.filter((finish) => finish.outcome === "ok").length, 3, "exactly cap calls executed");
 					const capFinish = finishes.find((finish) =>
 						String(finish.reason ?? "").startsWith("workerToolCallCap reached (3); tool calls are now disabled"),
 					);
-					strictEqual(capFinish?.outcome, "blocked", "the crossing attempt is blocked, its body never runs");
-					strictEqual(capFinish?.decision, "blocked");
-					strictEqual(capFinish?.reasonCode, "guard_block");
+					strictEqual(capFinish, undefined, "the coincident boundary does not require an over-cap attempt");
 					strictEqual(
 						lastAssistantText(events),
 						"synthesized after cap from gathered context",
@@ -795,7 +789,7 @@ describe("contracts/worker-steer", () => {
 			});
 		});
 
-		it("stops a model that keeps emitting tool calls after the cap at the bounded backstop", async () => {
+		it("lets the operator hard cap win when a model calls again after a coincident boundary", async () => {
 			await withWorkerCap(3, async () => {
 				const events: unknown[] = [];
 				const { input, unregister } = fauxRuntimeInput(
@@ -817,28 +811,141 @@ describe("contracts/worker-steer", () => {
 						3,
 						"exactly cap attempts reached the permission seam",
 					);
-					// Attempt 4 is the cap lockout; the bounded backstop then ends the
-					// run: the guard tolerates LOOP_SYNTHESIS_BACKSTOP_DENIALS further
-					// attempts, so the spiral cannot loop to the scripted end.
-					const capBlocks = reasons.filter((reason) =>
-						reason.startsWith("workerToolCallCap reached (3); tool calls are now disabled"),
-					);
-					strictEqual(capBlocks.length, 3, "the lockout plus the two bounded denials carry the synthesis directive");
-					ok(
-						reasons.some((reason) => reason.includes("was called again instead of answering")),
-						"the backstop reason ends the run",
-					);
-					strictEqual(finishes.length, 7, "3 denied calls + lockout + 2 bounded denials + the backstop, nothing more");
+					const capBlocks = reasons.filter((reason) => reason.startsWith("workerToolCallCap reached (3); abort run"));
+					strictEqual(capBlocks.length, 1, "the first post-boundary attempt crosses the independent hard cap");
+					strictEqual(finishes.length, 4, "three admitted attempts plus one hard-cap noncompliance block");
 				} finally {
 					unregister();
 				}
 			});
 		});
 
+		it("applies a transported 18/4 synthesis budget to a non-Scout custom agent", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-custom-budget-"));
+			const events: unknown[] = [];
+			const calls = Array.from({ length: SCOUT_TOOL_CALLS }, (_, index) => {
+				const path = join(scratch, `evidence-${index}.md`);
+				writeFileSync(path, `evidence ${index}\n`);
+				return fauxToolCall("read", { path }, { id: `custom-read-${index}` });
+			});
+			const { input, unregister } = fauxRuntimeInput(
+				[fauxAssistantMessage(calls, { stopReason: "toolUse" }), fauxAssistantMessage("custom synthesis complete")],
+				{
+					agentId: "custom-bounded",
+					budget: SCOUT_BUDGET,
+					task: "collect bounded evidence",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				strictEqual(result.exitCode, 0);
+				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "ok").length, SCOUT_TOOL_CALLS);
+				strictEqual(lastAssistantText(events), "custom synthesis complete");
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
+		it("stops a transported synthesis=false budget after the final admitted call", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-no-synthesis-budget-"));
+			const events: unknown[] = [];
+			const paths = [join(scratch, "one.md"), join(scratch, "two.md"), join(scratch, "blocked-sibling.md")];
+			for (const [index, path] of paths.entries()) writeFileSync(path, `evidence ${index}\n`);
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(
+						paths.map((path, index) => fauxToolCall("read", { path }, { id: `no-synthesis-${index}` })),
+						{ stopReason: "toolUse" },
+					),
+					fauxAssistantMessage("must not receive a synthesis round"),
+				],
+				{
+					agentId: "custom-stop",
+					budget: { toolCalls: 2, readReserve: 0, synthesis: false, hardCap: 10 },
+					task: "perform two bounded reads",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				strictEqual(result.exitCode, 1);
+				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "ok").length, 2);
+				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "blocked").length, 1);
+				strictEqual(lastAssistantText(events).includes("must not receive"), false);
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
+		it("waits for a slow final admitted native tool result before stopping synthesis=false", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-no-synthesis-slow-final-"));
+			const releasePath = join(scratch, "release");
+			const events: unknown[] = [];
+			const finalCallId = "no-synthesis-slow-final";
+			const command = `while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.01; done; printf final-tool-complete`;
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage([fauxToolCall("bash", { command }, { id: finalCallId })], { stopReason: "toolUse" }),
+					fauxAssistantMessage("must not receive a synthesis round"),
+				],
+				{
+					agentId: "custom-stop-slow",
+					budget: { toolCalls: 1, readReserve: 0, synthesis: false, hardCap: 10 },
+					task: "finish the admitted command before stopping",
+					allowedTools: [ToolNames.Bash],
+					autonomy: "full-auto",
+				},
+			);
+			try {
+				const handle = startWorkerRun(input, (event) => events.push(event));
+				await waitFor(
+					() =>
+						events.find(
+							(event) =>
+								(event as { type?: unknown; toolCallId?: unknown }).type === "tool_execution_start" &&
+								(event as { toolCallId?: unknown }).toolCallId === finalCallId,
+						),
+					"slow final tool never started",
+				);
+				await expectPending(handle.promise, "synthesis:false slow final tool");
+				writeFileSync(releasePath, "release\n");
+				const result = await handle.promise;
+
+				strictEqual(result.exitCode, 1);
+				const toolResult = events.find((event) => {
+					const candidate = event as {
+						type?: unknown;
+						message?: { role?: unknown; toolCallId?: unknown; content?: Array<{ type?: unknown; text?: unknown }> };
+					};
+					return (
+						candidate.type === "message_end" &&
+						candidate.message?.role === "toolResult" &&
+						candidate.message.toolCallId === finalCallId
+					);
+				}) as { message?: { content?: Array<{ type?: unknown; text?: unknown }> } } | undefined;
+				ok(toolResult, "the completed final tool result is emitted before settlement");
+				ok(
+					toolResult.message?.content?.some(
+						(block) => block.type === "text" && typeof block.text === "string" && block.text.includes("final-tool-complete"),
+					),
+					"the emitted result is the truthful completed tool output",
+				);
+				strictEqual(lastAssistantText(events).includes("must not receive"), false);
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
 		it("gives a wide Scout batch one graceful synthesis round at the soft exploration limit", async () => {
 			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-soft-limit-"));
 			const events: unknown[] = [];
-			const callCount = SCOUT_EXPLORATION_TOOL_CALL_LIMIT + 8;
+			const callCount = SCOUT_TOOL_CALLS + 8;
 			const calls = Array.from({ length: callCount }, (_, index) => {
 				const path = join(scratch, `scout-${index}.md`);
 				writeFileSync(path, `evidence ${index}\n`);
@@ -851,6 +958,7 @@ describe("contracts/worker-steer", () => {
 				],
 				{
 					agentId: "scout",
+					budget: SCOUT_BUDGET,
 					task: "map one bounded area",
 					allowedTools: [ToolNames.Read],
 					autonomy: "read-only",
@@ -860,14 +968,12 @@ describe("contracts/worker-steer", () => {
 				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
 				const finishes = toolFinishes(events);
 				strictEqual(result.exitCode, 0, "soft exploration transition must not turn a synthesis into failure");
-				strictEqual(finishes.filter((finish) => finish.outcome === "ok").length, SCOUT_EXPLORATION_TOOL_CALL_LIMIT);
+				strictEqual(finishes.filter((finish) => finish.outcome === "ok").length, SCOUT_TOOL_CALLS);
 				strictEqual(
 					finishes.filter(
 						(finish) =>
 							finish.outcome === "blocked" &&
-							String(finish.reason ?? "").startsWith(
-								`worker exploration budget reached (${SCOUT_EXPLORATION_TOOL_CALL_LIMIT})`,
-							),
+							String(finish.reason ?? "").startsWith(`worker exploration budget reached (${SCOUT_TOOL_CALLS})`),
 					).length,
 					8,
 					"every over-budget sibling is denied without consuming the round backstop",
@@ -885,7 +991,7 @@ describe("contracts/worker-steer", () => {
 		it("corrects consecutive narrated Scout syntheses and requires a cited final handoff", async () => {
 			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-synthesis-correction-"));
 			const events: unknown[] = [];
-			const callCount = SCOUT_EXPLORATION_TOOL_CALL_LIMIT + 2;
+			const callCount = SCOUT_TOOL_CALLS + 2;
 			const calls = Array.from({ length: callCount }, (_, index) => {
 				const path = join(scratch, `scout-${index}.md`);
 				writeFileSync(path, `evidence ${index}\n`);
@@ -900,6 +1006,7 @@ describe("contracts/worker-steer", () => {
 				],
 				{
 					agentId: "scout",
+					budget: SCOUT_BUDGET,
 					task: "map one bounded area",
 					allowedTools: [ToolNames.Read],
 					autonomy: "read-only",
@@ -946,7 +1053,7 @@ describe("contracts/worker-steer", () => {
 		it("fails a Scout that ignores both bounded synthesis corrections", async () => {
 			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-synthesis-refusal-"));
 			const events: unknown[] = [];
-			const callCount = SCOUT_EXPLORATION_TOOL_CALL_LIMIT + 2;
+			const callCount = SCOUT_TOOL_CALLS + 2;
 			const calls = Array.from({ length: callCount }, (_, index) => {
 				const path = join(scratch, `scout-${index}.md`);
 				writeFileSync(path, `evidence ${index}\n`);
@@ -962,6 +1069,7 @@ describe("contracts/worker-steer", () => {
 				],
 				{
 					agentId: "scout",
+					budget: SCOUT_BUDGET,
 					task: "map one bounded area",
 					allowedTools: [ToolNames.Read],
 					autonomy: "read-only",
@@ -985,10 +1093,7 @@ describe("contracts/worker-steer", () => {
 					SCOUT_SYNTHESIS_CORRECTION_LIMIT,
 					"only the bounded number of corrective provider rounds is admitted",
 				);
-				strictEqual(
-					toolFinishes(events).filter((finish) => finish.outcome === "ok").length,
-					SCOUT_EXPLORATION_TOOL_CALL_LIMIT,
-				);
+				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "ok").length, SCOUT_TOOL_CALLS);
 			} finally {
 				unregister();
 				rmSync(scratch, { recursive: true, force: true });

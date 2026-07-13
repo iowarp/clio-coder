@@ -13,8 +13,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { readClioVersion } from "../../core/package-root.js";
+import { ToolNames } from "../../core/tool-names.js";
 import type { AutonomyLevel } from "../../domains/safety/autonomy.js";
-import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
+import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
@@ -297,6 +298,68 @@ interface PermissionGateInput {
 	handledToolDecisions: Map<string, ClaudeToolPermissionDecision>;
 	/** Admitted tool surface (Clio builtin names) narrowed by any tool_profile. */
 	allowedTools: ReadonlySet<string>;
+	budgetGate?: ClaudeWorkerBudgetGate;
+}
+
+export interface ClaudeWorkerBudgetGate {
+	/** Count one logical SDK tool attempt and apply hard/phase/reserve policy. */
+	attempt(canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string };
+	/** Admit a call that passed profile, autonomy, and safety evaluation. */
+	admit(canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string };
+	phaseReached(): boolean;
+}
+
+/** Canonical call counter shared by the SDK's PreToolUse/canUseTool mediation seam. */
+export function createClaudeWorkerBudgetGate(
+	budget: WorkerBudget,
+	onBoundary: () => void,
+	onHardCap: () => void,
+): ClaudeWorkerBudgetGate {
+	let attempts = 0;
+	let admitted = 0;
+	let locked = false;
+	const phaseDecision = (canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string } => {
+		if (locked || admitted >= budget.toolCalls) {
+			return {
+				kind: "deny",
+				reason: budget.synthesis
+					? `worker agent budget reached (${budget.toolCalls}); tool calls are disabled for final synthesis`
+					: `worker agent budget reached (${budget.toolCalls}); synthesis is disabled`,
+			};
+		}
+		const reserveStart = budget.toolCalls - budget.readReserve;
+		if (budget.readReserve > 0 && admitted >= reserveStart && canonicalToolName !== ToolNames.Read) {
+			return {
+				kind: "deny",
+				reason: `worker read reserve: ${budget.toolCalls - admitted} admitted calls remain and only read is allowed`,
+			};
+		}
+		return { kind: "allow" };
+	};
+	return {
+		attempt(canonicalToolName) {
+			attempts += 1;
+			if (attempts > budget.hardCap) {
+				onHardCap();
+				return { kind: "deny", reason: `workerToolCallCap reached (${budget.hardCap}); abort run` };
+			}
+			return phaseDecision(canonicalToolName);
+		},
+		admit(canonicalToolName) {
+			// Recheck phase policy at the execution boundary. Permission evaluation
+			// is currently synchronous, but this keeps parallel SDK mediation honest
+			// if that implementation detail changes.
+			const phase = phaseDecision(canonicalToolName);
+			if (phase.kind === "deny") return phase;
+			admitted += 1;
+			if (admitted >= budget.toolCalls) {
+				locked = true;
+				onBoundary();
+			}
+			return { kind: "allow" };
+		},
+		phaseReached: () => locked,
+	};
 }
 
 function permissionResultForDecision(
@@ -335,17 +398,37 @@ function decideToolUse(input: PermissionGateInput, toolName: string, toolInput: 
 		onPermission: input.onPermission,
 		emit: input.emit,
 		allowedTools: input.allowedTools,
+		...(input.budgetGate ? { budgetGate: input.budgetGate } : {}),
 	});
+}
+
+/** Share one logical permission decision across the SDK hook/callback pair. */
+export function decideClaudeSdkToolUseOnce(
+	handled: Map<string, ClaudeToolPermissionDecision>,
+	toolUseID: string | undefined,
+	decide: () => ClaudeToolPermissionDecision,
+): ClaudeToolPermissionDecision {
+	const cached = toolUseID ? handled.get(toolUseID) : undefined;
+	if (cached) return cached;
+	const decision = decide();
+	if (toolUseID) handled.set(toolUseID, decision);
+	return decision;
+}
+
+function decideToolUseOnce(
+	input: PermissionGateInput,
+	toolUseID: string | undefined,
+	toolName: string,
+	toolInput: unknown,
+): ClaudeToolPermissionDecision {
+	return decideClaudeSdkToolUseOnce(input.handledToolDecisions, toolUseID, () =>
+		decideToolUse(input, toolName, toolInput),
+	);
 }
 
 function buildCanUseTool(input: PermissionGateInput): CanUseTool {
 	return async (toolName, toolInput, options): Promise<PermissionResult> => {
-		const cached = input.handledToolDecisions.get(options.toolUseID);
-		if (cached) return permissionResultForDecision(cached, options.toolUseID, input);
-		const decision = decideToolUse(input, toolName, toolInput);
-		if (options.toolUseID) {
-			input.handledToolDecisions.set(options.toolUseID, decision);
-		}
+		const decision = decideToolUseOnce(input, options.toolUseID, toolName, toolInput);
 		return permissionResultForDecision(decision, options.toolUseID, input);
 	};
 }
@@ -353,9 +436,8 @@ function buildCanUseTool(input: PermissionGateInput): CanUseTool {
 function buildPreToolUseHook(input: PermissionGateInput): HookCallback {
 	return async (hookInput, toolUseID) => {
 		if (hookInput.hook_event_name !== "PreToolUse") return { continue: true };
-		const decision = decideToolUse(input, hookInput.tool_name, hookInput.tool_input);
 		const id = hookInput.tool_use_id || toolUseID;
-		if (id) input.handledToolDecisions.set(id, decision);
+		const decision = decideToolUseOnce(input, id, hookInput.tool_name, hookInput.tool_input);
 		if (decision.kind === "allow") {
 			return {
 				continue: true,
@@ -383,6 +465,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	let queryHandle: ReturnType<typeof query> | null = null;
 	let aborted = false;
 	let permissionFailure = false;
+	let budgetFailure = false;
 
 	const abort = (): void => {
 		aborted = true;
@@ -412,6 +495,16 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	// the SDK disallowedTools option below is defense-in-depth so the model is
 	// not even offered them.
 	const allowedToolSet = new Set<string>(input.allowedTools);
+	const budgetGate = input.budget
+		? createClaudeWorkerBudgetGate(
+				input.budget,
+				() => {},
+				() => {
+					budgetFailure = true;
+					abort();
+				},
+			)
+		: undefined;
 	const permissionGate: PermissionGateInput = {
 		safety,
 		cwd: process.cwd(),
@@ -424,9 +517,26 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			abort();
 		},
 		allowedTools: allowedToolSet,
+		...(budgetGate ? { budgetGate } : {}),
 	};
 	const canUseTool = buildCanUseTool(permissionGate);
 	const preToolUseHook = buildPreToolUseHook(permissionGate);
+
+	const postToolBatchHook: HookCallback = async (hookInput) => {
+		if (hookInput.hook_event_name !== "PostToolBatch" || !budgetGate?.phaseReached()) return { continue: true };
+		if (input.budget?.synthesis === false) {
+			budgetFailure = true;
+			return { continue: false, stopReason: `worker agent budget reached (${input.budget.toolCalls})` };
+		}
+		return {
+			continue: true,
+			hookSpecificOutput: {
+				hookEventName: "PostToolBatch",
+				additionalContext:
+					"The admitted tool-call phase is complete. Tools are now disabled. Return the final answer in plain text from evidence already gathered.",
+			},
+		};
+	};
 
 	const options: Options = {
 		abortController,
@@ -436,7 +546,10 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		tools: claudeSdkToolsForAutonomy(input.autonomy),
 		permissionMode: claudeSdkPermissionModeForAutonomy(input.autonomy),
 		canUseTool,
-		hooks: { PreToolUse: [{ hooks: [preToolUseHook] }] },
+		hooks: {
+			PreToolUse: [{ hooks: [preToolUseHook] }],
+			...(budgetGate ? { PostToolBatch: [{ hooks: [postToolBatchHook] }] } : {}),
+		},
 		includePartialMessages: true,
 		persistSession: false,
 		settingSources: [],
@@ -503,6 +616,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			messages.push(finalMessage);
 			emit({ type: "agent_end", messages } as AgentEvent);
 			if (permissionFailure) return { messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
+			if (budgetFailure) return { messages, exitCode: 1 };
 			return { messages, exitCode: finalMessage.stopReason === "error" ? 1 : 0 };
 		} catch (error) {
 			const messageText = error instanceof Error ? error.message : String(error);
@@ -517,6 +631,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			messages.push(finalMessage);
 			emit({ type: "agent_end", messages } as AgentEvent);
 			if (permissionFailure) return { messages, exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
+			if (budgetFailure) return { messages, exitCode: 1 };
 			if (!aborted) process.stderr.write(`[worker:claude-sdk] ${messageText}\n`);
 			return { messages, exitCode: 1 };
 		} finally {

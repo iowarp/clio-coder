@@ -1,4 +1,4 @@
-import type { CompiledSessionPrompt, SessionPromptInputs } from "./compiler.js";
+import type { CompiledSessionPrompt, SessionPromptInputs, WorkerPromptInputs } from "./compiler.js";
 
 export interface CompileSessionPromptInput {
 	sessionInputs: SessionPromptInputs;
@@ -11,6 +11,8 @@ export interface CompileSessionPromptInput {
 	workingContextPaths?: ReadonlyArray<string>;
 }
 
+export type CompileWorkerPromptInput = WorkerPromptInputs;
+
 export interface PromptsContract {
 	/**
 	 * Compile the session system prompt. Called once per session (and again
@@ -19,6 +21,9 @@ export interface PromptsContract {
 	 * the session's lifetime.
 	 */
 	compileSessionPrompt(input: CompileSessionPromptInput): Promise<CompiledSessionPrompt>;
+
+	/** Compile the canonical stable harness for one mediated fleet worker. */
+	compileWorkerPrompt(input: CompileWorkerPromptInput): Promise<CompiledSessionPrompt>;
 
 	/** Reload fragment table (triggered by config.hotReload). */
 	reload(): void;

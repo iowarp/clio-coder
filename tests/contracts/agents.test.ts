@@ -1,4 +1,4 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -100,9 +100,9 @@ describe("contracts/agents", () => {
 
 		match(catalog, /normalized specs carry audience, category, capability/);
 		match(catalog, /User-facing agents:/);
-		match(catalog, /verifier \(base, quality, verification, fast, builtin, tags=tests\)/);
+		match(catalog, /verifier \(base, quality, verification, fast, builtin, tags=tests, budget=operator-default\)/);
 		match(catalog, /Shadow agents for internal orchestration:/);
-		match(catalog, /scout \(shadow, explore, read-only, fast, builtin\)/);
+		match(catalog, /scout \(shadow, explore, read-only, fast, builtin, budget=operator-default\)/);
 		// Recipe selection weighs skill fit: the catalog says to prefer a recipe
 		// whose bound skill matches the task.
 		match(catalog, /prefer the recipe that binds it/);
@@ -141,12 +141,16 @@ describe("contracts/agents", () => {
 				tags: ["delegation", "acp"],
 				skills: [],
 				output: null,
+				budget: null,
 				body: "",
 			},
 		]);
 
 		match(sections.stable, /User-facing agents:/);
-		match(sections.stable, /claude-cli \(custom, explore, orchestration, deep, custom, tags=delegation\/acp\)/);
+		match(
+			sections.stable,
+			/claude-cli \(custom, explore, orchestration, deep, custom, tags=delegation\/acp, budget=operator-default\)/,
+		);
 		match(sections.stable, /External ACP delegation agent/);
 	});
 
@@ -266,6 +270,149 @@ describe("contracts/agents", () => {
 			return agentSpecPolicyErrors(spec).map((error) => `${spec.id}: ${error}`);
 		});
 		strictEqual(failures.join("\n"), "");
+	});
+
+	it("loads the exact shipped Scout and Coder budget profiles", () => {
+		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
+		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
+		deepStrictEqual(recipes.find((recipe) => recipe.id === "scout")?.budget, {
+			toolCalls: 18,
+			readReserve: 4,
+			synthesis: true,
+		});
+		deepStrictEqual(recipes.find((recipe) => recipe.id === "coder")?.budget, {
+			toolCalls: 50,
+			readReserve: 5,
+			synthesis: true,
+		});
+	});
+
+	it("normalizes valid user and project budgets identically and preserves an absent budget", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-agent-budget-"));
+		try {
+			writeFileSync(
+				join(dir, "bounded.md"),
+				[
+					"---",
+					"name: Bounded",
+					"budget:",
+					"  toolCalls: 18",
+					"  readReserve: 4",
+					"  synthesis: true",
+					"---",
+					"Bounded agent.",
+				].join("\n"),
+			);
+			const userRecipe = loadRecipesFromDir({ dir, source: "user" })[0];
+			const projectRecipe = loadRecipesFromDir({ dir, source: "project" })[0];
+			ok(userRecipe);
+			ok(projectRecipe);
+			const user = normalizeAgentSpec(userRecipe);
+			const project = normalizeAgentSpec(projectRecipe);
+			deepStrictEqual(user.budget, { toolCalls: 18, readReserve: 4, synthesis: true });
+			deepStrictEqual(project.budget, user.budget);
+			strictEqual(
+				normalizeAgentSpec({
+					id: "legacy",
+					name: "Legacy",
+					description: "No declared budget.",
+					source: "user",
+					filepath: "/tmp/legacy.md",
+					body: "Legacy agent.",
+				}).budget,
+				null,
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects every malformed budget with a source-qualified property error", () => {
+		const invalid: ReadonlyArray<{ yaml: ReadonlyArray<string>; property: string }> = [
+			{ yaml: ["budget: null"], property: "budget" },
+			{ yaml: ["budget: 18"], property: "budget" },
+			{ yaml: ["budget: [18, 4, true]"], property: "budget" },
+			{ yaml: ["budget: {toolCalls: 18, readReserve: 4}"], property: "budget.synthesis" },
+			{
+				yaml: ["budget: {toolCalls: 18, readReserve: 4, synthesis: true, extra: 1}"],
+				property: "budget.extra",
+			},
+			{ yaml: ["budget: {toolCalls: '18', readReserve: 4, synthesis: true}"], property: "budget.toolCalls" },
+			{ yaml: ["budget: {toolCalls: 18.5, readReserve: 4, synthesis: true}"], property: "budget.toolCalls" },
+			{ yaml: ["budget: {toolCalls: 0, readReserve: 0, synthesis: true}"], property: "budget.toolCalls" },
+			{ yaml: ["budget: {toolCalls: -1, readReserve: 0, synthesis: true}"], property: "budget.toolCalls" },
+			{
+				yaml: ["budget: {toolCalls: 9007199254740992, readReserve: 4, synthesis: true}"],
+				property: "budget.toolCalls",
+			},
+			{ yaml: ["budget: {toolCalls: 18, readReserve: '4', synthesis: true}"], property: "budget.readReserve" },
+			{ yaml: ["budget: {toolCalls: 18, readReserve: 4.5, synthesis: true}"], property: "budget.readReserve" },
+			{ yaml: ["budget: {toolCalls: 18, readReserve: -1, synthesis: true}"], property: "budget.readReserve" },
+			{ yaml: ["budget: {toolCalls: 18, readReserve: 18, synthesis: true}"], property: "budget.readReserve" },
+			{ yaml: ["budget: {toolCalls: 18, readReserve: 19, synthesis: true}"], property: "budget.readReserve" },
+			{ yaml: ["budget: {toolCalls: 18, readReserve: 4, synthesis: 'true'}"], property: "budget.synthesis" },
+		];
+
+		for (const [index, testCase] of invalid.entries()) {
+			const dir = mkdtempSync(join(tmpdir(), "clio-agent-budget-invalid-"));
+			const filepath = join(dir, `invalid-${index}.md`);
+			try {
+				writeFileSync(filepath, ["---", "name: Invalid", ...testCase.yaml, "---", "Invalid."].join("\n"));
+				throws(
+					() => loadRecipesFromDir({ dir, source: "project" }),
+					(error: unknown) =>
+						error instanceof Error && error.message.includes(filepath) && error.message.includes(testCase.property),
+				);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}
+	});
+
+	it("renders deterministic declared and operator-default budget metadata", () => {
+		const catalog = renderAgentCatalog([
+			{
+				id: "bounded",
+				name: "Bounded",
+				description: "Bounded agent.",
+				budget: { toolCalls: 18, readReserve: 4, synthesis: true },
+				source: "user",
+				filepath: "/tmp/bounded.md",
+				body: "Bounded.",
+			},
+			{
+				id: "legacy",
+				name: "Legacy",
+				description: "Default policy.",
+				source: "user",
+				filepath: "/tmp/legacy.md",
+				body: "Legacy.",
+			},
+		]);
+		match(catalog, /bounded .*budget=18\/4\/synthesize/);
+		match(catalog, /legacy .*budget=operator-default/);
+		strictEqual(
+			catalog,
+			renderAgentCatalog([
+				{
+					id: "legacy",
+					name: "Legacy",
+					description: "Default policy.",
+					source: "user",
+					filepath: "/tmp/legacy.md",
+					body: "Legacy.",
+				},
+				{
+					id: "bounded",
+					name: "Bounded",
+					description: "Bounded agent.",
+					budget: { toolCalls: 18, readReserve: 4, synthesis: true },
+					source: "user",
+					filepath: "/tmp/bounded.md",
+					body: "Bounded.",
+				},
+			]),
+		);
 	});
 
 	it("gives Scout the exact bounded split-recommendation protocol", () => {

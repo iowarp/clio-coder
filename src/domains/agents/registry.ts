@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
-import { type AgentRecipe, type RecipeSource, recipeIdFromPath } from "./recipe.js";
+import { type AgentRecipe, parseAgentBudget, type RecipeSource, recipeIdFromPath } from "./recipe.js";
 import {
 	isAgentAudience,
 	isAgentCapabilityClass,
@@ -69,6 +69,8 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 		if (typeof frontmatter.target === "string") recipe.target = frontmatter.target;
 		const thinking = parseThinkingLevel(frontmatter.thinkingLevel);
 		if (thinking) recipe.thinkingLevel = thinking;
+		const budget = parseAgentBudget(frontmatter.budget, filepath);
+		if (budget) recipe.budget = budget;
 		if (isAgentCategory(frontmatter.category)) recipe.category = frontmatter.category;
 		if (isAgentCapabilityClass(frontmatter.capabilityClass)) recipe.capabilityClass = frontmatter.capabilityClass;
 		if (isAgentLatencyClass(frontmatter.latencyClass)) recipe.latencyClass = frontmatter.latencyClass;

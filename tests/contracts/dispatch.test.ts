@@ -11,6 +11,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { workerToolCallCapExceededReason, workerToolCallCapSynthesisReason } from "../../src/core/guardrails.js";
 import { RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES } from "../../src/core/response-schema.js";
+import type { ToolName } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
@@ -18,7 +19,6 @@ import { defaultProjectContextTier, normalizeAgentSpec } from "../../src/domains
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import {
 	buildDynamicPromptMessages,
-	buildStableSystemPrompt,
 	createDispatchBundle,
 	renderWorkerProjectContext,
 } from "../../src/domains/dispatch/extension.js";
@@ -37,7 +37,8 @@ import type { RunLineage, RunReceiptAutonomyEnforcement, RunReceiptDraft } from 
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
-import { safetyOneLiner } from "../../src/domains/prompts/compiler.js";
+import { compileWorker, safetyOneLiner } from "../../src/domains/prompts/compiler.js";
+import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -54,6 +55,41 @@ interface Deferred<T> {
 	promise: Promise<T>;
 	resolve(value: T): void;
 	reject(reason?: unknown): void;
+}
+
+function compileTestWorkerPrompt(
+	req: Record<string, unknown> & { systemPrompt?: string; noSkills?: boolean },
+	recipe: AgentRecipe,
+): string {
+	const skills = req.noSkills === true ? [] : (recipe.skills ?? []);
+	const skillBlock =
+		skills.length > 0 && (recipe.tools ?? []).includes("context")
+			? [
+					"# Agent-Bound Skills",
+					`This run binds these skills: ${skills.map((skill) => `\`${skill}\``).join(", ")}. context(scope=skills) admits exactly these names and rejects any other.`,
+					'Load a bound skill with `context` (scope="skills", name=<skill>) when it matches the assigned task, then follow its workflow.',
+					"Skills provide reusable know-how and resources; they never expand your tool authority.",
+					"If a bound skill fails to load, continue with the assigned task and report the missing skill.",
+				].join("\n")
+			: "";
+	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : recipe.body;
+	const persona = [base, skillBlock].filter(Boolean).join("\n\n");
+	return compileWorker(loadFragments(), {
+		autonomy: "auto-edit",
+		providerSupportsTools: true,
+		toolNames: (recipe.tools ?? []) as ReadonlyArray<ToolName>,
+		toolPromptHints: [],
+		hasCanonicalContext: (recipe.tools ?? []).includes("context"),
+		hasBoundSkills: skills.length > 0,
+		onPermission: "deny",
+		persona: {
+			id: `persona.${recipe.id}`,
+			relPath: recipe.filepath,
+			body: persona,
+			contentHash: createHash("sha256").update(persona).digest("hex"),
+			dynamic: false,
+		},
+	}).systemPrompt;
 }
 
 function deferred<T>(): Deferred<T> {
@@ -598,6 +634,47 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("fails closed before launching an explicit-budget recipe on a black-box subprocess runtime", async () => {
+		const runtime = runtimeDescriptor({
+			id: "claude-code",
+			kind: "subprocess",
+			apiFamily: "claude-code-subprocess",
+		});
+		const target: TargetDescriptor = { id: "claude", runtime: runtime.id, defaultModel: "claude" };
+		const context = stubContext({
+			target,
+			runtime,
+			recipes: [
+				{
+					id: "coder",
+					name: "coder",
+					description: "bounded coder",
+					source: "builtin",
+					filepath: "/test/coder.md",
+					body: "# Coder",
+					budget: { toolCalls: 50, readReserve: 5, synthesis: true },
+				},
+			],
+		});
+		let spawned = false;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not launch");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			await rejects(
+				() => bundle.contract.dispatch({ agentId: "coder", task: "bounded work" }),
+				/cannot enforce an explicit agent budget/,
+			);
+			strictEqual(spawned, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("forwards the run cwd through the reproducibility seam onto the receipt", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
@@ -730,18 +807,37 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "session safety dispatch" });
+			exit.resolve({ exitCode: 0, signal: null });
 			const spec = capturedSpec as WorkerSpec | null;
 			ok(spec);
 			strictEqual(spec.autonomy, "read-only");
 			strictEqual(spec.onPermission, "escalate");
 			deepStrictEqual(spec.escalation, { timeoutMs: 4_321, fallback: "fail" });
 			strictEqual(spec.trustProjectCompatRoots, true);
+			deepStrictEqual(
+				spec.budget,
+				{ toolCalls: 50, readReserve: 0, synthesis: true, hardCap: 50 },
+				"an admitted surface without canonical read must zero the effective reserve",
+			);
+			strictEqual(spec.systemPrompt.includes("require_tool(read)"), false);
+			strictEqual(spec.allowedTools.includes("code_nav"), false, "routine non-Scout work removes code_nav");
+			const sectionOrder = [
+				spec.systemPrompt.indexOf("# Identity"),
+				spec.systemPrompt.indexOf("# Operating Contract"),
+				spec.systemPrompt.indexOf("# Tool Contract"),
+				spec.systemPrompt.indexOf("# Read-only autonomy"),
+				spec.systemPrompt.indexOf("# Test Recipe"),
+			];
+			ok(sectionOrder.every((index) => index >= 0));
+			deepStrictEqual(
+				[...sectionOrder].sort((a, b) => a - b),
+				sectionOrder,
+			);
 			strictEqual(
 				spec.dynamicPromptMessages?.find((message) => message.id === "dispatch-safety-posture")?.body,
-				`Safety posture: autonomy read-only. ${safetyOneLiner("read-only")}`,
+				`Safety posture: autonomy read-only. ${safetyOneLiner("read-only")} Worker permission routing: escalate.`,
 			);
 
-			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			deepStrictEqual(receipt.autonomyEnforcement, { grade: "mediated", autonomy: "read-only" });
 
@@ -749,6 +845,63 @@ describe("contracts/dispatch", () => {
 			strictEqual(persistentSettings.autonomy, "full-auto");
 			strictEqual(persistentSettings.workers.onPermission, "deny");
 			strictEqual(persistentSettings.skills.trustProjectCompatRoots, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("uses one final toolkit for minimal-local prompt guidance, schemas, code_nav policy, and read reserve", async () => {
+		const recipe: AgentRecipe = {
+			id: "coder",
+			name: "coder",
+			description: "fully tooled coder",
+			source: "builtin",
+			filepath: "/test/coder.md",
+			body: "# Coder\n\nImplement the assigned change.",
+			tools: ["read", "grep", "find", "ls", "git", "context", "code_nav", "write", "edit", "verify", "web_fetch"],
+			budget: { toolCalls: 50, readReserve: 5, synthesis: true },
+		};
+		const captured: WorkerSpec[] = [];
+		const context = stubContext({ recipes: [recipe] });
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				captured.push(spec);
+				return {
+					pid: 9911 + captured.length,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: emptyEvents(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			const routine = await bundle.contract.dispatch({
+				agentId: "coder",
+				task: "make a small routine change",
+				toolProfile: "minimal-local",
+			});
+			await routine.finalPromise;
+			const routineSpec = captured[0];
+			ok(routineSpec);
+			for (const omitted of ["write", "edit", "verify", "web_fetch", "code_nav"] as const) {
+				strictEqual(routineSpec.allowedTools.includes(omitted), false, `${omitted} must be absent from schemas`);
+				strictEqual(routineSpec.systemPrompt.includes(`\`${omitted}\``), false, `${omitted} must be absent from guidance`);
+			}
+			deepStrictEqual(routineSpec.budget, { toolCalls: 50, readReserve: 5, synthesis: true, hardCap: 50 });
+
+			const navigation = await bundle.contract.dispatch({
+				agentId: "coder",
+				task: "locate the implementation and map call sites in src/domains/dispatch",
+				toolProfile: "minimal-local",
+			});
+			await navigation.finalPromise;
+			const navigationSpec = captured[1];
+			ok(navigationSpec);
+			strictEqual(navigationSpec.allowedTools.includes("code_nav"), true);
+			match(navigationSpec.systemPrompt, /`code_nav`/);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -1174,11 +1327,11 @@ describe("contracts/dispatch", () => {
 			filepath: "/test/researcher.md",
 			body: "# Researcher\nUse sources.",
 		};
-		const prompt = buildStableSystemPrompt({ agentId: "researcher", task: "check docs" }, recipe);
+		const prompt = compileTestWorkerPrompt({}, recipe);
 		match(prompt, /# Agent-Bound Skills/);
 		match(prompt, /`context7-docs`, `pdf-reader`/);
 		match(prompt, /Skills provide reusable know-how and resources; they never expand your tool authority\./);
-		const noSkillsPrompt = buildStableSystemPrompt({ agentId: "researcher", task: "check docs", noSkills: true }, recipe);
+		const noSkillsPrompt = compileTestWorkerPrompt({ noSkills: true }, recipe);
 		strictEqual(noSkillsPrompt.includes("# Agent-Bound Skills"), false);
 	});
 
@@ -1378,13 +1531,29 @@ describe("contracts/dispatch", () => {
 		ok(body.includes("1. Invariant that must survive convention truncation."));
 	});
 
-	it("adds one safety-posture line per run matching the shared safetyOneLiner text", () => {
+	it("adds an honest dynamic safety posture for each worker permission mode", () => {
 		const req = { agentId: "coder", task: "t" };
-		for (const level of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
-			const messages = buildDynamicPromptMessages(req, { autonomy: level });
-			strictEqual(messages.length, 1);
-			strictEqual(messages[0]?.id, "dispatch-safety-posture");
-			strictEqual(messages[0]?.body, `Safety posture: autonomy ${level}. ${safetyOneLiner(level)}`);
+		for (const autonomy of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
+			for (const onPermission of ["escalate", "deny", "fail"] as const) {
+				const messages = buildDynamicPromptMessages(req, { autonomy, onPermission });
+				strictEqual(messages.length, 1);
+				strictEqual(messages[0]?.id, "dispatch-safety-posture");
+				const body = messages[0]?.body ?? "";
+				ok(body.includes(`Worker permission routing: ${onPermission}.`));
+				if (autonomy === "read-only") {
+					ok(body.includes(safetyOneLiner("read-only")));
+					strictEqual(body.includes("bounded operator decision"), false);
+					continue;
+				}
+				if (onPermission === "escalate") ok(body.includes("bounded operator decision"));
+				if (onPermission === "deny") ok(body.includes("denied immediately"));
+				if (onPermission === "fail") ok(body.includes("fails and ends the worker run"));
+				if (onPermission !== "escalate") {
+					strictEqual(body.includes("parks for"), false);
+					strictEqual(body.includes("pause for"), false);
+					strictEqual(body.includes("asks for approval"), false);
+				}
+			}
 		}
 	});
 
@@ -1654,9 +1823,9 @@ describe("contracts/dispatch", () => {
 		// The stable worker prompt never carries the injected context: the
 		// static composition hash is promptHash(systemPrompt), so byte-identity
 		// here is byte-identity of staticCompositionHash across runs.
-		const withInjection = buildStableSystemPrompt(req, recipe);
-		const withPipelineInput = buildStableSystemPrompt(reqWithPipelineInput, recipe);
-		const withoutInjection = buildStableSystemPrompt({ agentId: "coder", task: "do work" }, recipe);
+		const withInjection = compileTestWorkerPrompt(req, recipe);
+		const withPipelineInput = compileTestWorkerPrompt(reqWithPipelineInput, recipe);
+		const withoutInjection = compileTestWorkerPrompt({}, recipe);
 		strictEqual(withInjection, withoutInjection);
 		strictEqual(withPipelineInput, withoutInjection);
 		strictEqual(withInjection.includes("Safety posture"), false);
@@ -1707,7 +1876,7 @@ describe("contracts/dispatch", () => {
 			const composed = await bundle.contract.dispatch(composedReq);
 			exits[0]?.resolve({ exitCode: 0, signal: null });
 			const composedReceipt = await composed.finalPromise;
-			const composedPrompt = buildStableSystemPrompt(composedReq, recipe);
+			const composedPrompt = compileTestWorkerPrompt(composedReq, recipe);
 			strictEqual(capturedPrompts[0], composedPrompt);
 			ok(composedPrompt.includes("# Import Boundary Specialist"));
 			strictEqual(composedPrompt.includes("# Base Recipe"), false);
@@ -1720,7 +1889,7 @@ describe("contracts/dispatch", () => {
 			const recipeRun = await bundle.contract.dispatch(recipeReq);
 			exits[1]?.resolve({ exitCode: 0, signal: null });
 			const recipeReceipt = await recipeRun.finalPromise;
-			const recipePrompt = buildStableSystemPrompt(recipeReq, recipe);
+			const recipePrompt = compileTestWorkerPrompt(recipeReq, recipe);
 			strictEqual(capturedPrompts[1], recipePrompt);
 			ok(recipePrompt.includes("# Base Recipe"));
 			strictEqual(recipeReceipt.staticCompositionHash, sha256(recipePrompt));
@@ -2204,7 +2373,10 @@ describe("contracts/dispatch", () => {
 			strictEqual(capturedTask, "delegate this");
 			strictEqual(capturedCommand, "opencode");
 			strictEqual(capturedAutonomy, "read-only");
-			strictEqual(capturedSafetyPosture, `Safety posture: autonomy read-only. ${safetyOneLiner("read-only")}`);
+			strictEqual(
+				capturedSafetyPosture,
+				`Safety posture: autonomy read-only. ${safetyOneLiner("read-only")} Worker permission routing: deny.`,
+			);
 			strictEqual(persistentSettings.autonomy, "full-auto");
 			strictEqual(receipt.runtimeKind, "acp-delegation");
 			deepStrictEqual(receipt.autonomyEnforcement, {
@@ -2716,6 +2888,7 @@ rl.once("line", () => {
 					runtimeId: "x",
 					wireModelId: "m",
 					allowedTools: ["bash"],
+					budget: { toolCalls: 1, readReserve: 0, synthesis: true, hardCap: 1 },
 				},
 				{ workerEntryPath: stubEntry },
 			);
