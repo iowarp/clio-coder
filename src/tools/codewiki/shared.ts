@@ -5,6 +5,7 @@ import {
 	codewikiNeedsBackfill,
 	codewikiPath,
 	readCodewiki,
+	syncCodewiki,
 	writeCodewiki,
 } from "../../domains/context/codewiki/indexer.js";
 import { computeFingerprint, isStale } from "../../domains/context/fingerprint.js";
@@ -83,7 +84,9 @@ export async function loadCodewikiForTool(
 	try {
 		const generatedAt = new Date().toISOString();
 		const projectType = detectProjectType(cwd);
-		const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt });
+		const rebuilt = codewiki
+			? await syncCodewiki(cwd, codewiki)
+			: await buildCodewiki({ cwd, language: projectType, generatedAt });
 		// Not cached here: a post-write stat could pair a concurrent writer's identity
 		// with this object. The next call re-reads once and caches from a clean stat.
 		writeCodewiki(cwd, rebuilt);

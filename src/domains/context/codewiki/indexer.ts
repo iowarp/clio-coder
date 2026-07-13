@@ -1109,6 +1109,37 @@ export async function updateCodewikiPaths(
 	return codewikiFromBuiltFiles(cwd, codewiki.language, [...keptFiles, ...rebuiltFiles]);
 }
 
+/**
+ * Reconcile an existing index with the current workspace without parsing
+ * unchanged files. The scan reads and hashes candidate files, then delegates
+ * extraction to the incremental updater only for additions, removals, and
+ * content changes. Callers can still use buildCodewiki when the artifact is
+ * missing or structurally incompatible.
+ */
+export async function syncCodewiki(
+	cwd: string,
+	codewiki: Codewiki,
+	options: CodewikiBuildOptions = {},
+): Promise<Codewiki> {
+	const readFile = options.readFile ?? defaultReadFile;
+	const currentPaths = enumerateWorkspaceFiles(cwd, EXCLUDED_DIRS).filter(isIndexablePath);
+	const currentFiles = new Map<string, string>();
+	for (const relPath of currentPaths) {
+		const text = readFile(join(cwd, relPath));
+		if (text !== null) currentFiles.set(relPath, contentHash(text));
+	}
+	const indexedFiles = new Map(codewiki.files.map((file) => [file.path, file] as const));
+	const changedPaths = new Set<string>();
+	for (const [relPath, hash] of currentFiles) {
+		if (indexedFiles.get(relPath)?.hash !== hash) changedPaths.add(relPath);
+	}
+	for (const relPath of indexedFiles.keys()) {
+		if (!currentFiles.has(relPath)) changedPaths.add(relPath);
+	}
+	if (changedPaths.size === 0) return codewiki;
+	return updateCodewikiPaths(cwd, codewiki, [...changedPaths], options);
+}
+
 export function codewikiPath(cwd: string): string {
 	return join(cwd, ".clio", "codewiki.json");
 }

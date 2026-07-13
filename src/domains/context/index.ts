@@ -49,6 +49,7 @@ export {
 	codewikiNeedsBackfill,
 	readCodewiki,
 	structuralCodewikiHash,
+	syncCodewiki,
 	updateCodewikiPaths,
 	writeCodewiki,
 } from "./codewiki/indexer.js";

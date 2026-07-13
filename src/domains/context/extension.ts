@@ -17,6 +17,7 @@ import {
 	codewikiPath,
 	parseCodewikiRaw,
 	readCodewiki,
+	syncCodewiki,
 	updateCodewikiPaths,
 	writeCodewiki,
 } from "./codewiki/indexer.js";
@@ -76,9 +77,11 @@ async function ensureCodewikiFresh(cwd: string): Promise<void> {
 	if (!stale) return;
 	const indexedAt = new Date().toISOString();
 	const projectType = state?.projectType ?? detectProjectType(cwd);
-	const rebuilt = await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
-	writeCodewiki(cwd, rebuilt);
-	persistState(cwd, computeFingerprint(cwd, rebuilt), indexedAt, state, rebuilt.version);
+	const synced = codewiki
+		? await syncCodewiki(cwd, codewiki)
+		: await buildCodewiki({ cwd, language: projectType, generatedAt: indexedAt });
+	writeCodewiki(cwd, synced);
+	persistState(cwd, computeFingerprint(cwd, synced), indexedAt, state, synced.version);
 }
 
 const CONTEXT_STATE_CACHE_TTL_MS = 1500;
@@ -249,7 +252,9 @@ export function createContextBundle(
 			let lastIndexedAt = state?.lastIndexedAt;
 			if (!state || isStale(state.fingerprint, fingerprint) || !codewiki || codewikiNeedsBackfill(codewiki)) {
 				lastIndexedAt = new Date().toISOString();
-				codewiki = await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt });
+				codewiki = codewiki
+					? await syncCodewiki(lastCwd, codewiki)
+					: await buildCodewiki({ cwd: lastCwd, language: projectType, generatedAt: lastIndexedAt });
 				writeCachedCodewiki(lastCwd, codewiki);
 				fingerprint = computeFingerprint(lastCwd, codewiki);
 			}
