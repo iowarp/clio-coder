@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.2.8",
+	"version": "0.2.9",
 	"description": "Coding agent for HPC and scientific-software developers, part of IOWarp's CLIO ecosystem of agentic science.",
 	"keywords": [
 		"ai",
@@ -93,9 +93,9 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.186",
-		"@earendil-works/pi-agent-core": "0.80.3",
-		"@earendil-works/pi-ai": "0.80.3",
-		"@earendil-works/pi-tui": "0.80.3",
+		"@earendil-works/pi-agent-core": "0.80.6",
+		"@earendil-works/pi-ai": "0.80.6",
+		"@earendil-works/pi-tui": "0.80.6",
 		"@lmstudio/sdk": "1.5.0",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"@vscode/tree-sitter-wasm": "^0.3.1",

@@ -1,7 +1,7 @@
 # Evolution and Change Manifests
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive change manifest editor, authority risk assessor, and checklist workspace is located at [docs/html/evolution_blueprint.html](html/evolution_blueprint.html) (Version: 0.2.8).
+> **Interactive Spec Available:** An interactive change manifest editor, authority risk assessor, and checklist workspace is located at [docs/html/evolution_blueprint.html](html/evolution_blueprint.html) (Version: 0.2.9).
 
 Clio Coder uses change manifests to make harness changes reviewable, falsifiable, and rollback-friendly. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history. A manifest is JSON, generated or checked with `clio evolve manifest`, and should describe what changed, why, what evidence supports it, what could regress, how to validate it, and how to roll it back.
 
@@ -17,7 +17,7 @@ clio evolve manifest validate change-manifest.json
 clio evolve manifest summarize change-manifest.json
 ```
 
-`init` prints a template. `validate` exits non-zero and reports JSON paths when fields are missing or invalid. In `v0.2.8`, it additionally resolves each non-empty `evidenceRefs` entry (which must match `run-<id>` or `session-<id>` formatting) against the local evidence store, failing validation if a referenced bundle is not found. `summarize` prints the iteration id, base SHA, authority levels, components, files, predicted regressions, validation-step count, and reports evidence refs resolution.
+`init` prints a template. `validate` exits non-zero and reports JSON paths when fields are missing or invalid. In `v0.2.9`, it additionally resolves each non-empty `evidenceRefs` entry (which must match `run-<id>` or `session-<id>` formatting) against the local evidence store, failing validation if a referenced bundle is not found. `summarize` prints the iteration id, base SHA, authority levels, components, files, predicted regressions, validation-step count, and reports evidence refs resolution.
 
 ---
 

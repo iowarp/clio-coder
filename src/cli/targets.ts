@@ -56,9 +56,9 @@ interface UseArgs {
 	workerModel?: string;
 }
 
-type WorkerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type WorkerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-const VALID_THINKING = new Set<WorkerThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const VALID_THINKING = new Set<WorkerThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 interface WorkerProfileArgs {
 	name: string;
@@ -287,7 +287,7 @@ function parseWorkerArgs(args: ReadonlyArray<string>): WorkerProfileArgs | null 
 		if (arg === "--thinking") {
 			const value = need();
 			if (!VALID_THINKING.has(value as WorkerThinkingLevel)) {
-				throw new Error("--thinking must be one of: off|minimal|low|medium|high|xhigh");
+				throw new Error("--thinking must be one of: off|minimal|low|medium|high|xhigh|max");
 			}
 			parsed.thinkingLevel = value as WorkerThinkingLevel;
 			continue;

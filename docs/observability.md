@@ -1,7 +1,7 @@
 # Observability Viewer
 
 > [!TIP]
-> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/observability_blueprint.html](html/observability_blueprint.html) (Version: 0.2.8).
+> **Interactive Spec Available:** An interactive dashboard is located at [docs/html/observability_blueprint.html](html/observability_blueprint.html) (Version: 0.2.9).
 
 `/view` is the interactive artifact viewer for a Clio session. It keeps the live transcript compact while preserving a full inspection path for durable artifacts.
 
@@ -123,7 +123,7 @@ separately and never substitute one hash for another.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
-The base provenance sets entered in v0.2.8; steering provenance and integrity v6 enter in v0.2.9. These fields are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
+The base provenance sets entered in v0.2.9; steering provenance and integrity v6 enter in v0.2.9. These fields are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
 
 | Field path | Type | When present | Meaning | Status |
 | --- | --- | --- | --- | --- |
@@ -148,8 +148,8 @@ The base provenance sets entered in v0.2.8; steering provenance and integrity v6
 | `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |
 | `safety.decisions.escalationDenied` | `number` | Run saw at least one permission escalation | Escalations the operator denied | experimental |
 | `safety.decisions.escalationTimedOut` | `number` | Run saw at least one permission escalation | Escalations resolved by the timeout fallback (no operator decision) | experimental |
-| `autonomyEnforcement.grade` | `string` | Always in v0.2.8 | The autonomy grade level enforced for the run | experimental |
-| `autonomyEnforcement.autonomy` | `number` | Always in v0.2.8 | The exact numeric autonomy dial value | experimental |
+| `autonomyEnforcement.grade` | `string` | Always in v0.2.9 | The autonomy grade level enforced for the run | experimental |
+| `autonomyEnforcement.autonomy` | `number` | Always in v0.2.9 | The exact numeric autonomy dial value | experimental |
 | `autonomyEnforcement.externalMode` | `string` | When running external worker | The execution mode of the external worker runtime | experimental |
 | `autonomyEnforcement.dangerousBypass` | `boolean` | When running external worker | Whether a safety bypass was explicitly activated | experimental |
 

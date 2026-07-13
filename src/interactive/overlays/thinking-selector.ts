@@ -19,6 +19,7 @@ const DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	medium: "standard reasoning",
 	high: "deep reasoning",
 	xhigh: "extended thinking (models that support it)",
+	max: "maximum reasoning effort (models that support it)",
 };
 
 export interface OpenThinkingOverlayDeps {

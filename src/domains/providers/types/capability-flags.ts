@@ -43,13 +43,21 @@ export const EMPTY_CAPABILITIES: CapabilityFlags = {
 	maxTokens: 0,
 };
 
-export const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export type ThinkingLevel = (typeof VALID_THINKING_LEVELS)[number];
 
 const THINKING_LEVELS_WITHOUT_XHIGH: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high"];
 const THINKING_LEVELS_OPENAI_5_1_MINI: ReadonlyArray<ThinkingLevel> = ["off", "minimal", "low", "medium", "high"];
-const THINKING_LEVELS_OPENAI_5_2_PLUS: ReadonlyArray<ThinkingLevel> = VALID_THINKING_LEVELS;
+const THINKING_LEVELS_OPENAI_5_2_PLUS: ReadonlyArray<ThinkingLevel> = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+];
+const THINKING_LEVELS_OPENAI_5_6: ReadonlyArray<ThinkingLevel> = [...THINKING_LEVELS_OPENAI_5_2_PLUS, "max"];
 const THINKING_LEVELS_HARMONY: ReadonlyArray<ThinkingLevel> = ["low", "medium", "high"];
 
 function normalizeModelId(modelId: string | undefined): string | undefined {
@@ -71,6 +79,9 @@ function availableOpenAICodexThinkingLevels(modelId: string | undefined): Readon
 	) {
 		return THINKING_LEVELS_OPENAI_5_2_PLUS;
 	}
+	if (normalized.startsWith("gpt-5.6")) {
+		return THINKING_LEVELS_OPENAI_5_6;
+	}
 	return THINKING_LEVELS_WITHOUT_XHIGH;
 }
 
@@ -86,7 +97,13 @@ export function availableThinkingLevels(
 		options?.runtimeId && options.modelId
 			? catalogThinkingLevelsForRuntime(options.runtimeId, options.modelId)
 			: undefined;
-	if (catalogLevels) return catalogLevels;
+	if (catalogLevels) {
+		// Pi 0.80.6 exposes `max` for some catalog entries whose runtime
+		// metadata still does not support extended effort levels. Preserve Clio's
+		// fail-closed capability boundary for those models.
+		if (!catalogLevels.includes("xhigh")) return catalogLevels.filter((level) => level !== "max");
+		return catalogLevels;
+	}
 	if (caps.thinkingFormat === "openai-codex" || options?.runtimeId === "openai-codex") {
 		return availableOpenAICodexThinkingLevels(options?.modelId);
 	}

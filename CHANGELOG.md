@@ -10,6 +10,9 @@ still change interfaces.
 
 ## Unreleased
 
+## 0.2.9 - 2026-07-13
+
+- Updated the Pi engine dependencies to 0.80.6, including native `max` thinking-level support and upstream runtime, accounting, and protocol fixes.
 - Made singular `dispatch({agent, task, briefing, detach})` first-class while preserving batch `tasks`, pinned task/briefing separation through approval, and rejected briefing-only or ambiguous `task`+`tasks` calls.
 - Made native-worker initialization fail closed on the same `worker_announce` wire-version handshake locally and over SSH; this proves worker-entry/protocol initialization, not cryptographic identity.
 - Required a nonempty receipt-sealed final answer for successful native and ACP delegation, with deterministic `worker_final_output_missing` failure and no automatic retry; added prose-free steering provenance and receipt-integrity v6 while retaining frozen v4/v5 verification.

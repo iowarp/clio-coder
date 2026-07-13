@@ -11,7 +11,7 @@ import { GUARDRAIL_DEFAULTS, type GuardrailValues } from "./guardrails.js";
 export type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 export type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface WorkerTarget {
 	target: string | null;

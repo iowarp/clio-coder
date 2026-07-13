@@ -292,7 +292,15 @@ export interface BuiltinSlashCommand {
 	handle(command: SlashCommand, ctx: SlashCommandContext): void;
 }
 
-const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+];
 
 function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 	return RUN_THINKING_LEVELS.some((level) => level === value);

@@ -72,7 +72,7 @@ const DEFAULT_AGENT_ID = "coder";
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
 const TRUNCATION_MARKER = "\n[agent output truncated]";
 const PERSONA_MAX_CHARS = 8_000;
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 
 export interface DispatchToolDeps {
@@ -421,7 +421,7 @@ function dispatchRequestFromArgs(
 	const thinkingLevel = stringArg(args, "thinking_level");
 	if (thinkingLevel) {
 		if (!VALID_THINKING.has(thinkingLevel as JobThinkingLevel)) {
-			return { ok: false, message: "thinking_level must be one of off|minimal|low|medium|high|xhigh" };
+			return { ok: false, message: "thinking_level must be one of off|minimal|low|medium|high|xhigh|max" };
 		}
 		request.thinkingLevel = thinkingLevel as JobThinkingLevel;
 	}

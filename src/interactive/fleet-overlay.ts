@@ -32,7 +32,7 @@ import { type ClioToken, clioTheme, formatCompactMs, GLYPH, rule } from "./theme
 
 const DEFAULT_CONTENT_WIDTH = 96;
 const REFRESH_MS = 1000;
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export const FLEET_OVERLAY_WIDTH = "100%";
 

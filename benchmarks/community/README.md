@@ -93,7 +93,7 @@ Terminal-Bench with the adapter import path:
 npm run build
 npm pack --pack-destination /tmp/clio-pack
 
-CLIO_TARBALL_URL=http://host.docker.internal:8899/iowarp-clio-coder-0.2.8.tgz \
+CLIO_TARBALL_URL=http://host.docker.internal:8899/iowarp-clio-coder-0.2.9.tgz \
 CLIO_MAIN_URL=http://orchestrator.example:8080 \
 CLIO_WORKER_URL=http://worker.example:1234 \
 PYTHONPATH=benchmarks/community/terminal-bench \
