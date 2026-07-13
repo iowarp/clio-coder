@@ -380,6 +380,8 @@ export interface KeyBindingDeps {
 	 * substitute a narrower matcher via createKeybindingManagerForTesting.
 	 */
 	matches: (data: string, id: ClioKeybinding) => boolean;
+	/** App exit follows pi's editor rule: Ctrl+D exits only when the editor is empty. */
+	canExit?: () => boolean;
 	cycleThinking: () => void;
 	requestShutdown: () => void;
 	toggleStatus: () => void;
@@ -490,9 +492,7 @@ export interface OverlayKeyDeps
 		ScopedModelsOverlayKeyDeps,
 		SettingsOverlayKeyDeps,
 		MessagePickerOverlayKeyDeps,
-		AskUserOverlayKeyDeps {
-	requestShutdown: () => void;
-}
+		AskUserOverlayKeyDeps {}
 
 export type CtrlCAction = "cancel-stream" | "close-overlay" | "clear-editor" | "arm-shutdown" | "shutdown";
 
@@ -522,11 +522,13 @@ function formatKeyLabel(keyId: string | undefined): string {
 }
 
 export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
+	// A modal is an input boundary. Never let a global double-tap or an active
+	// run escape through it; Ctrl+C cancels/closes the focused overlay instead.
+	if (deps.overlayState !== "closed") return "close-overlay";
 	if (deps.lastCtrlCAt > 0 && deps.now - deps.lastCtrlCAt <= CTRL_C_DOUBLE_TAP_MS) {
 		return "shutdown";
 	}
 	if (deps.streaming) return "cancel-stream";
-	if (deps.overlayState !== "closed") return "close-overlay";
 	if (deps.editorText.length > 0) return "clear-editor";
 	return "arm-shutdown";
 }
@@ -585,6 +587,7 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 			deps.cycleScopedModelForward();
 			return true;
 		case "clio.exit":
+			if (deps.canExit && !deps.canExit()) return false;
 			deps.requestShutdown();
 			return true;
 		case "clio.leader":
@@ -816,7 +819,15 @@ export function handleCwdFallbackCancel(preResumeSessionId: string | null, deps:
 // List overlays (help, agents, prompts, extensions, skills-hub) own their full
 // keymap including Esc; routeOverlayKey forwards every key to the ListOverlay kit.
 
-/** Overlay inputs always stay inside the overlay except for the exit keybinding (default ctrl+d). */
+/**
+ * Overlays are modal input boundaries. A false return means the focused overlay
+ * component must receive the key; it does not mean the key may reach the editor
+ * or the active agent run.
+ */
+export function overlayOwnsInput(overlayState: OverlayState): boolean {
+	return overlayState !== "closed";
+}
+
 export function routeOverlayKey(
 	data: string,
 	overlayState: OverlayState,
@@ -824,10 +835,6 @@ export function routeOverlayKey(
 	matches: (data: string, id: ClioKeybinding) => boolean,
 ): boolean {
 	if (overlayState === "closed") return false;
-	if (matches(data, "clio.exit")) {
-		deps.requestShutdown();
-		return true;
-	}
 	if (
 		(overlayState === "dispatch-board" && matches(data, "clio.dispatchBoard.toggle")) ||
 		(overlayState === "tree" && matches(data, "clio.session.tree")) ||
@@ -3245,6 +3252,10 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			return;
 		}
 		if (action === "close-overlay") {
+			// Closing a modal is not the first half of the main-editor shutdown
+			// gesture. Reset the double-tap clock so a quick second Ctrl+C cannot
+			// exit Clio after merely dismissing /agents or /fleet.
+			lastCtrlCAt = 0;
 			closeOverlay();
 			return;
 		}
@@ -3257,6 +3268,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 
 	const keyActionDeps = (): KeyBindingDeps => ({
 		matches: (input, id) => keybindings.matches(input, id),
+		canExit: () => editor.getText().length === 0,
 		cycleThinking: () => {
 			const settings = deps.getSettings?.();
 			const available = settings ? resolveAvailableThinkingLevels(deps.providers, settings) : (["off"] as ThinkingLevel[]);
@@ -3382,7 +3394,13 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 	];
 
 	tui.addInputListener((data: string) => {
-		if (leaderState.status === "pending") {
+		// A modal invalidates any half-entered leader sequence. Otherwise the key
+		// used to close /agents could become the first half of a shortcut after the
+		// overlay closes.
+		if (overlayOwnsInput(overlayState) && leaderState.status === "pending") setLeaderState(IDLE_LEADER_STATE);
+		// A pending leader sequence belongs to the main editor, never an overlay.
+		// Modal input must win before leader/agent cancellation precedence.
+		if (!overlayOwnsInput(overlayState) && leaderState.status === "pending") {
 			const leader = routeLeaderKey(data, leaderState, {
 				...keyActionDeps(),
 				matchesLeader: (input) => keybindings.matches(input, "clio.leader"),
@@ -3426,15 +3444,16 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				cancelAskUser: () => {
 					pendingAskUserCancel?.();
 				},
-				requestShutdown: () => {
-					void shutdown();
-				},
 			},
 			(input, id) => keybindings.matches(input, id),
 		);
 		if (overlayConsumed) {
 			return { consume: true };
 		}
+		// A false route result means the focused overlay component owns the full
+		// keymap. Do not let its key fall through to editor shortcuts, bash abort,
+		// or cancellation of the active agent run.
+		if (overlayOwnsInput(overlayState)) return undefined;
 
 		if (overlayState === "closed") {
 			const leader = routeLeaderKey(data, leaderState, {
@@ -3448,10 +3467,9 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 			if (leader.consumed) return { consume: true };
 		}
 
-		// Esc falls through to cancel an active run when one is in flight; before
-		// this fall-through Esc was short-circuited above the overlay router and stole
-		// the keystroke from any open modal, forcing the user to press Esc twice to
-		// dismiss modals that opened mid-stream.
+		// With no overlay, Esc cancels an active run (or an inline bash command).
+		// The modal boundary above is intentional: an overlay's Esc is delivered to
+		// its focused component and can never abort work behind the overlay.
 		if (isEscapeKey(data) && activeEditorBash) {
 			activeEditorBash.abort();
 			return { consume: true };

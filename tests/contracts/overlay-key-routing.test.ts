@@ -1,10 +1,14 @@
 import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+	dispatchInteractiveAction,
 	isEscapeKey,
 	isLiveWorkerEscalationRequest,
+	type KeyBindingDeps,
 	type OverlayKeyDeps,
 	type OverlayState,
+	overlayOwnsInput,
+	resolveCtrlCAction,
 	routeDispatchBoardOverlayKey,
 	routeOverlayKey,
 	routePermissionOverlayKey,
@@ -95,6 +99,42 @@ function makeDeps(): {
 }
 
 const neverMatches = () => false;
+
+describe("modal precedence", () => {
+	it("keeps every open overlay ahead of the editor and active run", () => {
+		strictEqual(overlayOwnsInput("closed"), false);
+		for (const state of ["fleet", "agents", "settings", "ask-user"] satisfies ReadonlyArray<OverlayState>) {
+			strictEqual(overlayOwnsInput(state), true, state);
+		}
+	});
+
+	it("makes Ctrl+C close a modal instead of cancelling or shutting down", () => {
+		strictEqual(
+			resolveCtrlCAction({
+				overlayState: "agents",
+				streaming: true,
+				editorText: "",
+				lastCtrlCAt: Date.now(),
+				now: Date.now(),
+			}),
+			"close-overlay",
+		);
+	});
+
+	it("keeps Ctrl+D as delete-forward when the editor is nonempty", () => {
+		let shutdowns = 0;
+		const deps = {
+			canExit: () => false,
+			requestShutdown: () => {
+				shutdowns += 1;
+			},
+		} as KeyBindingDeps;
+		strictEqual(dispatchInteractiveAction("clio.exit", deps), false);
+		strictEqual(shutdowns, 0);
+		strictEqual(dispatchInteractiveAction("clio.exit", { ...deps, canExit: () => true }), true);
+		strictEqual(shutdowns, 1);
+	});
+});
 
 describe("list-overlay key routing", () => {
 	for (const state of LIST_OVERLAY_STATES) {
