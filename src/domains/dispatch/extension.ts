@@ -464,10 +464,24 @@ function hasDurableFinalOutput(output: RunReceiptOutput | undefined): boolean {
 }
 
 /**
+ * Loop-degeneration family: any combination of these codes can accumulate on
+ * one legitimately degenerating run. Observed live (run 2l89ughlrj4w): a
+ * scout exhausts its corrective rounds (which emits its code without
+ * aborting), then calls a tool again, so the loop-guard backstop emits its
+ * code and aborts. The generic cap can likewise precede either sibling.
+ */
+const LOOP_DEGENERATION_CODES: ReadonlySet<RunOutcomeCode> = new Set([
+	"scout_synthesis_contract_exhausted",
+	"loop_guard_tools_disabled_exhausted",
+	"worker_tool_call_cap_exhausted",
+]);
+
+/**
  * Resolve trusted worker classifications independently of event order.
- * The generic cap can legitimately precede either more-specific synthesis
- * exhaustion code. Every other multi-code combination is contradictory and
- * is surfaced to diagnostics while still choosing deterministically.
+ * Multi-code combinations inside the loop-degeneration family are a
+ * legitimate progression resolved by specificity. Combinations that cross
+ * failure families are contradictory and are surfaced to diagnostics while
+ * still choosing deterministically.
  */
 function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 	code: RunOutcomeCode | null;
@@ -475,11 +489,7 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 } {
 	const code = OUTCOME_CODE_SPECIFICITY.find((candidate) => codes.has(candidate)) ?? null;
 	if (codes.size <= 1) return { code, conflict: null };
-	const legitimateLoopProgression =
-		codes.size === 2 &&
-		codes.has("worker_tool_call_cap_exhausted") &&
-		(codes.has("loop_guard_tools_disabled_exhausted") || codes.has("scout_synthesis_contract_exhausted"));
-	if (legitimateLoopProgression) return { code, conflict: null };
+	if ([...codes].every((candidate) => LOOP_DEGENERATION_CODES.has(candidate))) return { code, conflict: null };
 	return {
 		code,
 		conflict: `conflicting trusted outcome codes: ${[...codes].sort().join(", ")}`,
