@@ -102,7 +102,7 @@ Inside the TUI, verify the local surface with:
 /skill
 ```
 
-The `/targets` overlay is the interactive target hub. It shows one compact row per configured target, streams live probe updates, and keeps target actions on the selected row. Use `Enter` to show details, `u` to use the target for chat, `f` to set the target as the fleet default, `c` to connect or authorize it, `r` to probe the selected target, and `R` to probe all targets.
+The `/targets` overlay is the interactive target hub. It shows one compact row per configured target, streams live probe updates, and keeps target actions on the selected row. Use `Enter` to show details, `u` to use the target for chat, `f` to set the target as the fleet default, `b` to set an eligible target as the background-memory default, `c` to connect or authorize it, `r` to probe the selected target, and `R` to probe all targets.
 
 Only add `--context-window <tokens>`, `--max-tokens <tokens>`, or `--reasoning true` when you have runtime/model-specific values that should override live probe results.
 
@@ -120,6 +120,7 @@ Terminology used in code and receipts:
 | Target / `TargetDescriptor` | Persisted user-configured target plus runtime id, model defaults, auth metadata, and capability overrides. |
 | Resolved target | Target spec combined with the runtime descriptor, model catalog/probe data, wire model id, and effective capabilities. |
 | Orchestrator target | Main chat/print target. HTTP/native/pi-ai-backed. |
+| Background target | Optional proactive-memory model target. Unset means deterministic rules-only memory. |
 | Worker target | Fleet dispatch target. HTTP/native/pi-ai-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
 
 ```yaml
@@ -141,6 +142,20 @@ orchestrator:
   target: local-lmstudio
   model: your-model-id
   thinkingLevel: off
+
+# Optional proactive-memory model. Leave null for the zero-cost rules tier.
+background:
+  target: null
+  model: null
+  thinkingLevel: off
+
+memory:
+  intervention:
+    enabled: true
+    everyNTools: 10
+    windowSteps: 8
+    maxTokens: 400
+    timeoutMs: 20000
 
 workers:
   default:
@@ -269,7 +284,7 @@ unknown keys remains a validation error for the operator to edit deliberately.
 
 ## Live routing vs saved defaults
 
-The routing keys in `settings.yaml` (`orchestrator.*`, `workers.default.*`, `scope`) are **defaults**, not a live control surface. Each interactive session seeds its routing from them at launch and owns it from then on:
+The routing keys in `settings.yaml` (`orchestrator.*`, `background.*`, `workers.default.*`, `scope`) are **defaults**, not a live control surface. Each interactive session seeds its routing from them at launch and owns it from then on:
 
 - Interactive changes (`/model`, Alt+L, `/settings`, Shift+Tab, `/thinking`, Alt+J / Alt+K, `/scoped-models`) apply to the current session immediately and are written back as the defaults for sessions launched later.
 - Writes from other processes, such as a second Clio session, `clio targets use`, `clio configure`, or a manual edit, update the defaults and the shared target catalog. These writes never redirect a running session's chat or fleet routing. The running session shows a notice when the saved defaults diverge from its active routing.

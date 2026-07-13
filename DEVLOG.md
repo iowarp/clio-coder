@@ -3429,3 +3429,18 @@ you need a stable target.
   `/memory seed` when the newest handoff contains a snapshot; import is
   deduplicated and the master intervention switch disables both the offer and
   all seed writes. No worker-side intervention was added.
+
+# 2026-07-13 — Proactive memory WS6: telemetry, evaluation, and operations
+
+- Added speculation-style, content-free task-memory telemetry under the local
+  state directory. Exact-schema JSONL rows record coalesced triggers, tier,
+  count-only bank deltas, decision, citation count, model tokens, and latency;
+  the 1 MiB rotating sink is best effort and cannot alter intervention.
+- Added a fixed three-task A/B harness over baseline, rules-only, and LLM tiers.
+  It accepts any target/model adapter, reports pass rate, reminder/citation
+  selectivity, and baseline-relative token/latency cost, and treats always-on
+  reminders without a pass-rate gain as a regression.
+- Documented architecture, paper mapping, real settings and target surfaces,
+  trigger semantics, handoff continuity, the dynamo/qwopus reference route,
+  measurement criteria, and the event/steering seam for future worker-local
+  memory. Worker behavior remains unchanged.

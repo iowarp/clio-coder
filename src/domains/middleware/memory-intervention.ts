@@ -7,6 +7,12 @@ import {
 	type TaskMemoryPolicyResult,
 	type TaskMemoryTrajectoryStep,
 } from "../memory/task-memory-policy.js";
+import {
+	type TaskMemoryTelemetrySink,
+	type TaskMemoryTelemetryTier,
+	type TaskMemoryTelemetryTrigger,
+	taskMemoryBankDelta,
+} from "../memory/task-memory-telemetry.js";
 import { hashToolCall } from "../safety/loop-detector.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
@@ -60,6 +66,8 @@ export interface MemoryInterventionDeps {
 	getModelClient?: () => TaskMemoryModelClient | null;
 	/** Live next-turn settings view; individual fields above remain test-friendly fallbacks. */
 	getSettings?: () => Readonly<MemoryInterventionSettings>;
+	/** Best-effort content-free telemetry; sink failures never affect intervention. */
+	telemetry?: TaskMemoryTelemetrySink;
 }
 
 export interface MemoryPromptedStepInput {
@@ -68,6 +76,8 @@ export interface MemoryPromptedStepInput {
 	task?: string;
 	/** Keep phase-one writes but yield the visible channel to a synchronous reminder. */
 	suppressIntervention?: boolean;
+	/** Internal/eval attribution; direct callers default to `manual`. */
+	triggerReasons?: ReadonlyArray<TaskMemoryTelemetryTrigger>;
 }
 
 export interface MemoryPromptedStepResult extends TaskMemoryPolicyResult {
@@ -106,6 +116,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let lastInjectedMessage: string | null = null;
 	let lastDecision: TaskMemoryPolicyResult["decision"] | null = null;
 	const pendingTriggers = new Set<MemoryInterventionTriggerReason>();
+	let telemetryBankSnapshot = deps.bank.snapshot();
 
 	return {
 		id: MEMORY_INTERVENTION_REGISTRATION_ID,
@@ -121,14 +132,41 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					case "after_tool":
 						observeAfterTool(input);
 						return NO_EFFECTS;
-					case "turn_end":
-						return decideRepeatedFailure();
+					case "turn_end": {
+						const started = process.hrtime.bigint();
+						const effects = decideRepeatedFailure();
+						emitTelemetry(
+							[effects.length > 0 ? "repeated_failure" : "turn_end"],
+							"rules",
+							effects.length > 0 ? "injected" : "silent",
+							citedEntryCount(effects[0]?.kind === "inject_reminder" ? effects[0].message : null),
+							0,
+							0,
+							started,
+						);
+						return effects;
+					}
 					case "on_compaction":
 						reactivateAfterCompaction = true;
 						return NO_EFFECTS;
-					case "turn_start":
+					case "turn_start": {
 						if (input.text?.trim()) currentTask = shortText(input.text, 2_000);
-						return reactivateKnowledge();
+						const shouldReactivate = reactivateAfterCompaction;
+						const started = process.hrtime.bigint();
+						const effects = reactivateKnowledge();
+						if (shouldReactivate) {
+							emitTelemetry(
+								["post_compaction"],
+								"rules",
+								effects.length > 0 ? "injected" : "silent",
+								citedEntryCount(effects[0]?.kind === "inject_reminder" ? effects[0].message : null),
+								0,
+								0,
+								started,
+							);
+						}
+						return effects;
+					}
 				}
 			} catch {
 				return NO_EFFECTS;
@@ -149,6 +187,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			const result = await runPromptedStep({
 				deterministicTrigger: triggers.some((trigger) => trigger !== "interval"),
 				suppressIntervention: synchronousMemoryReminder,
+				triggerReasons: triggers,
 			});
 			// A rules-only reminder can win the visible boundary while the optional
 			// background route resolves to null. Preserve the operator-visible
@@ -188,40 +227,85 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			effects: NO_EFFECTS,
 		});
 		const live = settings();
-		if (!live.enabled || deps.getModelClient === undefined) {
+		if (!live.enabled) {
 			const result = silent();
 			lastDecision = result.decision;
 			return result;
 		}
+		const started = process.hrtime.bigint();
+		const triggers = input.triggerReasons?.length ? input.triggerReasons : ["manual" as const];
+		let tier: TaskMemoryTelemetryTier = "rules";
+		let promptedResult: TaskMemoryPolicyResult;
 		try {
-			const client = deps.getModelClient();
+			const client = deps.getModelClient?.() ?? null;
 			if (client === null) {
-				const result = silent();
-				lastDecision = result.decision;
-				return result;
+				promptedResult = silent();
+			} else {
+				tier = "llm";
+				promptedResult = await runTaskMemoryPolicy(deps.bank, client, {
+					task: input.task?.trim() || currentTask,
+					trajectory: [...trajectory],
+					deterministicTrigger: input.deterministicTrigger,
+					maxTokens: live.maxTokens,
+					...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
+					previousReminder: lastInjectedMessage,
+					timeoutMs: live.timeoutMs,
+				});
 			}
-			const result = await runTaskMemoryPolicy(deps.bank, client, {
-				task: input.task?.trim() || currentTask,
-				trajectory: [...trajectory],
-				deterministicTrigger: input.deterministicTrigger,
-				maxTokens: live.maxTokens,
-				...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
-				previousReminder: lastInjectedMessage,
-				timeoutMs: live.timeoutMs,
-			});
-			lastDecision = result.decision;
-			return {
-				...result,
-				effects:
-					result.reminder === null
-						? NO_EFFECTS
-						: [{ kind: "inject_reminder", message: result.reminder, severity: "advisory" }],
-			};
 		} catch {
-			const result = silent();
-			lastDecision = result.decision;
-			return result;
+			promptedResult = silent();
 		}
+		lastDecision = promptedResult.decision;
+		emitTelemetry(
+			triggers,
+			tier,
+			promptedResult.decision,
+			citedEntryCount(promptedResult.reminder),
+			promptedResult.inputTokens,
+			promptedResult.outputTokens,
+			started,
+		);
+		return {
+			...promptedResult,
+			effects:
+				promptedResult.reminder === null
+					? NO_EFFECTS
+					: [{ kind: "inject_reminder", message: promptedResult.reminder, severity: "advisory" }],
+		};
+	}
+
+	function emitTelemetry(
+		triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>,
+		tier: TaskMemoryTelemetryTier,
+		decision: TaskMemoryPolicyResult["decision"],
+		citedEntries: number,
+		inputTokens: number,
+		outputTokens: number,
+		started: bigint,
+	): void {
+		const next = deps.bank.snapshot();
+		const bankDelta = taskMemoryBankDelta(telemetryBankSnapshot, next);
+		telemetryBankSnapshot = next;
+		try {
+			deps.telemetry?.record({
+				triggerReasons,
+				tier,
+				bankDelta,
+				decision,
+				citedEntries,
+				inputTokens,
+				outputTokens,
+				latencyMs: Number(process.hrtime.bigint() - started) / 1_000_000,
+			});
+		} catch {
+			// Observability must never steer or block the memory policy.
+		}
+	}
+
+	function citedEntryCount(message: string | null): number {
+		if (message === null) return 0;
+		const snapshot = deps.bank.snapshot();
+		return [...snapshot.knowledge, ...snapshot.procedural].filter((entry) => message.includes(`[${entry.id}]`)).length;
 	}
 
 	function observeBeforeTool(input: MiddlewareHookInput): void {

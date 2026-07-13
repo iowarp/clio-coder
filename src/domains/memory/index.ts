@@ -84,6 +84,24 @@ export {
 	type TaskMemoryTier,
 	taskMemoryBankSize,
 } from "./task-memory-status.js";
+export {
+	type CreateTaskMemoryTelemetrySinkOptions,
+	createTaskMemoryTelemetrySink,
+	parseTaskMemoryTelemetryRecord,
+	TASK_MEMORY_TELEMETRY_FILE,
+	TASK_MEMORY_TELEMETRY_MAX_BYTES,
+	TASK_MEMORY_TELEMETRY_VERSION,
+	type TaskMemoryBankDelta,
+	type TaskMemoryClassDelta,
+	type TaskMemoryTelemetryRecord,
+	type TaskMemoryTelemetrySink,
+	type TaskMemoryTelemetryStep,
+	type TaskMemoryTelemetryTier,
+	type TaskMemoryTelemetryTrigger,
+	type TaskMemoryTokenCost,
+	taskMemoryBankDelta,
+	taskMemoryTelemetryRecord,
+} from "./task-memory-telemetry.js";
 export type {
 	MemoryProposalResult,
 	MemoryPruneResult,

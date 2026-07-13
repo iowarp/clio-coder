@@ -6,6 +6,23 @@ export {
 	sumEvalHarnessMetrics,
 	ZERO_EVAL_HARNESS_METRICS,
 } from "./harness-metrics.js";
+export {
+	PROACTIVE_MEMORY_EVAL_TASKS,
+	PROACTIVE_MEMORY_EVAL_VARIANTS,
+	type ProactiveMemoryEvalReport,
+	type ProactiveMemoryEvalRunner,
+	type ProactiveMemoryEvalRunOutput,
+	type ProactiveMemoryEvalRunRequest,
+	type ProactiveMemoryEvalTarget,
+	type ProactiveMemoryEvalTask,
+	type ProactiveMemoryEvalTrial,
+	type ProactiveMemoryEvalVariant,
+	type ProactiveMemoryEvalVariantSummary,
+	type RunProactiveMemoryEvalOptions,
+	renderProactiveMemoryEvalReport,
+	runProactiveMemoryEval,
+	summarizeProactiveMemoryEval,
+} from "./proactive-memory.js";
 export { evalClioProvenance, evalEnvironmentProvenance } from "./provenance.js";
 export { renderEvalReport, renderSummaryLines, renderSweJsonl } from "./report.js";
 export type {
