@@ -12,6 +12,7 @@ import type { LocalModelQuirks } from "../../src/domains/providers/types/local-m
 import { createEngineAi } from "../../src/engine/ai.js";
 import {
 	patchProviderThinkingPayload,
+	patchToolChoiceNamedPayload,
 	patchToolChoiceNonePayload,
 	patchWorkerRequestPayload,
 } from "../../src/engine/provider-payload.js";
@@ -130,6 +131,68 @@ describe("contracts/tool-choice lockout payload patch", () => {
 		const model = { api: "openai-completions" } as Parameters<typeof patchToolChoiceNonePayload>[1];
 		strictEqual(patchToolChoiceNonePayload({ model: "m" }, model), undefined);
 		strictEqual(patchToolChoiceNonePayload("not-a-record", model), undefined);
+	});
+
+	it("forces a named tool with provider-correct payload grammar", () => {
+		const dispatchFunction = { type: "function", function: { name: "dispatch" } };
+		const readFunction = { type: "function", function: { name: "read" } };
+		const openai = { api: "openai-completions" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+		deepStrictEqual(patchToolChoiceNamedPayload({ tools: [readFunction, dispatchFunction] }, openai, "dispatch"), {
+			tools: [dispatchFunction],
+			tool_choice: { type: "function", function: { name: "dispatch" } },
+		});
+		const responses = { api: "openai-responses" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+		deepStrictEqual(patchToolChoiceNamedPayload({ tools: [readFunction, dispatchFunction] }, responses, "dispatch"), {
+			tools: [dispatchFunction],
+			tool_choice: { type: "function", name: "dispatch" },
+		});
+		const anthropic = { api: "anthropic-messages" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+		deepStrictEqual(
+			patchToolChoiceNamedPayload(
+				{
+					tools: [{ name: "read" }, { name: "dispatch" }],
+					thinking: { type: "adaptive" },
+					output_config: { effort: "high", format: "text" },
+				},
+				anthropic,
+				"dispatch",
+			),
+			{
+				tools: [{ name: "dispatch" }],
+				output_config: { format: "text" },
+				tool_choice: { type: "tool", name: "dispatch" },
+			},
+		);
+		const google = { api: "google-generative-ai" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+		deepStrictEqual(
+			patchToolChoiceNamedPayload(
+				{ config: { tools: [{ functionDeclarations: [{ name: "read" }, { name: "dispatch" }] }] } },
+				google,
+				"dispatch",
+			),
+			{
+				config: {
+					tools: [{ functionDeclarations: [{ name: "dispatch" }] }],
+					toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["dispatch"] } },
+				},
+			},
+		);
+		const bedrock = { api: "bedrock-converse-stream" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+		deepStrictEqual(
+			patchToolChoiceNamedPayload(
+				{ toolConfig: { tools: [{ toolSpec: { name: "read" } }, { toolSpec: { name: "dispatch" } }] } },
+				bedrock,
+				"dispatch",
+			),
+			{
+				toolConfig: { tools: [{ toolSpec: { name: "dispatch" } }], toolChoice: { tool: { name: "dispatch" } } },
+			},
+		);
+		const mistral = { api: "mistral-conversations" } as Parameters<typeof patchToolChoiceNamedPayload>[1];
+		deepStrictEqual(patchToolChoiceNamedPayload({ tools: [readFunction, dispatchFunction] }, mistral, "dispatch"), {
+			tools: [dispatchFunction],
+			toolChoice: { type: "function", function: { name: "dispatch" } },
+		});
 	});
 });
 

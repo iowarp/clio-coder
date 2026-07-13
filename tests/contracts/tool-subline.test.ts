@@ -45,4 +45,26 @@ describe("contracts/tool subline rows identify the actual call", () => {
 		ok(text.includes("navigating symbol"), text);
 		ok(text.includes("`createRegistry`"), text);
 	});
+
+	it("dispatch rows identify the agent and bounded task instead of only a count", () => {
+		const text = strip(
+			renderToolSubline(
+				startCall("dispatch", {
+					tasks: [
+						{ agent: "scout", task: "Map the repository structure and key entry points with citations" },
+						{ agent: "scout", task: "Inspect the dispatch boundary" },
+					],
+				}),
+				120,
+			),
+		);
+		ok(text.includes("dispatching scout: Map the repository structure"), text);
+		ok(text.includes("+1 more"), text);
+		ok(!text.includes("dispatching 2 tasks"), text);
+	});
+
+	it("dispatch list rows describe the catalog action", () => {
+		const text = strip(renderToolSubline(startCall("dispatch", { list: true }), 120));
+		ok(text.includes("listing fleet agents"), text);
+	});
 });

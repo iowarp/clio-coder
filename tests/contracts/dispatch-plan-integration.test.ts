@@ -79,6 +79,7 @@ describe("resolved dispatch plan admission", () => {
 				tasks: [
 					{
 						agent: "coder\nforged",
+						task: "inspect\rthe repo\u001b[31m",
 						target: "primary\u001b[2J",
 						model: "model\u0000suffix",
 						node: "blade\rforged",
@@ -96,8 +97,16 @@ describe("resolved dispatch plan admission", () => {
 		strictEqual(plan.text.split("\n").length, 3, "embedded line breaks cannot forge plan rows");
 		match(
 			plan.text,
-			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged/,
+			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged task="inspect\?the repo\?\[31m"/,
 		);
+	});
+
+	it("binds the reviewed task into the artifact text and hash", () => {
+		const first = describeDispatchPlan({ tasks: [{ agent: "scout", task: "map dispatch lifecycle" }] });
+		const second = describeDispatchPlan({ tasks: [{ agent: "scout", task: "map worker guardrails" }] });
+		match(first.text, /agent=scout .* task="map dispatch lifecycle"/);
+		strictEqual(first.tasks[0]?.task, "map dispatch lifecycle");
+		strictEqual(first.hash === second.hash, false, "changing only the approved task must change the plan hash");
 	});
 
 	it("shows, approves once, pins, executes, and receipts explicit/profile/automatic placements", async () => {
@@ -197,6 +206,7 @@ describe("resolved dispatch plan admission", () => {
 				strictEqual(plan.planScale, true);
 				strictEqual(plan.taskCount, 1);
 				strictEqual(plan.tasks[0]?.agent, "coder");
+				strictEqual(plan.tasks[0]?.task, "perform the approved task");
 				strictEqual(plan.tasks[0]?.target, "primary");
 				strictEqual(plan.tasks[0]?.model, expectedModel);
 				strictEqual(plan.tasks[0]?.node, expectedNode);
@@ -227,6 +237,10 @@ describe("resolved dispatch plan admission", () => {
 					automaticNode = "mini";
 					settings.workers.default.model = "drift-model";
 				}
+				// The resolved artifact is the approval authority. Even if the raw
+				// argument object is changed while parked, execution restores the task
+				// the operator actually reviewed.
+				ask.args.tasks = ["substituted after approval"];
 				await registry.resumeParkedCalls({
 					actionClass: "dispatch",
 					requestId: ask.requestId,
@@ -241,6 +255,7 @@ describe("resolved dispatch plan admission", () => {
 				strictEqual(placementRequests[0], expectedNode, `${placementCase}: execution uses approved node pin`);
 				strictEqual(fabric.spawns[0]?.spec.target.id, "primary");
 				strictEqual(fabric.spawns[0]?.spec.wireModelId, expectedModel);
+				strictEqual(fabric.spawns[0]?.spec.task, "perform the approved task");
 
 				const runs = (verdict.result.details?.runs ?? []) as Array<{ runId: string }>;
 				strictEqual(runs.length, 1);

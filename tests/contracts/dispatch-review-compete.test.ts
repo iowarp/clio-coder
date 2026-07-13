@@ -288,6 +288,8 @@ describe("reviewer-gated dispatch", () => {
 			// The reviewer ran read-only regardless of the session level.
 			const reviewerSpawn = fabric.spawns.find((entry) => entry.spec.task.startsWith("Review the work"));
 			strictEqual(reviewerSpawn?.spec.autonomy, "read-only");
+			match(reviewerSpawn?.spec.task ?? "", new RegExp(builder?.runId ?? "missing-builder-run"));
+			strictEqual(reviewerSpawn?.spec.task.includes("plan-builder-"), false);
 			// Both receipts still verify against their ledger rows.
 			for (const receipt of [builder, reviewer]) {
 				ok(receipt);
@@ -873,6 +875,9 @@ describe("compete dispatch", () => {
 			strictEqual(result.kind, "ok");
 			ok(result.kind === "ok");
 			match(result.output, /compete winner candidate 2 applied/);
+			const judgeSpawn = fabric.spawns.find((entry) => entry.spec.task.startsWith("Rank "));
+			ok(judgeSpawn, "judge receives the runtime ranking task");
+			strictEqual(judgeSpawn?.spec.task.includes("Plan-time capability check"), false);
 			// The winner's work landed in the repository working tree.
 			const applied = readFileSync(join(repo, "answer.txt"), "utf8");
 			match(applied, /candidate-2/);

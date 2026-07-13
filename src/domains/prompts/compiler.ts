@@ -79,7 +79,7 @@ export interface CompiledSessionPrompt {
 
 export const FLEET_ROUTING_GUIDANCE_MAX_BYTES = 256;
 export const FLEET_ROUTING_GUIDANCE =
-	"Fleet routing: many-file exploration -> scout; external docs/papers -> researcher; receipts/evidence -> provenance; bounded code changes -> coder. Give each dispatch a concrete handoff and synthesize its result.";
+	"Fleet routing: explicit broad repo/codebase exploration -> scout before repo-wide reads; external docs/papers -> researcher; receipts/evidence -> provenance; bounded code changes -> coder. Give each dispatch a concrete handoff and synthesize its receipt.";
 
 function lookupFragment(table: FragmentTable, id: string, role: string): LoadedFragment {
 	const frag = table.byId.get(id);
@@ -144,8 +144,8 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		"# Tool Contract",
 		"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
-		'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
-		'Routing order: orient with structured observe tools before bash; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; dispatch only bounded parallel or delegated subwork and synthesize the receipts; validate with verify or git diff before final claims.',
+		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available and Scout is routable, explicit broad repository/codebase exploration goes to Scout before repo-wide reads.',
+		'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded Scout handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
 		'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
 		'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
 	];
@@ -177,7 +177,7 @@ function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
 	return [
 		"# Retrieval Hints",
 		"Compact CLIO.md project instructions may be preloaded above; everything else about the repository must be fetched, not assumed.",
-		"For questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
+		"For narrow questions about where code, skills, tools, prompts, or harness behavior live, inspect with code_nav, context, grep, or read before answering. For explicit broad repository exploration, follow the Scout fleet route when it is available. Never invent file paths, automatic tool behavior, or mutable repo details from the system prompt.",
 	].join("\n");
 }
 

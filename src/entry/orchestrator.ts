@@ -57,6 +57,7 @@ import {
 } from "../domains/middleware/dispatch-nudge.js";
 import {
 	createHookReceiptLog,
+	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
 	type ExtensionHookRoot,
 	installUserHooks,
@@ -820,9 +821,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
 	let activeAcpSessionAutonomy: AutonomyLevel | null = null;
+	const middlewareToolChoice = createMiddlewareToolChoiceControl();
 	const toolRegistry = createRegistry({
 		safety,
 		middleware,
+		onMiddlewareEffects: (effects) => middlewareToolChoice.apply(effects),
 		autonomy: () =>
 			activeAcpSessionAutonomy ??
 			effectiveSettingsForDispatch?.().autonomy ??
@@ -1059,7 +1062,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middleware.registerHook(createToolProseRegistration());
 	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	middleware.registerHook(createReadOnlyExplorationNudgeRegistration());
+	middleware.registerHook(
+		createReadOnlyExplorationNudgeRegistration({
+			canRouteScout: (task) => {
+				if (!dispatch.preview) return false;
+				const route = dispatch.preview({ agentId: "scout", task });
+				return route.agentId.trim().toLowerCase() === "scout";
+			},
+		}),
+	);
 	middleware.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
 	);
@@ -1083,6 +1094,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSettings: getCurrentSettings,
 		providers,
 		middleware,
+		middlewareToolChoice,
 		protectedArtifacts: {
 			replace: (state) => protectedArtifactsGuard.replaceState(state),
 			markDegraded: (reason) => protectedArtifactsGuard.markDegraded(reason),

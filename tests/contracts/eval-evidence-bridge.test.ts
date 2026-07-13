@@ -5,6 +5,7 @@ import {
 	dispatchCountFromJsonl,
 	evidenceMetricsFromReceipt,
 	receiptFromRunJsonStdout,
+	scoutDispatchCountFromJsonl,
 	wikiStaleAcknowledgedFromJsonl,
 } from "../../src/domains/eval/metrics/evidence.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
@@ -109,6 +110,37 @@ describe("contracts/eval evidence bridge", () => {
 			JSON.stringify({ type: "clio_tool_finish", payload: { tool: "dispatch", outcome: "ok", toolCallId: "b" } }),
 		].join("\n");
 		strictEqual(dispatchCountFromJsonl(canonicalTwo), 2);
+	});
+
+	it("counts only model-authored dispatch starts that actually target Scout", () => {
+		const stdout = [
+			JSON.stringify({
+				type: "tool_execution_start",
+				toolCallId: "s1",
+				toolName: "dispatch",
+				args: { tasks: [{ agent: "scout", task: "map the repo" }] },
+			}),
+			JSON.stringify({
+				type: "tool_execution_start",
+				toolCallId: "s1",
+				toolName: "dispatch",
+				args: { tasks: [{ agent: "scout", task: "duplicate" }] },
+			}),
+			JSON.stringify({
+				type: "tool_execution_start",
+				toolCallId: "c1",
+				toolName: "dispatch",
+				args: { agent: "coder", tasks: ["implement"] },
+			}),
+			JSON.stringify({
+				type: "tool_execution_start",
+				toolCallId: "s2",
+				toolName: "dispatch",
+				args: { agent_id: "scout", tasks: JSON.stringify(["inspect one domain"]) },
+			}),
+		].join("\n");
+		strictEqual(scoutDispatchCountFromJsonl(stdout), 2);
+		strictEqual(scoutDispatchCountFromJsonl(""), 0);
 	});
 
 	it("acknowledges wiki staleness only for a source read after a wiki lookup", () => {

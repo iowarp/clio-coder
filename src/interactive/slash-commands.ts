@@ -114,6 +114,7 @@ export async function handleRun(
 	options: RunCommandOptions = {},
 ): Promise<void> {
 	const { dispatch, notice, bus } = deps;
+	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
 	if (options.target && options.workerProfile) {
 		notice("warn", `--target ${options.target} takes precedence; --worker ${options.workerProfile} will be ignored`);
 	}
@@ -139,7 +140,7 @@ export async function handleRun(
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
 			if (!e.type || e.type === "heartbeat") continue;
-			bus?.emit(BusChannels.DispatchProgress, {
+			progressBus?.emit(BusChannels.DispatchProgress, {
 				runId: handle.runId,
 				agentId,
 				event,
@@ -158,6 +159,7 @@ export async function handleRun(
 
 export async function handleDelegate(agentId: string, task: string, deps: HandleRunDeps): Promise<void> {
 	const { dispatch, notice, bus } = deps;
+	const progressBus = dispatch.ownsProgressBus?.(bus) === true ? undefined : bus;
 	try {
 		const handle = await dispatch.dispatch({
 			agentId,
@@ -168,7 +170,7 @@ export async function handleDelegate(agentId: string, task: string, deps: Handle
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
 			if (!e.type || e.type === "heartbeat") continue;
-			bus?.emit(BusChannels.DispatchProgress, {
+			progressBus?.emit(BusChannels.DispatchProgress, {
 				runId: handle.runId,
 				agentId,
 				event,

@@ -2,6 +2,11 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { ToolNames } from "../../src/core/tool-names.js";
+import {
+	buildProactiveScoutRoutingMessage,
+	createReadOnlyExplorationNudgeRegistration,
+} from "../../src/domains/middleware/dispatch-nudge.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { runMiddlewareHook, runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import {
@@ -222,6 +227,21 @@ function assistantStopMessage(text: string): AgentMessage {
 	} as unknown as AgentMessage;
 }
 
+function dispatchOnlyRegistry(): unknown {
+	const spec = {
+		name: ToolNames.Dispatch,
+		description: "dispatch test tool",
+		parameters: { type: "object", properties: {} },
+		baseActionClass: "dispatch",
+		run: async () => ({ kind: "ok", output: "unused" }),
+	};
+	return {
+		listRegistered: () => [ToolNames.Dispatch],
+		get: (name: string) => (name === ToolNames.Dispatch ? spec : undefined),
+		invoke: async () => ({ kind: "ok", result: { kind: "ok", output: "sealed Scout receipt" }, decision: {} }),
+	};
+}
+
 async function emitAssistantTurn(agent: FakeAgent, message: AgentMessage): Promise<void> {
 	agent.state.messages.push(message);
 	await agent.emit({ type: "message_start", message } as AgentEvent);
@@ -289,6 +309,7 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 			session: createSession(entries),
 			readSessionEntries: () => entries,
 			middleware,
+			toolRegistry: dispatchOnlyRegistry(),
 			createAgent: createFakeAgentFactory(async (agent, input) => {
 				prompts.push(String(input));
 				await emitAssistantTurn(agent, assistantStopMessage("ok"));
@@ -301,6 +322,8 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		strictEqual(seenInputs[0]?.hook, "turn_start");
 		strictEqual(seenInputs[0]?.metadata?.promptChars, "hello there".length);
 		strictEqual(seenInputs[0]?.metadata?.queued, false);
+		strictEqual(seenInputs[0]?.metadata?.requestContinuation, false);
+		strictEqual(seenInputs[0]?.metadata?.activeToolNames, ToolNames.Dispatch);
 		strictEqual(prompts.length, 1);
 		const prompted = prompts[0] ?? "";
 		ok(prompted.startsWith("<system-reminder>\nsteering: prefer small diffs\n</system-reminder>"));
@@ -308,6 +331,118 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		// The injected block is plain visible text persisted with the user turn.
 		const userEntry = entries.find((entry) => entry.kind === "message" && entry.role === "user");
 		ok(userEntry && JSON.stringify(userEntry).includes("system-reminder"));
+	});
+
+	it("puts the Scout routing reminder in the literal broad-exploration request", async () => {
+		const middleware = createMiddlewareBundle().contract;
+		middleware.registerHook(createReadOnlyExplorationNudgeRegistration({ canRouteScout: () => true }));
+		const prompts: string[] = [];
+		const entries: SessionEntry[] = [];
+		type OnPayload = (payload: Record<string, unknown>, model: unknown) => Promise<Record<string, unknown> | undefined>;
+		let capturedOnPayload: OnPayload | null = null;
+		const baseFactory = createFakeAgentFactory(async (_agent, input) => {
+			prompts.push(String(input));
+		}, []);
+		const factory = ((options: { onPayload?: OnPayload }) => {
+			capturedOnPayload = options.onPayload ?? null;
+			return (baseFactory as unknown as (value: unknown) => unknown)(options);
+		}) as never;
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			toolRegistry: dispatchOnlyRegistry(),
+			createAgent: factory,
+		} as never);
+
+		await loop.submit("let’s just explore this repo and context");
+
+		strictEqual(prompts.length, 1);
+		const prompt = prompts[0] ?? "";
+		ok(prompt.startsWith(`<system-reminder>\n${buildProactiveScoutRoutingMessage()}\n</system-reminder>`));
+		ok(prompt.includes("let’s just explore this repo and context"));
+		ok(prompt.includes("The harness already ran Scout for this request"));
+		ok(prompt.includes("sealed Scout receipt"));
+		ok(capturedOnPayload !== null);
+		const onPayload = capturedOnPayload as OnPayload;
+		const patched = await onPayload(
+			{ tools: [{ type: "function", function: { name: ToolNames.Dispatch } }] },
+			{ api: "openai-completions" },
+		);
+		strictEqual(patched?.tool_choice, "none");
+	});
+
+	it("fires terminal turn_end from a terminating artifact result with the synthetic evidence boundary", async () => {
+		const seenInputs: MiddlewareHookInput[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		middleware.registerHook({
+			id: "test.terminal-turn-end-probe",
+			description: "capture terminal tool turn_end inputs",
+			hooks: ["turn_end"],
+			evaluate(input) {
+				seenInputs.push(input);
+				return [];
+			},
+		});
+		const entries: SessionEntry[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				const toolCall = {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "artifact-1", name: "artifact", arguments: { kind: "report" } }],
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				agent.state.messages.push(toolCall);
+				await agent.emit({ type: "message_start", message: toolCall } as AgentEvent);
+				await agent.emit({ type: "message_end", message: toolCall } as AgentEvent);
+				await agent.emit({
+					type: "tool_execution_start",
+					toolCallId: "artifact-1",
+					toolName: "artifact",
+					args: { kind: "report" },
+				} as unknown as AgentEvent);
+				await agent.emit({
+					type: "tool_execution_end",
+					toolCallId: "artifact-1",
+					toolName: "artifact",
+					result: { content: [], details: {}, terminate: true },
+					isError: false,
+				} as unknown as AgentEvent);
+				await agent.emit({ type: "agent_end", messages: [...agent.state.messages] } as AgentEvent);
+			}, []),
+		} as never);
+
+		await loop.submit("write the final report artifact");
+
+		strictEqual(seenInputs.length, 1);
+		const input = seenInputs[0];
+		strictEqual(input?.hook, "turn_end");
+		strictEqual(input?.text, "");
+		strictEqual(input?.metadata?.assistantTextChars, 0);
+		strictEqual(input?.metadata?.stopReason, "stop");
+		strictEqual(input?.metadata?.hasStructuredToolCall, true);
+		strictEqual(input?.metadata?.terminalToolResult, true);
+		strictEqual(input?.metadata?.terminalToolCallId, "artifact-1");
+		strictEqual(input?.metadata?.terminalToolName, "artifact");
+		const userEntry = entries.find((entry) => entry.kind === "message" && entry.role === "user");
+		const terminalEntry = entries.find(
+			(entry) =>
+				entry.kind === "message" && entry.role === "assistant" && JSON.stringify(entry).includes("terminalToolResult"),
+		);
+		ok(userEntry?.turnId);
+		ok(terminalEntry?.turnId);
+		strictEqual(input?.turnId, terminalEntry.turnId);
+		strictEqual(input?.metadata?.userTurnId, userEntry.turnId);
 	});
 
 	it("fires turn_end with capped text and assistant metadata", async () => {

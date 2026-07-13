@@ -265,6 +265,10 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			return { kind: "protect_path", path: effect.path, reason: effect.reason };
 		case "request_continuation":
 			return { kind: "request_continuation", message: effect.message };
+		case "require_tool":
+			return { kind: "require_tool", toolName: effect.toolName };
+		case "lock_tools":
+			return { kind: "lock_tools" };
 	}
 }
 

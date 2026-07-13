@@ -89,8 +89,21 @@ export function openHelpOverlay(
 
 	// Static concept topics. Unlike commands and keys these are not generated
 	// from a registry; keep each detail consistent with the enforced behavior
-	// documented in docs/safety-model.md.
+	// and with the live footer hints on the surface it documents.
 	const topics: ListOverlayItem[] = [
+		{
+			id: "topic-fleet-runs",
+			label: `${"fleet runs & steering".padEnd(30)}Inspect, guide, and cancel delegated workers`,
+			group: "Topics",
+			detail: () => [
+				"# Fleet runs & steering",
+				"**Fleet Runs board**: open it with the configured Dispatch Board key (Alt+W by default). Use Up/Down or `j`/`k` to select a live or recent run.",
+				"**Steer**: press `s` on a live native run to close the board and prefill `@<runId> `. Add guidance and submit it normally. The first notice means queued; a received notice confirms worker delivery.",
+				"**Cancel**: press `x` on a running, stale, queued, or retry-waiting run. The row changes to cancelling while the worker or retry is being stopped.",
+				"**Capabilities**: ACP delegation runs cannot accept live steering. The board footer only advertises actions supported by the selected row.",
+				"**Tasks versus runs**: `/tasks` shows the agent's plan steps. Fleet runs are concrete delegated worker executions and remain in this board as recent terminal history.",
+			],
+		},
 		{
 			id: "topic-autonomy",
 			label: `${"autonomy & safety net".padEnd(30)}How the autonomy level and the always-on guardrails interact`,

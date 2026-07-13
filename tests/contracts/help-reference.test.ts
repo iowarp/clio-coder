@@ -76,9 +76,19 @@ describe("contracts/help-reference", () => {
 		ok(exitRow.label.includes("Ctrl+D") || exitRow.label.includes("ctrl+d"));
 		ok(exitRow.label.includes("Exit the TUI"));
 
-		// 4. Topics group carries the autonomy & safety net concept entry (sd-01)
+		// 4. Topics group carries the autonomy and fleet-control concept entries.
 		const topicsItems = items.filter((item) => item.group === "Topics");
-		strictEqual(topicsItems.length, 1);
+		strictEqual(topicsItems.length, 2);
+		const fleetTopic = topicsItems.find((item) => item.id === "topic-fleet-runs");
+		ok(fleetTopic);
+		ok(fleetTopic.label.includes("fleet runs & steering"));
+		ok(fleetTopic.detail);
+		const fleetDetail = fleetTopic.detail().join("\n");
+		ok(fleetDetail.includes("`@<runId> `"));
+		ok(fleetDetail.includes("press `x`"));
+		ok(fleetDetail.includes("ACP delegation runs cannot accept live steering"));
+		ok(fleetDetail.includes("`/tasks` shows the agent's plan steps"));
+
 		const autonomyTopic = topicsItems.find((item) => item.id === "topic-autonomy");
 		ok(autonomyTopic);
 		ok(autonomyTopic.label.includes("autonomy & safety net"));

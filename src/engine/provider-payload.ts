@@ -20,6 +20,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function namedToolDefinitions(tools: unknown, toolName: string): unknown[] | null {
+	if (!Array.isArray(tools)) return null;
+	const narrowed: unknown[] = [];
+	for (const tool of tools) {
+		if (!isRecord(tool)) continue;
+		const directName = typeof tool.name === "string" ? tool.name : undefined;
+		const functionName =
+			isRecord(tool.function) && typeof tool.function.name === "string" ? tool.function.name : undefined;
+		const toolSpecName =
+			isRecord(tool.toolSpec) && typeof tool.toolSpec.name === "string" ? tool.toolSpec.name : undefined;
+		if (directName === toolName || functionName === toolName || toolSpecName === toolName) {
+			narrowed.push(tool);
+			continue;
+		}
+		if (Array.isArray(tool.functionDeclarations)) {
+			const declarations = tool.functionDeclarations.filter(
+				(declaration) => isRecord(declaration) && declaration.name === toolName,
+			);
+			if (declarations.length > 0) narrowed.push({ ...tool, functionDeclarations: declarations });
+		}
+	}
+	return narrowed.length > 0 ? narrowed : null;
+}
+
 function numberValue(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
@@ -124,6 +148,67 @@ export function patchToolChoiceNonePayload(payload: unknown, model: Model<never>
 	return { ...payload, tool_choice: "none" };
 }
 
+/** Require one exposed tool for the next provider round while preserving the full schema surface. */
+export function patchToolChoiceNamedPayload(
+	payload: unknown,
+	model: Model<never>,
+	toolName: string,
+): unknown | undefined {
+	if (!isRecord(payload) || toolName.trim().length === 0) return undefined;
+	if (isAnthropicMessagesApi(model.api)) {
+		const tools = namedToolDefinitions(payload.tools, toolName);
+		if (tools === null) return undefined;
+		// Anthropic rejects a named tool choice while extended/adaptive thinking
+		// is active. Required-tool rounds are routing rounds, so disable thinking
+		// for this request only and remove the adaptive effort knob that belongs
+		// to it; the next automatic round resumes the configured thinking level.
+		const patched = { ...payload };
+		delete patched.thinking;
+		if (isRecord(patched.output_config) && "effort" in patched.output_config) {
+			const outputConfig = { ...patched.output_config };
+			delete outputConfig.effort;
+			if (Object.keys(outputConfig).length > 0) patched.output_config = outputConfig;
+			else delete patched.output_config;
+		}
+		return { ...patched, tools, tool_choice: { type: "tool", name: toolName } };
+	}
+	if (model.api === "google-generative-ai" || model.api === "google-vertex") {
+		if (!isRecord(payload.config) || payload.config.tools === undefined || payload.config.tools === null)
+			return undefined;
+		const tools = namedToolDefinitions(payload.config.tools, toolName);
+		if (tools === null) return undefined;
+		const toolConfig = isRecord(payload.config.toolConfig) ? payload.config.toolConfig : {};
+		return {
+			...payload,
+			config: {
+				...payload.config,
+				tools,
+				toolConfig: {
+					...toolConfig,
+					functionCallingConfig: { mode: "ANY", allowedFunctionNames: [toolName] },
+				},
+			},
+		};
+	}
+	if (model.api === "bedrock-converse-stream") {
+		if (!isRecord(payload.toolConfig) || payload.toolConfig.tools === undefined || payload.toolConfig.tools === null) {
+			return undefined;
+		}
+		const tools = namedToolDefinitions(payload.toolConfig.tools, toolName);
+		if (tools === null) return undefined;
+		return { ...payload, toolConfig: { ...payload.toolConfig, tools, toolChoice: { tool: { name: toolName } } } };
+	}
+	const tools = namedToolDefinitions(payload.tools, toolName);
+	if (tools === null) return undefined;
+	if (isOpenAIResponsesApi(model.api)) {
+		return { ...payload, tools, tool_choice: { type: "function", name: toolName } };
+	}
+	if (model.api === "mistral-conversations") {
+		return { ...payload, tools, toolChoice: { type: "function", function: { name: toolName } } };
+	}
+	return { ...payload, tools, tool_choice: { type: "function", function: { name: toolName } } };
+}
+
 /** Attach llama-server's native JSON-schema response constraint without changing its tool surface. */
 export function patchLlamaCppResponseSchemaPayload(
 	payload: unknown,
@@ -152,6 +237,7 @@ export interface WorkerPayloadPatchOptions {
 	thinkingLevel?: ThinkingLevel;
 	responseSchema?: Record<string, unknown>;
 	toolChoiceNone?: boolean;
+	toolChoiceName?: string;
 }
 
 /** Compose all worker-owned request mutations over one payload in a stable order. */
@@ -177,6 +263,12 @@ export function patchWorkerRequestPayload(
 
 	if (options.toolChoiceNone === true) {
 		const toolChoicePatched = patchToolChoiceNonePayload(patched, model);
+		if (toolChoicePatched !== undefined) {
+			patched = toolChoicePatched;
+			changed = true;
+		}
+	} else if (options.toolChoiceName !== undefined) {
+		const toolChoicePatched = patchToolChoiceNamedPayload(patched, model, options.toolChoiceName);
 		if (toolChoicePatched !== undefined) {
 			patched = toolChoicePatched;
 			changed = true;

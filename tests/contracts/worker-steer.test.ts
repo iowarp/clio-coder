@@ -20,7 +20,13 @@ import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "../../src/engine/ai.js";
 import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
-import { startWorkerRun, type WorkerRunHandle, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
+import {
+	SCOUT_EXPLORATION_TOOL_CALL_LIMIT,
+	SCOUT_SYNTHESIS_CORRECTION_LIMIT,
+	startWorkerRun,
+	type WorkerRunHandle,
+	type WorkerRunInput,
+} from "../../src/engine/worker-runtime.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -827,6 +833,166 @@ describe("contracts/worker-steer", () => {
 					unregister();
 				}
 			});
+		});
+
+		it("gives a wide Scout batch one graceful synthesis round at the soft exploration limit", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-soft-limit-"));
+			const events: unknown[] = [];
+			const callCount = SCOUT_EXPLORATION_TOOL_CALL_LIMIT + 8;
+			const calls = Array.from({ length: callCount }, (_, index) => {
+				const path = join(scratch, `scout-${index}.md`);
+				writeFileSync(path, `evidence ${index}\n`);
+				return fauxToolCall("read", { path }, { id: `scout-call-${index}` });
+			});
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(calls, { stopReason: "toolUse" }),
+					fauxAssistantMessage(`Findings:\n- grounded at ${join(scratch, "scout-17.md")}:1\n- uncited orientation lead`),
+				],
+				{
+					agentId: "scout",
+					task: "map one bounded area",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				const finishes = toolFinishes(events);
+				strictEqual(result.exitCode, 0, "soft exploration transition must not turn a synthesis into failure");
+				strictEqual(finishes.filter((finish) => finish.outcome === "ok").length, SCOUT_EXPLORATION_TOOL_CALL_LIMIT);
+				strictEqual(
+					finishes.filter(
+						(finish) =>
+							finish.outcome === "blocked" &&
+							String(finish.reason ?? "").startsWith(
+								`worker exploration budget reached (${SCOUT_EXPLORATION_TOOL_CALL_LIMIT})`,
+							),
+					).length,
+					8,
+					"every over-budget sibling is denied without consuming the round backstop",
+				);
+				const finalText = lastAssistantText(events);
+				ok(finalText.includes(`- grounded at ${join(scratch, "scout-17.md")}:1`));
+				ok(finalText.includes("Unresolved gaps:"));
+				ok(finalText.includes("Unverified lead (not confirmed by a successful live read): uncited orientation lead"));
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
+		it("corrects consecutive narrated Scout syntheses and requires a cited final handoff", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-synthesis-correction-"));
+			const events: unknown[] = [];
+			const callCount = SCOUT_EXPLORATION_TOOL_CALL_LIMIT + 2;
+			const calls = Array.from({ length: callCount }, (_, index) => {
+				const path = join(scratch, `scout-${index}.md`);
+				writeFileSync(path, `evidence ${index}\n`);
+				return fauxToolCall("read", { path }, { id: `scout-correction-${index}` });
+			});
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(calls, { stopReason: "toolUse" }),
+					fauxAssistantMessage("OK, let me read the remaining critical files now."),
+					fauxAssistantMessage("I have enough evidence. Let me compile the cited results."),
+					fauxAssistantMessage(`Final finding grounded at ${join(scratch, "scout-17.md")}:1.\n\nUnresolved gaps: none.`),
+				],
+				{
+					agentId: "scout",
+					task: "map one bounded area",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				strictEqual(result.exitCode, 0);
+				strictEqual(
+					lastAssistantText(events),
+					`Final finding grounded at ${join(scratch, "scout-17.md")}:1.\n\nUnresolved gaps: none.`,
+				);
+				strictEqual(
+					result.messages.filter(
+						(message) =>
+							message.role === "user" &&
+							Array.isArray(message.content) &&
+							message.content.some(
+								(block) =>
+									block.type === "text" &&
+									(block.text.includes("not a final Scout handoff") || block.text.includes("FINAL HANDOFF REQUIRED")),
+							),
+					).length,
+					SCOUT_SYNTHESIS_CORRECTION_LIMIT,
+					"both corrections are explicit bounded follow-ups in the worker transcript",
+				);
+				ok(
+					result.messages.some(
+						(message) =>
+							message.role === "user" &&
+							Array.isArray(message.content) &&
+							message.content.some(
+								(block) => block.type === "text" && block.text.includes(`${join(scratch, "scout-17.md")}:1`),
+							),
+					),
+					"the repair prompt carries verified live-read citation anchors",
+				);
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
+		it("fails a Scout that ignores both bounded synthesis corrections", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-synthesis-refusal-"));
+			const events: unknown[] = [];
+			const callCount = SCOUT_EXPLORATION_TOOL_CALL_LIMIT + 2;
+			const calls = Array.from({ length: callCount }, (_, index) => {
+				const path = join(scratch, `scout-${index}.md`);
+				writeFileSync(path, `evidence ${index}\n`);
+				return fauxToolCall("read", { path }, { id: `scout-refusal-${index}` });
+			});
+			const refusal = "OK, 18 calls used. Let me read the remaining critical files I need to cite properly.";
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(calls, { stopReason: "toolUse" }),
+					fauxAssistantMessage(refusal),
+					fauxAssistantMessage(refusal),
+					fauxAssistantMessage(refusal),
+				],
+				{
+					agentId: "scout",
+					task: "map one bounded area",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				strictEqual(result.exitCode, 1);
+				strictEqual(lastAssistantText(events), refusal);
+				strictEqual(
+					result.messages.filter(
+						(message) =>
+							message.role === "user" &&
+							Array.isArray(message.content) &&
+							message.content.some(
+								(block) =>
+									block.type === "text" &&
+									(block.text.includes("not a final Scout handoff") || block.text.includes("FINAL HANDOFF REQUIRED")),
+							),
+					).length,
+					SCOUT_SYNTHESIS_CORRECTION_LIMIT,
+					"only the bounded number of corrective provider rounds is admitted",
+				);
+				strictEqual(
+					toolFinishes(events).filter((finish) => finish.outcome === "ok").length,
+					SCOUT_EXPLORATION_TOOL_CALL_LIMIT,
+				);
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
 		});
 	});
 

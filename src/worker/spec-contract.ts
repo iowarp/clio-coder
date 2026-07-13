@@ -181,6 +181,8 @@ const MIDDLEWARE_EFFECT_KINDS = [
 	"block_tool",
 	"protect_path",
 	"request_continuation",
+	"require_tool",
+	"lock_tools",
 ] as const;
 const RUNTIME_RESOLUTION_SEVERITIES = ["info", "warning", "error"] as const;
 const SPEC_AUTONOMY_LEVELS = [

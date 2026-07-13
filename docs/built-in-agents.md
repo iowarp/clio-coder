@@ -62,7 +62,7 @@ Internal orchestration helpers. They are hidden from default displays (but visib
 | `researcher` | read, web_fetch, context | Shadow docs and external-source researcher for coding decisions. | `read-only` | `deep` |
 | `provenance` | read, grep, find, ls, git | Shadow evidence, receipt, diff, and telemetry reader for handoffs. | `read-only` | `balanced` |
 
-`scout` is bound by a live-grounding contract: every source claim it returns must come from a live read in the same run and cite its `path:line` location, leads it could not verify go under a final `Unresolved gaps:` heading, and wiki or index content is orientation only, never citable as evidence. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):` and flags citation-free answers as unconfirmed leads.
+`scout` is bound by a live-grounding contract: every source claim it returns must come from a live read in the same run and cite its `path:line` location, leads it could not verify go under a final `Unresolved gaps:` heading, and wiki or index content is orientation only, never citable as evidence. It has an 18-call exploration phase followed by a tool-free synthesis phase; wide parallel batches cannot consume the synthesis backstop as separate violations. Dispatch labels its answer `reconnaissance output (advisory leads, not validation evidence):` and flags citation-free answers as unconfirmed leads.
 
 ---
 
@@ -99,8 +99,8 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 
 *   **Visibility**: Normal `clio agents` lists user-visible (base/custom) agents. The `/agents` slash command shows both Clio fleet agents and ACP delegation agents. The command `clio agents --all` includes shadow/internal specs reserved for Clio orchestration.
 *   **Invocation limits**: User-origin `/run` and `clio run --agent` **cannot** invoke shadow/internal agents.
-*   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool, including multi-task `tasks` arrays.
-*   **TUI rendering**: Shadow dispatch rows are marked with an `sh:` prefix in the dispatch board and footer so users can see when Clio is using internal orchestration helpers.
+*   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool. For an explicit broad repository/codebase exploration request, the chat harness itself invokes one bounded Scout task through normal admission and live dispatch events, then gives the sealed result to a tool-free main-model synthesis round. Scout failure is reported rather than replaced by a direct scan. Narrow file/symbol inspection remains local to the main agent.
+*   **TUI rendering and control**: Shadow dispatch rows are marked with an `sh:` prefix. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select a native run to steer it or cancel an active worker/retry timer.
 *   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
 
 ### ACP Delegation Agents as First-Class Workers

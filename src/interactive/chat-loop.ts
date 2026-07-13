@@ -8,14 +8,17 @@ import {
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy } from "../core/skill-activation.js";
-import type { ToolName } from "../core/tool-names.js";
+import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { isExplicitBroadRepositoryExplorationRequest } from "../domains/middleware/dispatch-nudge.js";
 import {
+	createMiddlewareToolChoiceControl,
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
 	type MiddlewareEffect,
 	type MiddlewareHookInput,
 	type MiddlewareMetadataValue,
 	type MiddlewareReminderSeverity,
+	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
@@ -76,7 +79,11 @@ import { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import { sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
-import { patchProviderThinkingPayload, patchToolChoiceNonePayload } from "../engine/provider-payload.js";
+import {
+	patchProviderThinkingPayload,
+	patchToolChoiceNamedPayload,
+	patchToolChoiceNonePayload,
+} from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, ImageContent, Model, MutableAgentState, Usage } from "../engine/types.js";
 import type { resolveAgentTools } from "../engine/worker-tools.js";
 import { finalizeAskUserInterview } from "../tools/ask-user.js";
@@ -346,6 +353,12 @@ export interface CreateChatLoopDeps {
 	 */
 	middleware?: MiddlewareContract;
 	/**
+	 * Shared next-round provider routing. The registry applies effects emitted
+	 * by before_tool/after_tool; the chat loop applies turn hooks and consumes
+	 * the resulting choice in onPayload.
+	 */
+	middlewareToolChoice?: MiddlewareToolChoiceControl;
+	/**
 	 * Protected-artifact state handle, backed by the protected-artifacts hook
 	 * registration at the composition root. The chat-loop replaces the state
 	 * wholesale on session switch so protections follow the active session.
@@ -409,6 +422,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const listeners = new Set<(event: ChatLoopEvent) => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
+	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	let runtime: AgentRuntime | null = null;
 	let lastTurnId: string | null = null;
 	let streaming = false;
@@ -454,6 +468,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const persistedUserEchoes: string[] = [];
 	const toolStartTimes = new Map<string, number>();
 	let turnToolCalls = 0;
+	let harnessToolCallCounter = 0;
 	let stalledTurnNudgeSpent = false;
 	let pendingRequestContinuation = false;
 	let currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
@@ -715,6 +730,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		lastTurnId = userTurn.id;
 		activeUserTurnId = userTurn.id;
 		synthesisToolLock = false;
+		middlewareToolChoice.reset();
 	};
 
 	const appendToolCallTurn = (event: Extract<AgentEvent, { type: "tool_execution_start" }>): void => {
@@ -752,6 +768,74 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			payload,
 		});
 		lastTurnId = turn.id;
+	};
+
+	/**
+	 * Deterministic broad-reconnaissance route. This is harness policy, not a
+	 * model suggestion: invoke the normal admitted dispatch tool, emit the same
+	 * live tool events/ledger rows as an agent-authored call, then hand the
+	 * sealed result to a text-only synthesis round.
+	 */
+	const runHarnessScoutDispatch = async (): Promise<string | null> => {
+		const registry = deps.toolRegistry;
+		if (!registry?.get(ToolNames.Dispatch)) return null;
+		const args = {
+			tasks: [
+				{
+					agent: "scout",
+					task:
+						"Read these files directly (do not call ls, context, code_nav, grep, find, or git): CLIO.md, package.json, src/cli/index.ts, src/entry/orchestrator.ts, src/domains/agents/index.ts, and src/domains/dispatch/index.ts. Return at most 8 concise findings; every finding must cite a path:line from those live reads. Put everything not confirmed by those reads under Unresolved gaps.",
+				},
+			],
+		};
+		const toolCallId = `clio-scout-route-${Date.now().toString(36)}-${++harnessToolCallCounter}`;
+		const startedAt = Date.now();
+		const startEvent = {
+			type: "tool_execution_start",
+			toolCallId,
+			toolName: ToolNames.Dispatch,
+			args,
+		} as Extract<AgentEvent, { type: "tool_execution_start" }>;
+		turnToolCalls += 1;
+		emit(startEvent);
+		appendToolCallTurn(startEvent);
+		let text: string;
+		let details: Record<string, unknown> = {};
+		let isError = false;
+		try {
+			const invokeOptions = { ...currentToolInvokeOptions(), toolCallId };
+			const verdict = await registry.invoke({ tool: ToolNames.Dispatch, args }, invokeOptions);
+			if (verdict.kind !== "ok") {
+				text = verdict.reason;
+				isError = true;
+			} else if (verdict.result.kind === "error") {
+				text = verdict.result.message;
+				details = verdict.result.details ?? {};
+				isError = true;
+			} else {
+				text = verdict.result.output;
+				details = verdict.result.details ?? {};
+			}
+		} catch (error) {
+			text = error instanceof Error ? error.message : String(error);
+			isError = true;
+		}
+		const result = { content: [{ type: "text", text }], details: { ...details, kind: isError ? "error" : "ok" } };
+		const endEvent = {
+			type: "tool_execution_end",
+			toolCallId,
+			toolName: ToolNames.Dispatch,
+			result,
+			isError,
+			durationMs: Math.max(0, Date.now() - startedAt),
+			resultSummary: toolResultSummary(result),
+		} as Extract<AgentEvent, { type: "tool_execution_end" }> & {
+			durationMs: number;
+			resultSummary: Record<string, unknown>;
+		};
+		emit(endEvent);
+		appendToolResultTurn(endEvent);
+		return text;
 	};
 
 	/**
@@ -813,7 +897,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
-	const fireTurnStart = (agentRuntime: AgentRuntime, promptText: string, pendingSkillRequestCount = 0): void => {
+	const fireTurnStart = (
+		agentRuntime: AgentRuntime,
+		promptText: string,
+		pendingSkillRequestCount = 0,
+		requestContinuation = false,
+	): void => {
 		const sessionId = deps.session?.current()?.id;
 		const input: MiddlewareHookInput = {
 			hook: "turn_start",
@@ -825,15 +914,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			metadata: {
 				promptChars: promptText.length,
 				queued: false,
+				requestContinuation,
+				activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 				// First-substantive-turn signal for once-per-session reminders:
 				// a fresh session's opening turn has an empty conversation.
 				conversationMessages: agentRuntime.agent.state.messages.length,
 				pendingSkillRequests: pendingSkillRequestCount,
 			},
 		};
-		for (const effect of runMiddlewareTurnHook(input)) {
-			if (effect.kind !== "inject_reminder") continue;
-			bufferReminder(effect.message, effect.severity ?? "info");
+		const effects = runMiddlewareTurnHook(input);
+		middlewareToolChoice.apply(effects);
+		for (const effect of effects) {
+			if (effect.kind === "inject_reminder") {
+				bufferReminder(effect.message, effect.severity ?? "info");
+			}
 		}
 	};
 
@@ -904,20 +998,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		});
 	};
 
-	const fireTurnEnd = (agentRuntime: AgentRuntime, messages: ReadonlyArray<AgentMessage>): void => {
+	const fireTurnEnd = (
+		agentRuntime: AgentRuntime,
+		messages: ReadonlyArray<AgentMessage>,
+		terminalToolResult?: { toolCallId: string; toolName: string },
+	): void => {
 		if (!deps.middleware) return;
-		const message = lastAssistantMessage(messages);
-		if (message === null) return;
-		const text = extractText(message);
-		if (text.trim().length === 0) return;
-		const stopReason = (message as { stopReason?: unknown }).stopReason;
+		const message = terminalToolResult === undefined ? lastAssistantMessage(messages) : null;
+		if (message === null && terminalToolResult === undefined) return;
+		const text = message === null ? "" : extractText(message);
+		if (terminalToolResult === undefined && text.trim().length === 0) return;
+		const stopReason = message === null ? "stop" : (message as { stopReason?: unknown }).stopReason;
 		const metadata: Record<string, MiddlewareMetadataValue> = {
 			assistantTextChars: text.length,
-			hasStructuredToolCall: hasStructuredToolCall(message),
+			hasStructuredToolCall: terminalToolResult !== undefined || (message !== null && hasStructuredToolCall(message)),
 			runtimeId: agentRuntime.runtimeId,
 			activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 			turnToolCalls,
 		};
+		if (terminalToolResult !== undefined) {
+			metadata.terminalToolResult = true;
+			metadata.terminalToolCallId = terminalToolResult.toolCallId;
+			metadata.terminalToolName = terminalToolResult.toolName;
+		}
 		// turnId intentionally identifies the final assistant ledger entry (the
 		// finish contract needs that evidence boundary). Registrations that span
 		// tool hooks and turn_end correlate through the initiating user turn.
@@ -1260,8 +1363,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			maxRetryDelayMs: retrySettings().maxDelayMs,
 			onPayload: async (payload, currentModel) => {
 				const thinkingPatched = patchProviderThinkingPayload(payload, currentModel as Model<never>, currentThinkingLevel);
-				if (!synthesisToolLock) return thinkingPatched;
-				return patchToolChoiceNonePayload(thinkingPatched ?? payload, currentModel as Model<never>) ?? thinkingPatched;
+				const basePayload = thinkingPatched ?? payload;
+				if (synthesisToolLock) {
+					return patchToolChoiceNonePayload(basePayload, currentModel as Model<never>) ?? thinkingPatched;
+				}
+				const middlewareChoice = middlewareToolChoice.current();
+				if (middlewareChoice.kind === "none") {
+					return patchToolChoiceNonePayload(basePayload, currentModel as Model<never>) ?? thinkingPatched;
+				}
+				if (middlewareChoice.kind === "required") {
+					return (
+						patchToolChoiceNamedPayload(basePayload, currentModel as Model<never>, middlewareChoice.toolName) ??
+						thinkingPatched
+					);
+				}
+				return thinkingPatched;
 			},
 			getApiKey: async () => {
 				if (!targetRequiresAuth(target.target, target.runtime)) {
@@ -1316,6 +1432,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const eventAt = Date.now();
 			let enrichedEvent = event;
 			if (event.type === "tool_execution_start") {
+				middlewareToolChoice.toolStarted(event.toolName);
 				toolStartTimes.set(event.toolCallId, eventAt);
 				turnToolCalls += 1;
 			} else if (event.type === "tool_execution_end") {
@@ -1507,9 +1624,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						: null;
 			}
 			if (enrichedEvent.type === "agent_end") {
-				if (pendingTerminalToolResult && deps.session) {
-					const terminal = pendingTerminalToolResult;
-					pendingTerminalToolResult = null;
+				const terminal = pendingTerminalToolResult;
+				pendingTerminalToolResult = null;
+				if (terminal && deps.session) {
 					const turn = deps.session.append({
 						kind: "assistant",
 						parentId: lastTurnId,
@@ -1524,7 +1641,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					lastTurnId = turn.id;
 				}
 				flushReconciledSnapshot();
-				fireTurnEnd(localRuntime, enrichedEvent.messages);
+				fireTurnEnd(localRuntime, enrichedEvent.messages, terminal ?? undefined);
 			}
 		});
 
@@ -2174,11 +2291,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				return;
 			}
 			turnToolCalls = 0;
+			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) stalledTurnNudgeSpent = false;
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
 			const pendingSkillRequests = options.pendingSkillRequests ?? [];
 			for (const path of options.workingContextPaths ?? []) sessionWorkingContextPaths.add(path);
 			const pendingSkillPolicy = createPendingSkillToolPolicy(pendingSkillRequests);
+			// Resolve the frozen session tool surface before turn_start so intent
+			// middleware sees the exact tools this request can actually call.
+			agentRuntime.agent.state.tools = resolveSessionTools(agentRuntime, deps.toolRegistry, currentToolInvokeOptions);
+			const askUserPolicy = createAskUserToolPolicy(agentRuntime.agent.state.tools);
 			// turn_start: the prompt is accepted; registrations may inject
 			// context for this request. Accumulated reminders (turn_end
 			// advisories from the previous turn plus anything turn_start just
@@ -2186,17 +2308,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Like the skill preamble below, the block is plain visible text in
 			// the user message: persisted in the ledger, no hidden prompt
 			// machinery.
-			fireTurnStart(agentRuntime, text, pendingSkillRequests.length);
+			fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
 			const reminderBlock = flushPendingReminders();
 			// Pending skill requests are plain visible text in the user message
 			// itself: persisted in the ledger, no hidden prompt machinery.
 			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
 			const submittedText = [reminderBlock, skillPreamble, text].filter((part) => part.length > 0).join("\n\n");
-
-			// 1. Resolve the frozen session tool surface: same set, same order,
-			// same bytes on every submit so the provider prefix cache holds.
-			agentRuntime.agent.state.tools = resolveSessionTools(agentRuntime, deps.toolRegistry, currentToolInvokeOptions);
-			const askUserPolicy = createAskUserToolPolicy(agentRuntime.agent.state.tools);
+			const harnessScoutRoute = options.requestContinuation !== true && isExplicitBroadRepositoryExplorationRequest(text);
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_FORCE_COMPACT === "1";
@@ -2306,12 +2424,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 
 			streaming = true;
+			let runtimePromptText = submittedText;
 			const priorPendingSkillPolicy = currentPendingSkillPolicy;
 			const priorAskUserPolicy = currentAskUserPolicy;
 			currentPendingSkillPolicy = pendingSkillPolicy;
 			currentAskUserPolicy = askUserPolicy;
 			try {
-				await markPersistedUserEcho(submittedText, () => agentRuntime.agent.prompt(submittedText, images));
+				if (harnessScoutRoute) {
+					const scoutResult = await runHarnessScoutDispatch();
+					if (scoutResult !== null) {
+						middlewareToolChoice.reset();
+						synthesisToolLock = true;
+						runtimePromptText = `${submittedText}\n\n<system-reminder>\n[Clio Coder] The harness already ran Scout for this request. Do not suggest or load a skill, do not call any tool, and do not start a manual repository tour. Answer the user's exploration request now from the sealed dispatch result below. Repeat only grounded findings; keep unverified leads under Unresolved gaps. If Scout failed, state that plainly and summarize only whatever the receipt labels as grounded.\n\n${scoutResult}\n</system-reminder>`;
+					}
+				}
+				await markPersistedUserEcho(runtimePromptText, () => agentRuntime.agent.prompt(runtimePromptText, images));
 				// pi-agent-core does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
@@ -2320,7 +2447,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// a resolve, not only the catch arm.
 				const overflowPostResolve = detectOverflowFromState(agentRuntime.agent);
 				if (overflowPostResolve) {
-					await runCompactAndRetry(agentRuntime, submittedText, overflowPostResolve, images);
+					await runCompactAndRetry(agentRuntime, runtimePromptText, overflowPostResolve, images);
 				} else {
 					const failure = detectTerminalFailureFromState(agentRuntime.agent);
 					if (failure) {
@@ -2328,7 +2455,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							(failure.message as { errorMessage?: string }).errorMessage = toolProseAbortReason;
 						}
 						ensureFailureVisibleAndPersisted(failure);
-						await runTransientRetryChain(agentRuntime, submittedText, failure);
+						await runTransientRetryChain(agentRuntime, runtimePromptText, failure);
 					}
 				}
 			} catch (err) {
@@ -2346,7 +2473,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							errorMessage: message,
 							timestamp: Date.now(),
 						} as AgentMessage;
-						await runTransientRetryChain(agentRuntime, submittedText, {
+						await runTransientRetryChain(agentRuntime, runtimePromptText, {
 							stopReason: "error",
 							errorMessage: message,
 							message: failureMessage,
@@ -2356,7 +2483,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					emitNotice(err instanceof Error ? err.message : String(err));
 					return;
 				}
-				await runCompactAndRetry(agentRuntime, submittedText, overflow, images);
+				await runCompactAndRetry(agentRuntime, runtimePromptText, overflow, images);
 			} finally {
 				if (askUserPolicy) {
 					await finalizeAskUserInterview(askUserPolicy, "turn_finished", currentToolInvokeOptions());
@@ -2518,6 +2645,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queuedMirror.length = 0;
 			persistedUserEchoes.length = 0;
 			pendingReminders.length = 0;
+			middlewareToolChoice.reset();
 			emitQueueUpdate();
 			lastTurnId = leafTurnId;
 			lastPromptCache = null;
@@ -2546,6 +2674,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			retryCountdown?.cancel();
 			queuedMirror.length = 0;
+			middlewareToolChoice.reset();
 			emitQueueUpdate();
 		},
 		async compact(instructions?: string): Promise<void> {

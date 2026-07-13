@@ -10,6 +10,9 @@ describe("contracts/dispatch retry fail-fast classifier", () => {
 			),
 		);
 		ok(isDeterministicWorkerFailure("model load failed: VRAM fit check failed"));
+		ok(isDeterministicWorkerFailure("workerToolCallCap reached (50); tool calls are now disabled"));
+		ok(isDeterministicWorkerFailure("loop guard: tool calls stayed disabled and read was called again"));
+		ok(isDeterministicWorkerFailure("Scout synthesis contract failed: omitted path:line citations"));
 	});
 
 	it("leaves transient and unknown failures retryable", () => {

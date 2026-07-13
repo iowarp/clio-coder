@@ -130,8 +130,9 @@ describe("contracts/observability-projection", () => {
 			outcome: "succeeded",
 			outcomeDetail: null,
 			tokenCount: 1200,
-			inputTokenCount: 1000,
+			inputTokenCount: 900,
 			outputTokenCount: 200,
+			cacheReadTokenCount: 100,
 			reasoningTokenCount: 30,
 			costUsd: 0.42,
 			durationMs: 5000,
@@ -143,7 +144,7 @@ describe("contracts/observability-projection", () => {
 		strictEqual(run.durationMs, 5000);
 		strictEqual(run.costUsd, 0.42);
 		strictEqual(run.tokens.total, 1200);
-		strictEqual(run.tokens.input, 1000);
+		strictEqual(run.tokens.input, 1000, "terminal input keeps the live input+cacheRead convention");
 		strictEqual(run.tokens.output, 200);
 		strictEqual(run.tokens.reasoning, 30);
 		strictEqual(run.finishedAtMs !== null, true);

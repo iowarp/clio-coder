@@ -420,8 +420,8 @@ describe("contracts/prompts compiler logic", () => {
 			"# Tool Contract",
 			"The attached schemas are the session's complete tool surface; follow each schema exactly.",
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
-			'Prefer context(scope="workspace"), grep, and read for repository orientation instead of assuming source-tree details were preloaded.',
-			'Routing order: orient with structured observe tools before bash; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; dispatch only bounded parallel or delegated subwork and synthesize the receipts; validate with verify or git diff before final claims.',
+			'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available and Scout is routable, explicit broad repository/codebase exploration goes to Scout before repo-wide reads.',
+			'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded Scout handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
 			'When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema, adjust the arguments, or query context(scope="docs") for that tool\'s usage.',
 			'List installed skills with context(scope="skills") only when the task is skill-shaped or the operator asks about skills; if one matches, suggest the operator run /skill:<name>, and never load a skill the operator did not request.',
 			FLEET_ROUTING_GUIDANCE,
@@ -458,7 +458,7 @@ describe("contracts/prompts compiler logic", () => {
 		});
 		ok(withDispatch.systemPrompt.includes(FLEET_ROUTING_GUIDANCE));
 		for (const route of [
-			"many-file exploration -> scout",
+			"explicit broad repo/codebase exploration -> scout before repo-wide reads",
 			"external docs/papers -> researcher",
 			"receipts/evidence -> provenance",
 			"bounded code changes -> coder",
@@ -497,8 +497,9 @@ describe("contracts/prompts compiler logic", () => {
 
 		// The deterministic routing order and failure recovery are static base
 		// lines, present regardless of which hinted tools are on the surface.
-		ok(prompt.includes("Routing order: orient with structured observe tools before bash"));
-		ok(prompt.includes("dispatch only bounded parallel or delegated subwork and synthesize the receipts"));
+		ok(prompt.includes("Routing order: use structured observe tools before bash for narrow inspection"));
+		ok(prompt.includes("treat broad reconnaissance as a bounded Scout handoff"));
+		ok(prompt.includes("dispatch other bounded parallel or delegated subwork, and synthesize receipts"));
 		ok(prompt.includes("validate with verify or git diff before final claims"));
 		ok(prompt.includes("do not retry the same shape blindly"));
 		ok(prompt.includes('query context(scope="docs")'));

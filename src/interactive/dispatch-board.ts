@@ -7,6 +7,7 @@ import {
 } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
+import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
 import type { DispatchRequestOrigin, RunKind, RunStatus } from "../domains/dispatch/types.js";
 import {
 	costAggregateForAmount,
@@ -15,6 +16,7 @@ import {
 	type ObservabilitySnapshot,
 } from "../domains/observability/index.js";
 import type { CostProvenance } from "../domains/providers/index.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
 import { formatFooterTokens } from "./footer-panel.js";
@@ -34,7 +36,20 @@ import {
 export type DispatchBoardStatus =
 	| Extract<RunStatus, "running" | "completed" | "failed" | "stale" | "dead">
 	| "aborted"
-	| "enqueued";
+	| "cancelling"
+	| "enqueued"
+	| "retrying";
+
+export interface DispatchRetryPresentation {
+	attempt: number;
+	dueAtMs: number;
+	reason: string;
+}
+
+export interface DispatchSteerAcknowledgement {
+	receivedAtMs: number;
+	chars: number;
+}
 
 export interface DispatchBoardRow {
 	runId: string;
@@ -45,6 +60,8 @@ export interface DispatchBoardRow {
 	runtimeId: string;
 	targetId: string;
 	wireModelId: string;
+	/** Sanitized, one-line summary of the task assigned to this run. */
+	taskSummary?: string;
 	status: DispatchBoardStatus;
 	elapsedMs: number;
 	tokenCount: number;
@@ -69,10 +86,27 @@ export interface DispatchBoardRow {
 	currentTool?: string | null;
 	/** Recently finished tools, newest first, bounded. */
 	recentTools?: ReadonlyArray<string>;
+	/** Waiting retry projected from the live dispatch snapshot. */
+	retry?: DispatchRetryPresentation;
+	/** Most recent worker delivery acknowledgement for an operator steer. */
+	steerAcknowledgement?: DispatchSteerAcknowledgement;
+}
+
+/** Native, live rows are the only rows whose stdin can accept operator guidance. */
+export function isDispatchBoardRowSteerable(row: DispatchBoardRow): boolean {
+	return (
+		row.runtimeKind !== "acp-delegation" &&
+		(row.status === "running" || row.status === "stale" || row.status === "enqueued")
+	);
+}
+
+/** Dispatch abort owns active workers and retry timers, but never terminal history. */
+export function isDispatchBoardRowCancellable(row: DispatchBoardRow): boolean {
+	return row.status === "running" || row.status === "stale" || row.status === "enqueued" || row.status === "retrying";
 }
 
 interface DispatchBoardEntry
-	extends Omit<DispatchBoardRow, "elapsedMs" | "recentTools" | "lastContextTokens" | "currentTool"> {
+	extends Omit<DispatchBoardRow, "elapsedMs" | "recentTools" | "lastContextTokens" | "currentTool" | "retry"> {
 	sequence: number;
 	enqueuedAtMs: number;
 	startedAtMs: number | null;
@@ -85,6 +119,8 @@ interface DispatchBoardEntry
 
 /** Bound on the recent-tool trail rendered on a card. */
 const RECENT_TOOL_TRAIL_LIMIT = 4;
+/** Keep raw task text out of long-lived TUI rows and bound hostile/user-sized input. */
+const TASK_SUMMARY_MAX_WIDTH = 240;
 
 interface WorkerEventShape {
 	type?: unknown;
@@ -110,12 +146,14 @@ const _EMPTY_MESSAGE = "No dispatch runs yet.";
 
 const STATUS_ORDER: Record<DispatchBoardStatus, number> = {
 	running: 0,
-	stale: 1,
-	enqueued: 2,
-	dead: 3,
-	failed: 4,
-	aborted: 5,
-	completed: 6,
+	cancelling: 1,
+	stale: 2,
+	retrying: 3,
+	enqueued: 4,
+	dead: 5,
+	failed: 6,
+	aborted: 7,
+	completed: 8,
 };
 const MAX_DISPATCH_BOARD_ROWS = 50;
 
@@ -156,6 +194,10 @@ export function dispatchStatusPresentation(
 				label: "running",
 				token: "action",
 			};
+		case "cancelling":
+			return { glyph: GLYPH.cancelled, label: "cancelling", token: "warning" };
+		case "retrying":
+			return { glyph: GLYPH.phaseRetry, label: "retrying", token: "warning" };
 		case "completed":
 			return { glyph: GLYPH.ok, label: compact ? "done" : "completed", token: "success" };
 		case "failed":
@@ -293,7 +335,27 @@ function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, c
 	return cardUnitsLine(theme, "proof", units, contentWidth);
 }
 
-export function renderDispatchCard(row: DispatchBoardRow, width: number, evidence?: RunEvidencePresentation): string[] {
+/** Sanitize lifecycle task text at the terminal boundary and collapse it to one bounded line. */
+export function sanitizeDispatchTaskSummary(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const sanitized = sanitizeCallTargetText(value);
+	if (sanitized.length === 0) return undefined;
+	// pi-tui's truncator appends reset sequences when it elides. Strip those
+	// again so the stored projection remains plain text, not terminal styling.
+	return sanitizeCallTargetText(truncateToWidth(sanitized, TASK_SUMMARY_MAX_WIDTH, "…", false));
+}
+
+function retryCountdown(retry: DispatchRetryPresentation, now = Date.now()): string {
+	const remainingMs = Math.max(0, retry.dueAtMs - now);
+	return remainingMs === 0 ? "now" : `in ${formatCompactMs(remainingMs)}`;
+}
+
+export function renderDispatchCard(
+	row: DispatchBoardRow,
+	width: number,
+	evidence?: RunEvidencePresentation,
+	options: { selected?: boolean } = {},
+): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
@@ -315,8 +377,13 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	// The agent label is the frame title and can be arbitrarily long (agent ids
 	// are user data); clamp it so the title plus the elapsed meta never pushes
 	// the right corner past the card width.
-	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10);
+	const selectionWidth = options.selected === true ? visibleWidth(GLYPH.cursor) + 1 : 0;
+	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth);
 	const clampedLabel = truncateToWidth(agentLabel, labelBudget, "...", false);
+	const cardTitle =
+		options.selected === true
+			? `${theme.fg("accent", GLYPH.cursor)} ${theme.style("title", clampedLabel, { bold: true })}`
+			: clampedLabel;
 
 	const elapsedSec = row.elapsedMs / 1000;
 	const tokensPerSec = elapsedSec > 0.1 ? Math.round(row.outputTokens / elapsedSec) : 0;
@@ -346,10 +413,28 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	];
 	const contextUnit = formatWorkerContextMeter(row.lastContextTokens ?? 0, row.contextWindow, theme);
 	const bodyLines = [
+		cardUnitsLine(theme, "run", [theme.fg("dim", row.runId)], contentWidth),
 		targetLine,
+		...(row.taskSummary
+			? [truncateToWidth(`${cardKvKey(theme, "task")}${theme.fg("muted", row.taskSummary)}`, contentWidth, "…", false)]
+			: []),
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
 		cardUnitsLine(theme, "telemetry", [up, down, total, ...(contextUnit !== null ? [contextUnit] : [])], contentWidth),
 	];
+	if (row.retry) {
+		bodyLines.push(
+			cardUnitsLine(
+				theme,
+				"retry",
+				[
+					theme.fg("warning", `attempt ${row.retry.attempt}`),
+					theme.fg("muted", retryCountdown(row.retry)),
+					...(row.retry.reason.length > 0 ? [theme.fg("muted", row.retry.reason)] : []),
+				],
+				contentWidth,
+			),
+		);
+	}
 	// Live tool activity: the executing tool (worker telemetry carries names,
 	// never arguments, across the stdout seam) and the recent-tool trail.
 	const currentTool = row.currentTool ?? null;
@@ -361,6 +446,16 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 		];
 		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
 	}
+	if (row.steerAcknowledgement) {
+		bodyLines.push(
+			cardUnitsLine(
+				theme,
+				"control",
+				[theme.fg("success", `${GLYPH.ok} steer received`), theme.fg("muted", `${row.steerAcknowledgement.chars} chars`)],
+				contentWidth,
+			),
+		);
+	}
 	// The proof row is present only when the observability projection knows an
 	// evidence state for this run; an unknown/none state adds no line, so cards
 	// without evidence keep their existing three-line body.
@@ -370,7 +465,7 @@ export function renderDispatchCard(row: DispatchBoardRow, width: number, evidenc
 	}
 	if (detail !== null) bodyLines.push(`${cardKvKey(theme, "detail")}${theme.fg("dim", detail)}`);
 
-	return frame(theme, clampedLabel, bodyLines, width, { rightMeta: elapsed });
+	return frame(theme, cardTitle, bodyLines, width, { rightMeta: elapsed });
 }
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
@@ -406,26 +501,36 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 		"muted",
 		`${GLYPH.down} ${formatFooterTokens(row.outputTokens)}${showRate ? ` (${tokensPerSec}/s)` : ""}`,
 	);
-	const telemetry = `  ${up}${dot}${down}${dot}${theme.fg("muted", cost)}`;
+	const telemetry = row.retry
+		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("muted", retryCountdown(row.retry))}`
+		: `  ${up}${dot}${down}${dot}${theme.fg("muted", cost)}`;
+	const task = row.taskSummary
+		? `  ${theme.fg("muted", truncateToWidth(row.taskSummary, Math.max(1, width - 2), "…", false))}`
+		: null;
 
-	return [padAnsi(line1, width), padAnsi(telemetry, width)];
+	return [padAnsi(line1, width), ...(task ? [padAnsi(task, width)] : []), padAnsi(telemetry, width)];
 }
 
 export function formatDispatchBoardLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	width = 76,
 	observability?: ObservabilitySnapshot,
+	selectedRunId?: string | null,
 ): string[] {
 	if (rows.length === 0) {
 		const theme = clioTheme();
-		const lines = ["", "No active dispatches", "Delegated runs appear here with live status and telemetry.", ""];
+		const lines = ["", "No fleet runs yet", "Delegated runs appear here with task, status, and telemetry.", ""];
 		return lines.map((line) => {
 			const padding = Math.max(0, Math.floor((width - visibleWidth(line)) / 2));
 			return theme.fg("dim", " ".repeat(padding) + line);
 		});
 	}
 
-	const cards = rows.map((row) => renderDispatchCard(row, width, deriveRunEvidenceState(observability, row.runId)));
+	const cards = rows.map((row) =>
+		renderDispatchCard(row, width, deriveRunEvidenceState(observability, row.runId), {
+			selected: row.runId === selectedRunId,
+		}),
+	);
 	const body: string[] = [];
 	for (const card of cards) {
 		if (body.length > 0) body.push("");
@@ -438,17 +543,60 @@ export function formatDispatchBoardLines(
  * Live dispatch-board component. Cards render at the width the TUI actually
  * grants instead of a baked-in 76-column layout, so a narrow terminal no
  * longer clips telemetry mid-token and a wide one no longer wastes the frame.
- * Rendering is stateless: rows and the observability snapshot are read per
- * render, and the overlay's ticker plus bus-driven requestRender calls drive
- * repaints (running rows read the clock for spinner and elapsed time).
+ * Rows and the observability snapshot are read per render. The only local
+ * state is the selected run id, kept stable across lifecycle-driven reorders;
+ * the overlay ticker plus bus-driven requestRender calls drive repaints.
  */
+export interface DispatchBoardView extends Component {
+	selectedRow(): DispatchBoardRow | null;
+	selectPrevious(): void;
+	selectNext(): void;
+	resetSelection(): void;
+}
+
 export function createDispatchBoardView(
 	rows: () => ReadonlyArray<DispatchBoardRow>,
 	observability: () => ObservabilitySnapshot | undefined,
-): Component {
+): DispatchBoardView {
+	let selectedRunId: string | null = null;
+
+	const normalizeSelection = (currentRows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow | null => {
+		if (currentRows.length === 0) {
+			selectedRunId = null;
+			return null;
+		}
+		const selected = currentRows.find((row) => row.runId === selectedRunId) ?? currentRows[0] ?? null;
+		selectedRunId = selected?.runId ?? null;
+		return selected;
+	};
+
+	const moveSelection = (delta: -1 | 1): void => {
+		const currentRows = rows();
+		const selected = normalizeSelection(currentRows);
+		if (!selected || currentRows.length < 2) return;
+		const index = currentRows.findIndex((row) => row.runId === selected.runId);
+		const nextIndex = (index + delta + currentRows.length) % currentRows.length;
+		selectedRunId = currentRows[nextIndex]?.runId ?? selected.runId;
+	};
+
 	return {
 		render(width: number): string[] {
-			return formatDispatchBoardLines(rows(), Math.max(1, width), observability());
+			const currentRows = rows();
+			normalizeSelection(currentRows);
+			return formatDispatchBoardLines(currentRows, Math.max(1, width), observability(), selectedRunId);
+		},
+		selectedRow(): DispatchBoardRow | null {
+			return normalizeSelection(rows());
+		},
+		selectPrevious(): void {
+			moveSelection(-1);
+		},
+		selectNext(): void {
+			moveSelection(1);
+		},
+		resetSelection(): void {
+			selectedRunId = null;
+			normalizeSelection(rows());
 		},
 		invalidate(): void {},
 	};
@@ -460,7 +608,7 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 
 	if (visibleRows.length === 0) {
 		const theme = clioTheme();
-		body.push(theme.fg("dim", "No active tasks."));
+		body.push(theme.fg("dim", "No active fleet runs."));
 		body.push(theme.fg("dim", "Use /run or /delegate to spawn agents."));
 	} else {
 		for (let i = 0; i < visibleRows.length; i++) {
@@ -481,7 +629,7 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 	// Body rows are already ANSI-padded to TASK_ISLAND_WIDTH by the row renderer
 	// (or are fixed-width dividers/empty-state lines). The canonical frame re-pads
 	// each row ANSI-aware, so passing the styled lines through is safe.
-	return frame(clioTheme(), "Tasks", body, TASK_ISLAND_WIDTH + 4);
+	return frame(clioTheme(), "Fleet runs", body, TASK_ISLAND_WIDTH + 4);
 }
 
 function parseRunId(value: unknown): string | null {
@@ -516,6 +664,13 @@ function parseFiniteNumber(value: unknown, fallback: number): number {
 
 function parseNonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function parseTaskSummary(
+	raw: Partial<DispatchRunIdentity> & { task?: unknown; taskSummary?: unknown },
+	fallback: string | undefined,
+): string | undefined {
+	return sanitizeDispatchTaskSummary(raw.task) ?? sanitizeDispatchTaskSummary(raw.taskSummary) ?? fallback;
 }
 
 function parsePositiveInt(value: unknown): number | undefined {
@@ -584,6 +739,84 @@ function isTerminalStatus(status: DispatchBoardStatus): boolean {
 	return status === "completed" || status === "failed" || status === "aborted" || status === "dead";
 }
 
+function parseRetrySnapshot(value: DispatchSnapshot["retrying"][number]): DispatchRetryPresentation | null {
+	const attempt = parsePositiveInt(value.attempt);
+	const dueAtMs = Date.parse(value.dueAt);
+	if (attempt === undefined || !Number.isFinite(dueAtMs)) return null;
+	return {
+		attempt,
+		dueAtMs,
+		reason: sanitizeCallTargetText(value.reason),
+	};
+}
+
+function readRetrySnapshot(
+	snapshot: (() => DispatchSnapshot) | undefined,
+): Map<string, { agentId: string; taskSummary?: string; retry: DispatchRetryPresentation }> {
+	const retrying = new Map<string, { agentId: string; taskSummary?: string; retry: DispatchRetryPresentation }>();
+	if (!snapshot) return retrying;
+	try {
+		for (const value of snapshot().retrying) {
+			const runId = parseRunId(value.runId);
+			const agentId = parseNonEmptyString(value.agentId);
+			const retry = parseRetrySnapshot(value);
+			const taskSummary = sanitizeDispatchTaskSummary(value.task);
+			if (runId && agentId && retry) {
+				retrying.set(runId, {
+					agentId,
+					...(taskSummary !== undefined ? { taskSummary } : {}),
+					retry,
+				});
+			}
+		}
+	} catch {
+		// The board remains lifecycle-event driven if an optional snapshot fails.
+	}
+	return retrying;
+}
+
+function readRunningSnapshot(snapshot: (() => DispatchSnapshot) | undefined): Map<
+	string,
+	{
+		inputTokens: number;
+		outputTokens: number;
+		tokenCount: number;
+		costUsd: number;
+		costProvenance: CostProvenance;
+		outcomePhase: string;
+	}
+> {
+	const running = new Map<
+		string,
+		{
+			inputTokens: number;
+			outputTokens: number;
+			tokenCount: number;
+			costUsd: number;
+			costProvenance: CostProvenance;
+			outcomePhase: string;
+		}
+	>();
+	if (!snapshot) return running;
+	try {
+		for (const value of snapshot().running) {
+			const runId = parseRunId(value.runId);
+			if (!runId) continue;
+			running.set(runId, {
+				inputTokens: parseFiniteNumberOrZero(value.tokens.input),
+				outputTokens: parseFiniteNumberOrZero(value.tokens.output),
+				tokenCount: parseFiniteNumberOrZero(value.tokens.total),
+				costUsd: parseFiniteNumberOrZero(value.costUsd),
+				costProvenance: value.costProvenance ?? "unknown",
+				outcomePhase: value.outcomePhase,
+			});
+		}
+	} catch {
+		// Lifecycle/progress events remain authoritative if the optional snapshot fails.
+	}
+	return running;
+}
+
 function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
 	const startedAtMs = entry.startedAtMs ?? entry.enqueuedAtMs;
 	if (entry.durationMs !== null) return entry.durationMs;
@@ -591,7 +824,7 @@ function resolveElapsedMs(entry: DispatchBoardEntry, now: number): number {
 	return Math.max(0, endMs - startedAtMs);
 }
 
-function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
+function toRow(entry: DispatchBoardEntry, now: number, retry?: DispatchRetryPresentation): DispatchBoardRow {
 	return {
 		runId: entry.runId,
 		agentId: entry.agentId,
@@ -601,7 +834,8 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		runtimeId: entry.runtimeId,
 		targetId: entry.targetId,
 		wireModelId: entry.wireModelId,
-		status: entry.status,
+		...(entry.taskSummary !== undefined ? { taskSummary: entry.taskSummary } : {}),
+		status: retry ? "retrying" : entry.status,
 		elapsedMs: resolveElapsedMs(entry, now),
 		tokenCount: entry.tokenCount,
 		costUsd: entry.costUsd,
@@ -615,8 +849,10 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
 		lastContextTokens: entry.lastContextTokens,
-		currentTool: entry.currentTool,
+		currentTool: retry ? null : entry.currentTool,
 		recentTools: [...entry.recentTools],
+		...(retry ? { retry: { ...retry } } : {}),
+		...(entry.steerAcknowledgement ? { steerAcknowledgement: { ...entry.steerAcknowledgement } } : {}),
 	};
 }
 
@@ -642,7 +878,10 @@ function pruneEntries(entries: Map<string, DispatchBoardEntry>): void {
 	}
 }
 
-export function createDispatchBoardStore(bus: SafeEventBus): {
+export function createDispatchBoardStore(
+	bus: SafeEventBus,
+	snapshot?: () => DispatchSnapshot,
+): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
 	unsubscribe(): void;
@@ -666,6 +905,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 		const gate = parseGateBadge(raw.gate) ?? previous?.gate;
 		const rerouteCount = parsePositiveInt(raw.rerouteCount) ?? previous?.rerouteCount;
 		const contextWindow = parsePositiveInt(raw.contextWindow) ?? previous?.contextWindow;
+		const taskSummary = parseTaskSummary(raw, previous?.taskSummary);
 		const entry: DispatchBoardEntry = {
 			runId,
 			agentId: parseText(raw.agentId, previous?.agentId ?? "-"),
@@ -675,6 +915,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			runtimeId: parseText(raw.runtimeId, previous?.runtimeId ?? "-"),
 			targetId: parseText(raw.targetId, previous?.targetId ?? "-"),
 			wireModelId: parseText(raw.wireModelId, previous?.wireModelId ?? "-"),
+			...(taskSummary !== undefined ? { taskSummary } : {}),
 			status,
 			tokenCount: previous?.tokenCount ?? 0,
 			costUsd: previous?.costUsd ?? 0,
@@ -695,6 +936,7 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			lastContextTokens: previous?.lastContextTokens ?? 0,
 			currentTool: previous?.currentTool ?? null,
 			recentTools: previous?.recentTools ?? [],
+			...(previous?.steerAcknowledgement ? { steerAcknowledgement: { ...previous.steerAcknowledgement } } : {}),
 		};
 		entries.set(runId, entry);
 		pruneEntries(entries);
@@ -725,8 +967,9 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = null;
+			entry.currentTool = null;
 			if (typeof payload.inputTokenCount === "number") {
-				entry.inputTokens = payload.inputTokenCount;
+				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);
 			}
 			if (typeof payload.outputTokenCount === "number") {
 				entry.outputTokens = payload.outputTokenCount;
@@ -748,12 +991,30 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			entry.costUsd = parseFiniteNumber(payload.costUsd, entry.costUsd);
 			entry.costProvenance = payload.costProvenance ?? "unknown";
 			entry.outcomeDetail = resolveFailureDetail(payload, entry.outcomeDetail);
+			entry.currentTool = null;
 			if (typeof payload.inputTokenCount === "number") {
-				entry.inputTokens = payload.inputTokenCount;
+				entry.inputTokens = payload.inputTokenCount + parseFiniteNumberOrZero(payload.cacheReadTokenCount);
 			}
 			if (typeof payload.outputTokenCount === "number") {
 				entry.outputTokens = payload.outputTokenCount;
 			}
+		}),
+		bus.on(BusChannels.RunAborted, (raw) => {
+			const runId = parseRunId(raw?.runId);
+			if (!runId) return;
+			const entry = entries.get(runId);
+			if (!entry) return;
+			if (entry.status === "retrying" && raw?.startedAt === null) {
+				// Canceling a retry timer is synchronous: there is no worker left to
+				// wind down, so the history row can become terminal immediately.
+				entry.status = "aborted";
+				entry.finishedAtMs = Date.now();
+				entry.currentTool = null;
+			} else {
+				if (isTerminalStatus(entry.status)) return;
+				entry.status = "cancelling";
+			}
+			entry.outcomeDetail = parseOptionalDetail(raw?.reason) ?? entry.outcomeDetail ?? null;
 		}),
 		bus.on(BusChannels.DispatchProgress, (raw) => {
 			const payload: Partial<DispatchProgressPayload> = raw ?? {};
@@ -764,11 +1025,14 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 			const workerEvent = (payload.event ?? {}) as WorkerEventShape;
 			const type = typeof workerEvent.type === "string" ? workerEvent.type : "";
 			if (type === "heartbeat_status") {
-				if (isTerminalStatus(entry.status)) return;
+				if (isTerminalStatus(entry.status) || entry.status === "cancelling") return;
 				const status = resolveHeartbeatStatus((workerEvent as { status?: unknown }).status);
 				if (!status) return;
 				entry.status = status;
-				if (status === "dead") entry.finishedAtMs ??= Date.now();
+				if (status === "dead") {
+					entry.finishedAtMs ??= Date.now();
+					entry.currentTool = null;
+				}
 				return;
 			}
 			if (type === "agent_start") {
@@ -800,6 +1064,13 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 					if (entry.recentTools.length > RECENT_TOOL_TRAIL_LIMIT) entry.recentTools.length = RECENT_TOOL_TRAIL_LIMIT;
 				}
 			}
+			if (type === "clio_steer_received") {
+				const steerPayload = (workerEvent as { payload?: { chars?: unknown } }).payload;
+				entry.steerAcknowledgement = {
+					receivedAtMs: Date.now(),
+					chars: Math.max(0, Math.floor(parseFiniteNumberOrZero(steerPayload?.chars))),
+				};
+			}
 			if (isTerminalStatus(entry.status)) return;
 			if (type === "message_end" && workerEvent.message?.role === "assistant") {
 				const usage = workerEvent.message.usage;
@@ -817,23 +1088,68 @@ export function createDispatchBoardStore(bus: SafeEventBus): {
 				if (!status) return;
 				entry.status = status;
 				entry.finishedAtMs ??= Date.now();
+				entry.currentTool = null;
 			}
 		}),
 	];
 
 	let closed = false;
+	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
+		const now = Date.now();
+		const retrying = readRetrySnapshot(snapshot);
+		const running = readRunningSnapshot(snapshot);
+		for (const entry of entries.values()) {
+			if (entry.status === "retrying" && !retrying.has(entry.runId)) {
+				// The timer left the queue (launched or was otherwise consumed). The
+				// parent attempt is terminal again; the successor gets its own row.
+				entry.status = "failed";
+				entry.finishedAtMs ??= now;
+			}
+		}
+		for (const [runId, projection] of retrying) {
+			const entry =
+				entries.get(runId) ??
+				upsertBase(
+					{
+						runId,
+						agentId: projection.agentId,
+						...(projection.taskSummary !== undefined ? { task: projection.taskSummary } : {}),
+					},
+					"retrying",
+					now,
+				);
+			if (entry) {
+				entry.status = "retrying";
+				entry.currentTool = null;
+				if (entry.taskSummary === undefined && projection.taskSummary !== undefined) {
+					entry.taskSummary = projection.taskSummary;
+				}
+			}
+		}
+		for (const [runId, live] of running) {
+			const entry = entries.get(runId);
+			if (!entry || isTerminalStatus(entry.status)) continue;
+			entry.inputTokens = live.inputTokens;
+			entry.outputTokens = live.outputTokens;
+			entry.tokenCount = live.tokenCount;
+			entry.costUsd = live.costUsd;
+			entry.costProvenance = live.costProvenance;
+			if (live.outcomePhase === "aborting") entry.status = "cancelling";
+		}
+		const rows = [...entries.values()]
+			.sort(sortEntries)
+			.map((entry) => toRow(entry, now, retrying.get(entry.runId)?.retry));
+		return rows
+			.filter((row) => !activeOnly || !isTerminalStatus(row.status))
+			.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+	};
 
 	return {
 		rows() {
-			const now = Date.now();
-			return [...entries.values()].sort(sortEntries).map((entry) => toRow(entry, now));
+			return projectRows(false);
 		},
 		activeRows() {
-			const now = Date.now();
-			return [...entries.values()]
-				.filter((entry) => !isTerminalStatus(entry.status))
-				.sort(sortEntries)
-				.map((entry) => toRow(entry, now));
+			return projectRows(true);
 		},
 		unsubscribe() {
 			if (closed) return;

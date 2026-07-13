@@ -44,15 +44,19 @@ function recordDispatchCost(
 		return;
 	}
 	telemetry.record("counter", "tokens.total", payload.tokenCount);
-	// Dispatch bus payloads carry a total token count plus optional reasoning
-	// detail, so sessionTokens() leaves input/output at zero for dispatch runs.
-	// Chat-loop runs pass the full Usage breakdown through recordTokens().
+	// Dispatch terminal payloads carry the same full split as receipts. Preserve
+	// it so /cost and the footer agree with the fleet board instead of showing
+	// zero input/output/cache for worker-only sessions.
 	cost.accumulate(
 		payload.targetId,
 		payload.wireModelId,
 		payload.tokenCount,
 		payload.costUsd,
 		{
+			input: payload.inputTokenCount ?? 0,
+			output: payload.outputTokenCount ?? 0,
+			cacheRead: payload.cacheReadTokenCount ?? 0,
+			cacheWrite: payload.cacheWriteTokenCount ?? 0,
 			reasoningTokens: payload.reasoningTokenCount ?? 0,
 			totalTokens: payload.tokenCount,
 		},
