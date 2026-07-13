@@ -3382,3 +3382,22 @@ you need a stable target.
 - Added focused contracts for routing isolation, explicit opt-in surfaces,
   operation ordering, citation gating, parser atomicity, timeouts, client
   failures, and engine-boundary prompt assembly.
+
+# 2026-07-13 — Proactive memory WS3: selective trigger cadence
+
+- Added a serialized, awaited turn-boundary middleware phase for model-backed
+  memory while retaining the original synchronous, no-I/O evaluator for all
+  tool hooks and rules-only effects. Agent run settlement now includes this
+  bounded phase; no completion is detached or concurrent.
+- Added independently testable interval, consecutive-error, and consumed
+  loop-guard triggers. Signals coalesce into one prompted step per turn
+  boundary, the cadence resets after a step, and configuration rejects an
+  every-tool cadence. Post-compaction reactivation remains deterministic and
+  makes no model call.
+- Added `memory.intervention.{enabled,everyNTools,windowSteps,maxTokens,timeoutMs}`
+  to strict settings validation and the Settings Center. The live next-turn
+  view controls both tiers, including the master kill switch, model deadline,
+  trajectory bound, and reminder cap.
+- Preserved one visible memory reminder per boundary: a prompted step may still
+  apply phase-one bank writes when a synchronous reminder already won, while
+  its phase-two output yields silently. Repeated model reminders are deduped.

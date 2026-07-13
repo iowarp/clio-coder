@@ -811,6 +811,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	const runMiddlewareTurnHookAsync = async (
+		input: MiddlewareHookInput,
+		priorEffects: ReadonlyArray<MiddlewareEffect>,
+	): Promise<ReadonlyArray<MiddlewareEffect>> => {
+		if (!deps.middleware?.runAsyncHook) return [];
+		try {
+			return (await deps.middleware.runAsyncHook(input, priorEffects)).effects;
+		} catch {
+			return [];
+		}
+	};
+
 	const appendMiddlewareReminderEntry = (message: string, severity: MiddlewareReminderSeverity): void => {
 		if (!deps.session?.current()) return;
 		try {
@@ -928,11 +940,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		});
 	};
 
-	const fireTurnEnd = (
+	const fireTurnEnd = async (
 		agentRuntime: AgentRuntime,
 		messages: ReadonlyArray<AgentMessage>,
 		terminalToolResult?: { toolCallId: string; toolName: string },
-	): void => {
+	): Promise<void> => {
 		if (!deps.middleware) return;
 		const message = terminalToolResult === undefined ? lastAssistantMessage(messages) : null;
 		if (message === null && terminalToolResult === undefined) return;
@@ -965,7 +977,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			text: text.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
 			metadata,
 		};
-		for (const effect of runMiddlewareTurnHook(input)) {
+		const syncEffects = runMiddlewareTurnHook(input);
+		const effects = [...syncEffects, ...(await runMiddlewareTurnHookAsync(input, syncEffects))];
+		for (const effect of effects) {
 			if (effect.kind === "inject_reminder") {
 				applyTurnEndReminder(agentRuntime, effect.message, effect.severity ?? "info");
 				continue;
@@ -1571,7 +1585,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					lastTurnId = turn.id;
 				}
 				flushReconciledSnapshot();
-				fireTurnEnd(localRuntime, enrichedEvent.messages, terminal ?? undefined);
+				await fireTurnEnd(localRuntime, enrichedEvent.messages, terminal ?? undefined);
 			}
 		});
 

@@ -135,6 +135,27 @@ describe("contracts/task memory prompted policy", () => {
 		strictEqual(result.reminder, "Memory: Avoid repeating the failed command.");
 	});
 
+	it("applies phase one while yielding or deduping the visible channel", async () => {
+		for (const input of [{ suppressIntervention: true }, { previousReminder: "Memory: Same reminder." }] as const) {
+			const bank = new TaskMemoryBank();
+			const result = await runTaskMemoryPolicy(
+				bank,
+				clientReturning(
+					response(
+						[{ op: "save_knowledge", content: "Phase one remains authoritative." }],
+						"<context_for_action>Same reminder.</context_for_action>",
+					),
+				),
+				{ ...BASE_INPUT, deterministicTrigger: true, ...input },
+			);
+			strictEqual(result.decision, "silent");
+			strictEqual(result.bankOperations, 1);
+			strictEqual(result.reminder, null);
+			strictEqual(bank.snapshot().knowledge[0]?.content, "Phase one remains authoritative.");
+			strictEqual(bank.snapshot().knowledge[0]?.injectionCount, 0);
+		}
+	});
+
 	it("treats malformed and empty responses atomically as silence", async () => {
 		const invalidResponses = [
 			"",

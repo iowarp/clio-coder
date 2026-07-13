@@ -207,6 +207,15 @@ export const DEFAULT_SETTINGS = {
 		model: null as string | null,
 		thinkingLevel: "off" as ThinkingLevel,
 	},
+	memory: {
+		intervention: {
+			enabled: true,
+			everyNTools: 10,
+			windowSteps: 8,
+			maxTokens: 400,
+			timeoutMs: 20_000,
+		},
+	},
 	workers: {
 		default: {
 			target: null as string | null,
@@ -355,6 +364,14 @@ background:
   target: null
   model: null
   thinkingLevel: off
+
+memory:
+  intervention:
+    enabled: true
+    everyNTools: 10
+    windowSteps: 8
+    maxTokens: 400
+    timeoutMs: 20000
 
 # Worker targets for dispatch. \`default\` preserves the legacy behavior when a
 # recipe or request does not specify an override. \`profiles\` are named

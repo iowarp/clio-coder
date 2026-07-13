@@ -12,6 +12,7 @@ import {
 	type MiddlewareHookRegistration,
 	type MiddlewareRuleDefinition,
 	registrationFromRuleDefinition,
+	runMiddlewareAsyncRegistrations,
 	runMiddlewareRegistrations,
 } from "./runtime.js";
 import { createMiddlewareSnapshot } from "./snapshot.js";
@@ -61,6 +62,11 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 		runHook(input) {
 			return runMiddlewareRegistrations(input, registrations, {
 				budgetTracker,
+				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+			});
+		},
+		runAsyncHook(input, priorEffects = []) {
+			return runMiddlewareAsyncRegistrations(input, registrations, priorEffects, {
 				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
 			});
 		},

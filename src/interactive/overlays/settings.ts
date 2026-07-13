@@ -60,7 +60,7 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 const SETTINGS_SECTION_DESCRIPTIONS = {
 	safety: "How freely Clio acts, and how delegated agents' tools are governed.",
-	orchestrator: "The target and model that drive the interactive chat loop.",
+	orchestrator: "Interactive chat routing and the optional proactive-memory model plane.",
 	fleet: "Defaults, profiles, and agent bindings applied to dispatched workers.",
 	models: "The /models picker, favorites, and Alt+J / Alt+K cycling.",
 	budget: "Cost ceiling, per-turn output budget, and worker concurrency.",
@@ -82,6 +82,11 @@ export const SETTINGS_LABELS_BY_ID = {
 	"background.target": "Memory target",
 	"background.model": "Memory model",
 	"background.thinkingLevel": "Memory thinking level",
+	"memory.intervention.enabled": "Proactive memory",
+	"memory.intervention.everyNTools": "Memory cadence (tools)",
+	"memory.intervention.windowSteps": "Memory trajectory steps",
+	"memory.intervention.maxTokens": "Memory reminder tokens",
+	"memory.intervention.timeoutMs": "Memory timeout (ms)",
 	"workers.default.target": "Default target",
 	"workers.default.model": "Default model",
 	"workers.default.thinkingLevel": "Default thinking level",
@@ -133,6 +138,11 @@ export const SETTINGS_SECTION_ROWS = {
 		"background.target",
 		"background.model",
 		"background.thinkingLevel",
+		"memory.intervention.enabled",
+		"memory.intervention.everyNTools",
+		"memory.intervention.windowSteps",
+		"memory.intervention.maxTokens",
+		"memory.intervention.timeoutMs",
 	],
 	fleet: [
 		"workers.default.target",
@@ -174,6 +184,11 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"background.target": "Optional target for LLM memory steps; unset keeps rules-only memory.",
 	"background.model": "Wire model id used only for proactive task memory.",
 	"background.thinkingLevel": "Reasoning budget for the background memory model.",
+	"memory.intervention.enabled": "Master switch for rules-only and model-backed task memory.",
+	"memory.intervention.everyNTools": "Maximum tool executions between prompted memory steps.",
+	"memory.intervention.windowSteps": "Recent completed tool steps visible to the memory policy.",
+	"memory.intervention.maxTokens": "Hard cap for one visible memory reminder.",
+	"memory.intervention.timeoutMs": "Hard deadline for one background-model memory call.",
 	"workers.default.target": "Default /run target id.",
 	"workers.default.model": "Default /run wire model id.",
 	"workers.default.thinkingLevel": "Reasoning budget for dispatched workers.",
@@ -601,6 +616,21 @@ export function buildSettingItems(
 		settingItem("background.thinkingLevel", backgroundThinking.display, {
 			values: backgroundThinking.values,
 		}),
+		settingItem("memory.intervention.enabled", String(settings.memory.intervention.enabled), {
+			values: ["true", "false"],
+		}),
+		settingItem("memory.intervention.everyNTools", String(settings.memory.intervention.everyNTools), {
+			values: ["5", "10", "20", "30"],
+		}),
+		settingItem("memory.intervention.windowSteps", String(settings.memory.intervention.windowSteps), {
+			values: ["4", "8", "12", "20"],
+		}),
+		settingItem("memory.intervention.maxTokens", String(settings.memory.intervention.maxTokens), {
+			values: ["100", "200", "400", "800"],
+		}),
+		settingItem("memory.intervention.timeoutMs", String(settings.memory.intervention.timeoutMs), {
+			values: ["5000", "10000", "20000", "30000", "60000"],
+		}),
 		settingItem("workers.default.target", settings.workers.default.target ?? "(unset)", {
 			submenu: targetSubmenu,
 			affordance: options?.providers ? "opens picker" : "free text",
@@ -785,6 +815,20 @@ export function applySettingChange(settings: ClioSettings, id: string, value: st
 			return;
 		case "background.thinkingLevel":
 			settings.background.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.background.thinkingLevel;
+			return;
+		case "memory.intervention.enabled":
+			if (value === "true" || value === "false") settings.memory.intervention.enabled = value === "true";
+			return;
+		case "memory.intervention.everyNTools":
+		case "memory.intervention.windowSteps":
+		case "memory.intervention.maxTokens":
+		case "memory.intervention.timeoutMs":
+			applyNonNegativeInteger(value, (next) => {
+				if (next >= 1) {
+					const key = id.slice("memory.intervention.".length) as "everyNTools" | "windowSteps" | "maxTokens" | "timeoutMs";
+					settings.memory.intervention[key] = next;
+				}
+			});
 			return;
 		case "workers.default.thinkingLevel":
 			settings.workers.default.thinkingLevel =

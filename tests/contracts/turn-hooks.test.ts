@@ -496,6 +496,42 @@ describe("contracts/turn-hooks chat-loop wiring", () => {
 		ok(input?.turnId !== input?.metadata?.userTurnId, "live user and assistant ledger turns have distinct ids");
 	});
 
+	it("awaits the serialized turn-end phase before the agent run settles", async () => {
+		const order: string[] = [];
+		const middleware = createMiddlewareBundle().contract;
+		middleware.registerHook({
+			id: "test.awaited-turn-end",
+			description: "prove awaited boundary settlement",
+			hooks: ["turn_end"],
+			evaluate() {
+				order.push("sync");
+				return [];
+			},
+			async evaluateAsync() {
+				await Promise.resolve();
+				order.push("async");
+				return [{ kind: "inject_reminder", message: "Memory: awaited", severity: "advisory" }];
+			},
+		});
+		const entries: SessionEntry[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings(),
+			providers: providers(),
+			knownTargets: () => new Set(["test-target"]),
+			session: createSession(entries),
+			readSessionEntries: () => entries,
+			middleware,
+			createAgent: createFakeAgentFactory(async (agent) => {
+				await emitAssistantTurn(agent, assistantStopMessage("done"));
+			}, []),
+		} as never);
+
+		await loop.submit("do the thing");
+
+		deepStrictEqual(order, ["sync", "async"]);
+		ok(entries.some((entry) => entry.kind === "custom" && JSON.stringify(entry).includes("Memory: awaited")));
+	});
+
 	it("delivers the finish-contract advisory through turn_end: notice, ledger entry, next-request flush", async () => {
 		const entries: SessionEntry[] = [];
 		const middleware = createMiddlewareBundle().contract;

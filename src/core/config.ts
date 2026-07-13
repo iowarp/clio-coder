@@ -647,6 +647,34 @@ function validateFleet(issues: Issues, value: unknown): ClioSettings["fleet"] {
 	return out;
 }
 
+function validateMemorySettings(issues: Issues, value: unknown): ClioSettings["memory"] {
+	const out = cloneValue(DEFAULT_SETTINGS.memory);
+	if (!isPlainObject(value)) {
+		issues.add("memory", `expected a map, got ${describe(value)}`);
+		return out;
+	}
+	issues.unknownKeys("memory", value, ["intervention"]);
+	if (!("intervention" in value)) return out;
+	if (!isPlainObject(value.intervention)) {
+		issues.add("memory.intervention", `expected a map, got ${describe(value.intervention)}`);
+		return out;
+	}
+	const raw = value.intervention;
+	issues.unknownKeys("memory.intervention", raw, ["enabled", "everyNTools", "windowSteps", "maxTokens", "timeoutMs"]);
+	if ("enabled" in raw) {
+		const enabled = expectBoolean(issues, "memory.intervention.enabled", raw.enabled);
+		if (enabled !== undefined) out.intervention.enabled = enabled;
+	}
+	for (const key of ["everyNTools", "windowSteps", "maxTokens", "timeoutMs"] as const) {
+		if (!(key in raw)) continue;
+		const parsed = expectInteger(issues, `memory.intervention.${key}`, raw[key], {
+			min: key === "everyNTools" ? 2 : 1,
+		});
+		if (parsed !== undefined) out.intervention[key] = parsed;
+	}
+	return out;
+}
+
 function validateKeybindings(issues: Issues, value: unknown): ClioSettings["keybindings"] {
 	if (!isPlainObject(value)) {
 		issues.add("keybindings", `expected a map, got ${describe(value)}`);
@@ -682,6 +710,7 @@ const TOP_LEVEL_KEYS = [
 	"runtimePlugins",
 	"orchestrator",
 	"background",
+	"memory",
 	"workers",
 	"fleet",
 	"scope",
@@ -778,6 +807,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			settings.targets,
 		);
 	}
+	if ("memory" in raw) settings.memory = validateMemorySettings(issues, raw.memory);
 
 	// Fleet nodes validate before workers so profile node pins can be checked
 	// against the configured node ids.

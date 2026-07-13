@@ -205,6 +205,31 @@ describe("contracts/settings center", () => {
 				assert: (s) => strictEqual(s.background.thinkingLevel, "low"),
 			},
 			{
+				id: "memory.intervention.enabled",
+				value: "false",
+				assert: (s) => strictEqual(s.memory.intervention.enabled, false),
+			},
+			{
+				id: "memory.intervention.everyNTools",
+				value: "20",
+				assert: (s) => strictEqual(s.memory.intervention.everyNTools, 20),
+			},
+			{
+				id: "memory.intervention.windowSteps",
+				value: "12",
+				assert: (s) => strictEqual(s.memory.intervention.windowSteps, 12),
+			},
+			{
+				id: "memory.intervention.maxTokens",
+				value: "200",
+				assert: (s) => strictEqual(s.memory.intervention.maxTokens, 200),
+			},
+			{
+				id: "memory.intervention.timeoutMs",
+				value: "30000",
+				assert: (s) => strictEqual(s.memory.intervention.timeoutMs, 30_000),
+			},
+			{
 				id: "workers.default.target",
 				value: "target-b",
 				assert: (s) => {

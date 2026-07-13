@@ -36,6 +36,8 @@ function execute(
 	registration.evaluate(toolInput("after_tool", call, args, resultKind, errorMessage));
 }
 
+const SILENT_MODEL_RESPONSE = "<operations>[]</operations>\n<no_intervention/>";
+
 describe("contracts/memory intervention rules tier", () => {
 	it("writes one idempotent procedural record and emits one cited advisory for a repeated failure", () => {
 		const bank = new TaskMemoryBank();
@@ -92,14 +94,25 @@ describe("contracts/memory intervention rules tier", () => {
 		deepStrictEqual(registration.evaluate({ hook: "turn_start" }), []);
 	});
 
-	it("is bit-identical when disabled: no effects and no bank writes", () => {
+	it("is bit-identical when disabled: no effects, bank writes, or model resolution", async () => {
 		const bank = new TaskMemoryBank();
-		const registration = createMemoryInterventionRegistration({ bank, enabled: false });
+		let modelResolutions = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			enabled: false,
+			getModelClient: () => {
+				modelResolutions += 1;
+				return null;
+			},
+		});
 		execute(registration, 1, { command: "false" }, "error", "failed");
 		execute(registration, 2, { command: "false" }, "error", "failed");
 		for (const hook of ["turn_end", "on_compaction", "turn_start"] as const) {
 			deepStrictEqual(registration.evaluate({ hook }), []);
 		}
+		registration.signalLoop();
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "disabled" }), []);
+		strictEqual(modelResolutions, 0);
 		deepStrictEqual(bank.snapshot(), { version: 1, status: null, knowledge: [], procedural: [] });
 	});
 
@@ -145,5 +158,147 @@ describe("contracts/memory intervention rules tier", () => {
 			outputTokens: 0,
 			effects: [],
 		});
+	});
+
+	it("fires the interval floor only after N completed tools and resets the cadence", async () => {
+		const bank = new TaskMemoryBank();
+		let calls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			everyNTools: 2,
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+
+		execute(registration, 1, { command: "first" });
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-1" }), []);
+		execute(registration, 2, { command: "second" });
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-2" }), []);
+		strictEqual(calls, 1);
+		execute(registration, 3, { command: "third" });
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-3" }), []);
+		strictEqual(calls, 1, "cadence restarts after the memory step");
+	});
+
+	it("fires on two consecutive tool errors but resets the streak after success", async () => {
+		const bank = new TaskMemoryBank();
+		let calls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			everyNTools: 100,
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+
+		execute(registration, 1, { command: "bad-a" }, "error", "a");
+		execute(registration, 2, { command: "good" });
+		execute(registration, 3, { command: "bad-b" }, "error", "b");
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-1" });
+		strictEqual(calls, 0);
+		execute(registration, 4, { command: "bad-c" }, "error", "c");
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-2" });
+		strictEqual(calls, 1);
+	});
+
+	it("consumes a loop verdict as a deterministic trigger and permits one uncited advisory", async () => {
+		const bank = new TaskMemoryBank();
+		let calls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					return {
+						text: "<operations>[]</operations>\n<context_for_action>Do not repeat the looped call.</context_for_action>",
+					};
+				},
+			}),
+		});
+
+		registration.signalLoop();
+		const effects = await registration.evaluateAsync({ hook: "turn_end", turnId: "turn-loop" });
+		strictEqual(calls, 1);
+		strictEqual(effects.length, 1);
+		const effect = effects[0];
+		ok(effect?.kind === "inject_reminder");
+		strictEqual(effect.severity, "advisory");
+		strictEqual(effect.message, "Memory: Do not repeat the looped call.");
+	});
+
+	it("coalesces simultaneous triggers and runs at most once for one turn boundary", async () => {
+		const bank = new TaskMemoryBank();
+		let calls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			everyNTools: 2,
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+		execute(registration, 1, { command: "bad-a" }, "error", "a");
+		execute(registration, 2, { command: "bad-b" }, "error", "b");
+		registration.signalLoop();
+
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "same-boundary" });
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "same-boundary" });
+		strictEqual(calls, 1);
+	});
+
+	it("keeps post-compaction reactivation deterministic and free in the LLM tier", async () => {
+		const bank = new TaskMemoryBank();
+		bank.saveKnowledge("Keep the operator's required branch.");
+		let calls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+
+		registration.evaluate({ hook: "on_compaction" });
+		const effects = registration.evaluate({ hook: "turn_start", text: "resume task" });
+		strictEqual(effects.length, 1);
+		deepStrictEqual(await registration.evaluateAsync({ hook: "turn_end", turnId: "post-compact" }), []);
+		strictEqual(calls, 0);
+	});
+
+	it("reads next-turn trigger settings from the live settings layer", async () => {
+		const bank = new TaskMemoryBank();
+		let calls = 0;
+		let live = { enabled: true, everyNTools: 4, windowSteps: 8, maxTokens: 400, timeoutMs: 20_000 };
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getSettings: () => live,
+			getModelClient: () => ({
+				async complete() {
+					calls += 1;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+		});
+		execute(registration, 1, { command: "one" });
+		live = { ...live, everyNTools: 2 };
+		execute(registration, 2, { command: "two" });
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "live-cadence" });
+		strictEqual(calls, 1);
+
+		live = { ...live, enabled: false };
+		registration.signalLoop();
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "live-disabled" });
+		strictEqual(calls, 1);
 	});
 });

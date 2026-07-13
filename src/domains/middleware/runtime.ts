@@ -56,6 +56,14 @@ export interface MiddlewareHookRegistration {
 	toolNames?: ReadonlyArray<string>;
 	/** Synchronous evaluation. A throw is isolated and contributes no effects. */
 	evaluate(input: MiddlewareHookInput, context?: MiddlewareHookEvaluationContext): ReadonlyArray<MiddlewareEffect>;
+	/**
+	 * Optional serialized I/O phase for awaited turn boundaries. Tool callers
+	 * continue to use only `evaluate`; no async work is detached from a hook.
+	 */
+	evaluateAsync?(
+		input: MiddlewareHookInput,
+		context?: MiddlewareHookEvaluationContext,
+	): Promise<ReadonlyArray<MiddlewareEffect>>;
 }
 
 /**
@@ -212,6 +220,45 @@ export function runMiddlewareRegistrations(
 		effects,
 		ruleIds,
 	};
+}
+
+/**
+ * Run only registrations with an async phase. Callers await this after the
+ * synchronous phase and pass its effects as prior context, preserving order
+ * without changing the latency-sensitive tool-hook contract.
+ */
+export async function runMiddlewareAsyncRegistrations(
+	input: MiddlewareHookInput,
+	registrations: ReadonlyArray<MiddlewareHookRegistration>,
+	priorEffects: ReadonlyArray<MiddlewareEffect> = [],
+	options: Pick<RunMiddlewareRegistrationsOptions, "onDiagnostic"> = {},
+): Promise<MiddlewareHookResult> {
+	const onDiagnostic = options.onDiagnostic ?? writeMiddlewareDiagnosticToStderr;
+	const effects: MiddlewareEffect[] = [];
+	const ruleIds: string[] = [];
+	for (const registration of registrations) {
+		if (registration.evaluateAsync === undefined || !registration.hooks.includes(input.hook)) continue;
+		if (registration.toolNames !== undefined) {
+			if (input.toolName === undefined || !registration.toolNames.includes(input.toolName)) continue;
+		}
+		let emitted: ReadonlyArray<MiddlewareEffect>;
+		try {
+			emitted = await registration.evaluateAsync(cloneHookInput(input), {
+				priorEffects: [...priorEffects, ...effects],
+			});
+		} catch (err) {
+			emitDiagnostic(onDiagnostic, {
+				kind: "hook_failed",
+				registrationId: registration.id,
+				hook: input.hook,
+				message: err instanceof Error ? err.message : String(err),
+			});
+			continue;
+		}
+		for (const effect of emitted) effects.push(cloneMiddlewareEffect(effect));
+		if (emitted.length > 0) ruleIds.push(registration.id);
+	}
+	return { hook: input.hook, input: cloneHookInput(input), effects, ruleIds };
 }
 
 function emitDiagnostic(sink: MiddlewareDiagnosticSink, diagnostic: MiddlewareDiagnostic): void {

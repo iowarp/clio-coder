@@ -2,18 +2,30 @@ import { createHash } from "node:crypto";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank } from "../memory/task-bank.js";
 import {
 	runTaskMemoryPolicy,
+	TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS,
 	type TaskMemoryModelClient,
 	type TaskMemoryPolicyResult,
 	type TaskMemoryTrajectoryStep,
 } from "../memory/task-memory-policy.js";
 import { hashToolCall } from "../safety/loop-detector.js";
 import { ceilChars } from "../session/context-accounting.js";
-import type { MiddlewareHookRegistration } from "./runtime.js";
+import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
 
 export const MEMORY_INTERVENTION_REGISTRATION_ID = "observer.memory-intervention";
 export const MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS = 8;
 export const MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS = 400;
+export const MEMORY_INTERVENTION_DEFAULT_EVERY_N_TOOLS = 10;
+
+export type MemoryInterventionTriggerReason = "interval" | "tool_error_streak" | "loop_signal";
+
+export interface MemoryInterventionSettings {
+	enabled: boolean;
+	everyNTools: number;
+	windowSteps: number;
+	maxTokens: number;
+	timeoutMs: number;
+}
 
 const RESULT_DIGEST_MAX_CHARS = 240;
 const CALL_DESCRIPTION_MAX_CHARS = 180;
@@ -43,14 +55,19 @@ export interface MemoryInterventionDeps {
 	windowSteps?: number;
 	maxTokens?: number;
 	timeoutMs?: number;
+	everyNTools?: number;
 	/** Lazily resolves the explicitly configured background role. Null means rules-only. */
 	getModelClient?: () => TaskMemoryModelClient | null;
+	/** Live next-turn settings view; individual fields above remain test-friendly fallbacks. */
+	getSettings?: () => Readonly<MemoryInterventionSettings>;
 }
 
 export interface MemoryPromptedStepInput {
 	deterministicTrigger: boolean;
 	/** Overrides the most recent turn-start task text when supplied. */
 	task?: string;
+	/** Keep phase-one writes but yield the visible channel to a synchronous reminder. */
+	suppressIntervention?: boolean;
 }
 
 export interface MemoryPromptedStepResult extends TaskMemoryPolicyResult {
@@ -58,8 +75,14 @@ export interface MemoryPromptedStepResult extends TaskMemoryPolicyResult {
 }
 
 export interface MemoryInterventionRegistration extends MiddlewareHookRegistration {
+	evaluateAsync(
+		input: MiddlewareHookInput,
+		context?: MiddlewareHookEvaluationContext,
+	): Promise<ReadonlyArray<MiddlewareEffect>>;
 	/** Serialized model step; the composition root decides which awaited boundary invokes it. */
 	runPromptedStep(input: MemoryPromptedStepInput): Promise<MemoryPromptedStepResult>;
+	/** Consume the orchestrator loop guard's already-computed verdict. */
+	signalLoop(): void;
 }
 
 /**
@@ -67,9 +90,6 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
  * emits only cited, advisory reminders through the existing visible channel.
  */
 export function createMemoryInterventionRegistration(deps: MemoryInterventionDeps): MemoryInterventionRegistration {
-	const enabled = deps.enabled ?? true;
-	const windowSteps = positiveInteger(deps.windowSteps, MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS);
-	const maxTokens = positiveInteger(deps.maxTokens, MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS);
 	const pending = new Map<string, PendingToolStep>();
 	const trajectory: TrajectoryStep[] = [];
 	const failures = new Map<string, FailedAttempt>();
@@ -78,13 +98,18 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let reactivateAfterCompaction = false;
 	let lastInjectedFingerprint: string | null = null;
 	let currentTask = "(current task unavailable)";
+	let toolsSinceMemoryStep = 0;
+	let consecutiveErrors = 0;
+	let lastPromptedBoundary: string | null = null;
+	let lastInjectedMessage: string | null = null;
+	const pendingTriggers = new Set<MemoryInterventionTriggerReason>();
 
 	return {
 		id: MEMORY_INTERVENTION_REGISTRATION_ID,
 		description: "maintain bounded task execution memory and selectively remind after repeated failures or compaction",
 		hooks: ["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
-			if (!enabled) return NO_EFFECTS;
+			if (!settings().enabled) return NO_EFFECTS;
 			try {
 				switch (input.hook) {
 					case "before_tool":
@@ -106,43 +131,84 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				return NO_EFFECTS;
 			}
 		},
-		async runPromptedStep(input): Promise<MemoryPromptedStepResult> {
-			const silent = (): MemoryPromptedStepResult => ({
-				decision: "silent",
-				bankOperations: 0,
-				reminder: null,
-				inputTokens: 0,
-				outputTokens: 0,
-				effects: NO_EFFECTS,
+		async evaluateAsync(input, context): Promise<ReadonlyArray<MiddlewareEffect>> {
+			if (!settings().enabled || input.hook !== "turn_end" || pendingTriggers.size === 0) return NO_EFFECTS;
+			const boundary = input.turnId ?? input.metadata?.userTurnId?.toString() ?? `tool-step:${toolStep}`;
+			if (boundary === lastPromptedBoundary) return NO_EFFECTS;
+			lastPromptedBoundary = boundary;
+			const triggers = [...pendingTriggers];
+			pendingTriggers.clear();
+			toolsSinceMemoryStep = 0;
+			consecutiveErrors = 0;
+			const result = await runPromptedStep({
+				deterministicTrigger: triggers.some((trigger) => trigger !== "interval"),
+				suppressIntervention:
+					context?.priorEffects.some(
+						(effect) => effect.kind === "inject_reminder" && effect.message.startsWith("Memory:"),
+					) ?? false,
 			});
-			if (!enabled || deps.getModelClient === undefined) return silent();
-			try {
-				const client = deps.getModelClient();
-				if (client === null) return silent();
-				const result = await runTaskMemoryPolicy(deps.bank, client, {
-					task: input.task?.trim() || currentTask,
-					trajectory: [...trajectory],
-					deterministicTrigger: input.deterministicTrigger,
-					maxTokens,
-					...(deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }),
-				});
-				return {
-					...result,
-					effects:
-						result.reminder === null
-							? NO_EFFECTS
-							: [{ kind: "inject_reminder", message: result.reminder, severity: "advisory" }],
-				};
-			} catch {
-				return silent();
-			}
+			if (result.reminder !== null) lastInjectedMessage = result.reminder;
+			return result.effects;
+		},
+		runPromptedStep,
+		signalLoop(): void {
+			if (settings().enabled) pendingTriggers.add("loop_signal");
 		},
 	};
+
+	function settings(): MemoryInterventionSettings {
+		const live = deps.getSettings?.();
+		return {
+			enabled: live?.enabled ?? deps.enabled ?? true,
+			everyNTools: Math.max(
+				2,
+				positiveInteger(live?.everyNTools ?? deps.everyNTools, MEMORY_INTERVENTION_DEFAULT_EVERY_N_TOOLS),
+			),
+			windowSteps: positiveInteger(live?.windowSteps ?? deps.windowSteps, MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS),
+			maxTokens: positiveInteger(live?.maxTokens ?? deps.maxTokens, MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS),
+			timeoutMs: positiveInteger(live?.timeoutMs ?? deps.timeoutMs, TASK_MEMORY_POLICY_DEFAULT_TIMEOUT_MS),
+		};
+	}
+
+	async function runPromptedStep(input: MemoryPromptedStepInput): Promise<MemoryPromptedStepResult> {
+		const silent = (): MemoryPromptedStepResult => ({
+			decision: "silent",
+			bankOperations: 0,
+			reminder: null,
+			inputTokens: 0,
+			outputTokens: 0,
+			effects: NO_EFFECTS,
+		});
+		const live = settings();
+		if (!live.enabled || deps.getModelClient === undefined) return silent();
+		try {
+			const client = deps.getModelClient();
+			if (client === null) return silent();
+			const result = await runTaskMemoryPolicy(deps.bank, client, {
+				task: input.task?.trim() || currentTask,
+				trajectory: [...trajectory],
+				deterministicTrigger: input.deterministicTrigger,
+				maxTokens: live.maxTokens,
+				...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
+				previousReminder: lastInjectedMessage,
+				timeoutMs: live.timeoutMs,
+			});
+			return {
+				...result,
+				effects:
+					result.reminder === null
+						? NO_EFFECTS
+						: [{ kind: "inject_reminder", message: result.reminder, severity: "advisory" }],
+			};
+		} catch {
+			return silent();
+		}
+	}
 
 	function observeBeforeTool(input: MiddlewareHookInput): void {
 		const prepared = prepareToolStep(input);
 		if (prepared === null) return;
-		setBounded(pending, pendingKey(input, prepared.fingerprint), prepared, windowSteps);
+		setBounded(pending, pendingKey(input, prepared.fingerprint), prepared, settings().windowSteps);
 	}
 
 	function observeAfterTool(input: MiddlewareHookInput): void {
@@ -153,6 +219,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		pending.delete(key);
 		const outcome = input.metadata?.resultKind === "error" ? "error" : "ok";
 		toolStep += 1;
+		toolsSinceMemoryStep += 1;
+		const live = settings();
+		if (toolsSinceMemoryStep >= live.everyNTools) pendingTriggers.add("interval");
+		if (outcome === "error") {
+			consecutiveErrors += 1;
+			if (consecutiveErrors >= 2) pendingTriggers.add("tool_error_streak");
+		} else {
+			consecutiveErrors = 0;
+		}
 		const step: TrajectoryStep = {
 			...prepared,
 			step: toolStep,
@@ -160,7 +235,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			resultDigest: resultDigest(input, outcome),
 		};
 		trajectory.push(step);
-		if (trajectory.length > windowSteps) trajectory.splice(0, trajectory.length - windowSteps);
+		if (trajectory.length > live.windowSteps) trajectory.splice(0, trajectory.length - live.windowSteps);
 		if (outcome === "error") rememberFailure(step);
 	}
 
@@ -212,10 +287,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				if (occurrences < 2 || failure === undefined) continue;
 				const message = boundedReminder(
 					`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}.`,
-					maxTokens,
+					settings().maxTokens,
 				);
 				if (message.length === 0) return NO_EFFECTS;
 				lastInjectedFingerprint = step.fingerprint;
+				lastInjectedMessage = message;
 				deps.bank.recordInjection([failure.entryId]);
 				return [{ kind: "inject_reminder", message, severity: "advisory" }];
 			}
@@ -229,6 +305,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (!reactivateAfterCompaction) return NO_EFFECTS;
 		reactivateAfterCompaction = false;
 		const prefix = "Memory: execution state restored after compaction:\n";
+		const maxTokens = settings().maxTokens;
 		const prefixTokens = ceilChars(prefix.length);
 		const rendered = deps.bank.render(Math.max(0, maxTokens - prefixTokens), ["knowledge"]);
 		if (rendered.length === 0) return NO_EFFECTS;
@@ -236,6 +313,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (message.length === 0) return NO_EFFECTS;
 		const citedIds = [...message.matchAll(/\[([^\]]+)\]/gu)].map((match) => match[1]).filter((id) => id !== undefined);
 		deps.bank.recordInjection(citedIds);
+		lastInjectedMessage = message;
 		return [{ kind: "inject_reminder", message, severity: "advisory" }];
 	}
 }

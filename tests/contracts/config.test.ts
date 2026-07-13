@@ -97,6 +97,51 @@ describe("contracts/config", () => {
 		strictEqual(settings.skills.trustProjectCompatRoots, false);
 	});
 
+	it("validates proactive-memory trigger settings and classifies them for the next turn", () => {
+		const result = validateSettings({
+			memory: {
+				intervention: {
+					enabled: false,
+					everyNTools: 6,
+					windowSteps: 12,
+					maxTokens: 250,
+					timeoutMs: 7_500,
+				},
+			},
+		});
+		deepStrictEqual(result.issues, []);
+		deepStrictEqual(result.settings.memory.intervention, {
+			enabled: false,
+			everyNTools: 6,
+			windowSteps: 12,
+			maxTokens: 250,
+			timeoutMs: 7_500,
+		});
+		const changed = diffSettings(DEFAULT_SETTINGS, result.settings);
+		deepStrictEqual(changed.nextTurn, [
+			"memory.intervention.enabled",
+			"memory.intervention.everyNTools",
+			"memory.intervention.windowSteps",
+			"memory.intervention.maxTokens",
+			"memory.intervention.timeoutMs",
+		]);
+	});
+
+	it("rejects malformed proactive-memory settings without accepting partial invalid values", () => {
+		const result = validateSettings({
+			memory: {
+				intervention: { enabled: "yes", everyNTools: 0, timeoutMs: 1.5, extra: true },
+			},
+		});
+		deepStrictEqual(result.issues.map((issue) => issue.path).sort(), [
+			"memory.intervention.enabled",
+			"memory.intervention.everyNTools",
+			"memory.intervention.extra",
+			"memory.intervention.timeoutMs",
+		]);
+		deepStrictEqual(result.settings.memory.intervention, DEFAULT_SETTINGS.memory.intervention);
+	});
+
 	it("reports unknown keys as validation errors with exact paths", () => {
 		const result = validateSettings({
 			defaultMode: "super",
