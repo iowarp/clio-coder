@@ -143,7 +143,7 @@ function readInjectReminder(
 	const message = readRequiredString(record, `${path}.message`, issues);
 	const severity = readOptionalString(record, `${path}.severity`, issues);
 	if (severity !== undefined && !isMiddlewareReminderSeverity(severity)) {
-		issues.push({ path: `${path}.severity`, message: "expected info, warn, or hard-block" });
+		issues.push({ path: `${path}.severity`, message: "expected info, advisory, warn, or hard-block" });
 	}
 	if (message === null) return null;
 	const effect: MiddlewareEffect = { kind: "inject_reminder", message };

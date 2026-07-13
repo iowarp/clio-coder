@@ -3350,3 +3350,17 @@ you need a stable target.
 - Added contract coverage for all bank operations, caps and eviction order,
   rendering limits, status privacy, content normalization, injection counts, and
   snapshot isolation.
+
+# 2026-07-13 — Proactive memory WS1: rules-only intervention
+
+- Added a synchronous middleware registration that observes a bounded tool
+  trajectory, records error attempts idempotently by canonical fingerprint, and
+  emits one cited advisory only after the same failure repeats.
+- Added post-compaction knowledge reactivation through the existing visible,
+  persisted `inject_reminder` channel. The private status and procedural history
+  are excluded from this deterministic compaction reminder.
+- Registered the rules-only tier beside the task-board reminder. It defaults on,
+  makes no model calls, and has explicit disabled-path coverage proving zero
+  effects and zero bank writes.
+- Extended reminder severity with the additive, non-blocking `advisory` value so
+  memory attribution remains literal in middleware effects and ledger entries.
