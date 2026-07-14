@@ -133,6 +133,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						observeAfterTool(input);
 						return NO_EFFECTS;
 					case "turn_end": {
+						// Middleware continuations can evaluate turn_end again without any
+						// completed tools. They are not new memory boundaries and must not
+						// replace the prior operator-visible outcome or emit telemetry.
+						if (toolStep <= lastTurnEndStep) return NO_EFFECTS;
 						const started = process.hrtime.bigint();
 						const effects = decideRepeatedFailure();
 						emitTelemetry(

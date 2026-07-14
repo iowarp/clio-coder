@@ -107,4 +107,67 @@ describe("contracts/memory overlay", () => {
 		strictEqual(hidden, 1);
 		deepStrictEqual(operatorStatus().bank.version, 1);
 	});
+
+	it("fully wraps long procedural entries and preserves tail sentinel", () => {
+		// Build a long procedural entry with a unique tail sentinel.
+		const bank = new TaskMemoryBank({ now: () => new Date("2026-07-13T00:00:00.000Z") });
+		bank.updateStatus("Inspect operator visibility.");
+		// Create a very long procedural content that will wrap across multiple lines.
+		const longContent =
+			"Do not retry a failed command without changing its inputs. This is a very long procedural memory entry " +
+			"that contains detailed instructions and warnings for the operator. It also includes a unique tail " +
+			"sentinel: TAIL_SENTINEL to verify that the entire content is preserved and nothing is truncated or " +
+			"replaced by an ellipsis.";
+		const procedural = bank.saveProcedural(longContent);
+		bank.recordInjection([procedural.id]);
+		const knowledge = bank.saveKnowledge("The active branch is feat/fleet-dispatch.");
+		bank.recordInjection([knowledge.id]);
+		const snapshot = bank.snapshot();
+
+		const status: TaskMemoryOperatorStatus = {
+			enabled: true,
+			tier: "llm",
+			size: taskMemoryBankSize(snapshot),
+			lastDecision: "injected",
+			bank: snapshot,
+		};
+
+		// Test at multiple widths.
+		for (const width of [84, 60, 40]) {
+			const lines = formatMemoryOverlayBodyLines(status, [durableRecord(true)], width);
+			const body = stripAnsi(lines.join("\n"));
+
+			// Verify metadata line is present.
+			ok(body.includes("memory on · tier LLM · bank"), `width ${width}: status line missing`);
+
+			// Verify procedural section exists and has multiple lines.
+			const procSectionIndex = body.indexOf("procedural");
+			ok(procSectionIndex >= 0, `width ${width}: procedural heading missing`);
+			const procStart = body.indexOf("injected", procSectionIndex);
+			ok(procStart >= 0, `width ${width}: procedural entry missing`);
+
+			// Verify the tail sentinel appears somewhere in the output.
+			ok(body.includes("TAIL_SENTINEL"), `width ${width}: TAIL_SENTINEL not found`);
+			ok(
+				body.replace(/\s/gu, "").includes(longContent.replace(/\s/gu, "")),
+				`width ${width}: procedural content was not preserved`,
+			);
+
+			// Verify no rendered line exceeds the requested visible width.
+			for (const line of lines) {
+				ok(visibleWidth(line) <= width, `width ${width}: line exceeds: ${stripAnsi(line)}`);
+			}
+
+			// Verify that the content is not truncated with ellipsis in the middle.
+			// The tail sentinel should appear intact, not as "TAIL_SENTIN...".
+			ok(/TAIL_SENTINEL/.test(body), `width ${width}: sentinel appears intact`);
+		}
+
+		// Verify that existing sections (approved lessons, knowledge) still render correctly.
+		const lines = formatMemoryOverlayBodyLines(status, [durableRecord(true)], 84);
+		const body = stripAnsi(lines.join("\n"));
+		ok(body.includes("Approved lessons (1)"), "approved lessons section present");
+		ok(body.includes("knowledge (1)"), "knowledge section present");
+		ok(body.includes("status (private)"), "status section present");
+	});
 });

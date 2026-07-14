@@ -167,6 +167,14 @@ describe("contracts/task memory telemetry", () => {
 				},
 			},
 		});
+		failing.evaluate({ hook: "before_tool", toolCallId: "healthy", toolName: "bash", toolArgs: {} });
+		failing.evaluate({
+			hook: "after_tool",
+			toolCallId: "healthy",
+			toolName: "bash",
+			toolArgs: {},
+			metadata: { resultKind: "ok" },
+		});
 		deepStrictEqual(failing.evaluate({ hook: "turn_end" }), []);
 		strictEqual(failing.lastDecision(), "silent");
 	});
