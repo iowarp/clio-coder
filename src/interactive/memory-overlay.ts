@@ -1,5 +1,12 @@
 import type { MemoryRecord, TaskMemoryEntry, TaskMemoryOperatorStatus } from "../domains/memory/index.js";
-import { type Component, matchesKey, type OverlayHandle, type TUI, truncateToWidth } from "../engine/tui.js";
+import {
+	type Component,
+	matchesKey,
+	type OverlayHandle,
+	type TUI,
+	truncateToWidth,
+	wrapTextWithAnsi,
+} from "../engine/tui.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { clioTheme, fitUnits, rule } from "./theme/index.js";
 
@@ -14,10 +21,16 @@ function fitLine(text: string, width: number): string {
 
 function entryLines(entry: TaskMemoryEntry, width: number): string[] {
 	const theme = clioTheme();
-	return [
-		fitLine(`${theme.fg("accent", entry.id)} ${theme.fg("dim", `injected ${entry.injectionCount}`)}`, width),
-		fitLine(`  ${theme.fg("muted", entry.content)}`, width),
-	];
+	const lines: string[] = [];
+	// Metadata line is typically short; fit to width.
+	lines.push(fitLine(`${theme.fg("accent", entry.id)} ${theme.fg("dim", `injected ${entry.injectionCount}`)}`, width));
+	// Wrap the content across multiple lines, preserving all text and applying muted style to each wrapped line.
+	const content = entry.content;
+	const wrapped = wrapTextWithAnsi(content, Math.max(1, width - 2));
+	for (const line of wrapped) {
+		lines.push(`  ${theme.fg("muted", line)}`);
+	}
+	return lines;
 }
 
 function taskClassLines(label: string, entries: ReadonlyArray<TaskMemoryEntry>, width: number): string[] {

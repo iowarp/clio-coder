@@ -83,6 +83,18 @@ deterministic. A prompted reminder from one of those paths may be uncited. An
 interval-only prompted reminder must cite at least one current knowledge or
 procedural ID or it is recorded as `gated` and remains invisible.
 
+### Outcome semantics
+
+The `/memory` overlay displays `last <decision>` where `<decision>` is the
+combined outcome of the most recent actual memory boundary. A **memory boundary**
+is a turn-end evaluation that includes newly completed tools or an explicit
+deterministic trigger (interval, error-streak, loop signal). A no-tool
+middleware continuation—another turn-end with no new tools since the previous
+boundary—is not a new memory boundary and does not replace the prior outcome.
+Thus `last` remains `injected` across such continuations until a later
+tool-bearing or explicitly triggered memory step produces a new outcome (e.g.,
+a healthy tool leading to `silent`).
+
 ## Operator setup
 
 The shipped defaults are:
@@ -175,6 +187,10 @@ keeps one previous generation as `steps.jsonl.1`. Every exact-schema record has:
 It contains no task, trajectory, bank, error, or reminder text. File creation,
 rotation, serialization, and injected sinks are all best effort; a read-only
 state directory or full disk cannot alter intervention behavior.
+
+Note that routine no-tool continuation checks do not emit telemetry rows, as they
+are not considered new memory boundaries. Only actual tool-bearing or explicitly
+triggered memory steps produce rows.
 
 ## Evaluation and promotion bar
 

@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
+import type { TaskMemoryTelemetryStep } from "../../src/domains/memory/task-memory-telemetry.js";
 import {
 	createMemoryInterventionRegistration,
 	MEMORY_INTERVENTION_REGISTRATION_ID,
@@ -319,5 +320,85 @@ describe("contracts/memory intervention rules tier", () => {
 		registration.signalLoop();
 		await registration.evaluateAsync({ hook: "turn_end", turnId: "live-disabled" });
 		strictEqual(calls, 1);
+	});
+
+	it("preserves injected outcome across no-tool continuation and updates on healthy tool", async () => {
+		const bank = new TaskMemoryBank();
+		const telemetryRows: TaskMemoryTelemetryStep[] = [];
+		let modelCalls = 0;
+		const registration = createMemoryInterventionRegistration({
+			bank,
+			getSettings: () => ({ enabled: true, everyNTools: 10, windowSteps: 8, maxTokens: 400, timeoutMs: 20_000 }),
+			getModelClient: () => ({
+				async complete() {
+					modelCalls += 1;
+					return { text: SILENT_MODEL_RESPONSE };
+				},
+			}),
+			telemetry: {
+				record(step) {
+					telemetryRows.push(step);
+				},
+			},
+		});
+
+		// 1. Execute same failing tool call twice.
+		const args = { command: "same failing command" };
+		execute(registration, 1, args, "error", "failed");
+		execute(registration, 2, args, "error", "failed");
+
+		// 2. Synchronous turn_end: should emit one cited inject_reminder.
+		const syncEffects = registration.evaluate({ hook: "turn_end" });
+		strictEqual(syncEffects.length, 1);
+		ok(syncEffects[0]?.kind === "inject_reminder");
+		strictEqual(registration.lastDecision(), "injected", "after synchronous injection");
+
+		// Verify telemetry row for repeated_failure with rules tier.
+		strictEqual(telemetryRows.length, 1);
+		const row1 = telemetryRows[0];
+		ok(row1);
+		deepStrictEqual(row1.triggerReasons, ["repeated_failure"]);
+		strictEqual(row1.tier, "rules");
+		strictEqual(row1.decision, "injected");
+		strictEqual(row1.citedEntries, 1);
+		strictEqual(row1.inputTokens, 0);
+		strictEqual(row1.outputTokens, 0);
+
+		// 3. Asynchronous turn_end with priorEffects: should preserve injected outcome.
+		const asyncEffects = await registration.evaluateAsync(
+			{ hook: "turn_end", turnId: "async-1" },
+			{ priorEffects: syncEffects },
+		);
+		strictEqual(asyncEffects.length, 0, "no new effect from async with priorEffects");
+		strictEqual(registration.lastDecision(), "injected", "after async with priorEffects");
+		strictEqual(modelCalls, 1, "model was called for the first async");
+
+		strictEqual(telemetryRows.length, 2, "prompted evaluation records its result");
+		strictEqual(telemetryRows[1]?.tier, "llm");
+		strictEqual(telemetryRows[1]?.decision, "silent");
+
+		// 4. Simulate middleware continuation: another turn_end with no intervening tools.
+		const telemetryBeforeContinuation = telemetryRows.length;
+		const syncContinuationEffects = registration.evaluate({ hook: "turn_end" });
+		strictEqual(syncContinuationEffects.length, 0, "no synchronous effect from continuation");
+		const continuationEffects = await registration.evaluateAsync({ hook: "turn_end", turnId: "continuation" });
+		strictEqual(continuationEffects.length, 0, "no new effect from continuation");
+		strictEqual(registration.lastDecision(), "injected", "after continuation");
+		strictEqual(modelCalls, 1, "no model call during continuation");
+		strictEqual(telemetryRows.length, telemetryBeforeContinuation, "no telemetry row after continuation");
+
+		// 5. Execute a healthy tool and synchronous turn_end: should allow silent outcome.
+		execute(registration, 3, { command: "healthy tool" });
+		const postHealthyEffects = registration.evaluate({ hook: "turn_end" });
+		strictEqual(postHealthyEffects.length, 0, "no injection after healthy tool");
+		strictEqual(registration.lastDecision(), "silent", "after healthy tool turn_end");
+
+		// Verify that a new telemetry row was emitted for the healthy turn_end (silent).
+		strictEqual(telemetryRows.length, 3, "new telemetry row after healthy turn");
+		const row3 = telemetryRows[2];
+		ok(row3);
+		deepStrictEqual(row3.triggerReasons, ["turn_end"]);
+		strictEqual(row3.tier, "rules");
+		strictEqual(row3.decision, "silent");
 	});
 });
