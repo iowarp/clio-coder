@@ -1,7 +1,11 @@
 import { strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
-import { remainingContextMaxTokens, setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
+import {
+	LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS,
+	remainingContextMaxTokens,
+	setGlobalDefaultMaxOutputTokens,
+} from "../../src/engine/apis/output-budget.js";
 
 type BudgetModel = Parameters<typeof remainingContextMaxTokens>[0];
 type BudgetContext = Parameters<typeof remainingContextMaxTokens>[1];
@@ -36,8 +40,10 @@ describe("contracts/output-budget", () => {
 	it("keeps the more-specific tool-turn limit over the global default", () => {
 		setGlobalDefaultMaxOutputTokens(32768);
 		strictEqual(
-			remainingContextMaxTokens(model(1_000_000, 0), emptyContext, undefined, { maxOutputTokens: 16384 }),
-			16384,
+			remainingContextMaxTokens(model(1_000_000, 0), emptyContext, undefined, {
+				maxOutputTokens: LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS,
+			}),
+			32768,
 		);
 	});
 

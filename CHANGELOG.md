@@ -10,6 +10,8 @@ still change interfaces.
 
 ## Unreleased
 
+- Grounded generated wikis in detected repository instructions and their declared source-of-truth documents, added dirty-working-tree evidence and source-tree freshness metadata, tightened capability-claim guidance, let the bound documenter worker profile control its thinking level, and raised the local tool-bearing turn ceiling to the configured 32K default so long-context documenters are not artificially constrained to 16K.
+
 ## 0.2.9 - 2026-07-13
 
 - Updated the Pi engine dependencies to 0.80.6, including native `max` thinking-level support and upstream runtime, accounting, and protocol fixes.

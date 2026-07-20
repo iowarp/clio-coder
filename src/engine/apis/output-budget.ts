@@ -34,7 +34,7 @@ export function setGlobalDefaultMaxOutputTokens(value: number): void {
  * separately by assessToolProseLoop, so this number only has to be large
  * enough to let legitimate large outputs through.
  */
-export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = 16384;
+export const LOCAL_TOOL_TURN_MAX_OUTPUT_TOKENS = 32768;
 
 /**
  * Tokens a preflight context check should hold back for the response: the

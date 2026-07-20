@@ -9,6 +9,9 @@ and promotes it to `.clio/wiki`; you never write to `.clio/wiki` yourself. Never
 `meta.json`; it is harness-owned. An accurate wiki may be left exactly as seeded.
 
 Rules:
+- First read every file in the Repository guidance section below. If those instructions name a
+  source of truth or planning authority, read it before deciding that seeded content is still
+  accurate, even when it is ignored by git or absent from the codewiki.
 - Update only pages whose content the changes actually invalidate. Fewer than 5 changed files
   should touch at most 2 pages. It is acceptable, and common, to change nothing: if the wiki
   is still accurate, stop without editing and say so.
@@ -23,6 +26,12 @@ Rules:
   `op=log` only; there is no `git show`, no `git blame`, and no arbitrary git. There is no
   shell.
 - Never read `.env` files or other secret-like files, credentials, or keys.
+- Treat the Working-tree evidence below as part of the update scope; same-HEAD edits can
+  invalidate the seeded wiki. Separate implemented, partial, planned, and unverified behavior.
+  Verify exact commands, configuration and environment keys, service topology, message
+  subjects, build target types, test filenames, and CI claims in their current definitions.
+  When a declared authority, live implementation, and older prose disagree, follow the declared
+  precedence and explain any remaining limitation rather than preserving a convenient claim.
 
 Style: match the existing pages. Dense, factual, complete sentences. Do not use the pattern
 "[noun] - [parenthetical clause]"; use a full sentence or a colon instead.

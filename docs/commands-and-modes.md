@@ -350,10 +350,11 @@ Java, Ruby, and C#, with per-file regex fallback where a regex extractor exists.
 `.clio/wiki/` by dispatching the `documenter` agent through the configured model
 target. `quickstart.md` is required as the hub, the layout is capped at eight
 Markdown pages, and `.clio/wiki/meta.json` records the page list, model label,
-content hash, and git head after validation succeeds.
+content hash, git head, and indexed source-tree hash after validation succeeds.
 
 `clio context wiki --update` requests update mode explicitly. Update prompts
-include the codewiki digest and git evidence since the recorded wiki `gitHead`.
+include repository-instruction discovery, bounded working-tree evidence, the
+codewiki digest, and git evidence since the recorded wiki `gitHead`.
 `clio context wiki --status` is read-only: it prints whether wiki metadata is
 present, page count, `updatedAt`, recorded `gitHead`, and whether that head
 differs from current `HEAD`. It does not dispatch the documenter and does not
