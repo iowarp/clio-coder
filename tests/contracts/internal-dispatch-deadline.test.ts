@@ -5,6 +5,7 @@ import { generateWikiWithDocumenter } from "../../src/cli/wiki-generate.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import type { AbortReason, DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { JobSpec } from "../../src/domains/dispatch/validation.js";
 
 interface AbortCall {
 	runId: string;
@@ -86,6 +87,33 @@ describe("internal generator dispatch deadline", () => {
 			const { dispatch, abortCalls } = fakeDispatch({ exitCode: 0, endImmediately: true });
 			await generateWikiWithDocumenter(dispatch, WIKI_INPUT);
 			strictEqual(abortCalls.length, 0, "a completed run is never aborted");
+		} finally {
+			configureGuardrails(undefined);
+		}
+	});
+
+	it("lets the configured documenter profile choose the thinking level", async () => {
+		configureGuardrails({ internalDispatchTimeoutMs: 60_000 });
+		try {
+			let submitted: JobSpec | null = null;
+			const dispatch = {
+				dispatch: async (spec: JobSpec) => {
+					submitted = spec;
+					return {
+						runId: "run-profile-1",
+						events: (async function* () {
+							yield* [];
+						})(),
+						finalPromise: Promise.resolve({ exitCode: 0 } as RunReceipt),
+					};
+				},
+				abort: () => {},
+			} as unknown as DispatchContract;
+
+			await generateWikiWithDocumenter(dispatch, WIKI_INPUT);
+
+			ok(submitted);
+			strictEqual("thinkingLevel" in submitted, false);
 		} finally {
 			configureGuardrails(undefined);
 		}

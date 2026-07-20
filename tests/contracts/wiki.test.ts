@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { type Codewiki, readCodewiki } from "../../src/domains/context/codewiki/indexer.js";
 import {
 	buildWikiPrompt,
+	computeFingerprint,
 	computeWikiContentHash,
 	listWikiPages,
 	readWikiMeta,
@@ -133,6 +134,7 @@ describe("contracts/wiki", () => {
 			version: 1 as const,
 			updatedAt: "2026-07-04T00:00:00.000Z",
 			gitHead: null,
+			sourceTreeHash: "2".repeat(64),
 			model: "test-model",
 			contentHash: "0".repeat(64),
 			pages: [
@@ -150,6 +152,7 @@ describe("contracts/wiki", () => {
 		ok(validateWikiMeta(meta).ok);
 		const malformed = validateWikiMeta({ ...meta, contentHash: "not-a-hash" });
 		strictEqual(malformed.ok, false);
+		strictEqual(validateWikiMeta({ ...meta, sourceTreeHash: "not-a-hash" }).ok, false);
 		writeFileSync(wikiMetaPath(scratch), JSON.stringify({ version: 2 }), "utf8");
 		strictEqual(readWikiMeta(scratch), null);
 	});
@@ -198,6 +201,49 @@ describe("contracts/wiki", () => {
 		if (stale.state === "stale") ok(stale.changedFiles >= 1);
 	});
 
+	it("reports same-HEAD source-tree drift when generated metadata has a fingerprint", () => {
+		writeProjectFile(scratch);
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
+		const head = initGitRepo(scratch);
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: head,
+			sourceTreeHash: computeFingerprint(scratch).treeHash,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		deepStrictEqual(wikiStaleness(scratch), { state: "fresh" });
+		writeFileSync(join(scratch, "src", "index.ts"), "export const main = false;\n", "utf8");
+		const stale = wikiStaleness(scratch);
+		strictEqual(stale.state, "stale");
+		if (stale.state === "stale") ok(stale.changedFiles >= 1);
+	});
+
+	it("counts a path changed in history and the working tree only once", () => {
+		writeProjectFile(scratch);
+		writeFileSync(join(scratch, ".gitignore"), ".clio/\n", "utf8");
+		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
+		const head = initGitRepo(scratch);
+		writeWikiMeta(scratch, {
+			version: 1,
+			updatedAt: "2026-07-04T00:00:00.000Z",
+			gitHead: head,
+			model: "test-model",
+			contentHash: "0".repeat(64),
+			pages: listWikiPages(scratch),
+		});
+
+		writeFileSync(join(scratch, "src", "index.ts"), "export const main = false;\n", "utf8");
+		git(scratch, ["add", "src/index.ts"]);
+		git(scratch, ["commit", "-m", "change source"]);
+		writeFileSync(join(scratch, "src", "index.ts"), "export const main = null;\n", "utf8");
+
+		deepStrictEqual(wikiStaleness(scratch), { state: "stale", changedFiles: 1 });
+	});
+
 	it("degrades git-less wiki staleness checks to fresh with a warning", () => {
 		writeWikiPage(scratch, "quickstart.md", "# Quickstart\n");
 		writeWikiMeta(scratch, {
@@ -240,6 +286,7 @@ describe("contracts/wiki", () => {
 		const meta = readWikiMeta(scratch);
 		ok(meta);
 		strictEqual(meta.model, "test-model");
+		match(meta.sourceTreeHash ?? "", /^[a-f0-9]{64}$/);
 		strictEqual(meta.contentHash, computeWikiContentHash(scratch));
 		deepStrictEqual(
 			meta.pages.map((page) => page.path),
@@ -487,10 +534,16 @@ describe("contracts/wiki", () => {
 	});
 
 	it("composes init and update prompts from fragments, digest, and git evidence", () => {
+		writeFileSync(join(scratch, "AGENTS.md"), "# Instructions\n\nUse docs/TRUTH.md as the authority.\n", "utf8");
 		const outputDir = join(scratch, ".clio", "wiki-staging-xyz");
 		const initPrompt = buildWikiPrompt({ cwd: scratch, mode: "init", codewiki: promptCodewiki(), outputDir });
 		ok(initPrompt.includes("## Codewiki digest"));
+		ok(initPrompt.includes("## Repository guidance"));
+		ok(initPrompt.includes("AGENTS.md"));
+		ok(initPrompt.includes("## Working-tree evidence"));
 		ok(initPrompt.includes("Structure requirements:"));
+		ok(initPrompt.includes("source of truth or planning authority"));
+		ok(initPrompt.includes("Component existence is not end-to-end evidence"));
 		ok(initPrompt.includes("src/index.ts"));
 		// The {{outputDir}} token is substituted with the staging path and never leaks.
 		ok(initPrompt.includes(outputDir));
@@ -506,6 +559,26 @@ describe("contracts/wiki", () => {
 		ok(updatePrompt.includes("## Git evidence"));
 		ok(updatePrompt.includes(outputDir));
 		ok(updatePrompt.includes("Git evidence unavailable") || updatePrompt.includes("Git evidence is empty"));
+	});
+
+	it("surfaces safe instruction aliases and dirty working-tree paths in the prompt", () => {
+		writeProjectFile(scratch);
+		mkdirSync(join(scratch, ".claude"), { recursive: true });
+		writeFileSync(join(scratch, ".claude", "CLAUDE.md"), "# Authority\n\nRead docs/TRUTH.md first.\n", "utf8");
+		initGitRepo(scratch);
+		writeFileSync(join(scratch, "src", "index.ts"), "export const main = false;\n", "utf8");
+		writeFileSync(join(scratch, "src", "untracked.ts"), "export const newFact = true;\n", "utf8");
+
+		const prompt = buildWikiPrompt({
+			cwd: scratch,
+			mode: "init",
+			codewiki: promptCodewiki(),
+			outputDir: join(scratch, ".clio", "wiki-staging-xyz"),
+		});
+
+		ok(prompt.includes("- .claude/CLAUDE.md"));
+		match(prompt, / M src\/index\.ts/);
+		match(prompt, /\?\? src\/untracked\.ts/);
 	});
 
 	it("prints CLI wiki status with and without metadata", async () => {

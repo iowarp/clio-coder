@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { computeFingerprint } from "../fingerprint.js";
 import { readWikiMeta } from "./meta.js";
 
 export type WikiStaleness =
@@ -7,6 +8,10 @@ export type WikiStaleness =
 	| { state: "stale"; changedFiles: number; warning?: string };
 
 const GIT_DIFF_LINE_CAP = 200;
+
+function splitNullTerminatedPaths(output: string): string[] {
+	return output.split("\0").filter((path) => path.length > 0);
+}
 
 function currentGitHead(cwd: string): string | null {
 	try {
@@ -23,16 +28,30 @@ function currentGitHead(cwd: string): string | null {
 
 function changedFileCount(cwd: string, gitHead: string): { count: number; warning?: string } | { warning: string } {
 	try {
-		const out = execFileSync("git", ["diff", "--name-only", `${gitHead}..HEAD`], {
+		const committed = execFileSync("git", ["diff", "--name-only", "-z", `${gitHead}..HEAD`], {
 			cwd,
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
-		}).trim();
-		const lines = out.length === 0 ? [] : out.split(/\r?\n/).filter((line) => line.length > 0);
-		const capped = lines.slice(0, GIT_DIFF_LINE_CAP);
+		});
+		const trackedWorking = execFileSync("git", ["diff", "--name-only", "-z", "HEAD"], {
+			cwd,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+			cwd,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const paths = new Set([
+			...splitNullTerminatedPaths(committed),
+			...splitNullTerminatedPaths(trackedWorking),
+			...splitNullTerminatedPaths(untracked),
+		]);
+		const capped = [...paths].slice(0, GIT_DIFF_LINE_CAP);
 		return {
 			count: capped.length,
-			...(lines.length > capped.length ? { warning: `changed file count capped at ${GIT_DIFF_LINE_CAP}` } : {}),
+			...(paths.size > capped.length ? { warning: `changed file count capped at ${GIT_DIFF_LINE_CAP}` } : {}),
 		};
 	} catch {
 		return { warning: "wiki staleness unavailable: git diff failed for the recorded wiki gitHead" };
@@ -49,7 +68,10 @@ export function wikiStaleness(cwd: string): WikiStaleness {
 	if (!head) {
 		return { state: "fresh", warning: "wiki staleness unavailable: current git HEAD is missing" };
 	}
-	if (head === meta.gitHead) return { state: "fresh" };
+	if (meta.sourceTreeHash && computeFingerprint(cwd).treeHash === meta.sourceTreeHash && head === meta.gitHead) {
+		return { state: "fresh" };
+	}
+	if (!meta.sourceTreeHash && head === meta.gitHead) return { state: "fresh" };
 	const diff = changedFileCount(cwd, meta.gitHead);
 	if (!("count" in diff)) return { state: "fresh", warning: diff.warning };
 	return { state: "stale", changedFiles: diff.count, ...(diff.warning ? { warning: diff.warning } : {}) };

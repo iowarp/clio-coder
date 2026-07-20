@@ -195,6 +195,7 @@ const THINKING_LEVELS = [
 	"medium",
 	"high",
 	"xhigh",
+	"max",
 ] as const satisfies ReadonlyArray<ThinkingLevel>;
 const TOOL_PROFILE_NAMES = [
 	"minimal-local",

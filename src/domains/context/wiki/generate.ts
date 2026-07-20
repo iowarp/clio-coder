@@ -294,6 +294,7 @@ export async function runWikiGenerate(
 	try {
 		progress(input, { phase: "codewiki", status: "started", message: "loading codewiki for wiki generation" });
 		const codewiki = await loadOrBuildCodewiki(cwd);
+		const sourceTreeHash = computeFingerprint(cwd, codewiki).treeHash;
 		progress(input, {
 			phase: "codewiki",
 			status: "completed",
@@ -366,6 +367,7 @@ export async function runWikiGenerate(
 				version: 1,
 				updatedAt: new Date().toISOString(),
 				gitHead: currentWikiGitHead(cwd),
+				sourceTreeHash,
 				model: input.model,
 				contentHash: afterHash,
 				pages: stagedPages,

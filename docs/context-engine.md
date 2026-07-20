@@ -133,8 +133,12 @@ paths are no-ops.
 The wiki lives under `.clio/wiki/` and is written by the `documenter` agent.
 `quickstart.md` is mandatory and acts as the hub. The layout validator allows
 at most eight Markdown pages, rejects empty pages, and requires
-`quickstart.md`. `meta.json` records `updatedAt`, `gitHead`, the model label,
-a content hash over the Markdown pages, and the page list. Metadata is written
+`quickstart.md`. Before drafting, the documenter receives a deterministic list
+of safe repository instruction files, bounded working-tree status, and the
+codewiki digest; repository-declared source-of-truth documents must be read even
+when they are ignored or absent from the structural index. `meta.json` records
+`updatedAt`, `gitHead`, the indexed source-tree hash, the model label, a content
+hash over the Markdown pages, and the page list. Metadata is written
 only after the generated layout validates and the page content changed.
 
 `clio context wiki` creates a wiki when no metadata exists and updates one when metadata is present. During wiki generation, Clio automatically refreshes a stale codewiki index before grounding the model run. The decision to write new pages and update metadata is a no-op if the newly generated content's hash matches the existing content hash. `clio context wiki --update` requests update mode explicitly. `clio context wiki --status` only reads metadata and does not run a model. `clio context refresh --wiki` first rebuilds the structural codewiki and then updates an existing wiki when `.clio/wiki/meta.json` exists; when no wiki metadata exists, it performs no wiki generation.
@@ -169,11 +173,13 @@ their missing or deliberately invalidated per-file hashes make `codewikiNeedsBac
 next session freshness check, `code_nav` demand load, wiki generation, or
 explicit refresh rebuilds them into full v5.
 
-Wiki staleness is separate. `.clio/wiki/meta.json` records the git head used
-when the wiki content last changed. If the current git head differs, Clio
-counts changed files with `git diff --name-only <recorded>..HEAD` and reports
-the wiki as stale. Git-less or unreadable git states degrade to `fresh` with a
-warning because Clio cannot prove drift.
+Wiki staleness is separate. New `.clio/wiki/meta.json` files record both the git
+head and the indexed source-tree hash used when the wiki content last changed.
+Clio reports drift at the same git head when tracked or untracked source files
+change, and combines committed and working-tree evidence in its changed-file
+count. Older metadata without a source-tree hash retains the git-head-only
+check. Git-less or unreadable git states degrade to `fresh` with a warning when
+Clio cannot prove drift.
 
 ### Surfacing and Navigation
 

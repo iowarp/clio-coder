@@ -9,6 +9,7 @@ export interface WikiMeta {
 	version: 1;
 	updatedAt: string;
 	gitHead: string | null;
+	sourceTreeHash?: string;
 	model: string;
 	contentHash: string;
 	pages: WikiPage[];
@@ -58,6 +59,10 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 	if (!updatedAt) problems.push("updatedAt must be a non-empty string");
 	const gitHead = value.gitHead;
 	if (gitHead !== null && typeof gitHead !== "string") problems.push("gitHead must be a string or null");
+	const sourceTreeHash = value.sourceTreeHash;
+	if (sourceTreeHash !== undefined && (typeof sourceTreeHash !== "string" || !/^[a-f0-9]{64}$/.test(sourceTreeHash))) {
+		problems.push("sourceTreeHash must be a sha256 hex string when present");
+	}
 	const model = stringValue(value.model);
 	if (!model) problems.push("model must be a non-empty string");
 	const contentHash = stringValue(value.contentHash);
@@ -83,6 +88,7 @@ export function validateWikiMeta(value: unknown): WikiMetaValidation {
 			version: 1,
 			updatedAt: updatedAt as string,
 			gitHead: gitHead as string | null,
+			...(sourceTreeHash !== undefined ? { sourceTreeHash: sourceTreeHash as string } : {}),
 			model: model as string,
 			contentHash: contentHash as string,
 			pages: normalizePages(value.pages as WikiPage[]),
@@ -112,6 +118,7 @@ export function writeWikiMeta(cwd: string, meta: WikiMeta): void {
 		version: 1,
 		updatedAt: meta.updatedAt,
 		gitHead: meta.gitHead,
+		...(meta.sourceTreeHash ? { sourceTreeHash: meta.sourceTreeHash } : {}),
 		model: meta.model,
 		contentHash: meta.contentHash,
 		pages: normalizePages(meta.pages),

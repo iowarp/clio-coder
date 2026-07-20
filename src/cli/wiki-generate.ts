@@ -107,7 +107,6 @@ export async function generateWikiWithDocumenter(dispatch: DispatchContract, inp
 		task: input.prompt,
 		cwd: input.cwd,
 		requestOrigin: "internal",
-		thinkingLevel: "off",
 		noSkills: true,
 		// Second containment layer: the worker safety seam blocks any write-class
 		// tool call whose target escapes the staging dir, so a mis-scoped or
