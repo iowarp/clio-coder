@@ -107,6 +107,7 @@ import {
 } from "./contract.js";
 import { createWorkerOutputCapture, startDispatchEventPump } from "./event-pump.js";
 import {
+	affectsTargetBreaker,
 	classifyFailure,
 	decideRetry,
 	type FailureClass,
@@ -2431,7 +2432,7 @@ export function createDispatchBundle(
 			targetCooldowns.delete(key);
 			return;
 		}
-		if (!isInfrastructureFailure(failureClass) || failureClass === "node-channel") return;
+		if (!affectsTargetBreaker(failureClass)) return;
 		const cooldownMs = getResilienceCooldownMs();
 		if (cooldownMs <= 0) return;
 		targetCooldowns.set(key, { until: now() + cooldownMs, reason: failureClass });
@@ -3167,6 +3168,7 @@ export function createDispatchBundle(
 				// agent is a guest inside Clio's policy model, not an exemption.
 				const finishContract = assessDispatchFinishContract();
 				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
+					evidence.qualityGateFailure = true;
 					finalOutcome = "failed";
 					finalDetail = "high-rigor finish gate: unvalidated mutation";
 					failureMessage = finalDetail;
@@ -4073,6 +4075,7 @@ export function createDispatchBundle(
 				let finalDetail = detail;
 				const finishContract = assessDispatchFinishContract();
 				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
+					evidence.qualityGateFailure = true;
 					finalOutcome = "failed";
 					finalDetail = "high-rigor finish gate: unvalidated mutation";
 					failureMessage = finalDetail;

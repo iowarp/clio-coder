@@ -30,6 +30,8 @@ export interface RunTerminationEvidence {
 	permissionFailure: boolean;
 	/** Admission/budget/scope/cooldown rejection reason; non-null means policy denial. */
 	policyDenied: string | null;
+	/** Coordinator quality/verification gate rejected an otherwise successful completion. */
+	qualityGateFailure?: boolean;
 	/** ACP stopReason when the peer reported one. */
 	stopReason: string | null;
 }

@@ -24,6 +24,8 @@ export type {
 export type { DurableAssignmentRecord } from "./assignment-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
 export {
+	affectsNodeBreaker,
+	affectsTargetBreaker,
 	classifyFailure,
 	decideRetry,
 	type FailureClass,
