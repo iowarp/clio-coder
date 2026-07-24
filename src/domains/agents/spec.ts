@@ -1,6 +1,6 @@
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { type ActionClass, classify } from "../safety/action-classifier.js";
-import type { AgentBudget, AgentRecipe } from "./recipe.js";
+import type { AgentBudget, AgentRecipe, AgentToolRequirement } from "./recipe.js";
 
 export type AgentCategory =
 	| "explore"
@@ -63,6 +63,11 @@ export const AGENT_PROJECT_CONTEXT_TIERS: ReadonlyArray<AgentProjectContextTier>
 const BUILTIN_SHADOW_AGENT_IDS = new Set(["scout", "researcher", "provenance"]);
 const BUILTIN_INTERNAL_AGENT_IDS = new Set<string>();
 
+export interface AgentToolRequirements {
+	required: ReadonlyArray<ToolName | { anyOf: ReadonlyArray<ToolName> }>;
+	optional: ReadonlyArray<ToolName>;
+}
+
 export interface AgentSpec {
 	id: string;
 	name: string;
@@ -70,6 +75,7 @@ export interface AgentSpec {
 	source: AgentRecipe["source"] | "custom";
 	filepath: string;
 	tools: ReadonlyArray<ToolName>;
+	toolRequirements: AgentToolRequirements;
 	category: AgentCategory;
 	capabilityClass: AgentCapabilityClass;
 	latencyClass: AgentLatencyClass;
@@ -172,6 +178,9 @@ function normalizeTools(recipe: AgentRecipe): ReadonlyArray<ToolName> {
 	const seen = new Set<string>();
 	const tools: ToolName[] = [];
 	for (const tool of recipe.tools ?? []) {
+		if (typeof tool !== "string" || tool.trim().length === 0) {
+			throw new Error(`agent recipe '${recipe.id}' declares an invalid tool name`);
+		}
 		if (seen.has(tool)) continue;
 		seen.add(tool);
 		tools.push(isBuiltinToolName(tool as ToolName) ? (tool as BuiltinToolName) : (tool as ToolName));
@@ -179,10 +188,98 @@ function normalizeTools(recipe: AgentRecipe): ReadonlyArray<ToolName> {
 	return tools;
 }
 
+function asToolName(tool: string): ToolName {
+	return isBuiltinToolName(tool as ToolName) ? (tool as BuiltinToolName) : (tool as ToolName);
+}
+
+function legacyToolRequirements(
+	capabilityClass: AgentCapabilityClass,
+	tools: ReadonlyArray<ToolName>,
+	skills: ReadonlyArray<string>,
+): AgentToolRequirements {
+	const required: Array<ToolName | { anyOf: ReadonlyArray<ToolName> }> = [];
+	if (capabilityClass === "workspace-edit") {
+		required.push(ToolNames.Read, { anyOf: [ToolNames.Write, ToolNames.Edit] });
+	}
+	if (capabilityClass === "verification") required.push(ToolNames.Verify);
+	if (capabilityClass === "artifact-write") required.push(ToolNames.Artifact);
+	if (skills.length > 0) required.push(ToolNames.Context);
+	if (capabilityClass === "orchestration" && tools.includes(ToolNames.Dispatch)) required.push(ToolNames.Dispatch);
+	const requiredNames = new Set(
+		required.flatMap((requirement) => (typeof requirement === "string" ? [requirement] : requirement.anyOf)),
+	);
+	return { required, optional: tools.filter((tool) => !requiredNames.has(tool)) };
+}
+
+function normalizeToolRequirements(
+	recipe: AgentRecipe,
+	tools: ReadonlyArray<ToolName>,
+	capabilityClass: AgentCapabilityClass,
+	skills: ReadonlyArray<string>,
+): AgentToolRequirements {
+	if (!recipe.toolRequirements) return legacyToolRequirements(capabilityClass, tools, skills);
+	const declared = new Set(tools);
+	const required = recipe.toolRequirements.required.map((requirement: AgentToolRequirement, index) => {
+		if (typeof requirement === "string") return asToolName(requirement);
+		if (!Array.isArray(requirement.anyOf) || requirement.anyOf.length === 0) {
+			throw new Error(`agent recipe '${recipe.id}' tools.required[${index}].anyOf must be non-empty`);
+		}
+		return { anyOf: requirement.anyOf.map(asToolName) };
+	});
+	const optional = recipe.toolRequirements.optional.map(asToolName);
+	const mentioned = required.flatMap((requirement) =>
+		typeof requirement === "string" ? [requirement] : requirement.anyOf,
+	);
+	for (const tool of [...mentioned, ...optional]) {
+		if (!declared.has(tool)) throw new Error(`agent recipe '${recipe.id}' requirement '${tool}' is not declared`);
+	}
+	if (new Set([...mentioned, ...optional]).size !== mentioned.length + optional.length) {
+		throw new Error(`agent recipe '${recipe.id}' contains duplicate tool requirements`);
+	}
+	if (new Set([...mentioned, ...optional]).size !== tools.length) {
+		throw new Error(`agent recipe '${recipe.id}' has declared tools without required/optional semantics`);
+	}
+	return { required, optional };
+}
+
+export interface AgentToolCompatibility {
+	compatible: boolean;
+	missingRequired: ReadonlyArray<string>;
+	lostOptional: ReadonlyArray<ToolName>;
+}
+
+export function resolveAgentToolCompatibility(
+	spec: Pick<AgentSpec, "toolRequirements">,
+	effectiveTools: ReadonlyArray<ToolName>,
+	options: { mediatesDispatch: boolean },
+): AgentToolCompatibility {
+	const available = new Set(effectiveTools);
+	const missingRequired: string[] = [];
+	for (const requirement of spec.toolRequirements.required) {
+		if (typeof requirement === "string") {
+			if (!available.has(requirement)) missingRequired.push(requirement);
+			continue;
+		}
+		if (!requirement.anyOf.some((tool) => available.has(tool))) {
+			missingRequired.push(`anyOf(${requirement.anyOf.join("|")})`);
+		}
+	}
+	if (available.has(ToolNames.Dispatch) && !options.mediatesDispatch) {
+		missingRequired.push("dispatch(runtime mediation unavailable)");
+	}
+	return {
+		compatible: missingRequired.length === 0,
+		missingRequired,
+		lostOptional: spec.toolRequirements.optional.filter((tool) => !available.has(tool)),
+	};
+}
+
 export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 	const tools = normalizeTools(recipe);
 	const category = recipe.category ?? inferCategory(recipe, tools);
 	const capabilityClass = recipe.capabilityClass ?? inferCapabilityClass(recipe, tools);
+	const skills = recipe.skills ?? [];
+	const toolRequirements = normalizeToolRequirements(recipe, tools, capabilityClass, skills);
 	const latencyClass = recipe.latencyClass ?? inferLatencyClass(category, capabilityClass);
 	const projectContextTier = recipe.projectContextTier ?? defaultProjectContextTier(capabilityClass);
 	return {
@@ -192,13 +289,14 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		source: recipe.source,
 		filepath: recipe.filepath,
 		tools,
+		toolRequirements,
 		category,
 		capabilityClass,
 		latencyClass,
 		projectContextTier,
 		audience: inferAudience(recipe),
 		tags: recipe.tags ?? [],
-		skills: recipe.skills ?? [],
+		skills,
 		output: recipe.output ?? null,
 		budget: recipe.budget ?? null,
 		body: recipe.body,
@@ -216,6 +314,33 @@ export function isShadowAgent(spec: AgentSpec): boolean {
 export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	const errors: string[] = [];
 	const actions = actionClassesForTools(spec.tools);
+	const requiredGroups = spec.toolRequirements.required.map((requirement) =>
+		typeof requirement === "string" ? [requirement] : requirement.anyOf,
+	);
+	const requiresTool = (tool: ToolName): boolean =>
+		requiredGroups.some((group) => group.length > 0 && group.every((candidate) => candidate === tool));
+	const requiresMutation = requiredGroups.some(
+		(group) => group.length > 0 && group.every((tool) => tool === ToolNames.Write || tool === ToolNames.Edit),
+	);
+	if (spec.capabilityClass === "workspace-edit" && (!requiresTool(ToolNames.Read) || !requiresMutation)) {
+		errors.push(`workspace-edit agent '${spec.id}' must require read and write|edit`);
+	}
+	if (spec.capabilityClass === "verification" && !requiresTool(ToolNames.Verify)) {
+		errors.push(`verification agent '${spec.id}' must require verify`);
+	}
+	if (spec.capabilityClass === "artifact-write" && !requiresTool(ToolNames.Artifact)) {
+		errors.push(`artifact-write agent '${spec.id}' must require artifact`);
+	}
+	if (spec.skills.length > 0 && !requiresTool(ToolNames.Context)) {
+		errors.push(`agent '${spec.id}' must require context for bound skills`);
+	}
+	if (
+		spec.capabilityClass === "orchestration" &&
+		spec.tools.includes(ToolNames.Dispatch) &&
+		!requiresTool(ToolNames.Dispatch)
+	) {
+		errors.push(`orchestration agent '${spec.id}' must require dispatch when it is declared`);
+	}
 	const toolList = spec.tools.join(", ");
 	if (spec.capabilityClass === "read-only") {
 		for (const action of actions) {

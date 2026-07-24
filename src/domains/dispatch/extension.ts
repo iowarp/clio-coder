@@ -29,6 +29,7 @@ import {
 import { antigravitySubprocessConfigForAutonomy } from "../../engine/antigravity/subprocess-runtime.js";
 import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude/subprocess-runtime.js";
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
+import { workerRuntimeMediatesClioDispatch } from "../../engine/worker-tools.js";
 import { toolPromptHintsForNames } from "../../tools/bootstrap.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
@@ -48,6 +49,7 @@ import {
 	assertAgentSpecPolicy,
 	isUserVisibleAgent,
 	normalizeAgentSpec,
+	resolveAgentToolCompatibility,
 } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract, ProjectStructuredContext } from "../context/contract.js";
@@ -1059,6 +1061,21 @@ function effectiveWorkerToolNames(
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
 	);
 	return [...new Set(names)].sort();
+}
+
+function assertPostRuntimeToolCompatibility(
+	agentId: string,
+	spec: ReturnType<typeof normalizeAgentSpec>,
+	effectiveTools: ReadonlyArray<ToolName>,
+	target: ResolvedTarget,
+): void {
+	const compatibility = resolveAgentToolCompatibility(spec, effectiveTools, {
+		mediatesDispatch: workerRuntimeMediatesClioDispatch(target.runtime.id),
+	});
+	if (compatibility.compatible) return;
+	throw new Error(
+		`dispatch: admission denied: agent '${agentId}' is incompatible with runtime '${target.runtime.id}' after tool narrowing; missing required tools: ${compatibility.missingRequired.join(", ")}`,
+	);
 }
 
 function resolveEffectiveWorkerBudget(input: {
@@ -2474,6 +2491,7 @@ export function createDispatchBundle(
 		const sessionAutonomy = settings?.autonomy ?? "auto-edit";
 		const effectiveAutonomy = clampWorkerAutonomy(sessionAutonomy, req.autonomy);
 		const effectiveTools = effectiveWorkerToolNames(admission.allowedTools, target);
+		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target);
 		const effectiveAdmission: DispatchAdmissionStage = {
 			...admission,
 			allowedTools: effectiveTools,
@@ -4289,7 +4307,7 @@ export function createDispatchBundle(
 		if (hasPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);
 		}
-		resolveDispatchAdmissionStage(req, recipe, safety);
+		const admission = resolveDispatchAdmissionStage(req, recipe, safety);
 		const targets = readWorkerTargets(settings);
 		const target = resolveDispatchTarget(
 			req,
@@ -4301,6 +4319,8 @@ export function createDispatchBundle(
 			providers,
 		);
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
+		const effectiveTools = effectiveWorkerToolNames(admission.allowedTools, target);
+		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.workers.onPermission ?? "deny");
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema);
 		assertWriteRootsEnforceable(target.runtime, req.writeRoots);

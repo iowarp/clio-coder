@@ -1,7 +1,9 @@
 ---
 name: Documenter
 description: Updates developer-facing docs, examples, and concise operational runbooks.
-tools: [read, write, edit, grep, find, ls, git, verify, code_nav, context]
+tools:
+  required: [read, {anyOf: [write, edit]}]
+  optional: [grep, find, ls, git, verify, code_nav, context]
 audience: base
 category: implement
 capabilityClass: workspace-edit
