@@ -8,12 +8,15 @@ export type FailureClass =
 	| "operator-cancel"
 	| "policy"
 	| "permission"
+	| "deterministic-task"
+	| "model-quality"
+	| "target-auth"
 	| "target-rate-limit"
 	| "target-transient"
 	| "capacity"
 	| "node-channel"
+	| "node-resource"
 	| "worker-runtime"
-	| "deterministic-task"
 	| "internal";
 
 export type RoutePart = "agent" | "target" | "model" | "node" | "runtime";
@@ -41,13 +44,16 @@ export function classifyFailure(
 	if (evidence.policyDenied !== null || outcome === "denied_by_policy") return "policy";
 	if (evidence.permissionFailure || evidence.exitCode === WORKER_EXIT_PERMISSION_REQUIRED) return "permission";
 	if (isDeterministicOutcomeCode(code)) return "deterministic-task";
+	if (evidence.qualityGateFailure === true) return "model-quality";
 	if (evidence.stallKilled || outcome === "stalled" || outcome === "spawn_failed" || result?.exitCode === 255) {
 		return "node-channel";
 	}
 	const diagnostic = resultText(result);
+	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(diagnostic)) return "target-auth";
 	if (/\b429\b|rate[ -]?limit|too many requests/.test(diagnostic)) return "target-rate-limit";
-	if (/capacity|out of memory|\boom\b|\bvram\b/.test(diagnostic)) return "capacity";
-	if (evidence.timedOut || outcome === "timed_out" || /temporar|unavailable|\b50[234]\b/.test(diagnostic)) {
+	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(diagnostic)) return "node-resource";
+	if (/capacity|overloaded|queue full/.test(diagnostic)) return "capacity";
+	if (evidence.timedOut || outcome === "timed_out" || /timeout|temporar|unavailable|\b50[234]\b/.test(diagnostic)) {
 		return "target-transient";
 	}
 	if (outcome === "failed") return "worker-runtime";
@@ -75,8 +81,14 @@ export function decideRetry(failureClass: FailureClass, attempt: number, maxRetr
 				mayEscalateQuality: false,
 				reasonCode: `non-retryable-${failureClass}`,
 			};
+		case "model-quality":
+			return base(["model"], "retry-model-quality", true);
 		case "node-channel":
 			return base(["node"], "retry-node-channel");
+		case "node-resource":
+			return base(["node"], "retry-node-resource");
+		case "target-auth":
+			return base(["target"], "retry-target-auth");
 		case "target-rate-limit": {
 			const decision = base(["target"], "retry-target-rate-limit");
 			return decision.retry ? { ...decision, retryAfterMs: 1_000 } : decision;
@@ -92,13 +104,19 @@ export function decideRetry(failureClass: FailureClass, attempt: number, maxRetr
 	}
 }
 
-export function isInfrastructureFailure(failureClass: FailureClass): boolean {
+export function affectsTargetBreaker(failureClass: FailureClass): boolean {
 	return (
+		failureClass === "target-auth" ||
 		failureClass === "target-rate-limit" ||
 		failureClass === "target-transient" ||
-		failureClass === "capacity" ||
-		failureClass === "node-channel" ||
-		failureClass === "worker-runtime" ||
-		failureClass === "internal"
+		failureClass === "worker-runtime"
 	);
+}
+
+export function affectsNodeBreaker(failureClass: FailureClass): boolean {
+	return failureClass === "node-channel" || failureClass === "node-resource" || failureClass === "capacity";
+}
+
+export function isInfrastructureFailure(failureClass: FailureClass): boolean {
+	return affectsTargetBreaker(failureClass) || affectsNodeBreaker(failureClass) || failureClass === "internal";
 }

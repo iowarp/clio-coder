@@ -1,8 +1,10 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import {
+	affectsNodeBreaker,
+	affectsTargetBreaker,
 	classifyFailure,
 	decideRetry,
 	isInfrastructureFailure,
@@ -10,7 +12,12 @@ import {
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../src/worker/spec-contract.js";
-import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import {
+	fastReproducibility,
+	isolateDispatchState,
+	makeDispatchBundle,
+	restoreDispatchState,
+} from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const BASE_EVIDENCE: RunTerminationEvidence = {
@@ -51,7 +58,10 @@ describe("dispatch failure classification", () => {
 			[{ ...BASE_EVIDENCE, abortedByOperator: true }, null, "canceled", null, "operator-cancel"],
 			[{ ...BASE_EVIDENCE, policyDenied: "scope denied" }, null, "denied_by_policy", null, "policy"],
 			[{ ...BASE_EVIDENCE, permissionFailure: true }, null, "failed", null, "permission"],
+			[BASE_EVIDENCE, null, "failed", "vram_capacity_fit_failure", "deterministic-task"],
+			[{ ...BASE_EVIDENCE, qualityGateFailure: true }, null, "failed", null, "model-quality"],
 			[BASE_EVIDENCE, { exitCode: 255, signal: null }, "failed", null, "node-channel"],
+			[BASE_EVIDENCE, { exitCode: 1, signal: null, stderrTail: "HTTP 403 Forbidden" }, "failed", null, "target-auth"],
 			[
 				BASE_EVIDENCE,
 				{ exitCode: 1, signal: null, stderrTail: "HTTP 429 rate limit" },
@@ -59,11 +69,12 @@ describe("dispatch failure classification", () => {
 				null,
 				"target-rate-limit",
 			],
+			[BASE_EVIDENCE, { exitCode: 1, signal: null, stderrTail: "CUDA out of memory" }, "failed", null, "node-resource"],
+			[BASE_EVIDENCE, { exitCode: 1, signal: null, stderrTail: "provider queue full" }, "failed", null, "capacity"],
 			[{ ...BASE_EVIDENCE, timedOut: true }, null, "timed_out", null, "target-transient"],
-			[BASE_EVIDENCE, null, "failed", "vram_capacity_fit_failure", "deterministic-task"],
-			[BASE_EVIDENCE, { exitCode: 1, signal: null, stderrTail: "out of memory" }, "failed", null, "capacity"],
 			[BASE_EVIDENCE, null, "failed", "worker_tool_call_cap_exhausted", "deterministic-task"],
 			[BASE_EVIDENCE, { exitCode: 1, signal: null }, "failed", null, "worker-runtime"],
+			[BASE_EVIDENCE, null, "succeeded", null, "internal"],
 		] as const;
 		for (const [evidence, result, outcome, code, expected] of cases) {
 			strictEqual(classifyFailure(evidence, result, outcome, code), expected);
@@ -74,7 +85,16 @@ describe("dispatch failure classification", () => {
 		strictEqual(isInfrastructureFailure("operator-cancel"), false);
 		strictEqual(isInfrastructureFailure("policy"), false);
 		strictEqual(isInfrastructureFailure("permission"), false);
+		strictEqual(isInfrastructureFailure("model-quality"), false);
+		strictEqual(affectsTargetBreaker("capacity"), false);
+		strictEqual(affectsTargetBreaker("internal"), false);
+		strictEqual(affectsTargetBreaker("target-auth"), true);
+		strictEqual(affectsNodeBreaker("node-resource"), true);
+		deepStrictEqual(decideRetry("model-quality", 0, 2).excludedRouteParts, ["model"]);
+		strictEqual(decideRetry("model-quality", 0, 2).mayEscalateQuality, true);
 		deepStrictEqual(decideRetry("node-channel", 0, 2).excludedRouteParts, ["node"]);
+		deepStrictEqual(decideRetry("node-resource", 0, 2).excludedRouteParts, ["node"]);
+		deepStrictEqual(decideRetry("target-auth", 0, 2).excludedRouteParts, ["target"]);
 		deepStrictEqual(decideRetry("target-rate-limit", 0, 2).excludedRouteParts, ["target"]);
 		strictEqual(decideRetry("target-rate-limit", 0, 2).retryAfterMs, 1_000);
 	});
@@ -118,6 +138,68 @@ describe("dispatch failure classification", () => {
 			} finally {
 				await bundle.extension.stop?.();
 			}
+		}
+	});
+
+	it("attributes target breaker failures without cooling for capacity or internal", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 0;
+		let spawns = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 5_000,
+			spawnWorker: () => {
+				spawns += 1;
+				return spawns === 1
+					? worker({ exitCode: 1, signal: null, stderrTail: "provider queue full" })
+					: worker({ exitCode: 0, signal: null }, "same target admitted");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const first = await bundle.contract.dispatch({ agentId: "coder", task: "capacity" });
+			strictEqual((await first.finalPromise).outcome, "failed");
+			const second = await bundle.contract.dispatch({ agentId: "coder", task: "after capacity" });
+			strictEqual((await second.finalPromise).outcome, "succeeded");
+			strictEqual(affectsTargetBreaker("internal"), false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+
+		const internalSettings = structuredClone(DEFAULT_SETTINGS);
+		internalSettings.workers.maxRetries = 0;
+		let reproductionCalls = 0;
+		const internalBundle = makeDispatchBundle(dispatchStubContext({ settings: internalSettings }), {
+			resilienceCooldownMs: 5_000,
+			collectReproducibility: (cwd, safety) => {
+				reproductionCalls += 1;
+				if (reproductionCalls === 1) throw new Error("synthetic finalization failure");
+				return fastReproducibility(cwd, safety);
+			},
+			spawnWorker: () => worker({ exitCode: 0, signal: null }, "same target after internal failure"),
+		});
+		await internalBundle.extension.start();
+		try {
+			const first = await internalBundle.contract.dispatch({ agentId: "coder", task: "internal" });
+			await rejects(first.finalPromise, /synthetic finalization failure/);
+			const second = await internalBundle.contract.dispatch({ agentId: "coder", task: "after internal" });
+			strictEqual((await second.finalPromise).outcome, "succeeded");
+		} finally {
+			await internalBundle.extension.stop?.();
+		}
+
+		const authSettings = structuredClone(DEFAULT_SETTINGS);
+		authSettings.workers.maxRetries = 0;
+		const authBundle = makeDispatchBundle(dispatchStubContext({ settings: authSettings }), {
+			resilienceCooldownMs: 5_000,
+			spawnWorker: () => worker({ exitCode: 1, signal: null, stderrTail: "HTTP 401 Unauthorized" }),
+		});
+		await authBundle.extension.start();
+		try {
+			const first = await authBundle.contract.dispatch({ agentId: "coder", task: "auth" });
+			strictEqual((await first.finalPromise).outcome, "failed");
+			await rejects(authBundle.contract.dispatch({ agentId: "coder", task: "after auth" }), /cooling down/);
+		} finally {
+			await authBundle.extension.stop?.();
 		}
 	});
 
@@ -170,6 +252,116 @@ describe("dispatch failure classification", () => {
 			]);
 		} finally {
 			await bundle.extension.stop?.();
+		}
+	});
+
+	it("integrates model-quality model failover and target-auth target failover", async () => {
+		const qualitySettings = structuredClone(DEFAULT_SETTINGS);
+		qualitySettings.workers.maxRetries = 1;
+		qualitySettings.targets[0] = {
+			...qualitySettings.targets[0],
+			id: "quality-target",
+			runtime: "openai",
+			defaultModel: "fallback-model",
+		};
+		qualitySettings.workers.default.target = "quality-target";
+		qualitySettings.workers.default.model = "fallback-model";
+		const qualityRoutes: Array<{ targetId: string; model: string }> = [];
+		let qualitySpawns = 0;
+		const originalRigor = process.env.CLIO_RIGOR;
+		process.env.CLIO_RIGOR = "high";
+		const qualityBundle = makeDispatchBundle(dispatchStubContext({ settings: qualitySettings }), {
+			resilienceCooldownMs: 5_000,
+			spawnWorker: (spec) => {
+				qualityRoutes.push({ targetId: spec.target.id, model: spec.wireModelId });
+				qualitySpawns += 1;
+				if (qualitySpawns > 1) return worker({ exitCode: 0, signal: null }, "validated fallback");
+				return {
+					pid: 9010,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+					events: (async function* () {
+						yield { type: "message_end", message: { role: "user", content: "edit src/app.ts" } };
+						yield {
+							type: "tool_execution_start",
+							toolCallId: "edit-1",
+							toolName: "edit",
+							args: { path: "src/app.ts" },
+						};
+						yield {
+							type: "tool_execution_end",
+							toolCallId: "edit-1",
+							toolName: "edit",
+							isError: false,
+							result: { details: { kind: "ok" } },
+						};
+						yield { type: "message_end", message: { role: "assistant", content: "Done." } };
+					})(),
+				};
+			},
+		});
+		await qualityBundle.extension.start();
+		try {
+			const handle = await qualityBundle.contract.dispatch({
+				agentId: "coder",
+				task: "quality gate",
+				failover: "automatic",
+				target: "quality-target",
+				model: "rejected-model",
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "succeeded");
+			deepStrictEqual(qualityRoutes, [
+				{ targetId: "quality-target", model: "rejected-model" },
+				{ targetId: "quality-target", model: "fallback-model" },
+			]);
+		} finally {
+			if (originalRigor === undefined) delete process.env.CLIO_RIGOR;
+			else process.env.CLIO_RIGOR = originalRigor;
+			await qualityBundle.extension.stop?.();
+		}
+
+		const authSettings = structuredClone(DEFAULT_SETTINGS);
+		authSettings.workers.maxRetries = 1;
+		authSettings.targets = [
+			{ id: "primary", runtime: "openai", defaultModel: "shared-model" },
+			{ id: "secondary", runtime: "openai", defaultModel: "shared-model" },
+		];
+		authSettings.workers.default.target = "primary";
+		authSettings.workers.default.model = "shared-model";
+		const authRoutes: Array<{ targetId: string; node?: string }> = [];
+		let authSpawns = 0;
+		const authBundle = makeDispatchBundle(dispatchStubContext({ settings: authSettings }), {
+			resilienceCooldownMs: 0,
+			resolveNode: (req) => {
+				authRoutes.push({ targetId: req.target ?? "", ...(req.node !== undefined ? { node: req.node } : {}) });
+				return { node: { id: "blade", kind: "ssh", host: "blade.lan" } };
+			},
+			spawnWorker: () => {
+				authSpawns += 1;
+				return authSpawns === 1
+					? worker({ exitCode: 1, signal: null, stderrTail: "401 invalid API key" })
+					: worker({ exitCode: 0, signal: null }, "auth failover recovered");
+			},
+		});
+		await authBundle.extension.start();
+		try {
+			const handle = await authBundle.contract.dispatch({
+				agentId: "coder",
+				task: "auth failover",
+				failover: "automatic",
+				target: "primary",
+				model: "shared-model",
+				node: "blade",
+			});
+			strictEqual((await handle.finalPromise).outcome, "succeeded");
+			deepStrictEqual(authRoutes, [
+				{ targetId: "primary", node: "blade" },
+				{ targetId: "secondary", node: "blade" },
+			]);
+		} finally {
+			await authBundle.extension.stop?.();
 		}
 	});
 
