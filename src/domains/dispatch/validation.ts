@@ -41,6 +41,16 @@ export interface ProtectedArtifactPathRemap {
 	workerRoot: string;
 }
 
+export type DispatchFailoverMode = "none" | "approved" | "automatic";
+
+/** One exact route tuple in an operator-approved fallback envelope. */
+export interface DispatchFailoverCandidate {
+	agentId: string;
+	target: string;
+	model: string;
+	node: string;
+}
+
 export interface JobSpec {
 	agentId: string;
 	task: string;
@@ -54,6 +64,10 @@ export interface JobSpec {
 	thinkingLevel?: JobThinkingLevel;
 	/** Explicit fleet node pin; `local` or a configured fleet.nodes id. */
 	node?: string;
+	/** Manual pins default to none; approved retries stay inside allowedCandidates. */
+	failover?: DispatchFailoverMode;
+	/** Exact route tuples approved for failover, in preference order. */
+	allowedCandidates?: ReadonlyArray<DispatchFailoverCandidate>;
 	/** Immutable plan-time node identity. Internal dispatch-tool field, never model-authored. */
 	plannedNode?: RunNodeIdentity;
 	/** Internal compete-worktree mapping that only expands inherited hard blocks. */
@@ -120,6 +134,8 @@ const KNOWN_KEYS = new Set([
 	"model",
 	"thinkingLevel",
 	"node",
+	"failover",
+	"allowedCandidates",
 	"plannedNode",
 	"protectedArtifactRemap",
 	"reroutes",
@@ -141,6 +157,7 @@ const KNOWN_KEYS = new Set([
 ]);
 const VALID_THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 const VALID_REQUEST_ORIGINS = new Set(["user", "agent", "internal"]);
+const VALID_FAILOVER_MODES = new Set(["none", "approved", "automatic"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -220,6 +237,28 @@ export function validateJobSpec(spec: unknown): Validated {
 		if (typeof spec.node !== "string" || spec.node.trim().length === 0) {
 			errors.push("node must be a non-empty string");
 		}
+	}
+
+	if ("failover" in spec && spec.failover !== undefined) {
+		if (typeof spec.failover !== "string" || !VALID_FAILOVER_MODES.has(spec.failover)) {
+			errors.push("failover must be one of: none|approved|automatic");
+		}
+	}
+
+	if ("allowedCandidates" in spec && spec.allowedCandidates !== undefined) {
+		if (
+			!Array.isArray(spec.allowedCandidates) ||
+			spec.allowedCandidates.length === 0 ||
+			spec.allowedCandidates.some((candidate) => !isValidFailoverCandidate(candidate))
+		) {
+			errors.push("allowedCandidates must be a non-empty array of exact {agentId, target, model, node} tuples");
+		}
+	}
+	if (spec.failover === "approved" && (!Array.isArray(spec.allowedCandidates) || spec.allowedCandidates.length === 0)) {
+		errors.push("failover approved requires allowedCandidates");
+	}
+	if (spec.failover !== "approved" && spec.allowedCandidates !== undefined) {
+		errors.push("allowedCandidates requires failover approved");
 	}
 
 	if ("plannedNode" in spec && spec.plannedNode !== undefined) {
@@ -388,6 +427,12 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.target === "string") out.target = spec.target;
 	if (typeof spec.model === "string") out.model = spec.model;
 	if (typeof spec.node === "string") out.node = spec.node.trim();
+	if (typeof spec.failover === "string" && VALID_FAILOVER_MODES.has(spec.failover)) {
+		out.failover = spec.failover as DispatchFailoverMode;
+	}
+	if (Array.isArray(spec.allowedCandidates) && spec.allowedCandidates.every(isValidFailoverCandidate)) {
+		out.allowedCandidates = spec.allowedCandidates.map((candidate) => ({ ...candidate }));
+	}
 	if (isValidPlannedNode(spec.plannedNode)) out.plannedNode = { ...spec.plannedNode };
 	if (isValidProtectedArtifactRemap(spec.protectedArtifactRemap)) {
 		out.protectedArtifactRemap = { ...spec.protectedArtifactRemap };
@@ -440,6 +485,16 @@ function isValidReroute(value: unknown): value is RunNodeReroute {
 	const toOk = typeof value.toNode === "string";
 	const reasonOk = typeof value.reason === "string";
 	return attemptOk && fromOk && toOk && reasonOk;
+}
+
+function isValidFailoverCandidate(value: unknown): value is DispatchFailoverCandidate {
+	if (!isPlainObject(value)) return false;
+	if (Object.keys(value).some((key) => key !== "agentId" && key !== "target" && key !== "model" && key !== "node")) {
+		return false;
+	}
+	return [value.agentId, value.target, value.model, value.node].every(
+		(part) => typeof part === "string" && part.trim().length > 0,
+	);
 }
 
 function isValidPlannedNode(value: unknown): value is RunNodeIdentity {

@@ -35,11 +35,21 @@ function guide(deps: SteerToolDeps, runId: string, message: string): ToolResult 
 
 function cancel(deps: SteerToolDeps, runId: string): ToolResult {
 	const run = deps.dispatch.getRun(runId);
-	if (!run) return { kind: "error", message: `steer: unknown run '${runId}'` };
-	if (TERMINAL_STATUSES.has(run.status)) {
+	const rootRunId = run?.lineage?.rootRunId ?? runId;
+	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	if (!run && !assignment) return { kind: "error", message: `steer: unknown run or assignment '${runId}'` };
+	if (assignment?.status === "running") {
+		deps.dispatch.abort(rootRunId);
+		return {
+			kind: "ok",
+			output: `cancellation signalled for assignment ${rootRunId}; its current attempt will finalize and no future attempt will start.`,
+			details: { action: "cancel", runId: rootRunId, assignmentId: rootRunId },
+		};
+	}
+	if (!run || TERMINAL_STATUSES.has(run.status)) {
 		return {
 			kind: "error",
-			message: `steer: run '${runId}' already finished (state=${run.outcome ?? run.status}); nothing to cancel`,
+			message: `steer: run or assignment '${runId}' already finished (state=${assignment?.status ?? run?.outcome ?? run?.status ?? "unknown"}); nothing to cancel`,
 		};
 	}
 	deps.dispatch.abort(runId);

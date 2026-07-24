@@ -79,7 +79,17 @@ import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
-import { type BackoffState, createBackoff, isDeterministicOutcomeCode, nextDelay } from "./backoff.js";
+import { AssignmentRegistry, asAssignmentId } from "./assignment.js";
+import { reconcileOrphanAssignments } from "./assignment-reconcile.js";
+import {
+	cancelStoredAssignment,
+	getStoredAssignment,
+	listStoredAssignments,
+	recordAssignmentAttempt,
+	registerAssignment,
+	settleStoredAssignment,
+} from "./assignment-store.js";
+import { type BackoffState, createBackoff, nextDelay } from "./backoff.js";
 import {
 	getDetachedBatch,
 	listDetachedBatches,
@@ -96,6 +106,13 @@ import {
 	type DispatchSnapshot,
 } from "./contract.js";
 import { createWorkerOutputCapture, startDispatchEventPump } from "./event-pump.js";
+import {
+	classifyFailure,
+	decideRetry,
+	type FailureClass,
+	isInfrastructureFailure,
+	type RetryDecision,
+} from "./failure-classification.js";
 import { isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
@@ -138,7 +155,12 @@ import {
 	type SafetyBlockedAttempt,
 	type ToolCallStat,
 } from "./types.js";
-import { type PipelineInput, validateJobSpec } from "./validation.js";
+import {
+	type DispatchFailoverCandidate,
+	type DispatchFailoverMode,
+	type PipelineInput,
+	validateJobSpec,
+} from "./validation.js";
 import { type SpawnedWorker, type SpawnedWorkerResult, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
 interface RunTokenMeter {
@@ -1871,10 +1893,16 @@ export function createDispatchBundle(
 		attempt: number;
 		dueAt: number;
 		reason: string;
+		excludedRouteParts: RetryDecision["excludedRouteParts"];
+		rootRunId: string;
+		terminalCandidate: RunReceipt;
 		timer: ReturnType<typeof setTimeout>;
 	}
 	const retryQueue = new Map<string, RetryQueueEntry>();
 	const retryBackoff = new Map<string, BackoffState>();
+	const retryReasons = new Map<string, string>();
+	const assignments = new AssignmentRegistry();
+	const assignmentWrites = new Set<Promise<unknown>>();
 	let draining = false;
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
@@ -1884,6 +1912,19 @@ export function createDispatchBundle(
 	function workersMaxRetries(): number {
 		const value = getEffectiveSettings()?.workers?.maxRetries;
 		return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 2;
+	}
+
+	function failoverModeFor(req: DispatchRequest): DispatchFailoverMode {
+		if (req.failover !== undefined) return req.failover;
+		return req.node !== undefined || req.target !== undefined ? "none" : "automatic";
+	}
+
+	function assignmentPolicyFor(req: DispatchRequest): import("./assignment.js").AssignmentPolicy {
+		return {
+			maxRetries: workersMaxRetries(),
+			failover: failoverModeFor(req),
+			allowedCandidates: req.allowedCandidates?.map((candidate) => ({ ...candidate })) ?? [],
+		};
 	}
 
 	function lineageFor(req: DispatchRequest, runId: string): RunLineage {
@@ -1904,30 +1945,64 @@ export function createDispatchBundle(
 		}
 	}
 
+	function trackAssignmentWrite<T>(operation: Promise<T>): Promise<T> {
+		assignmentWrites.add(operation);
+		operation.finally(() => assignmentWrites.delete(operation)).catch(() => {});
+		return operation;
+	}
+
+	function persistAssignment(operation: Promise<unknown>, label: string): void {
+		trackAssignmentWrite(operation).catch((error) => reportDispatchDiagnostic(`persist assignment ${label}`, error));
+	}
+
+	function settleAssignmentDurably(
+		assignmentId: import("./assignment.js").AssignmentId,
+		receipt: RunReceipt,
+		status: "succeeded" | "failed" | "canceled",
+	): void {
+		trackAssignmentWrite(settleStoredAssignment(assignmentId, receipt.runId, status))
+			.catch((error) => reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error))
+			.finally(() => assignments.settle(assignmentId, receipt, status));
+	}
+
+	/**
+	 * Finalization failed before an immutable receipt existed, so the normal
+	 * settlement path (completeAssignmentAttempt) never ran. Mark the durable
+	 * assignment failed against the attempt's run id so a later wait/collect can
+	 * never observe a stuck "running" record. The in-memory terminal promise is
+	 * rejected by the attached finalPromise.catch on the dispatch/retry handle.
+	 */
+	function settleAssignmentDurablyWithoutReceipt(rootRunId: string, attemptRunId: string): void {
+		persistAssignment(settleStoredAssignment(rootRunId, attemptRunId, "failed"), `${rootRunId}:finalize-error`);
+	}
+
 	function maybeScheduleRetry(
 		run: ActiveRun,
 		outcome: RunOutcome,
 		outcomeCode: RunOutcomeCode | null | undefined,
 		detail: string | null,
-	): void {
-		if (draining) return;
+		receipt: RunReceipt,
+		failureClass: FailureClass,
+	): boolean {
+		if (draining) return false;
 		const rootRunId = run.lineage.rootRunId;
+		if (assignments.get(rootRunId)?.status !== "running") return false;
 		if (!RETRYABLE_OUTCOMES.has(outcome)) {
 			retryBackoff.delete(rootRunId);
-			return;
+			return false;
 		}
-		if (isDeterministicOutcomeCode(outcomeCode)) {
+		const baseDecision = decideRetry(failureClass, run.lineage.attempt, workersMaxRetries());
+		// An exact manual route may be retried, but no route component may drift.
+		const decision = failoverModeFor(run.req) === "none" ? { ...baseDecision, excludedRouteParts: [] } : baseDecision;
+		if (!decision.retry) {
 			retryBackoff.delete(rootRunId);
-			reportDispatchDiagnostic(
-				`run ${run.runId}`,
-				new Error(`retry suppressed: deterministic outcome code (${outcomeCode})`),
-			);
-			return;
-		}
-		const maxRetries = workersMaxRetries();
-		if (maxRetries <= 0 || run.lineage.attempt >= maxRetries) {
-			retryBackoff.delete(rootRunId);
-			return;
+			if (failureClass === "deterministic-task") {
+				reportDispatchDiagnostic(
+					`run ${run.runId}`,
+					new Error(`retry suppressed: deterministic outcome code (${outcomeCode})`),
+				);
+			}
+			return false;
 		}
 		const backoff = retryBackoff.get(rootRunId) ?? createBackoff();
 		const { state: nextBackoff, delayMs: backoffDelayMs } = nextDelay(backoff);
@@ -1938,15 +2013,18 @@ export function createDispatchBundle(
 		// arrival by a cooldown this same failure created.
 		const cooldown = targetCooldowns.get(cooldownKey(run.targetId, run.runtimeId, run.wireModelId));
 		const cooldownRemainingMs = cooldown ? Math.max(0, cooldown.until - now()) : 0;
-		const delayMs = Math.max(backoffDelayMs, cooldownRemainingMs > 0 ? cooldownRemainingMs + 250 : 0);
+		const delayMs = Math.max(
+			backoffDelayMs,
+			decision.retryAfterMs ?? 0,
+			cooldownRemainingMs > 0 ? cooldownRemainingMs + 250 : 0,
+		);
 		const attempt = run.lineage.attempt + 1;
 		const reason = detail !== null ? `${outcome}: ${detail}` : outcome;
 		const dueAt = now() + delayMs;
 		const timer = setTimeout(() => {
 			retryQueue.delete(run.runId);
-			void executeRetry(run, attempt, reason);
+			void executeRetry(run, attempt, reason, decision);
 		}, delayMs);
-		timer.unref?.();
 		retryQueue.set(run.runId, {
 			runId: run.runId,
 			agentId: run.agentId,
@@ -1954,6 +2032,9 @@ export function createDispatchBundle(
 			attempt,
 			dueAt,
 			reason,
+			excludedRouteParts: [...decision.excludedRouteParts],
+			rootRunId,
+			terminalCandidate: receipt,
 			timer,
 		});
 		context.bus.emit(BusChannels.DispatchProgress, {
@@ -1968,6 +2049,44 @@ export function createDispatchBundle(
 			runtimeKind: run.runtimeKind,
 			event: { type: "retry_scheduled", attempt, dueAt: new Date(dueAt).toISOString(), reason },
 		});
+		return true;
+	}
+
+	function retryReasonKey(rootRunId: string, attempt: number): string {
+		return `${rootRunId}:${attempt}`;
+	}
+
+	function completeAssignmentAttempt(
+		run: ActiveRun,
+		receipt: RunReceipt,
+		outcome: RunOutcome,
+		outcomeCode: RunOutcomeCode | null | undefined,
+		detail: string | null,
+		failureClass: FailureClass,
+	): void {
+		const assignment = assignments.open(run.lineage.rootRunId, assignmentPolicyFor(run.req));
+		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
+		const reasonKey = retryReasonKey(run.lineage.rootRunId, run.lineage.attempt);
+		const retryReason = run.lineage.attempt > 0 ? (retryReasons.get(reasonKey) ?? "retry") : null;
+		retryReasons.delete(reasonKey);
+		assignments.recordAttempt(assignment.id, {
+			runId: run.runId,
+			attempt: run.lineage.attempt,
+			outcome,
+			node: run.node,
+			receiptDigest: receipt.integrity.digest,
+			retryReason,
+		});
+		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
+		if (maybeScheduleRetry(run, outcome, outcomeCode, detail, receipt, failureClass)) return;
+		const currentStatus = assignments.get(assignment.id)?.status;
+		const terminalStatus =
+			currentStatus === "canceled" || outcome === "canceled"
+				? "canceled"
+				: outcome === "succeeded"
+					? "succeeded"
+					: "failed";
+		settleAssignmentDurably(assignment.id, receipt, terminalStatus);
 	}
 
 	/**
@@ -1978,10 +2097,76 @@ export function createDispatchBundle(
 	 * toNode filled by placement) so the receipt chain records the full
 	 * failover lineage.
 	 */
-	async function executeRetry(run: ActiveRun, attempt: number, reason = "retry"): Promise<void> {
-		if (draining) return;
+	function sameCandidate(left: DispatchFailoverCandidate, right: DispatchFailoverCandidate): boolean {
+		return (
+			left.agentId === right.agentId &&
+			left.target === right.target &&
+			left.model === right.model &&
+			left.node === right.node
+		);
+	}
+
+	/**
+	 * An approved failover envelope binds every attempt, root included. If the
+	 * effective route resolved for this attempt is not an exact member of the
+	 * approved list, refuse before the worker spawns so no attempt escapes the
+	 * envelope.
+	 */
+	function assertRouteWithinApprovedEnvelope(req: DispatchRequest, effective: DispatchFailoverCandidate): void {
+		if (failoverModeFor(req) !== "approved") return;
+		const allowed = req.allowedCandidates ?? [];
+		if (!allowed.some((candidate) => sameCandidate(candidate, effective))) {
+			throw new Error(
+				`dispatch: admission denied: effective route agent=${effective.agentId} target=${effective.target} model=${effective.model} node=${effective.node} is outside the approved failover envelope`,
+			);
+		}
+	}
+
+	function approvedRetryCandidate(run: ActiveRun, decision: RetryDecision): DispatchFailoverCandidate {
+		const allowed = run.req.allowedCandidates ?? [];
+		const current: DispatchFailoverCandidate = {
+			agentId: run.agentId,
+			target: run.targetId,
+			model: run.wireModelId,
+			node: run.node?.id ?? "local",
+		};
+		if (!allowed.some((candidate) => sameCandidate(candidate, current))) {
+			throw new Error("dispatch: approved failover envelope does not contain the current route");
+		}
+		const excluded = new Set(decision.excludedRouteParts);
+		const candidate = allowed.find((entry) => {
+			if (sameCandidate(entry, current)) return false;
+			if (!excluded.has("agent") && entry.agentId !== current.agentId) return false;
+			if (!excluded.has("target") && entry.target !== current.target) return false;
+			if (!excluded.has("model") && entry.model !== current.model) return false;
+			if (!excluded.has("node") && entry.node !== current.node) return false;
+			// Runtime is not part of the minimal approved identity, so an envelope
+			// cannot authorize changing it.
+			if (excluded.has("runtime")) return false;
+			return decision.excludedRouteParts.some((part) => {
+				if (part === "agent") return entry.agentId !== current.agentId;
+				if (part === "target") return entry.target !== current.target;
+				if (part === "model") return entry.model !== current.model;
+				if (part === "node") return entry.node !== current.node;
+				return false;
+			});
+		});
+		if (!candidate) throw new Error("dispatch: approved failover envelope has no eligible next candidate");
+		return { ...candidate };
+	}
+
+	async function executeRetry(
+		run: ActiveRun,
+		attempt: number,
+		reason = "retry",
+		decision: RetryDecision = decideRetry("internal", run.lineage.attempt, workersMaxRetries()),
+	): Promise<void> {
+		if (draining || assignments.get(run.lineage.rootRunId)?.status !== "running") return;
+		const excludesNode = decision.excludedRouteParts.includes("node");
+		// Record the failed node (local or ssh) so placement excludes it and the
+		// retry lands on a different eligible node instead of hardcoded local.
 		const rerouteHops =
-			run.node !== null && run.node.kind === "ssh"
+			excludesNode && run.node !== null
 				? [...(run.req.reroutes ?? []), { attempt, fromNode: run.node.id, toNode: "", reason }]
 				: run.req.reroutes;
 		const retryReq: DispatchRequest = {
@@ -1995,7 +2180,41 @@ export function createDispatchBundle(
 				depth: run.lineage.depth,
 			},
 		};
+		const reasonKey = retryReasonKey(run.lineage.rootRunId, attempt);
+		retryReasons.set(reasonKey, reason);
 		try {
+			if (failoverModeFor(run.req) === "approved") {
+				const candidate = approvedRetryCandidate(run, decision);
+				retryReq.agentId = candidate.agentId;
+				retryReq.target = candidate.target;
+				retryReq.model = candidate.model;
+				retryReq.node = candidate.node;
+				delete retryReq.plannedNode;
+			} else {
+				// Exact mode freezes the effective first-attempt tuple, including a node
+				// that was selected implicitly because only the target was pinned.
+				if (failoverModeFor(run.req) === "none") {
+					retryReq.agentId = run.agentId;
+					retryReq.target = run.targetId;
+					retryReq.model = run.wireModelId;
+					retryReq.node = run.node?.id ?? "local";
+				}
+				// Automatic mode excludes only the failed route component. Drop the
+				// node pin so placement re-selects among the non-excluded eligible
+				// nodes (recorded via the reroute hop above); it settles failed if
+				// none remain, rather than silently forcing local.
+				if (excludesNode) {
+					delete retryReq.node;
+					delete retryReq.plannedNode;
+				}
+				if (decision.excludedRouteParts.includes("target")) {
+					const alternateTarget = getEffectiveSettings()?.targets.find((target) => target.id !== run.targetId);
+					if (alternateTarget) retryReq.target = alternateTarget.id;
+					else delete retryReq.target;
+				}
+				if (decision.excludedRouteParts.includes("model")) delete retryReq.model;
+				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
+			}
 			const handle = await dispatch(retryReq);
 			// No interactive consumer exists for a retry; accounting is folded by
 			// the domain event pump regardless, so this drain only keeps the
@@ -2005,9 +2224,21 @@ export function createDispatchBundle(
 					// drained
 				}
 			})().catch((error) => reportDispatchDiagnostic(`drain retry run ${handle.runId}`, error));
-			handle.finalPromise.catch((error) => reportDispatchDiagnostic(`finalize retry run ${handle.runId}`, error));
+			handle.finalPromise.catch((error) => {
+				assignments.reject(asAssignmentId(run.lineage.rootRunId), error);
+				reportDispatchDiagnostic(`finalize retry run ${handle.runId}`, error);
+			});
 		} catch (err) {
+			retryReasons.delete(reasonKey);
 			retryBackoff.delete(run.lineage.rootRunId);
+			// Admission failed before another immutable run existed. The last
+			// completed attempt therefore remains the assignment's terminal evidence.
+			try {
+				const previousReceipt = await run.finalPromise;
+				settleAssignmentDurably(asAssignmentId(run.lineage.rootRunId), previousReceipt, "failed");
+			} catch (finalizationError) {
+				assignments.reject(asAssignmentId(run.lineage.rootRunId), finalizationError);
+			}
 			const message = err instanceof Error ? err.message : String(err);
 			context.bus.emit(BusChannels.DispatchFailed, {
 				runId: run.runId,
@@ -2028,12 +2259,6 @@ export function createDispatchBundle(
 	function requireLedger(): Ledger {
 		if (!ledger) throw new Error("dispatch: ledger not initialised");
 		return ledger;
-	}
-
-	/** SSH exits 255 when the connection itself failed; the worker never ran. */
-	function isChannelFailure(outcome: RunOutcome, result: SpawnedWorkerResult): boolean {
-		if (outcome === "stalled" || outcome === "spawn_failed") return true;
-		return result.exitCode === 255;
 	}
 
 	/**
@@ -2066,16 +2291,16 @@ export function createDispatchBundle(
 	function recordNodeChannelOutcome(
 		run: ActiveRun,
 		outcome: RunOutcome,
-		result: SpawnedWorkerResult,
+		failureClass: FailureClass,
 		detail: string | null,
 	): void {
 		if (!fleetRegistry || run.node === null || run.node.kind !== "ssh") return;
-		if (isChannelFailure(outcome, result)) {
+		if (failureClass === "node-channel") {
 			const state = fleetRegistry.recordChannelFailure(run.node.id, detail ?? outcome);
 			if (state === "offline") reapRunsOnDeadNode(run.node.id, run.runId);
 			return;
 		}
-		if (outcome === "succeeded" || outcome === "failed") {
+		if (outcome === "succeeded" || isInfrastructureFailure(failureClass)) {
 			fleetRegistry.recordChannelSuccess(run.node.id);
 		}
 	}
@@ -2199,15 +2424,17 @@ export function createDispatchBundle(
 		wireModelId: string,
 		status: RunStatus,
 		exitCode: number,
+		failureClass: FailureClass,
 	): void {
 		const key = cooldownKey(targetId, runtimeId, wireModelId);
 		if (status === "completed" && exitCode === 0) {
 			targetCooldowns.delete(key);
 			return;
 		}
+		if (!isInfrastructureFailure(failureClass) || failureClass === "node-channel") return;
 		const cooldownMs = getResilienceCooldownMs();
 		if (cooldownMs <= 0) return;
-		targetCooldowns.set(key, { until: now() + cooldownMs, reason: status });
+		targetCooldowns.set(key, { until: now() + cooldownMs, reason: failureClass });
 	}
 
 	async function resolveLifecycle(
@@ -2952,6 +3179,12 @@ export function createDispatchBundle(
 					failureMessage = finalDetail;
 				}
 				const status = runStatusForOutcome(finalOutcome);
+				const failureClass = classifyFailure(
+					evidence,
+					{ exitCode: result.exitCode, signal: null, ...(failureMessage ? { stderrTail: failureMessage } : {}) },
+					finalOutcome,
+					outcomeCode,
+				);
 				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
@@ -2978,10 +3211,17 @@ export function createDispatchBundle(
 				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
 				await ledgerRef.persist();
 				active.delete(envelope.id);
-				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode);
+				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				maybeScheduleRetry(activeRun, finalOutcome, receipt.outcomeCode, receipt.outcomeDetail ?? finalDetail);
+				completeAssignmentAttempt(
+					activeRun,
+					receipt,
+					finalOutcome,
+					receipt.outcomeCode,
+					receipt.outcomeDetail ?? finalDetail,
+					failureClass,
+				);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (ACP promise rejection, ledger or
@@ -3004,7 +3244,8 @@ export function createDispatchBundle(
 					reportDispatchDiagnostic(`persist failed row for run ${envelope.id}`, ledgerError);
 				}
 				active.delete(envelope.id);
-				recordTargetOutcome(targetId, runtimeId, wireModelId, "failed", 1);
+				settleAssignmentDurablyWithoutReceipt(lineage.rootRunId, envelope.id);
+				recordTargetOutcome(targetId, runtimeId, wireModelId, "failed", 1, "internal");
 				context.bus.emit(BusChannels.DispatchFailed, {
 					runId: envelope.id,
 					agentId: req.agentId,
@@ -3036,7 +3277,7 @@ export function createDispatchBundle(
 		};
 	}
 
-	async function dispatch(
+	async function dispatchAttempt(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
 	): Promise<{
@@ -3121,6 +3362,12 @@ export function createDispatchBundle(
 		const placement = resolveNode(req) ?? null;
 		try {
 			assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
+			assertRouteWithinApprovedEnvelope(req, {
+				agentId: req.agentId,
+				target: lifecycle.target.target.id,
+				model: lifecycle.target.wireModelId,
+				node: placement?.node?.id ?? "local",
+			});
 		} catch (error) {
 			try {
 				placement?.release?.();
@@ -3852,6 +4099,7 @@ export function createDispatchBundle(
 					failureMessage = finalDetail;
 				}
 				const status = runStatusForOutcome(finalOutcome);
+				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode);
 				const receiptDraft = buildReceiptDraft(
 					result,
 					endedAt,
@@ -3898,11 +4146,19 @@ export function createDispatchBundle(
 					lifecycle.target.wireModelId,
 					status,
 					receipt.exitCode,
+					failureClass,
 				);
-				recordNodeChannelOutcome(activeRun, finalOutcome, result, finalDetail);
+				recordNodeChannelOutcome(activeRun, finalOutcome, failureClass, finalDetail);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				maybeScheduleRetry(activeRun, finalOutcome, receipt.outcomeCode, receipt.outcomeDetail ?? finalDetail);
+				completeAssignmentAttempt(
+					activeRun,
+					receipt,
+					finalOutcome,
+					receipt.outcomeCode,
+					receipt.outcomeDetail ?? finalDetail,
+					failureClass,
+				);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (worker promise rejection, ledger or
@@ -3925,12 +4181,14 @@ export function createDispatchBundle(
 					reportDispatchDiagnostic(`persist failed row for run ${envelope.id}`, ledgerError);
 				}
 				active.delete(envelope.id);
+				settleAssignmentDurablyWithoutReceipt(lineage.rootRunId, envelope.id);
 				recordTargetOutcome(
 					lifecycle.target.target.id,
 					lifecycle.target.runtime.id,
 					lifecycle.target.wireModelId,
 					"failed",
 					1,
+					"internal",
 				);
 				context.bus.emit(BusChannels.DispatchFailed, {
 					runId: envelope.id,
@@ -3963,6 +4221,27 @@ export function createDispatchBundle(
 			events: eventPump.events,
 			finalPromise,
 		});
+	}
+
+	async function dispatch(
+		req: DispatchRequest,
+		observer?: DispatchAdmissionObserver,
+	): Promise<{
+		runId: string;
+		events: AsyncIterableIterator<unknown>;
+		finalPromise: Promise<RunReceipt>;
+	}> {
+		const handle = await dispatchAttempt(req, observer);
+		// Requests carrying lineage are internal attempts (retry or nested
+		// orchestration) and retain the per-attempt handle contract.
+		if (req.lineage) return handle;
+
+		const assignment = assignments.open(handle.runId, assignmentPolicyFor(req));
+		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
+		// A finalization failure has no immutable receipt to settle with; preserve
+		// the attempt error rather than leaving the assignment pending forever.
+		handle.finalPromise.catch((error) => assignments.reject(assignment.id, error));
+		return { runId: handle.runId, events: handle.events, finalPromise: assignment.terminal };
 	}
 
 	function preview(req: DispatchRequest): DispatchPlanTaskResolution {
@@ -4084,6 +4363,7 @@ export function createDispatchBundle(
 
 	async function dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
 		batchId: string;
+		assignmentIds?: ReadonlyArray<string>;
 		runIds: ReadonlyArray<string>;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
@@ -4135,7 +4415,9 @@ export function createDispatchBundle(
 		).then((receipts) => receipts as ReadonlyArray<RunReceipt>);
 		return {
 			batchId: batchRef.current.id,
-			runIds: batchRef.current.runIds,
+			assignmentIds: batchRef.current.assignmentIds,
+			// Public compatibility: an assignment id is its first-attempt run id.
+			runIds: batchRef.current.assignmentIds,
 			events: mergeBatchEvents(batchRef.current.id, handles, batchRef),
 			finalPromise,
 		};
@@ -4160,15 +4442,41 @@ export function createDispatchBundle(
 			} catch {
 				// Recovery is best-effort; a failed scan never blocks startup.
 			}
+			// Reconcile durable assignments orphaned in `running` by a crash: the
+			// in-memory registry and retry queue do not survive restart, so an
+			// orphan can never settle without this pass. Resolves each against
+			// durable ledger evidence so wait/collect never hang on it.
+			try {
+				const reconciledLedger = ledger;
+				const reconciled = await reconcileOrphanAssignments({
+					listRunning: () => listStoredAssignments().filter((record) => record.status === "running"),
+					lookupAttempt: (runId) => {
+						const envelope = reconciledLedger?.get(runId) ?? null;
+						if (!envelope) return null;
+						return {
+							runId,
+							terminal: envelope.status !== "running",
+							succeeded: envelope.outcome === "succeeded",
+						};
+					},
+					settle: (assignmentId, terminalRunId, status) => settleStoredAssignment(assignmentId, terminalRunId, status),
+				});
+				if ((reconciled.recovered > 0 || reconciled.abandoned > 0) && process.env.CLIO_INTERACTIVE !== "1") {
+					process.stderr.write(
+						`[dispatch] assignment reconcile: recovered=${reconciled.recovered} abandoned=${reconciled.abandoned}\n`,
+					);
+				}
+			} catch {
+				// Reconciliation is best-effort; a failure never blocks startup.
+			}
 			startHeartbeatWatchdog();
 		},
 		async stop() {
 			draining = true;
-			for (const entry of retryQueue.values()) clearTimeout(entry.timer);
-			retryQueue.clear();
-			retryBackoff.clear();
+			settleQueuedAssignmentsForShutdown();
 			stopHeartbeatWatchdog();
 			await drain();
+			await Promise.allSettled([...assignmentWrites]);
 		},
 	};
 
@@ -4264,10 +4572,33 @@ export function createDispatchBundle(
 		};
 	}
 
+	/**
+	 * Settle every queued retry deterministically before shutdown. A cleared
+	 * retry timer would otherwise leave the assignment (and its attached
+	 * finalPromise / durable record) pending forever. The last immutable attempt
+	 * receipt becomes the terminal evidence and the assignment settles `canceled`.
+	 */
+	function settleQueuedAssignmentsForShutdown(): void {
+		for (const [finishedRunId, entry] of retryQueue) {
+			clearTimeout(entry.timer);
+			if (assignments.get(entry.rootRunId)?.status === "running") {
+				settleAssignmentDurably(asAssignmentId(entry.rootRunId), entry.terminalCandidate, "canceled");
+			}
+			context.bus.emit(BusChannels.DispatchProgress, {
+				runId: finishedRunId,
+				agentId: entry.agentId,
+				task: entry.task,
+				event: { type: "retry_canceled", attempt: entry.attempt },
+			});
+		}
+		retryQueue.clear();
+		retryBackoff.clear();
+		retryReasons.clear();
+	}
+
 	async function drain(): Promise<void> {
 		draining = true;
-		for (const entry of retryQueue.values()) clearTimeout(entry.timer);
-		retryQueue.clear();
+		settleQueuedAssignmentsForShutdown();
 		const runs = Array.from(active.values());
 		for (const run of runs) {
 			emitRunAborted(run, "dispatch_drain");
@@ -4279,7 +4610,25 @@ export function createDispatchBundle(
 			}
 		}
 		await Promise.allSettled(runs.map((r) => r.finalPromise));
+		await Promise.allSettled([...assignmentWrites]);
 		if (ledger) await ledger.persist();
+	}
+
+	function assignmentRootFor(id: string): string {
+		if (assignments.get(id) !== null) return id;
+		const live = active.get(id);
+		if (live) return live.lineage.rootRunId;
+		return ledger?.get(id)?.lineage?.rootRunId ?? id;
+	}
+
+	function currentAssignmentRun(id: string): ActiveRun | null {
+		const rootRunId = assignmentRootFor(id);
+		let current: ActiveRun | null = null;
+		for (const run of active.values()) {
+			if (run.lineage.rootRunId !== rootRunId) continue;
+			if (current === null || run.lineage.attempt > current.lineage.attempt) current = run;
+		}
+		return current;
 	}
 
 	const contract: DispatchContract = {
@@ -4298,28 +4647,41 @@ export function createDispatchBundle(
 			if (!ledger) return null;
 			return ledger.get(runId);
 		},
+		assignments: {
+			get: (id) => assignments.get(id),
+			getStored: (id) => getStoredAssignment(id),
+			flushWrites: async () => {
+				await Promise.allSettled([...assignmentWrites]);
+			},
+		},
 		abort(runId, reason) {
-			const run = active.get(runId);
-			if (!run) {
-				const retry = retryQueue.get(runId);
-				if (!retry) return;
+			const rootRunId = assignmentRootFor(runId);
+			const assignment = assignments.get(rootRunId);
+			if (assignment?.status === "running") {
+				assignments.cancel(assignment.id);
+				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel`);
+			}
+			for (const [finishedRunId, retry] of retryQueue) {
+				if (retry.rootRunId !== rootRunId) continue;
 				clearTimeout(retry.timer);
-				retryQueue.delete(runId);
+				retryQueue.delete(finishedRunId);
+				settleAssignmentDurably(asAssignmentId(rootRunId), retry.terminalCandidate, "canceled");
 				context.bus.emit(BusChannels.RunAborted, {
 					source: "dispatch_abort",
-					runId,
+					runId: finishedRunId,
 					startedAt: null,
 					elapsedMs: null,
 					reason: `scheduled retry ${retry.attempt} canceled by operator`,
 				});
 				context.bus.emit(BusChannels.DispatchProgress, {
-					runId,
+					runId: finishedRunId,
 					agentId: retry.agentId,
 					task: retry.task,
 					event: { type: "retry_canceled", attempt: retry.attempt },
 				});
-				return;
 			}
+			const run = currentAssignmentRun(rootRunId);
+			if (!run) return;
 			emitRunAborted(run, "dispatch_abort");
 			run.aborted = true;
 			// A timeout kill rides the abort path but must not launder into an
@@ -4336,9 +4698,9 @@ export function createDispatchBundle(
 			if (trimmed.length === 0) {
 				throw new Error("steer: empty message");
 			}
-			const run = active.get(runId);
+			const run = currentAssignmentRun(runId);
 			if (!run) {
-				throw new Error(`steer: run '${runId}' is not active; only running native workers accept steers`);
+				throw new Error(`steer: run or assignment '${runId}' is not active; only running native workers accept steers`);
 			}
 			if (run.aborted || run.stallKilled) {
 				throw new Error(`steer: run '${runId}' is ${run.aborted ? "aborting" : "terminating"} and cannot be steered`);
@@ -4353,10 +4715,10 @@ export function createDispatchBundle(
 			}
 		},
 		resolveWorkerPermission(runId, requestId, decision) {
-			const run = active.get(runId);
+			const run = currentAssignmentRun(runId);
 			if (!run) {
 				throw new Error(
-					`resolveWorkerPermission: run '${runId}' is not active; only running native workers accept permission decisions`,
+					`resolveWorkerPermission: run or assignment '${runId}' is not active; only running native workers accept permission decisions`,
 				);
 			}
 			if (run.aborted || run.stallKilled) {

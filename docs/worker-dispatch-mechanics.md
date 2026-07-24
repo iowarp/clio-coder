@@ -119,7 +119,55 @@ stateDiagram-v2
 
 ---
 
-## 5. Worker Exit Codes
+## 5. Assignment-aware retry and failover
+
+A worker process produces one immutable **attempt**. Dispatch groups attempts
+under a logical **assignment** whose id is the first attempt's
+`lineage.rootRunId`. Attached and batch `finalPromise` handles resolve to the
+terminal attempt receipt, not to an earlier failure that happened to trigger a
+retry. Receipt bytes and integrity versions remain unchanged; assignment state
+is maintained separately in `assignments.json` with the attempt ids, terminal
+run id, and status.
+
+Detached `monitor collect` resolves the assignment's terminal run and returns
+its complete `attemptRunIds` history. `status`, `wait`, `steer`, permission
+resolution, and cancellation also accept the assignment id and address the
+current attempt. Cancellation prevents queued or future attempts. Pipelines
+therefore receive terminal fallback output as their next-stage input.
+
+Failover modes are:
+
+- `none`: exact pins remain fail-closed; retries can only repeat the same tuple.
+- `approved`: candidates must be exact members of the operator-approved
+  agent/target/model/node envelope.
+- `automatic`: typed failures may replace only implicated route parts. Node
+  channel failure excludes the node; target rate limiting excludes the target.
+
+Operator cancellation, policy rejection, permission refusal, and deterministic
+task failures do not retry. The first three are neutral to target/node
+infrastructure breakers.
+
+### Acceptance coverage
+
+The assignment contract's acceptance scenarios map to deterministic contract
+tests as follows:
+
+| # | Scenario | Contract test |
+| --- | --- | --- |
+| 1 | Remote stall, approved local fallback, attached success | `dispatch-envelope.test.ts` — “falls back from remote to local only within an approved envelope” |
+| 2 | Detached collection returns successful terminal fallback | `dispatch-assignment-detached.test.ts` — “collects the terminal retry…” |
+| 3 | Pipeline consumes terminal fallback output | `dispatch-assignment-detached.test.ts` — “threads the successful retry output…” |
+| 4 | Failed attempt remains visible and integrity-verifiable | `dispatch-assignment.test.ts` — “resolves attached dispatch…” (also covered by detached collection) |
+| 5 | Cancellation starts no retry | `dispatch-assignment.test.ts` — “canceling the root attempt starts no retry” |
+| 6 | Cancellation does not cool the target | `dispatch-failure-class.test.ts` — “keeps cancellation and permission neutral…” |
+| 7 | Permission/policy rejection is retry- and breaker-neutral | `dispatch-failure-class.test.ts` — classification/decision table and neutral-target test |
+| 8 | Node-channel failure changes node but retains model | `dispatch-failure-class.test.ts` — “moves only the node…” |
+| 9 | Rate limit retains agent/model and delays or changes target | `dispatch-failure-class.test.ts` — “changes target after rate limiting…” |
+| 10 | Exhaustion returns one failure with all attempt receipts | `dispatch-assignment.test.ts` — “settles exhausted retries…” |
+| 11 | Exact manual pin never falls back | `dispatch-envelope.test.ts` — “keeps a manual exact pin fail-closed…” |
+| 12 | Approved envelope never spawns outside its candidate list | `dispatch-envelope.test.ts` — “settles failed instead of spawning an unlisted candidate” |
+
+## 6. Worker Exit Codes
 
 The child process exits with specific status codes to signal run outcomes to the orchestrator:
 * **`0`**: The worker task completed successfully (e.g., reached the target milestone or generated the requested artifact).

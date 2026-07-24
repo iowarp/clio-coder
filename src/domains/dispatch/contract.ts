@@ -1,6 +1,8 @@
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
+import type { AssignmentId, DispatchAssignment } from "./assignment.js";
+import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunReceipt, RunStatus } from "./types.js";
 import type { JobSpec } from "./validation.js";
@@ -120,6 +122,9 @@ export interface DispatchContract {
 	/** Spawn a group of dispatches and expose one merged batch event stream. */
 	dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
 		batchId: string;
+		/** Logical ids; present on the real contract and equal root run ids. */
+		assignmentIds?: ReadonlyArray<string>;
+		/** Compatibility alias for assignmentIds. */
 		runIds: ReadonlyArray<string>;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
@@ -128,11 +133,28 @@ export interface DispatchContract {
 	/** List runs from the ledger. */
 	listRuns(status?: RunStatus): ReadonlyArray<RunEnvelope>;
 
-	/** Get a specific run envelope. */
+	/** Get a specific immutable attempt envelope. */
 	getRun(runId: string): RunEnvelope | null;
 
+	/** In-memory logical assignment state and complete finalized-attempt history. */
+	readonly assignments?: {
+		/** Live assignment, including its terminal promise and detailed attempt refs. */
+		get(id: AssignmentId | string): DispatchAssignment | null;
+		/** Durable status/history, available after process restart. */
+		getStored(id: AssignmentId | string): DurableAssignmentRecord | null;
+		/**
+		 * Resolve once every in-flight durable assignment write has landed. A
+		 * detached caller awaits this so its assignment records exist before it
+		 * returns; immediate collection then sees the assignment rather than
+		 * falling back to a bare first-attempt run row.
+		 */
+		flushWrites?(): Promise<void>;
+	};
+
 	/**
-	 * Abort a running run. Absent `reason` means an operator/user cancel, sealed
+	 * Abort a logical assignment or an individual running attempt. Assignment ids
+	 * address the current attempt and suppress pending/future retries. Absent
+	 * `reason` means an operator/user cancel, sealed
 	 * as `outcome=canceled, outcomeDetail="operator abort"`. Pass a reason to
 	 * record a non-operator cause (e.g. a dispatch `timeout_ms`) in the receipt's
 	 * outcomeDetail so a time-boxed kill is distinguishable from an operator
@@ -141,7 +163,8 @@ export interface DispatchContract {
 	abort(runId: string, reason?: AbortReason): void;
 
 	/**
-	 * Queue an operator steer on a running native worker. The text is sent as
+	 * Queue an operator steer on a running native worker. A logical assignment id
+	 * addresses its current attempt. The text is sent as
 	 * a JSON line on the worker's open stdin and injected into its transcript
 	 * as a user message at the next loop boundary; the worker acks with a
 	 * `clio_steer_received` event on its stream. Throws with an operator-facing
@@ -153,7 +176,7 @@ export interface DispatchContract {
 
 	/**
 	 * Apply an operator's decision to a parked permission escalation on a
-	 * running native worker (onPermission="escalate"). Writes a
+	 * running native worker. A logical assignment id addresses its current attempt (onPermission="escalate"). Writes a
 	 * `permission_decision` JSON line on the worker's open stdin; the worker
 	 * releases or denies the parked tool call and acks with a
 	 * `clio_permission_resolved` event. Human-only: no model-facing tool can

@@ -261,6 +261,10 @@ describe("detached dispatch + collect", () => {
 			const detachedRunId = (detached.details?.runIds as string[])[0];
 			ok(detachedRunId);
 			await waitFor(() => bundle.contract.getRun(detachedRunId)?.status === "failed", "detached run classified");
+			await waitFor(
+				() => bundle.contract.assignments?.getStored(detachedRunId)?.status !== "running",
+				"detached assignment settled",
+			);
 			const detachedRow = bundle.contract.getRun(detachedRunId);
 			strictEqual(detachedRow?.outcome, synchronousRow?.outcome);
 			strictEqual(detachedRow?.outcomeCode, synchronousRow?.outcomeCode);
@@ -457,11 +461,12 @@ describe("detached dispatch + collect", () => {
 		}
 	});
 
-	it("collect is a barrier: pending snapshot in flight, full mixed results once terminal, then marked collected", async () => {
+	it("collect is an assignment barrier: pending snapshot in flight, then terminal retry results", async () => {
 		const gated = gatedWorker();
 		const workers: Array<() => SpawnedWorker> = [() => okWorker("first answer"), () => gated.worker];
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: () => (workers.shift() ?? okWorker)(),
+			resilienceCooldownMs: 0,
 		});
 		await bundle.extension.start();
 		try {
@@ -492,7 +497,14 @@ describe("detached dispatch + collect", () => {
 			gated.finish(1);
 			const slowRunId = runIds[1];
 			ok(slowRunId !== undefined);
-			await waitFor(() => bundle.contract.getRun(slowRunId)?.status === "failed", "slow run finalized as failed");
+			await waitFor(
+				() => bundle.contract.getRun(slowRunId)?.status === "failed",
+				"slow first attempt finalized as failed",
+			);
+			await waitFor(
+				() => bundle.contract.assignments?.getStored(slowRunId)?.status !== "running",
+				"slow assignment did not settle after retry processing",
+			);
 
 			const collected = (await monitor.run(
 				{ mode: "collect", batch_id: batchId, timeout_ms: 120_000 },
@@ -501,7 +513,7 @@ describe("detached dispatch + collect", () => {
 			strictEqual(collected.kind, "ok");
 			ok(collected.kind === "ok");
 			strictEqual(collected.details?.complete, true);
-			strictEqual(collected.details?.failedCount, 1);
+			strictEqual(collected.details?.failedCount, 0);
 			match(collected.output, /collect complete/);
 			match(collected.output, /first answer/);
 			match(collected.output, /cost=~\$0\.00 est/, "catalog fallback cost is labeled estimated");
@@ -539,6 +551,10 @@ describe("detached dispatch + collect", () => {
 			const runId = runIds[0];
 			ok(runId !== undefined);
 			await waitFor(() => bundle.contract.getRun(runId)?.status === "completed", "detached run finalized");
+			await waitFor(
+				() => bundle.contract.assignments?.getStored(runId)?.status !== "running",
+				"detached assignment settled",
+			);
 
 			const effects = registration.evaluate(turnEndInput());
 			deepStrictEqual(
@@ -585,7 +601,7 @@ describe("detached dispatch + collect", () => {
 			strictEqual(timedOut.details?.timedOut, true);
 			strictEqual(
 				timedOut.output,
-				`wait timed out after 300ms: run ${runId} is still running and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the run's result is no longer needed — cancelling discards its work.`,
+				`wait timed out after 300ms: assignment ${runId} is still running and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the result is no longer needed — cancelling discards its work.`,
 			);
 			ok(timedOut.output.indexOf("Wait again or collect later.") < timedOut.output.indexOf('steer(action="cancel")'));
 
@@ -697,6 +713,10 @@ describe("detached dispatch + collect", () => {
 			const runId = runIds[0];
 			ok(runId !== undefined);
 			await waitFor(() => bundle.contract.getRun(runId)?.status === "completed", "detached run finalized");
+			await waitFor(
+				() => bundle.contract.assignments?.getStored(runId)?.status !== "running",
+				"detached assignment settled",
+			);
 
 			const detached = bundle.contract.detached;
 			ok(detached);
