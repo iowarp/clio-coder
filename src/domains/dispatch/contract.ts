@@ -4,7 +4,7 @@ import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
-import type { RunEnvelope, RunLineage, RunNodeIdentity, RunReceipt, RunStatus } from "./types.js";
+import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
 import type { JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
@@ -52,7 +52,10 @@ export interface DispatchSnapshot {
 		heartbeat: "alive" | "stale" | "dead" | "n/a";
 		lineage: RunLineage;
 		startedAt: string;
+		/** Execution-only elapsed time retained for runtime monitoring. */
 		elapsedMs: number;
+		/** Routing-system phases, including total user-observed time. */
+		timing?: RunPhaseDurations;
 		tokens: { input: number; output: number; total: number };
 		costUsd: number;
 		costProvenance?: CostProvenance;

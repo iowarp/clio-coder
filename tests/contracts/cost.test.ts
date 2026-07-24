@@ -7,7 +7,11 @@ import {
 	emptyCostAggregate,
 	formatCostAggregate,
 } from "../../src/domains/observability/cost.js";
-import { listCatalogModelsForRuntime, resolveCostProvenance } from "../../src/domains/providers/catalog.js";
+import {
+	listCatalogModelsForRuntime,
+	resolveCostProvenance,
+	resolveEffectivePricing,
+} from "../../src/domains/providers/catalog.js";
 import { normalizeCostProvenance } from "../../src/domains/providers/index.js";
 
 describe("contracts/cost provenance algebra", () => {
@@ -18,9 +22,33 @@ describe("contracts/cost provenance algebra", () => {
 			resolveCostProvenance({ ...target, pricing: { input: 0, output: 0 } }, "openai", "missing"),
 			"known_free",
 		);
-		const catalogModel = listCatalogModelsForRuntime("openai")[0];
+		deepStrictEqual(resolveEffectivePricing({ ...target, pricing: { input: 1, output: 2 } }, "openai", "missing"), {
+			rates: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+			provenance: "known",
+		});
+		deepStrictEqual(resolveEffectivePricing({ ...target, pricing: { input: 0, output: 0 } }, "openai", "missing"), {
+			rates: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			provenance: "known_free",
+		});
+		const catalogModel = listCatalogModelsForRuntime("openai").find(
+			(model) => model.cost.input > 0 || model.cost.output > 0,
+		);
 		strictEqual(catalogModel ? resolveCostProvenance(target, "openai", catalogModel.id) : "estimated", "estimated");
-		strictEqual(resolveCostProvenance(target, "openai", "definitely-not-cataloged"), "unknown");
+		if (catalogModel) {
+			deepStrictEqual(resolveEffectivePricing(target, "openai", catalogModel.id), {
+				rates: {
+					input: catalogModel.cost.input,
+					output: catalogModel.cost.output,
+					cacheRead: catalogModel.cost.cacheRead,
+					cacheWrite: catalogModel.cost.cacheWrite,
+				},
+				provenance: "estimated",
+			});
+		}
+		deepStrictEqual(resolveEffectivePricing(target, "openai", "definitely-not-cataloged"), {
+			rates: null,
+			provenance: "unknown",
+		});
 	});
 	it("preserves a known subtotal when another component has unknown pricing", () => {
 		deepStrictEqual(

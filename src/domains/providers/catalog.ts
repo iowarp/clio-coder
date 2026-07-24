@@ -37,22 +37,49 @@ export function listCatalogModelsForRuntime(runtimeId: string): Model<Api>[] {
 	}
 }
 
+export interface EffectivePricing {
+	rates: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+	provenance: CostProvenance;
+}
+
+/** Resolve rates and provenance together so callers cannot price from a different source. */
+export function resolveEffectivePricing(
+	target: TargetDescriptor,
+	runtimeId: string,
+	wireModelId: string,
+): EffectivePricing {
+	if (target.pricing) {
+		const rates = {
+			input: target.pricing.input,
+			output: target.pricing.output,
+			cacheRead: target.pricing.cacheRead ?? 0,
+			cacheWrite: target.pricing.cacheWrite ?? 0,
+		};
+		return {
+			rates,
+			provenance: Object.values(rates).every((rate) => rate === 0) ? "known_free" : "known",
+		};
+	}
+	const catalogModel = getCatalogModelForRuntime(runtimeId, wireModelId);
+	if (!catalogModel) return { rates: null, provenance: "unknown" };
+	return {
+		rates: {
+			input: catalogModel.cost.input,
+			output: catalogModel.cost.output,
+			cacheRead: catalogModel.cost.cacheRead,
+			cacheWrite: catalogModel.cost.cacheWrite,
+		},
+		provenance: "estimated",
+	};
+}
+
 /** Resolve pricing truth from the same fallback chain used for model synthesis. */
 export function resolveCostProvenance(
 	target: TargetDescriptor,
 	runtimeId: string,
 	wireModelId: string,
 ): CostProvenance {
-	if (target.pricing) {
-		const rates = [
-			target.pricing.input,
-			target.pricing.output,
-			target.pricing.cacheRead ?? 0,
-			target.pricing.cacheWrite ?? 0,
-		];
-		return rates.every((rate) => rate === 0) ? "known_free" : "known";
-	}
-	return getCatalogModelForRuntime(runtimeId, wireModelId) ? "estimated" : "unknown";
+	return resolveEffectivePricing(target, runtimeId, wireModelId).provenance;
 }
 
 export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string): Model<Api> | undefined {

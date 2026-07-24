@@ -56,6 +56,7 @@ import type { ContextContract, ProjectStructuredContext } from "../context/contr
 import type { MiddlewareContract } from "../middleware/contract.js";
 import { workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
+import { type EffectivePricing, resolveEffectivePricing } from "../providers/catalog.js";
 import {
 	type CapabilityFlags,
 	canonicalizeWireModelId,
@@ -120,6 +121,7 @@ import { isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
+import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import { deriveReceiptVerification } from "./receipt-findings.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -146,6 +148,7 @@ import {
 	type RunOutcome,
 	type RunOutcomeCode,
 	type RunPersonaOverride,
+	type RunPhaseMarks,
 	type RunPipelineProvenance,
 	type RunProjectContextProvenance,
 	type RunReceipt,
@@ -195,6 +198,7 @@ interface ActiveRun {
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	startedAt: string;
+	timing: RunPhaseMarks;
 	targetId: string;
 	wireModelId: string;
 	runtimeId: string;
@@ -217,7 +221,7 @@ interface ActiveRun {
 	heartbeatAt: { current: number } | null;
 	heartbeatStatus: HeartbeatStatus;
 	meter: RunTokenMeter;
-	pricing: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null;
+	pricing: EffectivePricing["rates"];
 	costProvenance: import("../providers/index.js").CostProvenance;
 	finalPromise: Promise<RunReceipt>;
 }
@@ -292,6 +296,29 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
 /** ACP event-inactivity stall window (Symphony §5.3.6 semantics); <= 0 disables. */
 const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
+const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
+/** Conservative cold-route prior used only when no configured or catalog rates exist. */
+export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
+
+function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["rates"]): number {
+	if (pricing === null) return 0;
+	return (
+		(meter.inputTokens * pricing.input +
+			meter.outputTokens * pricing.output +
+			meter.cacheReadTokens * pricing.cacheRead +
+			meter.cacheWriteTokens * pricing.cacheWrite) /
+		1_000_000
+	);
+}
+
+export function conservativeRouteAdmissionEstimateUsd(pricing: EffectivePricing, maxOutputTokens: number): number {
+	if (pricing.provenance === "known_free") return 0;
+	if (pricing.rates === null) return UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD;
+	return (
+		(ADMISSION_INPUT_TOKEN_ESTIMATE * pricing.rates.input + Math.max(1, maxOutputTokens) * pricing.rates.output) /
+		1_000_000
+	);
+}
 
 function requestOriginFor(req: DispatchRequest): DispatchRequestOrigin {
 	return req.requestOrigin ?? "agent";
@@ -319,6 +346,21 @@ function toolSignature(tools: ReadonlyArray<ToolName>): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function eventContainsFirstModelToken(event: Record<string, unknown>): boolean {
+	if (event.type === "message_end") return true;
+	const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;
+	return (
+		assistantEvent?.type === "text_delta" ||
+		assistantEvent?.type === "thinking_delta" ||
+		assistantEvent?.type === "toolcall_start" ||
+		assistantEvent?.type === "toolcall_delta"
+	);
+}
+
+function eventStartsTool(event: Record<string, unknown>): boolean {
+	return event.type === "tool_execution_start" || event.type === "clio_tool_start";
 }
 
 function finitePositive(value: unknown): number | undefined {
@@ -832,6 +874,7 @@ interface ResolvedTarget {
 	capabilities: CapabilityFlags | null;
 	modelCapabilities: CapabilityFlags | null;
 	runtimeResolution: ResolvedRuntimeTarget;
+	effectivePricing: EffectivePricing;
 	routeWarning?: string;
 }
 
@@ -1640,6 +1683,7 @@ function resolveSelectedDispatchTarget(
 		capabilities: capabilityInfoForTarget(providers, target.id),
 		modelCapabilities,
 		runtimeResolution: resolved.target,
+		effectivePricing: resolveEffectivePricing(target, runtime.id, wireModelId),
 	};
 	if (routeWarning) resolvedTarget.routeWarning = routeWarning;
 	return { ok: true, target: resolvedTarget };
@@ -1886,8 +1930,13 @@ export function createDispatchBundle(
 	 * run row exists, so without this denied tool_call row the audit log would
 	 * carry no trace that the admission gate refused the dispatch.
 	 */
-	function denyDispatchForBudget(preflight: { currentUsd: number; ceilingUsd: number }, agentId: string): never {
-		const reason = `budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}`;
+	function denyDispatchForBudget(
+		preflight: { currentUsd: number; ceilingUsd: number },
+		agentId: string,
+		routeEstimateUsd = 0,
+	): never {
+		const estimateSuffix = routeEstimateUsd > 0 ? ` (includes $${routeEstimateUsd.toFixed(4)} route estimate)` : "";
+		const reason = `budget ceiling crossed: $${preflight.currentUsd.toFixed(4)} / $${preflight.ceilingUsd.toFixed(4)}${estimateSuffix}`;
 		safety.audit.recordToolCall?.({
 			tool: "dispatch",
 			classification: { actionClass: "dispatch", reasons: ["budget admission preflight"] },
@@ -1897,6 +1946,24 @@ export function createDispatchBundle(
 			args: { agentId },
 		});
 		throw new Error(`dispatch: admission denied: ${reason}`);
+	}
+
+	function assertBudgetAdmitsRoute(
+		req: DispatchRequest,
+		pricing: EffectivePricing,
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): void {
+		const preflight = scheduling.preflight();
+		assertApprovedCostCeiling(req, preflight.ceilingUsd);
+		if (preflight.verdict === "over" || preflight.verdict === "at") {
+			denyDispatchForBudget(preflight, req.agentId);
+		}
+		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, settings?.defaults.maxTokens ?? 32768);
+		if (estimateUsd <= 0) return;
+		const projectedUsd = preflight.currentUsd + estimateUsd;
+		if (scheduling.checkCeiling(projectedUsd) !== "under") {
+			denyDispatchForBudget({ currentUsd: projectedUsd, ceilingUsd: preflight.ceilingUsd }, req.agentId, estimateUsd);
+		}
 	}
 
 	/**
@@ -2668,6 +2735,7 @@ export function createDispatchBundle(
 	async function dispatchAcpDelegation(
 		req: DispatchRequest,
 		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+		timing: RunPhaseMarks,
 		observer?: DispatchAdmissionObserver,
 	): Promise<{
 		runId: string;
@@ -2675,16 +2743,13 @@ export function createDispatchBundle(
 		finalPromise: Promise<RunReceipt>;
 	}> {
 		const lifecycle = resolveAcpDelegationLifecycle(req, settings);
+		timing.decisionCompletedAt = new Date(now()).toISOString();
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = lifecycle.agentConfig.id;
 		assertTargetNotCoolingDown(targetId, runtimeId, wireModelId);
 
-		const preflight = scheduling.preflight();
-		assertApprovedCostCeiling(req, preflight.ceilingUsd);
-		if (preflight.verdict === "over" || preflight.verdict === "at") {
-			denyDispatchForBudget(preflight, req.agentId);
-		}
+		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
 		let workerSlotHeld = false;
 		const releaseWorkerSlot = (): void => {
@@ -2692,10 +2757,12 @@ export function createDispatchBundle(
 			workerSlotHeld = false;
 			scheduling.releaseWorker();
 		};
+		timing.queuedAt = new Date(now()).toISOString();
 		workerSlotHeld = scheduling.tryAcquireWorker();
 		if (!workerSlotHeld) {
 			throw new DispatchConcurrencyError(scheduling.activeWorkers());
 		}
+		timing.admittedAt = new Date(now()).toISOString();
 
 		// Resolve the ledger before starting the ACP process: an external agent
 		// must never outlive a failure to create its tracking row.
@@ -2723,6 +2790,7 @@ export function createDispatchBundle(
 			releaseWorkerSlot();
 			throw error;
 		}
+		timing.workerSpawnedAt = new Date(now()).toISOString();
 
 		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
@@ -2737,6 +2805,17 @@ export function createDispatchBundle(
 		let reportedSpoofedOutcome = false;
 		let runIdForPermissionAudit: string | null = null;
 		const outputCapture = createWorkerOutputCapture();
+		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
+			if (timing[field] !== undefined) return;
+			timing[field] = new Date(now()).toISOString();
+			const runId = runIdForPermissionAudit;
+			if (runId !== null) {
+				recordRunTimingBestEffort(
+					() => ledgerRef.update(runId, { timing: { ...timing } }),
+					(error) => reportDispatchDiagnostic(`record timing for run ${runId}`, error),
+				);
+			}
+		};
 		const foldAcpEvent = (raw: unknown): void => {
 			outputCapture.observe(raw);
 			const event = raw as {
@@ -2766,6 +2845,10 @@ export function createDispatchBundle(
 					source?: "operator" | "timeout" | "policy";
 				};
 			};
+			if (isRecord(event)) {
+				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
+				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
+			}
 			// ACP is an external protocol peer, never an authority for Clio's
 			// deterministic terminal taxonomy. Ignore even syntactically valid
 			// assertions; only a future coordinator-side classifier may set one.
@@ -2855,6 +2938,7 @@ export function createDispatchBundle(
 				wireModelId,
 				runtimeId,
 				runtimeKind: "acp-delegation",
+				timing,
 				sessionId: null,
 				cwd: lifecycle.cwd,
 				staticShellHash: lifecycle.staticCompositionHash,
@@ -2951,6 +3035,7 @@ export function createDispatchBundle(
 			),
 			recipe: null,
 			startedAt,
+			timing,
 			targetId,
 			wireModelId,
 			runtimeId,
@@ -3169,6 +3254,11 @@ export function createDispatchBundle(
 					);
 				}
 				const endedAt = new Date().toISOString();
+				timing.endedAt = endedAt;
+				recordRunTimingBestEffort(
+					() => ledgerRef.update(envelope.id, { timing: { ...timing } }),
+					(error) => reportDispatchDiagnostic(`record final timing for run ${envelope.id}`, error),
+				);
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode,
 					abortedByOperator: activeRun.aborted,
@@ -3250,6 +3340,7 @@ export function createDispatchBundle(
 				// active entry leaks until restart.
 				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
 				const endedAt = new Date().toISOString();
+				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
 				try {
 					ledgerRef.update(envelope.id, {
@@ -3305,6 +3396,8 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
+		const requestedAt = new Date(now()).toISOString();
+		const timing: RunPhaseMarks = { requestedAt, decisionStartedAt: requestedAt };
 		const settings = getEffectiveSettings();
 		const isAcpAgent = settings?.delegation?.agents?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) {
@@ -3333,13 +3426,17 @@ export function createDispatchBundle(
 			if (speculationId === null) return handle;
 			handle.finalPromise
 				.then((receipt) => {
-					const startedMs = Date.parse(receipt.startedAt);
-					const endedMs = Date.parse(receipt.endedAt);
-					const latencyMs = Number.isFinite(startedMs) && Number.isFinite(endedMs) ? Math.max(0, endedMs - startedMs) : 0;
+					const envelope = ledger?.get(receipt.runId);
+					const phases = envelope ? deriveEnvelopePhaseDurations(envelope) : undefined;
+					const latencyMs = phases?.totalEndToEndMs ?? 0;
 					speculationObserver?.recordOutcome(speculationId, {
 						agentId: receipt.agentId,
 						outcome: receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed"),
 						latencyMs,
+						...(phases !== undefined ? { phases } : {}),
+						...(phases?.executionMs !== null && phases?.executionMs !== undefined
+							? { executionDurationMs: phases.executionMs }
+							: {}),
 						tokens: receipt.tokenCount,
 					});
 				})
@@ -3362,18 +3459,15 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			return attachSpeculation(await dispatchAcpDelegation(req, settings, observer));
+			return attachSpeculation(await dispatchAcpDelegation(req, settings, timing, observer));
 		}
 
 		const lifecycle = await resolveLifecycle(req, settings);
+		timing.decisionCompletedAt = new Date(now()).toISOString();
 		assertResponseSchemaEnforceable(lifecycle.target.runtime, lifecycle.target.modelCapabilities, req.responseSchema);
 		assertTargetNotCoolingDown(lifecycle.target.target.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
 
-		const preflight = scheduling.preflight();
-		assertApprovedCostCeiling(req, preflight.ceilingUsd);
-		if (preflight.verdict === "over" || preflight.verdict === "at") {
-			denyDispatchForBudget(preflight, req.agentId);
-		}
+		assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings);
 
 		// Fleet placement resolves before the global slot so a node-admission
 		// failure (dead node, unpreflighted path parity, per-node cap) is a
@@ -3420,11 +3514,13 @@ export function createDispatchBundle(
 			scheduling.releaseWorker();
 		};
 
+		timing.queuedAt = new Date(now()).toISOString();
 		workerSlotHeld = scheduling.tryAcquireWorker();
 		if (!workerSlotHeld) {
 			releaseNodeSlot();
 			throw new DispatchConcurrencyError(scheduling.activeWorkers());
 		}
+		timing.admittedAt = new Date(now()).toISOString();
 
 		// Resolve the ledger before spawning: a worker subprocess must never
 		// outlive a failure to create its tracking row.
@@ -3469,6 +3565,7 @@ export function createDispatchBundle(
 			releaseNodeSlot();
 			throw error;
 		}
+		timing.workerSpawnedAt = new Date(now()).toISOString();
 		const pid = worker.pid;
 		const abort = () => worker.abort();
 		const sendToWorker = worker.send?.bind(worker);
@@ -3527,6 +3624,17 @@ export function createDispatchBundle(
 		let runIdForPermissionAudit: string | null = null;
 		let workerPolicyPermissionCounter = 0;
 		const outputCapture = createWorkerOutputCapture();
+		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
+			if (timing[field] !== undefined) return;
+			timing[field] = new Date(now()).toISOString();
+			const runId = runIdForPermissionAudit;
+			if (runId !== null) {
+				recordRunTimingBestEffort(
+					() => ledgerRef.update(runId, { timing: { ...timing } }),
+					(error) => reportDispatchDiagnostic(`record timing for run ${runId}`, error),
+				);
+			}
+		};
 		const foldWorkerEvent = (raw: unknown): void => {
 			outputCapture.observe(raw);
 			const event = raw as {
@@ -3563,6 +3671,10 @@ export function createDispatchBundle(
 					source?: "operator" | "timeout" | "policy";
 				};
 			};
+			if (isRecord(event)) {
+				if (eventContainsFirstModelToken(event)) markObservedPhase("firstModelTokenAt");
+				if (eventStartsTool(event)) markObservedPhase("firstToolAt");
+			}
 			if (event.type === "clio_steer_received") acknowledgeOldestSteer();
 			if (
 				event.type === "clio_run_outcome" &&
@@ -3720,6 +3832,7 @@ export function createDispatchBundle(
 				wireModelId: lifecycle.target.wireModelId,
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
+				timing,
 				sessionId: null,
 				cwd: lifecycle.cwd,
 				staticShellHash: lifecycle.staticCompositionHash,
@@ -3847,6 +3960,7 @@ export function createDispatchBundle(
 			),
 			recipe: lifecycle.recipe,
 			startedAt,
+			timing,
 			targetId: lifecycle.target.target.id,
 			wireModelId: lifecycle.target.wireModelId,
 			runtimeId: lifecycle.target.runtime.id,
@@ -3865,8 +3979,8 @@ export function createDispatchBundle(
 			heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
-			pricing: lifecycle.target.target.pricing ?? null,
-			costProvenance: lifecycle.target.runtimeResolution.costProvenance,
+			pricing: lifecycle.target.effectivePricing.rates,
+			costProvenance: lifecycle.target.effectivePricing.provenance,
 			finalPromise: undefined as unknown as Promise<RunReceipt>,
 		};
 
@@ -3895,13 +4009,7 @@ export function createDispatchBundle(
 			const routeOutcomeDetail = mergeRouteWarningDetail(lifecycle.target.routeWarning, outcomeDetail ?? activityNote);
 			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(routeOutcomeDetail, result, includeDiagnostics);
 			const finalFailureMessage = mergeWorkerDiagnosticFailure(failureMessage, result, includeDiagnostics);
-			const pricing = lifecycle.target.target.pricing;
-			const costUsd = pricing
-				? (tokenMeter.inputTokens * pricing.input) / 1_000_000 +
-					(tokenMeter.outputTokens * pricing.output) / 1_000_000 +
-					(tokenMeter.cacheReadTokens * (pricing.cacheRead ?? 0)) / 1_000_000 +
-					(tokenMeter.cacheWriteTokens * (pricing.cacheWrite ?? 0)) / 1_000_000
-				: 0;
+			const costUsd = calculateUsageCostUsd(tokenMeter, lifecycle.target.effectivePricing.rates);
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const tokenCount =
 				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
@@ -3946,7 +4054,7 @@ export function createDispatchBundle(
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd,
-				costProvenance: lifecycle.target.runtimeResolution.costProvenance,
+				costProvenance: lifecycle.target.effectivePricing.provenance,
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
 				staticShellHash: lifecycle.staticCompositionHash,
@@ -4078,6 +4186,11 @@ export function createDispatchBundle(
 					);
 				}
 				const endedAt = new Date().toISOString();
+				timing.endedAt = endedAt;
+				recordRunTimingBestEffort(
+					() => ledgerRef.update(envelope.id, { timing: { ...timing } }),
+					(error) => reportDispatchDiagnostic(`record final timing for run ${envelope.id}`, error),
+				);
 				const evidence: RunTerminationEvidence = {
 					exitCode: result.exitCode ?? null,
 					abortedByOperator: activeRun.aborted,
@@ -4188,6 +4301,7 @@ export function createDispatchBundle(
 				// active entry leaks until restart.
 				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
 				const endedAt = new Date().toISOString();
+				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
 				try {
 					ledgerRef.update(envelope.id, {
@@ -4540,16 +4654,10 @@ export function createDispatchBundle(
 			}
 			const meter = run.meter;
 			const totalTokens = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
-			const pricing = run.pricing;
-			const costUsd = pricing
-				? (meter.inputTokens * pricing.input +
-						meter.outputTokens * pricing.output +
-						meter.cacheReadTokens * (pricing.cacheRead ?? 0) +
-						meter.cacheWriteTokens * (pricing.cacheWrite ?? 0)) /
-					1_000_000
-				: 0;
+			const costUsd = calculateUsageCostUsd(meter, run.pricing);
 			const startedMs = Date.parse(run.startedAt);
 			const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, tickNow - startedMs) : 0;
+			const timing = deriveRunPhaseDurations(run.timing, run.startedAt, new Date(tickNow).toISOString());
 			running.push({
 				runId: run.runId,
 				agentId: run.agentId,
@@ -4560,6 +4668,7 @@ export function createDispatchBundle(
 				lineage: { ...run.lineage },
 				startedAt: run.startedAt,
 				elapsedMs,
+				timing,
 				tokens: { input: meter.inputTokens, output: meter.outputTokens, total: totalTokens },
 				costUsd,
 				costProvenance: run.costProvenance,

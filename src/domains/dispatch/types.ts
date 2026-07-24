@@ -232,6 +232,32 @@ export interface RunPlanProvenance {
 export type RunKind = "http" | "sdk" | "subprocess" | "acp-delegation";
 export type DispatchRequestOrigin = "user" | "agent" | "internal";
 
+/** Durable routing-system phase marks. They live on the ledger envelope, not the sealed receipt. */
+export interface RunPhaseMarks {
+	requestedAt: string;
+	decisionStartedAt: string;
+	decisionCompletedAt?: string;
+	queuedAt?: string;
+	admittedAt?: string;
+	workerSpawnedAt?: string;
+	firstModelTokenAt?: string;
+	firstToolAt?: string;
+	endedAt?: string;
+}
+
+/** Derived durations keep execution and user-observed end-to-end time explicitly distinct. */
+export interface RunPhaseDurations {
+	requestToDecisionMs: number | null;
+	decisionMs: number | null;
+	admissionWaitMs: number | null;
+	queueWaitMs: number | null;
+	spawnSetupMs: number | null;
+	timeToFirstModelTokenMs: number | null;
+	timeToFirstToolMs: number | null;
+	executionMs: number | null;
+	totalEndToEndMs: number | null;
+}
+
 export interface RunReceiptIntegrity {
 	version: 4 | 5 | 6;
 	algorithm: "sha256";
@@ -268,6 +294,8 @@ export interface RunEnvelope {
 	wireModelId: string;
 	runtimeId: string;
 	runtimeKind: RunKind;
+	/** Durable side-channel timing; intentionally outside receipt integrity and optional on historical rows. */
+	timing?: RunPhaseMarks;
 	startedAt: string;
 	endedAt: string | null;
 	status: RunStatus;

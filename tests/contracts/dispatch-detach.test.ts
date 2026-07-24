@@ -516,7 +516,12 @@ describe("detached dispatch + collect", () => {
 			strictEqual(collected.details?.failedCount, 0);
 			match(collected.output, /collect complete/);
 			match(collected.output, /first answer/);
-			match(collected.output, /cost=~\$0\.00 est/, "catalog fallback cost is labeled estimated");
+			match(collected.output, /cost=~\$0\.0000 est/, "catalog fallback cost is labeled estimated");
+			for (const assignmentId of runIds) {
+				const terminalRunId = bundle.contract.assignments?.getStored(assignmentId)?.terminalRunId;
+				ok(terminalRunId);
+				ok((bundle.contract.getRun(terminalRunId)?.costUsd ?? 0) > 0, "catalog fallback records a nonzero estimate");
+			}
 			match(collected.output, /collect never blocks; timeout_ms is ignored — block on one run with mode="wait"\./);
 			ok(bundle.contract.detached?.get(batchId)?.collectedAt !== null, "batch marked collected");
 
