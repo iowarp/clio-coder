@@ -117,13 +117,24 @@ function withResolvedTaskPin(
 	options: { pinTask?: boolean } = {},
 ): DispatchRequest {
 	if (task === undefined) return request;
-	// Omit the raw briefing before restoring the approved value. With exact
-	// optional properties, approved absence means the field must be absent—not
-	// present as undefined—and must clear any untrusted raw default.
-	const { briefing: _untrustedBriefing, ...requestWithoutBriefing } = request;
+	// Omit the raw briefing and failover envelope before restoring the approved
+	// values. With exact optional properties, approved absence means the field
+	// must be absent—not present as undefined—and must clear any untrusted raw
+	// default. The failover mode and allowedCandidates are execution-authoritative
+	// route policy, so a post-approval raw mutation cannot widen the envelope.
+	const {
+		briefing: _untrustedBriefing,
+		failover: _untrustedFailover,
+		allowedCandidates: _untrustedCandidates,
+		...requestWithoutUntrusted
+	} = request;
 	return {
-		...requestWithoutBriefing,
+		...requestWithoutUntrusted,
 		agentId: task.agent,
+		...(task.failover !== undefined ? { failover: task.failover } : {}),
+		...(task.allowedCandidates !== undefined
+			? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
+			: {}),
 		// Primary builder/candidate/task text comes from operator-controlled
 		// arguments and must be restored from the approved artifact. Reviewer and
 		// judge text is synthesized later from sealed run ids, receipts, and diff
@@ -398,6 +409,34 @@ function dispatchRequestFromArgs(
 	if (model) request.model = model;
 	const node = stringArg(args, "node");
 	if (node) request.node = node;
+	const failover = stringArg(args, "failover");
+	if (failover) {
+		if (failover !== "none" && failover !== "approved" && failover !== "automatic") {
+			return { ok: false, message: "failover must be one of none|approved|automatic" };
+		}
+		request.failover = failover;
+	}
+	if (args.allowed_candidates !== undefined) {
+		if (!Array.isArray(args.allowed_candidates) || args.allowed_candidates.length === 0) {
+			return { ok: false, message: "allowed_candidates must be a non-empty array" };
+		}
+		const candidates = [];
+		for (const candidate of args.allowed_candidates) {
+			if (!isRecord(candidate)) return { ok: false, message: "allowed_candidates entries must be objects" };
+			const agentId = stringArg(candidate, "agent", "agentId");
+			const candidateTarget = stringArg(candidate, "target");
+			const candidateModel = stringArg(candidate, "model");
+			const candidateNode = stringArg(candidate, "node");
+			if (!agentId || !candidateTarget || !candidateModel || !candidateNode) {
+				return {
+					ok: false,
+					message: "allowed_candidates entries require non-empty agent, target, model, and node",
+				};
+			}
+			candidates.push({ agentId, target: candidateTarget, model: candidateModel, node: candidateNode });
+		}
+		request.allowedCandidates = candidates;
+	}
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
 
@@ -569,11 +608,17 @@ async function runDetached(
 		fallbackProgressBus(deps),
 	);
 	// dispatchBatch admits requests in order, so runIds[i] belongs to requests[i].
+	const assignmentIds = handle.assignmentIds ?? handle.runIds;
 	const runs = handle.runIds.map((runId, index) => ({
 		runId,
+		assignmentId: assignmentIds[index] ?? runId,
 		agentId: requests[index]?.agentId ?? "unknown",
 	}));
 	registered.completion.catch(() => {});
+	// The runs are live; make their assignment records durable before returning
+	// so an immediate collect resolves the logical assignment (and any queued
+	// retry) instead of falling back to a bare, possibly-failed first attempt.
+	await deps.dispatch.assignments?.flushWrites?.();
 	try {
 		await detached.register({ batchId: handle.batchId, runs, sessionId });
 	} catch (err) {
@@ -588,7 +633,7 @@ async function runDetached(
 	}
 	const lines = [
 		`dispatch (detached) batch=${handle.batchId} started ${runs.length} run(s)`,
-		...runs.map((run) => `- ${run.runId} agent=${run.agentId}`),
+		...runs.map((run) => `- ${run.assignmentId} agent=${run.agentId}`),
 		"",
 		`Runs continue in the background. Collect results with monitor(mode="collect", batch_id="${handle.batchId}"); block on one run with monitor(mode="wait", run_id=<id>).`,
 	];
@@ -599,7 +644,7 @@ async function runDetached(
 			mode: "detached",
 			batchId: handle.batchId,
 			runIds: [...handle.runIds],
-			runs: runs.map((run) => ({ runId: run.runId, agentId: run.agentId })),
+			runs: runs.map((run) => ({ runId: run.runId, assignmentId: run.assignmentId, agentId: run.agentId })),
 		},
 	};
 }
@@ -2147,6 +2192,11 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	): ResolvedDispatchPlanArtifact["tasks"][number] => {
 		const resolution = deps.dispatch.preview?.(request);
 		if (resolution === undefined) throw new Error("dispatch preview is unavailable");
+		// Seal the effective failover mode and the exact approved envelope into the
+		// artifact so the plan hash distinguishes different fallback envelopes and
+		// execution restores an operator-approved value, not raw arguments.
+		const failover =
+			request.failover ?? (request.node !== undefined || request.target !== undefined ? "none" : "automatic");
 		return {
 			agent: resolution.agentId,
 			task: request.task,
@@ -2156,6 +2206,10 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			node: resolution.node.id,
 			nodeKind: resolution.node.kind,
 			...(resolution.node.host !== undefined ? { nodeHost: resolution.node.host } : {}),
+			failover,
+			...(failover === "approved" && request.allowedCandidates && request.allowedCandidates.length > 0
+				? { allowedCandidates: request.allowedCandidates.map((candidate) => ({ ...candidate })) }
+				: {}),
 			role,
 			position,
 		};
@@ -2331,6 +2385,17 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 							target: Type.Optional(Type.String()),
 							model: Type.Optional(Type.String()),
 							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
+							failover: Type.Optional(stringEnum(["none", "approved", "automatic"] as const)),
+							allowed_candidates: Type.Optional(
+								Type.Array(
+									Type.Object({
+										agent: Type.String(),
+										target: Type.String(),
+										model: Type.String(),
+										node: Type.String(),
+									}),
+								),
+							),
 							cwd: Type.Optional(Type.String()),
 						}),
 					]),
@@ -2415,6 +2480,23 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			model: Type.Optional(Type.String({ description: "Default model override." })),
 			node: Type.Optional(
 				Type.String({ description: "Default fleet node pin: local or a fleet.nodes id (omit for automatic placement)." }),
+			),
+			failover: Type.Optional(
+				stringEnum(
+					["none", "approved", "automatic"] as const,
+					"Exact pins default to none; approved requires allowed_candidates.",
+				),
+			),
+			allowed_candidates: Type.Optional(
+				Type.Array(
+					Type.Object({
+						agent: Type.String(),
+						target: Type.String(),
+						model: Type.String(),
+						node: Type.String(),
+					}),
+					{ description: "Exact operator-approved fallback route tuples, in preference order." },
+				),
 			),
 			thinking_level: Type.Optional(stringEnum(THINKING_LEVELS)),
 			cwd: Type.Optional(Type.String({ description: "Default agent working directory." })),

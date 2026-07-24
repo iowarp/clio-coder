@@ -14,7 +14,22 @@ export function createDispatchDomainModule(options: DispatchBundleOptions = {}):
 	};
 }
 
+export type {
+	AssignmentId,
+	AssignmentPolicy,
+	AssignmentStatus,
+	AttemptRef,
+	DispatchAssignment,
+} from "./assignment.js";
+export type { DurableAssignmentRecord } from "./assignment-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
+export {
+	classifyFailure,
+	decideRetry,
+	type FailureClass,
+	type RetryDecision,
+	type RoutePart,
+} from "./failure-classification.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,
@@ -34,4 +49,9 @@ export type {
 	RunStatus,
 	ToolCallStat,
 } from "./types.js";
-export { DISPATCH_BRIEFING_MAX_BYTES, type JobSpec } from "./validation.js";
+export {
+	DISPATCH_BRIEFING_MAX_BYTES,
+	type DispatchFailoverCandidate,
+	type DispatchFailoverMode,
+	type JobSpec,
+} from "./validation.js";

@@ -42,23 +42,25 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
 		synthesizeModel: () => ({ id: target.defaultModel, provider: target.runtime }) as never,
 	};
-	const status: TargetStatus = {
-		target,
+	const statuses: TargetStatus[] = settings.targets.map((configuredTarget) => ({
+		target: configuredTarget,
 		runtime,
 		available: true,
 		reason: "test",
 		health: { status: "healthy", lastCheckAt: null, lastError: null, latencyMs: null },
 		capabilities: { ...runtime.defaultCapabilities },
 		discoveredModels: [],
-	};
+	}));
+	const fallbackStatus = statuses[0];
+	if (!fallbackStatus) throw new Error("dispatch stub requires at least one target status");
 	const providers = {
-		list: () => [status],
-		getTarget: (id: string) => (id === target.id ? target : null),
+		list: () => statuses,
+		getTarget: (id: string) => settings.targets.find((entry) => entry.id === id) ?? null,
 		getRuntime: (id: string) => (id === runtime.id ? runtime : null),
 		probeAll: async () => {},
 		probeAllLive: async () => {},
-		probeTarget: async () => status,
-		disconnectTarget: () => status,
+		probeTarget: async (id: string) => statuses.find((entry) => entry.target.id === id) ?? fallbackStatus,
+		disconnectTarget: (id: string) => statuses.find((entry) => entry.target.id === id) ?? fallbackStatus,
 		auth: {
 			statusForTarget: () => ({
 				providerId: runtime.id,

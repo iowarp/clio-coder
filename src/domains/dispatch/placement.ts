@@ -72,7 +72,15 @@ export function createFleetPlacementResolver(
 	return (req: DispatchRequest): DispatchNodePlacement | null => {
 		const settings = deps.getSettings();
 		const nodes = settings?.fleet?.nodes ?? [];
-		const requested = requestedNodeId(req, settings);
+		// Failover retries record each failed node as a reroute `fromNode`. Those
+		// nodes are excluded from re-selection so a node-scoped failure moves to a
+		// different eligible node instead of landing back on the failed one.
+		const excludedNodeIds = new Set((req.reroutes ?? []).map((hop) => hop.fromNode).filter((id) => id.length > 0));
+		// A profile/agent-binding pin that names an excluded node is overridden by
+		// the exclusion (an explicit req.node pin is dropped by the retry path
+		// before this runs, so any surviving request is a soft pin).
+		let requested = requestedNodeId(req, settings);
+		if (requested !== null && excludedNodeIds.has(requested)) requested = null;
 		// No fleet configured and nothing requested: stay on the pre-fleet
 		// local path with no node identity recorded at all.
 		if (nodes.length === 0 && requested === null && !req.reroutes?.length) return null;
@@ -123,11 +131,13 @@ export function createFleetPlacementResolver(
 			return sshPlacement(node);
 		}
 
-		// Least-loaded eligible remote node; local is the fallback.
+		// Least-loaded eligible remote node; local is the fallback unless it too
+		// has been excluded by a prior failure.
 		if (fleet !== undefined && nodes.length > 0) {
 			const preflightRecords = readFleetPreflightRecords();
 			const eligible = nodes
 				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
+				.filter((entry) => !excludedNodeIds.has(entry.node.id))
 				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
 				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
 				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
@@ -135,6 +145,11 @@ export function createFleetPlacementResolver(
 			for (const entry of eligible) {
 				if (fleet.tryAcquire(entry.node.id)) return sshPlacement(entry.node);
 			}
+		}
+		// A node exclusion that also excludes local has no eligible node left:
+		// fail closed rather than silently re-running on the excluded local node.
+		if (excludedNodeIds.has(LOCAL_NODE_ID)) {
+			throw admissionError(`no eligible fleet node remains after excluding ${[...excludedNodeIds].join(", ")}`);
 		}
 		return localPlacement();
 	};

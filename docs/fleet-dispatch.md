@@ -150,22 +150,25 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 | Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. |
 | Sequential | `mode: "sequential"` | One at a time, stop reporting on timeout/abort. |
 | Pipeline | `mode: "pipeline"` | Each step receives the previous step's output as data. |
-| Detached | `detach: true` | Return run ids and a batch id immediately; collect later. |
+| Detached | `detach: true` | Return assignment ids and a batch id immediately; collect later. |
 | Review gate | `review: {reviewer?, max_cycles?}` | Builder, read-only reviewer verdict, bounded revise loop. |
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
 
 ### Detached fan-out and collect
 
-`detach: true` validates, admits, and spawns every task, then returns. Runs
-keep streaming into the board and the run ledger. The batch is durable
-(`batches.json` under the state dir), so it survives session exit. Gather
-results with the monitor tool: `mode="wait"` observes one run for a bounded
-time (it never cancels the run; `steer` with `action="cancel"` stops one);
-`mode="collect"` is the barrier over a batch id or run-id list; a
-pending snapshot while runs are in flight, full results once all are
-terminal. Collecting marks the batch so the turn-end nudge stops firing.
-`wait` observes without collecting; `collect` is the authoritative terminal
-batch operation. Collect every detached batch before final synthesis.
+`detach: true` validates, admits, and spawns every task, then returns. The
+reported id is the logical assignment id (also the first attempt's run id).
+Attempts keep streaming into the board and immutable run ledger. The batch and
+assignment index are durable (`batches.json` and `assignments.json` under the
+state dir), so collection survives session exit. Gather results with the
+monitor tool: `mode="wait"` observes one assignment for a bounded time (it
+never cancels it; `steer` with `action="cancel"` cancels its current attempt
+and suppresses later attempts); `mode="collect"` is the barrier over a batch id
+or assignment-id list. It returns a pending snapshot while assignments are in
+flight, then each assignment's terminal attempt plus `attemptRunIds` history.
+Collecting marks the batch so the turn-end nudge stops firing. `wait` observes
+without collecting; `collect` is the authoritative terminal batch operation.
+Collect every detached batch before final synthesis.
 
 ### Review gate
 
@@ -213,6 +216,29 @@ unapproved alternative. Full-auto skips the stop and seals the
 same plan hash into every run's receipt instead
 (`plan.approval: "full-auto"`). Read-only autonomy denies dispatch outright,
 as it denies every non-read action.
+
+## Assignments, attempts, and failover
+
+A dispatch is a logical assignment containing one or more immutable run
+attempts. Its id is `lineage.rootRunId`, which is also the first attempt's run
+id. Public `finalPromise` handles resolve only when the assignment succeeds,
+is canceled, or exhausts its retry policy; the returned receipt is the
+terminal attempt's unchanged receipt. Earlier attempts stay independently
+addressable and integrity-verifiable.
+
+Manual `target`, `model`, or `node` pins default to exact failover (`none`): a
+retry may repeat the tuple but cannot silently move away from it. `approved`
+failover requires an ordered `allowedCandidates` envelope of exact
+agent/target/model/node tuples and can never leave that set. `automatic`
+failover lets typed infrastructure failures exclude only the failed route
+part—for example, an SSH channel failure can move the node while retaining the
+agent, target, and model. Cancellation, policy rejection, and permission
+refusal neither retry nor penalize infrastructure.
+
+Individual receipt schemas are intentionally unchanged. Assignment status,
+attempt ids, and terminal run id are stored separately in `assignments.json`.
+Pipelines and batches await assignment terminals, so downstream stages consume
+the successful fallback output rather than an earlier failed attempt.
 
 ## Receipts
 

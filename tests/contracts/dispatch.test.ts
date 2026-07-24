@@ -225,6 +225,9 @@ function stubContext(
 	} = {},
 ): DomainContext {
 	const settings = structuredClone(DEFAULT_SETTINGS);
+	// Most contracts exercise one attempt. Retry-specific cases opt in so the
+	// assignment-level finalPromise does not wait through production backoff.
+	settings.workers.maxRetries = 0;
 	const target: TargetDescriptor = options.target ?? {
 		id: "default",
 		runtime: "openai",
@@ -3371,11 +3374,13 @@ rl.once("line", (line) => {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "stall me" });
 			await waitFor(() => abortCalled, "heartbeat reconciler did not kill dead worker");
 			const receipt = await handle.finalPromise;
-			strictEqual(receipt.outcome, "stalled");
-			const retry = bundle.contract.snapshot().retrying[0];
-			strictEqual(retry?.runId, handle.runId);
-			strictEqual(retry?.attempt, 1);
-			strictEqual(retry?.reason.startsWith("stalled"), true);
+			strictEqual(receipt.outcome, "failed");
+			const assignment = bundle.contract.assignments?.get(handle.runId);
+			deepStrictEqual(
+				assignment?.attempts.map((attempt) => attempt.outcome),
+				["stalled", "failed"],
+			);
+			strictEqual(assignment?.status, "failed");
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -3559,7 +3564,9 @@ rl.once("line", (line) => {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "legacy prose" });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcomeCode, null);
-			strictEqual(bundle.contract.snapshot().retrying[0]?.runId, handle.runId);
+			const assignment = bundle.contract.assignments?.get(handle.runId);
+			strictEqual(assignment?.attempts.length, 2);
+			strictEqual(assignment?.attempts[1]?.retryReason?.startsWith("failed"), true);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -3665,7 +3672,7 @@ rl.once("line", (line) => {
 			const first = await bundle.contract.dispatch({ agentId: "coder", task: "running one" });
 			const second = await bundle.contract.dispatch({ agentId: "coder", task: "running two" });
 			const failed = await bundle.contract.dispatch({ agentId: "coder", task: "fail for retry" });
-			await failed.finalPromise;
+			await waitFor(() => bundle.contract.snapshot().retrying.length === 1, "failed attempt was not queued for retry");
 			const snapshot = bundle.contract.snapshot();
 			strictEqual(snapshot.running.length, 2);
 			strictEqual(snapshot.retrying.length, 1);

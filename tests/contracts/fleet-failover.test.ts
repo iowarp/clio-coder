@@ -85,6 +85,9 @@ describe("dead-node failover", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.nodes = [{ id: "blade", host: "blade.lan", maxWorkers: 3 }];
 		const registry = createFleetRegistry(() => settings.fleet.nodes);
+		// One prior channel strike makes the probe failure cross the dead-node
+		// threshold immediately; route-part-aware retry must then exclude blade.
+		registry.recordChannelFailure("blade", "prior channel failure");
 		const bladeTransport: WorkerTransport = {
 			kind: "ssh",
 			node: { id: "blade", kind: "ssh", host: "blade.lan" },
@@ -108,25 +111,25 @@ describe("dead-node failover", () => {
 			const inflightA = await bundle.contract.dispatch({ agentId: "coder", task: "long job a" });
 			const inflightB = await bundle.contract.dispatch({ agentId: "coder", task: "long job b" });
 			const failing = await bundle.contract.dispatch({ agentId: "coder", task: "channel probe" });
-			const failedReceipt = await failing.finalPromise;
-			strictEqual(failedReceipt.outcome, "failed");
-			strictEqual(failedReceipt.node?.id, "blade");
+			const terminalFailover = await failing.finalPromise;
+			strictEqual(terminalFailover.outcome, "succeeded");
+			strictEqual(terminalFailover.node?.id, "local");
+			const failedAttempt = bundle.contract.getRun(failing.runId);
+			strictEqual(failedAttempt?.outcome, "failed");
+			strictEqual(failedAttempt?.node?.id, "blade");
 
-			// First failure leaves blade online; the retry lands on blade again,
-			// fails, crosses the death threshold, and triggers the reap.
+			// The channel failure crosses the death threshold and triggers the reap;
+			// its retry excludes only the node and lands on local.
 			await waitFor(() => registry.get("blade")?.state === "offline", "blade classified dead");
 			match(registry.get("blade")?.stateReason ?? "", /consecutive channel failures/);
 
-			// The reaped in-flight runs finalize as stalled and their retries
-			// reroute to the local survivor with lineage recorded.
-			await Promise.allSettled([inflightA.finalPromise, inflightB.finalPromise]);
-			const stalledA = await inflightA.finalPromise;
-			strictEqual(stalledA.outcome, "stalled");
+			// The reaped in-flight attempts remain stalled evidence, while each
+			// attached assignment resolves with its local survivor retry.
+			const [terminalA, terminalB] = await Promise.all([inflightA.finalPromise, inflightB.finalPromise]);
+			strictEqual(terminalA.outcome, "succeeded");
+			strictEqual(terminalB.outcome, "succeeded");
+			strictEqual(bundle.contract.getRun(inflightA.runId)?.outcome, "stalled");
 
-			await waitFor(
-				() => bundle.contract.listRuns().filter((run) => run.status === "completed").length >= 3,
-				"rerouted retries completed on the local survivor",
-			);
 			const completed = bundle.contract.listRuns().filter((run) => run.status === "completed");
 			for (const envelope of completed) {
 				strictEqual(envelope.node?.id, "local", "rerouted run landed on local");
@@ -135,17 +138,6 @@ describe("dead-node failover", () => {
 				strictEqual(lastHop?.fromNode, "blade");
 				strictEqual(lastHop?.toNode, "local");
 			}
-			// The failing chain carries both hops: blade -> blade, then blade -> local.
-			const twoHop = completed.find((run) => (run.reroutes?.length ?? 0) === 2);
-			ok(twoHop, "retry chain that failed twice records two hops");
-			deepStrictEqual(
-				twoHop?.reroutes?.map((hop) => [hop.fromNode, hop.toNode]),
-				[
-					["blade", "blade"],
-					["blade", "local"],
-				],
-			);
-
 			// The rerouted receipt still verifies against its ledger row.
 			const withReceipt = completed.find((run): run is RunEnvelope & { receiptPath: string } => run.receiptPath !== null);
 			ok(withReceipt, "completed run has a receipt");
@@ -154,6 +146,47 @@ describe("dead-node failover", () => {
 				deepStrictEqual(receipt.node, { id: "local", kind: "local" });
 				deepStrictEqual(verifyReceiptIntegrity(receipt, withReceipt), { ok: true });
 			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("excludes a failed remote node and fails over to another remote node, not local", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		settings.fleet.nodes = [
+			{ id: "blade", host: "blade.lan", maxWorkers: 2 },
+			{ id: "mini", host: "mini.lan", maxWorkers: 2 },
+		];
+		const registry = createFleetRegistry(() => settings.fleet.nodes);
+		const transportFor = (id: string): WorkerTransport => ({
+			kind: "ssh",
+			node: { id, kind: "ssh", host: `${id}.lan` },
+			spawn: () => (id === "blade" ? channelFailureWorker() : okWorker()),
+		});
+		const context = dispatchStubContext({ settings, scheduling: { fleet: registry } });
+		const bundle = makeDispatchBundle(context, {
+			resolveNode: createFleetPlacementResolver({
+				getSettings: () => settings,
+				fleet: registry,
+				transportForNode: (node) => transportFor(node.id),
+				preflightVerdict: () => ({ ok: true, reason: null }),
+			}),
+			// Local must never be used: the fallback is another remote node.
+			spawnWorker: () => {
+				throw new Error("local spawn must not run for a remote-to-remote failover");
+			},
+			resilienceCooldownMs: 0,
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "remote to remote" });
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "succeeded");
+			strictEqual(terminal.node?.id, "mini", "failed over to another remote node, not local");
+			const lastHop = terminal.reroutes?.[terminal.reroutes.length - 1];
+			strictEqual(lastHop?.fromNode, "blade");
+			strictEqual(lastHop?.toNode, "mini");
 		} finally {
 			await bundle.extension.stop?.();
 		}

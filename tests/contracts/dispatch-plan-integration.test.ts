@@ -86,6 +86,7 @@ describe("resolved dispatch plan admission", () => {
 						node: "blade\rforged",
 						nodeKind: "ssh",
 						nodeHost: "host\nforged",
+						failover: "automatic",
 						role: "task",
 						position: 1,
 					},
@@ -98,7 +99,7 @@ describe("resolved dispatch plan admission", () => {
 		strictEqual(plan.text.split("\n").length, 3, "embedded line breaks cannot forge plan rows");
 		match(
 			plan.text,
-			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged task="inspect\?the repo\?\[31m"/,
+			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged failover=automatic task="inspect\?the repo\?\[31m"/,
 		);
 	});
 
@@ -108,6 +109,48 @@ describe("resolved dispatch plan admission", () => {
 		match(first.text, /agent=scout .* task="map dispatch lifecycle"/);
 		strictEqual(first.tasks[0]?.task, "map dispatch lifecycle");
 		strictEqual(first.hash === second.hash, false, "changing only the approved task must change the plan hash");
+	});
+
+	it("distinguishes fallback envelopes cryptographically in the plan hash", () => {
+		const resolvedTask = (extra: Record<string, unknown>) => ({
+			tasks: ["route"],
+			[RESOLVED_DISPATCH_PLAN_ARGUMENT]: {
+				version: 1,
+				topology: "parallel",
+				tasks: [
+					{
+						agent: "coder",
+						task: "route",
+						target: "primary",
+						model: "base-model",
+						node: "blade",
+						nodeKind: "ssh",
+						nodeHost: "blade.example.test",
+						role: "task",
+						position: 1,
+						...extra,
+					},
+				],
+				costCeilingUsd: 5,
+			},
+		});
+		const c1 = { agentId: "coder", target: "primary", model: "base-model", node: "blade" };
+		const c2 = { agentId: "coder", target: "primary", model: "base-model", node: "local" };
+
+		const automatic = describeDispatchPlan(resolvedTask({ failover: "automatic" }));
+		const none = describeDispatchPlan(resolvedTask({ failover: "none" }));
+		strictEqual(automatic.hash === none.hash, false, "changing only the failover mode must change the plan hash");
+
+		const oneCandidate = describeDispatchPlan(resolvedTask({ failover: "approved", allowedCandidates: [c1] }));
+		const twoCandidates = describeDispatchPlan(resolvedTask({ failover: "approved", allowedCandidates: [c1, c2] }));
+		strictEqual(
+			oneCandidate.hash === twoCandidates.hash,
+			false,
+			"changing only the allowed candidates must change the plan hash",
+		);
+		// Order is the approved preference and must be part of the hash.
+		const reordered = describeDispatchPlan(resolvedTask({ failover: "approved", allowedCandidates: [c2, c1] }));
+		strictEqual(twoCandidates.hash === reordered.hash, false, "candidate order is part of the approved envelope");
 	});
 
 	it("binds briefing presence, bytes, hash, and a bounded preview into approval", () => {

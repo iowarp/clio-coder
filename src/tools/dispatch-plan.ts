@@ -16,6 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { DispatchFailoverCandidate, DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import { prepareDispatchArguments } from "./dispatch.js";
 
 export type DispatchPlanTopology = "parallel" | "sequential" | "pipeline" | "review" | "compete" | "detached";
@@ -37,6 +38,10 @@ export interface DispatchPlanTaskView {
 	role?: "task" | "builder" | "reviewer" | "candidate" | "judge";
 	/** One-based source task or gate cycle/candidate number. */
 	position?: number;
+	/** Approved failover mode sealed into the plan. */
+	failover?: DispatchFailoverMode;
+	/** Exact approved fallback tuples, order-significant, present only for approved failover. */
+	allowedCandidates?: ReadonlyArray<DispatchFailoverCandidate>;
 }
 
 export interface DispatchPlanView {
@@ -63,8 +68,8 @@ export interface ResolvedDispatchPlanArtifact {
 	topology: DispatchPlanTopology;
 	tasks: Array<
 		Required<Pick<DispatchPlanTaskView, "agent" | "task" | "model" | "node" | "target">> &
-			Required<Pick<DispatchPlanTaskView, "nodeKind">> &
-			Pick<DispatchPlanTaskView, "briefing" | "nodeHost" | "role" | "position">
+			Required<Pick<DispatchPlanTaskView, "nodeKind" | "failover">> &
+			Pick<DispatchPlanTaskView, "briefing" | "nodeHost" | "role" | "position" | "allowedCandidates">
 	>;
 	costCeilingUsd: number;
 	confirmation?: { branch: string; group: string; index: number };
@@ -109,8 +114,37 @@ function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 		if (node !== undefined) view.node = node;
 		const target = str(record.target) ?? sharedTarget;
 		if (target !== undefined) view.target = target;
+		const failover = failoverModeOf(record.failover) ?? failoverModeOf(args.failover);
+		if (failover !== undefined) view.failover = failover;
+		const rawCandidates = "allowedCandidates" in record ? record.allowedCandidates : args.allowedCandidates;
+		const candidates = canonicalCandidates(rawCandidates);
+		if (failover === "approved" && candidates !== null) view.allowedCandidates = candidates;
 		return view;
 	});
+}
+
+function failoverModeOf(value: unknown): DispatchFailoverMode | undefined {
+	return value === "none" || value === "approved" || value === "automatic" ? value : undefined;
+}
+
+/**
+ * Canonicalize an approved failover envelope: trim every field, drop malformed
+ * tuples, and preserve order (order is the approved preference and is part of
+ * the plan hash). Returns null when the list is absent or empty after cleanup.
+ */
+function canonicalCandidates(value: unknown): DispatchFailoverCandidate[] | null {
+	if (!Array.isArray(value)) return null;
+	const out: DispatchFailoverCandidate[] = [];
+	for (const item of value) {
+		if (!isRecord(item)) return null;
+		const agentId = str(item.agentId);
+		const target = str(item.target);
+		const model = str(item.model);
+		const node = str(item.node);
+		if (!agentId || !target || !model || !node) return null;
+		out.push({ agentId, target, model, node });
+	}
+	return out.length > 0 ? out : null;
 }
 
 function topologyOf(args: Record<string, unknown>): DispatchPlanTopology {
@@ -146,9 +180,17 @@ function renderPlanText(
 		}${task.nodeHost !== undefined ? ` host=${safeField(task.nodeHost)}` : ""}`;
 		const role =
 			task.role !== undefined ? ` role=${task.role}${task.position !== undefined ? `#${task.position}` : ""}` : "";
+		const failover = task.failover !== undefined ? ` failover=${task.failover}` : "";
 		lines.push(
-			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node} task=${JSON.stringify(safeField(task.task))}`,
+			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover} task=${JSON.stringify(safeField(task.task))}`,
 		);
+		if (task.allowedCandidates !== undefined) {
+			for (const [candidateIndex, candidate] of task.allowedCandidates.entries()) {
+				lines.push(
+					`    candidate#${candidateIndex + 1} agent=${safeField(candidate.agentId)} target=${safeField(candidate.target)} model=${safeField(candidate.model)} node=${safeField(candidate.node)}`,
+				);
+			}
+		}
 		if (task.briefing !== undefined) {
 			lines.push(
 				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing))}`,
@@ -177,6 +219,12 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	if (value.nodeKind === "local" && value.nodeHost !== undefined) return false;
 	if (value.briefing !== undefined && (typeof value.briefing !== "string" || value.briefing.trim().length === 0))
 		return false;
+	if (failoverModeOf(value.failover) === undefined) return false;
+	if (value.failover === "approved") {
+		if (canonicalCandidates(value.allowedCandidates) === null) return false;
+	} else if (value.allowedCandidates !== undefined) {
+		return false;
+	}
 	return [value.agent, value.task, value.model, value.node, value.target].every(
 		(candidate) => typeof candidate === "string" && candidate.trim().length > 0,
 	);
@@ -230,6 +278,10 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			node: task.node.trim(),
 			nodeKind: task.nodeKind,
 			target: task.target.trim(),
+			failover: task.failover,
+			...(task.failover === "approved" && canonicalCandidates(task.allowedCandidates) !== null
+				? { allowedCandidates: canonicalCandidates(task.allowedCandidates) as DispatchFailoverCandidate[] }
+				: {}),
 			...(task.nodeHost !== undefined ? { nodeHost: task.nodeHost.trim() } : {}),
 			...(task.role !== undefined ? { role: task.role } : {}),
 			...(task.position !== undefined ? { position: task.position } : {}),

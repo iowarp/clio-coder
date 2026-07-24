@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { readReceiptVerification } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
@@ -84,14 +85,25 @@ function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined)
 }
 
 function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
-	const run = deps.dispatch.getRun(runId);
-	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
-	const live = deps.dispatch.snapshot().running.find((entry) => entry.runId === runId) ?? null;
+	const requestedRun = deps.dispatch.getRun(runId);
+	const rootRunId = requestedRun?.lineage?.rootRunId ?? runId;
+	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	const resolvedRunId = assignment?.terminalRunId ?? runId;
+	const run = deps.dispatch.getRun(resolvedRunId) ?? requestedRun;
+	if (!run && !assignment) return { kind: "error", message: `monitor: unknown run or assignment '${runId}'` };
+	if (!run) return { kind: "error", message: `monitor: assignment '${runId}' has no available attempt` };
+	const live = deps.dispatch.snapshot().running.find((entry) => entry.lineage.rootRunId === rootRunId) ?? null;
 	const reroutes =
 		run.reroutes !== undefined && run.reroutes.length > 0
 			? ` reroutes=${run.reroutes.map((hop) => `${hop.fromNode}>${hop.toNode}`).join(",")}`
 			: "";
 	const lines = [
+		...(assignment
+			? [
+					`assignment ${assignment.assignmentId} status=${assignment.status} terminal=${assignment.terminalRunId ?? "pending"}`,
+					`attempts: ${assignment.attempts.join(", ") || "none finalized"}`,
+				]
+			: []),
 		`run ${run.id} (${run.agentId})`,
 		`state: ${run.status}${run.outcome ? ` outcome=${run.outcome}` : ""}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind} node=${run.node?.id ?? "local"}${reroutes}`,
@@ -108,6 +120,14 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 		output: lines.join("\n"),
 		details: {
 			mode: "status",
+			...(assignment
+				? {
+						assignmentId: assignment.assignmentId,
+						assignmentStatus: assignment.status,
+						attemptRunIds: [...assignment.attempts],
+						terminalRunId: assignment.terminalRunId,
+					}
+				: {}),
 			runId: run.id,
 			agentId: run.agentId,
 			status: run.status,
@@ -298,18 +318,28 @@ async function runWait(
 	const startedAt = performance.now();
 	let run = deps.dispatch.getRun(runId);
 	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
-	while (!isTerminalRunEnvelope(run)) {
+	const rootRunId = run.lineage?.rootRunId ?? runId;
+	let assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	while (assignment?.status === "running" || (assignment === null && !isTerminalRunEnvelope(run))) {
 		if (signal?.aborted) return { kind: "error", message: "monitor: wait aborted" };
 		const elapsed = Math.round(performance.now() - startedAt);
 		if (elapsed >= timeoutMs) {
 			return {
 				kind: "ok",
-				output: `wait timed out after ${timeoutMs}ms: run ${runId} is still ${run.status} and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the run's result is no longer needed — cancelling discards its work.`,
-				details: { mode: "wait", runId, timedOut: true, state: run.status, waitedMs: elapsed },
+				output: `wait timed out after ${timeoutMs}ms: ${assignment ? "assignment" : "run"} ${runId} is still ${assignment?.status ?? run.status} and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the result is no longer needed — cancelling discards its work.`,
+				details: {
+					mode: "wait",
+					runId,
+					timedOut: true,
+					state: assignment?.status ?? run.status,
+					waitedMs: elapsed,
+				},
 			};
 		}
 		await sleep(Math.min(WAIT_POLL_MS, timeoutMs - elapsed));
-		run = deps.dispatch.getRun(runId);
+		assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+		const resolvedRunId = assignment?.terminalRunId ?? runId;
+		run = deps.dispatch.getRun(resolvedRunId) ?? run;
 		if (!run) return { kind: "error", message: `monitor: run '${runId}' disappeared from the ledger while waiting` };
 	}
 	const status = runStatus(deps, runId);
@@ -323,7 +353,11 @@ async function runWait(
 }
 
 interface CollectRow {
+	/** Terminal attempt id when known, otherwise the original legacy run id. */
 	runId: string;
+	assignmentId: string | null;
+	attemptRunIds: ReadonlyArray<string>;
+	assignmentStatus: DurableAssignmentRecord["status"] | null;
 	agentId: string;
 	run: RunEnvelope | null;
 }
@@ -343,6 +377,12 @@ function collectRunLine(row: CollectedRunRow): string[] {
 				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance))} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 			]
 		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; receipt may still exist)`];
+	if (row.assignmentId !== null) {
+		lines.unshift(
+			`- assignment=${row.assignmentId} status=${row.assignmentStatus ?? "unknown"} terminal=${row.runId}`,
+			`  attempts=${row.attemptRunIds.join(",") || "none"}`,
+		);
+	}
 	if (row.evidence.receipt !== null) {
 		lines.push(
 			...receiptEvidenceLabels(row.evidence.receipt, row.evidence.verification, row.evidence.integrity).map(
@@ -378,6 +418,22 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	return lines;
 }
 
+function resolveCollectRow(deps: MonitorToolDeps, originalRunId: string, agentId: string): CollectRow {
+	const original = deps.dispatch.getRun(originalRunId);
+	const rootRunId = original?.lineage?.rootRunId ?? originalRunId;
+	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	const runId = assignment?.terminalRunId ?? originalRunId;
+	const run = deps.dispatch.getRun(runId) ?? original;
+	return {
+		runId,
+		assignmentId: assignment?.assignmentId ?? null,
+		attemptRunIds: assignment?.attempts ?? [originalRunId],
+		assignmentStatus: assignment?.status ?? null,
+		agentId: run?.agentId ?? agentId,
+		run,
+	};
+}
+
 /**
  * Batch barrier over a durable batch id or an explicit run-id list. Never
  * blocks: while any run is in flight it returns a pending snapshot; once all
@@ -398,22 +454,26 @@ async function runCollect(
 		if (!detached) return { kind: "error", message: "monitor: no detached batch records are available in this context" };
 		const record = detached.get(batchId);
 		if (!record) return { kind: "error", message: `monitor: unknown batch '${batchId}'` };
-		rows = record.runs.map((run) => ({ runId: run.runId, agentId: run.agentId, run: deps.dispatch.getRun(run.runId) }));
+		rows = record.runs.map((entry) => resolveCollectRow(deps, entry.assignmentId ?? entry.runId, entry.agentId));
 		scope = `batch ${batchId}${record.collectedAt !== null ? " (already collected)" : ""}`;
 	} else {
-		rows = runIds.map((runId) => {
-			const run = deps.dispatch.getRun(runId);
-			return { runId, agentId: run?.agentId ?? "unknown", run };
-		});
+		rows = runIds.map((runId) => resolveCollectRow(deps, runId, "unknown"));
 		scope = `${rows.length} run(s)`;
 	}
-	const pending = rows.filter((row) => row.run !== null && !isTerminalRunEnvelope(row.run));
+	// A durably-running assignment is never collectable: a genuinely in-flight
+	// one still has an active attempt or a queued retry, and an orphaned one is
+	// reconciled to terminal at startup. Reporting it complete while its status
+	// is still "running" would let a caller consume a non-final attempt.
+	const pending = rows.filter((row) => {
+		if (row.assignmentStatus === null) return row.run !== null && !isTerminalRunEnvelope(row.run);
+		return row.assignmentStatus === "running";
+	});
 	if (pending.length > 0) {
 		const lines = [
 			`collect pending: ${pending.length} of ${rows.length} run(s) still in flight for ${scope}`,
 			...rows.map((row) => {
 				const state = row.run === null ? "missing" : (row.run.outcome ?? row.run.status);
-				return `- ${row.runId} agent=${row.agentId} state=${state}`;
+				return `- ${row.assignmentId ?? row.runId} agent=${row.agentId} state=${row.assignmentStatus ?? state}`;
 			}),
 			"",
 			'Collect again later, or block on a single run with mode="wait".',
@@ -428,7 +488,7 @@ async function runCollect(
 				complete: false,
 				pendingCount: pending.length,
 				runCount: rows.length,
-				pendingRunIds: pending.map((row) => row.runId),
+				pendingRunIds: pending.map((row) => row.assignmentId ?? row.runId),
 			},
 		};
 	}
@@ -473,6 +533,14 @@ async function runCollect(
 				const output = row.evidence.output;
 				return {
 					runId: row.runId,
+					...(row.assignmentId !== null
+						? {
+								assignmentId: row.assignmentId,
+								assignmentStatus: row.assignmentStatus,
+								attemptRunIds: [...row.attemptRunIds],
+								terminalRunId: row.runId,
+							}
+						: {}),
 					agentId: row.agentId,
 					state: row.run === null ? "missing" : (row.run.outcome ?? row.run.status),
 					exitCode: row.run?.exitCode ?? null,
