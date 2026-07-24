@@ -10,11 +10,13 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { workerToolCallCapExceededReason, workerToolCallCapSynthesisReason } from "../../src/core/guardrails.js";
+import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES } from "../../src/core/response-schema.js";
 import type { ToolName } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
+import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { defaultProjectContextTier, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import {
@@ -455,6 +457,148 @@ describe("contracts/dispatch", () => {
 		throws(() => createDispatchBundle(withoutScheduling), /requires 'scheduling' contract/);
 	});
 
+	it("rejects every built-in before spawn when runtime narrowing removes required tools, and admits compatible routes", async () => {
+		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
+		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
+		const roles = [
+			"coder",
+			"verifier",
+			"debugger",
+			"architect",
+			"researcher",
+			"scout",
+			"tester",
+			"documenter",
+			"provenance",
+		];
+		for (const agentId of roles) {
+			const recipe = recipes.find((entry) => entry.id === agentId);
+			ok(recipe, `missing built-in ${agentId}`);
+
+			let strippedSpawns = 0;
+			const strippedRuntime: RuntimeDescriptor = {
+				...runtimeDescriptor({ id: `stripped-${agentId}`, kind: "http", apiFamily: "openai-completions" }),
+				defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: false },
+			};
+			const strippedTarget: TargetDescriptor = {
+				id: `stripped-${agentId}`,
+				runtime: strippedRuntime.id,
+				defaultModel: "test-model",
+			};
+			const strippedContext = stubContext({
+				target: strippedTarget,
+				runtime: strippedRuntime,
+				recipes: [recipe],
+				status: { capabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: false } },
+			});
+			const stripped = makeDispatchBundle(strippedContext, {
+				spawnWorker: () => {
+					strippedSpawns += 1;
+					throw new Error("must not spawn");
+				},
+			});
+			await stripped.extension.start();
+			try {
+				throws(() => stripped.contract.preview?.({ agentId, task: "compatibility preview" }), /missing required tools/);
+				await rejects(stripped.contract.dispatch({ agentId, task: "compatibility execution" }), /missing required tools/);
+				strictEqual(strippedSpawns, 0, `${agentId} spawned without required tools`);
+			} finally {
+				await stripped.extension.stop?.();
+			}
+
+			let compatibleSpawns = 0;
+			const compatibleContext = stubContext({ recipes: [recipe] });
+			const compatible = makeDispatchBundle(compatibleContext, {
+				spawnWorker: () => {
+					compatibleSpawns += 1;
+					return {
+						pid: 9000 + compatibleSpawns,
+						promise: Promise.resolve({ exitCode: 0, signal: null }),
+						events: finalEvents(`${agentId} done`),
+						heartbeatAt: { current: Date.now() },
+						abort: () => {},
+					};
+				},
+			});
+			await compatible.extension.start();
+			try {
+				const handle = await compatible.contract.dispatch({ agentId, task: "compatible execution" });
+				await handle.finalPromise;
+				strictEqual(compatibleSpawns, 1, `${agentId} did not spawn on compatible runtime`);
+			} finally {
+				await compatible.extension.stop?.();
+			}
+		}
+	});
+
+	it("allows observable optional-tool degradation and rejects unmediated orchestration", async () => {
+		const optionalRecipe: AgentRecipe = {
+			id: "optional-reader",
+			name: "Optional Reader",
+			description: "Reads with optional code navigation.",
+			tools: ["read", "code_nav"],
+			toolRequirements: { required: ["read"], optional: ["code_nav"] },
+			capabilityClass: "read-only",
+			source: "project",
+			filepath: "/tmp/optional-reader.md",
+			body: "Read.",
+		};
+		const claudeRuntime = runtimeDescriptor({ id: "claude-sdk", kind: "sdk", apiFamily: "anthropic-messages" });
+		const claudeTarget: TargetDescriptor = { id: "claude", runtime: "claude-sdk", defaultModel: "test-model" };
+		let captured: WorkerSpec | null = null;
+		const context = stubContext({ target: claudeTarget, runtime: claudeRuntime, recipes: [optionalRecipe] });
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				captured = spec;
+				return {
+					pid: 9100,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					events: finalEvents("optional degradation done"),
+					heartbeatAt: { current: Date.now() },
+					abort: () => {},
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: optionalRecipe.id, task: "read" });
+			await handle.finalPromise;
+			const spawnedSpec = captured as WorkerSpec | null;
+			ok(spawnedSpec);
+			deepStrictEqual(spawnedSpec.allowedTools, ["read"]);
+			strictEqual(spawnedSpec.toolSignature, sha256(JSON.stringify(["read"])));
+		} finally {
+			await bundle.extension.stop?.();
+		}
+
+		const orchestrator: AgentRecipe = {
+			id: "nested",
+			name: "Nested",
+			description: "Nested dispatch.",
+			tools: ["dispatch"],
+			toolRequirements: { required: ["dispatch"], optional: [] },
+			capabilityClass: "orchestration",
+			source: "project",
+			filepath: "/tmp/nested.md",
+			body: "Dispatch.",
+		};
+		let orchestrationSpawns = 0;
+		const orchestration = makeDispatchBundle(stubContext({ recipes: [orchestrator] }), {
+			spawnWorker: () => {
+				orchestrationSpawns += 1;
+				throw new Error("must not spawn");
+			},
+		});
+		await orchestration.extension.start();
+		try {
+			throws(() => orchestration.contract.preview?.({ agentId: "nested", task: "nested" }), /mediation unavailable/);
+			await rejects(orchestration.contract.dispatch({ agentId: "nested", task: "nested" }), /mediation unavailable/);
+			strictEqual(orchestrationSpawns, 0);
+		} finally {
+			await orchestration.extension.stop?.();
+		}
+	});
+
 	it("dispatches single task using a fake worker and returns exit receipt", async () => {
 		const context = stubContext();
 		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
@@ -871,6 +1015,11 @@ describe("contracts/dispatch", () => {
 			filepath: "/test/coder.md",
 			body: "# Coder\n\nImplement the assigned change.",
 			tools: ["read", "grep", "find", "ls", "git", "context", "code_nav", "write", "edit", "verify", "web_fetch"],
+			toolRequirements: {
+				required: ["read"],
+				optional: ["grep", "find", "ls", "git", "context", "code_nav", "write", "edit", "verify", "web_fetch"],
+			},
+			capabilityClass: "internal",
 			budget: { toolCalls: 50, readReserve: 5, synthesis: true },
 		};
 		const captured: WorkerSpec[] = [];

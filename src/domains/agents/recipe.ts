@@ -58,11 +58,24 @@ export function parseAgentBudget(value: unknown, sourcePath: string): AgentBudge
 	return { toolCalls, readReserve, synthesis };
 }
 
+export interface AgentToolAnyOfRequirement {
+	anyOf: ReadonlyArray<string>;
+}
+
+export type AgentToolRequirement = string | AgentToolAnyOfRequirement;
+
+/** Authored required/optional semantics. `tools` remains the flattened declared inventory. */
+export interface AgentToolRequirements {
+	required: ReadonlyArray<AgentToolRequirement>;
+	optional: ReadonlyArray<string>;
+}
+
 export interface AgentRecipe {
 	id: string;
 	name: string;
 	description: string;
 	tools?: ReadonlyArray<string>;
+	toolRequirements?: AgentToolRequirements;
 	model?: string;
 	target?: string;
 	thinkingLevel?: RecipeThinkingLevel;

@@ -4,9 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { renderAgentCatalog, renderAgentCatalogSectionsFromSpecs } from "../../src/domains/agents/catalog.js";
 import { loadRecipesFromDir, mergeRecipes } from "../../src/domains/agents/registry.js";
-import { agentSpecPolicyErrors, isUserVisibleAgent, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import {
+	agentSpecPolicyErrors,
+	isUserVisibleAgent,
+	normalizeAgentSpec,
+	resolveAgentToolCompatibility,
+} from "../../src/domains/agents/spec.js";
 import { SPOT_CHECK_GUIDANCE, workerTextLabel } from "../../src/tools/worker-evidence.js";
 
 describe("contracts/agents", () => {
@@ -47,6 +53,71 @@ describe("contracts/agents", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("resolves required all-of/any-of groups and optional degradation", () => {
+		const spec = normalizeAgentSpec({
+			id: "semantic-coder",
+			name: "Semantic Coder",
+			description: "Edits with optional navigation.",
+			tools: ["read", "write", "edit", "code_nav"],
+			toolRequirements: {
+				required: ["read", { anyOf: ["write", "edit"] }],
+				optional: ["code_nav"],
+			},
+			capabilityClass: "workspace-edit",
+			source: "project",
+			filepath: "/tmp/semantic-coder.md",
+			body: "Semantic coder.",
+		});
+		deepStrictEqual(resolveAgentToolCompatibility(spec, [ToolNames.Read, ToolNames.Edit], { mediatesDispatch: false }), {
+			compatible: true,
+			missingRequired: [],
+			lostOptional: [ToolNames.CodeNav],
+		});
+		deepStrictEqual(resolveAgentToolCompatibility(spec, [ToolNames.Read], { mediatesDispatch: false }), {
+			compatible: false,
+			missingRequired: ["anyOf(write|edit)"],
+			lostOptional: [ToolNames.CodeNav],
+		});
+	});
+
+	it("derives conservative legacy requirements by capability, skill binding, and orchestration", () => {
+		const cases = [
+			{ id: "coder", capabilityClass: "workspace-edit" as const, tools: ["read", "write", "edit"] },
+			{ id: "verifier", capabilityClass: "verification" as const, tools: ["read", "verify"] },
+			{ id: "debugger", capabilityClass: "verification" as const, tools: ["read", "verify"] },
+			{ id: "architect", capabilityClass: "artifact-write" as const, tools: ["read", "artifact"] },
+			{ id: "researcher", capabilityClass: "read-only" as const, tools: ["read", "web_fetch"] },
+			{ id: "scout", capabilityClass: "read-only" as const, tools: ["read", "code_nav"] },
+			{ id: "tester", capabilityClass: "workspace-edit" as const, tools: ["read", "edit"] },
+			{ id: "documenter", capabilityClass: "workspace-edit" as const, tools: ["read", "write"] },
+			{ id: "skill-bound", capabilityClass: "read-only" as const, tools: ["read", "context"], skills: ["hpc"] },
+			{ id: "orchestrator", capabilityClass: "orchestration" as const, tools: ["read", "dispatch"] },
+		];
+		const requirements = Object.fromEntries(
+			cases.map((entry) => {
+				const spec = normalizeAgentSpec({
+					...entry,
+					name: entry.id,
+					description: entry.id,
+					source: "project",
+					filepath: `/tmp/${entry.id}.md`,
+					body: entry.id,
+				});
+				return [entry.id, spec.toolRequirements.required];
+			}),
+		);
+		deepStrictEqual(requirements.coder, ["read", { anyOf: ["write", "edit"] }]);
+		deepStrictEqual(requirements.verifier, ["verify"]);
+		deepStrictEqual(requirements.debugger, ["verify"]);
+		deepStrictEqual(requirements.architect, ["artifact"]);
+		deepStrictEqual(requirements.researcher, []);
+		deepStrictEqual(requirements.scout, []);
+		deepStrictEqual(requirements.tester, ["read", { anyOf: ["write", "edit"] }]);
+		deepStrictEqual(requirements.documenter, ["read", { anyOf: ["write", "edit"] }]);
+		deepStrictEqual(requirements["skill-bound"], ["context"]);
+		deepStrictEqual(requirements.orchestrator, ["dispatch"]);
 	});
 
 	it("flags capability declarations that contradict tool access", () => {
@@ -133,6 +204,7 @@ describe("contracts/agents", () => {
 				source: "custom",
 				filepath: "settings.yaml",
 				tools: [],
+				toolRequirements: { required: [], optional: [] },
 				category: "explore",
 				capabilityClass: "orchestration",
 				latencyClass: "deep",
@@ -260,16 +332,47 @@ describe("contracts/agents", () => {
 		match(errors[0] ?? "", /declares skills but does not expose context/);
 	});
 
-	it("keeps shipped built-in recipes aligned with their declared capability class", () => {
+	it("keeps shipped built-in recipes aligned with their declared capability class and semantic requirements", () => {
 		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
 		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
 		ok(recipes.length > 0);
 
-		const failures = recipes.flatMap((recipe) => {
-			const spec = normalizeAgentSpec(recipe);
-			return agentSpecPolicyErrors(spec).map((error) => `${spec.id}: ${error}`);
-		});
+		const specs = recipes.map(normalizeAgentSpec);
+		const failures = specs.flatMap((spec) => agentSpecPolicyErrors(spec).map((error) => `${spec.id}: ${error}`));
 		strictEqual(failures.join("\n"), "");
+		const required = Object.fromEntries(specs.map((spec) => [spec.id, spec.toolRequirements.required]));
+		deepStrictEqual(required.coder, ["read", { anyOf: ["write", "edit"] }]);
+		deepStrictEqual(required.verifier, ["verify"]);
+		deepStrictEqual(required.debugger, ["verify"]);
+		deepStrictEqual(required.architect, ["artifact", "context"]);
+		deepStrictEqual(required.researcher, ["read"]);
+		deepStrictEqual(required.scout, ["read"]);
+		deepStrictEqual(required.tester, ["read", { anyOf: ["write", "edit"] }]);
+		deepStrictEqual(required.documenter, ["read", { anyOf: ["write", "edit"] }]);
+	});
+
+	it("fails hard for malformed shipped tool semantics and quarantines malformed custom recipes", () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-agent-tools-invalid-"));
+		const filepath = join(dir, "invalid.md");
+		let diagnostic = "";
+		const originalWrite = process.stderr.write;
+		try {
+			writeFileSync(
+				filepath,
+				["---", "name: Invalid", "tools:", "  required: [{anyOf: []}]", "  optional: [read]", "---", "Invalid."].join("\n"),
+			);
+			throws(() => loadRecipesFromDir({ dir, source: "builtin" }), /tools\.required\[0\]/);
+			process.stderr.write = ((chunk: string | Uint8Array) => {
+				diagnostic += String(chunk);
+				return true;
+			}) as typeof process.stderr.write;
+			deepStrictEqual(loadRecipesFromDir({ dir, source: "user" }), []);
+			match(diagnostic, /quarantine/);
+			ok(diagnostic.includes(filepath));
+		} finally {
+			process.stderr.write = originalWrite;
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("loads the exact shipped Scout and Coder budget profiles", () => {
@@ -327,7 +430,7 @@ describe("contracts/agents", () => {
 		}
 	});
 
-	it("rejects every malformed budget with a source-qualified property error", () => {
+	it("quarantines every malformed custom budget with a source-qualified diagnostic", () => {
 		const invalid: ReadonlyArray<{ yaml: ReadonlyArray<string>; property: string }> = [
 			{ yaml: ["budget: null"], property: "budget" },
 			{ yaml: ["budget: 18"], property: "budget" },
@@ -356,14 +459,20 @@ describe("contracts/agents", () => {
 		for (const [index, testCase] of invalid.entries()) {
 			const dir = mkdtempSync(join(tmpdir(), "clio-agent-budget-invalid-"));
 			const filepath = join(dir, `invalid-${index}.md`);
+			let diagnostic = "";
+			const originalWrite = process.stderr.write;
 			try {
 				writeFileSync(filepath, ["---", "name: Invalid", ...testCase.yaml, "---", "Invalid."].join("\n"));
-				throws(
-					() => loadRecipesFromDir({ dir, source: "project" }),
-					(error: unknown) =>
-						error instanceof Error && error.message.includes(filepath) && error.message.includes(testCase.property),
-				);
+				process.stderr.write = ((chunk: string | Uint8Array) => {
+					diagnostic += String(chunk);
+					return true;
+				}) as typeof process.stderr.write;
+				deepStrictEqual(loadRecipesFromDir({ dir, source: "project" }), []);
+				ok(diagnostic.includes(filepath), diagnostic);
+				ok(diagnostic.includes(testCase.property), diagnostic);
+				match(diagnostic, /quarantine/);
 			} finally {
+				process.stderr.write = originalWrite;
 				rmSync(dir, { recursive: true, force: true });
 			}
 		}

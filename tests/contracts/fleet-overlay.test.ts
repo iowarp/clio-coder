@@ -155,6 +155,7 @@ function spec(id: string, audience: AgentSpec["audience"]): AgentSpec {
 		source: "builtin",
 		filepath: `/builtin/${id}.md`,
 		tools: [],
+		toolRequirements: { required: [], optional: [] },
 		category: "research",
 		capabilityClass: "read-only",
 		latencyClass: "fast",

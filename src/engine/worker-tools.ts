@@ -84,6 +84,11 @@ export interface ToolFinishEvent {
 	skillActivation?: SkillActivation;
 }
 
+/** Native worker registries currently receive no DispatchContract, so nested Clio dispatch is never registered. */
+export function workerRuntimeMediatesClioDispatch(_runtimeId: string): boolean {
+	return false;
+}
+
 export interface ResolveAgentToolsInput {
 	registry: ToolRegistry;
 	allowedTools?: ReadonlyArray<ToolName>;

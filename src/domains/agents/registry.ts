@@ -1,8 +1,15 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
-import { type AgentRecipe, parseAgentBudget, type RecipeSource, recipeIdFromPath } from "./recipe.js";
 import {
+	type AgentRecipe,
+	type AgentToolRequirement,
+	parseAgentBudget,
+	type RecipeSource,
+	recipeIdFromPath,
+} from "./recipe.js";
+import {
+	assertAgentSpecPolicy,
 	isAgentAudience,
 	isAgentCapabilityClass,
 	isAgentCategory,
@@ -22,6 +29,46 @@ function parseRuntime(value: unknown): AgentRecipe["runtime"] {
 function parseStringArray(value: unknown): ReadonlyArray<string> | undefined {
 	if (!Array.isArray(value)) return undefined;
 	return value.map((v) => String(v));
+}
+
+function strictToolName(value: unknown, path: string): string {
+	if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${path} must be a non-empty string`);
+	return value;
+}
+
+function parseTools(value: unknown, filepath: string): Pick<AgentRecipe, "tools" | "toolRequirements"> | undefined {
+	if (value === undefined) return undefined;
+	if (Array.isArray(value)) {
+		return { tools: value.map((entry, index) => strictToolName(entry, `${filepath}: tools[${index}]`)) };
+	}
+	if (value === null || typeof value !== "object") {
+		throw new Error(`${filepath}: tools must be an array or a required/optional object`);
+	}
+	const record = value as Record<string, unknown>;
+	for (const key of Object.keys(record)) {
+		if (key !== "required" && key !== "optional") throw new Error(`${filepath}: tools.${key} is unknown`);
+	}
+	if (!Array.isArray(record.required)) throw new Error(`${filepath}: tools.required must be an array`);
+	if (!Array.isArray(record.optional)) throw new Error(`${filepath}: tools.optional must be an array`);
+	const required: AgentToolRequirement[] = record.required.map((entry, index) => {
+		const entryPath = `${filepath}: tools.required[${index}]`;
+		if (typeof entry === "string") return strictToolName(entry, entryPath);
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+			throw new Error(`${entryPath} must be a tool name or { anyOf: [...] }`);
+		}
+		const group = entry as Record<string, unknown>;
+		if (Object.keys(group).length !== 1 || !Array.isArray(group.anyOf) || group.anyOf.length === 0) {
+			throw new Error(`${entryPath} must contain only a non-empty anyOf array`);
+		}
+		return { anyOf: group.anyOf.map((tool, toolIndex) => strictToolName(tool, `${entryPath}.anyOf[${toolIndex}]`)) };
+	});
+	const optional = record.optional.map((entry, index) => strictToolName(entry, `${filepath}: tools.optional[${index}]`));
+	const tools = [
+		...required.flatMap((requirement) => (typeof requirement === "string" ? [requirement] : requirement.anyOf)),
+		...optional,
+	];
+	if (new Set(tools).size !== tools.length) throw new Error(`${filepath}: tools contains duplicate requirements`);
+	return { tools, toolRequirements: { required, optional } };
 }
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
@@ -46,42 +93,51 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 		if (!entry.name.endsWith(".md")) continue;
 		const filepath = path.join(source.dir, entry.name);
 		const id = recipeIdFromPath(filepath, source.dir);
-		const raw = readFileSync(filepath, "utf8");
-		const { frontmatter, body } = parseFrontmatter(raw, filepath);
-		const name = typeof frontmatter.name === "string" ? frontmatter.name : id;
-		const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
+		try {
+			const raw = readFileSync(filepath, "utf8");
+			const { frontmatter, body } = parseFrontmatter(raw, filepath);
+			const name = typeof frontmatter.name === "string" ? frontmatter.name : id;
+			const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
 
-		const recipe: AgentRecipe = {
-			id,
-			name,
-			description,
-			source: source.source,
-			filepath,
-			body,
-		};
-		const runtime = parseRuntime(frontmatter.runtime);
-		if (runtime) recipe.runtime = runtime;
-		const tools = parseStringArray(frontmatter.tools);
-		if (tools) recipe.tools = tools;
-		const skills = parseStringArray(frontmatter.skills);
-		if (skills) recipe.skills = skills;
-		if (typeof frontmatter.model === "string") recipe.model = frontmatter.model;
-		if (typeof frontmatter.target === "string") recipe.target = frontmatter.target;
-		const thinking = parseThinkingLevel(frontmatter.thinkingLevel);
-		if (thinking) recipe.thinkingLevel = thinking;
-		const budget = parseAgentBudget(frontmatter.budget, filepath);
-		if (budget) recipe.budget = budget;
-		if (isAgentCategory(frontmatter.category)) recipe.category = frontmatter.category;
-		if (isAgentCapabilityClass(frontmatter.capabilityClass)) recipe.capabilityClass = frontmatter.capabilityClass;
-		if (isAgentLatencyClass(frontmatter.latencyClass)) recipe.latencyClass = frontmatter.latencyClass;
-		if (isAgentProjectContextTier(frontmatter.projectContextTier)) {
-			recipe.projectContextTier = frontmatter.projectContextTier;
+			const recipe: AgentRecipe = {
+				id,
+				name,
+				description,
+				source: source.source,
+				filepath,
+				body,
+			};
+			const runtime = parseRuntime(frontmatter.runtime);
+			if (runtime) recipe.runtime = runtime;
+			const parsedTools = parseTools(frontmatter.tools, filepath);
+			if (parsedTools?.tools) recipe.tools = parsedTools.tools;
+			if (parsedTools?.toolRequirements) recipe.toolRequirements = parsedTools.toolRequirements;
+			const skills = parseStringArray(frontmatter.skills);
+			if (skills) recipe.skills = skills;
+			if (typeof frontmatter.model === "string") recipe.model = frontmatter.model;
+			if (typeof frontmatter.target === "string") recipe.target = frontmatter.target;
+			const thinking = parseThinkingLevel(frontmatter.thinkingLevel);
+			if (thinking) recipe.thinkingLevel = thinking;
+			const budget = parseAgentBudget(frontmatter.budget, filepath);
+			if (budget) recipe.budget = budget;
+			if (isAgentCategory(frontmatter.category)) recipe.category = frontmatter.category;
+			if (isAgentCapabilityClass(frontmatter.capabilityClass)) recipe.capabilityClass = frontmatter.capabilityClass;
+			if (isAgentLatencyClass(frontmatter.latencyClass)) recipe.latencyClass = frontmatter.latencyClass;
+			if (isAgentProjectContextTier(frontmatter.projectContextTier)) {
+				recipe.projectContextTier = frontmatter.projectContextTier;
+			}
+			if (isAgentAudience(frontmatter.audience)) recipe.audience = frontmatter.audience;
+			const tags = parseStringArray(frontmatter.tags);
+			if (tags) recipe.tags = tags;
+			if (typeof frontmatter.output === "string") recipe.output = frontmatter.output;
+			// Normalization and policy validation run before the recipe enters any catalog.
+			assertAgentSpecPolicy(normalizeAgentSpec(recipe));
+			recipes.push(recipe);
+		} catch (error) {
+			if (source.source === "builtin") throw error;
+			const message = error instanceof Error ? error.message : String(error);
+			process.stderr.write(`[clio:agents] quarantine path=${filepath} source=${source.source} reason=${message}\n`);
 		}
-		if (isAgentAudience(frontmatter.audience)) recipe.audience = frontmatter.audience;
-		const tags = parseStringArray(frontmatter.tags);
-		if (tags) recipe.tags = tags;
-		if (typeof frontmatter.output === "string") recipe.output = frontmatter.output;
-		recipes.push(recipe);
 	}
 
 	recipes.sort((a, b) => a.id.localeCompare(b.id));
