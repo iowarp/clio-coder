@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
+import type { RunPhaseDurations } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Contracts (ported from awoc dispatch/contracts.ts, trimmed to the observer)
@@ -69,7 +70,10 @@ export interface SpeculationPlan {
 export interface SpeculationActual {
 	agentId: string;
 	outcome: string;
+	/** User-observed request-to-terminal latency, never execution-only duration. */
 	latencyMs: number;
+	executionDurationMs?: number;
+	phases?: RunPhaseDurations;
 	tokens: number;
 }
 

@@ -27,6 +27,7 @@ import {
 import { DispatchManifest } from "../../src/domains/dispatch/manifest.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { resolveRunOutcome, runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
+import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "../../src/domains/dispatch/phase-timing.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
 	countToolCalls,
@@ -41,6 +42,7 @@ import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import { compileWorker, safetyOneLiner } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
+import { listCatalogModelsForRuntime } from "../../src/domains/providers/catalog.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -222,6 +224,7 @@ function stubContext(
 		recipes?: ReadonlyArray<AgentRecipe>;
 		status?: Partial<TargetStatus>;
 		budgetVerdict?: "under" | "at" | "over";
+		budgetCurrentUsd?: number;
 		auditSink?: ToolCallAuditInput[];
 		completionSink?: CompletionContractAuditInput[];
 	} = {},
@@ -360,11 +363,12 @@ function stubContext(
 		if (name === "scheduling")
 			return {
 				ceilingUsd: () => 5,
-				checkCeiling: () => options.budgetVerdict ?? "under",
+				checkCeiling: (usd: number) => options.budgetVerdict ?? (usd < 5 ? "under" : usd === 5 ? "at" : "over"),
 				raiseCeiling: () => {},
 				preflight: () => {
 					const verdict = options.budgetVerdict ?? "under";
-					return verdict === "under" ? { verdict, currentUsd: 0, ceilingUsd: 5 } : { verdict, currentUsd: 5, ceilingUsd: 5 };
+					const currentUsd = options.budgetCurrentUsd ?? (verdict === "under" ? 0 : 5);
+					return { verdict, currentUsd, ceilingUsd: 5 };
 				},
 				activeWorkers: () => 0,
 				tryAcquireWorker: () => true,
@@ -890,6 +894,127 @@ describe("contracts/dispatch", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	});
+
+	it("prices catalog-backed usage in both the in-flight snapshot and finalized receipt", async () => {
+		const model = listCatalogModelsForRuntime("openai").find(
+			(candidate) => candidate.cost.input > 0 && candidate.cost.output > 0,
+		);
+		ok(model, "the OpenAI catalog must expose a paid model for this contract");
+		const context = stubContext({
+			target: { id: "catalog-target", runtime: "openai", defaultModel: model.id },
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		const events = (async function* () {
+			yield {
+				type: "message_end",
+				message: {
+					role: "assistant",
+					stopReason: "stop",
+					content: "catalog priced result",
+					usage: { input: 1000, output: 1000, cacheRead: 100, cacheWrite: 100 },
+				},
+			};
+		})();
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => ({
+				pid: 9001,
+				promise: exit.promise,
+				events,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "catalog pricing" });
+			await waitFor(() => (bundle.contract.snapshot().running[0]?.tokens.total ?? 0) > 0, "usage was not metered");
+			const inFlight = bundle.contract.snapshot().running[0];
+			ok(inFlight);
+			strictEqual(inFlight.costProvenance, "estimated");
+			ok(inFlight.costUsd > 0);
+			exit.resolve({ exitCode: 0, signal: null });
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.costProvenance, "estimated");
+			ok(receipt.costUsd > 0);
+			strictEqual(receipt.costUsd, inFlight.costUsd);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("applies a nonzero conservative admission estimate to unknown pricing", async () => {
+		const auditRows: ToolCallAuditInput[] = [];
+		const context = stubContext({
+			budgetCurrentUsd: 4.5,
+			auditSink: auditRows,
+			target: { id: "unknown-price", runtime: "openai", defaultModel: "definitely-not-cataloged" },
+		});
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				throw new Error("unknown-price route must not spawn past its projected ceiling");
+			},
+		});
+
+		await bundle.extension.start();
+		try {
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", task: "unknown pricing admission" }),
+				/includes \$1\.0000 route estimate/,
+			);
+			strictEqual(auditRows[0]?.reasonCode, "budget-ceiling");
+			match(auditRows[0]?.reasons?.[0] ?? "", /\$5\.5000 \/ \$5\.0000/);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("persists end-to-end phase marks separately from sealed receipts", async () => {
+		const ledger = openLedger();
+		const timing = {
+			requestedAt: "2026-07-20T00:00:00.000Z",
+			decisionStartedAt: "2026-07-20T00:00:00.010Z",
+			decisionCompletedAt: "2026-07-20T00:00:00.110Z",
+			queuedAt: "2026-07-20T00:00:00.210Z",
+			admittedAt: "2026-07-20T00:00:00.410Z",
+			workerSpawnedAt: "2026-07-20T00:00:00.610Z",
+			firstModelTokenAt: "2026-07-20T00:00:00.700Z",
+			endedAt: "2026-07-20T00:00:01.000Z",
+		};
+		const run = ledger.create({
+			agentId: "coder",
+			task: "timed run",
+			targetId: "target",
+			wireModelId: "model",
+			runtimeId: "runtime",
+			runtimeKind: "http",
+			timing,
+			sessionId: null,
+			cwd: "/tmp",
+		});
+		ledger.update(run.id, {
+			startedAt: "2026-07-20T00:00:00.900Z",
+			endedAt: timing.endedAt,
+			status: "completed",
+			exitCode: 0,
+		});
+		await ledger.persist();
+
+		const reloaded = openLedger().get(run.id);
+		ok(reloaded);
+		deepStrictEqual(reloaded.timing, timing);
+		const phases = deriveEnvelopePhaseDurations(reloaded);
+		strictEqual(phases.executionMs, 100);
+		strictEqual(phases.totalEndToEndMs, 1000);
+		ok((phases.totalEndToEndMs ?? 0) > (phases.executionMs ?? 0));
+		strictEqual(
+			recordRunTimingBestEffort(() => {
+				throw new Error("timing store unavailable");
+			}),
+			false,
+			"timing persistence failures are contained",
+		);
 	});
 
 	it("resolves worker targets through the injected session settings view, not the shared config", async () => {

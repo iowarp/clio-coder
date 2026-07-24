@@ -140,6 +140,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				wireModelId: input.wireModelId,
 				runtimeId: input.runtimeId,
 				runtimeKind: input.runtimeKind,
+				...(input.timing !== undefined ? { timing: structuredClone(input.timing) } : {}),
 				startedAt: new Date().toISOString(),
 				endedAt: null,
 				status: "queued",
