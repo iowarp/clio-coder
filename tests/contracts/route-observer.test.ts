@@ -85,6 +85,7 @@ function receiptDraft(run: RunEnvelope): RunReceiptDraft {
 			version: 1,
 			typedValidations: [{ sourceId: "verifier", validatorDigest: "a".repeat(64), passed: true }],
 			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: null,
 		},
 		sessionId: null,
 	};

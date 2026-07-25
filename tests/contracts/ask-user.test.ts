@@ -16,6 +16,7 @@ import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { createAskUserTool, normalizeAskUserCall } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { type AskUserToolPolicy, createRegistry } from "../../src/tools/registry.js";
+import { agentRecipeFixture } from "../harness/agent-recipe.js";
 
 const ESC = String.fromCharCode(27);
 const stripAnsi = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
@@ -198,6 +199,7 @@ describe("contracts/ask_user", () => {
 
 	it("policy errors fire for recipes declaring ask_user", () => {
 		const spec = normalizeAgentSpec({
+			...agentRecipeFixture(),
 			toolRequirements: { required: [], optional: ["read", "ask_user"] },
 			id: "interviewer",
 			name: "Interviewer",

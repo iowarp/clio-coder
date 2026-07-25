@@ -47,6 +47,7 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 			version: 1,
 			typedValidations: [],
 			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: null,
 		},
 		costProvenance: "unknown",
 		outcome: "succeeded",
@@ -80,7 +81,7 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		toolCalls: 2,
 		toolStats: [],
 		sessionId: null,
-		integrity: { version: 8, algorithm: "sha256", digest: "0".repeat(64) },
+		integrity: { version: 9, algorithm: "sha256", digest: "0".repeat(64) },
 		...overrides,
 	};
 }

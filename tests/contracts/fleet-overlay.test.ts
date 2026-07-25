@@ -149,6 +149,7 @@ function evidenceErrorNotice(runId: string, message: string): ObservabilityNotic
 
 function spec(id: string, audience: AgentSpec["audience"]): AgentSpec {
 	return {
+		version: 1,
 		id,
 		name: id,
 		description: `${id} agent`,
@@ -163,9 +164,9 @@ function spec(id: string, audience: AgentSpec["audience"]): AgentSpec {
 		audience,
 		tags: [],
 		skills: [],
-		output: null,
-		budget: null,
-		body: "",
+		resultContract: { kind: "provenance-report" },
+		budget: { toolCalls: 8, readReserve: 1, synthesis: true },
+		body: "# Fixture",
 	};
 }
 
@@ -180,6 +181,7 @@ function fakeAgents(): AgentsContract {
 	return {
 		list: () => [],
 		get: () => null,
+		diagnostics: () => [],
 		listSpecs: () => specs,
 		getSpec: (id: string) => specs.find((entry) => entry.id === id) ?? null,
 		reload() {},

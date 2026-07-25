@@ -21,6 +21,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
+import type { AgentLatencyClass } from "../agents/spec.js";
 import { parseEvalArtifactV3 } from "../eval/artifacts/store.js";
 import { readGateDecisionArtifacts } from "./gate-decisions.js";
 import {
@@ -40,6 +41,7 @@ import {
 	type RouteEstimate,
 	type RouteObservation,
 	routeObservationFromHistory,
+	routePriorForLatencyClass,
 } from "./route-policy.js";
 import { type RouteQualityReduction, reduceRouteQuality, routeQualityEvalDigest } from "./route-quality.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
@@ -138,6 +140,7 @@ export function classifyRouteIntent(task: string): RouteIntent {
 export interface RouteAgentDescriptor {
 	id: string;
 	description: string;
+	latencyClass?: AgentLatencyClass;
 }
 
 /** Agent-id hints per task type, tried in order against the known agents. */
@@ -370,7 +373,7 @@ export interface CreateRouteObserverOptions {
 	/** Monotonic microsecond clock; injectable so a test can pin decision duration. */
 	nowUs?: () => number;
 	/** Estimator seam; defaults to the shrinkage estimator over the sample store. */
-	estimate?: (samples: ReadonlyArray<RouteObservation>) => RouteEstimate;
+	estimate?: (samples: ReadonlyArray<RouteObservation>, prior?: Parameters<typeof estimateRoute>[1]) => RouteEstimate;
 }
 
 function durableQualitySources(stateDir: string): {
@@ -490,13 +493,17 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					mode: "shadow",
 					posture: "balanced",
 					executedRoute: input.executedRoute,
-					candidates: input.candidates.map((entry) => ({
-						candidate: entry.candidate,
-						estimate: estimateFor(
-							samples?.samplesFor(entry.candidate) ?? history.recordsFor(entry.candidate).map(routeObservationFromHistory),
-						),
-						rejection: entry.rejection,
-					})),
+					candidates: input.candidates.map((entry) => {
+						const latencyClass = options.getAgents().find((agent) => agent.id === entry.candidate.agentId)?.latencyClass;
+						return {
+							candidate: entry.candidate,
+							estimate: estimateFor(
+								samples?.samplesFor(entry.candidate) ?? history.recordsFor(entry.candidate).map(routeObservationFromHistory),
+								latencyClass === undefined ? undefined : routePriorForLatencyClass(latencyClass),
+							),
+							rejection: entry.rejection,
+						};
+					}),
 					hardConstraints: input.hardConstraints,
 					maxFallbacks: input.maxFallbacks,
 					decisionDurationMs: Math.max(0, nowUs() - startedUs) / 1000,

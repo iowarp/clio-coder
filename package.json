@@ -47,6 +47,7 @@
 		"!dist/**/*.map",
 		"assets/clio-coder-logo-128.webp",
 		"src/domains/agents/builtins/**",
+		"skills/cut-it/**",
 		"src/domains/providers/models/**",
 		"src/domains/prompts/fragments/**",
 		"docs/*.md",

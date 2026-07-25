@@ -91,6 +91,7 @@ async function sealRunWithSession(scratch: string, task: string): Promise<string
 			version: 1,
 			typedValidations: [],
 			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: null,
 		},
 		costProvenance: "unknown",
 		runId: envelope.id,

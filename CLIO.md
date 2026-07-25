@@ -25,4 +25,9 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 ## Dispatch routing quality
 
 - `src/domains/dispatch/route-quality.ts` is the pure reducer for integrity-valid receipt, gate, and eval evidence. Descriptive receipt verification never establishes routing quality.
-- `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity v8 requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.
+- `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity v9 requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.
+
+## Strict agent recipes
+
+- `src/domains/agents/recipe-schema.ts` is the only versioned frontmatter schema; malformed custom recipes are quarantined with `AgentsContract.diagnostics()` and builtins fail startup.
+- `src/domains/agents/result-contract.ts` validates typed terminal contracts. Result conformance is sealed in receipt quality facts, while only correctness-bearing contracts can label routing quality.

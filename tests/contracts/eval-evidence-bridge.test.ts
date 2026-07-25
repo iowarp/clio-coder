@@ -39,9 +39,10 @@ function receipt(partial: Partial<RunReceipt> = {}): RunReceipt {
 			version: 1,
 			typedValidations: [],
 			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: null,
 		},
 		sessionId: null,
-		integrity: { version: 8, algorithm: "sha256", digest: "d".repeat(64) },
+		integrity: { version: 9, algorithm: "sha256", digest: "d".repeat(64) },
 		...partial,
 	} as RunReceipt;
 }

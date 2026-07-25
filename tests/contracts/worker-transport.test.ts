@@ -26,6 +26,7 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
+import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { type FakeSsh, installFakeSsh } from "../harness/fake-ssh.js";
 
@@ -468,6 +469,7 @@ function stubContext(): DomainContext {
 	};
 	const recipes: ReadonlyArray<AgentRecipe> = [
 		{
+			...agentRecipeFixture(),
 			toolRequirements: { required: [], optional: [] },
 			id: "coder",
 			name: "coder",
@@ -480,6 +482,7 @@ function stubContext(): DomainContext {
 	const agents: AgentsContract = {
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
+		diagnostics: () => [],
 		listSpecs: () => recipes.map(normalizeAgentSpec),
 		getSpec: (id) => {
 			const recipe = recipes.find((entry) => entry.id === id);

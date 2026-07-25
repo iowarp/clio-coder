@@ -19,6 +19,7 @@ import type {
 	RunReceiptDraft,
 	RunReceiptFindingsSummary,
 	RunReceiptQuality,
+	RunReceiptResultContractFact,
 	RunReceiptTypedValidationFact,
 	RunReceiptVerification,
 } from "./types.js";
@@ -57,6 +58,7 @@ export interface CreateRunReceiptQualityInput {
 	runtimeEnforceable: boolean;
 	enforcementPassed: boolean | null;
 	typedValidations?: ReadonlyArray<RunReceiptTypedValidationFact>;
+	resultContract?: RunReceiptResultContractFact | null;
 }
 
 /**
@@ -93,6 +95,7 @@ export function createRunReceiptQuality(input: CreateRunReceiptQualityInput): Ru
 			runtimeEnforceable: input.responseSchema === undefined ? false : input.runtimeEnforceable,
 			enforcementPassed: input.responseSchema === undefined ? null : input.enforcementPassed,
 		},
+		resultContract: input.resultContract ?? null,
 	};
 }
 

@@ -6,7 +6,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 8;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 9;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -238,12 +238,27 @@ function isReceiptQuality(value: unknown): value is RunReceiptQuality {
 	const schema = quality.responseSchema;
 	if (!schema || typeof schema !== "object" || Array.isArray(schema)) return false;
 	const responseSchema = schema as Record<string, unknown>;
+	const resultContract = quality.resultContract;
+	const validResultContract =
+		resultContract === null ||
+		(resultContract !== undefined &&
+			typeof resultContract === "object" &&
+			!Array.isArray(resultContract) &&
+			typeof (resultContract as Record<string, unknown>).sourceId === "string" &&
+			typeof (resultContract as Record<string, unknown>).validatorDigest === "string" &&
+			/^[0-9a-f]{64}$/.test(String((resultContract as Record<string, unknown>).validatorDigest)) &&
+			((resultContract as Record<string, unknown>).conformance === "pass" ||
+				(resultContract as Record<string, unknown>).conformance === "fail") &&
+			((resultContract as Record<string, unknown>).quality === "pass" ||
+				(resultContract as Record<string, unknown>).quality === "fail" ||
+				(resultContract as Record<string, unknown>).quality === "unmeasured"));
 	return (
 		(responseSchema.sourceId === null || typeof responseSchema.sourceId === "string") &&
 		(responseSchema.schemaDigest === null ||
 			(typeof responseSchema.schemaDigest === "string" && /^[0-9a-f]{64}$/.test(responseSchema.schemaDigest))) &&
 		typeof responseSchema.runtimeEnforceable === "boolean" &&
-		(responseSchema.enforcementPassed === null || typeof responseSchema.enforcementPassed === "boolean")
+		(responseSchema.enforcementPassed === null || typeof responseSchema.enforcementPassed === "boolean") &&
+		validResultContract
 	);
 }
 

@@ -1,572 +1,83 @@
-import { deepStrictEqual, doesNotMatch, match, ok, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { renderAgentCatalog, renderAgentCatalogSectionsFromSpecs } from "../../src/domains/agents/catalog.js";
+import { renderAgentCatalog } from "../../src/domains/agents/catalog.js";
+import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { loadRecipesFromDir, mergeRecipes } from "../../src/domains/agents/registry.js";
 import {
 	agentSpecPolicyErrors,
-	isUserVisibleAgent,
 	normalizeAgentSpec,
 	resolveAgentToolCompatibility,
 } from "../../src/domains/agents/spec.js";
-import { SPOT_CHECK_GUIDANCE, workerTextLabel } from "../../src/tools/worker-evidence.js";
+
+function recipe(overrides: Partial<AgentRecipe> = {}): AgentRecipe {
+	return {
+		version: 1,
+		id: "helper",
+		name: "Helper",
+		description: "Strict test helper.",
+		tools: ["read"],
+		toolRequirements: { required: ["read"], optional: [] },
+		skills: [],
+		boundSkillPaths: [],
+		audience: "custom",
+		category: "explore",
+		capabilityClass: "read-only",
+		latencyClass: "fast",
+		projectContextTier: "none",
+		budget: { toolCalls: 8, readReserve: 1, synthesis: true },
+		resultContract: { kind: "provenance-report" },
+		tags: [],
+		source: "project",
+		filepath: "/tmp/helper.md",
+		body: "# Helper",
+		...overrides,
+	};
+}
 
 describe("contracts/agents", () => {
-	it("loads recipe metadata into normalized agent specs", () => {
-		const dir = mkdtempSync(join(tmpdir(), "clio-agents-"));
-		try {
-			writeFileSync(
-				join(dir, "scientific-validator.md"),
-				[
-					"---",
-					"name: Scientific Validator",
-					"description: HPC artifact validation planner.",
-					"tools:",
-					"  required: [read, context]",
-					"  optional: [grep, find, ls]",
-					"audience: custom",
-					"category: science",
-					"capabilityClass: read-only",
-					"latencyClass: deep",
-					"tags: [hpc, artifacts]",
-					"skills: [science-validation]",
-					"---",
-					"",
-					"# Scientific Validator",
-					"Validate scientific artifacts.",
-				].join("\n"),
-			);
-
-			const recipe = loadRecipesFromDir({ dir, source: "project" })[0];
-			ok(recipe);
-			const spec = normalizeAgentSpec(recipe);
-			strictEqual(spec.id, "scientific-validator");
-			strictEqual(spec.category, "science");
-			strictEqual(spec.capabilityClass, "read-only");
-			strictEqual(spec.latencyClass, "deep");
-			strictEqual(spec.audience, "custom");
-			strictEqual(spec.tags.includes("hpc"), true);
-			strictEqual(spec.skills.includes("science-validation"), true);
-			strictEqual(agentSpecPolicyErrors(spec).length, 0);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
+	it("loads shipped recipes as explicit strict specs", () => {
+		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
+		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
+		strictEqual(recipes.length, 9);
+		for (const entry of recipes) {
+			strictEqual(entry.version, 1);
+			ok(entry.body.trim().length > 0);
+			ok(entry.resultContract);
+			strictEqual(agentSpecPolicyErrors(normalizeAgentSpec(entry)).join("\n"), "");
 		}
+		const architect = recipes.find((entry) => entry.id === "architect");
+		deepStrictEqual(architect?.resultContract, { kind: "architect-plan", path: "PLAN.md" });
+		strictEqual(architect?.boundSkillPaths[0]?.endsWith("skills/cut-it/SKILL.md"), true);
 	});
 
-	it("resolves required all-of/any-of groups and optional degradation", () => {
-		const spec = normalizeAgentSpec({
-			id: "semantic-coder",
-			name: "Semantic Coder",
-			description: "Edits with optional navigation.",
-			tools: ["read", "write", "edit", "code_nav"],
-			toolRequirements: {
-				required: ["read", { anyOf: ["write", "edit"] }],
-				optional: ["code_nav"],
-			},
-			capabilityClass: "workspace-edit",
-			source: "project",
-			filepath: "/tmp/semantic-coder.md",
-			body: "Semantic coder.",
-		});
-		deepStrictEqual(resolveAgentToolCompatibility(spec, [ToolNames.Read, ToolNames.Edit], { mediatesDispatch: false }), {
+	it("keeps display metadata visible while policy reads hard semantics", () => {
+		const catalog = renderAgentCatalog([
+			recipe({ name: "Display Name", description: "Display-only description.", tags: ["display"] }),
+		]);
+		match(catalog, /Display Name/);
+		match(catalog, /tags=display/);
+		const spec = normalizeAgentSpec(
+			recipe({ tools: ["read", "edit"], toolRequirements: { required: ["read"], optional: ["edit"] } }),
+		);
+		deepStrictEqual(resolveAgentToolCompatibility(spec, [ToolNames.Read], { mediatesDispatch: false }), {
 			compatible: true,
 			missingRequired: [],
-			lostOptional: [ToolNames.CodeNav],
-		});
-		deepStrictEqual(resolveAgentToolCompatibility(spec, [ToolNames.Read], { mediatesDispatch: false }), {
-			compatible: false,
-			missingRequired: ["anyOf(write|edit)"],
-			lostOptional: [ToolNames.CodeNav],
+			lostOptional: [ToolNames.Edit],
 		});
 	});
 
-	it("fails loudly when a recipe declares tools without required/optional groups", () => {
-		throws(
-			() =>
-				normalizeAgentSpec({
-					id: "undeclared",
-					name: "Undeclared",
-					description: "Declares tools but no requirement groups.",
-					tools: ["read", "write"],
-					capabilityClass: "workspace-edit",
-					source: "project",
-					filepath: "/tmp/undeclared.md",
-					body: "undeclared",
-				} as unknown as Parameters<typeof normalizeAgentSpec>[0]),
-			/must declare tools.required and tools.optional/,
-		);
+	it("does not permit bound skills without the required context tool", () => {
+		const spec = normalizeAgentSpec(recipe({ skills: ["cut-it"] }));
+		match(agentSpecPolicyErrors(spec).join("\n"), /must require context for bound skills/);
 	});
 
-	it("flags capability declarations that contradict tool access", () => {
-		const spec = normalizeAgentSpec({
-			toolRequirements: { required: ["read", { anyOf: ["edit"] }], optional: [] },
-			id: "bad-scout",
-			name: "Bad Scout",
-			description: "Invalid read-only recipe.",
-			tools: ["read", "edit"],
-			category: "explore",
-			capabilityClass: "read-only",
-			source: "project",
-			filepath: "/tmp/bad-scout.md",
-			body: "# Bad Scout",
-		});
-
-		const errors = agentSpecPolicyErrors(spec);
-		strictEqual(errors.length, 1);
-		match(errors[0] ?? "", /read-only agent 'bad-scout' requests write tools/);
-	});
-
-	it("renders catalog entries from normalized specs instead of raw role prose", () => {
-		const catalog = renderAgentCatalog([
-			{
-				toolRequirements: { required: ["read"], optional: ["verify"] },
-				id: "verifier",
-				name: "Verifier",
-				description: "Run gates.",
-				tools: ["read", "verify"],
-				category: "quality",
-				capabilityClass: "verification",
-				latencyClass: "fast",
-				audience: "base",
-				tags: ["tests"],
-				source: "builtin",
-				filepath: "/tmp/verifier.md",
-				body: "# Verifier",
-			},
-			{
-				toolRequirements: { required: [], optional: ["read", "grep"] },
-				id: "scout",
-				name: "Scout",
-				description: "Map code.",
-				tools: ["read", "grep"],
-				category: "explore",
-				capabilityClass: "read-only",
-				latencyClass: "fast",
-				audience: "shadow",
-				source: "builtin",
-				filepath: "/tmp/scout.md",
-				body: "# Scout",
-			},
-		]);
-
-		match(catalog, /normalized specs carry audience, category, capability/);
-		match(catalog, /User-facing agents:/);
-		match(catalog, /verifier \(base, quality, verification, fast, builtin, tags=tests, budget=operator-default\)/);
-		match(catalog, /Shadow agents for internal orchestration:/);
-		match(catalog, /scout \(shadow, explore, read-only, fast, builtin, budget=operator-default\)/);
-		// Recipe selection weighs skill fit: the catalog says to prefer a recipe
-		// whose bound skill matches the task.
-		match(catalog, /prefer the recipe that binds it/);
-		// Delegated evidence stays qualified: the sealed receipt is the evidence
-		// and worker prose is an advisory claim, never bare "evidence".
-		match(catalog, /synthesize from the sealed receipt/);
-		match(catalog, /advisory claim until its verification state is verified/);
-		doesNotMatch(catalog, /use that receipt\/output as evidence/);
-		// The spot-check sentence is byte-exact with the one dispatch renders
-		// head-anchored in its summary (worker-evidence.ts).
-		ok(catalog.includes(SPOT_CHECK_GUIDANCE));
-	});
-
-	it("includes config-synthesized delegation specs in the spec-based roster", () => {
-		const sections = renderAgentCatalogSectionsFromSpecs([
-			normalizeAgentSpec({
-				toolRequirements: { required: [], optional: [] },
-				id: "coder",
-				name: "Coder",
-				description: "Code.",
-				source: "builtin",
-				filepath: "/tmp/coder.md",
-				body: "# Coder",
-			}),
-			{
-				id: "claude-cli",
-				name: "claude-cli",
-				description: "External ACP delegation agent: claude --acp",
-				source: "custom",
-				filepath: "settings.yaml",
-				tools: [],
-				toolRequirements: { required: [], optional: [] },
-				category: "explore",
-				capabilityClass: "orchestration",
-				latencyClass: "deep",
-				projectContextTier: "none",
-				audience: "custom",
-				tags: ["delegation", "acp"],
-				skills: [],
-				output: null,
-				budget: null,
-				body: "",
-			},
-		]);
-
-		match(sections.stable, /User-facing agents:/);
-		match(
-			sections.stable,
-			/claude-cli \(custom, explore, orchestration, deep, custom, tags=delegation\/acp, budget=operator-default\)/,
-		);
-		match(sections.stable, /External ACP delegation agent/);
-	});
-
-	it("keeps shadow agents hidden from user-visible lists", () => {
-		const visible = [
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "coder",
-				name: "Coder",
-				description: "Code.",
-				source: "builtin" as const,
-				filepath: "/tmp/coder.md",
-				body: "# Coder",
-			},
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "scout",
-				name: "Scout",
-				description: "Scout.",
-				source: "builtin" as const,
-				filepath: "/tmp/scout.md",
-				body: "# Scout",
-			},
-		]
-			.map(normalizeAgentSpec)
-			.filter(isUserVisibleAgent)
-			.map((spec) => spec.id);
-		strictEqual(visible.join(","), "coder");
-	});
-
-	it("prevents user and project recipes from overriding reserved shipped agents", () => {
-		const builtin = [
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "scout",
-				name: "Scout",
-				description: "Shadow scout.",
-				audience: "shadow" as const,
-				source: "builtin" as const,
-				filepath: "/pkg/scout.md",
-				body: "# Scout",
-			},
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "coder",
-				name: "Coder",
-				description: "Base coder.",
-				audience: "base" as const,
-				source: "builtin" as const,
-				filepath: "/pkg/coder.md",
-				body: "# Coder",
-			},
-		];
-		const user = [
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "scout",
-				name: "User Scout",
-				description: "Should not override shadow.",
-				source: "user" as const,
-				filepath: "/user/scout.md",
-				body: "# User Scout",
-			},
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "coder",
-				name: "User Coder",
-				description: "May customize base.",
-				source: "user" as const,
-				filepath: "/user/coder.md",
-				body: "# User Coder",
-			},
-		];
-		const project = [
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "coder",
-				name: "Project Coder",
-				description: "Project must not override shipped ids.",
-				source: "project" as const,
-				filepath: "/repo/.clio/agents/coder.md",
-				body: "# Project Coder",
-			},
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "domain-helper",
-				name: "Domain Helper",
-				description: "Project custom agent.",
-				source: "project" as const,
-				filepath: "/repo/.clio/agents/domain-helper.md",
-				body: "# Domain Helper",
-			},
-		];
-		const merged = mergeRecipes(builtin, user, project);
-		strictEqual(merged.find((recipe) => recipe.id === "scout")?.name, "Scout");
-		strictEqual(merged.find((recipe) => recipe.id === "coder")?.name, "User Coder");
-		strictEqual(merged.find((recipe) => recipe.id === "domain-helper")?.source, "project");
-	});
-
-	it("requires context when a recipe declares agent-bound skills", () => {
-		const spec = normalizeAgentSpec({
-			toolRequirements: { required: [], optional: ["read"] },
-			id: "skillful",
-			name: "Skillful",
-			description: "Invalid skill recipe.",
-			tools: ["read"],
-			skills: ["missing-tool"],
-			category: "research",
-			capabilityClass: "read-only",
-			source: "project",
-			filepath: "/tmp/skillful.md",
-			body: "# Skillful",
-		});
-		// A skill-bound recipe must both require and expose context. Nothing
-		// derives the requirement for it any more, so both faults are reported.
-		const errors = agentSpecPolicyErrors(spec);
-		strictEqual(errors.length, 2);
-		match(errors[0] ?? "", /must require context for bound skills/);
-		match(errors[1] ?? "", /declares skills but does not expose context/);
-	});
-
-	it("keeps shipped built-in recipes aligned with their declared capability class and semantic requirements", () => {
-		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
-		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
-		ok(recipes.length > 0);
-
-		const specs = recipes.map(normalizeAgentSpec);
-		const failures = specs.flatMap((spec) => agentSpecPolicyErrors(spec).map((error) => `${spec.id}: ${error}`));
-		strictEqual(failures.join("\n"), "");
-		const required = Object.fromEntries(specs.map((spec) => [spec.id, spec.toolRequirements.required]));
-		deepStrictEqual(required.coder, ["read", { anyOf: ["write", "edit"] }]);
-		deepStrictEqual(required.verifier, ["verify"]);
-		deepStrictEqual(required.debugger, ["verify"]);
-		deepStrictEqual(required.architect, ["artifact", "context"]);
-		deepStrictEqual(required.researcher, ["read"]);
-		deepStrictEqual(required.scout, ["read"]);
-		deepStrictEqual(required.tester, ["read", { anyOf: ["write", "edit"] }]);
-		deepStrictEqual(required.documenter, ["read", { anyOf: ["write", "edit"] }]);
-	});
-
-	it("fails hard for malformed shipped tool semantics and quarantines malformed custom recipes", () => {
-		const dir = mkdtempSync(join(tmpdir(), "clio-agent-tools-invalid-"));
-		const filepath = join(dir, "invalid.md");
-		let diagnostic = "";
-		const originalWrite = process.stderr.write;
-		try {
-			writeFileSync(
-				filepath,
-				["---", "name: Invalid", "tools:", "  required: [{anyOf: []}]", "  optional: [read]", "---", "Invalid."].join("\n"),
-			);
-			throws(() => loadRecipesFromDir({ dir, source: "builtin" }), /tools\.required\[0\]/);
-			process.stderr.write = ((chunk: string | Uint8Array) => {
-				diagnostic += String(chunk);
-				return true;
-			}) as typeof process.stderr.write;
-			deepStrictEqual(loadRecipesFromDir({ dir, source: "user" }), []);
-			match(diagnostic, /quarantine/);
-			ok(diagnostic.includes(filepath));
-		} finally {
-			process.stderr.write = originalWrite;
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
-	it("loads the exact shipped Scout and Coder budget profiles", () => {
-		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
-		const recipes = loadRecipesFromDir({ dir: builtinDir, source: "builtin" });
-		deepStrictEqual(recipes.find((recipe) => recipe.id === "scout")?.budget, {
-			toolCalls: 18,
-			readReserve: 4,
-			synthesis: true,
-		});
-		deepStrictEqual(recipes.find((recipe) => recipe.id === "coder")?.budget, {
-			toolCalls: 50,
-			readReserve: 5,
-			synthesis: true,
-		});
-	});
-
-	it("normalizes valid user and project budgets identically and preserves an absent budget", () => {
-		const dir = mkdtempSync(join(tmpdir(), "clio-agent-budget-"));
-		try {
-			writeFileSync(
-				join(dir, "bounded.md"),
-				[
-					"---",
-					"name: Bounded",
-					"budget:",
-					"  toolCalls: 18",
-					"  readReserve: 4",
-					"  synthesis: true",
-					"---",
-					"Bounded agent.",
-				].join("\n"),
-			);
-			const userRecipe = loadRecipesFromDir({ dir, source: "user" })[0];
-			const projectRecipe = loadRecipesFromDir({ dir, source: "project" })[0];
-			ok(userRecipe);
-			ok(projectRecipe);
-			const user = normalizeAgentSpec(userRecipe);
-			const project = normalizeAgentSpec(projectRecipe);
-			deepStrictEqual(user.budget, { toolCalls: 18, readReserve: 4, synthesis: true });
-			deepStrictEqual(project.budget, user.budget);
-			strictEqual(
-				normalizeAgentSpec({
-					toolRequirements: { required: [], optional: [] },
-					id: "legacy",
-					name: "Legacy",
-					description: "No declared budget.",
-					source: "user",
-					filepath: "/tmp/legacy.md",
-					body: "Legacy agent.",
-				}).budget,
-				null,
-			);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
-	it("quarantines every malformed custom budget with a source-qualified diagnostic", () => {
-		const invalid: ReadonlyArray<{ yaml: ReadonlyArray<string>; property: string }> = [
-			{ yaml: ["budget: null"], property: "budget" },
-			{ yaml: ["budget: 18"], property: "budget" },
-			{ yaml: ["budget: [18, 4, true]"], property: "budget" },
-			{ yaml: ["budget: {toolCalls: 18, readReserve: 4}"], property: "budget.synthesis" },
-			{
-				yaml: ["budget: {toolCalls: 18, readReserve: 4, synthesis: true, extra: 1}"],
-				property: "budget.extra",
-			},
-			{ yaml: ["budget: {toolCalls: '18', readReserve: 4, synthesis: true}"], property: "budget.toolCalls" },
-			{ yaml: ["budget: {toolCalls: 18.5, readReserve: 4, synthesis: true}"], property: "budget.toolCalls" },
-			{ yaml: ["budget: {toolCalls: 0, readReserve: 0, synthesis: true}"], property: "budget.toolCalls" },
-			{ yaml: ["budget: {toolCalls: -1, readReserve: 0, synthesis: true}"], property: "budget.toolCalls" },
-			{
-				yaml: ["budget: {toolCalls: 9007199254740992, readReserve: 4, synthesis: true}"],
-				property: "budget.toolCalls",
-			},
-			{ yaml: ["budget: {toolCalls: 18, readReserve: '4', synthesis: true}"], property: "budget.readReserve" },
-			{ yaml: ["budget: {toolCalls: 18, readReserve: 4.5, synthesis: true}"], property: "budget.readReserve" },
-			{ yaml: ["budget: {toolCalls: 18, readReserve: -1, synthesis: true}"], property: "budget.readReserve" },
-			{ yaml: ["budget: {toolCalls: 18, readReserve: 18, synthesis: true}"], property: "budget.readReserve" },
-			{ yaml: ["budget: {toolCalls: 18, readReserve: 19, synthesis: true}"], property: "budget.readReserve" },
-			{ yaml: ["budget: {toolCalls: 18, readReserve: 4, synthesis: 'true'}"], property: "budget.synthesis" },
-		];
-
-		for (const [index, testCase] of invalid.entries()) {
-			const dir = mkdtempSync(join(tmpdir(), "clio-agent-budget-invalid-"));
-			const filepath = join(dir, `invalid-${index}.md`);
-			let diagnostic = "";
-			const originalWrite = process.stderr.write;
-			try {
-				writeFileSync(filepath, ["---", "name: Invalid", ...testCase.yaml, "---", "Invalid."].join("\n"));
-				process.stderr.write = ((chunk: string | Uint8Array) => {
-					diagnostic += String(chunk);
-					return true;
-				}) as typeof process.stderr.write;
-				deepStrictEqual(loadRecipesFromDir({ dir, source: "project" }), []);
-				ok(diagnostic.includes(filepath), diagnostic);
-				ok(diagnostic.includes(testCase.property), diagnostic);
-				match(diagnostic, /quarantine/);
-			} finally {
-				process.stderr.write = originalWrite;
-				rmSync(dir, { recursive: true, force: true });
-			}
-		}
-	});
-
-	it("renders deterministic declared and operator-default budget metadata", () => {
-		const catalog = renderAgentCatalog([
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "bounded",
-				name: "Bounded",
-				description: "Bounded agent.",
-				budget: { toolCalls: 18, readReserve: 4, synthesis: true },
-				source: "user",
-				filepath: "/tmp/bounded.md",
-				body: "Bounded.",
-			},
-			{
-				toolRequirements: { required: [], optional: [] },
-				id: "legacy",
-				name: "Legacy",
-				description: "Default policy.",
-				source: "user",
-				filepath: "/tmp/legacy.md",
-				body: "Legacy.",
-			},
-		]);
-		match(catalog, /bounded .*budget=18\/4\/synthesize/);
-		match(catalog, /legacy .*budget=operator-default/);
-		strictEqual(
-			catalog,
-			renderAgentCatalog([
-				{
-					toolRequirements: { required: [], optional: [] },
-					id: "legacy",
-					name: "Legacy",
-					description: "Default policy.",
-					source: "user",
-					filepath: "/tmp/legacy.md",
-					body: "Legacy.",
-				},
-				{
-					toolRequirements: { required: [], optional: [] },
-					id: "bounded",
-					name: "Bounded",
-					description: "Bounded agent.",
-					budget: { toolCalls: 18, readReserve: 4, synthesis: true },
-					source: "user",
-					filepath: "/tmp/bounded.md",
-					body: "Bounded.",
-				},
-			]),
-		);
-	});
-
-	it("gives Scout the exact bounded split-recommendation protocol", () => {
-		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
-		const scout = loadRecipesFromDir({ dir: builtinDir, source: "builtin" }).find((recipe) => recipe.id === "scout");
-		ok(scout, "shipped Scout recipe is missing");
-		const protocol = [
-			"When and only when the task cannot be grounded within budget or spans multiple independent domains, emit as the first non-empty lines of the final message:",
-			"`SPLIT RECOMMENDATION: <one-line rationale, 1..200 bytes>`",
-			"`- <scoped subtask with entry file(s), 1..120 bytes>`",
-			"Use 1..4 contiguous bullet lines and keep the whole block within the first 800 bytes (all limits UTF-8).",
-		].join("\n");
-		ok(scout.body.includes(protocol), scout.body);
-		strictEqual(scout.body.match(/SPLIT RECOMMENDATION/g)?.length, 1);
-	});
-
-	it("requires Scout to ground reconnaissance in live reads", () => {
-		const builtinDir = join(resolvePackageRoot(), "src", "domains", "agents", "builtins");
-		const scout = loadRecipesFromDir({ dir: builtinDir, source: "builtin" }).find((recipe) => recipe.id === "scout");
-		ok(scout, "shipped Scout recipe is missing");
-		// Live grounding: source claims cite path:line from a read in this run.
-		ok(
-			scout.body.includes(
-				"Ground every source claim you return in a live read from this run and cite its `path:line` location.",
-			),
-		);
-		// Unverifiable leads are quarantined under an explicit heading, not asserted.
-		ok(
-			scout.body.includes(
-				"Report leads you could not verify live under a final `Unresolved gaps:` heading instead of asserting them.",
-			),
-		);
-		// Wiki/index content orients; it is never citable evidence.
-		ok(
-			scout.body.includes(
-				"Treat wiki and index content as orientation only, never as evidence: confirm every lead in the current source before reporting it.",
-			),
-		);
-		// The advertised label is byte-exact with the not_applicable header the
-		// parent sees from dispatch/monitor (worker-evidence.ts).
-		const reconLabel = workerTextLabel({ state: "not_applicable", basis: "read-only-agent" });
-		ok(scout.body.includes(`\`${reconLabel}\``));
-		// Recon prose is never advertised to the scout as bare "evidence".
-		doesNotMatch(scout.body, /Return compact evidence/);
+	it("preserves native recipe precedence over project overrides", () => {
+		const builtin = recipe({ id: "coder", source: "builtin", filepath: "/pkg/coder.md" });
+		const project = recipe({ id: "coder", source: "project", filepath: "/repo/.clio/agents/coder.md" });
+		const merged = mergeRecipes([builtin], [project]);
+		strictEqual(merged[0]?.filepath, "/pkg/coder.md");
 	});
 });

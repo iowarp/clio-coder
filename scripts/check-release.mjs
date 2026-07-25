@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const SHEBANG = "#!/usr/bin/env node";
@@ -56,6 +57,8 @@ const REQUIRED_FILES = [
 const REQUIRED_PREFIXES = [
 	"src/domains/prompts/fragments/",
 	"src/domains/agents/builtins/",
+	"dist/domains/agents/builtins/",
+	"skills/cut-it/",
 	"src/domains/providers/models/",
 	"docs/html/",
 ];
@@ -116,6 +119,55 @@ for (const required of REQUIRED_FILES) {
 
 for (const prefix of REQUIRED_PREFIXES) {
 	if (!files.some((f) => f.startsWith(prefix))) errors.push(`no files under required tree: ${prefix}`);
+}
+
+const recipeKeys = new Set([
+	"version",
+	"name",
+	"description",
+	"tools",
+	"skills",
+	"audience",
+	"category",
+	"capabilityClass",
+	"latencyClass",
+	"projectContextTier",
+	"budget",
+	"resultContract",
+	"tags",
+]);
+const sourceRecipeDir = join(root, "src", "domains", "agents", "builtins");
+const distRecipeDir = join(root, "dist", "domains", "agents", "builtins");
+for (const name of readdirSync(sourceRecipeDir)
+	.filter((entry) => entry.endsWith(".md"))
+	.sort()) {
+	const distPath = join(distRecipeDir, name);
+	const packagePath = `dist/domains/agents/builtins/${name}`;
+	if (!fileSet.has(packagePath)) {
+		errors.push(`missing built recipe in dist/package: ${packagePath}`);
+		continue;
+	}
+	try {
+		const raw = readFileSync(distPath, "utf8");
+		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+		const frontmatter = match ? parseYaml(match[1]) : null;
+		if (!frontmatter || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
+			errors.push(`invalid built recipe frontmatter: ${packagePath}`);
+			continue;
+		}
+		const keys = Object.keys(frontmatter);
+		if (
+			frontmatter.version !== 1 ||
+			keys.some((key) => !recipeKeys.has(key)) ||
+			[...recipeKeys].some((key) => !keys.includes(key))
+		) {
+			errors.push(`built recipe is not the strict v1 schema: ${packagePath}`);
+		}
+	} catch (error) {
+		errors.push(
+			`unable to inspect built recipe ${packagePath}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 if (report.size > MAX_TARBALL_BYTES) {

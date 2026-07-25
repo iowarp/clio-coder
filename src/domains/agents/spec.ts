@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { type ActionClass, classify } from "../safety/action-classifier.js";
 import type { AgentBudget, AgentRecipe, AgentToolRequirement } from "./recipe.js";
+import type { ResultContract } from "./result-contract.js";
 
 export type AgentCategory =
 	| "explore"
@@ -61,15 +62,13 @@ export const AGENT_AUDIENCES: ReadonlyArray<AgentAudience> = ["base", "shadow", 
 
 export const AGENT_PROJECT_CONTEXT_TIERS: ReadonlyArray<AgentProjectContextTier> = ["none", "bounded"];
 
-const BUILTIN_SHADOW_AGENT_IDS = new Set(["scout", "researcher", "provenance"]);
-const BUILTIN_INTERNAL_AGENT_IDS = new Set<string>();
-
 export interface AgentToolRequirements {
 	required: ReadonlyArray<ToolName | { anyOf: ReadonlyArray<ToolName> }>;
 	optional: ReadonlyArray<ToolName>;
 }
 
 export interface AgentSpec {
+	version: 1;
 	id: string;
 	name: string;
 	description: string;
@@ -84,9 +83,8 @@ export interface AgentSpec {
 	audience: AgentAudience;
 	tags: ReadonlyArray<string>;
 	skills: ReadonlyArray<string>;
-	output: string | null;
-	/** Declared phase policy, or null when runtime/operator defaults apply. */
-	budget: AgentBudget | null;
+	resultContract: ResultContract;
+	budget: AgentBudget;
 	body: string;
 }
 
@@ -131,54 +129,10 @@ function actionClassesForTools(tools: ReadonlyArray<ToolName>): ReadonlySet<Acti
 	return actions;
 }
 
-function hasTool(tools: ReadonlyArray<ToolName>, tool: BuiltinToolName): boolean {
-	return tools.includes(tool);
-}
-
-function inferCategory(recipe: AgentRecipe, tools: ReadonlyArray<ToolName>): AgentCategory {
-	if (recipe.id === "worker") return "internal";
-	if (recipe.id.includes("scientific") || recipe.id.includes("benchmark")) return "science";
-	if (recipe.id.includes("review") || recipe.id.includes("test") || recipe.id.includes("valid")) return "quality";
-	if (recipe.id.includes("implement") || recipe.id.includes("simplif")) return "implement";
-	if (recipe.id.includes("research")) return "research";
-	if (recipe.id.includes("plan") || recipe.id.includes("architect") || hasTool(tools, ToolNames.Artifact)) return "plan";
-	if (recipe.id.includes("debug") || recipe.id.includes("attrib") || recipe.id.includes("evol")) return "evolution";
-	if (recipe.id.includes("memory") || recipe.id.includes("middleware")) return "operations";
-	return "explore";
-}
-
-function inferCapabilityClass(recipe: AgentRecipe, tools: ReadonlyArray<ToolName>): AgentCapabilityClass {
-	if (recipe.id === "worker") return "internal";
-	const actions = actionClassesForTools(tools);
-	const writesOnlyArtifacts = tools.every((tool) => {
-		const action = classify({ tool }).actionClass;
-		return action !== "write" || tool === ToolNames.Artifact;
-	});
-	if (actions.has("dispatch")) return "orchestration";
-	if (actions.has("execute") && !actions.has("write")) return "verification";
-	if (actions.has("write") && writesOnlyArtifacts) return "artifact-write";
-	if (actions.has("write") || actions.has("execute")) return "workspace-edit";
-	return "read-only";
-}
-
-function inferLatencyClass(category: AgentCategory, capability: AgentCapabilityClass): AgentLatencyClass {
-	if (category === "explore" || capability === "verification") return "fast";
-	if (category === "plan" || category === "science" || category === "evolution") return "deep";
-	return "balanced";
-}
-
-function inferAudience(recipe: AgentRecipe): AgentAudience {
-	if (recipe.source !== "builtin") return "custom";
-	if (recipe.audience) return recipe.audience;
-	if (BUILTIN_INTERNAL_AGENT_IDS.has(recipe.id)) return "internal";
-	if (BUILTIN_SHADOW_AGENT_IDS.has(recipe.id)) return "shadow";
-	return "base";
-}
-
 function normalizeTools(recipe: AgentRecipe): ReadonlyArray<ToolName> {
 	const seen = new Set<string>();
 	const tools: ToolName[] = [];
-	for (const tool of recipe.tools ?? []) {
+	for (const tool of recipe.tools) {
 		if (typeof tool !== "string" || tool.trim().length === 0) {
 			throw new Error(`agent recipe '${recipe.id}' declares an invalid tool name`);
 		}
@@ -255,13 +209,9 @@ export function resolveAgentToolCompatibility(
 
 export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 	const tools = normalizeTools(recipe);
-	const category = recipe.category ?? inferCategory(recipe, tools);
-	const capabilityClass = recipe.capabilityClass ?? inferCapabilityClass(recipe, tools);
-	const skills = recipe.skills ?? [];
 	const toolRequirements = normalizeToolRequirements(recipe, tools);
-	const latencyClass = recipe.latencyClass ?? inferLatencyClass(category, capabilityClass);
-	const projectContextTier = recipe.projectContextTier ?? defaultProjectContextTier(capabilityClass);
 	return {
+		version: recipe.version,
 		id: recipe.id,
 		name: recipe.name,
 		description: recipe.description,
@@ -269,15 +219,15 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		filepath: recipe.filepath,
 		tools,
 		toolRequirements,
-		category,
-		capabilityClass,
-		latencyClass,
-		projectContextTier,
-		audience: inferAudience(recipe),
-		tags: recipe.tags ?? [],
-		skills,
-		output: recipe.output ?? null,
-		budget: recipe.budget ?? null,
+		category: recipe.category,
+		capabilityClass: recipe.capabilityClass,
+		latencyClass: recipe.latencyClass,
+		projectContextTier: recipe.projectContextTier,
+		audience: recipe.audience,
+		tags: recipe.tags,
+		skills: recipe.skills,
+		resultContract: recipe.resultContract,
+		budget: recipe.budget,
 		body: recipe.body,
 	};
 }
@@ -289,8 +239,8 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
  * agent. A Coder run under a reviewer persona, a Coder whose declared tools
  * changed, and a Coder whose body was rewritten are three different things to
  * aggregate, so each gets a different fingerprint. Display-only metadata
- * (name, description, filepath, source, tags) is excluded: renaming a recipe
- * must not invalidate its measured history.
+ * (name, description, category, filepath, source, tags) is excluded: display
+ * metadata edits must not invalidate measured history.
  */
 export function agentSpecFingerprint(spec: AgentSpec): string {
 	const requirement = (entry: AgentToolRequirement): string =>
@@ -300,13 +250,12 @@ export function agentSpecFingerprint(spec: AgentSpec): string {
 		tools: [...spec.tools].sort(),
 		required: spec.toolRequirements.required.map(requirement).sort(),
 		optional: [...spec.toolRequirements.optional].sort(),
-		category: spec.category,
 		capabilityClass: spec.capabilityClass,
 		latencyClass: spec.latencyClass,
 		projectContextTier: spec.projectContextTier,
 		audience: spec.audience,
 		skills: [...spec.skills].sort(),
-		output: spec.output,
+		resultContract: spec.resultContract,
 		budget: spec.budget,
 		body: createHash("sha256").update(spec.body, "utf8").digest("hex"),
 	});

@@ -4,6 +4,7 @@
  * admission property for a better score.
  */
 
+import type { AgentLatencyClass } from "../agents/spec.js";
 import type { RouteHistoryRecord } from "./route-history.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 
@@ -89,6 +90,17 @@ export const DEFAULT_ROUTE_PRIOR: RoutePrior = {
 	reliability: 0.5,
 	queueWaitMs: 0,
 };
+
+/** Cold-start latency only. Completed route timing supersedes these priors. */
+export const LATENCY_CLASS_ROUTE_PRIORS: Readonly<Record<AgentLatencyClass, RoutePrior>> = {
+	fast: { ...DEFAULT_ROUTE_PRIOR, expectedEndToEndMs: 30_000 },
+	balanced: { ...DEFAULT_ROUTE_PRIOR, expectedEndToEndMs: 120_000 },
+	deep: { ...DEFAULT_ROUTE_PRIOR, expectedEndToEndMs: 300_000 },
+};
+
+export function routePriorForLatencyClass(latencyClass: AgentLatencyClass): RoutePrior {
+	return { ...LATENCY_CLASS_ROUTE_PRIORS[latencyClass] };
+}
 
 /** The estimator projection of one durable route-history record. */
 export interface RouteObservation {

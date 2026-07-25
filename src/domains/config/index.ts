@@ -7,6 +7,7 @@ export const ConfigDomainModule: DomainModule = {
 	createExtension: createConfigBundle,
 };
 
+export { assertAgentIdNamespace } from "./agent-namespace.js";
 export { type ChangeKind, type ConfigDiff, diffSettings } from "./classify.js";
 export type { ConfigContract } from "./contract.js";
 export { ConfigManifest } from "./manifest.js";

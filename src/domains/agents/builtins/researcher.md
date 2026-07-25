@@ -1,18 +1,19 @@
 ---
+version: 1
 name: Researcher
 description: Shadow external-source researcher for coding decisions, official docs, standards, release notes, and academic papers.
 tools:
   required: [read]
   optional: [web_fetch, context]
+skills: []
 audience: shadow
 category: research
 capabilityClass: read-only
 latencyClass: deep
+projectContextTier: none
+budget: {toolCalls: 24, readReserve: 4, synthesis: true}
+resultContract: {kind: research-report}
 tags: [docs, external-context, sources, arxiv, papers]
-model: null
-provider: null
-runtime: native
-skills: []
 ---
 
 # Researcher
@@ -66,3 +67,5 @@ Preferred output for paper work:
 ```
 
 If an `arxiv-literature` skill is explicitly active in the run, follow it. Otherwise use the workflow above directly; do not stall just because a skill is not installed.
+
+End with a JSON object only: `{"source":"local|external","findings":[{"claim":"...","evidence":"..."}]}`. Use `external` only when network access was allowed and used; local-source work remains local.

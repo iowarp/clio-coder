@@ -53,6 +53,7 @@ import type { AcpDelegationRunHandle } from "../../src/engine/acp/adapter.js";
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 
 interface Deferred<T> {
@@ -333,6 +334,7 @@ function stubContext(
 
 	const recipes: ReadonlyArray<AgentRecipe> = options.recipes ?? [
 		{
+			...agentRecipeFixture(),
 			toolRequirements: { required: [], optional: [] },
 			id: "coder",
 			name: "coder",
@@ -345,6 +347,7 @@ function stubContext(
 	const agents: AgentsContract = {
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
+		diagnostics: () => [],
 		listSpecs: () => recipes.map(normalizeAgentSpec),
 		getSpec: (id) => {
 			const recipe = recipes.find((entry) => entry.id === id);
@@ -538,6 +541,7 @@ describe("contracts/dispatch", () => {
 
 	it("allows observable optional-tool degradation and rejects unmediated orchestration", async () => {
 		const optionalRecipe: AgentRecipe = {
+			...agentRecipeFixture(),
 			id: "optional-reader",
 			name: "Optional Reader",
 			description: "Reads with optional code navigation.",
@@ -577,6 +581,7 @@ describe("contracts/dispatch", () => {
 		}
 
 		const orchestrator: AgentRecipe = {
+			...agentRecipeFixture(),
 			id: "nested",
 			name: "Nested",
 			description: "Nested dispatch.",
@@ -807,6 +812,7 @@ describe("contracts/dispatch", () => {
 			runtime,
 			recipes: [
 				{
+					...agentRecipeFixture(),
 					toolRequirements: { required: [], optional: [] },
 					id: "coder",
 					name: "coder",
@@ -1135,6 +1141,7 @@ describe("contracts/dispatch", () => {
 
 	it("uses one final toolkit for minimal-local prompt guidance, schemas, code_nav policy, and read reserve", async () => {
 		const recipe: AgentRecipe = {
+			...agentRecipeFixture(),
 			id: "coder",
 			name: "coder",
 			description: "fully tooled coder",
@@ -1456,6 +1463,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					...agentRecipeFixture(),
 					toolRequirements: { required: [], optional: ["read", "verify"] },
 					id: "bad-validator",
 					name: "Bad Validator",
@@ -1484,6 +1492,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					...agentRecipeFixture(),
 					toolRequirements: { required: [], optional: ["read", "verify"] },
 					id: "bad-validator",
 					name: "Bad Validator",
@@ -1517,6 +1526,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					...agentRecipeFixture(),
 					toolRequirements: { required: [], optional: ["read"] },
 					id: "scout",
 					name: "Scout",
@@ -1566,6 +1576,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					...agentRecipeFixture(),
 					toolRequirements: { required: [], optional: ["read"] },
 					id: "scout",
 					name: "Scout",
@@ -1610,6 +1621,7 @@ describe("contracts/dispatch", () => {
 
 	it("injects declared skills as compact prompt guidance", () => {
 		const recipe: AgentRecipe = {
+			...agentRecipeFixture(),
 			toolRequirements: { required: ["context"], optional: ["read"] },
 			id: "researcher",
 			name: "Researcher",
@@ -1698,6 +1710,7 @@ describe("contracts/dispatch", () => {
 
 		// Recipe frontmatter override flows through normalizeAgentSpec.
 		const optedInReviewer = normalizeAgentSpec({
+			...agentRecipeFixture(),
 			toolRequirements: { required: ["read"], optional: [] },
 			id: "reviewer",
 			name: "Reviewer",
@@ -2161,11 +2174,13 @@ describe("contracts/dispatch", () => {
 
 	it("keeps memory before pipeline input and the stable system prompt untouched by dynamic context", () => {
 		const recipe: AgentRecipe = {
+			...agentRecipeFixture(),
 			toolRequirements: { required: ["read", { anyOf: ["edit"] }], optional: [] },
 			id: "coder",
 			name: "Coder",
 			description: "Coding worker.",
 			tools: ["read", "edit"],
+			capabilityClass: "workspace-edit",
 			source: "builtin",
 			filepath: "/test/coder.md",
 			body: "# Coder\nDo bounded work.",
@@ -2203,11 +2218,13 @@ describe("contracts/dispatch", () => {
 
 	it("records persona override provenance only for composed stable prompts", async () => {
 		const recipe: AgentRecipe = {
+			...agentRecipeFixture(),
 			toolRequirements: { required: ["read", { anyOf: ["edit"] }], optional: [] },
 			id: "coder",
 			name: "Coder",
 			description: "Coding worker.",
 			tools: ["read", "edit"],
+			capabilityClass: "workspace-edit",
 			source: "builtin",
 			filepath: "/test/coder.md",
 			body: "# Base Recipe\nUse the normal recipe persona.",
@@ -4034,6 +4051,7 @@ rl.once("line", (line) => {
 					version: 1,
 					typedValidations: [],
 					responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+					resultContract: null,
 				},
 				costProvenance: "unknown",
 				runId: env.id,
@@ -5162,6 +5180,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	afterEach(restoreDispatchState);
 	const mutatingCoderRecipes: ReadonlyArray<AgentRecipe> = [
 		{
+			...agentRecipeFixture(),
 			toolRequirements: { required: ["read", { anyOf: ["write"] }], optional: ["verify"] },
 			id: "coder",
 			name: "coder",

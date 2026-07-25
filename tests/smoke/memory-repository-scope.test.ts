@@ -111,7 +111,12 @@ describe("smoke/memory repository scope integration", { concurrency: false }, ()
 		mkdirSync(repositoryB, { recursive: true });
 		await seedRepositoryMemory(repositoryA, repositoryB);
 
-		const fixture = await startOpenAICompatFixture("memory dispatch reply");
+		const fixture = await startOpenAICompatFixture(
+			JSON.stringify({
+				mutatedPaths: [],
+				validations: [{ name: "response", passed: true, evidence: "memory dispatch reply" }],
+			}),
+		);
 		try {
 			seedOpenAICompatOrchestrator(join(scratch.dir, "config"), fixture.url);
 			seedOpenAICompatFleetDefault(join(scratch.dir, "config"));
