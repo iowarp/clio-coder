@@ -37,7 +37,7 @@ current source, tests, and `CHANGELOG.md`.
 | Source-first docs workflow, mapping matrix, and alpha wording guidance | [documentation-guide.md](documentation-guide.md) ([Interactive Blueprint](html/documentation_blueprint.html)) |
 | Interface layout, colors palette, Unicode character vocabulary, and drawing choreography | [tui-design.md](tui-design.md) ([Interactive Blueprint](html/tui_design_blueprint.html)) |
 | NDJSON parent-child socket protocols, watchdog timers, and exit status mapping | [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md) ([Interactive Blueprint](html/worker_dispatch_blueprint.html)) |
-| Multi-node fleet dispatch: SSH transport, doctor preflight, placement, topologies, receipts, Scout routing | [fleet-dispatch.md](fleet-dispatch.md) ([Interactive Blueprint](html/fleet_dispatch_blueprint.html)) |
+| Multi-node fleet dispatch: SSH transport, doctor preflight, placement, topologies, receipts, advisory Scout routing | [fleet-dispatch.md](fleet-dispatch.md) ([Interactive Blueprint](html/fleet_dispatch_blueprint.html)) |
 | Executable multi-node demo with reviewer gate and receipt provenance walkthrough | [fleet-demo-runbook.md](fleet-demo-runbook.md) |
 | Proactive task memory architecture, session task bank, intervention rules, and handoff carrying | [proactive-memory.md](proactive-memory.md) ([Interactive Blueprint](html/memory_blueprint.html)) |
 | Private context index determinism and target smoke matrices (Internal Reference) | [evals-internal.md](evals-internal.md) ([Interactive Blueprint](html/evals_internal_blueprint.html)) |

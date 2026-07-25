@@ -34,7 +34,8 @@ sequenceDiagram
 
     Orchestrator->>WorkerSubprocess: Spawn (node entry.js)
     Orchestrator->>WorkerSubprocess: Send WorkerSpec (NDJSON on stdin)
-    Note over WorkerSubprocess: Reads WorkerSpec & starts heartbeat
+    WorkerSubprocess->>Orchestrator: worker_announce (specVersion)
+    Note over WorkerSubprocess: Starts heartbeat after announcement
     WorkerSubprocess->>Engine: startWorkerRun(input)
     loop Execution Loop
         Engine->>WorkerSubprocess: Emit event
@@ -159,13 +160,13 @@ The coordinator classifies failures into 13 explicit categories (`src/domains/di
 | `deterministic-task` | `isDeterministicOutcomeCode()` (e.g. `scout_synthesis_contract_exhausted`) | None | No |
 | `model-quality` | Quality gate failure | `model` | Yes |
 | `node-channel` | Stall killed, `spawn_failed`, SSH exit code 255 | `node` | Yes |
-| `node-resource` | VRAM/GPU OOM error pattern | `node`, `target` | Yes |
+| `node-resource` | VRAM/GPU OOM error pattern | `node` | Yes |
 | `target-auth` | HTTP 401/403, invalid API key | `target` | Yes |
 | `target-rate-limit` | HTTP 429, rate limit error pattern | `target` | Yes (Delayed) |
 | `target-transient` | Timeout, HTTP 502/503/504 | `target` | Yes |
-| `capacity` | Queue full / overload pattern | `node`, `target` | Yes |
-| `worker-runtime` | Process crash / uncaught exception | `runtime` | Yes |
-| `internal` | Internal coordinator failure | None | No |
+| `capacity` | Queue full / overload pattern | `node` | Yes |
+| `worker-runtime` | `failed` outcome after more-specific classifiers do not match | `runtime` | Yes |
+| `internal` | No more-specific termination evidence; coordinator fallback | None | Yes |
 
 ### 5.2 Canonical Receipt Integrity Serialization (v6)
 
@@ -198,7 +199,7 @@ tests as follows:
 ## 6. Worker Exit Codes
 
 The child process exits with specific status codes to signal run outcomes to the orchestrator:
-* **`0`**: The worker task completed successfully (e.g., reached the target milestone or generated the requested artifact).
+* **`0`**: The worker process completed without a runtime error; dispatch still requires a nonempty receipt-sealed final answer before classifying the run as successful.
 * **`2`**: Worker runtime initialization failed (e.g., target runtime not registered, or `WorkerSpec` invalid/mismatched).
 * **`3` (`WORKER_EXIT_PERMISSION_REQUIRED`)**: The run aborted because a tool required permission and `onPermission` was set to `fail` (or timed out to a `fail` fallback).
 * **Other (e.g., `1` or uncaught exceptions)**: Represents an unhandled crash or internal error within the runner.
