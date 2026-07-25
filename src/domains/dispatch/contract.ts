@@ -22,9 +22,16 @@ export interface DispatchAdmissionObserver {
 /** Side-effect-free effective routing used to construct a dispatch approval artifact. */
 export interface DispatchPlanTaskResolution {
 	agentId: string;
+	/** Stable identity of the recipe surface this route would execute. */
+	specFingerprint: string;
 	targetId: string;
 	wireModelId: string;
+	runtimeId: string;
 	node: RunNodeIdentity;
+	/** Effective thinking control for this route; null when the runtime has none. */
+	thinkingLevel: string | null;
+	/** Effective tool surface after the runtime narrows it; part of route identity. */
+	toolSignature: string;
 	/** Conservative effective-pricing estimate; unknown pricing is never zero. */
 	costUpperBoundUsd: number;
 }

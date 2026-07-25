@@ -8,11 +8,11 @@ Clio Coder is a TypeScript/Node.js project. Coding agent for HPC and scientific-
 
 ## Context retrieval
 
-The codewiki currently indexes 806 source files. Start orientation with these indexed entry points: `src/cli/index.ts`, `src/domains/agents/index.ts`, `src/domains/components/index.ts`, `src/domains/config/index.ts`, `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`, `src/domains/dispatch/index.ts`, `src/domains/eval/index.ts`. Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.
+The codewiki currently indexes 901 source files. Start orientation with these indexed entry points: `src/cli/index.ts`, `src/domains/agents/index.ts`, `src/domains/components/index.ts`, `src/domains/config/index.ts`, `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`, `src/domains/dispatch/index.ts`, `src/domains/eval/index.ts`. Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.
 
 ## Repository shape
 
-Largest indexed areas: src/domains (350), tests/contracts (182), src/interactive (81), src/cli (48), src/engine (39), src/tools (39), src/core (31), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
+Largest indexed areas: src/domains (382), tests/contracts (228), src/interactive (83), src/cli (48), src/tools (43), src/engine (40), src/core (35), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
 
 ## Verification expectations
 

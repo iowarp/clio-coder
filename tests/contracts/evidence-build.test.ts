@@ -161,7 +161,7 @@ async function sealRun(
 	await ledger.persist();
 	const receiptPath = ledger.get(envelope.id)?.receiptPath;
 	if (!receiptPath) throw new Error("fixture receipt path missing");
-	strictEqual(receipt.integrity.version, 6);
+	strictEqual(receipt.integrity.version, 7);
 	return { runId: envelope.id, receiptPath };
 }
 

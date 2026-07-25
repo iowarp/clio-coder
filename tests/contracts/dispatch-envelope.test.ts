@@ -1,9 +1,10 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/index.js";
 import {
+	firstAvailableRouteCandidate,
 	ROUTE_CANDIDATE_LIMIT,
 	routeCandidateOrder,
 	selectRouteCandidates,
@@ -84,6 +85,11 @@ function request(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
 		node: "blade",
 		...overrides,
 	};
+}
+
+/** No target/model/node pin, so the envelope alone decides where the work lands. */
+function unpinnedRequest(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
+	return { agentId: "coder", task: "exercise approved failover", ...overrides };
 }
 
 describe("dispatch failover envelopes", () => {
@@ -235,6 +241,108 @@ describe("dispatch failover envelopes", () => {
 			strictEqual(terminal.outcome, "succeeded");
 			strictEqual(terminal.node?.id, "local");
 			deepStrictEqual(spawns, ["blade", "local"]);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("picks the first envelope member that can accept new work", () => {
+		const first = { agentId: "coder", target: TARGET, model: MODEL, node: "blade" };
+		const second = { agentId: "coder", target: "alt", model: "alt-model", node: "blade" };
+		deepStrictEqual(
+			firstAvailableRouteCandidate([
+				{ candidate: first, unavailable: "cooling down" },
+				{ candidate: second, unavailable: null },
+			]),
+			second,
+		);
+		strictEqual(
+			firstAvailableRouteCandidate([
+				{ candidate: first, unavailable: "cooling down" },
+				{ candidate: second, unavailable: "cooling down" },
+			]),
+			null,
+		);
+		strictEqual(firstAvailableRouteCandidate([]), null);
+	});
+
+	it("routes new work around a cooling target onto the approved alternate", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 0;
+		settings.targets = [
+			{ id: TARGET, runtime: "openai", defaultModel: MODEL },
+			{ id: "alt", runtime: "openai", defaultModel: MODEL },
+		];
+		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		const candidates = [
+			{ agentId: "coder", target: TARGET, model: MODEL, node: "local" },
+			{ agentId: "coder", target: "alt", model: MODEL, node: "local" },
+		];
+		const routes: string[] = [];
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resolveNode: () => ({ node: { id: "local", kind: "local" } }),
+			resilienceCooldownMs: 60_000,
+			spawnWorker: (spec) => {
+				routes.push(spec.target.id);
+				// 503 on the default target classifies target-transient, which cools it.
+				return spec.target.id === TARGET
+					? {
+							pid: 401,
+							promise: Promise.resolve({ exitCode: 1, signal: null, stderrTail: "503 Service Unavailable" }),
+							events: (async function* () {})(),
+							abort: () => {},
+							heartbeatAt: { current: Date.now() },
+						}
+					: worker(0);
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const first = await bundle.contract.dispatch(
+				unpinnedRequest({ failover: "approved", allowedCandidates: candidates }),
+			);
+			strictEqual((await first.finalPromise).outcome, "failed");
+			// The cooldown the first assignment created must not sink the second: its
+			// approved envelope already names a target that can take the work.
+			const second = await bundle.contract.dispatch(
+				unpinnedRequest({ failover: "approved", allowedCandidates: candidates }),
+			);
+			const terminal = await second.finalPromise;
+			strictEqual(terminal.outcome, "succeeded");
+			strictEqual(terminal.targetId, "alt");
+			deepStrictEqual(routes, [TARGET, "alt"]);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("still refuses new work when the cooling target is the only approved route", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 0;
+		settings.targets = [{ id: TARGET, runtime: "openai", defaultModel: MODEL }];
+		settings.workers.default = { target: TARGET, model: MODEL, thinkingLevel: "off" };
+		const candidates = [{ agentId: "coder", target: TARGET, model: MODEL, node: "local" }];
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resolveNode: () => ({ node: { id: "local", kind: "local" } }),
+			resilienceCooldownMs: 60_000,
+			spawnWorker: () => ({
+				pid: 402,
+				promise: Promise.resolve({ exitCode: 1, signal: null, stderrTail: "503 Service Unavailable" }),
+				events: (async function* () {})(),
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const first = await bundle.contract.dispatch(
+				unpinnedRequest({ failover: "approved", allowedCandidates: candidates }),
+			);
+			strictEqual((await first.finalPromise).outcome, "failed");
+			await rejects(
+				bundle.contract.dispatch(unpinnedRequest({ failover: "approved", allowedCandidates: candidates })),
+				/cooling down/,
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}

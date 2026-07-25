@@ -220,7 +220,7 @@ describe("orphan provenance recovery", () => {
 		}
 	});
 
-	it("adopts gate-only, plan-only, and combined v6 receipts from the receipt-written crash window", () => {
+	it("adopts gate-only, plan-only, and combined v7 receipts from the receipt-written crash window", () => {
 		const isolated = isolateClioEnv("clio-orphan-matrix-");
 		try {
 			const gateOnly = sealOrphan({ gate });
@@ -244,7 +244,7 @@ describe("orphan provenance recovery", () => {
 		}
 	});
 
-	it("quarantines a shape-valid v6 orphan whose authenticated steering provenance was tampered", () => {
+	it("quarantines a shape-valid v7 orphan whose authenticated steering provenance was tampered", () => {
 		const isolated = isolateClioEnv("clio-orphan-tamper-");
 		try {
 			const orphan = sealOrphan({ gate, plan, steering });

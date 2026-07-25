@@ -46,6 +46,7 @@ import {
 	type AgentAudience,
 	type AgentCapabilityClass,
 	type AgentProjectContextTier,
+	agentSpecFingerprint,
 	assertAgentSpecPolicy,
 	isUserVisibleAgent,
 	normalizeAgentSpec,
@@ -140,13 +141,23 @@ import {
 	rollbackUnconsumedDispatchReservation,
 } from "./reservation-store.js";
 import {
+	firstAvailableRouteCandidate,
+	ROUTE_CANDIDATE_LIMIT,
+	type RouteAvailability,
+	type RouteCandidateProbe,
 	type RouteUniverse,
 	routeCandidateOrder,
 	sameRouteCandidate,
 	selectRouteCandidates,
 } from "./route-candidates.js";
+import {
+	type RouteDecisionV1,
+	type RouteIdentityInput,
+	type RouteRoleInput,
+	toRouteCandidate,
+} from "./route-decision.js";
+import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
 import { detectRunIdentity } from "./run-identity.js";
-import { createSpeculationObserver, type SpeculationObserver } from "./speculation.js";
 import { type Ledger, openLedger } from "./state.js";
 import {
 	countToolCalls,
@@ -305,11 +316,11 @@ export interface DispatchBundleOptions {
 	 */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
 	/**
-	 * Shadow-mode speculation observer toggle (default on). Observer-only:
-	 * disabling it changes no dispatch behavior; it only stops the bounded
-	 * plan-versus-actual JSONL under the state dir from being written.
+	 * Shadow-mode route observer toggle (default on). Observer-only: disabling
+	 * it changes no dispatch behavior; it stops the bounded decision-versus-
+	 * outcome JSONL from being written and leaves `routeDecision` off receipts.
 	 */
-	speculation?: boolean;
+	routeObserver?: boolean;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -317,6 +328,41 @@ const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
 /** ACP event-inactivity stall window (Symphony §5.3.6 semantics); <= 0 disables. */
 const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
+/**
+ * An external ACP agent runs its own tool loop and ships no recipe, so neither
+ * its tool surface nor its spec surface is observable from here. These are that
+ * unknown named once rather than a synthetic empty surface pretending to be a
+ * measurement.
+ */
+const ACP_TOOL_SIGNATURE = "acp:unobservable";
+const ACP_SPEC_FINGERPRINT = "acp:unobservable";
+
+/**
+ * Fold the shadow decision onto a receipt draft before it is sealed. Route
+ * regret has to be recomputable from receipts alone for an offline replay to
+ * reproduce it, so the decision travels with the run rather than only with the
+ * observer's log. Absent only when the observer is disabled.
+ */
+function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1 | undefined): RunReceiptDraft {
+	return decision === undefined ? draft : { ...draft, routeDecision: decision };
+}
+/**
+ * The hard filters every candidate passes through before it can be scored.
+ * These are the constraints `preview` actually enforces; they eliminate
+ * candidates and are never traded against cost, quality, or latency.
+ */
+const ROUTE_HARD_CONSTRAINTS: ReadonlyArray<string> = [
+	"agent-audience",
+	"agent-autonomy",
+	"required-tools-after-runtime-narrowing",
+	"response-schema-enforceable",
+	"write-roots-enforceable",
+	"protected-artifacts-enforceable",
+	"target-auth-and-availability",
+	"model-capabilities",
+	"worker-permission-mode",
+	"node-eligibility",
+];
 /** Conservative cold-route prior used only when no configured or catalog rates exist. */
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
@@ -1923,14 +1969,14 @@ export function createDispatchBundle(
 		return DEFAULT_RESILIENCE_COOLDOWN_MS;
 	};
 	const now = options?.now ?? (() => Date.now());
-	// Shadow-mode speculation observer: computes the plan the rule pipeline
-	// would have chosen for every dispatch and records plan-versus-actual into
+	// Shadow-mode route observer: builds the RouteDecisionV1 the policy would
+	// have produced for every dispatch and records decision-versus-outcome into
 	// a bounded JSONL under the state dir. Observer-only: it never influences
 	// admission, placement, or execution, and every call is failure-isolated.
-	const speculationObserver: SpeculationObserver | null =
-		options?.speculation === false
+	const routeObserver: RouteObserver | null =
+		options?.routeObserver === false
 			? null
-			: createSpeculationObserver({
+			: createRouteObserver({
 					getAgents: () => {
 						try {
 							return agents.listSpecs().map((spec) => ({ id: spec.id, description: spec.description ?? "" }));
@@ -2626,6 +2672,18 @@ export function createDispatchBundle(
 	 * and gating its retries here strands the assignment mid-chain with no
 	 * remaining attempts. A request carrying lineage is an in-assignment retry.
 	 */
+	function targetCooldownReason(targetId: string, runtimeId: string, wireModelId: string): string | null {
+		const key = cooldownKey(targetId, runtimeId, wireModelId);
+		const cooldown = targetCooldowns.get(key);
+		if (!cooldown) return null;
+		const remaining = cooldown.until - now();
+		if (remaining <= 0) {
+			targetCooldowns.delete(key);
+			return null;
+		}
+		return `target '${targetId}' is cooling down for ${Math.ceil(remaining / 1000)}s after ${cooldown.reason}`;
+	}
+
 	function assertTargetNotCoolingDown(
 		req: DispatchRequest,
 		targetId: string,
@@ -2633,17 +2691,79 @@ export function createDispatchBundle(
 		wireModelId: string,
 	): void {
 		if (req.lineage !== undefined) return;
-		const key = cooldownKey(targetId, runtimeId, wireModelId);
-		const cooldown = targetCooldowns.get(key);
-		if (!cooldown) return;
-		const remaining = cooldown.until - now();
-		if (remaining <= 0) {
-			targetCooldowns.delete(key);
-			return;
-		}
-		throw new Error(
-			`dispatch: target '${targetId}' is cooling down for ${Math.ceil(remaining / 1000)}s after ${cooldown.reason}`,
+		const reason = targetCooldownReason(targetId, runtimeId, wireModelId);
+		if (reason !== null) throw new Error(`dispatch: ${reason}`);
+	}
+
+	/** The target identity a request resolves to, without composing a worker. */
+	function resolveTargetIdentity(
+		req: DispatchRequest,
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): { targetId: string; runtimeId: string; wireModelId: string } {
+		const recipe = agents.get(req.agentId);
+		if (!recipe) throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
+		const targets = readWorkerTargets(settings);
+		const target = resolveDispatchTarget(
+			req,
+			recipe,
+			targets.workerDefault,
+			targets.workerProfiles,
+			targets.agentBindings,
+			targets.targetOrder,
+			providers,
 		);
+		return { targetId: target.target.id, runtimeId: target.runtime.id, wireModelId: target.wireModelId };
+	}
+
+	/**
+	 * Move a *new* assignment off a cooling target onto the next member of its
+	 * failover envelope.
+	 *
+	 * A target cooldown protects new work from a known-bad target, but a dispatch
+	 * that already carries alternates must use them rather than die: the first
+	 * step of a pipeline can cool the shared default target and strand every
+	 * later step on a route the plan never required. Only the route moves; the
+	 * failover mode is carried explicitly so pinning the alternate does not
+	 * silently downgrade the request to an exact pin. Returns null when the
+	 * resolved route is usable or when no member can take the work, in which case
+	 * `assertTargetNotCoolingDown` reports the resolved route's own reason.
+	 */
+	function routeAroundCoolingTarget(
+		req: DispatchRequest,
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): DispatchRequest | null {
+		if (req.lineage !== undefined || req.delegationAgentId !== undefined) return null;
+		const mode = failoverModeFor(req);
+		if (mode === "none") return null;
+		const resolved = resolveTargetIdentity(req, settings);
+		if (targetCooldownReason(resolved.targetId, resolved.runtimeId, resolved.wireModelId) === null) return null;
+		const candidates = mode === "approved" ? (req.allowedCandidates ?? []) : routeCandidates(req);
+		if (candidates.length < 2) return null;
+		const probes: RouteAvailability[] = candidates.map((candidate) => {
+			try {
+				const identity = resolveTargetIdentity({ ...req, target: candidate.target, model: candidate.model }, settings);
+				return {
+					candidate,
+					unavailable: targetCooldownReason(identity.targetId, identity.runtimeId, identity.wireModelId),
+				};
+			} catch (error) {
+				return { candidate, unavailable: error instanceof Error ? error.message : String(error) };
+			}
+		});
+		const next = firstAvailableRouteCandidate(probes);
+		if (next === null) return null;
+		const rerouted: DispatchRequest = {
+			...req,
+			agentId: next.agentId,
+			target: next.target,
+			model: next.model,
+			failover: mode,
+			// An approved envelope binds the node too, so the alternate's node is
+			// pinned with it. Automatic failover leaves placement free.
+			...(mode === "approved" ? { node: next.node } : {}),
+		};
+		if (rerouted.plannedNode !== undefined && rerouted.plannedNode.id !== next.node) delete rerouted.plannedNode;
+		return rerouted;
 	}
 
 	function recordTargetOutcome(
@@ -2879,6 +2999,7 @@ export function createDispatchBundle(
 		req: DispatchRequest,
 		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
 		timing: RunPhaseMarks,
+		routeDecision: RouteDecisionV1 | undefined,
 		observer?: DispatchAdmissionObserver,
 	): Promise<{
 		runId: string;
@@ -3461,7 +3582,7 @@ export function createDispatchBundle(
 					heartbeatAt: heartbeatIso(acp.heartbeatAt.current),
 				};
 				ledgerRef.update(envelope.id, ledgerPatch);
-				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
+				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeDecision));
 				await ledgerRef.persist();
 				active.delete(envelope.id);
 				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
@@ -3560,27 +3681,27 @@ export function createDispatchBundle(
 		// placement. Every accepted runtime consumes this same immutable state.
 		const protectedArtifactState = protectedArtifactStateForRequest(getProtectedArtifactState(), req);
 
-		// Shadow observation: the rule pipeline computes its would-be plan
-		// synchronously; the outcome is recorded when the run's receipt seals.
-		// Failure-isolated on both ends; a null id means no observation exists.
-		const speculationId =
-			speculationObserver !== null ? speculationObserver.observe({ task: req.task, requestedAgentId: req.agentId }) : null;
-		const attachSpeculation = <T extends { finalPromise: Promise<RunReceipt> }>(handle: T): T => {
-			if (speculationId === null) return handle;
+		// Shadow route decision. It is computed once the production route is
+		// resolved, is never fed back into placement, and its outcome is recorded
+		// when the run's receipt seals. Failure-isolated on both ends; a null
+		// observation means the decision could not be built and nothing is sealed.
+		let routeObservation: RouteObservationHandle | null = null;
+		const attachRouteObservation = <T extends { finalPromise: Promise<RunReceipt> }>(handle: T): T => {
+			const observation = routeObservation;
+			if (observation === null) return handle;
 			handle.finalPromise
 				.then((receipt) => {
 					const envelope = ledger?.get(receipt.runId);
 					const phases = envelope ? deriveEnvelopePhaseDurations(envelope) : undefined;
-					const latencyMs = phases?.totalEndToEndMs ?? 0;
-					speculationObserver?.recordOutcome(speculationId, {
-						agentId: receipt.agentId,
-						outcome: receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed"),
-						latencyMs,
-						...(phases !== undefined ? { phases } : {}),
-						...(phases?.executionMs !== null && phases?.executionMs !== undefined
-							? { executionDurationMs: phases.executionMs }
-							: {}),
-						tokens: receipt.tokenCount,
+					const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
+					routeObserver?.recordOutcome(observation.id, {
+						route: observation.decision.executedRoute,
+						outcome,
+						verified: receipt.verification?.state === "verified",
+						firstPass: outcome === "succeeded" && (receipt.lineage?.attempt ?? 0) === 0,
+						attempt: receipt.lineage?.attempt ?? 0,
+						costUsd: receipt.costUsd,
+						endToEndMs: phases?.totalEndToEndMs ?? 0,
 					});
 				})
 				.catch(() => {});
@@ -3605,9 +3726,13 @@ export function createDispatchBundle(
 			}
 			consumeReservationSlot(req);
 			rebindReservationSlot(req, "local", UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
-			return attachSpeculation(await dispatchAcpDelegation(req, settings, timing, observer));
+			routeObservation = observeShadowRoute(req);
+			return attachRouteObservation(
+				await dispatchAcpDelegation(req, settings, timing, routeObservation?.decision, observer),
+			);
 		}
 
+		req = routeAroundCoolingTarget(req, settings) ?? req;
 		const lifecycle = await resolveLifecycle(req, settings);
 		timing.decisionCompletedAt = new Date(now()).toISOString();
 		assertResponseSchemaEnforceable(lifecycle.target.runtime, lifecycle.target.modelCapabilities, req.responseSchema);
@@ -3659,6 +3784,9 @@ export function createDispatchBundle(
 		if (placement?.reroutes !== undefined && placement.reroutes.length > 0) {
 			req = { ...req, reroutes: [...placement.reroutes] };
 		}
+		// The production route is now fully resolved and about to run. The shadow
+		// decision is built from it and recorded; nothing below reads it back.
+		routeObservation = observeShadowRoute(req, placement?.node ?? { id: "local", kind: "local" });
 		let nodeSlotHeld = placement?.release !== undefined;
 		const releaseNodeSlot = (): void => {
 			if (!nodeSlotHeld) return;
@@ -4434,7 +4562,7 @@ export function createDispatchBundle(
 					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
 				}
 				ledgerRef.update(envelope.id, ledgerPatch);
-				const receipt = ledgerRef.recordReceipt(envelope.id, receiptDraft);
+				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation?.decision));
 				await ledgerRef.persist();
 				active.delete(envelope.id);
 				recordTargetOutcome(
@@ -4514,7 +4642,7 @@ export function createDispatchBundle(
 		activeRun.finalPromise = finalPromise;
 		active.set(envelope.id, activeRun);
 
-		return attachSpeculation({
+		return attachRouteObservation({
 			runId: envelope.id,
 			events: eventPump.events,
 			finalPromise,
@@ -4583,11 +4711,19 @@ export function createDispatchBundle(
 				);
 			}
 			const lifecycle = resolveAcpDelegationLifecycle(req, settings);
+			const delegationRecipe = agents.get(req.agentId);
 			return {
 				agentId: req.agentId,
+				specFingerprint:
+					delegationRecipe !== null ? agentSpecFingerprint(normalizeAgentSpec(delegationRecipe)) : ACP_SPEC_FINGERPRINT,
 				targetId: `delegation:${lifecycle.agentConfig.id}`,
 				wireModelId: lifecycle.agentConfig.id,
+				runtimeId: "acp",
 				node: previewNode({ ...req, node: "local" }).node,
+				thinkingLevel: null,
+				// An external ACP agent runs its own tool loop, so Clio cannot observe
+				// its surface. The named signature is that unknown, stated once.
+				toolSignature: ACP_TOOL_SIGNATURE,
 				costUpperBoundUsd: UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD,
 			};
 		}
@@ -4627,9 +4763,13 @@ export function createDispatchBundle(
 		);
 		return {
 			agentId: req.agentId,
+			specFingerprint: agentSpecFingerprint(agentSpec),
 			targetId: target.target.id,
 			wireModelId: target.wireModelId,
+			runtimeId: target.runtime.id,
 			node: previewNode(req).node,
+			thinkingLevel: target.thinkingLevel,
+			toolSignature: toolSignature(effectiveTools),
 			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(
 				target.effectivePricing,
 				settings?.defaults.maxTokens ?? 32768,
@@ -4644,7 +4784,22 @@ export function createDispatchBundle(
 	 * after runtime narrowing, target auth and health, node eligibility,
 	 * capability gate). A tuple that throws is rejected; nothing is scored.
 	 */
-	function routeCandidates(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate> {
+	interface RouteProbeSet {
+		resolution: DispatchPlanTaskResolution;
+		resolved: DispatchFailoverCandidate;
+		/** Alternates in probe order, each carrying its own resolution when it passed. */
+		probes: ReadonlyArray<RouteCandidateProbe & { resolution: DispatchPlanTaskResolution | null }>;
+	}
+
+	/**
+	 * Probe every alternate tuple through `preview`, which is the same hard
+	 * admission chain a real dispatch runs (agent admission, tool compatibility
+	 * after runtime narrowing, target auth and health, node eligibility,
+	 * capability gate). Rejections are kept, not discarded: the failover envelope
+	 * only wants the survivors, but the route decision has to explain why a tuple
+	 * was excluded, and a rejected tuple must be provably unable to be selected.
+	 */
+	function routeProbes(req: DispatchRequest): RouteProbeSet {
 		const settings = getEffectiveSettings();
 		const resolution = preview(req);
 		const resolved: DispatchFailoverCandidate = {
@@ -4653,7 +4808,7 @@ export function createDispatchBundle(
 			model: resolution.wireModelId,
 			node: resolution.node.id,
 		};
-		if (req.delegationAgentId !== undefined) return [resolved];
+		if (req.delegationAgentId !== undefined) return { resolution, resolved, probes: [] };
 		const universe: RouteUniverse = {
 			agentId: resolution.agentId,
 			resolved,
@@ -4685,12 +4840,81 @@ export function createDispatchBundle(
 							node: probed.node.id,
 						},
 						rejection: null,
+						resolution: probed,
 					};
 				} catch (error) {
-					return { candidate, rejection: error instanceof Error ? error.message : String(error) };
+					return {
+						candidate,
+						rejection: error instanceof Error ? error.message : String(error),
+						resolution: null,
+					};
 				}
 			});
+		return { resolution, resolved, probes };
+	}
+
+	/**
+	 * Bounded, deterministic route envelope a plan may approve for this request:
+	 * the resolved route first, then the alternates that passed every hard filter.
+	 */
+	function routeCandidates(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate> {
+		const { resolved, probes } = routeProbes(req);
 		return selectRouteCandidates(resolved, probes);
+	}
+
+	/**
+	 * Build and record the shadow decision for a route that is already resolved
+	 * and about to execute.
+	 *
+	 * Shadow means advisory: this returns a handle the caller seals onto the
+	 * receipt and hands the outcome to, and nothing else. No caller reads
+	 * `decision.selected` back into placement, so a shadow decision cannot move
+	 * the executed route across a success, a target failover, or a node failover.
+	 * The whole function is failure-isolated: observation must never sink a
+	 * dispatch that admission already approved.
+	 */
+	function observeShadowRoute(req: DispatchRequest, placedNode?: RunNodeIdentity): RouteObservationHandle | null {
+		if (routeObserver === null) return null;
+		try {
+			const { resolution, probes } = routeProbes(req);
+			const role: RouteRoleInput = {
+				attempt: req.lineage?.attempt ?? 0,
+				...(req.gate?.role !== undefined ? { gateRole: req.gate.role } : {}),
+				...(req.systemPrompt !== undefined ? { personaPrompt: req.systemPrompt } : {}),
+			};
+			// Placement, not preview, decides the node a run lands on; the executed
+			// candidate must name the node that is actually about to be used.
+			const identity = (probed: DispatchPlanTaskResolution, nodeId: string): RouteIdentityInput => ({
+				...probed,
+				nodeId,
+			});
+			const executedRoute = toRouteCandidate(identity(resolution, placedNode?.id ?? resolution.node.id), role);
+			const candidates = [
+				{ candidate: executedRoute, rejection: null },
+				...probes.map((probe) => ({
+					candidate:
+						probe.resolution !== null
+							? toRouteCandidate(identity(probe.resolution, probe.resolution.node.id), role)
+							: {
+									...executedRoute,
+									targetId: probe.candidate.target,
+									modelId: probe.candidate.model,
+									nodeId: probe.candidate.node,
+								},
+					rejection: probe.rejection,
+				})),
+			];
+			return routeObserver.observe({
+				task: req.task,
+				requestedAgentId: req.agentId,
+				executedRoute,
+				candidates,
+				hardConstraints: ROUTE_HARD_CONSTRAINTS,
+				maxFallbacks: ROUTE_CANDIDATE_LIMIT - 1,
+			});
+		} catch {
+			return null;
+		}
 	}
 
 	function mergeBatchEvents(

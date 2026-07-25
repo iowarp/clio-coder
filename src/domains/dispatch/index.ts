@@ -47,6 +47,7 @@ export type {
 	RunKind,
 	RunOutcomeCode,
 	RunReceipt,
+	RunReceiptIntegrity,
 	RunReceiptVerification,
 	RunStatus,
 	ToolCallStat,

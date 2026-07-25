@@ -6,8 +6,8 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } fr
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION = 6;
-export type ReceiptIntegrityVersion = typeof RUN_RECEIPT_INTEGRITY_VERSION;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 7;
+export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
@@ -126,6 +126,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	briefing: true,
 	outcomeCode: true,
 	steering: true,
+	routeDecision: true,
 } as const satisfies Record<ReceiptIntegrityField, true>;
 
 const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];

@@ -1,7 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
-import type { RunEnvelope, RunKind, RunReceipt, RunStatus, ToolCallStat } from "../dispatch/index.js";
+import type {
+	RunEnvelope,
+	RunKind,
+	RunReceipt,
+	RunReceiptIntegrity,
+	RunStatus,
+	ToolCallStat,
+} from "../dispatch/index.js";
 import { readGateDecisionArtifactsForRunIds, verifyReceiptIntegrity } from "../dispatch/index.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import {
@@ -1314,7 +1321,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		toolStats: readToolStats(value, source, "toolStats"),
 		sessionId: readNullableString(value, source, "sessionId"),
 		integrity: {
-			version: readNumber(integrity, `${source}.integrity`, "version") as 4 | 5,
+			version: readNumber(integrity, `${source}.integrity`, "version") as RunReceiptIntegrity["version"],
 			algorithm: readString(integrity, `${source}.integrity`, "algorithm") as "sha256",
 			digest: readString(integrity, `${source}.integrity`, "digest"),
 		},
