@@ -11,6 +11,7 @@ import type { ToolProfileName } from "../../tools/profiles.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
+import type { RouteDecisionV1 } from "./route-decision.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
@@ -258,8 +259,14 @@ export interface RunPhaseDurations {
 	totalEndToEndMs: number | null;
 }
 
+/**
+ * The one receipt integrity version. Clio is pre-1.0 with no installed base, so
+ * there is nothing to keep verifying: a receipt is this version or it is not a
+ * receipt. `receipt-integrity.ts` annotates its constant against this type, so
+ * bumping one without the other is a compile error.
+ */
 export interface RunReceiptIntegrity {
-	version: 4 | 5 | 6;
+	version: 7;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -602,6 +609,14 @@ export interface RunReceipt {
 	delegation?: RunReceiptDelegation;
 	/** Compact findings summary; absent on receipts written before v3 integrity. */
 	findingsSummary?: RunReceiptFindingsSummary;
+	/**
+	 * Sealed shadow route decision: the candidates, their estimates, the hard
+	 * filters that rejected some of them, and what the policy would have picked.
+	 * Absent only when the route observer is disabled, which is a test-bundle
+	 * option; every production dispatch seals one, which is what lets route
+	 * regret be recomputed offline from receipts alone.
+	 */
+	routeDecision?: RouteDecisionV1;
 	sessionId: string | null;
 	integrity: RunReceiptIntegrity;
 }

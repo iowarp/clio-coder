@@ -4132,7 +4132,7 @@ rl.once("line", (line) => {
 				orphanPath,
 				JSON.stringify({
 					runId: "nocwd0000001",
-					integrity: { version: 6, algorithm: "sha256", digest: "a".repeat(64) },
+					integrity: { version: 7, algorithm: "sha256", digest: "a".repeat(64) },
 				}),
 				"utf8",
 			);

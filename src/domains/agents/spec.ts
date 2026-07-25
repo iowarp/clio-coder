@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import { type ActionClass, classify } from "../safety/action-classifier.js";
 import type { AgentBudget, AgentRecipe, AgentToolRequirement } from "./recipe.js";
@@ -279,6 +280,37 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 		budget: recipe.budget ?? null,
 		body: recipe.body,
 	};
+}
+
+/**
+ * Stable identity of everything about a recipe that changes what a route means.
+ *
+ * Route statistics are only comparable when they were produced by the same
+ * agent. A Coder run under a reviewer persona, a Coder whose declared tools
+ * changed, and a Coder whose body was rewritten are three different things to
+ * aggregate, so each gets a different fingerprint. Display-only metadata
+ * (name, description, filepath, source, tags) is excluded: renaming a recipe
+ * must not invalidate its measured history.
+ */
+export function agentSpecFingerprint(spec: AgentSpec): string {
+	const requirement = (entry: AgentToolRequirement): string =>
+		typeof entry === "string" ? entry : `anyOf(${[...entry.anyOf].sort().join("|")})`;
+	const payload = JSON.stringify({
+		id: spec.id,
+		tools: [...spec.tools].sort(),
+		required: spec.toolRequirements.required.map(requirement).sort(),
+		optional: [...spec.toolRequirements.optional].sort(),
+		category: spec.category,
+		capabilityClass: spec.capabilityClass,
+		latencyClass: spec.latencyClass,
+		projectContextTier: spec.projectContextTier,
+		audience: spec.audience,
+		skills: [...spec.skills].sort(),
+		output: spec.output,
+		budget: spec.budget,
+		body: createHash("sha256").update(spec.body, "utf8").digest("hex"),
+	});
+	return createHash("sha256").update(payload, "utf8").digest("hex");
 }
 
 export function isUserVisibleAgent(spec: AgentSpec): boolean {

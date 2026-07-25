@@ -7,6 +7,8 @@ import {
 	verifyReceiptIntegrity,
 	withReceiptIntegrity,
 } from "../../src/domains/dispatch/receipt-integrity.js";
+import { decideRoute, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
+import { estimateRoute } from "../../src/domains/dispatch/route-policy.js";
 import type {
 	RunEnvelope,
 	RunReceipt,
@@ -14,6 +16,21 @@ import type {
 	RunReceiptFindingsSummary,
 	RunReceiptIntegrity,
 } from "../../src/domains/dispatch/types.js";
+
+function fixtureRouteCandidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
+	return {
+		agentId: "coder",
+		specFingerprint: "d".repeat(64),
+		executionRole: "builder",
+		targetId: "local",
+		modelId: "model-a",
+		runtimeId: "openai",
+		nodeId: "local",
+		toolSignature: "e".repeat(64),
+		promptCompositionHash: "f".repeat(64),
+		...overrides,
+	};
+}
 
 function required<T>(value: T | undefined, label: string): T {
 	if (value === undefined) throw new Error(`fixture field missing: ${label}`);
@@ -132,7 +149,7 @@ describe("contracts/receipt-integrity", () => {
 		const draft = fixtureReceiptDraft(envelope);
 		const current = computeReceiptIntegrity(draft, envelope);
 
-		for (const version of [1, 2, 3, 4, 5, 7]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 8]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -303,6 +320,22 @@ describe("contracts/receipt-integrity", () => {
 				],
 			},
 			findingsSummary: sampleSummary,
+			routeDecision: decideRoute({
+				mode: "shadow",
+				posture: "balanced",
+				executedRoute: fixtureRouteCandidate(),
+				candidates: [
+					{ candidate: fixtureRouteCandidate(), estimate: estimateRoute([]), rejection: null },
+					{
+						candidate: fixtureRouteCandidate({ targetId: "alt" }),
+						estimate: estimateRoute([]),
+						rejection: "node-eligibility",
+					},
+				],
+				hardConstraints: ["node-eligibility"],
+				maxFallbacks: 2,
+				decisionDurationMs: 1,
+			}),
 		};
 		const receipt = withReceiptIntegrity(draft, envelope);
 		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });

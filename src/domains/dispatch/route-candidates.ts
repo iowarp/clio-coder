@@ -89,3 +89,27 @@ export function selectRouteCandidates(
 	}
 	return selected;
 }
+
+/** Whether one enveloped candidate can accept new work right now. */
+export interface RouteAvailability {
+	candidate: DispatchFailoverCandidate;
+	/** Null when the candidate can take new work; otherwise why it cannot. */
+	unavailable: string | null;
+}
+
+/**
+ * The first envelope member that can accept new work, in approval order.
+ *
+ * Availability is a hard filter applied at launch, not a preference: a target
+ * cooling down after a failure is unusable for a *new* assignment even though
+ * the plan approved it, and the envelope exists precisely so the next member
+ * can carry the work instead of the dispatch dying. Order is the approved
+ * order, so equal inputs always pick the same route. Null means every member
+ * is unavailable and the caller reports the resolved route's own reason.
+ */
+export function firstAvailableRouteCandidate(
+	probes: ReadonlyArray<RouteAvailability>,
+): DispatchFailoverCandidate | null {
+	const available = probes.find((probe) => probe.unavailable === null);
+	return available ? { ...available.candidate } : null;
+}
