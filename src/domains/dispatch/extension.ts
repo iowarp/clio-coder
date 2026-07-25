@@ -113,6 +113,7 @@ import {
 	type DispatchSnapshot,
 } from "./contract.js";
 import { createWorkerOutputCapture, startDispatchEventPump } from "./event-pump.js";
+import { appliesRecipeResultContract, withAttemptRole } from "./execution-role.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
@@ -3170,6 +3171,7 @@ export function createDispatchBundle(
 		try {
 			envelope = ledgerRef.create({
 				agentId: req.agentId,
+				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
 				targetId,
@@ -3327,6 +3329,7 @@ export function createDispatchBundle(
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
+				executionRole: envelope.executionRole,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
 				targetId,
@@ -4081,6 +4084,7 @@ export function createDispatchBundle(
 		try {
 			envelope = ledgerRef.create({
 				agentId: req.agentId,
+				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
@@ -4275,6 +4279,7 @@ export function createDispatchBundle(
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
+				executionRole: envelope.executionRole,
 				agentAudience: lifecycle.agentAudience,
 				requestOrigin: lifecycle.requestOrigin,
 				task: req.task,
@@ -4494,7 +4499,7 @@ export function createDispatchBundle(
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
 				const resultContract = validateRecipeResult({
-					contract: lifecycle.recipe?.resultContract ?? null,
+					contract: appliesRecipeResultContract(req.gate?.role) ? (lifecycle.recipe?.resultContract ?? null) : null,
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 					cwd: lifecycle.cwd,
 					networkAllowed: lifecycle.admission.allowedTools.includes(ToolNames.WebFetch),
@@ -4876,17 +4881,11 @@ export function createDispatchBundle(
 		if (routeObserver === null) return null;
 		try {
 			const { resolution, probes } = routeProbes(req);
-			const role: RouteRoleInput = {
-				attempt: req.lineage?.attempt ?? 0,
-				...(req.gate?.role !== undefined ? { gateRole: req.gate.role } : {}),
-				...(req.systemPrompt !== undefined ? { personaPrompt: req.systemPrompt } : {}),
-			};
+			const role: RouteRoleInput = { executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0) };
+			if (req.systemPrompt !== undefined) role.personaPrompt = req.systemPrompt;
 			// Placement, not preview, decides the node a run lands on; the executed
 			// candidate must name the node that is actually about to be used.
-			const identity = (probed: DispatchPlanTaskResolution, nodeId: string): RouteIdentityInput => ({
-				...probed,
-				nodeId,
-			});
+			const identity = (p: DispatchPlanTaskResolution, nodeId: string): RouteIdentityInput => ({ ...p, nodeId });
 			const executedRoute = toRouteCandidate(identity(resolution, placedNode?.id ?? resolution.node.id), role);
 			const candidates = [
 				{ candidate: executedRoute, rejection: null },

@@ -63,6 +63,7 @@ function terminalEnvelope(runId: string, outcome: RunOutcome): RunEnvelope {
 	return {
 		id: runId,
 		agentId: "scout",
+		executionRole: "builder",
 		task: "bounded reconnaissance",
 		targetId: "local",
 		wireModelId: "test-model",
@@ -187,8 +188,8 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 		}
 
 		const notCredited: ReadonlyArray<Record<string, unknown>> = [
-			{ agentId: "scout", task: "Map the repository." },
-			{ tasks: [{ agentId: "scout", task: "Map the repository." }] },
+			{ agentId: "scout", executionRole: "builder", task: "Map the repository." },
+			{ tasks: [{ agentId: "scout", executionRole: "builder", task: "Map the repository." }] },
 			{ ...SCOUT_TASK_ARGS, list: true },
 			{ ...SCOUT_TASK_ARGS, apply_winner: { branch: "clio/compete/group/1" } },
 			{ ...SCOUT_TASK_ARGS, review: true },

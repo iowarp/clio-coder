@@ -36,6 +36,7 @@ function seedRun(stateDir: string, runId: string): void {
 	const envelope = {
 		id: runId,
 		agentId: "agent-smoke",
+		executionRole: "builder",
 		task: "run pytest to validate the change",
 		targetId: "target-smoke",
 		wireModelId: "model-smoke",
@@ -67,6 +68,7 @@ function completedPayload(runId: string) {
 	return {
 		runId,
 		agentId: "agent-smoke",
+		executionRole: "builder",
 		targetId: "target-smoke",
 		wireModelId: "model-smoke",
 		runtimeId: "runtime-smoke",

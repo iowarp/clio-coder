@@ -48,7 +48,7 @@ describe("dispatch assignments", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "recover once" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "recover once" });
 			const terminal = await handle.finalPromise;
 			strictEqual(terminal.outcome, "succeeded");
 			ok(terminal.lineage);
@@ -83,7 +83,7 @@ describe("dispatch assignments", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "always fail" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "always fail" });
 			const terminal = await handle.finalPromise;
 			strictEqual(terminal.outcome, "failed");
 			ok(terminal.lineage);
@@ -111,7 +111,11 @@ describe("dispatch assignments", () => {
 			},
 		});
 		await bundle.extension.start();
-		const handle = await bundle.contract.dispatch({ agentId: "coder", task: "queue then stop" });
+		const handle = await bundle.contract.dispatch({
+			agentId: "coder",
+			executionRole: "builder",
+			task: "queue then stop",
+		});
 		// The first attempt fails and its retry is queued behind a backoff timer.
 		await waitFor(() => bundle.contract.snapshot().retrying.length === 1, "retry queued");
 		await bundle.extension.stop?.();
@@ -131,7 +135,7 @@ describe("dispatch assignments", () => {
 			spawnWorker: () => worker(0, "done"),
 		});
 		await bundleA.extension.start();
-		const handle = await bundleA.contract.dispatch({ agentId: "coder", task: "orphan me" });
+		const handle = await bundleA.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "orphan me" });
 		const terminal = await handle.finalPromise;
 		strictEqual(terminal.outcome, "succeeded");
 		await bundleA.extension.stop?.();
@@ -186,7 +190,11 @@ describe("dispatch assignments", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cancel assignment" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "cancel assignment",
+			});
 			bundle.contract.abort(handle.runId);
 			const terminal = await handle.finalPromise;
 			strictEqual(terminal.outcome, "canceled");

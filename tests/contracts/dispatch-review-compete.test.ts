@@ -7,6 +7,12 @@ import { after, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { DispatchConcurrencyError, type DispatchContract } from "../../src/domains/dispatch/contract.js";
 import {
+	DEFAULT_GATE_DECIDER_AGENT_ID,
+	gateRouteCorrelation,
+	preferIndependentRoute,
+} from "../../src/domains/dispatch/execution-role.js";
+import {
+	parseCompeteGateResult,
 	readGateDecisionArtifacts,
 	readPendingGateDecisions,
 	stagePendingGateOutput,
@@ -15,7 +21,6 @@ import {
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
-import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import {
@@ -28,21 +33,16 @@ import {
 	mergeWinnerBranch,
 	recoverCleanupReadyCompeteGroups,
 } from "../../src/tools/compete-worktrees.js";
-import { createDispatchTool, parseJudgeWinner, parseReviewVerdict } from "../../src/tools/dispatch.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { describeDispatchPlan, isPlanScaleDispatchArgs } from "../../src/tools/dispatch-plan.js";
 import { createRegistry } from "../../src/tools/registry.js";
-import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { judgeReport, reviewReport, scriptedGateFabric } from "../harness/gate-fabric.js";
 
 type ToolRunResult =
 	| { kind: "ok"; output: string; details?: Record<string, unknown> }
 	| { kind: "error"; message: string; details?: Record<string, unknown> };
-
-interface SpawnRecord {
-	spec: WorkerSpec;
-	cwd: string | undefined;
-}
 
 function approvedDispatchOptions(requestId = "apr-test-dispatch") {
 	return { approval: { requestId, requestedBy: "test-operator", actionClass: "dispatch" as const } };
@@ -70,49 +70,6 @@ function assertPidExited(pid: number): void {
 		Atomics.wait(sleeper, 0, 0, 25);
 	}
 	throw new Error(`worker pid ${pid} remained live after compete restart recovery`);
-}
-
-/**
- * Scripted fake worker fabric. Roles are recognized from the task text the
- * dispatch tool composes: reviewer tasks start with "Review the work of
- * builder run", judge tasks with "Rank". Reviewer/judge answers pop from
- * queues; builders answer with a fixed text and optionally write a file into
- * their cwd (which is the candidate worktree under compete).
- */
-function scriptedFabric(script: {
-	builderText?: string;
-	builderWritesFile?: string;
-	reviewerAnswers?: string[];
-	judgeAnswers?: string[];
-}): { spawn: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker; spawns: SpawnRecord[] } {
-	const spawns: SpawnRecord[] = [];
-	const reviewerAnswers = [...(script.reviewerAnswers ?? [])];
-	const judgeAnswers = [...(script.judgeAnswers ?? [])];
-	const spawn = (spec: WorkerSpec, opts?: { cwd?: string }): SpawnedWorker => {
-		spawns.push({ spec, cwd: opts?.cwd });
-		let text: string;
-		if (spec.task.startsWith("Review the work of builder run")) {
-			text = reviewerAnswers.shift() ?? "VERDICT: pass";
-		} else if (spec.task.startsWith("Rank ")) {
-			text = judgeAnswers.shift() ?? "WINNER: 1";
-		} else {
-			text = script.builderText ?? "built it";
-			if (script.builderWritesFile !== undefined && opts?.cwd !== undefined) {
-				writeFileSync(join(opts.cwd, script.builderWritesFile), `work in ${opts.cwd}\n`);
-			}
-		}
-		const events = (async function* () {
-			yield { type: "message_end", message: { role: "assistant", content: text, usage: { input: 1, output: 1 } } };
-		})();
-		return {
-			pid: 300 + spawns.length,
-			promise: Promise.resolve({ exitCode: 0, signal: null }),
-			events,
-			abort: () => {},
-			heartbeatAt: { current: Date.now() },
-		};
-	};
-	return { spawn, spawns };
 }
 
 /**
@@ -217,6 +174,19 @@ function decisionOutcomes(group: string): string[] {
 		.sort();
 }
 
+/** A throwaway git repository with one commit, as compete requires. */
+function makeCompeteRepo(): string {
+	const repo = mkdtempSync(join(tmpdir(), "clio-compete-repo-"));
+	const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+	git("init", "-b", "main");
+	git("config", "user.name", "test");
+	git("config", "user.email", "test@local");
+	writeFileSync(join(repo, "README.md"), "hello\n");
+	git("add", "-A");
+	git("commit", "-m", "init");
+	return repo;
+}
+
 function subjectRefForTest(receipt: RunReceipt): { runId: string; digest: string } {
 	const digest = receipt.integrity?.digest;
 	if (digest === undefined) throw new Error(`receipt ${receipt.runId} has no integrity digest`);
@@ -245,13 +215,6 @@ describe("dispatch plan detection", () => {
 		strictEqual(mapAutonomy("suggest", "dispatch", { dispatchPlanScale: true }), "ask");
 		strictEqual(mapAutonomy("read-only", "dispatch", { dispatchPlanScale: true }), "deny");
 	});
-
-	it("parses gate verdicts and judge winners from the last matching line", () => {
-		strictEqual(parseReviewVerdict("findings...\nVERDICT: revise\nmore\nVERDICT: pass"), "pass");
-		strictEqual(parseReviewVerdict("no verdict here"), null);
-		strictEqual(parseJudgeWinner("reasons\nWINNER: 2", 3), 2);
-		strictEqual(parseJudgeWinner("WINNER: 9", 3), null);
-	});
 });
 
 describe("reviewer-gated dispatch", () => {
@@ -263,7 +226,7 @@ describe("reviewer-gated dispatch", () => {
 	});
 
 	it("passes on the first cycle with chained receipts and a read-only reviewer", async () => {
-		const fabric = scriptedFabric({ reviewerAnswers: ["looks correct\nVERDICT: pass"] });
+		const fabric = scriptedGateFabric({ reviewerAnswers: [reviewReport("pass", "build and tests are green")] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -272,7 +235,7 @@ describe("reviewer-gated dispatch", () => {
 				{ tasks: ["fix the build"], review: true },
 				approvedDispatchOptions(),
 			)) as ToolRunResult;
-			strictEqual(result.kind, "ok");
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
 			ok(result.kind === "ok");
 			match(result.output, /review gate passed after 1 cycle/);
 			const gate = result.details?.gate as { verdict: string; cycles: number };
@@ -306,7 +269,7 @@ describe("reviewer-gated dispatch", () => {
 	});
 
 	it("reconstructs staged reviewer output from verified receipts on the next dispatch", async () => {
-		const fabric = scriptedFabric({ reviewerAnswers: ["VERDICT: pass"] });
+		const fabric = scriptedGateFabric({ reviewerAnswers: [reviewReport("pass")] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -322,28 +285,41 @@ describe("reviewer-gated dispatch", () => {
 			ok(builder && reviewer);
 			if (builder === undefined || reviewer === undefined) throw new Error("receipt fixtures missing");
 
+			// A failure with cycles left replays as revise, the same failure at the
+			// bound replays as the terminal fail, and an answer that does not satisfy
+			// the contract replays as a broken gate rather than a free extra cycle.
+			stagePendingGateOutput({
+				group: "restart-review-revise",
+				topology: "review",
+				cycle: 1,
+				subjects: [subjectRefForTest(builder)],
+				deciderRunId: reviewer.runId,
+				finalOutput: reviewReport("fail", "recovered findings"),
+			});
 			stagePendingGateOutput({
 				group: "restart-review-fail",
 				topology: "review",
 				cycle: 1,
 				subjects: [subjectRefForTest(builder)],
 				deciderRunId: reviewer.runId,
-				finalOutput: "recovered findings\nVERDICT: fail",
+				finalOutput: reviewReport("fail", "still wrong"),
+				terminalCycle: true,
 			});
 			stagePendingGateOutput({
-				group: "restart-review-exhausted",
+				group: "restart-review-broken",
 				topology: "review",
 				cycle: 1,
 				subjects: [subjectRefForTest(builder)],
 				deciderRunId: reviewer.runId,
-				finalOutput: "still wrong\nVERDICT: revise",
+				finalOutput: "VERDICT: pass",
 				terminalCycle: true,
 			});
 
 			const trigger = (await tool.run({ tasks: ["trigger gate recovery"] }, {})) as ToolRunResult;
 			strictEqual(trigger.kind, "ok");
+			deepStrictEqual(decisionOutcomes("restart-review-revise"), ["revise"]);
 			deepStrictEqual(decisionOutcomes("restart-review-fail"), ["fail"]);
-			deepStrictEqual(decisionOutcomes("restart-review-exhausted"), ["exhausted", "revise"]);
+			deepStrictEqual(decisionOutcomes("restart-review-broken"), ["exhausted"]);
 			deepStrictEqual(readPendingGateDecisions(), { records: [], errors: [] });
 		} finally {
 			await bundle.extension.stop?.();
@@ -351,8 +327,8 @@ describe("reviewer-gated dispatch", () => {
 	});
 
 	it("threads revise findings into the builder rerun and records the verdict on its receipt", async () => {
-		const fabric = scriptedFabric({
-			reviewerAnswers: ["missing tests\nVERDICT: revise", "VERDICT: pass"],
+		const fabric = scriptedGateFabric({
+			reviewerAnswers: [reviewReport("fail", "missing tests"), reviewReport("pass")],
 		});
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
@@ -389,7 +365,9 @@ describe("reviewer-gated dispatch", () => {
 	});
 
 	it("surfaces exhaustion as a needs-decision error, never a silent failure", async () => {
-		const fabric = scriptedFabric({ reviewerAnswers: ["still wrong\nVERDICT: revise"] });
+		// A reviewer that cannot produce its declared contract graded nothing, so the
+		// gate fails closed to the operator instead of burning another cycle.
+		const fabric = scriptedGateFabric({ reviewerAnswers: ["findings...\nVERDICT: revise"] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -401,26 +379,26 @@ describe("reviewer-gated dispatch", () => {
 			strictEqual(result.kind, "error");
 			ok(result.kind === "error");
 			match(result.message, /review gate needs an operator decision/);
-			match(result.message, /exhausted after 1 cycle/);
+			match(result.message, /no structured verdict in cycle 1/);
 			const gate = result.details?.gate as { verdict: string | null; needsDecision?: string };
 			strictEqual(gate.verdict, null);
 			ok(gate.needsDecision);
 			const group = receiptsByRole(result.details, bundle.contract).get("reviewer")?.[0]?.gate?.group;
 			ok(group);
-			deepStrictEqual(decisionOutcomes(group ?? ""), ["exhausted", "revise"]);
+			deepStrictEqual(decisionOutcomes(group ?? ""), ["exhausted"]);
 		} finally {
 			await bundle.extension.stop?.();
 		}
 	});
 
 	it("reports a fail verdict as gate failure", async () => {
-		const fabric = scriptedFabric({ reviewerAnswers: ["wrong approach\nVERDICT: fail"] });
+		const fabric = scriptedGateFabric({ reviewerAnswers: [reviewReport("fail", "wrong approach")] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({ dispatch: bundle.contract });
 			const result = (await tool.run(
-				{ tasks: ["fix the build"], review: true },
+				{ tasks: ["fix the build"], review: { max_cycles: 1 } },
 				approvedDispatchOptions(),
 			)) as ToolRunResult;
 			strictEqual(result.kind, "error");
@@ -435,7 +413,7 @@ describe("reviewer-gated dispatch", () => {
 	});
 
 	it("seals plan provenance onto every run of a plan-scale dispatch", async () => {
-		const fabric = scriptedFabric({});
+		const fabric = scriptedGateFabric({});
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -463,7 +441,7 @@ describe("reviewer-gated dispatch", () => {
 	});
 
 	it("executes every review cycle on its own approved role placement", async () => {
-		const fabric = scriptedFabric({ reviewerAnswers: ["VERDICT: revise", "VERDICT: pass"] });
+		const fabric = scriptedGateFabric({ reviewerAnswers: [reviewReport("fail"), reviewReport("pass")] });
 		const placements: string[] = [];
 		const nodeFor = (role: string | undefined, cycle: number | undefined) => `${role ?? "task"}-${cycle ?? 1}`;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
@@ -514,7 +492,7 @@ describe("compete dispatch", () => {
 	}
 
 	it("rolls back every branch and worktree when candidate N creation fails after mutating git", async () => {
-		const fabric = scriptedFabric({});
+		const fabric = scriptedGateFabric({});
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -595,7 +573,7 @@ describe("compete dispatch", () => {
 	});
 
 	it("records cleanup-ready before cleanup and recovers an injected cleanup crash on the next startup", async () => {
-		const fabric = scriptedFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["no winner"] });
+		const fabric = scriptedGateFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["no winner"] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -748,7 +726,7 @@ describe("compete dispatch", () => {
 	});
 
 	it("reconstructs a staged judge winner and preserves only that crash-leftover branch", async () => {
-		const fabric = scriptedFabric({});
+		const fabric = scriptedGateFabric({});
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -793,7 +771,7 @@ describe("compete dispatch", () => {
 				cycle: 1,
 				subjects: [subjectRefForTest(candidate)],
 				deciderRunId: judge.runId,
-				finalOutput: "recovered ranking\nWINNER: 1",
+				finalOutput: judgeReport(1, "recovered ranking"),
 				resourceRoot: repo,
 			});
 
@@ -841,10 +819,10 @@ describe("compete dispatch", () => {
 			cycle: 1,
 			subjects: [{ runId: "missing-candidate", digest: "a".repeat(64) }],
 			deciderRunId: "missing-judge",
-			finalOutput: "WINNER: 1",
+			finalOutput: judgeReport(1),
 			resourceRoot: repo,
 		});
-		const fabric = scriptedFabric({});
+		const fabric = scriptedGateFabric({});
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -866,7 +844,10 @@ describe("compete dispatch", () => {
 	});
 
 	it("full-auto applies the judge's pick and cleans every worktree and branch", async () => {
-		const fabric = scriptedFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["reasons\nWINNER: 2"] });
+		const fabric = scriptedGateFabric({
+			builderWritesFile: "answer.txt",
+			judgeAnswers: [judgeReport(2, "candidate 2 is more complete")],
+		});
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -875,7 +856,7 @@ describe("compete dispatch", () => {
 				{ tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 2 },
 				{},
 			)) as ToolRunResult;
-			strictEqual(result.kind, "ok");
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
 			ok(result.kind === "ok");
 			match(result.output, /compete winner candidate 2 applied/);
 			const judgeSpawn = fabric.spawns.find((entry) => entry.spec.task.startsWith("Rank "));
@@ -917,7 +898,7 @@ describe("compete dispatch", () => {
 	});
 
 	it("executes every compete role on its own approved placement", async () => {
-		const fabric = scriptedFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["WINNER: 1"] });
+		const fabric = scriptedGateFabric({ builderWritesFile: "answer.txt", judgeAnswers: [judgeReport(1)] });
 		const placements: string[] = [];
 		const nodeFor = (role: string | undefined, cycle: number | undefined) => `${role ?? "task"}-${cycle ?? 1}`;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
@@ -952,7 +933,7 @@ describe("compete dispatch", () => {
 		execFileSync("git", ["-C", repo, "add", "README.md"]);
 		execFileSync("git", ["-C", repo, "commit", "-m", "protected baseline"]);
 		const protectedAt = new Date(0).toISOString();
-		const fabric = scriptedFabric({ builderWritesFile: "README.md", judgeAnswers: ["WINNER: 1"] });
+		const fabric = scriptedGateFabric({ builderWritesFile: "README.md", judgeAnswers: [judgeReport(1)] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: fabric.spawn,
 			getProtectedArtifactState: () => ({
@@ -997,7 +978,7 @@ describe("compete dispatch", () => {
 		writeFileSync(join(repo, "README.md"), "protected baseline\n");
 		execFileSync("git", ["-C", repo, "add", "README.md"]);
 		execFileSync("git", ["-C", repo, "commit", "-m", "protected baseline"]);
-		const fabric = scriptedFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["WINNER: 1"] });
+		const fabric = scriptedGateFabric({ builderWritesFile: "answer.txt", judgeAnswers: [judgeReport(1)] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: fabric.spawn,
 			getProtectedArtifactState: () => ({
@@ -1041,7 +1022,7 @@ describe("compete dispatch", () => {
 	});
 
 	it("supervised keeps the winner for confirmation; apply_winner merges and cleans up", async () => {
-		const fabric = scriptedFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["WINNER: 1"] });
+		const fabric = scriptedGateFabric({ builderWritesFile: "answer.txt", judgeAnswers: [judgeReport(1)] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -1107,7 +1088,7 @@ describe("compete dispatch", () => {
 	});
 
 	it("distinguishes a full-auto retry application from an operator confirmation", async () => {
-		const fabric = scriptedFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["WINNER: 1"] });
+		const fabric = scriptedGateFabric({ builderWritesFile: "answer.txt", judgeAnswers: [judgeReport(1)] });
 		let injectMergeFailure = true;
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
@@ -1153,7 +1134,7 @@ describe("compete dispatch", () => {
 	});
 
 	it("cleans all candidates when the judge picks nothing and reports needs-decision", async () => {
-		const fabric = scriptedFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["I cannot decide"] });
+		const fabric = scriptedGateFabric({ builderWritesFile: "answer.txt", judgeAnswers: ["I cannot decide"] });
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
@@ -1176,5 +1157,178 @@ describe("compete dispatch", () => {
 			await bundle.extension.stop?.();
 			rmSync(repo, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("Slice 3 gate role defaults and independence", () => {
+	beforeEach(() => {
+		isolateDispatchState();
+	});
+	after(() => {
+		restoreDispatchState();
+	});
+
+	it("review defaults to verifier and never to the builder", async () => {
+		const fabric = scriptedGateFabric({});
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const result = (await tool.run(
+				{ agent: "coder", tasks: ["fix the build"], review: true },
+				approvedDispatchOptions("apr-review-default"),
+			)) as ToolRunResult;
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			const byRole = receiptsByRole(result.details, bundle.contract);
+			const builder = byRole.get("builder")?.[0];
+			const reviewer = byRole.get("reviewer")?.[0];
+			ok(builder && reviewer, "builder and reviewer receipts sealed");
+			strictEqual(builder?.agentId, "coder");
+			strictEqual(reviewer?.agentId, DEFAULT_GATE_DECIDER_AGENT_ID);
+			notStrictEqual(reviewer?.agentId, builder?.agentId, "an omitted reviewer never routes back to the builder");
+			strictEqual(reviewer?.executionRole, "reviewer");
+			strictEqual(builder?.executionRole, "builder");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("compete defaults to verifier and never to the builder", async () => {
+		const repo = makeCompeteRepo();
+		const fabric = scriptedGateFabric({ builderWritesFile: "answer.txt" });
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const result = (await tool.run(
+				{ agent: "coder", tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 2 },
+				{},
+			)) as ToolRunResult;
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			const byRole = receiptsByRole(result.details, bundle.contract);
+			const candidates = byRole.get("candidate") ?? [];
+			const judge = byRole.get("judge")?.[0];
+			strictEqual(candidates.length, 2);
+			ok(judge, "judge receipt sealed");
+			strictEqual(judge?.agentId, DEFAULT_GATE_DECIDER_AGENT_ID);
+			for (const candidate of candidates) {
+				strictEqual(candidate.agentId, "coder");
+				notStrictEqual(judge?.agentId, candidate.agentId, "an omitted judge never routes back to the builder");
+				// Compete candidates are ordinary builder evidence regardless of ordinal.
+				strictEqual(candidate.executionRole, "builder");
+			}
+			strictEqual(judge?.executionRole, "judge");
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("structured gate results replace trailing prose verdicts", async () => {
+		// The old protocol is now just malformed text: it proves nothing and the
+		// gate fails closed instead of reading a verdict out of prose.
+		for (const [answer, expected] of [
+			["findings...\nVERDICT: pass", "exhausted"],
+			[reviewReport("pass"), "pass"],
+		] as const) {
+			const fabric = scriptedGateFabric({ reviewerAnswers: [answer] });
+			const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
+			await bundle.extension.start();
+			try {
+				const tool = createDispatchTool({ dispatch: bundle.contract });
+				const result = (await tool.run(
+					{ tasks: ["fix the build"], review: { max_cycles: 1 } },
+					approvedDispatchOptions("apr-structured-gate"),
+				)) as ToolRunResult;
+				const group = receiptsByRole(result.details, bundle.contract).get("reviewer")?.[0]?.gate?.group;
+				ok(group);
+				deepStrictEqual(decisionOutcomes(group ?? ""), [expected]);
+			} finally {
+				await bundle.extension.stop?.();
+				isolateDispatchState();
+			}
+		}
+		// The judge protocol is structured for the same reason.
+		strictEqual(parseCompeteGateResult("reasons\nWINNER: 2", 3).ok, false);
+		const judged = parseCompeteGateResult(judgeReport(2), 3);
+		ok(judged.ok && judged.result.winner === 2);
+		strictEqual(parseCompeteGateResult(judgeReport(9), 3).ok, false, "the winner must name an enumerated candidate");
+	});
+
+	it("correlated quality routes are recorded rather than hidden", async () => {
+		// Pinning the reviewer to the builder agent is the correlated case a small
+		// fleet hits. The gate still runs and its decision still records the
+		// correlation, so the evidence is visible instead of silently trusted.
+		const fabric = scriptedGateFabric({});
+		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const result = (await tool.run(
+				{ agent: "coder", tasks: ["fix the build"], review: { reviewer: "coder" } },
+				approvedDispatchOptions("apr-correlated"),
+			)) as ToolRunResult;
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			const byRole = receiptsByRole(result.details, bundle.contract);
+			const group = byRole.get("reviewer")?.[0]?.gate?.group;
+			ok(group);
+			const decisions = readGateDecisionArtifacts(group ?? "");
+			strictEqual(decisions.length, 1);
+			const artifact = decisions[0]?.artifact;
+			ok(artifact, "the correlated gate is recorded, not dropped");
+			deepStrictEqual(verifyGateDecisionArtifact(artifact ?? ({} as never)), { ok: true });
+			strictEqual(artifact?.outcome, "pass");
+			// Every dimension is sealed, and a shared agent makes it non-independent.
+			strictEqual(artifact?.correlation?.agent, true);
+			strictEqual(artifact?.correlation?.modelFamily, true);
+			strictEqual(artifact?.correlation?.target, true);
+			strictEqual(artifact?.correlation?.runtime, true);
+			strictEqual(artifact?.correlation?.node, true);
+			strictEqual(artifact?.correlation?.independent, false);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("independence preference cannot select a hard-rejected route", () => {
+		const subject = {
+			agentId: "coder",
+			targetId: "primary",
+			wireModelId: "model-a",
+			runtimeId: "openai",
+			nodeId: "local",
+		};
+		const correlated = { ...subject, agentId: "coder" };
+		const independent = { ...subject, agentId: "verifier", wireModelId: "model-b" };
+
+		// Given both, the preference is soft but deterministic: it picks the
+		// independent route out of the eligible set.
+		strictEqual(
+			preferIndependentRoute([correlated, independent], subject, (route) => route),
+			independent,
+		);
+		strictEqual(
+			preferIndependentRoute([independent, correlated], subject, (route) => route),
+			independent,
+		);
+
+		// The caller passes only routes that already cleared every hard filter and
+		// quality floor. A rejected route is simply absent, so the preference can
+		// never resurrect it: it returns an input or nothing at all.
+		const eligibleAfterHardFilters = [correlated];
+		strictEqual(
+			preferIndependentRoute(eligibleAfterHardFilters, subject, (route) => route),
+			correlated,
+			"a single-target fleet still runs its gate and reports the correlation",
+		);
+		ok(!eligibleAfterHardFilters.includes(independent), "the hard-rejected route was never eligible");
+		strictEqual(
+			preferIndependentRoute([], subject, (route) => route),
+			null,
+			"nothing eligible selects nothing",
+		);
+		// Independence is measured, not assumed.
+		strictEqual(gateRouteCorrelation(subject, correlated).independent, false);
+		strictEqual(gateRouteCorrelation(subject, independent).independent, true);
 	});
 });

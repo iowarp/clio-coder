@@ -3,11 +3,13 @@ import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { clioDataDir } from "../core/xdg.js";
+import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { createContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
@@ -330,8 +332,13 @@ async function runDispatch(
 	const noSkills = options.noSkills === true || parsed.noSkills === true;
 	const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
 
+	const runAgents = loaded.getContract<AgentsContract>("agents");
 	const dispatchReq: DispatchRequest = {
 		agentId: parsed.agentId,
+		executionRole: requestExecutionRole({
+			agentId: parsed.agentId,
+			...(runAgents ? { resolveFacts: agentRoleFactsResolver((id: string) => runAgents.getSpec(id)) } : {}),
+		}),
 		task,
 		requestOrigin: "user",
 	};

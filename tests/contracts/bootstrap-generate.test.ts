@@ -53,6 +53,7 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		outcome: "succeeded",
 		runId: "scout-run-1",
 		agentId: "scout",
+		executionRole: "builder",
 		requestOrigin: "internal",
 		task: "bootstrap",
 		targetId: "mini",
@@ -81,7 +82,7 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		toolCalls: 2,
 		toolStats: [],
 		sessionId: null,
-		integrity: { version: 9, algorithm: "sha256", digest: "0".repeat(64) },
+		integrity: { version: 10, algorithm: "sha256", digest: "0".repeat(64) },
 		...overrides,
 	};
 }

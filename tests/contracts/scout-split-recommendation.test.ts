@@ -16,6 +16,7 @@ function receiptEnvelope(draft: RunReceiptDraft): RunEnvelope {
 	return {
 		id: draft.runId,
 		agentId: draft.agentId,
+		executionRole: "builder",
 		task: draft.task,
 		targetId: draft.targetId,
 		wireModelId: draft.wireModelId,
@@ -51,6 +52,7 @@ function toolForAnswer(answer: string) {
 				outcome: "succeeded",
 				runId: "run-scout",
 				agentId: request.agentId,
+				executionRole: "builder",
 				task: request.task,
 				targetId: "target",
 				wireModelId: "model",

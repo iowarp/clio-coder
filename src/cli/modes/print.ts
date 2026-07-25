@@ -190,6 +190,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		agentId: "main-agent",
+		executionRole: "builder",
 		requestOrigin: "user",
 		task: input.task,
 		targetId: snapshot.targetId,
@@ -228,6 +229,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const receipt: RunReceiptDraft = {
 		runId: envelope.id,
 		agentId: "main-agent",
+		executionRole: "builder",
 		requestOrigin: "user",
 		task: input.task,
 		targetId: snapshot.targetId,

@@ -34,6 +34,7 @@ function envelope(): RunEnvelope {
 	return {
 		id: "run-1",
 		agentId: "coder",
+		executionRole: "builder",
 		task: "inspect the code",
 		targetId: "primary",
 		wireModelId: "model-a",
@@ -59,6 +60,7 @@ function receiptDraft(run: RunEnvelope): RunReceiptDraft {
 	return {
 		runId: run.id,
 		agentId: run.agentId,
+		executionRole: "builder",
 		task: run.task,
 		targetId: run.targetId,
 		wireModelId: run.wireModelId,

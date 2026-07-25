@@ -82,6 +82,7 @@ describe("contracts/eval evidence linking", () => {
 			const run = {
 				id: "run-nested",
 				agentId: "coder",
+				executionRole: "builder",
 				task: "fix the target",
 				targetId: "mini",
 				wireModelId: "Qwopus-test",

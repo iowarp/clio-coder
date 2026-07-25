@@ -439,7 +439,11 @@ async function receiptForRuntime(input: {
 	});
 	await bundle.extension.start();
 	try {
-		const handle = await bundle.contract.dispatch({ agentId: "coder", task: `receipt ${input.runtime.id}` });
+		const handle = await bundle.contract.dispatch({
+			agentId: "coder",
+			executionRole: "builder",
+			task: `receipt ${input.runtime.id}`,
+		});
 		const receipt = await handle.finalPromise;
 		return { autonomyEnforcement: receipt.autonomyEnforcement, spec: capturedSpec };
 	} finally {
@@ -507,8 +511,14 @@ describe("contracts/dispatch", () => {
 			});
 			await stripped.extension.start();
 			try {
-				throws(() => stripped.contract.preview?.({ agentId, task: "compatibility preview" }), /missing required tools/);
-				await rejects(stripped.contract.dispatch({ agentId, task: "compatibility execution" }), /missing required tools/);
+				throws(
+					() => stripped.contract.preview?.({ executionRole: "builder", agentId, task: "compatibility preview" }),
+					/missing required tools/,
+				);
+				await rejects(
+					stripped.contract.dispatch({ executionRole: "builder", agentId, task: "compatibility execution" }),
+					/missing required tools/,
+				);
 				strictEqual(strippedSpawns, 0, `${agentId} spawned without required tools`);
 			} finally {
 				await stripped.extension.stop?.();
@@ -530,7 +540,11 @@ describe("contracts/dispatch", () => {
 			});
 			await compatible.extension.start();
 			try {
-				const handle = await compatible.contract.dispatch({ agentId, task: "compatible execution" });
+				const handle = await compatible.contract.dispatch({
+					executionRole: "builder",
+					agentId,
+					task: "compatible execution",
+				});
 				await handle.finalPromise;
 				strictEqual(compatibleSpawns, 1, `${agentId} did not spawn on compatible runtime`);
 			} finally {
@@ -570,7 +584,11 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: optionalRecipe.id, task: "read" });
+			const handle = await bundle.contract.dispatch({
+				agentId: optionalRecipe.id,
+				executionRole: "builder",
+				task: "read",
+			});
 			await handle.finalPromise;
 			const spawnedSpec = captured as WorkerSpec | null;
 			ok(spawnedSpec);
@@ -601,8 +619,14 @@ describe("contracts/dispatch", () => {
 		});
 		await orchestration.extension.start();
 		try {
-			throws(() => orchestration.contract.preview?.({ agentId: "nested", task: "nested" }), /mediation unavailable/);
-			await rejects(orchestration.contract.dispatch({ agentId: "nested", task: "nested" }), /mediation unavailable/);
+			throws(
+				() => orchestration.contract.preview?.({ agentId: "nested", executionRole: "builder", task: "nested" }),
+				/mediation unavailable/,
+			);
+			await rejects(
+				orchestration.contract.dispatch({ agentId: "nested", executionRole: "builder", task: "nested" }),
+				/mediation unavailable/,
+			);
 			strictEqual(orchestrationSpawns, 0);
 		} finally {
 			await orchestration.extension.stop?.();
@@ -629,7 +653,11 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "single dispatch" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "single dispatch",
+			});
 			ok(spawned);
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
@@ -742,7 +770,11 @@ describe("contracts/dispatch", () => {
 			});
 			await bundle.extension.start();
 			try {
-				const handle = await bundle.contract.dispatch({ agentId: "coder", task: `protected ${transport} worker` });
+				const handle = await bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: `protected ${transport} worker`,
+				});
 				exit.resolve({ exitCode: 0, signal: null });
 				await drainEvents(handle.events);
 				const receipt = await handle.finalPromise;
@@ -791,7 +823,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				bundle.contract.dispatch({ agentId: "coder", task: "must preserve hard blocks" }),
+				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "must preserve hard blocks" }),
 				/cannot enforce 1 protected artifact hard block/,
 			);
 			strictEqual(spawned, false);
@@ -834,7 +866,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				() => bundle.contract.dispatch({ agentId: "coder", task: "bounded work" }),
+				() => bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "bounded work" }),
 				/cannot enforce an explicit agent budget/,
 			);
 			strictEqual(spawned, false);
@@ -858,7 +890,12 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cwd flow", cwd: "/work/project" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "cwd flow",
+				cwd: "/work/project",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			// The fast collector preserves its cwd argument, so a regression that
@@ -886,7 +923,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				bundle.contract.dispatch({ agentId: "coder", task: "budget denied dispatch" }),
+				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "budget denied dispatch" }),
 				/dispatch: admission denied: budget ceiling crossed: \$5\.0000 \/ \$5\.0000/,
 			);
 			strictEqual(spawned, false);
@@ -936,7 +973,11 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "catalog pricing" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "catalog pricing",
+			});
 			await waitFor(() => (bundle.contract.snapshot().running[0]?.tokens.total ?? 0) > 0, "usage was not metered");
 			const inFlight = bundle.contract.snapshot().running[0];
 			ok(inFlight);
@@ -968,7 +1009,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				bundle.contract.dispatch({ agentId: "coder", task: "unknown pricing admission" }),
+				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "unknown pricing admission" }),
 				/includes \$1\.0000 route estimate/,
 			);
 			strictEqual(auditRows[0]?.reasonCode, "budget-ceiling");
@@ -992,6 +1033,7 @@ describe("contracts/dispatch", () => {
 		};
 		const run = ledger.create({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "timed run",
 			targetId: "target",
 			wireModelId: "model",
@@ -1052,7 +1094,11 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "session view dispatch" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "session view dispatch",
+			});
 			strictEqual(capturedSpecs[0]?.wireModelId, "session-model");
 			exit.resolve({ exitCode: 0, signal: null });
 			await handle.finalPromise;
@@ -1095,7 +1141,11 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "session safety dispatch" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "session safety dispatch",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			const spec = capturedSpecs[0];
 			ok(spec);
@@ -1175,6 +1225,7 @@ describe("contracts/dispatch", () => {
 		try {
 			const routine = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "make a small routine change",
 				toolProfile: "minimal-local",
 			});
@@ -1189,6 +1240,7 @@ describe("contracts/dispatch", () => {
 
 			const navigation = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "locate the implementation and map call sites in src/domains/dispatch",
 				toolProfile: "minimal-local",
 			});
@@ -1238,7 +1290,11 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "canonical model dispatch" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "canonical model dispatch",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual((capturedSpec as WorkerSpec | null)?.wireModelId, canonical);
@@ -1280,7 +1336,7 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: `run ${id}` });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: `run ${id}` });
 			exit.resolve({ exitCode: 0, signal: null });
 			await handle.finalPromise;
 			const spec = capturedSpec as unknown as WorkerSpec;
@@ -1430,8 +1486,8 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const batch = await bundle.contract.dispatchBatch([
-				{ agentId: "coder", task: "batch task 1" },
-				{ agentId: "coder", task: "batch task 2" },
+				{ agentId: "coder", executionRole: "builder", task: "batch task 1" },
+				{ agentId: "coder", executionRole: "builder", task: "batch task 2" },
 			]);
 
 			strictEqual(batch.runIds.length, 2);
@@ -1480,7 +1536,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				() => bundle.contract.dispatch({ agentId: "bad-validator", task: "run tests" }),
+				() => bundle.contract.dispatch({ agentId: "bad-validator", executionRole: "builder", task: "run tests" }),
 				/read-only agent 'bad-validator' requests execute tools/,
 			);
 		} finally {
@@ -1512,6 +1568,7 @@ describe("contracts/dispatch", () => {
 				() =>
 					bundle.contract.dispatch({
 						agentId: "bad-validator",
+						executionRole: "builder",
 						task: "run tests",
 						systemPrompt: "# Validation Specialist\nRun focused checks.",
 					}),
@@ -1556,10 +1613,11 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				() => bundle.contract.dispatch({ agentId: "scout", task: "map files", requestOrigin: "user" }),
+				() =>
+					bundle.contract.dispatch({ agentId: "scout", executionRole: "builder", task: "map files", requestOrigin: "user" }),
 				/reserved for Clio internal orchestration/,
 			);
-			const handle = await bundle.contract.dispatch({ agentId: "scout", task: "map files" });
+			const handle = await bundle.contract.dispatch({ agentId: "scout", executionRole: "builder", task: "map files" });
 			strictEqual(spawned, true);
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
@@ -1603,6 +1661,7 @@ describe("contracts/dispatch", () => {
 				() =>
 					bundle.contract.dispatch({
 						agentId: "scout",
+						executionRole: "builder",
 						task: "map files",
 						systemPrompt: "# Shadow Specialist\nMap files with custom instructions.",
 					}),
@@ -1646,7 +1705,7 @@ describe("contracts/dispatch", () => {
 			conventions: ["Tabs, line width 120."],
 			invariants: ["Only src/engine imports the pi SDK."],
 		};
-		const req = { agentId: "coder", task: "do work" };
+		const req = { agentId: "coder", executionRole: "builder" as const, task: "do work" };
 
 		for (const capabilityClass of ["workspace-edit", "verification", "artifact-write"] as const) {
 			strictEqual(defaultProjectContextTier(capabilityClass), "bounded");
@@ -1706,7 +1765,7 @@ describe("contracts/dispatch", () => {
 			conventions: ["Tabs."],
 			invariants: [],
 		};
-		const req = { agentId: "coder", task: "do work" };
+		const req = { agentId: "coder", executionRole: "builder" as const, task: "do work" };
 
 		// Recipe frontmatter override flows through normalizeAgentSpec.
 		const optedInReviewer = normalizeAgentSpec({
@@ -1752,7 +1811,7 @@ describe("contracts/dispatch", () => {
 			verificationExpectations: "Before handoff, run `npm run typecheck` and `npm run lint`.",
 		};
 		const { verificationExpectations: _omitted, ...projectWithoutSection } = project;
-		const req = { agentId: "verifier", task: "verify work" };
+		const req = { agentId: "verifier", executionRole: "builder" as const, task: "verify work" };
 
 		const verifier = buildDynamicPromptMessages(req, {
 			capabilityClass: "verification",
@@ -1829,7 +1888,7 @@ describe("contracts/dispatch", () => {
 			invariants: ["Invariant that must survive convention truncation."],
 		};
 		const messages = buildDynamicPromptMessages(
-			{ agentId: "coder", task: "t" },
+			{ agentId: "coder", executionRole: "builder", task: "t" },
 			{ capabilityClass: "workspace-edit", projectContextTier: "bounded", autonomy: "auto-edit", project },
 		);
 		const body = messages[0]?.body ?? "";
@@ -1839,7 +1898,7 @@ describe("contracts/dispatch", () => {
 	});
 
 	it("adds an honest dynamic safety posture for each worker permission mode", () => {
-		const req = { agentId: "coder", task: "t" };
+		const req = { agentId: "coder", executionRole: "builder" as const, task: "t" };
 		for (const autonomy of ["read-only", "suggest", "auto-edit", "full-auto"] as const) {
 			for (const onPermission of ["escalate", "deny", "fail"] as const) {
 				const messages = buildDynamicPromptMessages(req, { autonomy, onPermission });
@@ -1867,6 +1926,7 @@ describe("contracts/dispatch", () => {
 	it("renders pipeline input as the last dynamic message with the fixed envelope", () => {
 		const req = {
 			agentId: "coder",
+			executionRole: "builder" as const,
 			task: "use prior result",
 			memorySection: "# Memory\nKnown fact.",
 			pipelineInput: {
@@ -1921,6 +1981,7 @@ describe("contracts/dispatch", () => {
 		try {
 			const handle = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "consume large pipeline input",
 				pipelineInput: {
 					fromRunId: "run-large",
@@ -1984,7 +2045,7 @@ describe("contracts/dispatch", () => {
 		try {
 			const task = "inspect the named paths";
 			const briefing = "Prior receipt: src/a.ts:12; constraint: read-only.";
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task, briefing });
+			const handle = await bundle.contract.dispatch({ executionRole: "builder", agentId: "coder", task, briefing });
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
 			const capturedSpec = capturedSpecs[0];
@@ -2009,6 +2070,7 @@ describe("contracts/dispatch", () => {
 	it("renders empty pipeline input with an explicit marker", () => {
 		const req = {
 			agentId: "coder",
+			executionRole: "builder" as const,
 			task: "use empty prior result",
 			pipelineInput: {
 				fromRunId: "run-empty",
@@ -2028,6 +2090,7 @@ describe("contracts/dispatch", () => {
 	it("renders a bounded briefing after memory and before the final pipeline input", () => {
 		const messages = buildDynamicPromptMessages({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "keep this task unchanged",
 			memorySection: "memory",
 			briefing: "Prior receipt found src/a.ts:12.",
@@ -2045,6 +2108,7 @@ describe("contracts/dispatch", () => {
 	it("validates the pipelineInput job-spec shape", () => {
 		const good = validateJobSpec({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "consume prior result",
 			pipelineInput: { fromRunId: "run-1", position: 2, text: "" },
 		});
@@ -2059,6 +2123,7 @@ describe("contracts/dispatch", () => {
 
 		const goodRoot = validateJobSpec({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "consume bootstrap result",
 			pipelineInput: { fromRunId: null, position: 1, text: "seed" },
 		});
@@ -2066,6 +2131,7 @@ describe("contracts/dispatch", () => {
 
 		const badPosition = validateJobSpec({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "bad position",
 			pipelineInput: { fromRunId: "run-1", position: 1.5, text: "data" },
 		});
@@ -2073,6 +2139,7 @@ describe("contracts/dispatch", () => {
 
 		const missingText = validateJobSpec({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "missing text",
 			pipelineInput: { fromRunId: "run-1", position: 2 },
 		});
@@ -2080,6 +2147,7 @@ describe("contracts/dispatch", () => {
 
 		const unknown = validateJobSpec({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "unknown key",
 			pipelineInput: { fromRunId: "run-1", position: 2, text: "data" },
 			pipelineInputs: [],
@@ -2107,6 +2175,7 @@ describe("contracts/dispatch", () => {
 	it("accepts and normalizes writeRoots onto the validated job spec", () => {
 		const good = validateJobSpec({
 			agentId: "documenter",
+			executionRole: "builder",
 			task: "write wiki",
 			cwd: "/work/repo",
 			writeRoots: ["staging/wiki", "/abs/root"],
@@ -2185,7 +2254,12 @@ describe("contracts/dispatch", () => {
 			filepath: "/test/coder.md",
 			body: "# Coder\nDo bounded work.",
 		};
-		const req = { agentId: "coder", task: "do work", memorySection: "# Memory\nApproved fact." };
+		const req = {
+			agentId: "coder",
+			executionRole: "builder" as const,
+			task: "do work",
+			memorySection: "# Memory\nApproved fact.",
+		};
 		const reqWithPipelineInput = {
 			...req,
 			pipelineInput: { fromRunId: "run-source", position: 2, text: "prior result" },
@@ -2256,9 +2330,10 @@ describe("contracts/dispatch", () => {
 		try {
 			const composedReq = {
 				agentId: "coder",
+				executionRole: "builder",
 				task: "composed task",
 				systemPrompt: "# Import Boundary Specialist\nAudit import boundaries and report concrete risks.",
-			};
+			} as const;
 			const composed = await bundle.contract.dispatch(composedReq);
 			exits[0]?.resolve({ exitCode: 0, signal: null });
 			const composedReceipt = await composed.finalPromise;
@@ -2271,7 +2346,7 @@ describe("contracts/dispatch", () => {
 				promptHash: composedReceipt.staticCompositionHash,
 			});
 
-			const recipeReq = { agentId: "coder", task: "recipe task" };
+			const recipeReq = { agentId: "coder", executionRole: "builder" as const, task: "recipe task" };
 			const recipeRun = await bundle.contract.dispatch(recipeReq);
 			exits[1]?.resolve({ exitCode: 0, signal: null });
 			const recipeReceipt = await recipeRun.finalPromise;
@@ -2299,7 +2374,7 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "failing task" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "failing task" });
 			exit.resolve({ exitCode: 1, signal: null });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 1);
@@ -2326,7 +2401,7 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "aborted task" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "aborted task" });
 			bundle.contract.abort(handle.runId);
 			exit.resolve({ exitCode: 0, signal: null });
 			const receipt = await handle.finalPromise;
@@ -2358,7 +2433,11 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "timed-out task" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "timed-out task",
+			});
 			bundle.contract.abort(handle.runId, { cause: "timeout", detail: "timed out after 1000ms" });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "canceled");
@@ -2390,7 +2469,11 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "doomed finalization" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "doomed finalization",
+			});
 			exit.reject(new Error("worker channel collapsed"));
 			await rejects(handle.finalPromise, /worker channel collapsed/);
 			// The run must not be stranded: without containment the row stayed
@@ -2426,7 +2509,11 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "slow consumer accounting" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "slow consumer accounting",
+			});
 			// A consumer that is mid-drain when the worker exits must still get
 			// its metering folded into the receipt instead of losing the race
 			// to finalization.
@@ -2469,7 +2556,11 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "instant worker" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "instant worker",
+			});
 			// Deliberately no iteration of handle.events: receipt correctness must
 			// not depend on an external consumer.
 			const receipt = await handle.finalPromise;
@@ -2519,7 +2610,11 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "read without synthesis" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "read without synthesis",
+			});
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(receipt.outcomeCode, "worker_final_output_missing");
@@ -2571,7 +2666,9 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const receipt = await (await bundle.contract.dispatch({ agentId: "coder", task: "preamble only" })).finalPromise;
+			const receipt = await (
+				await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "preamble only" })
+			).finalPromise;
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(receipt.outcomeCode, "worker_final_output_missing");
 			strictEqual(receipt.output, undefined);
@@ -2598,7 +2695,9 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const receipt = await (await bundle.contract.dispatch({ agentId: "coder", task: "unflushed" })).finalPromise;
+			const receipt = await (
+				await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "unflushed" })
+			).finalPromise;
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(receipt.outcomeCode, "worker_final_output_missing");
 			deepStrictEqual(receipt.output, {
@@ -2651,6 +2750,7 @@ describe("contracts/dispatch", () => {
 		try {
 			const receipt = await (
 				await bundle.contract.dispatch({
+					executionRole: "builder",
 					agentId: "silent-acp",
 					delegationAgentId: "silent-acp",
 					task: "return a final answer",
@@ -2704,8 +2804,8 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatchBatch([
-				{ agentId: "coder", task: "early member" },
-				{ agentId: "coder", task: "late member" },
+				{ agentId: "coder", executionRole: "builder", task: "early member" },
+				{ agentId: "coder", executionRole: "builder", task: "late member" },
 			]);
 			// No consumer for the merged stream either.
 			const receipts = await handle.finalPromise;
@@ -2771,6 +2871,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "fast-acp",
 				delegationAgentId: "fast-acp",
 				task: "delegate fast",
@@ -2822,7 +2923,7 @@ describe("contracts/dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cap exhausted" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "cap exhausted" });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "failed", "the cap bound must not present as an unconstrained success");
 			strictEqual(receipt.outcomeCode, "worker_tool_call_cap_exhausted");
@@ -2935,6 +3036,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "opencode",
 				delegationAgentId: "opencode",
 				task: "delegate this",
@@ -3012,6 +3114,7 @@ describe("contracts/dispatch", () => {
 		try {
 			await rejects(
 				bundle.contract.dispatch({
+					executionRole: "builder",
 					agentId: "unmediated",
 					delegationAgentId: "unmediated",
 					task: "must remain read-only",
@@ -3041,6 +3144,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "mediated",
 				delegationAgentId: "mediated",
 				task: "review without writes",
@@ -3078,6 +3182,7 @@ describe("contracts/dispatch", () => {
 		try {
 			await rejects(
 				bundle.contract.dispatch({
+					executionRole: "builder",
 					agentId: "unmediated",
 					delegationAgentId: "unmediated",
 					task: "review without writes",
@@ -3110,6 +3215,7 @@ describe("contracts/dispatch", () => {
 			for (const toolProfile of ["minimal-local", "science-local"] as const) {
 				await rejects(
 					bundle.contract.dispatch({
+						executionRole: "builder",
 						agentId: "profiled",
 						delegationAgentId: "profiled",
 						task: "profile must be real",
@@ -3122,6 +3228,7 @@ describe("contracts/dispatch", () => {
 			strictEqual(bundle.contract.listRuns().length, 0);
 
 			const handle = await bundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "profiled",
 				delegationAgentId: "profiled",
 				task: "full surface makes no narrowing claim",
@@ -3172,6 +3279,7 @@ describe("contracts/dispatch", () => {
 			await bundle.extension.start();
 			try {
 				const handle = await bundle.contract.dispatch({
+					executionRole: "builder",
 					agentId: `governance-${item.governance}`,
 					delegationAgentId: `governance-${item.governance}`,
 					task: `record ${item.governance} governance`,
@@ -3213,6 +3321,7 @@ describe("contracts/dispatch", () => {
 			await rejects(
 				() =>
 					bundle.contract.dispatch({
+						executionRole: "builder",
 						agentId: "opencode",
 						delegationAgentId: "opencode",
 						task: "delegate this",
@@ -3271,6 +3380,7 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "opencode",
 				delegationAgentId: "opencode",
 				task: "delegate and time out",
@@ -3316,7 +3426,11 @@ describe("contracts/dispatch", () => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "hit worker tool cap" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "hit worker tool cap",
+			});
 			exit.resolve({ exitCode: 1, signal: null, stderrTail: `[worker] ${reason}` });
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
@@ -3367,7 +3481,11 @@ rl.once("line", (line) => {
 
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "crash with diagnostics" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "crash with diagnostics",
+			});
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.exitCode, 1);
@@ -3406,14 +3524,21 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const first = await bundle.contract.dispatch({ agentId: "coder", task: "fails" });
+			const first = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "fails" });
 			firstExit.resolve({ exitCode: 1, signal: null });
 			await first.finalPromise;
 
 			const { rejects } = await import("node:assert/strict");
-			await rejects(bundle.contract.dispatch({ agentId: "coder", task: "retry too soon" }), /cooling down/);
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "retry too soon" }),
+				/cooling down/,
+			);
 			now += 501;
-			const second = await bundle.contract.dispatch({ agentId: "coder", task: "retry after cooldown" });
+			const second = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "retry after cooldown",
+			});
 			secondExit.resolve({ exitCode: 0, signal: null });
 			const receipt = await second.finalPromise;
 			strictEqual(receipt.exitCode, 0);
@@ -3511,6 +3636,7 @@ rl.once("line", (line) => {
 		try {
 			const handle = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "test skill forwarding",
 				noSkills: true,
 				skillPaths: ["/some/path/SKILL.md"],
@@ -3556,6 +3682,7 @@ rl.once("line", (line) => {
 		try {
 			const handle = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "test default config trust",
 				noSkills: true,
 			});
@@ -3672,7 +3799,7 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "stall me" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "stall me" });
 			await waitFor(() => abortCalled, "heartbeat reconciler did not kill dead worker");
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "failed");
@@ -3715,6 +3842,7 @@ rl.once("line", (line) => {
 		try {
 			const exhausted = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "already retried",
 				lineage: { parentRunId: "parent", rootRunId: "root", attempt: 1, depth: 0 },
 			});
@@ -3723,7 +3851,7 @@ rl.once("line", (line) => {
 			strictEqual(exhaustedReceipt.outcome, "failed");
 			strictEqual(bundle.contract.snapshot().retrying.length, 0);
 
-			const canceled = await bundle.contract.dispatch({ agentId: "coder", task: "cancel me" });
+			const canceled = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "cancel me" });
 			bundle.contract.abort(canceled.runId);
 			const canceledReceipt = await canceled.finalPromise;
 			strictEqual(canceledReceipt.outcome, "canceled");
@@ -3753,7 +3881,7 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "bounded run" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "bounded run" });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcomeCode, "worker_tool_call_cap_exhausted");
 			strictEqual(bundle.contract.snapshot().retrying.length, 0);
@@ -3777,7 +3905,11 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "contradictory success" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "contradictory success",
+			});
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(receipt.outcomeCode, "worker_tool_call_cap_exhausted");
@@ -3832,7 +3964,7 @@ rl.once("line", (line) => {
 			});
 			await bundle.extension.start();
 			try {
-				const handle = await bundle.contract.dispatch({ agentId: "coder", task: testCase.name });
+				const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: testCase.name });
 				const receipt = await handle.finalPromise;
 				strictEqual(receipt.outcomeCode, testCase.expected);
 				strictEqual((receipt.outcomeDetail ?? "").includes("conflicting trusted outcome codes"), testCase.conflict);
@@ -3862,7 +3994,7 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "legacy prose" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "legacy prose" });
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcomeCode, null);
 			const assignment = bundle.contract.assignments?.get(handle.runId);
@@ -3916,7 +4048,7 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			const batchPromise = bundle.contract.dispatchBatch(
-				Array.from({ length: 5 }, (_, i) => ({ agentId: "coder", task: `batch ${i}` })),
+				Array.from({ length: 5 }, (_, i) => ({ agentId: "coder", executionRole: "builder", task: `batch ${i}` })),
 			);
 			await waitFor(() => spawnCount === 2, "batch did not fill the first two worker slots");
 			exits[0]?.resolve({ exitCode: 0, signal: null });
@@ -3970,9 +4102,13 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const first = await bundle.contract.dispatch({ agentId: "coder", task: "running one" });
-			const second = await bundle.contract.dispatch({ agentId: "coder", task: "running two" });
-			const failed = await bundle.contract.dispatch({ agentId: "coder", task: "fail for retry" });
+			const first = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "running one" });
+			const second = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "running two" });
+			const failed = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "fail for retry",
+			});
 			await waitFor(() => bundle.contract.snapshot().retrying.length === 1, "failed attempt was not queued for retry");
 			const snapshot = bundle.contract.snapshot();
 			strictEqual(snapshot.running.length, 2);
@@ -4016,6 +4152,7 @@ rl.once("line", (line) => {
 			const ledger = openLedger({ maxRuns: 10 });
 			const env = ledger.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "orphan task",
 				targetId: "default",
 				wireModelId: "model",
@@ -4056,6 +4193,7 @@ rl.once("line", (line) => {
 				costProvenance: "unknown",
 				runId: env.id,
 				agentId: "coder",
+				executionRole: "builder",
 				task: "orphan task",
 				targetId: "default",
 				wireModelId: "model",
@@ -4124,6 +4262,7 @@ rl.once("line", (line) => {
 			const ledger = openLedger({ maxRuns: 10 });
 			const env = ledger.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "abandoned task",
 				targetId: "default",
 				wireModelId: "model",
@@ -4176,6 +4315,7 @@ rl.once("line", (line) => {
 			for (let i = 0; i < 5; i += 1) {
 				const created = ledger.create({
 					agentId: "coder",
+					executionRole: "builder",
 					task: `task ${i}`,
 					targetId: "default",
 					wireModelId: "model",
@@ -4215,6 +4355,7 @@ rl.once("line", (line) => {
 			const seed = openLedger({ maxRuns: 10 });
 			const newest = seed.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "newest",
 				targetId: "default",
 				wireModelId: "model",
@@ -4226,6 +4367,7 @@ rl.once("line", (line) => {
 			seed.update(newest.id, { startedAt: "2026-06-10T00:00:09.000Z" });
 			const oldest = seed.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "oldest",
 				targetId: "default",
 				wireModelId: "model",
@@ -4243,6 +4385,7 @@ rl.once("line", (line) => {
 			const stale = openLedger({ maxRuns: 2 });
 			const middle = stale.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "middle",
 				targetId: "default",
 				wireModelId: "model",
@@ -4267,6 +4410,7 @@ rl.once("line", (line) => {
 			const ledgerA = openLedger({ maxRuns: 10 });
 			const shared = ledgerA.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "shared",
 				targetId: "default",
 				wireModelId: "model",
@@ -4283,6 +4427,7 @@ rl.once("line", (line) => {
 			const ledgerB = openLedger({ maxRuns: 10 });
 			const sibling = ledgerB.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "sibling",
 				targetId: "default",
 				wireModelId: "model",
@@ -4311,6 +4456,7 @@ rl.once("line", (line) => {
 			const ledger = openLedger({ maxRuns: 10 });
 			const live = ledger.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "live",
 				targetId: "default",
 				wireModelId: "model",
@@ -4378,7 +4524,11 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "need operator permission" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "need operator permission",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			await drainEvents(handle.events);
 			await handle.finalPromise;
@@ -4443,7 +4593,7 @@ rl.once("line", (line) => {
 			const permissionContract = bundle.contract as typeof bundle.contract & WorkerPermissionDispatchContract;
 			throws(() => permissionContract.resolveWorkerPermission("no-such-run", "perm-1", "approve"), /not active/);
 
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "approve me" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "approve me" });
 			permissionContract.resolveWorkerPermission(handle.runId, "perm-1", "approve");
 			deepStrictEqual(sent, [{ type: "permission_decision", requestId: "perm-1", decision: "approve" }]);
 
@@ -4500,6 +4650,7 @@ rl.once("line", (line) => {
 		try {
 			const permissionContract = bundle.contract as typeof bundle.contract & WorkerPermissionDispatchContract;
 			const handle = await bundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "opencode",
 				delegationAgentId: "opencode",
 				task: "delegate this",
@@ -4580,6 +4731,7 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "opencode",
 				delegationAgentId: "opencode",
 				task: "delegate permission ask",
@@ -4684,7 +4836,11 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "count escalations" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "count escalations",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
@@ -4757,7 +4913,11 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "need permission" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "need permission",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
@@ -4805,7 +4965,11 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "fail on permission" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "fail on permission",
+			});
 			const receipt = await handle.finalPromise;
 			strictEqual((capturedSpec as WorkerSpec | null)?.onPermission, "fail");
 			strictEqual(receipt.outcome, "failed");
@@ -4844,7 +5008,7 @@ rl.once("line", (line) => {
 			await bundle.extension.start();
 			try {
 				await rejects(
-					bundle.contract.dispatch({ agentId: "coder", task: `subprocess ${mode} permission` }),
+					bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: `subprocess ${mode} permission` }),
 					new RegExp(`workers\\.onPermission='${mode}'`),
 				);
 				strictEqual(spawned, false);
@@ -4883,7 +5047,11 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "spoof a deterministic code" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "spoof a deterministic code",
+			});
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(receipt.outcomeCode, null);
@@ -4910,7 +5078,12 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			const roots = ["/tmp/clio-wiki-staging-abc"];
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "stage wiki", writeRoots: roots });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "stage wiki",
+				writeRoots: roots,
+			});
 			await handle.finalPromise;
 			deepStrictEqual((capturedSpec as WorkerSpec | null)?.writeRoots, roots);
 		} finally {
@@ -4955,7 +5128,12 @@ rl.once("line", (line) => {
 		});
 		await bundle.extension.start();
 		try {
-			const dispatchPromise = bundle.contract.dispatch({ agentId: "coder", task: "inspect", responseSchema });
+			const dispatchPromise = bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "inspect",
+				responseSchema,
+			});
 			responseSchema.properties.project.type = "number";
 			const handle = await dispatchPromise;
 			await handle.finalPromise;
@@ -5001,6 +5179,7 @@ rl.once("line", (line) => {
 			await rejects(
 				bundle.contract.dispatch({
 					agentId: "coder",
+					executionRole: "builder",
 					task: "inspect",
 					responseSchema: { type: "object" },
 				}),
@@ -5025,12 +5204,13 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				bundle.contract.dispatch({ agentId: "coder", task: "inspect", responseSchema }),
+				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "inspect", responseSchema }),
 				/responseSchema requires the native llamacpp runtime/,
 			);
 			await rejects(
 				bundle.contract.dispatch({
 					agentId: "coder",
+					executionRole: "builder",
 					task: "inspect",
 					delegationAgentId: "external-agent",
 					responseSchema,
@@ -5071,6 +5251,7 @@ rl.once("line", (line) => {
 			await rejects(
 				bundle.contract.dispatch({
 					agentId: "coder",
+					executionRole: "builder",
 					task: "inspect",
 					responseSchema: { type: "object" },
 				}),
@@ -5108,7 +5289,12 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				bundle.contract.dispatch({ agentId: "coder", task: "stage wiki", writeRoots: ["/tmp/staging"] }),
+				bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "builder",
+					task: "stage wiki",
+					writeRoots: ["/tmp/staging"],
+				}),
 				/cannot enforce writeRoots/,
 			);
 			strictEqual(spawned, false);
@@ -5131,6 +5317,7 @@ rl.once("line", (line) => {
 			await rejects(
 				bundle.contract.dispatch({
 					agentId: "coder",
+					executionRole: "builder",
 					task: "stage wiki",
 					delegationAgentId: "external-agent",
 					writeRoots: ["/tmp/staging"],
@@ -5212,7 +5399,11 @@ describe("contracts/dispatch tool activity honesty", () => {
 		const bundle = makeDispatchBundle(context, { spawnWorker: instantWorker });
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "impossible write task" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "impossible write task",
+			});
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 
@@ -5332,7 +5523,11 @@ describe("contracts/dispatch tool activity honesty", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "read something" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "read something",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
@@ -5394,7 +5589,11 @@ describe("contracts/dispatch tool activity honesty", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "edit src/app.ts" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "edit src/app.ts",
+			});
 			exit.resolve({ exitCode: 0, signal: null });
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
@@ -5465,7 +5664,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "edit and test" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "edit and test" });
 			exit.resolve({ exitCode: 0, signal: null });
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
@@ -5510,7 +5709,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "try and fail" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "try and fail" });
 			exit.resolve({ exitCode: 0, signal: null });
 			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
@@ -5631,6 +5830,7 @@ describe("contracts/dispatch agent alias precedence", () => {
 				const receipt = {
 					runId: "r1",
 					agentId: request.agentId,
+					executionRole: "builder",
 					targetId: "fixture-target",
 					wireModelId: "fixture-model",
 					tokenCount: 0,

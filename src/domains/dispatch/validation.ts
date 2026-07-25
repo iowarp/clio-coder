@@ -9,6 +9,7 @@ import path from "node:path";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import { type AutonomyLevel, isAutonomyLevel } from "../safety/autonomy.js";
+import { isExecutionRole } from "./execution-role.js";
 import type {
 	DispatchRequestOrigin,
 	RunGateProvenance,
@@ -125,6 +126,8 @@ type Validated = { ok: true; spec: JobSpec } | { ok: false; errors: string[] };
 
 const KNOWN_KEYS = new Set([
 	"agentId",
+	// Derived by execution-role.ts at request construction, never model-authored.
+	"executionRole",
 	"task",
 	"briefing",
 	"workerProfile",
@@ -184,6 +187,13 @@ export function validateJobSpec(spec: unknown): Validated {
 	const task = spec.task;
 	if (typeof task !== "string" || task.length === 0) {
 		errors.push("task must be a non-empty string");
+	}
+
+	// The role is required on a DispatchRequest but derived, never supplied by a
+	// model. JobSpec callers that predate a request may omit it; a present value
+	// must name a real role so a typo cannot silently create a new sample pool.
+	if ("executionRole" in spec && !isExecutionRole(spec.executionRole)) {
+		errors.push("executionRole must be a known execution role");
 	}
 
 	let briefing: string | undefined;

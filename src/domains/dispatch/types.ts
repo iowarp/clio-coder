@@ -11,6 +11,7 @@ import type { ToolProfileName } from "../../tools/profiles.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
+import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
@@ -193,7 +194,7 @@ export interface RunGateSubjectRef {
  * that triggered it).
  */
 export interface RunGateProvenance {
-	role: "builder" | "reviewer" | "candidate" | "judge";
+	role: GateTopologyRole;
 	/** Gate group id shared by every run of one gated dispatch. */
 	group: string;
 	/** 1-based review cycle, or candidate ordinal for compete candidates. */
@@ -266,7 +267,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 9;
+	version: 10;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -324,6 +325,8 @@ export interface RunReceiptFindingsSummary {
 export interface RunEnvelope {
 	id: string;
 	agentId: string;
+	/** Semantic role this attempt's route statistics belong to. */
+	executionRole: ExecutionRole;
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;
@@ -570,6 +573,8 @@ export interface RunReceiptVerification {
 export interface RunReceipt {
 	runId: string;
 	agentId: string;
+	/** Semantic role this attempt's route statistics belong to. */
+	executionRole: ExecutionRole;
 	agentAudience?: AgentAudience;
 	requestOrigin?: DispatchRequestOrigin;
 	task: string;

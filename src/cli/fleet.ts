@@ -27,6 +27,7 @@ import {
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
@@ -192,6 +193,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		return fail("required domains unavailable (dispatch/agents/safety)");
 	}
 
+	const roleFacts = agentRoleFactsResolver((id) => agents.getSpec(id));
 	const preflightError = preflightFleet(contract, { agents, safety, scheduling });
 	if (preflightError !== null) {
 		await loaded.stop();
@@ -214,6 +216,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			}
 			const req: DispatchRequest = {
 				agentId: step.agent,
+				executionRole: requestExecutionRole({ agentId: step.agent, resolveFacts: roleFacts }),
 				task: prompt,
 				requestOrigin: "user",
 				lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },

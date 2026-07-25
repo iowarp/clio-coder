@@ -34,6 +34,7 @@ const TEST_SPEC = {
 	specVersion: WORKER_SPEC_VERSION,
 	systemPrompt: "",
 	agentId: "coder",
+	executionRole: "builder",
 	task: "transport test",
 	target: { id: "default", runtime: "openai", defaultModel: "gpt-4o" },
 	runtime: { version: 2, id: "openai", kind: "http", apiFamily: "openai-completions", auth: "api-key" },
@@ -541,7 +542,7 @@ describe("dispatch records fleet placement", () => {
 		const bundle = makeDispatchBundle(stubContext(), { resolveNode: () => placement });
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "record node" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "record node" });
 			await drain(handle.events);
 			const receipt = await handle.finalPromise;
 			deepStrictEqual(receipt.node, NODE);
@@ -569,7 +570,7 @@ describe("dispatch records fleet placement", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "no node" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "no node" });
 			await drain(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual("node" in receipt, false);
@@ -613,7 +614,10 @@ describe("dispatch records fleet placement", () => {
 		});
 		await bundle.extension.start();
 		try {
-			await rejects(bundle.contract.dispatch({ agentId: "coder", task: "blocked" }), /concurrency limit/);
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "blocked" }),
+				/concurrency limit/,
+			);
 			strictEqual(released, 1);
 		} finally {
 			await bundle.extension.stop?.();

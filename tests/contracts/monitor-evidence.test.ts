@@ -24,6 +24,7 @@ function receiptDraft(runId: string, overrides: Partial<RunReceiptDraft> = {}): 
 	return {
 		runId,
 		agentId: "coder",
+		executionRole: "builder",
 		task: `task ${runId}`,
 		targetId: "local",
 		wireModelId: "test-model",
@@ -62,6 +63,7 @@ function envelopeFor(draft: RunReceiptDraft, receiptPath: string): RunEnvelope {
 	return {
 		id: draft.runId,
 		agentId: draft.agentId,
+		executionRole: "builder",
 		task: draft.task,
 		targetId: draft.targetId,
 		wireModelId: draft.wireModelId,
@@ -209,28 +211,28 @@ describe("contracts/monitor collect evidence labeling", () => {
 		if (result.kind !== "ok") return;
 
 		const verified = runBlock(result.output, "run-verified");
-		match(verified, /receipt_integrity=verified\/v9\/sha256/);
+		match(verified, /receipt_integrity=verified\/v10\/sha256/);
 		match(verified, /evidence_verification=verified\/validation-tool/);
 		match(verified, new RegExp(`briefing=bytes:12 sha256:${"a".repeat(64)}`));
 		match(verified, /project_context=absent/);
 		match(verified, /worker output \(tool-verified\):/);
 
 		const unverified = runBlock(result.output, "run-unverified");
-		match(unverified, /receipt_integrity=verified\/v9\/sha256/);
+		match(unverified, /receipt_integrity=verified\/v10\/sha256/);
 		match(unverified, /evidence_verification=unverified\/no-validation-tool/);
 		match(unverified, /briefing=none/);
 		match(unverified, new RegExp(`project_context=bounded chars:639 sha256:${"b".repeat(64)}`));
 		match(unverified, /worker claims \(unverified prose\):/);
 
 		const recon = runBlock(result.output, "run-recon");
-		match(recon, /receipt_integrity=verified\/v9\/sha256/);
+		match(recon, /receipt_integrity=verified\/v10\/sha256/);
 		match(recon, /evidence_verification=not_applicable\/read-only-agent/);
 		match(recon, new RegExp(`briefing=bytes:24 sha256:${"c".repeat(64)}`));
 		match(recon, new RegExp(`project_context=bounded chars:412 sha256:${"d".repeat(64)}`));
 		match(recon, /reconnaissance output \(advisory leads, not validation evidence\):/);
 
 		const unknown = runBlock(result.output, "run-unknown");
-		match(unknown, /receipt_integrity=verified\/v9\/sha256/);
+		match(unknown, /receipt_integrity=verified\/v10\/sha256/);
 		match(unknown, /evidence_verification=unknown\/acp-external-unobserved/);
 		match(unknown, /briefing=none/);
 		match(unknown, /project_context=absent/);

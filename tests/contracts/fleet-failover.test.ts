@@ -108,9 +108,13 @@ describe("dead-node failover", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const inflightA = await bundle.contract.dispatch({ agentId: "coder", task: "long job a" });
-			const inflightB = await bundle.contract.dispatch({ agentId: "coder", task: "long job b" });
-			const failing = await bundle.contract.dispatch({ agentId: "coder", task: "channel probe" });
+			const inflightA = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "long job a" });
+			const inflightB = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "long job b" });
+			const failing = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "channel probe",
+			});
 			const terminalFailover = await failing.finalPromise;
 			strictEqual(terminalFailover.outcome, "succeeded");
 			strictEqual(terminalFailover.node?.id, "local");
@@ -180,7 +184,11 @@ describe("dead-node failover", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "remote to remote" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "remote to remote",
+			});
 			const terminal = await handle.finalPromise;
 			strictEqual(terminal.outcome, "succeeded");
 			strictEqual(terminal.node?.id, "mini", "failed over to another remote node, not local");

@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { GateDecisionDraft, GateDecisionOutcome } from "../../src/domains/dispatch/gate-decisions.js";
 import {
+	type GateDecisionArtifact,
+	materializePendingGateDecision,
 	readGateDecisionArtifacts,
 	readGateDecisionArtifactsForRunIds,
 	readPendingGateDecisions,
@@ -13,13 +15,22 @@ import {
 	stagePendingGateOutput,
 	verifyGateDecisionArtifact,
 	verifyPendingGateDecisionRecord,
-	writeGateDecisionArtifact,
 } from "../../src/domains/dispatch/gate-decisions.js";
 import type { RunGateSubjectRef } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const builder: RunGateSubjectRef = { runId: "builder-1", digest: "a".repeat(64) };
 const reviewer: RunGateSubjectRef = { runId: "reviewer-1", digest: "b".repeat(64) };
+
+/** Independent decider correlation, the ordinary case for a gated fixture. */
+const INDEPENDENT_GATE_CORRELATION = {
+	agent: false,
+	target: true,
+	modelFamily: false,
+	runtime: true,
+	node: true,
+	independent: true,
+} as const;
 
 describe("gate decision artifacts", () => {
 	it("durably distinguishes every review terminal state and detects tampering", () => {
@@ -31,13 +42,14 @@ describe("gate decision artifacts", () => {
 				"revise",
 				"exhausted",
 			] as const satisfies ReadonlyArray<GateDecisionOutcome>) {
-				const written = writeGateDecisionArtifact({
+				const written = writeGateDecision({
 					group: "review-group",
 					topology: "review",
 					cycle: outcome === "exhausted" ? 2 : 1,
 					outcome,
 					subjects: [builder],
 					decider: reviewer,
+					correlation: INDEPENDENT_GATE_CORRELATION,
 					detail: `${outcome} evidence`,
 				});
 				deepStrictEqual(verifyGateDecisionArtifact(written.artifact), { ok: true });
@@ -63,13 +75,14 @@ describe("gate decision artifacts", () => {
 		try {
 			const candidateTwo = { runId: "candidate-2", digest: "c".repeat(64) };
 			const judge = { runId: "judge-1", digest: "d".repeat(64) };
-			const { artifact } = writeGateDecisionArtifact({
+			const { artifact } = writeGateDecision({
 				group: "compete-group",
 				topology: "compete",
 				cycle: 1,
 				outcome: "winner",
 				subjects: [builder, candidateTwo],
 				decider: judge,
+				correlation: INDEPENDENT_GATE_CORRELATION,
 				winner: { index: 2, subject: candidateTwo, branch: "clio/compete/compete-group/2" },
 			});
 
@@ -84,7 +97,7 @@ describe("gate decision artifacts", () => {
 				{ ok: false, reason: "gate decision winner invalid" },
 			);
 
-			const confirmation = writeGateDecisionArtifact({
+			const confirmation = writeGateDecision({
 				group: "compete-group",
 				topology: "compete",
 				cycle: 1,
@@ -120,6 +133,7 @@ describe("gate decision artifacts", () => {
 				topology: "review" | "compete";
 				subjects: RunGateSubjectRef[];
 				decider: RunGateSubjectRef;
+				correlation?: GateDecisionDraft["correlation"];
 				winner?: GateDecisionDraft["winner"];
 			}> = [
 				{ outcome: "pass", topology: "review", subjects: [builder], decider: reviewer },
@@ -131,6 +145,7 @@ describe("gate decision artifacts", () => {
 					topology: "compete",
 					subjects: [builder, candidateTwo],
 					decider: { runId: "judge-1", digest: "d".repeat(64) },
+					correlation: INDEPENDENT_GATE_CORRELATION,
 					winner: { index: 2, subject: candidateTwo, branch: "clio/compete/pending-group-winner/2" },
 				},
 				{
@@ -138,14 +153,16 @@ describe("gate decision artifacts", () => {
 					topology: "compete",
 					subjects: [builder, candidateTwo],
 					decider: { runId: "judge-2", digest: "e".repeat(64) },
+					correlation: INDEPENDENT_GATE_CORRELATION,
 				},
 			];
 
 			for (const testCase of cases) {
 				const group = `pending-group-${testCase.outcome}`;
-				const output = `terminal output for ${testCase.outcome}\n${
-					testCase.topology === "review" ? `VERDICT: ${testCase.outcome}` : "WINNER: 2"
-				}`;
+				const output =
+					testCase.topology === "review"
+						? JSON.stringify({ verdict: "pass", checks: [{ name: "review", passed: true, evidence: "inspected" }] })
+						: JSON.stringify({ winner: 2, checks: [{ name: "ranking", passed: true, evidence: "compared" }] });
 				const staged = stagePendingGateOutput({
 					group,
 					topology: testCase.topology,
@@ -170,6 +187,7 @@ describe("gate decision artifacts", () => {
 					outcome: testCase.outcome,
 					subjects: testCase.subjects,
 					decider: testCase.decider,
+					correlation: INDEPENDENT_GATE_CORRELATION,
 					...(testCase.winner !== undefined ? { winner: testCase.winner } : {}),
 				});
 				strictEqual(resolved.record.kind, "decision");
@@ -262,6 +280,7 @@ describe("gate decision artifacts", () => {
 				outcome: "pass",
 				subjects: [builder],
 				decider: reviewer,
+				correlation: INDEPENDENT_GATE_CORRELATION,
 			});
 			if (alreadyWritten.record.kind !== "decision") throw new Error("expected resolved pending fixture");
 			const finalPath = join(isolated.dir, "state", "gate-decisions", `${alreadyWritten.record.id}.json`);
@@ -290,3 +309,8 @@ describe("gate decision artifacts", () => {
 		}
 	});
 });
+
+/** Every decision crosses the staged durable boundary; there is no direct writer. */
+function writeGateDecision(draft: GateDecisionDraft): { artifact: GateDecisionArtifact; path: string } {
+	return materializePendingGateDecision(stagePendingGateDecision(draft));
+}

@@ -25,9 +25,18 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 ## Dispatch routing quality
 
 - `src/domains/dispatch/route-quality.ts` is the pure reducer for integrity-valid receipt, gate, and eval evidence. Descriptive receipt verification never establishes routing quality.
-- `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity v9 requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.
+- `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity v10 requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.
 
 ## Strict agent recipes
 
 - `src/domains/agents/recipe-schema.ts` is the only versioned frontmatter schema; malformed custom recipes are quarantined with `AgentsContract.diagnostics()` and builtins fail startup.
 - `src/domains/agents/result-contract.ts` validates typed terminal contracts. Result conformance is sealed in receipt quality facts, while only correctness-bearing contracts can label routing quality.
+
+## Execution roles and quality gates
+
+- `src/domains/dispatch/execution-role.ts` owns the one `ExecutionRole` union (`builder`, `reviewer`, `judge`, `researcher`, `verifier`, `recovery`), its derivation from strict recipe facts, the gate decider default, and the route correlation and independence policy.
+- The role is required and typed on every dispatch request, ledger envelope, receipt, route candidate, plan task, route decision, and route-history key. Route statistics never mix roles, and any attempt after the first is `recovery`.
+- Review and compete gates default to the builtin `verifier` and never fall back to the builder agent. Topology roles override recipe defaults, and a gate decider's postcondition is the gate result contract rather than its own recipe contract.
+- Gate deciders answer typed contracts, not trailing prose. Review uses the Slice 2 `verifier-report`; `revise` is the coordinator's bounded continuation policy in `decideReviewGate`, not a verdict a model authors. Compete uses the judge gate-result schema in `src/domains/dispatch/gate-decisions.ts`.
+- `GateDecisionArtifact` is v2 and seals route correlation across agent, target, model family, runtime, and node. Independence is a deterministic soft preference among already-eligible routes; it never bypasses a hard constraint or quality floor, and a correlated gate is reported rather than hidden.
+- Every gate decision crosses the staged durable boundary (`stagePendingGateDecision` then `materializePendingGateDecision`); there is no direct compatibility writer.

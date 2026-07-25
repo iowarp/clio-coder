@@ -137,7 +137,9 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatchBatch([{ agentId: "coder", task: "cancel queued retry" }]);
+			const handle = await bundle.contract.dispatchBatch([
+				{ agentId: "coder", executionRole: "builder", task: "cancel queued retry" },
+			]);
 			const assignmentId = handle.runIds[0];
 			ok(assignmentId);
 			deepStrictEqual(handle.assignmentIds, handle.runIds);

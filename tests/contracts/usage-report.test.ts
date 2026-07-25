@@ -103,6 +103,7 @@ function seedArchive(dir: string): void {
 	writeJson(join(state, "receipts", "run-aaa.json"), {
 		runId: "run-aaa",
 		agentId: "scout",
+		executionRole: "builder",
 		task: "investigate flaky integration test in module foo",
 		startedAt: RECENT,
 		endedAt: RECENT,
@@ -113,6 +114,7 @@ function seedArchive(dir: string): void {
 	writeJson(join(state, "receipts", "run-bbb.json"), {
 		runId: "run-bbb",
 		agentId: "scout",
+		executionRole: "builder",
 		task: "investigate flaky integration test in module foo",
 		startedAt: RECENT,
 		endedAt: RECENT,
@@ -123,6 +125,7 @@ function seedArchive(dir: string): void {
 	writeJson(join(state, "receipts", "run-ccc.json"), {
 		runId: "run-ccc",
 		agentId: "scout",
+		executionRole: "builder",
 		task: "old triage run for the release cut",
 		startedAt: OLD,
 		endedAt: OLD,

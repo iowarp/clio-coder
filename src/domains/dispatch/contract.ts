@@ -4,11 +4,19 @@ import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
+import type { ExecutionRole } from "./execution-role.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
+	/**
+	 * Semantic role this request's first attempt runs under. Derived once by
+	 * `execution-role.ts` at request construction, never authored by a model, and
+	 * never inferred later: it is what separates builder, gate, reconnaissance,
+	 * and recovery route statistics from each other.
+	 */
+	executionRole: ExecutionRole;
 	systemPrompt?: string;
 	/** Trusted side-store lease reference; never serialized into a worker spec or receipt. */
 	reservation?: { ownerId: string; memberId: string };

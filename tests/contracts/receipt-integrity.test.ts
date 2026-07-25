@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	computeReceiptIntegrity,
@@ -41,6 +41,7 @@ function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 	return {
 		id: runId,
 		agentId: "coder",
+		executionRole: "builder",
 		task: "run the test suite",
 		targetId: "local",
 		wireModelId: "model-a",
@@ -82,6 +83,7 @@ function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
 		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: envelope.agentId,
+		executionRole: "builder",
 		task: envelope.task,
 		targetId: envelope.targetId,
 		wireModelId: envelope.wireModelId,
@@ -190,11 +192,54 @@ describe("contracts/receipt-integrity", () => {
 		const draft = fixtureReceiptDraft(envelope);
 		const current = computeReceiptIntegrity(draft, envelope);
 
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8]) {
+		// v9 is the shape Slice 3 retired; it is rejected, never upgraded.
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
 		}
+	});
+
+	it("requires and integrity-covers the typed execution role", () => {
+		const envelope = fixtureEnvelope("run-execution-role");
+		const draft = fixtureReceiptDraft(envelope);
+		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 10);
+
+		const sealed = withReceiptIntegrity(draft, envelope);
+		strictEqual(sealed.executionRole, "builder");
+		deepStrictEqual(verifyReceiptIntegrity(sealed, envelope), { ok: true });
+
+		// The role is required and typed: an absent or unknown value is not a receipt.
+		const { executionRole: _omitted, ...withoutRole } = draft;
+		throws(
+			() => withReceiptIntegrity(withoutRole as unknown as RunReceiptDraft, envelope),
+			/required execution role invalid/,
+		);
+		throws(
+			() => withReceiptIntegrity({ ...draft, executionRole: "auditor" } as unknown as RunReceiptDraft, envelope),
+			/required execution role invalid/,
+		);
+		deepStrictEqual(verifyReceiptIntegrity({ ...sealed, executionRole: "auditor" } as unknown as RunReceipt, envelope), {
+			ok: false,
+			reason: "execution role invalid",
+		});
+
+		// It is digest-covered on both sides and cross-checked against the ledger.
+		deepStrictEqual(verifyReceiptIntegrity({ ...sealed, executionRole: "reviewer" }, envelope), {
+			ok: false,
+			reason: "ledger mismatch: executionRole",
+		});
+		deepStrictEqual(verifyReceiptIntegrity(sealed, { ...envelope, executionRole: "reviewer" }), {
+			ok: false,
+			reason: "ledger mismatch: executionRole",
+		});
+		const reviewerEnvelope: RunEnvelope = { ...envelope, executionRole: "reviewer" };
+		const reviewerSealed = withReceiptIntegrity({ ...draft, executionRole: "reviewer" }, reviewerEnvelope);
+		deepStrictEqual(verifyReceiptIntegrity(reviewerSealed, reviewerEnvelope), { ok: true });
+		// A different role is a different sealed receipt, which is what keeps role
+		// statistics from being forgeable after the fact.
+		strictEqual(sealed.integrity.digest === reviewerSealed.integrity.digest, false);
 	});
 
 	it("detects mutation of every current receipt provenance field", () => {

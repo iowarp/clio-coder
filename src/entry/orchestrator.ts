@@ -40,6 +40,7 @@ import { type ContextContract, createContextDomainModule } from "../domains/cont
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
+import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
@@ -986,6 +987,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
+		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
 		// Same effective-autonomy resolution the registry admission uses, so plan
 		// provenance and compete winner handling agree with the approval surface.
 		getAutonomy: () =>

@@ -486,6 +486,7 @@ describe("contracts/claude subprocess permission gate", () => {
 		const base = {
 			systemPrompt: "",
 			agentId: "contract",
+			executionRole: "builder",
 			task: "hello",
 			target: { id: "contract", runtime: "claude-code" },
 			runtime: claudeCodeRuntime,
@@ -500,6 +501,7 @@ describe("contracts/claude subprocess permission gate", () => {
 		const base = {
 			systemPrompt: "",
 			agentId: "contract",
+			executionRole: "builder",
 			task: "hello",
 			target: { id: "contract", runtime: "claude-code" },
 			runtime: claudeCodeRuntime,

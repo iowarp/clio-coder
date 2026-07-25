@@ -3,6 +3,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
@@ -98,6 +99,8 @@ export interface RunCommandOptions {
 
 export interface HandleRunDeps {
 	dispatch: DispatchContract;
+	/** Strict recipe facts the run's execution role is derived from. */
+	getAgentRoleFacts?: AgentRoleFactsResolver;
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
 	workerDefault?: { target?: string; model?: string } | undefined;
@@ -133,6 +136,10 @@ export async function handleRun(
 		const request = {
 			agentId,
 			task,
+			executionRole: requestExecutionRole({
+				agentId,
+				...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
+			}),
 			requestOrigin: "user" as const,
 			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
 			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
@@ -172,6 +179,7 @@ export async function handleDelegate(agentId: string, task: string, deps: Handle
 		const handle = await dispatch.dispatch({
 			agentId,
 			delegationAgentId: agentId,
+			executionRole: "builder",
 			requestOrigin: "user",
 			task,
 		});

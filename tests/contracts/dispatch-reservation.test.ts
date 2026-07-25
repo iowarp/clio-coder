@@ -164,8 +164,8 @@ describe("dispatch batch reservations", () => {
 		await bundle.extension.start();
 		try {
 			const requests = [
-				{ agentId: "coder", task: "one" },
-				{ agentId: "coder", task: "two" },
+				{ agentId: "coder", executionRole: "builder", task: "one" },
+				{ agentId: "coder", executionRole: "builder", task: "two" },
 			] as const;
 			const firstResolution = bundle.contract.preview?.(requests[0]);
 			const secondResolution = bundle.contract.preview?.(requests[1]);
@@ -224,7 +224,7 @@ describe("dispatch batch reservations", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const resolution = bundle.contract.preview?.({ agentId: "coder", task: "one" });
+			const resolution = bundle.contract.preview?.({ agentId: "coder", executionRole: "builder", task: "one" });
 			ok(resolution);
 			const reservation = bundle.contract.reservations?.prepare({
 				topology: "parallel",
@@ -235,6 +235,7 @@ describe("dispatch batch reservations", () => {
 				.dispatchBatch(
 					[1, 2].map((position) => ({
 						agentId: "coder",
+						executionRole: "builder",
 						task: `task ${position}`,
 						reservation: { ownerId: reservation.ownerId, memberId: `task-${position}` },
 					})),
@@ -426,7 +427,7 @@ describe("dispatch batch reservations", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const request = { agentId: "coder", task: "target failover under reservation" };
+			const request = { agentId: "coder", executionRole: "builder" as const, task: "target failover under reservation" };
 			const resolution = bundle.contract.preview?.(request);
 			ok(resolution);
 			const reservation = bundle.contract.reservations?.prepare({
@@ -483,7 +484,7 @@ describe("dispatch batch reservations", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const request = { agentId: "coder", task: "node failover under reservation" };
+			const request = { agentId: "coder", executionRole: "builder" as const, task: "node failover under reservation" };
 			const resolution = bundle.contract.preview?.(request);
 			ok(resolution);
 			const reservation = bundle.contract.reservations?.prepare({
@@ -580,7 +581,7 @@ describe("dispatch batch reservations", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const request = { agentId: "coder", task: "rebind denied" };
+			const request = { agentId: "coder", executionRole: "builder" as const, task: "rebind denied" };
 			const resolution = bundle.contract.preview?.(request);
 			ok(resolution);
 			const reservation = bundle.contract.reservations?.prepare({

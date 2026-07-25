@@ -137,4 +137,44 @@ describe("route decision", () => {
 			/posture-floors-unsatisfiable/,
 		);
 	});
+
+	it("keeps route identity and statistics separated by execution role", () => {
+		const builder = candidate({ executionRole: "builder" });
+		const roles = ["reviewer", "judge", "researcher", "verifier", "recovery"] as const;
+		const keys = new Set([
+			routeCandidateKey(builder),
+			...roles.map((role) => routeCandidateKey(candidate({ executionRole: role }))),
+		]);
+		// Same agent, target, model, runtime, and node; six distinct route identities.
+		strictEqual(keys.size, 6, "each execution role is its own route identity");
+
+		// A role cannot be dropped from the identity by omission: it is required.
+		const decision = decideRoute({
+			mode: "shadow",
+			posture: "balanced",
+			executedRoute: builder,
+			candidates: [
+				{ candidate: builder, estimate: estimateRoute(Array.from({ length: 6 }, () => sample())), rejection: null },
+				{
+					candidate: candidate({ executionRole: "recovery" }),
+					estimate: estimateRoute(Array.from({ length: 6 }, () => sample())),
+					rejection: null,
+				},
+			],
+			hardConstraints: ["agent"],
+			maxFallbacks: 2,
+			decisionDurationMs: 1,
+		});
+		strictEqual(decision.selected.executionRole, "builder", "the executed role is preserved in the decision");
+		deepStrictEqual(
+			decision.candidateEvaluations.map((evaluation) => evaluation.candidate.executionRole),
+			["builder", "recovery"],
+		);
+		// Recovery evidence is a separate candidate, so it can never be folded into
+		// the builder sample by the decision artifact.
+		strictEqual(
+			new Set(decision.candidateEvaluations.map((evaluation) => routeCandidateKey(evaluation.candidate))).size,
+			2,
+		);
+	});
 });

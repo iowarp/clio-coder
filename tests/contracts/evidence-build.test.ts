@@ -11,7 +11,12 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runEvidenceCommand } from "../../src/cli/evidence.js";
-import { writeGateDecisionArtifact } from "../../src/domains/dispatch/gate-decisions.js";
+import {
+	type GateDecisionArtifact,
+	type GateDecisionDraft,
+	materializePendingGateDecision,
+	stagePendingGateDecision,
+} from "../../src/domains/dispatch/gate-decisions.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type {
 	RunKind,
@@ -92,6 +97,7 @@ async function sealRun(
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		agentId: "coder",
+		executionRole: "builder",
 		task: "evidence fixture task",
 		targetId: "mini",
 		wireModelId: "test-model",
@@ -129,6 +135,7 @@ async function sealRun(
 		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "coder",
+		executionRole: "builder",
 		task: "evidence fixture task",
 		targetId: "mini",
 		wireModelId: "test-model",
@@ -167,7 +174,7 @@ async function sealRun(
 	await ledger.persist();
 	const receiptPath = ledger.get(envelope.id)?.receiptPath;
 	if (!receiptPath) throw new Error("fixture receipt path missing");
-	strictEqual(receipt.integrity.version, 9);
+	strictEqual(receipt.integrity.version, 10);
 	return { runId: envelope.id, receiptPath };
 }
 
@@ -178,6 +185,16 @@ function readJsonl(path: string): unknown[] {
 		.filter((line) => line.trim().length > 0)
 		.map((line) => JSON.parse(line) as unknown);
 }
+
+/** Independent decider correlation, the ordinary case for a gated fixture. */
+const INDEPENDENT_GATE_CORRELATION = {
+	agent: false,
+	target: true,
+	modelFamily: false,
+	runtime: true,
+	node: true,
+	independent: true,
+} as const;
 
 describe("contracts/evidence-build", () => {
 	it("exits 0 on a clean modern receipt and 1 with the integrity failure printed on a corrupted one", async () => {
@@ -244,13 +261,14 @@ describe("contracts/evidence-build", () => {
 				runId: string;
 				integrity: { digest: string };
 			};
-			const decision = writeGateDecisionArtifact({
+			const decision = writeGateDecision({
 				group: "evidence-review",
 				topology: "review",
 				cycle: 1,
 				outcome: "pass",
 				subjects: [{ runId: builderReceipt.runId, digest: builderReceipt.integrity.digest }],
 				decider: { runId: reviewerReceipt.runId, digest: reviewerReceipt.integrity.digest },
+				correlation: INDEPENDENT_GATE_CORRELATION,
 			});
 			const dataDir = join(scratch, "data");
 			const stateDir = join(scratch, "state");
@@ -558,3 +576,8 @@ describe("contracts/evidence-build", () => {
 		});
 	});
 });
+
+/** Every decision crosses the staged durable boundary; there is no direct writer. */
+function writeGateDecision(draft: GateDecisionDraft): { artifact: GateDecisionArtifact; path: string } {
+	return materializePendingGateDecision(stagePendingGateDecision(draft));
+}

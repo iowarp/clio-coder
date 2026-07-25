@@ -79,6 +79,7 @@ function route(
 function request(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
 	return {
 		agentId: "coder",
+		executionRole: "builder",
 		task: "exercise approved failover",
 		target: TARGET,
 		model: MODEL,
@@ -89,7 +90,7 @@ function request(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
 
 /** No target/model/node pin, so the envelope alone decides where the work lands. */
 function unpinnedRequest(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
-	return { agentId: "coder", task: "exercise approved failover", ...overrides };
+	return { agentId: "coder", executionRole: "builder", task: "exercise approved failover", ...overrides };
 }
 
 describe("dispatch failover envelopes", () => {

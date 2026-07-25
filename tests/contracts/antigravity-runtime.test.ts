@@ -58,6 +58,7 @@ describe("contracts/antigravity subprocess permission gate", () => {
 		const base = {
 			systemPrompt: "",
 			agentId: "contract",
+			executionRole: "builder",
 			task: "Summarize the repository.",
 			target: { id: "contract", runtime: "antigravity-code" },
 			runtime: antigravityCodeRuntime,
@@ -72,6 +73,7 @@ describe("contracts/antigravity subprocess permission gate", () => {
 		const base = {
 			systemPrompt: "",
 			agentId: "contract",
+			executionRole: "builder",
 			task: "Summarize the repository.",
 			target: { id: "contract", runtime: "antigravity-code" },
 			runtime: antigravityCodeRuntime,

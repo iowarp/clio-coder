@@ -53,6 +53,7 @@ function sealOrphan(provenance: {
 	const ledger = openLedger({ maxRuns: 20 });
 	const envelope = ledger.create({
 		agentId: "coder",
+		executionRole: "builder",
 		task: "orphan provenance task",
 		briefing,
 		targetId: "default",
@@ -96,6 +97,7 @@ function sealOrphan(provenance: {
 		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "coder",
+		executionRole: "builder",
 		task: "orphan provenance task",
 		targetId: "default",
 		wireModelId: "model",
@@ -165,6 +167,7 @@ describe("orphan provenance recovery", () => {
 			const receipt = {
 				runId,
 				agentId: "coder",
+				executionRole: "builder",
 				task: "historical v4",
 				targetId: "local",
 				wireModelId: "model-a",

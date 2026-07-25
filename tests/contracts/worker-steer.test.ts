@@ -82,6 +82,7 @@ const MINIMAL_SPEC_LINE = `${JSON.stringify({
 	runtimeId: "x",
 	systemPrompt: "",
 	agentId: "coder",
+	executionRole: "builder",
 	task: "t",
 	target: { id: "e", runtime: "x" },
 	wireModelId: "m",
@@ -184,6 +185,7 @@ function fauxRuntimeInput(
 		input: {
 			systemPrompt: "",
 			agentId: "coder",
+			executionRole: "builder",
 			task: "run the requested bash command",
 			target,
 			runtime,
@@ -1166,6 +1168,7 @@ rl.on("line", (line) => {
 						specVersion: WORKER_SPEC_VERSION,
 						systemPrompt: "",
 						agentId: "coder",
+						executionRole: "builder",
 						task: "t",
 						target: { id: "e", runtime: "x" } as never,
 						runtime: {
@@ -1226,7 +1229,7 @@ rl.on("line", (line) => {
 
 			await bundle.extension.start();
 			try {
-				const handle = await bundle.contract.dispatch({ agentId: "coder", task: "steerable" });
+				const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "steerable" });
 				bundle.contract.steer(handle.runId, "  focus on tests/  ");
 				deepStrictEqual(sent, [{ type: "steer", text: "focus on tests/" }]);
 				exit.resolve({ exitCode: 0, signal: null });
@@ -1256,7 +1259,7 @@ rl.on("line", (line) => {
 			try {
 				throws(() => bundle.contract.steer("no-such-run", "hello"), /not active/);
 
-				const handle = await bundle.contract.dispatch({ agentId: "coder", task: "lifecycle" });
+				const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "lifecycle" });
 				throws(() => bundle.contract.steer(handle.runId, "   "), /empty message/);
 
 				sendAlive = false;
@@ -1288,7 +1291,7 @@ rl.on("line", (line) => {
 
 			await bundle.extension.start();
 			try {
-				const handle = await bundle.contract.dispatch({ agentId: "coder", task: "channel-less" });
+				const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "channel-less" });
 				throws(() => bundle.contract.steer(handle.runId, "hello"), /no input channel/);
 				exit.resolve({ exitCode: 0, signal: null });
 				await handle.finalPromise;
