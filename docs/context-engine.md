@@ -119,13 +119,13 @@ tree-sitter parse fails for one file, that file falls back to the available
 regex extractor instead of aborting the whole build. C# is covered by the
 tree-sitter C# grammar.
 
-Ambiguous `.h` files are classified deterministically by `classifyCHeaderLanguage` (`src/core/c-header-language.ts`). Content is scanned for C++-only standard includes (`<iostream>`, `<vector>`, `<memory>`, `<string>`, `<algorithm>`), template keywords (`template<`), namespaces (`namespace`), classes (`class `, `public:`, `private:`), and C++ casting (`static_cast`, `reinterpret_cast`). If any C++ marker is present, the header is indexed as `c++`; otherwise, it defaults to `c`. This guarantees that both full indexing and incremental file syncs assign identical language tags to `.h` files. Declaration-only C/C++ APIs are indexed so header-heavy MPI, CUDA, and scientific libraries remain navigable even when implementations live elsewhere.
+Ambiguous `.h` files are classified deterministically by `classifyCHeaderLanguage` (`src/core/c-header-language.ts`). The scanner removes comments before checking C++-only standard-library includes, and removes comments and literals before checking C++ syntax markers such as templates, namespaces, class/member declarations, scope resolution, C++ casts, and C++ qualifiers. If any C++ marker is present, the header is indexed as `c++`; otherwise, it defaults to `c`. This guarantees that both full indexing and incremental file syncs assign identical language tags to `.h` files. Declaration-only C/C++ APIs are indexed so header-heavy MPI, CUDA, and scientific libraries remain navigable even when implementations live elsewhere.
 
 Incremental updates are real updates, not a full rebuild hidden behind the
 name. Successful file-mutating tools report changed paths through the
 middleware observer. The context domain coalesces those paths, checks per-file
-hashes to avoid unnecessary re-reads of already synced files (`perf(context)` optimization),
-reads only the changed indexable files, replaces their file and symbol records, removes
+content hashes and reparses only changed files (`perf(context)` optimization),
+reads only the changed indexable files for path-based updates, replaces their file and symbol records, removes
 deleted records, and rebuilds edges from the merged import set. Non-indexable
 paths are no-ops.
 
@@ -133,8 +133,9 @@ paths are no-ops.
 
 The wiki lives under `.clio/wiki/` and is written by the `documenter` agent.
 Model agents can resolve Markdown wiki pages dynamically through `code_nav` with
-`mode: "wiki"` or `mode: "page"` actions, giving models deterministic on-demand navigation
-without loading entire wiki pages into prompt context.
+`mode: "wiki"`; an optional query resolves a page id or title and returns its summary
+and path, giving models deterministic on-demand navigation without loading entire wiki pages
+into prompt context.
 `quickstart.md` is mandatory and acts as the hub. The layout validator allows
 at most eight Markdown pages, rejects empty pages, and requires
 `quickstart.md`. Before drafting, the documenter receives a deterministic list

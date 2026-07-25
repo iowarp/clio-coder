@@ -89,7 +89,7 @@
         </div>
         <div class="header-title-wrapper">
           <h1>Fleet Dispatch Mechanics &amp; Bounded Reconnaissance</h1>
-          <p>Multi-node SSH execution, Scout-first exploration routing, integrity-sealed receipts, and failover mechanics</p>
+          <p>Multi-node SSH execution, advisory Scout routing, integrity-sealed receipts, and failover mechanics</p>
           <div class="meta-chips-row">
             <span class="chip">Source: docs/fleet-dispatch.md</span>
             <span class="chip chip-orange">clio docs fleet</span>
@@ -120,7 +120,7 @@
         <!-- Architecture Overview Card -->
         <div class="glass-card">
           <h2>Fleet Dispatch v0.2.9 Overview</h2>
-          <p>Clio's Fleet Dispatch orchestrates parallel worker agents across local processes and remote HPC nodes via SSH transport. In v0.2.9, dispatch includes Scout-first exploration routing, integrity-sealed receipt verification, worker capability compilation, batch budget reservations, and circuit-breaker failover.</p>
+          <p>Clio's Fleet Dispatch orchestrates parallel worker agents across local processes and remote HPC nodes via SSH transport. In v0.2.9, dispatch includes advisory Scout routing, integrity-sealed receipt verification, worker capability compilation, batch budget reservations, and typed failover.</p>
         </div>
 
         <!-- Interactive Tabs Navigation -->
@@ -143,17 +143,17 @@
         <div class="tab-pane active" id="pane-topology">
           <div class="interactive-panel">
             <h3>Fleet Node Config &amp; Preflight Validator</h3>
-            <p>Simulate `clio fleet doctor` preflight checks across configured cluster nodes:</p>
+            <p>Simulate the placement inputs checked by <code>clio doctor</code> across configured cluster nodes:</p>
             <div class="control-row">
-              <label for="placementSelect" style="font-weight: 600;">Placement Strategy:</label>
+              <label for="placementSelect" style="font-weight: 600;">Placement Mode:</label>
               <select id="placementSelect" onchange="runTopologySim()" style="background: #090d16; color: #fff; padding: 0.4rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-card);">
-                <option value="round_robin">Round-Robin (Default)</option>
-                <option value="capacity_aware">Capacity-Aware (Batch Budget)</option>
-                <option value="affinity">Capability-Affinity (Worker Profile)</option>
+                <option value="automatic">Automatic: least-loaded eligible remote</option>
+                <option value="pinned">Pinned: profile or request node</option>
+                <option value="local">Local fallback</option>
               </select>
-              <button type="button" class="tab-btn active" onclick="runTopologySim()">Run Doctor Preflight</button>
+              <button type="button" class="tab-btn active" onclick="runTopologySim()">Run Preflight Simulation</button>
             </div>
-            
+
             <div class="fleet-grid" id="nodeGrid">
               <!-- Dynamically populated -->
             </div>
@@ -163,15 +163,15 @@
         <!-- Tab 2: Scout Exploration -->
         <div class="tab-pane" id="pane-scout">
           <div class="interactive-panel">
-            <h3>Scout-First Bounded Reconnaissance &amp; Synthesis Budget</h3>
-            <p>Broad search and exploratory tasks are automatically routed to Scout workers with bounded synthesis context and budget reservation.</p>
+            <h3>Advisory Scout Reconnaissance &amp; Bounded Synthesis</h3>
+            <p>The operating contract steers explicit broad repository exploration to the read-only Scout recipe. After nine or more manual read-only exploration calls without a successful Scout dispatch, middleware emits a continuation nudge; direct reads remain allowed.</p>
             <div class="terminal-window" id="scoutTerminal">
               <div class="term-line"><span class="term-prompt">orchestrator$</span> clio dispatch --query "explore repository architecture and dependencies"</div>
               <div class="term-line term-out">[dispatch] evaluating task profile: broad reconnaissance query detected.</div>
-              <div class="term-line term-out">[dispatch] applying Scout-first split recommendation (synthesis budget: 4,000 tokens).</div>
-              <div class="term-line term-success">[scout-1] launched on node-login-01 (SSH). Collecting evidence receipts...</div>
-              <div class="term-line term-success">[scout-1] evidence collected: 14 target files identified. Digest hash: sha256-a9f81b...</div>
-              <div class="term-line term-out">[orchestrator] bounded synthesis turn executing with verified evidence receipts.</div>
+              <div class="term-line term-out">[dispatch] broad exploration is advisory-routed to the read-only Scout recipe.</div>
+              <div class="term-line term-out">[middleware] 9+ manual read-only calls without Scout: continuation nudge emitted.</div>
+              <div class="term-line term-success">[scout-1] launched on node-login-01 (SSH). Exploration budget: 18 calls; read reserve: 4.</div>
+              <div class="term-line term-success">[scout-1] synthesis phase: text-only handoff with live path:line citations.</div>
             </div>
           </div>
         </div>
@@ -180,14 +180,14 @@
         <div class="tab-pane" id="pane-receipts">
           <div class="interactive-panel">
             <h3>Integrity-Sealed Receipt Verification</h3>
-            <p>Worker claims are distinguished from cryptographic execution receipts in telemetry and TUI overlays.</p>
+            <p>Model-facing dispatch and monitor output separates the sealed receipt digest from validation evidence and worker prose.</p>
             <div class="terminal-window">
               <div class="term-line"><span class="term-prompt">receipt-verifier$</span> checking worker dispatch receipt #rcpt-89201</div>
-              <div class="term-line term-out">Worker Claim: "Edited 3 files and ran pytest successfully"</div>
-              <div class="term-line term-success">Verified Receipt Signature: SHA-256 (OK)</div>
-              <div class="term-line term-success">Tool Execution Log: [view_file, replace_file_content, run_command]</div>
-              <div class="term-line term-success">Cost Provenance: $0.0421 (Worker Tokens: 12,410 | Orchestrator Tokens: 2,100)</div>
-              <div class="term-line term-prompt">Verification Badge: [VERIFIED_RECEIPT_OK]</div>
+              <div class="term-line term-out">Worker claim: "Edited 3 files and ran pytest successfully"</div>
+              <div class="term-line term-success">receipt_integrity=verified/v6/sha256</div>
+              <div class="term-line term-success">evidence_verification=verified/validation-tool</div>
+              <div class="term-line term-success">Run tokens: 12,410 | Cost: ~$0.04 est</div>
+              <div class="term-line term-prompt">worker output (tool-verified):</div>
             </div>
           </div>
         </div>
@@ -195,35 +195,36 @@
         <!-- Tab 4: Failover -->
         <div class="tab-pane" id="pane-failover">
           <div class="interactive-panel">
-            <h3>Typed Failure Taxonomy &amp; Circuit Breaker Attribution</h3>
-            <p>When remote worker dispatches fail, typed taxonomy categorizes errors and triggers assignment-aware failover without corrupting session state.</p>
+            <h3>Typed Failure Taxonomy &amp; Failover Attribution</h3>
+            <p>When worker dispatches fail, the coordinator classifies termination evidence and applies assignment-aware retry policy without corrupting session state. Target cooldowns and node offline state are separate mechanisms; there is no generic circuit-breaker state in the public fleet registry.</p>
+            <p>Representative policy rows are shown below; the complete 13-class matrix is documented in <a href="../worker-dispatch-mechanics.md">Worker Dispatch Mechanics</a>.</p>
             <table style="width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem;">
               <thead>
                 <tr style="border-bottom: 1px solid var(--border-card); text-align: left;">
                   <th style="padding: 0.5rem;">Failure Class</th>
                   <th style="padding: 0.5rem;">Trigger Cause</th>
                   <th style="padding: 0.5rem;">Failover Action</th>
-                  <th style="padding: 0.5rem;">Circuit Breaker Status</th>
+                  <th style="padding: 0.5rem;">Retry / Node State</th>
                 </tr>
               </thead>
               <tbody>
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 0.5rem; color: var(--color-rose);">timeout</td>
-                  <td style="padding: 0.5rem;">Worker stdout idle > 300s</td>
-                  <td style="padding: 0.5rem;">Reassign to healthy node</td>
-                  <td style="padding: 0.5rem; color: var(--color-amber);">Half-Open (1 penalty)</td>
+                  <td style="padding: 0.5rem; color: var(--color-rose);">node-channel</td>
+                  <td style="padding: 0.5rem;">Heartbeat dead/stalled, spawn failure, or SSH exit 255</td>
+                  <td style="padding: 0.5rem;">Retry with `node` excluded</td>
+                  <td style="padding: 0.5rem; color: var(--color-amber);">Offline after 2 consecutive channel failures</td>
                 </tr>
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 0.5rem; color: var(--color-rose);">tool_failure</td>
-                  <td style="padding: 0.5rem;">Incompatible tool invocation</td>
-                  <td style="padding: 0.5rem;">Re-compile worker profile</td>
-                  <td style="padding: 0.5rem; color: var(--color-emerald);">Closed (Normal)</td>
+                  <td style="padding: 0.5rem; color: var(--color-rose);">target-rate-limit</td>
+                  <td style="padding: 0.5rem;">HTTP 429 or rate-limit diagnostic</td>
+                  <td style="padding: 0.5rem;">Retry with `target` excluded after 1s minimum</td>
+                  <td style="padding: 0.5rem; color: var(--color-amber);">Target cooldown (default 15s; configurable)</td>
                 </tr>
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 0.5rem; color: var(--color-rose);">exit_status</td>
-                  <td style="padding: 0.5rem;">SSH connection dropped (code 255)</td>
-                  <td style="padding: 0.5rem;">Drain node &amp; failover</td>
-                  <td style="padding: 0.5rem; color: var(--color-rose);">Open (Tripped)</td>
+                  <td style="padding: 0.5rem; color: var(--color-rose);">deterministic-task</td>
+                  <td style="padding: 0.5rem;">Typed terminal outcome code</td>
+                  <td style="padding: 0.5rem;">No retry; preserve the attempt receipt</td>
+                  <td style="padding: 0.5rem; color: var(--color-emerald);">No breaker action</td>
                 </tr>
               </tbody>
             </table>
@@ -244,7 +245,7 @@
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-      
+
       const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
       if (activeBtn) activeBtn.classList.add('active');
 
@@ -255,19 +256,23 @@
     function runTopologySim() {
       const grid = document.getElementById('nodeGrid');
       const strategy = document.getElementById('placementSelect').value;
+      const route = strategy === 'local'
+        ? 'local (explicit fallback)'
+        : strategy === 'pinned'
+          ? 'remote-login-01 (profile/request pin)'
+          : 'remote-login-01 (least-loaded eligible remote)';
       grid.innerHTML = `
         <div class="node-card">
-          <h4><span class="node-status status-healthy"></span> local-worker-01 (Local)</h4>
+          <h4><span class="node-status status-healthy"></span> Selected route: ${route}</h4>
           <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.4rem;">
-            Transport: Local Process | Cores: 8 | Active Runs: 0/4<br>
-            Capability Profile: Standard 19 Tools | Preflight: PASS
+            ${strategy === 'local' ? 'Transport: Local Process | Capacity: global gate' : 'Transport: ssh -T user@hpc-cluster | Active Runs: 1/2'}<br>
+            ${strategy === 'local' ? 'Preflight: implicit local node' : 'Doctor preflight: PASS'} | Node state: online
           </p>
         </div>
         <div class="node-card">
-          <h4><span class="node-status status-healthy"></span> remote-login-01 (SSH)</h4>
+          <h4><span class="node-status status-warning"></span> Placement rules</h4>
           <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.4rem;">
-            Transport: ssh -T user@hpc-cluster | Active Runs: 1/8<br>
-            Capability Profile: High-Memory CUDA | Preflight: PASS
+            Explicit pins fail closed when unavailable. Automatic placement sorts eligible remote nodes by active workers, then declaration order, and falls back to local.
           </p>
         </div>
       `;

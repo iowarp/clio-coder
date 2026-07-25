@@ -199,6 +199,6 @@ All other code elements (identifiers, types, function names, punctuation) remain
 - **`/fleet` Overlay**: Modal overlay allowing operators to view running dispatches, inspect node capabilities, edit profile node pins, and monitor worker heartbeats.
 - **Parked Tools & Approvals**: Parked tool calls awaiting permission are rendered as `⏸ awaiting approval` with explicit approval prompts. Input overlays stay modal during active runs so background completions do not displace open dialogs.
 
-### 7.2 Cost Provenance Algebra Rendering
-- **Session vs Run Provenance**: TUI headers and footers render cost provenance truthfully: orchestrator tokens vs worker tokens are tracked separately with distinct cost algebra.
-- **Verification Badges**: Telemetry lines display `[VERIFIED_RECEIPT_OK]` when execution output matches an integrity-sealed receipt signature.
+### 7.2 Cost Provenance & Evidence Rendering
+- **Session vs Run Provenance**: The Activity footer renders session token/cost totals, while the dispatch board and `/fleet` overlay render per-run worker tokens and cost with `known`, `estimated`, or `unknown` provenance markers. The current surfaces do not present a separate orchestrator-versus-worker algebra.
+- **Proof Markers**: Dispatch cards and `/fleet` rows render evidence readiness as `proof` markers (`pending`, `ready`, or `failed`) from the observability projection. Model-facing dispatch and monitor output use `receipt_integrity=verified/v6/sha256` and a separate `evidence_verification` label; the TUI does not emit a `[VERIFIED_RECEIPT_OK]` badge.

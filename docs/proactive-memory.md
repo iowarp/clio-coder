@@ -64,26 +64,30 @@ and persists its attribution in the session ledger; there is no hidden
 Model output uses a strict two-line grammar parsed by `src/domains/memory/task-memory-policy.ts`:
 
 ```text
-<operations>[{"op":"save_knowledge","entry":{"id":"k1","type":"requirement","content":"..."}}]</operations>
-<context_for_action>Restored requirement [k1]</context_for_action>
-```
-
-Alternatively, if no intervention is required:
-```text
-<operations>[]</operations>
+<operations>[{"op":"update_status","content":"Tracking the current requirement."}]</operations>
 <no_intervention/>
 ```
 
-The response parsing regex enforces this exact shape:
+When a visible reminder cites an existing bank entry, the second line uses:
+```text
+<operations>[]</operations>
+<context_for_action>Restored requirement [tm-k-1]</context_for_action>
+```
+
+Knowledge and procedural saves use `{"op":"save_knowledge","content":"..."}` or
+`{"op":"save_procedural","content":"..."}`; an `id` is only valid when updating
+an existing entry. The response parsing regex enforces this exact shape after trimming
+outer whitespace:
 `/^\<operations\>(\[[^\r\n]*\])\<\/operations\>\r?\n(\<no_intervention\/>|\<context_for_action\>([^\<\>]*)\<\/context_for_action\>)$/u`
 
 Operations are validated atomically, so a malformed operation list changes nothing. Phase 1 writes remain valid when Phase 2 is gated or yields to a deterministic reminder. A timeout, provider failure, malformed response, or telemetry failure is silent and never blocks a tool.
 
 ### Intervention Defaults & Cadence Knobs
 - `memory.intervention.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
-- `memory.intervention.everyNTools` (default `10`): Minimum tool execution interval between background interventions.
-- `memory.intervention.windowSteps` (default `8`): Transcript turn window analyzed during background evaluation.
-- `memory.intervention.maxTokens` (default `400`): Maximum token allocation for background memory resolution.
+- `memory.intervention.everyNTools` (default `10`): Minimum completed-tool interval between background interventions.
+- `memory.intervention.windowSteps` (default `8`): Completed tool-trajectory window analyzed during background evaluation.
+- `memory.intervention.maxTokens` (default `400`): Bounds the rendered memory-bank and reminder context budget; the policy model output cap is a separate fixed `1,200`-token contract in `task-memory-policy.ts`.
+- `memory.intervention.timeoutMs` (default `20000`): Wall-clock limit for a background memory-policy request.
 
 ## Trigger semantics
 

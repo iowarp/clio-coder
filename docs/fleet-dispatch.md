@@ -32,6 +32,13 @@ entry parsed the spec and speaks the dispatched protocol version. It is not
 cryptographic process identity authentication; the child supplies its own
 announcement. SSH also uses the announced remote pid for its kill fallback.
 
+Scout routing is advisory rather than forced: the worker operating contract
+steers explicit broad repository exploration to the read-only `scout` recipe,
+and middleware emits a continuation nudge after nine or more manual
+read-only exploration calls without a successful Scout dispatch. Direct reads
+remain allowed; Clio does not automatically rewrite a broad request into a
+Scout run.
+
 Design decisions that shape everything else:
 
 - Per-node inference targets, no central proxy. Target URLs resolve on the
@@ -271,8 +278,8 @@ policy all consume that same final classification.
 
 Receipt integrity and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
-says whether the worker ran an applicable validation tool. A read-only Scout
-can therefore report `receipt_integrity=verified/v6/sha256` alongside
+reports whether Clio observed an applicable validation tool (or marks the
+basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v6/sha256` alongside
 `evidence_verification=not_applicable/read-only-agent`. Briefing provenance and
 bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
