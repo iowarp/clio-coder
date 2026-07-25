@@ -1,5 +1,7 @@
 # Proactive task memory
 
+> **Interactive Spec Available:** An interactive memory lifecycle dashboard and simulator is located at [docs/html/memory_blueprint.html](html/memory_blueprint.html) (Version: 0.2.9).
+
 Clio's proactive task memory protects long-running work from behavioral state
 decay: a requirement, environment fact, failed attempt, or diagnosis can still
 exist in the transcript while no longer influencing the next action. The design
@@ -59,11 +61,29 @@ and persists its attribution in the session ledger; there is no hidden
 | Learned intervention calibration | Structural authority gate: spontaneous reminders must cite a bank entry; deterministic triggers may be uncited |
 | Passive and always-on ablations | A/B harness compares baseline, rules, and LLM tiers and flags always-noisy ties as regressions |
 
-Model output uses a strict two-line grammar. Operations are validated atomically,
-so a malformed operation list changes nothing. Phase 1 writes remain valid when
-Phase 2 is gated or yields to a deterministic reminder. A timeout, provider
-failure, malformed response, or telemetry failure is silent and never blocks a
-tool.
+Model output uses a strict two-line grammar parsed by `src/domains/memory/task-memory-policy.ts`:
+
+```text
+<operations>[{"op":"save_knowledge","entry":{"id":"k1","type":"requirement","content":"..."}}]</operations>
+<context_for_action>Restored requirement [k1]</context_for_action>
+```
+
+Alternatively, if no intervention is required:
+```text
+<operations>[]</operations>
+<no_intervention/>
+```
+
+The response parsing regex enforces this exact shape:
+`/^\<operations\>(\[[^\r\n]*\])\<\/operations\>\r?\n(\<no_intervention\/>|\<context_for_action\>([^\<\>]*)\<\/context_for_action\>)$/u`
+
+Operations are validated atomically, so a malformed operation list changes nothing. Phase 1 writes remain valid when Phase 2 is gated or yields to a deterministic reminder. A timeout, provider failure, malformed response, or telemetry failure is silent and never blocks a tool.
+
+### Intervention Defaults & Cadence Knobs
+- `memory.intervention.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
+- `memory.intervention.everyNTools` (default `10`): Minimum tool execution interval between background interventions.
+- `memory.intervention.windowSteps` (default `8`): Transcript turn window analyzed during background evaluation.
+- `memory.intervention.maxTokens` (default `400`): Maximum token allocation for background memory resolution.
 
 ## Trigger semantics
 

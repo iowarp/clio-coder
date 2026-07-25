@@ -23,8 +23,8 @@ When the orchestrator dispatches a task to a fleet agent (such as via the `dispa
    The parent process spawns a Node.js subprocess pointing to `dist/worker/entry.js`.
 2. **Environment Scrubbing:**
    To ensure clean execution, the child process runs with a sanitized environment. The orchestrator scrubs user-interactive flags (e.g., `CLIO_INTERACTIVE` is removed from `process.env`) to prevent child workers from attempting to mount TUI elements or intercept standard input signals.
-3. **Spec Injection:**
-   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker, immediately followed by a newline (`\n`).
+3. **Spec Injection & `worker_announce` Handshake:**
+   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. Both local and SSH workers emit `worker_announce` as their first protocol event (`CLIO_WORKER_ANNOUNCE=1`) to confirm wire-contract protocol compatibility before ordinary NDJSON streaming begins.
 
 ```mermaid
 sequenceDiagram
@@ -147,7 +147,35 @@ Operator cancellation, policy rejection, permission refusal, and deterministic
 task failures do not retry. The first three are neutral to target/node
 infrastructure breakers.
 
-### Acceptance coverage
+### 5.1 Failure Taxonomy & Route Exclusion
+
+The coordinator classifies failures into 13 explicit categories (`src/domains/dispatch/failure-classification.ts`) to determine which route parts (`agent`, `target`, `model`, `node`, `runtime`) are excluded during an assignment retry:
+
+| Failure Class | Trigger Pattern / Exit Code | Excluded Route Part | Retryable? |
+| --- | --- | --- | --- |
+| `operator-cancel` | User abort, `canceled` outcome | None (Neutral) | No |
+| `policy` | Policy denial, `denied_by_policy` | None (Neutral) | No |
+| `permission` | `WORKER_EXIT_PERMISSION_REQUIRED` (code 3) | None (Neutral) | No |
+| `deterministic-task` | `isDeterministicOutcomeCode()` (e.g. `scout_synthesis_contract_exhausted`) | None | No |
+| `model-quality` | Quality gate failure | `model` | Yes |
+| `node-channel` | Stall killed, `spawn_failed`, SSH exit code 255 | `node` | Yes |
+| `node-resource` | VRAM/GPU OOM error pattern | `node`, `target` | Yes |
+| `target-auth` | HTTP 401/403, invalid API key | `target` | Yes |
+| `target-rate-limit` | HTTP 429, rate limit error pattern | `target` | Yes (Delayed) |
+| `target-transient` | Timeout, HTTP 502/503/504 | `target` | Yes |
+| `capacity` | Queue full / overload pattern | `node`, `target` | Yes |
+| `worker-runtime` | Process crash / uncaught exception | `runtime` | Yes |
+| `internal` | Internal coordinator failure | None | No |
+
+### 5.2 Canonical Receipt Integrity Serialization (v6)
+
+Receipt integrity v6 (`RUN_RECEIPT_INTEGRITY_VERSION = 6`) computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
+
+- **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
+- **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.
+- **Coverage**: Includes `runId`, `agentId`, `task`, `targetId`, `startedAt`, `endedAt`, `outcome`, `lineage`, `node`, `reroutes`, `gate`, `plan`, `briefing`, `steering`, and `outcomeCode`.
+
+### 5.3 Acceptance Coverage
 
 The assignment contract's acceptance scenarios map to deterministic contract
 tests as follows:

@@ -189,3 +189,16 @@ Syntax highlighting within code blocks is handled by [src/interactive/renderers/
 - **Numeric Literals**: `info`
 
 All other code elements (identifiers, types, function names, punctuation) remain plain. Diff blocks highlight added lines with `success` green and removed lines with `error` red.
+
+---
+
+## 7. v0.2.9 TUI & Cost Provenance Transformations
+
+### 7.1 Fleet Visibility Across Surfaces
+- **Dispatch Board**: Displays per-run status cards with node assignments (`local` vs remote node ID), reroute badges, gate indicators (`gate reviewer c2`), live tool activity, and context occupancy meters.
+- **`/fleet` Overlay**: Modal overlay allowing operators to view running dispatches, inspect node capabilities, edit profile node pins, and monitor worker heartbeats.
+- **Parked Tools & Approvals**: Parked tool calls awaiting permission are rendered as `⏸ awaiting approval` with explicit approval prompts. Input overlays stay modal during active runs so background completions do not displace open dialogs.
+
+### 7.2 Cost Provenance Algebra Rendering
+- **Session vs Run Provenance**: TUI headers and footers render cost provenance truthfully: orchestrator tokens vs worker tokens are tracked separately with distinct cost algebra.
+- **Verification Badges**: Telemetry lines display `[VERIFIED_RECEIPT_OK]` when execution output matches an integrity-sealed receipt signature.
