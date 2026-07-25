@@ -10,6 +10,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
 import type { DelegationToolGovernance } from "../../core/defaults.js";
@@ -42,6 +43,7 @@ import {
 } from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
+import { validateRecipeResult } from "../agents/result-contract.js";
 import {
 	type AgentAudience,
 	type AgentCapabilityClass,
@@ -191,6 +193,7 @@ import {
 	type RunReceiptAutonomyEnforcement,
 	type RunReceiptDraft,
 	type RunReceiptOutput,
+	type RunReceiptResultContractFact,
 	type RunReceiptUpstreamResponse,
 	type RunStatus,
 	type RunSteeringProvenance,
@@ -1416,10 +1419,8 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	}
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
-	if (input.req.skillPaths !== undefined) spec.skillPaths = input.req.skillPaths;
-	// Recipe-declared skills become a harness-enforced context(scope=skills)
-	// allowlist in the worker. Only forwarded when the admitted tool surface
-	// can use them.
+	const skillPaths = [...(input.req.skillPaths ?? []), ...(input.recipe?.boundSkillPaths ?? [])];
+	if (skillPaths.length > 0) spec.skillPaths = [...new Set(skillPaths)];
 	const recipeSkills = (input.recipe?.skills ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
 	if (
 		input.req.noSkills !== true &&
@@ -1647,7 +1648,7 @@ function compactRouteReason(reason: string | null | undefined): string {
 
 function resolveSelectedDispatchTarget(
 	req: DispatchRequest,
-	recipe: AgentRecipe,
+	_recipe: AgentRecipe,
 	workerDefault: WorkerTargetConfig | null,
 	selectedWorkerTarget: WorkerTargetConfig | null,
 	providers: ProvidersContract,
@@ -1684,7 +1685,7 @@ function resolveSelectedDispatchTarget(
 	}
 	const matchingDefault = workerDefault?.target === targetId ? workerDefault : null;
 	const fallbackWorkerTarget = selectedWorkerTarget ?? matchingDefault;
-	const requestedWireModelId = req.model ?? recipe.model ?? fallbackWorkerTarget?.model ?? target.defaultModel;
+	const requestedWireModelId = req.model ?? fallbackWorkerTarget?.model ?? target.defaultModel;
 	if (!requestedWireModelId) {
 		return {
 			ok: false,
@@ -1693,10 +1694,7 @@ function resolveSelectedDispatchTarget(
 		};
 	}
 	const wireModelId = status ? canonicalizeWireModelId(status, requestedWireModelId) : requestedWireModelId;
-	const thinkingLevel = (req.thinkingLevel ??
-		recipe.thinkingLevel ??
-		fallbackWorkerTarget?.thinkingLevel ??
-		"off") as ThinkingLevel;
+	const thinkingLevel = (req.thinkingLevel ?? fallbackWorkerTarget?.thinkingLevel ?? "off") as ThinkingLevel;
 	const resolved = resolveRuntimeTarget(providers, {
 		targetId,
 		wireModelId,
@@ -1788,15 +1786,6 @@ function resolveDispatchTarget(
 		selection = profileRouteSelection(req.agentId, boundProfile, workerProfiles);
 	}
 
-	if (!selection && recipe.target) {
-		selection = {
-			label: `agent ${req.agentId} recipe target ${recipe.target}`,
-			targetId: recipe.target,
-			selectedWorkerTarget: null,
-			problem: null,
-		};
-	}
-
 	if (!selection) {
 		const capabilityMatchedWorker = pickCapabilityMatchedWorker(
 			req.requiredCapabilities,
@@ -1848,7 +1837,7 @@ function resolveDispatchTarget(
 		selection = { ...selection, problem: attempt.reason };
 	}
 
-	const selectedModel = req.model ?? recipe.model ?? selection.selectedWorkerTarget?.model ?? null;
+	const selectedModel = req.model ?? selection.selectedWorkerTarget?.model ?? null;
 	const selectedThinkingLevel = (selection.selectedWorkerTarget?.thinkingLevel ?? "off") as ThinkingLevel;
 	const fallback = pickBestAvailableWorker(
 		providers,
@@ -1960,7 +1949,11 @@ export function createDispatchBundle(
 			: createRouteObserver({
 					getAgents: () => {
 						try {
-							return agents.listSpecs().map((spec) => ({ id: spec.id, description: spec.description ?? "" }));
+							return agents.listSpecs().map((spec) => ({
+								id: spec.id,
+								description: spec.description,
+								latencyClass: spec.latencyClass,
+							}));
 						} catch {
 							return [];
 						}
@@ -3385,7 +3378,7 @@ export function createDispatchBundle(
 				// own tools, so no zero-activity note is derived from this record.
 				toolActivity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
-				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
+				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
 				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
 					lifecycle.autonomy,
 					lifecycle.agentConfig.toolGovernance ?? "clio-policy",
@@ -3655,12 +3648,7 @@ export function createDispatchBundle(
 		if (!validated.ok) {
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
-		// Carry the normalized, detached spec from this point forward. In
-		// particular, responseSchema must not retain a caller-owned reference across
-		// the asynchronous target-resolution window below.
 		req = { ...req, ...validated.spec };
-		// Freeze the parent hard-block boundary before runtime routing or fleet
-		// placement. Every accepted runtime consumes this same immutable state.
 		const protectedArtifactState = protectedArtifactStateForRequest(getProtectedArtifactState(), req);
 
 		// Shadow route decision. It is computed once the production route is
@@ -3736,10 +3724,6 @@ export function createDispatchBundle(
 
 		assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings);
 
-		// Fleet placement resolves before the global slot so a node-admission
-		// failure (dead node, unpreflighted path parity, per-node cap) is a
-		// clean rejection that never holds a concurrency slot. The placement's
-		// own capacity is released on every exit path below.
 		const placement = resolveNode(req) ?? null;
 		try {
 			assertUnreservedCapacity(req, placement?.node.id ?? "local", settings);
@@ -3769,14 +3753,9 @@ export function createDispatchBundle(
 			}
 			throw error;
 		}
-		// Fold the placement-completed reroute hops back onto the effective
-		// request: a later retry of this run must extend the filled lineage,
-		// not re-open hops placement already resolved.
 		if (placement?.reroutes !== undefined && placement.reroutes.length > 0) {
 			req = { ...req, reroutes: [...placement.reroutes] };
 		}
-		// The production route is now fully resolved and about to run. The shadow
-		// decision is built from it and recorded; nothing below reads it back.
 		routeObservation = observeShadowRoute(req, placement?.node ?? { id: "local", kind: "local" });
 		let nodeSlotHeld = placement?.release !== undefined;
 		const releaseNodeSlot = (): void => {
@@ -3804,8 +3783,6 @@ export function createDispatchBundle(
 		}
 		timing.admittedAt = new Date(now()).toISOString();
 
-		// Resolve the ledger before spawning: a worker subprocess must never
-		// outlive a failure to create its tracking row.
 		const ledgerRef = (() => {
 			try {
 				return requireLedger();
@@ -3897,9 +3874,6 @@ export function createDispatchBundle(
 		let outcomeCode: RunOutcomeCode | null = null;
 		const trustedOutcomeCodes = new Set<RunOutcomeCode>();
 		let reportedUntrustedOutcome = false;
-		// Native pi/http workers (local or SSH transport) and Clio's Claude SDK
-		// wrapper own their event semantics. Black-box subprocess runtimes own
-		// their stdout and therefore cannot self-assert a Clio outcome code.
 		const acceptsOutcomeCodeEvents =
 			lifecycle.runtimeKind === "http" ||
 			(lifecycle.runtimeKind === "sdk" && lifecycle.target.runtime.id === "claude-sdk");
@@ -4274,6 +4248,7 @@ export function createDispatchBundle(
 			outcomeDetail: string | null,
 			capturedOutput: RunReceiptOutput | undefined,
 			steering: ReadonlyArray<RunSteeringProvenance>,
+			resultContract: RunReceiptResultContractFact | null,
 		): RunReceiptDraft => {
 			// A canceled run seals status "interrupted" and must not report exit 0:
 			// the terminal state disagrees with a success code. This mirrors the ACP
@@ -4363,6 +4338,7 @@ export function createDispatchBundle(
 					enforcementPassed:
 						req.responseSchema === undefined ? null : outcome === "succeeded" && capturedOutput?.state === "final",
 					typedValidations: typedValidationFactsFromToolStats(finalToolStats),
+					resultContract,
 				}),
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				autonomyEnforcement: autonomyEnforcementForWorkerSpec(
@@ -4517,7 +4493,29 @@ export function createDispatchBundle(
 				// acknowledgement after the bounded drain cannot race the sealed facts.
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
-				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput)) {
+				const resultContract = validateRecipeResult({
+					contract: lifecycle.recipe?.resultContract ?? null,
+					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
+					cwd: lifecycle.cwd,
+					networkAllowed: lifecycle.admission.allowedTools.includes(ToolNames.WebFetch),
+					filesystem: {
+						readFile(filePath) {
+							try {
+								return readFileSync(filePath, "utf8");
+							} catch {
+								return null;
+							}
+						},
+					},
+				});
+				if (finalOutcome === "succeeded" && resultContract?.validation.conformance === "fail") {
+					finalOutcome = "failed";
+					finalDetail = `result contract failed: ${resultContract.validation.reason ?? "invalid result"}`;
+					failureMessage = finalDetail;
+				}
+				const hasTerminalArtifact =
+					lifecycle.recipe?.resultContract.kind === "architect-plan" && resultContract?.validation.conformance === "pass";
+				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput) && !hasTerminalArtifact) {
 					finalOutcome = "failed";
 					outcomeCode = "worker_final_output_missing";
 					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
@@ -4533,6 +4531,7 @@ export function createDispatchBundle(
 					finalDetail,
 					capturedOutput,
 					steering,
+					resultContract?.fact ?? null,
 				);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,

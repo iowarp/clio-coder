@@ -735,7 +735,12 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 
 	it("prints the worker final answer for headless --agent dispatch", async () => {
 		await runCli(["doctor", "--fix"], { env: scratch.env });
-		const fixture = await startOpenAICompatFixture("dispatch mock answer");
+		const fixture = await startOpenAICompatFixture(
+			JSON.stringify({
+				mutatedPaths: [],
+				validations: [{ name: "response", passed: true, evidence: "dispatch mock answer" }],
+			}),
+		);
 		const project = join(scratch.dir, "project");
 		mkdirSync(project, { recursive: true });
 		try {

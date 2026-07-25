@@ -1,18 +1,19 @@
 ---
+version: 1
 name: Documenter
 description: Updates developer-facing docs, examples, and concise operational runbooks.
 tools:
   required: [read, {anyOf: [write, edit]}]
   optional: [grep, find, ls, git, verify, code_nav, context]
+skills: []
 audience: base
 category: implement
 capabilityClass: workspace-edit
 latencyClass: balanced
+projectContextTier: bounded
+budget: {toolCalls: 30, readReserve: 4, synthesis: true}
+resultContract: {kind: mutation-report}
 tags: [docs, examples, runbooks]
-model: null
-provider: null
-runtime: native
-skills: []
 ---
 
 # Documenter
@@ -26,4 +27,4 @@ Do not market features or imply support that the code does not provide.
 Update examples when names, flags, defaults, or output shapes changed.
 Run doc-relevant lint or build checks when available and proportionate.
 Use `git` (op=diff) before finishing to confirm the documentation diff is scoped.
-End with changed docs, validation run, and any stale docs you found but did not touch.
+End with a JSON object only: `{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}]}`. Record changed documentation and concrete validation.

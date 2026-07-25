@@ -7,7 +7,7 @@ import type { RunEnvelope, RunReceipt } from "./types.js";
 export type RouteQualityLabel = "pass" | "fail" | "unmeasured";
 
 export interface RouteQualityCheck {
-	kind: "typed-validation" | "independent-gate" | "evaluation";
+	kind: "typed-validation" | "result-contract" | "independent-gate" | "evaluation";
 	sourceDigest: string;
 	passed: boolean;
 }
@@ -134,6 +134,14 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 			kind: "typed-validation",
 			sourceDigest: subject.integrity.digest,
 			passed: fact.passed,
+		});
+	}
+	const resultContract = subject.quality.resultContract;
+	if (resultContract !== null && resultContract.quality !== "unmeasured") {
+		checks.push({
+			kind: "result-contract",
+			sourceDigest: subject.integrity.digest,
+			passed: resultContract.quality === "pass",
 		});
 	}
 

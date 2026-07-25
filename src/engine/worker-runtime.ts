@@ -17,6 +17,7 @@ import {
 } from "../core/guardrails.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { parseScoutResult } from "../domains/agents/result-contract.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
@@ -39,7 +40,6 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import type { ToolProfileName } from "../tools/profiles.js";
-import { parseScoutSplitRecommendation } from "../tools/scout-split-recommendation.js";
 import { hasVerifiedScoutGrounding, quarantineUnverifiedScoutBullets } from "../tools/worker-evidence.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
@@ -198,7 +198,7 @@ function scoutSynthesisNeedsCorrection(
 	if (!isAssistantMessage(message)) return false;
 	const text = assistantMessageText(message);
 	if (text === null || text.length === 0) return true;
-	if (parseScoutSplitRecommendation(text) !== null) return false;
+	if (parseScoutResult(text) !== null) return false;
 	const stopReason = message.stopReason;
 	const announcesMoreWork = shouldRequestStalledTurnContinuation({
 		hook: "turn_end",
@@ -566,7 +566,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			sanitizeLockedSynthesisMessage(event.message);
 			if (input.agentId === "scout") {
 				const text = assistantMessageText(event.message);
-				if (text !== null && parseScoutSplitRecommendation(text) === null) {
+				if (text !== null && parseScoutResult(text) === null) {
 					const grounded = quarantineUnverifiedScoutBullets(text, successfulScoutReadCitations);
 					if (grounded !== text) replaceAssistantMessageText(event.message, grounded);
 				}

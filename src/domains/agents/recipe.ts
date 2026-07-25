@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { ResultContract } from "./result-contract.js";
 import type {
 	AgentAudience,
 	AgentCapabilityClass,
@@ -6,8 +7,6 @@ import type {
 	AgentLatencyClass,
 	AgentProjectContextTier,
 } from "./spec.js";
-
-export type RecipeThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 /** Authored worker-loop phase policy carried by an agent recipe. */
 export interface AgentBudget {
@@ -21,7 +20,7 @@ export interface AgentBudget {
 
 const AGENT_BUDGET_KEYS = ["toolCalls", "readReserve", "synthesis"] as const;
 
-/** Strict parser shared by built-in, user, and project recipes. */
+/** Strict parser shared by the one recipe schema and direct contract fixtures. */
 export function parseAgentBudget(value: unknown, sourcePath: string): AgentBudget | undefined {
 	if (value === undefined) return undefined;
 	const prefix = `agent budget: ${sourcePath}: budget`;
@@ -64,41 +63,41 @@ export interface AgentToolAnyOfRequirement {
 
 export type AgentToolRequirement = string | AgentToolAnyOfRequirement;
 
-/** Authored required/optional semantics. `tools` remains the flattened declared inventory. */
+/** Authored required/optional semantics. `tools` is the flattened declared inventory. */
 export interface AgentToolRequirements {
 	required: ReadonlyArray<AgentToolRequirement>;
 	optional: ReadonlyArray<string>;
 }
 
+/** The only current recipe shape. Every field is explicit and consumed. */
 export interface AgentRecipe {
+	version: 1;
+	/** Filename-derived stable recipe identity; never accepted from frontmatter. */
 	id: string;
 	name: string;
 	description: string;
-	tools?: ReadonlyArray<string>;
+	tools: ReadonlyArray<string>;
 	toolRequirements: AgentToolRequirements;
-	model?: string;
-	target?: string;
-	thinkingLevel?: RecipeThinkingLevel;
-	budget?: AgentBudget;
-	/** Legacy recipe hint only; dispatch target selection comes from configured worker targets/profiles. */
-	runtime?: "native" | "cli";
-	skills?: ReadonlyArray<string>;
-	category?: AgentCategory;
-	capabilityClass?: AgentCapabilityClass;
-	latencyClass?: AgentLatencyClass;
-	/** Overrides the capability-class default for the bounded project-context message. */
-	projectContextTier?: AgentProjectContextTier;
-	audience?: AgentAudience;
-	tags?: ReadonlyArray<string>;
-	output?: string;
+	skills: ReadonlyArray<string>;
+	/** Discovery-resolved paths for bound skills; never parsed from frontmatter. */
+	boundSkillPaths: ReadonlyArray<string>;
+	audience: AgentAudience;
+	category: AgentCategory;
+	capabilityClass: AgentCapabilityClass;
+	latencyClass: AgentLatencyClass;
+	projectContextTier: AgentProjectContextTier;
+	budget: AgentBudget;
+	resultContract: ResultContract;
+	tags: ReadonlyArray<string>;
 	source: "builtin" | "user" | "project";
 	filepath: string;
+	/** Persona prompt body. */
 	body: string;
 }
 
 export interface RecipeSource {
 	dir: string;
-	source: "builtin" | "user" | "project";
+	source: AgentRecipe["source"];
 }
 
 export function recipeIdFromPath(absPath: string, rootDir: string): string {

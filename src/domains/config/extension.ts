@@ -2,11 +2,16 @@ import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js"
 import { type ClioSettings, readSettings, updateSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
+import { assertAgentIdNamespace } from "./agent-namespace.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
 import { type ConfigWatcher, startConfigWatcher } from "./watcher.js";
 
 type ChangeListener = (payload: ConfigChangePayload) => void;
+
+interface NativeAgentNamespace {
+	list(): ReadonlyArray<{ id: string }>;
+}
 
 export function createConfigBundle(context: DomainContext): DomainBundle<ConfigContract> {
 	let watcher: ConfigWatcher | null = null;
@@ -16,6 +21,11 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		["nextTurn", new Set()],
 		["restartRequired", new Set()],
 	]);
+
+	function assertAgentNamespace(settings: Readonly<ClioSettings>): void {
+		const agents = context.getContract<NativeAgentNamespace>("agents");
+		if (agents) assertAgentIdNamespace(agents.list(), settings.delegation.agents);
+	}
 
 	function dispatch(kind: ChangeKind, payload: ConfigChangePayload): void {
 		const bus = context.bus;
@@ -47,6 +57,12 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 			return;
 		}
 		const prev = snapshot;
+		try {
+			assertAgentNamespace(next);
+		} catch (err) {
+			console.error("[clio:config] reload rejected:", err);
+			return;
+		}
 		snapshot = next;
 		if (!prev) return;
 		const diff = diffSettings(prev, next);
@@ -78,6 +94,9 @@ export function createConfigBundle(context: DomainContext): DomainBundle<ConfigC
 		update(mutate) {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
+			const candidate = structuredClone(previous);
+			mutate(candidate);
+			assertAgentNamespace(candidate);
 			// updateSettings writes the user layer; re-layer so project overlays
 			// stay applied in the refreshed snapshot.
 			updateSettings(mutate);

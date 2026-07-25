@@ -6,6 +6,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
+import { parseScoutResult, type ScoutResult } from "../domains/agents/result-contract.js";
 import type {
 	AbortReason,
 	DispatchContract,
@@ -67,7 +68,6 @@ import {
 } from "./dispatch-plan.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
-import { parseScoutSplitRecommendation, type ScoutSplitRecommendation } from "./scout-split-recommendation.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
@@ -803,11 +803,8 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 
 function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolResultDetails {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
-	let splitRecommendation: ScoutSplitRecommendation | null = null;
+	let splitRecommendation: ScoutResult | null = null;
 	for (const run of runs) {
-		// Receipt integrity authenticates both the Scout identity and the sealed
-		// final output used for this advisory recommendation. Transient event text
-		// is never written back to the receipt or allowed to affect control flow.
 		if (
 			!run.integrity.ok ||
 			run.receipt.agentId !== "scout" ||
@@ -816,7 +813,7 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 		) {
 			continue;
 		}
-		const parsed = parseScoutSplitRecommendation(run.receipt.output.text);
+		const parsed = parseScoutResult(run.receipt.output.text);
 		if (parsed === null) continue;
 		// The top-level shape is singular. Multiple valid Scout envelopes in one
 		// dispatch are ambiguous, so fail closed instead of silently selecting one.

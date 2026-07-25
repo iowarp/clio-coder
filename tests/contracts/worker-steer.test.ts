@@ -28,6 +28,7 @@ import {
 } from "../../src/engine/worker-runtime.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
+import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 
 const SCOUT_TOOL_CALLS = 18;
@@ -284,6 +285,7 @@ function stubContext(): DomainContext {
 
 	const recipes: ReadonlyArray<AgentRecipe> = [
 		{
+			...agentRecipeFixture(),
 			toolRequirements: { required: [], optional: [] },
 			id: "coder",
 			name: "coder",
@@ -296,6 +298,7 @@ function stubContext(): DomainContext {
 	const agents: AgentsContract = {
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
+		diagnostics: () => [],
 		listSpecs: () => recipes.map(normalizeAgentSpec),
 		getSpec: (id) => {
 			const recipe = recipes.find((entry) => entry.id === id);

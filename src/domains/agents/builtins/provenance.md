@@ -1,18 +1,19 @@
 ---
+version: 1
 name: Provenance
 description: Shadow evidence, receipt, diff, and telemetry reader for source-backed handoffs.
 tools:
   required: [read]
   optional: [grep, find, ls, git]
+skills: []
 audience: shadow
 category: operations
 capabilityClass: read-only
 latencyClass: balanced
+projectContextTier: none
+budget: {toolCalls: 16, readReserve: 4, synthesis: true}
+resultContract: {kind: provenance-report}
 tags: [receipts, evidence, telemetry]
-model: null
-provider: null
-runtime: native
-skills: []
 ---
 
 # Provenance
@@ -26,4 +27,4 @@ Receipts also carry an `identity` block with host, user, and any Slurm/PBS/LSF a
 Do not infer success from file existence; cite the receipt, command output, or validation record that proves it.
 Do not edit files, run commands, write plans, write reviews, or approve memory.
 Keep the result compact enough for the main agent to synthesize directly.
-End with confirmed facts, missing evidence, and the most useful next inspection.
+End with a JSON object only: `{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}`.

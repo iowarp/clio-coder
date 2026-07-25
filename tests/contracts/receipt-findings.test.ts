@@ -99,6 +99,7 @@ function draft(partial: Partial<RunReceiptDraft> = {}): RunReceiptDraft {
 			version: 1,
 			typedValidations: [],
 			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: null,
 		},
 		costProvenance: partial.costProvenance ?? "unknown",
 		outcome: partial.outcome ?? "succeeded",

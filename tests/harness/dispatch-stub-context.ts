@@ -1,3 +1,4 @@
+import { agentRecipeFixture } from "./agent-recipe.js";
 /**
  * Minimal DomainContext stub for dispatch-bundle contract tests: one healthy
  * openai-compat target, a permissive safety contract, a single `coder`
@@ -102,6 +103,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 	};
 	const recipes: ReadonlyArray<AgentRecipe> = [
 		{
+			...agentRecipeFixture(),
 			toolRequirements: { required: [], optional: [] },
 			id: "coder",
 			name: "coder",
@@ -114,6 +116,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 	const agents: AgentsContract = {
 		list: () => recipes,
 		get: (id) => recipes.find((recipe) => recipe.id === id) ?? null,
+		diagnostics: () => [],
 		listSpecs: () => recipes.map(normalizeAgentSpec),
 		getSpec: (id) => {
 			const recipe = recipes.find((entry) => entry.id === id);

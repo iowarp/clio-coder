@@ -1,149 +1,82 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { loadSkills } from "../resources/skills/loader.js";
 import { parseFrontmatter } from "./frontmatter.js";
-import {
-	type AgentRecipe,
-	type AgentToolRequirement,
-	parseAgentBudget,
-	type RecipeSource,
-	recipeIdFromPath,
-} from "./recipe.js";
-import {
-	assertAgentSpecPolicy,
-	isAgentAudience,
-	isAgentCapabilityClass,
-	isAgentCategory,
-	isAgentLatencyClass,
-	isAgentProjectContextTier,
-	isShadowAgent,
-	normalizeAgentSpec,
-} from "./spec.js";
+import { type AgentRecipe, type RecipeSource, recipeIdFromPath } from "./recipe.js";
+import { parseAgentRecipeSchema } from "./recipe-schema.js";
+import { assertAgentSpecPolicy, isShadowAgent, normalizeAgentSpec } from "./spec.js";
 
 const RESERVED_CUSTOM_AGENT_IDS = new Set(["worker", "delegate"]);
 
-function parseRuntime(value: unknown): AgentRecipe["runtime"] {
-	if (value === "native" || value === "cli") return value;
-	return undefined;
+export interface AgentRecipeDiagnostic {
+	source: RecipeSource["source"];
+	filepath: string;
+	message: string;
 }
 
-function parseStringArray(value: unknown): ReadonlyArray<string> | undefined {
-	if (!Array.isArray(value)) return undefined;
-	return value.map((v) => String(v));
-}
-
-function strictToolName(value: unknown, path: string): string {
-	if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${path} must be a non-empty string`);
-	return value;
-}
-
-function parseTools(value: unknown, filepath: string): Pick<AgentRecipe, "tools" | "toolRequirements"> | undefined {
-	if (value === undefined) return undefined;
-	// Every recipe declares which tools it needs and which it merely wants. A
-	// bare list cannot express that, so it is rejected rather than guessed at
-	// from the capability class.
-	if (value === null || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error(`${filepath}: tools must be a { required, optional } object`);
-	}
-	const record = value as Record<string, unknown>;
-	for (const key of Object.keys(record)) {
-		if (key !== "required" && key !== "optional") throw new Error(`${filepath}: tools.${key} is unknown`);
-	}
-	if (!Array.isArray(record.required)) throw new Error(`${filepath}: tools.required must be an array`);
-	if (!Array.isArray(record.optional)) throw new Error(`${filepath}: tools.optional must be an array`);
-	const required: AgentToolRequirement[] = record.required.map((entry, index) => {
-		const entryPath = `${filepath}: tools.required[${index}]`;
-		if (typeof entry === "string") return strictToolName(entry, entryPath);
-		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-			throw new Error(`${entryPath} must be a tool name or { anyOf: [...] }`);
-		}
-		const group = entry as Record<string, unknown>;
-		if (Object.keys(group).length !== 1 || !Array.isArray(group.anyOf) || group.anyOf.length === 0) {
-			throw new Error(`${entryPath} must contain only a non-empty anyOf array`);
-		}
-		return { anyOf: group.anyOf.map((tool, toolIndex) => strictToolName(tool, `${entryPath}.anyOf[${toolIndex}]`)) };
+function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRecipe {
+	if (recipe.skills.length === 0) return { ...recipe, boundSkillPaths: [] };
+	// Builtins may bind a package-owned skill. Custom recipes deliberately use
+	// only the operator's discovered skill roots; a recipe cannot smuggle an
+	// arbitrary filesystem path into worker context through a skill name.
+	const packageSkills = path.resolve(source.dir, "..", "..", "..", "..", "skills");
+	const skills = loadSkills({
+		cwd: process.cwd(),
+		...(source.source === "builtin" && existsSync(packageSkills) ? { explicitSkillPaths: [packageSkills] } : {}),
 	});
-	const optional = record.optional.map((entry, index) => strictToolName(entry, `${filepath}: tools.optional[${index}]`));
-	const tools = [
-		...required.flatMap((requirement) => (typeof requirement === "string" ? [requirement] : requirement.anyOf)),
-		...optional,
-	];
-	if (new Set(tools).size !== tools.length) throw new Error(`${filepath}: tools contains duplicate requirements`);
-	return { tools, toolRequirements: { required, optional } };
+	const byName = new Map(skills.items.map((skill) => [skill.name, skill.filePath]));
+	const missing = recipe.skills.filter((skill) => !byName.has(skill));
+	if (missing.length > 0) {
+		throw new Error(`agent recipe: ${recipe.filepath}: bound skill(s) unavailable: ${missing.join(", ")}`);
+	}
+	const boundSkillPaths = recipe.skills.map((skill) => {
+		const filePath = byName.get(skill);
+		if (filePath === undefined) throw new Error(`agent recipe: ${recipe.filepath}: bound skill unavailable: ${skill}`);
+		return filePath;
+	});
+	return { ...recipe, boundSkillPaths };
 }
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-function parseThinkingLevel(value: unknown): AgentRecipe["thinkingLevel"] {
-	if (typeof value !== "string") return undefined;
-	return THINKING_LEVELS.has(value) ? (value as AgentRecipe["thinkingLevel"]) : undefined;
-}
-
-export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRecipe> {
+/**
+ * Strictly parse one recipe directory. Shipped recipe defects abort discovery;
+ * user and project defects are quarantined with a structured diagnostic.
+ */
+export function loadRecipesFromDir(
+	source: RecipeSource,
+	diagnostics: AgentRecipeDiagnostic[] = [],
+): ReadonlyArray<AgentRecipe> {
 	let entries: import("node:fs").Dirent[];
 	try {
 		entries = readdirSync(source.dir, { withFileTypes: true });
 	} catch (err) {
-		const e = err as NodeJS.ErrnoException;
-		if (e.code === "ENOENT" || e.code === "ENOTDIR") return [];
+		const error = err as NodeJS.ErrnoException;
+		if (error.code === "ENOENT" || error.code === "ENOTDIR") return [];
 		throw err;
 	}
 
 	const recipes: AgentRecipe[] = [];
 	for (const entry of entries) {
-		if (!entry.isFile()) continue;
-		if (!entry.name.endsWith(".md")) continue;
+		if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
 		const filepath = path.join(source.dir, entry.name);
-		const id = recipeIdFromPath(filepath, source.dir);
 		try {
+			const id = recipeIdFromPath(filepath, source.dir);
 			const raw = readFileSync(filepath, "utf8");
 			const { frontmatter, body } = parseFrontmatter(raw, filepath);
-			const name = typeof frontmatter.name === "string" ? frontmatter.name : id;
-			const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
-
-			const recipe: AgentRecipe = {
-				id,
-				name,
-				description,
-				source: source.source,
-				filepath,
-				body,
-				// A recipe that declares no tools requires none; parseTools replaces
-				// this when the recipe declares a tools block.
-				toolRequirements: { required: [], optional: [] },
-			};
-			const runtime = parseRuntime(frontmatter.runtime);
-			if (runtime) recipe.runtime = runtime;
-			const parsedTools = parseTools(frontmatter.tools, filepath);
-			if (parsedTools?.tools) recipe.tools = parsedTools.tools;
-			if (parsedTools?.toolRequirements) recipe.toolRequirements = parsedTools.toolRequirements;
-			const skills = parseStringArray(frontmatter.skills);
-			if (skills) recipe.skills = skills;
-			if (typeof frontmatter.model === "string") recipe.model = frontmatter.model;
-			if (typeof frontmatter.target === "string") recipe.target = frontmatter.target;
-			const thinking = parseThinkingLevel(frontmatter.thinkingLevel);
-			if (thinking) recipe.thinkingLevel = thinking;
-			const budget = parseAgentBudget(frontmatter.budget, filepath);
-			if (budget) recipe.budget = budget;
-			if (isAgentCategory(frontmatter.category)) recipe.category = frontmatter.category;
-			if (isAgentCapabilityClass(frontmatter.capabilityClass)) recipe.capabilityClass = frontmatter.capabilityClass;
-			if (isAgentLatencyClass(frontmatter.latencyClass)) recipe.latencyClass = frontmatter.latencyClass;
-			if (isAgentProjectContextTier(frontmatter.projectContextTier)) {
-				recipe.projectContextTier = frontmatter.projectContextTier;
-			}
-			if (isAgentAudience(frontmatter.audience)) recipe.audience = frontmatter.audience;
-			const tags = parseStringArray(frontmatter.tags);
-			if (tags) recipe.tags = tags;
-			if (typeof frontmatter.output === "string") recipe.output = frontmatter.output;
-			// Normalization and policy validation run before the recipe enters any catalog.
+			const parsedRecipe = parseAgentRecipeSchema({ id, source: source.source, filepath, body, frontmatter });
+			const recipe = resolveBoundSkills(parsedRecipe, source);
+			// Policy validation runs before a recipe enters any catalog, prompt, or
+			// dispatch lookup. The schema is intentionally not a permissive pre-pass.
 			assertAgentSpecPolicy(normalizeAgentSpec(recipe));
 			recipes.push(recipe);
 		} catch (error) {
 			if (source.source === "builtin") throw error;
 			const message = error instanceof Error ? error.message : String(error);
+			diagnostics.push({ source: source.source, filepath, message });
 			process.stderr.write(`[clio:agents] quarantine path=${filepath} source=${source.source} reason=${message}\n`);
 		}
 	}
 
-	recipes.sort((a, b) => a.id.localeCompare(b.id));
+	recipes.sort((left, right) => left.id.localeCompare(right.id));
 	return recipes;
 }
 
@@ -170,11 +103,9 @@ export function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe
 				process.stderr.write(`[clio:agents] ignore override id=${recipe.id} by=project reason=reserved-builtin\n`);
 				continue;
 			}
-			if (byId.has(recipe.id)) {
-				process.stderr.write(`[clio:agents] override id=${recipe.id} by=${recipe.source}\n`);
-			}
+			if (byId.has(recipe.id)) process.stderr.write(`[clio:agents] override id=${recipe.id} by=${recipe.source}\n`);
 			byId.set(recipe.id, recipe);
 		}
 	}
-	return Array.from(byId.values());
+	return Array.from(byId.values()).sort((left, right) => left.id.localeCompare(right.id));
 }

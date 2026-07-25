@@ -62,7 +62,7 @@ function formatSpecLine(spec: AgentSpec, suffix: string): string {
 	const budget = spec.budget
 		? `, budget=${spec.budget.toolCalls}/${spec.budget.readReserve}/${spec.budget.synthesis ? "synthesize" : "stop"}`
 		: ", budget=operator-default";
-	return `- ${spec.id} (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.source}${tags}${skills}${budget})${suffix}`;
+	return `- ${spec.name} [${spec.id}] (${spec.audience}, ${spec.category}, ${spec.capabilityClass}, ${spec.latencyClass}, ${spec.source}${tags}${skills}${budget})${suffix}`;
 }
 
 export function renderAgentCatalog(recipes: ReadonlyArray<AgentRecipe>): string {

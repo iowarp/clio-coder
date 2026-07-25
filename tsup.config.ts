@@ -1,3 +1,5 @@
+import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { defineConfig } from "tsup";
 
 const entries = {
@@ -22,6 +24,12 @@ export default defineConfig({
 	dts: false,
 	shims: false,
 	outDir: "dist",
+	onSuccess() {
+		const recipes = join("dist", "domains", "agents", "builtins");
+		rmSync(recipes, { recursive: true, force: true });
+		mkdirSync(join("dist", "domains", "agents"), { recursive: true });
+		cpSync(join("src", "domains", "agents", "builtins"), recipes, { recursive: true });
+	},
 	// The shebang comes from the hashbang line in each entry source file;
 	// esbuild hoists it to the top of the corresponding entry chunk. A tsup
 	// `banner` would stamp it onto every emitted chunk instead.

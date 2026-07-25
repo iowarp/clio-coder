@@ -266,7 +266,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 8;
+	version: 9;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -286,6 +286,14 @@ export interface RunReceiptResponseSchemaFact {
 	enforcementPassed: boolean | null;
 }
 
+/** Typed result-contract conformance and its separately eligible quality label. */
+export interface RunReceiptResultContractFact {
+	sourceId: string;
+	validatorDigest: string;
+	conformance: "pass" | "fail";
+	quality: "pass" | "fail" | "unmeasured";
+}
+
 /**
  * Required run-local quality facts. Later gate and evaluation artifacts link to
  * the sealed receipt digest rather than mutating this block after finalization.
@@ -294,6 +302,7 @@ export interface RunReceiptQuality {
 	version: 1;
 	typedValidations: RunReceiptTypedValidationFact[];
 	responseSchema: RunReceiptResponseSchemaFact;
+	resultContract: RunReceiptResultContractFact | null;
 }
 
 /**

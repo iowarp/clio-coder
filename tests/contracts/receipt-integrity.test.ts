@@ -77,6 +77,7 @@ function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
 			version: 1,
 			typedValidations: [],
 			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: null,
 		},
 		costProvenance: "unknown",
 		runId: envelope.id,
@@ -142,6 +143,29 @@ describe("contracts/receipt-integrity", () => {
 		});
 	});
 
+	it("requires and integrity-covers the typed result-contract fact", () => {
+		const envelope = fixtureEnvelope("run-result-contract");
+		const receipt = withReceiptIntegrity(
+			{
+				...fixtureReceiptDraft(envelope),
+				quality: {
+					...fixtureReceiptDraft(envelope).quality,
+					resultContract: {
+						sourceId: "agent-result-contract:verifier-report:test",
+						validatorDigest: "a".repeat(64),
+						conformance: "pass",
+						quality: "pass",
+					},
+				},
+			},
+			envelope,
+		);
+		strictEqual(
+			verifyReceiptIntegrity({ ...receipt, quality: { ...receipt.quality, resultContract: null } }, envelope).ok,
+			false,
+		);
+	});
+
 	it("integrity-covers the worker_final_output_missing outcome code", () => {
 		const envelope: RunEnvelope = {
 			...fixtureEnvelope("run-final-output-missing"),
@@ -166,7 +190,7 @@ describe("contracts/receipt-integrity", () => {
 		const draft = fixtureReceiptDraft(envelope);
 		const current = computeReceiptIntegrity(draft, envelope);
 
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 9]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });

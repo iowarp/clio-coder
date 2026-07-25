@@ -28,6 +28,21 @@ export type {
 	RecipeSource,
 } from "./recipe.js";
 export { parseAgentBudget } from "./recipe.js";
+export { parseAgentRecipeSchema, recipeSchemaFieldNames } from "./recipe-schema.js";
+export type { AgentRecipeDiagnostic } from "./registry.js";
+export type {
+	ResultContract,
+	ResultContractQuality,
+	ResultContractValidation,
+	ScoutResult,
+} from "./result-contract.js";
+export {
+	parseResultContract,
+	parseScoutResult,
+	resultContractDigest,
+	validateRecipeResult,
+	validateResultContract,
+} from "./result-contract.js";
 export type {
 	AgentCapabilityClass,
 	AgentCategory,
