@@ -105,11 +105,14 @@ export interface ToolSpec {
 	 */
 	prepareArguments?(args: Record<string, unknown>): Record<string, unknown>;
 	/**
-	 * Pure, synchronous admission planner. Unlike `prepareArguments`, this runs
-	 * before safety/autonomy mapping so approval-sensitive tools can attach the
-	 * exact immutable artifact that admission and execution will share.
+	 * Synchronous admission planner. Unlike `prepareArguments`, this runs before
+	 * safety/autonomy mapping so approval-sensitive tools can attach the exact
+	 * immutable artifact—and provisional resources—that admission and execution
+	 * share. Resource owners must pair it with `disposeAdmissionArguments`.
 	 */
 	prepareAdmissionArguments?(args: Record<string, unknown>): Record<string, unknown>;
+	/** Release provisional resources when prepared admission is denied or execution returns. */
+	disposeAdmissionArguments?(args: Record<string, unknown>): void;
 	/** Trusted admission artifact renderer used by policy after preparation. */
 	describeDispatchPlan?(args: Record<string, unknown>): DispatchPlanView;
 	/** Execute the tool. Only called after admission. */
@@ -377,6 +380,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options),
 				decision,
 			};
+		} finally {
+			disposeAdmissionArgs(spec, call.args ?? {});
 		}
 	};
 
@@ -582,6 +587,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 
 	const resolveParkedAsBlocked = (entry: ParkedCall, reason: string): void => {
 		cleanupParkedEntry(entry);
+		disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
 		// A denied/cancelled park is still a model attempt: observe it so
 		// identical retries trip the loop detector. When the detector fires, its
 		// reason replaces the generic denial so the model gets recovery guidance.
@@ -653,11 +659,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
 			const outcome = admit(admissionCall, undefined, options);
 			if (outcome.kind === "terminal") {
+				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
 				return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
 			}
 			if (outcome.kind === "execute") return runSpec(outcome.spec, admissionCall, outcome.decision, options);
 			const abortReason = "run aborted before the operator decided";
 			if (options?.signal?.aborted) {
+				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
 				const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
 				return { kind: "blocked", reason: loopReason ?? abortReason, decision: outcome.decision };
 			}
@@ -723,6 +731,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				}
 				cleanupParkedEntry(entry);
 				if (outcome.kind === "terminal") {
+					disposeAdmissionArgs(tools.get(entry.call.tool as ToolName), entry.call.args ?? {});
 					entry.resolve(observeBlockedAttempt(entry.call, outcome.verdict, entry.options) ?? outcome.verdict);
 					continue;
 				}
@@ -779,6 +788,14 @@ function prepareToolArgs(spec: ToolSpec, args: Record<string, unknown>): Record<
 		return prepared !== null && typeof prepared === "object" && !Array.isArray(prepared) ? prepared : args;
 	} catch {
 		return args;
+	}
+}
+
+function disposeAdmissionArgs(spec: ToolSpec | undefined, args: Record<string, unknown>): void {
+	try {
+		spec?.disposeAdmissionArguments?.(args);
+	} catch {
+		// Cleanup is best-effort here; durable reservation expiry is the backstop.
 	}
 }
 
