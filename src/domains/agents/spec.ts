@@ -192,32 +192,10 @@ function asToolName(tool: string): ToolName {
 	return isBuiltinToolName(tool as ToolName) ? (tool as BuiltinToolName) : (tool as ToolName);
 }
 
-function legacyToolRequirements(
-	capabilityClass: AgentCapabilityClass,
-	tools: ReadonlyArray<ToolName>,
-	skills: ReadonlyArray<string>,
-): AgentToolRequirements {
-	const required: Array<ToolName | { anyOf: ReadonlyArray<ToolName> }> = [];
-	if (capabilityClass === "workspace-edit") {
-		required.push(ToolNames.Read, { anyOf: [ToolNames.Write, ToolNames.Edit] });
+function normalizeToolRequirements(recipe: AgentRecipe, tools: ReadonlyArray<ToolName>): AgentToolRequirements {
+	if (!recipe.toolRequirements) {
+		throw new Error(`agent recipe '${recipe.id}' must declare tools.required and tools.optional`);
 	}
-	if (capabilityClass === "verification") required.push(ToolNames.Verify);
-	if (capabilityClass === "artifact-write") required.push(ToolNames.Artifact);
-	if (skills.length > 0) required.push(ToolNames.Context);
-	if (capabilityClass === "orchestration" && tools.includes(ToolNames.Dispatch)) required.push(ToolNames.Dispatch);
-	const requiredNames = new Set(
-		required.flatMap((requirement) => (typeof requirement === "string" ? [requirement] : requirement.anyOf)),
-	);
-	return { required, optional: tools.filter((tool) => !requiredNames.has(tool)) };
-}
-
-function normalizeToolRequirements(
-	recipe: AgentRecipe,
-	tools: ReadonlyArray<ToolName>,
-	capabilityClass: AgentCapabilityClass,
-	skills: ReadonlyArray<string>,
-): AgentToolRequirements {
-	if (!recipe.toolRequirements) return legacyToolRequirements(capabilityClass, tools, skills);
 	const declared = new Set(tools);
 	const required = recipe.toolRequirements.required.map((requirement: AgentToolRequirement, index) => {
 		if (typeof requirement === "string") return asToolName(requirement);
@@ -279,7 +257,7 @@ export function normalizeAgentSpec(recipe: AgentRecipe): AgentSpec {
 	const category = recipe.category ?? inferCategory(recipe, tools);
 	const capabilityClass = recipe.capabilityClass ?? inferCapabilityClass(recipe, tools);
 	const skills = recipe.skills ?? [];
-	const toolRequirements = normalizeToolRequirements(recipe, tools, capabilityClass, skills);
+	const toolRequirements = normalizeToolRequirements(recipe, tools);
 	const latencyClass = recipe.latencyClass ?? inferLatencyClass(category, capabilityClass);
 	const projectContextTier = recipe.projectContextTier ?? defaultProjectContextTier(capabilityClass);
 	return {

@@ -137,10 +137,14 @@ export function deriveReceiptVerification(
 	return { state: "unverified", basis: "no-validation-tool" };
 }
 
-/** Conservative consumer view for receipts written before verification landed. */
-export function readReceiptVerification(receipt: Pick<RunReceiptDraft, "verification">): RunReceiptVerification {
-	return receipt.verification ?? { state: "unknown", basis: "legacy-receipt" };
-}
+/**
+ * Evidence confidence when no sealed receipt can be read: the run has none, or
+ * its integrity check failed, so nothing it claims may be reported as verified.
+ */
+export const UNVERIFIABLE_RECEIPT_VERIFICATION: RunReceiptVerification = {
+	state: "unknown",
+	basis: "receipt-unavailable",
+};
 
 /**
  * Compute the durable findings summary for a receipt draft. Pure and cheap:

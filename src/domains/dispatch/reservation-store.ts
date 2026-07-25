@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import type { DispatchFailoverCandidate } from "./validation.js";
 
 const MAX_RESERVATION_RECORDS = 500;
 export const DEFAULT_RESERVATION_TTL_MS = 15 * 60_000;
@@ -13,15 +12,19 @@ export type ReservationTopology = "parallel" | "detached" | "sequential" | "pipe
 export type ReservationMemberStatus = "held" | "consumed" | "released";
 export type ReservationStatus = "active" | "released" | "rolled_back" | "expired";
 
+/**
+ * A reservation holds three scarce things and nothing else: a global
+ * concurrency slot, a per-node slot, and a budget upper bound. Node identity
+ * matters only because slots are per-node. Agent, target, model, and runtime
+ * identity are route identity, which the failover envelope owns
+ * (`assertRouteWithinApprovedEnvelope`); pinning them here made a
+ * plan-approved dispatch unable to fail over at all.
+ */
 export interface ReservationPlanTask {
 	memberId: string;
 	wave: number;
-	agentId: string;
-	targetId: string;
-	wireModelId: string;
 	nodeId: string;
 	costUpperBoundUsd: number;
-	allowedCandidates?: ReadonlyArray<DispatchFailoverCandidate>;
 }
 
 export interface ReservationMember extends ReservationPlanTask {
@@ -50,14 +53,12 @@ interface ReservationStoreFile {
 export interface ReservationCapacitySnapshot {
 	global: { active: number; limit: number };
 	nodes: Readonly<Record<string, { active: number; limit: number }>>;
-	targets?: Readonly<Record<string, { active: number; limit: number }>>;
 	budget: { currentUsd: number; ceilingUsd: number };
 }
 
 export interface ReservationAllocation {
 	globalSlots: number;
 	nodeSlots: Readonly<Record<string, number>>;
-	targetSlots: Readonly<Record<string, number>>;
 	budgetUsd: number;
 }
 
@@ -68,15 +69,7 @@ function storePath(): string {
 }
 
 function copyRecord(record: DispatchReservationRecord): DispatchReservationRecord {
-	return {
-		...record,
-		members: record.members.map((member) => ({
-			...member,
-			...(member.allowedCandidates !== undefined
-				? { allowedCandidates: member.allowedCandidates.map((candidate) => ({ ...candidate })) }
-				: {}),
-		})),
-	};
+	return { ...record, members: record.members.map((member) => ({ ...member })) };
 }
 
 function validRecord(value: unknown): value is DispatchReservationRecord {
@@ -105,9 +98,6 @@ function validRecord(value: unknown): value is DispatchReservationRecord {
 			(member) =>
 				typeof member.memberId === "string" &&
 				Number.isInteger(member.wave) &&
-				typeof member.agentId === "string" &&
-				typeof member.targetId === "string" &&
-				typeof member.wireModelId === "string" &&
 				typeof member.nodeId === "string" &&
 				typeof member.costUpperBoundUsd === "number" &&
 				Number.isFinite(member.costUpperBoundUsd) &&
@@ -164,11 +154,9 @@ export function reservationAllocation(tasks: ReadonlyArray<ReservationPlanTask>)
 		),
 	);
 	const nodeSlots = peakBy(tasks.map((task) => ({ wave: task.wave, key: task.nodeId })));
-	const targetSlots = peakBy(tasks.map((task) => ({ wave: task.wave, key: task.targetId })));
 	return {
 		globalSlots,
 		nodeSlots,
-		targetSlots,
 		budgetUsd: tasks.reduce((sum, task) => sum + task.costUpperBoundUsd, 0),
 	};
 }
@@ -212,15 +200,6 @@ export function allocateReservation(
 			return { ok: false, reason: `node '${nodeId}' capacity exceeded (${used + slots}/${node.limit})` };
 		}
 	}
-	for (const [targetId, slots] of Object.entries(requested.targetSlots)) {
-		const target = capacity.targets?.[targetId];
-		if (!target || !Number.isFinite(target.limit)) continue;
-		const heldSlots = held.reduce((sum, allocation) => sum + (allocation.targetSlots[targetId] ?? 0), 0);
-		const used = target.active + heldSlots;
-		if (used + slots > target.limit) {
-			return { ok: false, reason: `target '${targetId}' capacity exceeded (${used + slots}/${target.limit})` };
-		}
-	}
 	const existingBudget = activeRecords.reduce((sum, record) => sum + outstandingBudget(record), 0);
 	const projected = capacity.budget.currentUsd + existingBudget + requested.budgetUsd;
 	if (projected >= capacity.budget.ceilingUsd) {
@@ -256,44 +235,21 @@ export function createDispatchReservation(input: {
 			createdAt,
 			expiresAt: new Date(nowMs + (input.ttlMs ?? DEFAULT_RESERVATION_TTL_MS)).toISOString(),
 			settledAt: null,
-			members: input.tasks.map((task) => ({
-				...task,
-				...(task.allowedCandidates !== undefined
-					? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
-					: {}),
-				status: "held",
-				consumedAt: null,
-				releasedAt: null,
-			})),
+			members: input.tasks.map((task) => ({ ...task, status: "held", consumedAt: null, releasedAt: null })),
 		};
 		writeStore([record, ...records]);
 		return copyRecord(record);
 	});
 }
 
-function routeMatches(member: ReservationMember, route: DispatchFailoverCandidate): boolean {
-	const exact =
-		member.agentId === route.agentId &&
-		member.targetId === route.target &&
-		member.wireModelId === route.model &&
-		member.nodeId === route.node;
-	if (exact) return true;
-	return (
-		member.allowedCandidates?.some(
-			(candidate) =>
-				candidate.agentId === route.agentId &&
-				candidate.target === route.target &&
-				candidate.model === route.model &&
-				candidate.node === route.node,
-		) ?? false
-	);
-}
-
+/**
+ * Claim a member's held slot for execution. A member is consumed exactly once,
+ * by the assignment, not once per attempt: a retry rebinds the member instead.
+ */
 export function consumeDispatchReservation(
 	ownerId: string,
 	memberId: string,
-	route: DispatchFailoverCandidate,
-	options?: { allowAlreadyConsumed?: boolean; nowMs?: number },
+	options?: { nowMs?: number },
 ): DispatchReservationRecord {
 	return withStateFileLockSync(storePath(), () => {
 		const nowMs = options?.nowMs ?? Date.now();
@@ -302,12 +258,80 @@ export function consumeDispatchReservation(
 		if (record?.status !== "active") throw new Error(`dispatch: reservation '${ownerId}' is not active`);
 		const member = record.members.find((entry) => entry.memberId === memberId);
 		if (!member) throw new Error(`dispatch: reservation '${ownerId}' has no member '${memberId}'`);
-		if (!routeMatches(member, route)) throw new Error(`dispatch: reservation drift for member '${memberId}'`);
-		if (member.status === "consumed" && options?.allowAlreadyConsumed === true) return copyRecord(record);
 		if (member.status !== "held")
 			throw new Error(`dispatch: reservation member '${memberId}' was already ${member.status}`);
 		member.status = "consumed";
 		member.consumedAt = new Date(nowMs).toISOString();
+		writeStore(records);
+		return copyRecord(record);
+	});
+}
+
+/**
+ * Move a member's held capacity to the node a retry actually resolved, and
+ * re-check the aggregate budget against the retry's own estimate. Atomic under
+ * the state-file lock: the old node's slot is released and the new one acquired
+ * in a single write, so a concurrent plan can never observe both held. Fails
+ * closed with a named reason, which the caller surfaces as an admission denial
+ * rather than letting the attempt escape its reservation.
+ */
+export function rebindDispatchReservationMember(input: {
+	ownerId: string;
+	memberId: string;
+	nodeId: string;
+	costUpperBoundUsd: number;
+	capacity: ReservationCapacitySnapshot;
+	nowMs?: number;
+}): DispatchReservationRecord {
+	return withStateFileLockSync(storePath(), () => {
+		const nowMs = input.nowMs ?? Date.now();
+		const records = expireRecords(readStore(), nowMs, false);
+		const record = records.find((entry) => entry.ownerId === input.ownerId);
+		if (record?.status !== "active") throw new Error(`dispatch: reservation '${input.ownerId}' is not active`);
+		const member = record.members.find((entry) => entry.memberId === input.memberId);
+		if (!member) throw new Error(`dispatch: reservation '${input.ownerId}' has no member '${input.memberId}'`);
+		if (member.status === "released") {
+			throw new Error(`dispatch: reservation member '${input.memberId}' was already released`);
+		}
+		if (member.nodeId === input.nodeId && member.costUpperBoundUsd === input.costUpperBoundUsd) {
+			return copyRecord(record);
+		}
+
+		const others = records.filter((entry) => entry.status === "active" && entry.ownerId !== input.ownerId);
+		if (member.nodeId !== input.nodeId) {
+			const node = input.capacity.nodes[input.nodeId];
+			if (node !== undefined && Number.isFinite(node.limit)) {
+				// Siblings inside this same reservation still hold their own slots.
+				const siblingSlots = record.members.filter(
+					(entry) => entry !== member && entry.status !== "released" && entry.nodeId === input.nodeId,
+				).length;
+				const otherHeld = others.reduce(
+					(sum, entry) => sum + (reservationAllocation(outstandingTasks(entry)).nodeSlots[input.nodeId] ?? 0),
+					0,
+				);
+				const used = node.active + otherHeld + siblingSlots;
+				if (used + 1 > node.limit) {
+					throw new Error(
+						`dispatch: reservation rebind denied: node '${input.nodeId}' capacity exceeded (${used + 1}/${node.limit})`,
+					);
+				}
+			}
+		}
+
+		const otherBudget = others.reduce((sum, entry) => sum + outstandingBudget(entry), 0);
+		const siblingBudget = record.members
+			.filter((entry) => entry !== member && (entry.status === "held" || entry.status === "consumed"))
+			.reduce((sum, entry) => sum + entry.costUpperBoundUsd, 0);
+		const projected =
+			input.capacity.budget.currentUsd + otherBudget + siblingBudget + Math.max(0, input.costUpperBoundUsd);
+		if (projected >= input.capacity.budget.ceilingUsd) {
+			throw new Error(
+				`dispatch: reservation rebind denied: aggregate budget exceeded ($${projected.toFixed(4)} / $${input.capacity.budget.ceilingUsd.toFixed(4)})`,
+			);
+		}
+
+		member.nodeId = input.nodeId;
+		member.costUpperBoundUsd = Math.max(0, input.costUpperBoundUsd);
 		writeStore(records);
 		return copyRecord(record);
 	});

@@ -23,10 +23,10 @@ import { atomicWrite } from "../../engine/session.js";
 const MAX_BATCH_RECORDS = 200;
 
 export interface DetachedBatchRun {
-	/** First attempt id, retained for records written before assignment-aware collection. */
+	/** First attempt id. */
 	runId: string;
-	/** Logical assignment id (the root run id). Absent on legacy records. */
-	assignmentId?: string;
+	/** Logical assignment id (the root run id). */
+	assignmentId: string;
 	agentId: string;
 }
 
@@ -76,7 +76,7 @@ export async function registerDetachedBatch(input: RegisterDetachedBatchInput): 
 		id: input.batchId,
 		runs: input.runs.map((run) => ({
 			runId: run.runId,
-			...(run.assignmentId !== undefined ? { assignmentId: run.assignmentId } : {}),
+			assignmentId: run.assignmentId,
 			agentId: run.agentId,
 		})),
 		sessionId: input.sessionId,

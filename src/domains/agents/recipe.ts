@@ -75,7 +75,7 @@ export interface AgentRecipe {
 	name: string;
 	description: string;
 	tools?: ReadonlyArray<string>;
-	toolRequirements?: AgentToolRequirements;
+	toolRequirements: AgentToolRequirements;
 	model?: string;
 	target?: string;
 	thinkingLevel?: RecipeThinkingLevel;

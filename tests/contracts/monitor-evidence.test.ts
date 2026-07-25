@@ -31,7 +31,6 @@ function receiptDraft(runId: string, overrides: Partial<RunReceiptDraft> = {}): 
 		runtimeKind: "http",
 		startedAt: "2026-07-11T00:00:00.000Z",
 		endedAt: "2026-07-11T00:00:01.000Z",
-		outcome: "succeeded",
 		exitCode: 0,
 		tokenCount: 2,
 		costUsd: 0,
@@ -47,6 +46,9 @@ function receiptDraft(runId: string, overrides: Partial<RunReceiptDraft> = {}): 
 		sessionId: "monitor-evidence-test",
 		output: { state: "final", text: `output ${runId}`, bytes: Buffer.byteLength(`output ${runId}`), truncated: false },
 		...overrides,
+		verification: overrides.verification ?? { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: overrides.costProvenance ?? "unknown",
+		outcome: overrides.outcome ?? "succeeded",
 	};
 }
 
@@ -121,7 +123,7 @@ function runBlock(output: string, runId: string): string {
 }
 
 describe("contracts/monitor collect evidence labeling", () => {
-	it("labels sealed receipt text and fails closed for legacy, canceled, tampered, and missing receipts", async () => {
+	it("labels sealed receipt text and fails closed for canceled, tampered, and missing receipts", async () => {
 		const root = scratchDir();
 		const envelopes = [
 			writeSealedReceipt(
@@ -159,7 +161,6 @@ describe("contracts/monitor collect evidence labeling", () => {
 					verification: { state: "unknown", basis: "acp-external-unobserved" },
 				}),
 			),
-			writeSealedReceipt(root, receiptDraft("run-legacy")),
 			writeSealedReceipt(
 				root,
 				receiptDraft("run-canceled", {
@@ -228,7 +229,6 @@ describe("contracts/monitor collect evidence labeling", () => {
 		match(unknown, /briefing=none/);
 		match(unknown, /project_context=absent/);
 		match(unknown, /worker claims \(validation not observable at this layer\):/);
-		match(runBlock(result.output, "run-legacy"), /worker claims \(validation not observable at this layer\):/);
 
 		const canceled = runBlock(result.output, "run-canceled");
 		match(canceled, /worker claims \(unverified prose\):/);

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import {
 	computeReceiptFindingsSummary,
 	deriveReceiptVerification,
-	readReceiptVerification,
+	UNVERIFIABLE_RECEIPT_VERIFICATION,
 } from "../../src/domains/dispatch/receipt-findings.js";
 import type { RunEnvelope, RunLineage, RunReceiptDraft, ToolCallStat } from "../../src/domains/dispatch/types.js";
 
@@ -71,7 +71,6 @@ function draft(partial: Partial<RunReceiptDraft> = {}): RunReceiptDraft {
 		runtimeKind: "subprocess",
 		startedAt: "2026-06-25T12:00:00.000Z",
 		endedAt: "2026-06-25T12:00:05.000Z",
-		outcome: "succeeded",
 		outcomeDetail: null,
 		lineage: lineage(0),
 		exitCode: 0,
@@ -95,6 +94,9 @@ function draft(partial: Partial<RunReceiptDraft> = {}): RunReceiptDraft {
 		toolStats: [],
 		sessionId: "session-1",
 		...partial,
+		verification: partial.verification ?? { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: partial.costProvenance ?? "unknown",
+		outcome: partial.outcome ?? "succeeded",
 	};
 }
 
@@ -126,8 +128,8 @@ describe("contracts/receipt findings summary", () => {
 	});
 
 	it("reads a missing legacy verification field as unknown, never verified", () => {
-		deepStrictEqual(readReceiptVerification(draft()), { state: "unknown", basis: "legacy-receipt" });
-		deepStrictEqual(readReceiptVerification(draft({ verification: { state: "verified", basis: "validation-tool" } })), {
+		deepStrictEqual(UNVERIFIABLE_RECEIPT_VERIFICATION, { state: "unknown", basis: "receipt-unavailable" });
+		deepStrictEqual(draft({ verification: { state: "verified", basis: "validation-tool" } }).verification, {
 			state: "verified",
 			basis: "validation-tool",
 		});

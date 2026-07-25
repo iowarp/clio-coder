@@ -260,6 +260,14 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (spec.failover !== "approved" && spec.allowedCandidates !== undefined) {
 		errors.push("allowedCandidates requires failover approved");
 	}
+	// A plan freezes a route envelope the operator saw. "automatic" would let an
+	// approved dispatch reroute to a tuple that was never in the approval, so a
+	// planned task is either an exact pin (none) or a bounded envelope (approved).
+	if (spec.failover === "automatic" && spec.plan !== undefined) {
+		errors.push(
+			"failover automatic is not allowed on a plan-approved dispatch; a planned task is either an exact pin (none) or a bounded approved envelope",
+		);
+	}
 
 	if ("plannedNode" in spec && spec.plannedNode !== undefined) {
 		if (!isPlainObject(spec.plannedNode)) {

@@ -66,7 +66,7 @@ export interface DispatchBoardRow {
 	elapsedMs: number;
 	tokenCount: number;
 	costUsd: number;
-	/** Pricing truth for costUsd; absent legacy events are treated as unknown. */
+	/** Pricing truth for costUsd; a progress event that omits it reads as unknown. */
 	costProvenance?: CostProvenance;
 	inputTokens: number;
 	outputTokens: number;
@@ -78,6 +78,8 @@ export interface DispatchBoardRow {
 	gate?: { role: string; cycle: number };
 	/** Dead-node failover hops recorded on this run's chain. */
 	rerouteCount?: number;
+	/** Assignment retry attempts observed on the assignment event stream. */
+	failoverHops?: number;
 	/** Model context window for the per-worker context meter. */
 	contextWindow?: number;
 	/** Last assistant message's input+cacheRead+output: current context occupancy. */
@@ -408,6 +410,9 @@ export function renderDispatchCard(
 		...(row.gate !== undefined ? [theme.fg("info", `gate ${row.gate.role} c${row.gate.cycle}`)] : []),
 		...(row.rerouteCount !== undefined && row.rerouteCount > 0
 			? [theme.fg("warning", `rerouted x${row.rerouteCount}`)]
+			: []),
+		...(row.failoverHops !== undefined && row.failoverHops > 0
+			? [theme.fg("warning", `failed over x${row.failoverHops}`)]
 			: []),
 		`${theme.fg("dim", "ttft")} ${theme.fg("muted", ttft)}`,
 		`${theme.fg("dim", "cost")} ${theme.fg("muted", cost)}`,
@@ -849,6 +854,7 @@ function toRow(entry: DispatchBoardEntry, now: number): DispatchBoardRow {
 		...(entry.node !== undefined ? { node: entry.node } : {}),
 		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
 		...(entry.rerouteCount !== undefined ? { rerouteCount: entry.rerouteCount } : {}),
+		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
 		lastContextTokens: entry.lastContextTokens,
 		currentTool: retry ? null : entry.currentTool,
@@ -1047,6 +1053,16 @@ export function createDispatchBoardStore(
 					entry.currentTool = null;
 					delete entry.retry;
 				}
+				return;
+			}
+			if (type === "attempt_start") {
+				// The assignment stream hands the root run a failover hop: a later
+				// attempt took over, so the row is live again on the new route.
+				entry.failoverHops = (entry.failoverHops ?? 0) + 1;
+				entry.status = "running";
+				entry.finishedAtMs = null;
+				entry.currentTool = null;
+				delete entry.retry;
 				return;
 			}
 			if (type === "agent_start") {

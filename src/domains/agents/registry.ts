@@ -38,11 +38,11 @@ function strictToolName(value: unknown, path: string): string {
 
 function parseTools(value: unknown, filepath: string): Pick<AgentRecipe, "tools" | "toolRequirements"> | undefined {
 	if (value === undefined) return undefined;
-	if (Array.isArray(value)) {
-		return { tools: value.map((entry, index) => strictToolName(entry, `${filepath}: tools[${index}]`)) };
-	}
-	if (value === null || typeof value !== "object") {
-		throw new Error(`${filepath}: tools must be an array or a required/optional object`);
+	// Every recipe declares which tools it needs and which it merely wants. A
+	// bare list cannot express that, so it is rejected rather than guessed at
+	// from the capability class.
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		throw new Error(`${filepath}: tools must be a { required, optional } object`);
 	}
 	const record = value as Record<string, unknown>;
 	for (const key of Object.keys(record)) {
@@ -106,6 +106,9 @@ export function loadRecipesFromDir(source: RecipeSource): ReadonlyArray<AgentRec
 				source: source.source,
 				filepath,
 				body,
+				// A recipe that declares no tools requires none; parseTools replaces
+				// this when the recipe declares a tools block.
+				toolRequirements: { required: [], optional: [] },
 			};
 			const runtime = parseRuntime(frontmatter.runtime);
 			if (runtime) recipe.runtime = runtime;

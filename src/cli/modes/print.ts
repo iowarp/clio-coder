@@ -236,6 +236,11 @@ async function recordHeadlessMainAgentReceipt(input: {
 		outcome,
 		outcomeDetail,
 		lineage,
+		// A print-mode session run is the main agent, not a dispatched worker: no
+		// validation tool gates it, and its cost comes from the session usage
+		// meter rather than a resolved worker pricing table.
+		verification: { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: "unknown",
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,
 		exitCode: input.exitCode,

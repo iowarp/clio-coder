@@ -284,6 +284,7 @@ function stubContext(): DomainContext {
 
 	const recipes: ReadonlyArray<AgentRecipe> = [
 		{
+			toolRequirements: { required: [], optional: [] },
 			id: "coder",
 			name: "coder",
 			description: "test recipe",

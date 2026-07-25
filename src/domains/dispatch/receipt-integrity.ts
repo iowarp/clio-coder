@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } from "./types.js";
 
-/** New receipts use v6; verification retains the exact historical v4/v5 contracts. */
+/**
+ * The single receipt integrity contract. Clio is pre-1.0 with no installed
+ * base, so there are no historical receipts to keep verifying: a receipt is
+ * either this version or it is not a receipt.
+ */
 export const RUN_RECEIPT_INTEGRITY_VERSION = 6;
-export type ReceiptIntegrityVersion = 4 | 5 | typeof RUN_RECEIPT_INTEGRITY_VERSION;
+export type ReceiptIntegrityVersion = typeof RUN_RECEIPT_INTEGRITY_VERSION;
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
@@ -61,7 +65,7 @@ function serializeCanonical(value: unknown): string {
  * exhaustive: adding a receipt field without registering it here is a compile
  * error, so a new field can never ship outside integrity coverage.
  */
-const V4_RECEIPT_INTEGRITY_FIELD_COVERAGE = {
+export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	runId: true,
 	agentId: true,
 	agentAudience: true,
@@ -119,21 +123,11 @@ const V4_RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	delegation: true,
 	findingsSummary: true,
 	sessionId: true,
-} as const;
-
-const V5_RECEIPT_INTEGRITY_FIELD_COVERAGE = {
-	...V4_RECEIPT_INTEGRITY_FIELD_COVERAGE,
 	briefing: true,
 	outcomeCode: true,
-} as const;
-
-export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
-	...V5_RECEIPT_INTEGRITY_FIELD_COVERAGE,
 	steering: true,
 } as const satisfies Record<ReceiptIntegrityField, true>;
 
-const V4_RECEIPT_FIELDS = Object.keys(V4_RECEIPT_INTEGRITY_FIELD_COVERAGE);
-const V5_RECEIPT_FIELDS = Object.keys(V5_RECEIPT_INTEGRITY_FIELD_COVERAGE);
 const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];
 
 function selectedReceiptFields(
@@ -149,18 +143,7 @@ function selectedReceiptFields(
 	return result;
 }
 
-function receiptDigestFieldsV4(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
-	return selectedReceiptFields(receipt, V4_RECEIPT_FIELDS);
-}
-
-function receiptDigestFieldsV5(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
-	const result = selectedReceiptFields(receipt, V5_RECEIPT_FIELDS);
-	result.briefing = receipt.briefing ?? null;
-	result.outcomeCode = receipt.outcomeCode ?? null;
-	return result;
-}
-
-function receiptDigestFieldsV6(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
+function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
 	const result = selectedReceiptFields(receipt, RECEIPT_FIELDS);
 	result.briefing = receipt.briefing ?? null;
 	result.outcomeCode = receipt.outcomeCode ?? null;
@@ -168,8 +151,7 @@ function receiptDigestFieldsV6(receipt: RunReceipt | RunReceiptDraft): Record<st
 	return result;
 }
 
-/** Frozen historical projection. Do not add v5 fields here. */
-function ledgerDigestFieldsV4(envelope: RunEnvelope): Record<string, unknown> {
+function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		id: envelope.id,
 		agentId: envelope.agentId,
@@ -208,67 +190,19 @@ function ledgerDigestFieldsV4(envelope: RunEnvelope): Record<string, unknown> {
 		outputTokenCount: envelope.outputTokenCount ?? 0,
 		promptSignature: envelope.promptSignature ?? null,
 		toolSignature: envelope.toolSignature ?? null,
-	};
-}
-
-function ledgerDigestFieldsV5(envelope: RunEnvelope): Record<string, unknown> {
-	return {
-		...ledgerDigestFieldsV4(envelope),
 		briefing: envelope.briefing ?? null,
 		outcomeCode: envelope.outcomeCode ?? null,
-	};
-}
-
-function ledgerDigestFieldsV6(envelope: RunEnvelope): Record<string, unknown> {
-	return {
-		...ledgerDigestFieldsV5(envelope),
 		steering: envelope.steering ?? null,
 	};
 }
 
-function integrityPayloadV4(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
+function integrityPayload(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		contract: "clio.runReceipt.integrity",
-		version: 4,
+		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		sources: ["receipt", "run-ledger"],
-		receipt: receiptDigestFieldsV4(receipt),
-		ledger: ledgerDigestFieldsV4(envelope),
-	};
-}
-
-function integrityPayloadV5(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
-	return {
-		contract: "clio.runReceipt.integrity",
-		version: 5,
-		sources: ["receipt", "run-ledger"],
-		receipt: receiptDigestFieldsV5(receipt),
-		ledger: ledgerDigestFieldsV5(envelope),
-	};
-}
-
-function integrityPayloadV6(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): Record<string, unknown> {
-	return {
-		contract: "clio.runReceipt.integrity",
-		version: 6,
-		sources: ["receipt", "run-ledger"],
-		receipt: receiptDigestFieldsV6(receipt),
-		ledger: ledgerDigestFieldsV6(envelope),
-	};
-}
-
-function computeReceiptIntegrityV4(receipt: RunReceipt, envelope: RunEnvelope): RunReceiptIntegrity {
-	return {
-		version: 4,
-		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayloadV4(receipt, envelope))),
-	};
-}
-
-function computeReceiptIntegrityV5(receipt: RunReceipt, envelope: RunEnvelope): RunReceiptIntegrity {
-	return {
-		version: 5,
-		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayloadV5(receipt, envelope))),
+		receipt: receiptDigestFields(receipt),
+		ledger: ledgerDigestFields(envelope),
 	};
 }
 
@@ -279,7 +213,7 @@ export function computeReceiptIntegrity(
 	return {
 		version: RUN_RECEIPT_INTEGRITY_VERSION,
 		algorithm: RUN_RECEIPT_INTEGRITY_ALGORITHM,
-		digest: sha256(canonicalJson(integrityPayloadV6(receipt, envelope))),
+		digest: sha256(canonicalJson(integrityPayload(receipt, envelope))),
 	};
 }
 
@@ -294,7 +228,7 @@ export function isReceiptIntegrity(value: unknown): value is RunReceiptIntegrity
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
 	return (
-		(candidate.version === 4 || candidate.version === 5 || candidate.version === RUN_RECEIPT_INTEGRITY_VERSION) &&
+		candidate.version === RUN_RECEIPT_INTEGRITY_VERSION &&
 		candidate.algorithm === RUN_RECEIPT_INTEGRITY_ALGORITHM &&
 		typeof candidate.digest === "string" &&
 		/^[0-9a-f]{64}$/.test(candidate.digest)
@@ -327,24 +261,12 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 		["outcome", receipt.outcome ?? null, envelope.outcome ?? null],
 		["outcomeDetail", receipt.outcomeDetail ?? null, envelope.outcomeDetail ?? null],
 		["nodeId", receipt.node?.id ?? null, envelope.node?.id ?? null],
+		["outcomeCode", receipt.outcomeCode ?? null, envelope.outcomeCode ?? null],
 	];
 	for (const [field, receiptValue, ledgerValue] of sharedFields) {
 		if (!Object.is(receiptValue, ledgerValue)) return field;
 	}
-	return null;
-}
-
-function firstLedgerMismatchV5(receipt: RunReceipt, envelope: RunEnvelope): string | null {
-	const mismatch = firstLedgerMismatch(receipt, envelope);
-	if (mismatch !== null) return mismatch;
 	if (canonicalJson(receipt.briefing ?? null) !== canonicalJson(envelope.briefing ?? null)) return "briefing";
-	if (!Object.is(receipt.outcomeCode ?? null, envelope.outcomeCode ?? null)) return "outcomeCode";
-	return null;
-}
-
-function firstLedgerMismatchV6(receipt: RunReceipt, envelope: RunEnvelope): string | null {
-	const mismatch = firstLedgerMismatchV5(receipt, envelope);
-	if (mismatch !== null) return mismatch;
 	if (canonicalJson(receipt.steering ?? null) !== canonicalJson(envelope.steering ?? null)) return "steering";
 	return null;
 }
@@ -353,34 +275,11 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 	if (!isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
-	if (receipt.integrity.version === 4) {
-		// v4 never authenticated these later additions. Reject the property shape
-		// itself (including explicit null/undefined) so callers cannot mistake
-		// unauthenticated data for verified provenance after a successful check.
-		for (const field of ["briefing", "outcomeCode", "steering"] as const) {
-			if (Object.hasOwn(receipt, field) || Object.hasOwn(envelope, field)) {
-				return { ok: false, reason: `integrity invalid: v4 contains unauthenticated ${field}` };
-			}
-		}
-	}
-	if (receipt.integrity.version === 5 && (Object.hasOwn(receipt, "steering") || Object.hasOwn(envelope, "steering"))) {
-		return { ok: false, reason: "integrity invalid: v5 contains unauthenticated steering" };
-	}
-	const mismatch =
-		receipt.integrity.version === 4
-			? firstLedgerMismatch(receipt, envelope)
-			: receipt.integrity.version === 5
-				? firstLedgerMismatchV5(receipt, envelope)
-				: firstLedgerMismatchV6(receipt, envelope);
+	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };
 	}
-	const expected =
-		receipt.integrity.version === 4
-			? computeReceiptIntegrityV4(receipt, envelope)
-			: receipt.integrity.version === 5
-				? computeReceiptIntegrityV5(receipt, envelope)
-				: computeReceiptIntegrity(receipt, envelope);
+	const expected = computeReceiptIntegrity(receipt, envelope);
 	if (expected.digest !== receipt.integrity.digest) {
 		return { ok: false, reason: "integrity mismatch" };
 	}

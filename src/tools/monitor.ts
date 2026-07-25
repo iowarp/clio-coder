@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { readReceiptVerification } from "../domains/dispatch/receipt-findings.js";
+import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import {
 	isTerminalRunEnvelope,
@@ -212,7 +212,7 @@ function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
 			receiptIntegrity,
 			...(receipt !== null && receiptIntegrity.ok
 				? {
-						evidenceVerification: readReceiptVerification(receipt),
+						evidenceVerification: receipt.verification,
 						briefing: receipt.briefing ?? null,
 						projectContext: receipt.projectContext ?? null,
 					}
@@ -234,7 +234,7 @@ function unavailableRunEvidence(reason: string, note: string, integrityFailure =
 	return {
 		receipt: null,
 		output: null,
-		verification: readReceiptVerification({}),
+		verification: UNVERIFIABLE_RECEIPT_VERIFICATION,
 		integrity: { ok: false, reason },
 		integrityNote: note,
 		integrityFailure,
@@ -291,7 +291,7 @@ function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
 	return {
 		receipt,
 		output: receipt.output ?? null,
-		verification: readReceiptVerification(receipt),
+		verification: receipt.verification,
 		integrity,
 		integrityNote: null,
 		integrityFailure: false,
@@ -421,6 +421,9 @@ function collectRunLine(row: CollectedRunRow): string[] {
 function resolveCollectRow(deps: MonitorToolDeps, originalRunId: string, agentId: string): CollectRow {
 	const original = deps.dispatch.getRun(originalRunId);
 	const rootRunId = original?.lineage?.rootRunId ?? originalRunId;
+	// The durable assignment record is written asynchronously at admission, so a
+	// collect issued in that window sees none yet and reads the attempt directly.
+	// terminalRunId is null while the assignment is still running.
 	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
 	const runId = assignment?.terminalRunId ?? originalRunId;
 	const run = deps.dispatch.getRun(runId) ?? original;
@@ -454,7 +457,7 @@ async function runCollect(
 		if (!detached) return { kind: "error", message: "monitor: no detached batch records are available in this context" };
 		const record = detached.get(batchId);
 		if (!record) return { kind: "error", message: `monitor: unknown batch '${batchId}'` };
-		rows = record.runs.map((entry) => resolveCollectRow(deps, entry.assignmentId ?? entry.runId, entry.agentId));
+		rows = record.runs.map((entry) => resolveCollectRow(deps, entry.assignmentId, entry.agentId));
 		scope = `batch ${batchId}${record.collectedAt !== null ? " (already collected)" : ""}`;
 	} else {
 		rows = runIds.map((runId) => resolveCollectRow(deps, runId, "unknown"));

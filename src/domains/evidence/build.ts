@@ -1289,7 +1289,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 	// write-time digest covered those fields and a lossy re-parse would make
 	// every clean receipt recompute to a different digest.
 	return {
-		...(value as Partial<RunReceipt>),
+		...(value as unknown as RunReceipt),
 		runId: readString(value, source, "runId"),
 		agentId: readString(value, source, "agentId"),
 		task: readString(value, source, "task"),

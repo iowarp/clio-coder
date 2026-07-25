@@ -6,7 +6,6 @@
  * than silently pass.
  */
 
-import { readReceiptVerification } from "../../dispatch/receipt-findings.js";
 import type { RunReceipt } from "../../dispatch/types.js";
 
 /**
@@ -57,7 +56,7 @@ function isReceiptShaped(value: unknown): value is RunReceipt {
  */
 export function evidenceMetricsFromReceipt(receipt: RunReceipt): Record<string, string | boolean | number> {
 	return {
-		"evidence.verification": readReceiptVerification(receipt).state,
+		"evidence.verification": receipt.verification.state,
 		...(receipt.findingsSummary === undefined
 			? {}
 			: { "evidence.firstPassSuccess": receipt.findingsSummary.firstPassSuccess === true }),
