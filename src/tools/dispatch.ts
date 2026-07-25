@@ -6,7 +6,12 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
-import type { AbortReason, DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import type {
+	AbortReason,
+	DispatchContract,
+	DispatchPlanTaskResolution,
+	DispatchRequest,
+} from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import {
 	finalizePendingGateDecision,
@@ -131,6 +136,9 @@ function withResolvedTaskPin(
 	return {
 		...requestWithoutUntrusted,
 		agentId: task.agent,
+		...(request.reservation !== undefined && task.role !== undefined && task.position !== undefined
+			? { reservation: { ownerId: request.reservation.ownerId, memberId: `${task.role}-${task.position}` } }
+			: {}),
 		...(task.failover !== undefined ? { failover: task.failover } : {}),
 		...(task.allowedCandidates !== undefined
 			? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
@@ -1052,6 +1060,9 @@ async function runReviewGated(
 				...(review.model !== undefined ? { model: review.model } : {}),
 				...(review.target !== undefined ? { target: review.target } : {}),
 				...(base.plan !== undefined ? { plan: base.plan } : {}),
+				...(base.reservation !== undefined
+					? { reservation: { ownerId: base.reservation.ownerId, memberId: base.reservation.memberId } }
+					: {}),
 			};
 			const reviewer = await runOne(
 				withResolvedTaskPin(
@@ -1685,6 +1696,9 @@ async function runCompete(
 				...(compete.judge?.target !== undefined ? { target: compete.judge.target } : {}),
 				...(compete.judge?.node !== undefined ? { node: compete.judge.node } : {}),
 				...(base.plan !== undefined ? { plan: base.plan } : {}),
+				...(base.reservation !== undefined
+					? { reservation: { ownerId: base.reservation.ownerId, memberId: base.reservation.memberId } }
+					: {}),
 			};
 			throwIfStopped();
 			const judgeOwned = await admitOwnedRun(
@@ -2149,6 +2163,8 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	// consume the same immutable resolution even if settings/capacity drift.
 	const preparedAdmissionArgs = new WeakSet<Record<string, unknown>>();
 	const trustedResolvedPlans = new WeakMap<Record<string, unknown>, ResolvedDispatchPlanArtifact>();
+	const trustedReservationOwners = new WeakMap<Record<string, unknown>, string>();
+	const taskResolutions = new WeakMap<object, DispatchPlanTaskResolution>();
 	const deepFreeze = <T>(value: T): T => {
 		if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
 		for (const child of Object.values(value)) deepFreeze(child);
@@ -2197,7 +2213,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		// execution restores an operator-approved value, not raw arguments.
 		const failover =
 			request.failover ?? (request.node !== undefined || request.target !== undefined ? "none" : "automatic");
-		return {
+		const task: ResolvedDispatchPlanArtifact["tasks"][number] = {
 			agent: resolution.agentId,
 			task: request.task,
 			...(request.briefing !== undefined ? { briefing: request.briefing } : {}),
@@ -2213,6 +2229,8 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			role,
 			position,
 		};
+		taskResolutions.set(task, resolution);
+		return task;
 	};
 	const resolvedCostCeiling = (): number => {
 		const injected = deps.getCostCeilingUsd?.();
@@ -2222,6 +2240,45 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			throw new Error("dispatch scheduling cost ceiling is unavailable");
 		}
 		return ceiling;
+	};
+	const reservationWave = (
+		topology: ResolvedDispatchPlanArtifact["topology"],
+		task: ResolvedDispatchPlanArtifact["tasks"][number],
+		index: number,
+	): number => {
+		if (topology === "parallel" || topology === "detached") return 0;
+		if (topology === "compete") return task.role === "judge" ? 1 : 0;
+		return index;
+	};
+	const markReservedPlan = (
+		args: Record<string, unknown>,
+		artifact: ResolvedDispatchPlanArtifact,
+	): Record<string, unknown> => {
+		const prepared = withResolvedDispatchPlan(args, artifact);
+		if (deps.dispatch.reservations === undefined) return markPrepared(prepared);
+		const tasks = artifact.tasks.map((task, index) => {
+			const resolution = taskResolutions.get(task);
+			if (resolution === undefined || task.role === undefined || task.position === undefined) {
+				throw new Error("dispatch reservation resolution is incomplete");
+			}
+			return {
+				memberId: `${task.role}-${task.position}`,
+				wave: reservationWave(artifact.topology, task, index),
+				resolution,
+				...(task.allowedCandidates !== undefined
+					? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
+					: {}),
+			};
+		});
+		const reservation = deps.dispatch.reservations.prepare({ topology: artifact.topology, tasks });
+		try {
+			const marked = markPrepared(prepared);
+			trustedReservationOwners.set(marked, reservation.ownerId);
+			return marked;
+		} catch (error) {
+			deps.dispatch.reservations.rollback(reservation.ownerId);
+			throw error;
+		}
 	};
 	const prepareAdmissionArguments = (rawArgs: Record<string, unknown>): Record<string, unknown> => {
 		const args = stripUntrustedPlanFields(rawArgs);
@@ -2336,14 +2393,12 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			const topology = describeDispatchPlan(args).topology;
 			const planScale = tasks.length > 1 || topology === "compete" || tasks.some((task) => task.node !== "local");
 			if (!planScale) return markPrepared(args);
-			return markPrepared(
-				withResolvedDispatchPlan(args, {
-					version: 1,
-					topology,
-					tasks,
-					costCeilingUsd: resolvedCostCeiling(),
-				}),
-			);
+			return markReservedPlan(args, {
+				version: 1,
+				topology,
+				tasks,
+				costCeilingUsd: resolvedCostCeiling(),
+			});
 		} catch (err) {
 			return preparationFailure(args, err);
 		}
@@ -2506,6 +2561,10 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		baseActionClass: "dispatch",
 		executionMode: "sequential",
 		prepareAdmissionArguments,
+		disposeAdmissionArguments: (args) => {
+			const ownerId = trustedReservationOwners.get(args);
+			if (ownerId !== undefined) deps.dispatch.reservations?.rollbackUnconsumed(ownerId);
+		},
 		prepareArguments: prepareExecutionArguments,
 		describeDispatchPlan: (args) => {
 			const trusted = trustedResolvedPlans.get(args);
@@ -2600,6 +2659,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			// The parser remains available in dispatch-plan.ts for direct utility
 			// tests/tools, but a hidden model-supplied field is never execution trust.
 			const resolvedPlan = trustedResolvedPlan;
+			const reservationOwnerId = trustedReservationOwners.get(args);
 			let requests = parsed.requests;
 			if (planView.planScale && deps.dispatch.preview !== undefined && resolvedPlan === null) {
 				return { kind: "error", message: "dispatch: resolved plan is missing after admission" };
@@ -2620,7 +2680,13 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 						message: `dispatch: resolved plan has ${executionTasks.length} primary task(s), expected ${requests.length}`,
 					};
 				}
-				requests = requests.map((request, index) => withResolvedTaskPin(request, executionTasks[index]));
+				requests = requests.map((request, index) => {
+					const task = executionTasks[index];
+					const pinned = withResolvedTaskPin(request, task);
+					return reservationOwnerId !== undefined && task?.role !== undefined && task.position !== undefined
+						? { ...pinned, reservation: { ownerId: reservationOwnerId, memberId: `${task.role}-${task.position}` } }
+						: pinned;
+				});
 				if (review !== undefined) {
 					const reviewer = resolvedPlan.tasks.find((task) => task.role === "reviewer");
 					if (reviewer === undefined) {

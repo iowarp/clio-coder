@@ -19,6 +19,8 @@ export interface SchedulingContract {
 	 */
 	preflight(): BudgetPreflight;
 	activeWorkers(): number;
+	/** Configured global worker capacity used by transactional batch planning. */
+	maxWorkers?(): number;
 	tryAcquireWorker(): boolean;
 	releaseWorker(): void;
 	listNodes(): ReadonlyArray<ClusterNode>;

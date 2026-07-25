@@ -4,11 +4,14 @@ import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
+import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
 import type { JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
 	systemPrompt?: string;
+	/** Trusted side-store lease reference; never serialized into a worker spec or receipt. */
+	reservation?: { ownerId: string; memberId: string };
 }
 
 /** Internal, non-serializable admission hook for transactional resource owners. */
@@ -22,6 +25,8 @@ export interface DispatchPlanTaskResolution {
 	targetId: string;
 	wireModelId: string;
 	node: RunNodeIdentity;
+	/** Conservative effective-pricing estimate; unknown pricing is never zero. */
+	costUpperBoundUsd: number;
 }
 
 /**
@@ -108,6 +113,21 @@ export interface DispatchContract {
 	 * failure aborts rather than choosing a different unapproved node.
 	 */
 	preview?(req: DispatchRequest): DispatchPlanTaskResolution;
+	/** Durable transactional reservations prepared before a plan can be approved. */
+	readonly reservations?: {
+		prepare(input: {
+			topology: ReservationTopology;
+			tasks: ReadonlyArray<{
+				memberId: string;
+				wave: number;
+				resolution: DispatchPlanTaskResolution;
+				allowedCandidates?: JobSpec["allowedCandidates"];
+			}>;
+		}): DispatchReservationRecord;
+		rollback(ownerId: string): DispatchReservationRecord | null;
+		rollbackUnconsumed(ownerId: string): DispatchReservationRecord | null;
+		get(ownerId: string): DispatchReservationRecord | null;
+	};
 	/** Session scheduling ceiling captured in the same immutable approval artifact. */
 	costCeilingUsd?(): number;
 	/** Current trusted hard-block state for coordinator-side merge validation. */

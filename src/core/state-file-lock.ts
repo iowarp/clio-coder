@@ -42,6 +42,56 @@ function lockfileAgeMs(lockPath: string): number | null {
 	}
 }
 
+/** Synchronous variant for admission planners whose host API cannot yield. */
+export function withStateFileLockSync<T>(targetPath: string, fn: () => T): T {
+	const lockPath = `${targetPath}.lock`;
+	mkdirSync(dirname(lockPath), { recursive: true });
+	const deadlineMs = Date.now() + ACQUIRE_DEADLINE_MS;
+	let attempt = 0;
+	for (;;) {
+		try {
+			const fd = openSync(lockPath, "wx", 0o600);
+			try {
+				writeSync(fd, String(process.pid));
+			} finally {
+				closeSync(fd);
+			}
+			break;
+		} catch (err) {
+			const error = err as NodeJS.ErrnoException;
+			if (error.code !== "EEXIST") throw err;
+			const ownerPid = readLockPid(lockPath);
+			const ageMs = lockfileAgeMs(lockPath);
+			if ((ownerPid !== null && !isProcessAlive(ownerPid)) || (ageMs !== null && ageMs > STALE_LOCK_MS)) {
+				try {
+					unlinkSync(lockPath);
+				} catch {
+					// Another waiter reclaimed it first.
+				}
+			}
+			if (Date.now() > deadlineMs) {
+				throw new Error(
+					`state file lock timeout after ${ACQUIRE_DEADLINE_MS}ms at ${lockPath} (owner pid=${ownerPid ?? "?"}, age=${ageMs ?? "?"}ms)`,
+				);
+			}
+			attempt += 1;
+			const delay = Math.min(100, 5 * 2 ** Math.min(attempt, 5));
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+		}
+	}
+	try {
+		return fn();
+	} finally {
+		if (readLockPid(lockPath) === process.pid) {
+			try {
+				unlinkSync(lockPath);
+			} catch {
+				// Already reclaimed or removed.
+			}
+		}
+	}
+}
+
 export async function withStateFileLock<T>(targetPath: string, fn: () => T | Promise<T>): Promise<T> {
 	const lockPath = `${targetPath}.lock`;
 	const dir = dirname(lockPath);

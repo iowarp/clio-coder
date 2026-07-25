@@ -1,0 +1,434 @@
+import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import { clioStateDir } from "../../core/xdg.js";
+import { atomicWrite } from "../../engine/session.js";
+import type { DispatchFailoverCandidate } from "./validation.js";
+
+const MAX_RESERVATION_RECORDS = 500;
+export const DEFAULT_RESERVATION_TTL_MS = 15 * 60_000;
+
+export type ReservationTopology = "parallel" | "detached" | "sequential" | "pipeline" | "review" | "compete";
+export type ReservationMemberStatus = "held" | "consumed" | "released";
+export type ReservationStatus = "active" | "released" | "rolled_back" | "expired";
+
+export interface ReservationPlanTask {
+	memberId: string;
+	wave: number;
+	agentId: string;
+	targetId: string;
+	wireModelId: string;
+	nodeId: string;
+	costUpperBoundUsd: number;
+	allowedCandidates?: ReadonlyArray<DispatchFailoverCandidate>;
+}
+
+export interface ReservationMember extends ReservationPlanTask {
+	status: ReservationMemberStatus;
+	consumedAt: string | null;
+	releasedAt: string | null;
+}
+
+export interface DispatchReservationRecord {
+	ownerId: string;
+	/** Process that owns execution; startup cleanup preserves live sibling processes. */
+	ownerPid: number;
+	topology: ReservationTopology;
+	status: ReservationStatus;
+	createdAt: string;
+	expiresAt: string;
+	settledAt: string | null;
+	members: ReservationMember[];
+}
+
+interface ReservationStoreFile {
+	version: 1;
+	reservations: DispatchReservationRecord[];
+}
+
+export interface ReservationCapacitySnapshot {
+	global: { active: number; limit: number };
+	nodes: Readonly<Record<string, { active: number; limit: number }>>;
+	targets?: Readonly<Record<string, { active: number; limit: number }>>;
+	budget: { currentUsd: number; ceilingUsd: number };
+}
+
+export interface ReservationAllocation {
+	globalSlots: number;
+	nodeSlots: Readonly<Record<string, number>>;
+	targetSlots: Readonly<Record<string, number>>;
+	budgetUsd: number;
+}
+
+export type ReservationPlanResult = { ok: true; allocation: ReservationAllocation } | { ok: false; reason: string };
+
+function storePath(): string {
+	return join(clioStateDir(), "dispatch-reservations.json");
+}
+
+function copyRecord(record: DispatchReservationRecord): DispatchReservationRecord {
+	return {
+		...record,
+		members: record.members.map((member) => ({
+			...member,
+			...(member.allowedCandidates !== undefined
+				? { allowedCandidates: member.allowedCandidates.map((candidate) => ({ ...candidate })) }
+				: {}),
+		})),
+	};
+}
+
+function validRecord(value: unknown): value is DispatchReservationRecord {
+	if (typeof value !== "object" || value === null) return false;
+	const record = value as Partial<DispatchReservationRecord>;
+	return (
+		typeof record.ownerId === "string" &&
+		typeof record.ownerPid === "number" &&
+		Number.isInteger(record.ownerPid) &&
+		record.ownerPid > 0 &&
+		(record.topology === "parallel" ||
+			record.topology === "detached" ||
+			record.topology === "sequential" ||
+			record.topology === "pipeline" ||
+			record.topology === "review" ||
+			record.topology === "compete") &&
+		(record.status === "active" ||
+			record.status === "released" ||
+			record.status === "rolled_back" ||
+			record.status === "expired") &&
+		typeof record.createdAt === "string" &&
+		typeof record.expiresAt === "string" &&
+		(record.settledAt === null || typeof record.settledAt === "string") &&
+		Array.isArray(record.members) &&
+		record.members.every(
+			(member) =>
+				typeof member.memberId === "string" &&
+				Number.isInteger(member.wave) &&
+				typeof member.agentId === "string" &&
+				typeof member.targetId === "string" &&
+				typeof member.wireModelId === "string" &&
+				typeof member.nodeId === "string" &&
+				typeof member.costUpperBoundUsd === "number" &&
+				Number.isFinite(member.costUpperBoundUsd) &&
+				member.costUpperBoundUsd >= 0 &&
+				(member.status === "held" || member.status === "consumed" || member.status === "released") &&
+				(member.consumedAt === null || typeof member.consumedAt === "string") &&
+				(member.releasedAt === null || typeof member.releasedAt === "string"),
+		)
+	);
+}
+
+function readStore(): DispatchReservationRecord[] {
+	const path = storePath();
+	if (!existsSync(path)) return [];
+	let parsed: ReservationStoreFile;
+	try {
+		parsed = JSON.parse(readFileSync(path, "utf8")) as ReservationStoreFile;
+	} catch (error) {
+		throw new Error(
+			`dispatch reservation store is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+	if (parsed?.version !== 1 || !Array.isArray(parsed.reservations) || !parsed.reservations.every(validRecord)) {
+		throw new Error("dispatch reservation store has an invalid schema");
+	}
+	return parsed.reservations.map(copyRecord);
+}
+
+function writeStore(records: ReadonlyArray<DispatchReservationRecord>): void {
+	const file: ReservationStoreFile = {
+		version: 1,
+		reservations: records.slice(0, MAX_RESERVATION_RECORDS).map(copyRecord),
+	};
+	atomicWrite(storePath(), JSON.stringify(file, null, 2));
+}
+
+function peakBy(tasks: ReadonlyArray<Pick<ReservationPlanTask, "wave"> & { key: string }>): Record<string, number> {
+	const byKeyWave = new Map<string, Map<number, number>>();
+	for (const task of tasks) {
+		const waves = byKeyWave.get(task.key) ?? new Map<number, number>();
+		waves.set(task.wave, (waves.get(task.wave) ?? 0) + 1);
+		byKeyWave.set(task.key, waves);
+	}
+	const result: Record<string, number> = {};
+	for (const [key, waves] of byKeyWave) result[key] = Math.max(0, ...waves.values());
+	return result;
+}
+
+export function reservationAllocation(tasks: ReadonlyArray<ReservationPlanTask>): ReservationAllocation {
+	const globalSlots = Math.max(
+		0,
+		...Array.from(new Set(tasks.map((task) => task.wave))).map(
+			(wave) => tasks.filter((task) => task.wave === wave).length,
+		),
+	);
+	const nodeSlots = peakBy(tasks.map((task) => ({ wave: task.wave, key: task.nodeId })));
+	const targetSlots = peakBy(tasks.map((task) => ({ wave: task.wave, key: task.targetId })));
+	return {
+		globalSlots,
+		nodeSlots,
+		targetSlots,
+		budgetUsd: tasks.reduce((sum, task) => sum + task.costUpperBoundUsd, 0),
+	};
+}
+
+function outstandingTasks(record: DispatchReservationRecord): ReservationPlanTask[] {
+	return record.members
+		.filter((member) => member.status === "held")
+		.map(({ status: _status, consumedAt: _consumedAt, releasedAt: _releasedAt, ...task }) => task);
+}
+
+function outstandingBudget(record: DispatchReservationRecord): number {
+	return record.members
+		.filter((member) => member.status === "held" || member.status === "consumed")
+		.reduce((sum, member) => sum + member.costUpperBoundUsd, 0);
+}
+
+export function allocateReservation(
+	tasks: ReadonlyArray<ReservationPlanTask>,
+	existing: ReadonlyArray<DispatchReservationRecord>,
+	capacity: ReservationCapacitySnapshot,
+): ReservationPlanResult {
+	if (tasks.length === 0) return { ok: false, reason: "reservation requires at least one task" };
+	const duplicate = tasks.find((task, index) => tasks.slice(0, index).some((entry) => entry.memberId === task.memberId));
+	if (duplicate) return { ok: false, reason: `duplicate reservation member '${duplicate.memberId}'` };
+	const requested = reservationAllocation(tasks);
+	const activeRecords = existing.filter((record) => record.status === "active");
+	const held = activeRecords.map((record) => reservationAllocation(outstandingTasks(record)));
+	const globalUsed = capacity.global.active + held.reduce((sum, allocation) => sum + allocation.globalSlots, 0);
+	if (globalUsed + requested.globalSlots > capacity.global.limit) {
+		return {
+			ok: false,
+			reason: `global concurrency capacity exceeded (${globalUsed + requested.globalSlots}/${capacity.global.limit})`,
+		};
+	}
+	for (const [nodeId, slots] of Object.entries(requested.nodeSlots)) {
+		const node = capacity.nodes[nodeId];
+		if (!node || !Number.isFinite(node.limit)) continue;
+		const heldSlots = held.reduce((sum, allocation) => sum + (allocation.nodeSlots[nodeId] ?? 0), 0);
+		const used = node.active + heldSlots;
+		if (used + slots > node.limit) {
+			return { ok: false, reason: `node '${nodeId}' capacity exceeded (${used + slots}/${node.limit})` };
+		}
+	}
+	for (const [targetId, slots] of Object.entries(requested.targetSlots)) {
+		const target = capacity.targets?.[targetId];
+		if (!target || !Number.isFinite(target.limit)) continue;
+		const heldSlots = held.reduce((sum, allocation) => sum + (allocation.targetSlots[targetId] ?? 0), 0);
+		const used = target.active + heldSlots;
+		if (used + slots > target.limit) {
+			return { ok: false, reason: `target '${targetId}' capacity exceeded (${used + slots}/${target.limit})` };
+		}
+	}
+	const existingBudget = activeRecords.reduce((sum, record) => sum + outstandingBudget(record), 0);
+	const projected = capacity.budget.currentUsd + existingBudget + requested.budgetUsd;
+	if (projected >= capacity.budget.ceilingUsd) {
+		return {
+			ok: false,
+			reason: `aggregate budget exceeded ($${projected.toFixed(4)} / $${capacity.budget.ceilingUsd.toFixed(4)}; batch upper bound $${requested.budgetUsd.toFixed(4)})`,
+		};
+	}
+	return { ok: true, allocation: requested };
+}
+
+export function createDispatchReservation(input: {
+	topology: ReservationTopology;
+	tasks: ReadonlyArray<ReservationPlanTask>;
+	capacity: ReservationCapacitySnapshot;
+	nowMs?: number;
+	ttlMs?: number;
+}): DispatchReservationRecord {
+	return withStateFileLockSync(storePath(), () => {
+		const nowMs = input.nowMs ?? Date.now();
+		const records = expireRecords(readStore(), nowMs, false);
+		const planned = allocateReservation(input.tasks, records, input.capacity);
+		if (!planned.ok) {
+			writeStore(records);
+			throw new Error(`dispatch: reservation denied: ${planned.reason}`);
+		}
+		const createdAt = new Date(nowMs).toISOString();
+		const record: DispatchReservationRecord = {
+			ownerId: `plan-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
+			ownerPid: process.pid,
+			topology: input.topology,
+			status: "active",
+			createdAt,
+			expiresAt: new Date(nowMs + (input.ttlMs ?? DEFAULT_RESERVATION_TTL_MS)).toISOString(),
+			settledAt: null,
+			members: input.tasks.map((task) => ({
+				...task,
+				...(task.allowedCandidates !== undefined
+					? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
+					: {}),
+				status: "held",
+				consumedAt: null,
+				releasedAt: null,
+			})),
+		};
+		writeStore([record, ...records]);
+		return copyRecord(record);
+	});
+}
+
+function routeMatches(member: ReservationMember, route: DispatchFailoverCandidate): boolean {
+	const exact =
+		member.agentId === route.agentId &&
+		member.targetId === route.target &&
+		member.wireModelId === route.model &&
+		member.nodeId === route.node;
+	if (exact) return true;
+	return (
+		member.allowedCandidates?.some(
+			(candidate) =>
+				candidate.agentId === route.agentId &&
+				candidate.target === route.target &&
+				candidate.model === route.model &&
+				candidate.node === route.node,
+		) ?? false
+	);
+}
+
+export function consumeDispatchReservation(
+	ownerId: string,
+	memberId: string,
+	route: DispatchFailoverCandidate,
+	options?: { allowAlreadyConsumed?: boolean; nowMs?: number },
+): DispatchReservationRecord {
+	return withStateFileLockSync(storePath(), () => {
+		const nowMs = options?.nowMs ?? Date.now();
+		const records = expireRecords(readStore(), nowMs, false);
+		const record = records.find((entry) => entry.ownerId === ownerId);
+		if (record?.status !== "active") throw new Error(`dispatch: reservation '${ownerId}' is not active`);
+		const member = record.members.find((entry) => entry.memberId === memberId);
+		if (!member) throw new Error(`dispatch: reservation '${ownerId}' has no member '${memberId}'`);
+		if (!routeMatches(member, route)) throw new Error(`dispatch: reservation drift for member '${memberId}'`);
+		if (member.status === "consumed" && options?.allowAlreadyConsumed === true) return copyRecord(record);
+		if (member.status !== "held")
+			throw new Error(`dispatch: reservation member '${memberId}' was already ${member.status}`);
+		member.status = "consumed";
+		member.consumedAt = new Date(nowMs).toISOString();
+		writeStore(records);
+		return copyRecord(record);
+	});
+}
+
+export function releaseDispatchReservationMember(
+	ownerId: string,
+	memberId: string,
+	nowMs = Date.now(),
+): DispatchReservationRecord | null {
+	return withStateFileLockSync(storePath(), () => {
+		const records = readStore();
+		const record = records.find((entry) => entry.ownerId === ownerId);
+		if (!record) return null;
+		const member = record.members.find((entry) => entry.memberId === memberId);
+		if (record.status !== "active" || !member || member.status === "released") return copyRecord(record);
+		member.status = "released";
+		member.releasedAt = new Date(nowMs).toISOString();
+		if (record.members.every((entry) => entry.status === "released")) {
+			record.status = "released";
+			record.settledAt = new Date(nowMs).toISOString();
+		}
+		writeStore(records);
+		return copyRecord(record);
+	});
+}
+
+export function rollbackDispatchReservation(ownerId: string, nowMs = Date.now()): DispatchReservationRecord | null {
+	return withStateFileLockSync(storePath(), () => {
+		const records = readStore();
+		const record = records.find((entry) => entry.ownerId === ownerId);
+		if (!record) return null;
+		if (record.status !== "active") return copyRecord(record);
+		const settledAt = new Date(nowMs).toISOString();
+		for (const member of record.members) {
+			if (member.status === "released") continue;
+			member.status = "released";
+			member.releasedAt = settledAt;
+		}
+		record.status = "rolled_back";
+		record.settledAt = settledAt;
+		writeStore(records);
+		return copyRecord(record);
+	});
+}
+
+/** Release a denied/unexecuted plan without disturbing a plan that has begun execution. */
+export function rollbackUnconsumedDispatchReservation(
+	ownerId: string,
+	nowMs = Date.now(),
+): DispatchReservationRecord | null {
+	const record = getDispatchReservation(ownerId);
+	if (record?.status !== "active") return record;
+	if (record.members.some((member) => member.status === "consumed")) return record;
+	return rollbackDispatchReservation(ownerId, nowMs);
+}
+
+function reservationOwnerAlive(ownerPid: number | undefined): boolean {
+	if (ownerPid === undefined || ownerPid === process.pid) return false;
+	try {
+		process.kill(ownerPid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+function expireRecords(
+	records: DispatchReservationRecord[],
+	nowMs: number,
+	startup: boolean,
+): DispatchReservationRecord[] {
+	const settledAt = new Date(nowMs).toISOString();
+	for (const record of records) {
+		if (record.status !== "active") continue;
+		if (startup ? reservationOwnerAlive(record.ownerPid) : Date.parse(record.expiresAt) > nowMs) continue;
+		for (const member of record.members) {
+			if (member.status === "released") continue;
+			member.status = "released";
+			member.releasedAt = settledAt;
+		}
+		record.status = "expired";
+		record.settledAt = settledAt;
+	}
+	return records;
+}
+
+export function cleanupDispatchReservations(options?: { startup?: boolean; nowMs?: number }): number {
+	return withStateFileLockSync(storePath(), () => {
+		const records = readStore();
+		const before = records.filter((record) => record.status === "active").length;
+		expireRecords(records, options?.nowMs ?? Date.now(), options?.startup === true);
+		const after = records.filter((record) => record.status === "active").length;
+		if (before !== after) writeStore(records);
+		return before - after;
+	});
+}
+
+export function getDispatchReservation(ownerId: string): DispatchReservationRecord | null {
+	const record = readStore().find((entry) => entry.ownerId === ownerId);
+	return record ? copyRecord(record) : null;
+}
+
+export function listDispatchReservations(): ReadonlyArray<DispatchReservationRecord> {
+	return readStore();
+}
+
+export function reservedBudgetUsd(): number {
+	return readStore()
+		.filter((record) => record.status === "active")
+		.reduce((sum, record) => sum + outstandingBudget(record), 0);
+}
+
+export function reservedCapacity(): { globalSlots: number; nodeSlots: Readonly<Record<string, number>> } {
+	let globalSlots = 0;
+	const nodeSlots: Record<string, number> = {};
+	for (const record of readStore().filter((entry) => entry.status === "active")) {
+		const allocation = reservationAllocation(outstandingTasks(record));
+		globalSlots += allocation.globalSlots;
+		for (const [nodeId, count] of Object.entries(allocation.nodeSlots))
+			nodeSlots[nodeId] = (nodeSlots[nodeId] ?? 0) + count;
+	}
+	return { globalSlots, nodeSlots };
+}

@@ -86,6 +86,7 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
 		},
 		activeWorkers: () => gate.activeWorkers(),
+		maxWorkers: () => gate.maxWorkers,
 		tryAcquireWorker: () => gate.tryAcquire(),
 		releaseWorker: () => gate.release(),
 		listNodes: () => legacyClusterNodes(fleet),
