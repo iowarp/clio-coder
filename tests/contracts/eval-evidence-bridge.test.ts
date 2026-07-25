@@ -35,8 +35,13 @@ function receipt(partial: Partial<RunReceipt> = {}): RunReceipt {
 		nodeVersion: "v22.19.0",
 		toolCalls: 3,
 		toolStats: [],
+		quality: {
+			version: 1,
+			typedValidations: [],
+			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+		},
 		sessionId: null,
-		integrity: { version: 3, algorithm: "sha256", digest: "d".repeat(64) },
+		integrity: { version: 8, algorithm: "sha256", digest: "d".repeat(64) },
 		...partial,
 	} as RunReceipt;
 }
@@ -80,6 +85,8 @@ describe("contracts/eval evidence bridge", () => {
 			{
 				"evidence.verification": "verified",
 				"evidence.firstPassSuccess": true,
+				"evidence.quality.typedValidationCount": 0,
+				"evidence.responseSchema.digest": "none",
 				"cost.usd": 0.042,
 			},
 		);

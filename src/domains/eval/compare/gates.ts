@@ -1,4 +1,4 @@
-import type { EvalArtifactV2 } from "../schema/artifact.js";
+import type { EvalArtifactV3 } from "../schema/artifact.js";
 import type { EvalMetricAssertion, EvalSuiteThresholdsV2 } from "../schema/suite.js";
 import { evaluateMetricAssertion, metricValue } from "./thresholds.js";
 
@@ -19,7 +19,7 @@ export interface EvalGateResult {
  * and so is a threshold whose metric the artifact cannot resolve. A typoed or
  * uncollected metric must never let a release gate pass silently.
  */
-export function evaluateGate(artifact: EvalArtifactV2, thresholds: EvalSuiteThresholdsV2): EvalGateResult {
+export function evaluateGate(artifact: EvalArtifactV3, thresholds: EvalSuiteThresholdsV2): EvalGateResult {
 	const failures: EvalGateFailure[] = [];
 	for (const assertion of thresholds.fail) {
 		const actual = metricValue(assertion.metric, {}, artifact);

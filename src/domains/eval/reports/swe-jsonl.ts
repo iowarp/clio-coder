@@ -1,6 +1,6 @@
-import type { EvalArtifactV2 } from "../schema/artifact.js";
+import type { EvalArtifactV3 } from "../schema/artifact.js";
 
-export function renderEvalSweJsonlReportV2(artifact: EvalArtifactV2): string {
+export function renderEvalSweJsonlReportV3(artifact: EvalArtifactV3): string {
 	return artifact.results
 		.map((result) =>
 			JSON.stringify({

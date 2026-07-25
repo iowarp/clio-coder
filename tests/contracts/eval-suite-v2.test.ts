@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { EvalArtifactV2 } from "../../src/domains/eval/schema/artifact.js";
+import type { EvalArtifactV3 } from "../../src/domains/eval/schema/artifact.js";
 import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
 import { loadV1TaskFileAsSuite } from "../../src/domains/eval/suites/load.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
@@ -136,7 +136,7 @@ describe("contracts/eval suite v2", { concurrency: false }, () => {
 			});
 			strictEqual(result.code, 0, `stderr=${result.stderr}`);
 			const artifact = readArtifact(scratch.env, evalIdFrom(result.stdout));
-			strictEqual(artifact.version, 2);
+			strictEqual(artifact.version, 3);
 			strictEqual(artifact.summary.passed, 1);
 			const indexedFiles = artifact.results[0]?.metrics["context.indexedFiles"];
 			if (typeof indexedFiles !== "number") throw new Error("context.indexedFiles metric missing");
@@ -199,7 +199,7 @@ describe("contracts/eval suite v2", { concurrency: false }, () => {
 
 			const json = await runCli(["eval", "report", passEvalId, "--format", "json"], { env: scratch.env });
 			strictEqual(json.code, 0, `stderr=${json.stderr}`);
-			strictEqual((JSON.parse(json.stdout) as EvalArtifactV2).evalId, passEvalId);
+			strictEqual((JSON.parse(json.stdout) as EvalArtifactV3).evalId, passEvalId);
 
 			const md = await runCli(["eval", "report", passEvalId, "--format", "md"], { env: scratch.env });
 			strictEqual(md.code, 0, `stderr=${md.stderr}`);
@@ -326,8 +326,8 @@ function evalIdFrom(stdout: string): string {
 	return found[1];
 }
 
-function readArtifact(env: NodeJS.ProcessEnv, evalId: string): EvalArtifactV2 {
+function readArtifact(env: NodeJS.ProcessEnv, evalId: string): EvalArtifactV3 {
 	const dataDir = env.CLIO_DATA_DIR;
 	if (dataDir === undefined) throw new Error("scratch CLIO_DATA_DIR missing");
-	return JSON.parse(readFileSync(join(dataDir, "evals", `${evalId}.json`), "utf8")) as EvalArtifactV2;
+	return JSON.parse(readFileSync(join(dataDir, "evals", `${evalId}.json`), "utf8")) as EvalArtifactV3;
 }

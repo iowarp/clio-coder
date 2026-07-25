@@ -47,6 +47,8 @@ export async function runContextInitRunner(
 	const clioMdPath = join(cwd, "CLIO.md");
 	const clioMdBytes = existsSync(clioMdPath) ? statSync(clioMdPath).size : 0;
 	return {
+		assignmentId: null,
+		terminalReceiptDigest: null,
 		exitCode,
 		stdout: result.stdout,
 		stderr,

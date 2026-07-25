@@ -22,19 +22,7 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 
 `CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `clio context init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
 
-## Imported agent context
+## Dispatch routing quality
 
-Conflict policy: CLIO.md conventions and hard invariants are canonical; project-local imports win over explicit global imports; duplicate rules are merged by normalized text.
-
-### Adopted rules
-
-- No project-specific rules were adopted from external agent configs.
-
-### Source provenance
-
-- No supported project-local agent config files were found.
-
-### Rejected sources
-
-- Claude Code `CLAUDE.md`: skipped symlink skipped.
-- Codex `AGENTS.md`: skipped symlink skipped.
+- `src/domains/dispatch/route-quality.ts` is the pure reducer for integrity-valid receipt, gate, and eval evidence. Descriptive receipt verification never establishes routing quality.
+- `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity v8 requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.

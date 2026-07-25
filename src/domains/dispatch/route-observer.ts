@@ -18,9 +18,11 @@
  * authority, so no observer output can ever alter the executed agent.
  */
 
-import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { clioStateDir } from "../../core/xdg.js";
+import { clioDataDir, clioStateDir } from "../../core/xdg.js";
+import { parseEvalArtifactV3 } from "../eval/artifacts/store.js";
+import { readGateDecisionArtifacts } from "./gate-decisions.js";
 import {
 	type CandidateEvaluation,
 	decideRoute,
@@ -32,7 +34,15 @@ import {
 	type RouteRealizedOutcome,
 	routeCandidateKey,
 } from "./route-decision.js";
-import { estimateRoute, type RouteEstimate, type RouteObservation } from "./route-policy.js";
+import { createRouteHistoryStore, type RouteHistoryStore } from "./route-history.js";
+import {
+	estimateRoute,
+	type RouteEstimate,
+	type RouteObservation,
+	routeObservationFromHistory,
+} from "./route-policy.js";
+import { type RouteQualityReduction, reduceRouteQuality, routeQualityEvalDigest } from "./route-quality.js";
+import type { RunEnvelope, RunReceipt } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Rule-based intent detector (sync, <1ms; no LLM)
@@ -185,14 +195,13 @@ export function recommendAgent(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Route-tuple sample store (bounded, in-memory)
+// Route-history projection
 // ---------------------------------------------------------------------------
 
-/** Runs retained per route tuple; the estimator only needs a recent window. */
-const SAMPLES_PER_ROUTE = 32;
-/** Distinct route tuples retained; a fleet has far fewer than this in practice. */
-const ROUTE_SAMPLE_KEYS = 256;
-
+/**
+ * Test-only estimator seam. Production always reads the durable route-history
+ * store, so process restart cannot erase the policy's evidence window.
+ */
 export interface RouteSampleStore {
 	samplesFor(candidate: RouteCandidate): ReadonlyArray<RouteObservation>;
 	record(candidate: RouteCandidate, observation: RouteObservation): void;
@@ -208,12 +217,7 @@ export function createRouteSampleStore(): RouteSampleStore {
 			const key = routeCandidateKey(candidate);
 			const samples = byRoute.get(key) ?? [];
 			samples.push(observation);
-			if (samples.length > SAMPLES_PER_ROUTE) samples.splice(0, samples.length - SAMPLES_PER_ROUTE);
 			byRoute.set(key, samples);
-			if (byRoute.size > ROUTE_SAMPLE_KEYS) {
-				const oldest = byRoute.keys().next().value;
-				if (oldest !== undefined) byRoute.delete(oldest);
-			}
 		},
 	};
 }
@@ -242,11 +246,11 @@ export interface RouteObserverSummary {
 	shadowDivergenceRate: number;
 	/** Share of decisions that respected every hard constraint. Anything below 1 is a defect. */
 	constraintValidityRate: number;
-	/** Mean Brier score of the verified-success estimate; lower is better calibrated. */
-	meanVerifiedSuccessBrier: number;
+	/** Mean Brier score over measured quality labels; lower is better calibrated. */
+	meanQualityBrier: number;
 	/** Mean ratio of actual to estimated cost for the route that ran. */
 	meanCostRatio: number;
-	verifiedRate: number;
+	qualityPassRate: number;
 	firstPassRate: number;
 	escalationRate: number;
 	taskTypeDistribution: Record<string, number>;
@@ -298,9 +302,13 @@ export function createRouteLearner(capacity = LEARNER_CAPACITY): RouteLearner {
 				offFrontierRate: rateOf(evaluations.map((evaluation) => evaluation.regret.executedOffFrontier)),
 				shadowDivergenceRate: rateOf(evaluations.map((evaluation) => evaluation.regret.routeDiffered)),
 				constraintValidityRate: rateOf(evaluations.map((evaluation) => evaluation.validity.valid)),
-				meanVerifiedSuccessBrier: meanOf(evaluations.map((evaluation) => evaluation.calibration.verifiedSuccessBrier)),
+				meanQualityBrier: meanOf(
+					evaluations.flatMap((evaluation) =>
+						evaluation.calibration.qualityBrier === null ? [] : [evaluation.calibration.qualityBrier],
+					),
+				),
 				meanCostRatio: meanOf(evaluations.map((evaluation) => evaluation.calibration.costRatio)),
-				verifiedRate: rateOf(evaluations.map((evaluation) => evaluation.outcome.verified)),
+				qualityPassRate: rateOf(evaluations.map((evaluation) => evaluation.outcome.qualityLabel === "pass")),
 				firstPassRate: rateOf(evaluations.map((evaluation) => evaluation.outcome.firstPass)),
 				escalationRate: rateOf(evaluations.map((evaluation) => evaluation.outcome.escalated)),
 				taskTypeDistribution,
@@ -333,25 +341,77 @@ export interface RouteObservationHandle {
 	decision: RouteDecisionV1;
 }
 
+export interface RouteObservedOutcome extends RouteRealizedOutcome {
+	receipt: RunReceipt;
+	envelope: RunEnvelope;
+	quality: RouteQualityReduction;
+	phaseTiming: { totalEndToEndMs: number | null; queueWaitMs: number | null } | undefined;
+}
+
 export interface RouteObserver {
 	/** Build the shadow decision for a dispatch; null when observation failed. */
 	observe(input: RouteObserveInput): RouteObservationHandle | null;
-	/** Record what the real dispatch actually did for a prior observation. */
-	recordOutcome(observationId: string, realized: RouteRealizedOutcome): void;
+	/** Reduce and durably record the real terminal route outcome. */
+	recordOutcome(observationId: string, outcome: RouteObservedOutcome): void;
 	summary(): RouteObserverSummary;
 }
 
 export interface CreateRouteObserverOptions {
 	/** Known agent descriptors; read per observation so hot-reloads apply. */
 	getAgents: () => ReadonlyArray<RouteAgentDescriptor>;
-	/** Estimator inputs per route tuple; defaults to a bounded in-memory store. */
+	/** Durable production source for route estimation. */
+	history?: RouteHistoryStore;
+	/** Test-only estimator input seam. Production does not use this store. */
 	samples?: RouteSampleStore;
 	/** Log directory override; defaults to `<state>/route-decisions`. */
 	logDir?: string;
+	/** Durable source directory override, primarily for restart/replay tests. */
+	stateDir?: string;
 	/** Monotonic microsecond clock; injectable so a test can pin decision duration. */
 	nowUs?: () => number;
 	/** Estimator seam; defaults to the shrinkage estimator over the sample store. */
 	estimate?: (samples: ReadonlyArray<RouteObservation>) => RouteEstimate;
+}
+
+function durableQualitySources(stateDir: string): {
+	receipts: Array<{ receipt: RunReceipt; envelope: RunEnvelope }>;
+	gates: ReturnType<typeof readGateDecisionArtifacts>[number]["artifact"][];
+	evals: Array<{ artifact: Parameters<typeof routeQualityEvalDigest>[0]; digest: string }>;
+} {
+	const runsPath = join(stateDir, "runs.json");
+	if (!existsSync(runsPath)) return { receipts: [], gates: [], evals: [] };
+	try {
+		const parsed = JSON.parse(readFileSync(runsPath, "utf8")) as unknown;
+		if (!Array.isArray(parsed)) return { receipts: [], gates: [], evals: [] };
+		const receipts: Array<{ receipt: RunReceipt; envelope: RunEnvelope }> = [];
+		for (const envelope of parsed) {
+			if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope)) continue;
+			const run = envelope as RunEnvelope;
+			const path = run.receiptPath ?? join(stateDir, "receipts", `${run.id}.json`);
+			if (!existsSync(path)) continue;
+			const receipt = JSON.parse(readFileSync(path, "utf8")) as unknown;
+			if (typeof receipt === "object" && receipt !== null && !Array.isArray(receipt)) {
+				receipts.push({ receipt: receipt as RunReceipt, envelope: run });
+			}
+		}
+		const evals: Array<{ artifact: Parameters<typeof routeQualityEvalDigest>[0]; digest: string }> = [];
+		const evalDirectory = join(clioDataDir(), "evals");
+		if (existsSync(evalDirectory)) {
+			for (const name of readdirSync(evalDirectory)
+				.filter((entry) => entry.endsWith(".json"))
+				.sort()) {
+				try {
+					const artifact = parseEvalArtifactV3(JSON.parse(readFileSync(join(evalDirectory, name), "utf8")) as unknown, name);
+					evals.push({ artifact, digest: routeQualityEvalDigest(artifact) });
+				} catch {
+					// Retired or malformed artifact formats are not routing evidence.
+				}
+			}
+		}
+		return { receipts, gates: readGateDecisionArtifacts(undefined, stateDir).map((entry) => entry.artifact), evals };
+	} catch {
+		return { receipts: [], gates: [], evals: [] };
+	}
 }
 
 function appendObservationLine(dir: string, record: Record<string, unknown>): void {
@@ -380,7 +440,8 @@ function loggableEvaluation(evaluation: CandidateEvaluation): Record<string, unk
 
 export function createRouteObserver(options: CreateRouteObserverOptions): RouteObserver {
 	const learner = createRouteLearner();
-	const samples = options.samples ?? createRouteSampleStore();
+	const history = options.history ?? createRouteHistoryStore();
+	const samples = options.samples;
 	const pending = new Map<string, { decision: RouteDecisionV1; taskType: RouteTaskType }>();
 	const PENDING_LIMIT = 512;
 	let totalObservations = 0;
@@ -388,10 +449,34 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 	const logDir = (): string => options.logDir ?? join(clioStateDir(), "route-decisions");
 	const nowUs = options.nowUs ?? ((): number => Number(process.hrtime.bigint() / 1000n));
 	const estimateFor = options.estimate ?? estimateRoute;
+	const reconcileHistory = (): void => {
+		const sources = durableQualitySources(options.stateDir ?? clioStateDir());
+		if (sources.receipts.length === 0) return;
+		const byDigest = new Map(sources.receipts.map((source) => [source.receipt.integrity.digest, source]));
+		for (const record of history.all()) {
+			const subject = byDigest.get(record.receiptDigest);
+			if (subject === undefined) continue;
+			const quality = reduceRouteQuality({
+				subject,
+				receipts: sources.receipts,
+				gateArtifacts: sources.gates,
+				evalArtifacts: sources.evals,
+			});
+			const completed = record.reliability === "success" && quality.label !== "fail";
+			history.upsert({
+				...record,
+				qualityLabel: quality.label,
+				completedCostUsd: completed ? record.completedCostUsd : null,
+				completedPhaseTiming: completed ? record.completedPhaseTiming : null,
+				sourceDigests: quality.sourceDigests,
+			});
+		}
+	};
 
 	return {
 		observe(input) {
 			try {
+				reconcileHistory();
 				const startedUs = nowUs();
 				const intent = classifyRouteIntent(input.task);
 				const recommendation = recommendAgent({
@@ -407,7 +492,9 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					executedRoute: input.executedRoute,
 					candidates: input.candidates.map((entry) => ({
 						candidate: entry.candidate,
-						estimate: estimateFor(samples.samplesFor(entry.candidate)),
+						estimate: estimateFor(
+							samples?.samplesFor(entry.candidate) ?? history.recordsFor(entry.candidate).map(routeObservationFromHistory),
+						),
 						rejection: entry.rejection,
 					})),
 					hardConstraints: input.hardConstraints,
@@ -448,21 +535,61 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				return null;
 			}
 		},
-		recordOutcome(observationId, realized) {
+		recordOutcome(observationId, outcome) {
 			try {
 				const entry = pending.get(observationId);
 				if (entry === undefined) return;
 				pending.delete(observationId);
+				const realized: RouteRealizedOutcome = outcome;
 				const evaluation = evaluateRouteDecision(entry.decision, realized);
 				learner.record({ observationId, decision: entry.decision, realized, evaluation }, entry.taskType);
-				samples.record(realized.route, {
-					verified: realized.verified,
+				const reliability =
+					realized.outcome === "canceled" ||
+					realized.outcome === "denied_by_policy" ||
+					(outcome.receipt.outcomeDetail?.toLowerCase().includes("permission") === true &&
+						(outcome.receipt.outcomeDetail?.toLowerCase().includes("denied") === true ||
+							outcome.receipt.outcomeDetail?.toLowerCase().includes("required") === true))
+						? "neutral"
+						: realized.outcome === "succeeded"
+							? "success"
+							: "failure";
+				const completed = realized.outcome === "succeeded" && outcome.quality.label !== "fail";
+				const sample: RouteObservation = {
+					qualityLabel: outcome.quality.label,
+					reliability,
 					firstPass: realized.firstPass,
-					costUsd: realized.costUsd,
-					endToEndMs: realized.endToEndMs,
-					succeeded: realized.outcome === "succeeded",
+					completedCostUsd: completed ? realized.costUsd : null,
+					completedEndToEndMs: completed ? realized.endToEndMs : null,
 					cacheRead: false,
-					queueWaitMs: 0,
+					queueWaitMs: completed ? (outcome.phaseTiming?.queueWaitMs ?? null) : null,
+				};
+				samples?.record(realized.route, sample);
+				history.upsert({
+					version: 1,
+					receiptDigest: outcome.receipt.integrity.digest,
+					assignmentId: outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
+					route: realized.route,
+					executionRole: realized.route.executionRole,
+					qualityLabel: outcome.quality.label,
+					reliability,
+					firstPass: realized.firstPass,
+					completedCostUsd: sample.completedCostUsd,
+					completedPhaseTiming:
+						completed && outcome.phaseTiming !== undefined
+							? {
+									requestToDecisionMs: null,
+									decisionMs: null,
+									admissionWaitMs: null,
+									queueWaitMs: outcome.phaseTiming.queueWaitMs,
+									spawnSetupMs: null,
+									timeToFirstModelTokenMs: null,
+									timeToFirstToolMs: null,
+									executionMs: null,
+									totalEndToEndMs: outcome.phaseTiming.totalEndToEndMs,
+								}
+							: null,
+					sourceDigests: outcome.quality.sourceDigests,
+					settledAt: outcome.receipt.endedAt,
 				});
 				appendObservationLine(logDir(), {
 					kind: "outcome",
@@ -470,6 +597,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					at: new Date().toISOString(),
 					decisionHash: entry.decision.decisionHash,
 					executed: routeCandidateKey(realized.route),
+					quality: outcome.quality,
 					regret: evaluation.regret,
 					validity: evaluation.validity,
 					calibration: evaluation.calibration,

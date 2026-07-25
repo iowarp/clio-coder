@@ -1,28 +1,21 @@
 import { resolve } from "node:path";
 import { InvalidIdError } from "../core/safe-id.js";
 import { clioDataDir } from "../core/xdg.js";
-import { loadEvalArtifactAny, writeEvalArtifactV2 } from "../domains/eval/artifacts/store.js";
-import { compareEvalArtifactsV2, renderEvalComparisonV2 } from "../domains/eval/compare/compare.js";
+import { loadEvalArtifactV3, writeEvalArtifactV3 } from "../domains/eval/artifacts/store.js";
+import { compareEvalArtifactsV3, renderEvalComparisonV3 } from "../domains/eval/compare/compare.js";
 import { evaluateGate } from "../domains/eval/compare/gates.js";
 import { loadThresholds } from "../domains/eval/compare/thresholds.js";
-import {
-	compareEvalArtifacts,
-	evalArtifactPath,
-	renderEvalComparison,
-	renderEvalReport,
-	renderSweJsonl,
-} from "../domains/eval/index.js";
-import { renderEvalJsonReportV2 } from "../domains/eval/reports/json.js";
-import { renderEvalJunitReportV2 } from "../domains/eval/reports/junit.js";
-import { renderEvalMarkdownReportV2 } from "../domains/eval/reports/markdown.js";
-import { renderEvalSweJsonlReportV2 } from "../domains/eval/reports/swe-jsonl.js";
-import { renderEvalTextReportV2 } from "../domains/eval/reports/text.js";
-import type { EvalArtifactV2 } from "../domains/eval/schema/artifact.js";
+
+import { renderEvalJsonReportV3 } from "../domains/eval/reports/json.js";
+import { renderEvalJunitReportV3 } from "../domains/eval/reports/junit.js";
+import { renderEvalMarkdownReportV3 } from "../domains/eval/reports/markdown.js";
+import { renderEvalSweJsonlReportV3 } from "../domains/eval/reports/swe-jsonl.js";
+import { renderEvalTextReportV3 } from "../domains/eval/reports/text.js";
+import type { EvalArtifactV3 } from "../domains/eval/schema/artifact.js";
 import { EvalSuiteFileError, loadEvalSuiteFile, loadV1TaskFileAsSuite } from "../domains/eval/suites/load.js";
 import { resolveSuiteForRun } from "../domains/eval/suites/resolve.js";
 import { runEvalSuiteV2 } from "../domains/eval/suites/run.js";
 import { EvalTaskFileError } from "../domains/eval/task-file.js";
-import type { EvalRunArtifact } from "../domains/eval/types.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio eval <command>
@@ -217,8 +210,8 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 		// relative --clio-entry must be pinned to the invoking directory here.
 		const clioEntry = resolve(parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js");
 		const artifact = await runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
-		const artifactPath = await writeEvalArtifactV2(clioDataDir(), artifact, parsed.out);
-		process.stdout.write(`${renderEvalTextReportV2(artifact)}artifact: ${artifactPath}\n`);
+		const artifactPath = await writeEvalArtifactV3(clioDataDir(), artifact, parsed.out);
+		process.stdout.write(`${renderEvalTextReportV3(artifact)}artifact: ${artifactPath}\n`);
 		return artifact.summary.failed === 0 ? 0 : 1;
 	} catch (error) {
 		return handleEvalLoadError(error, 1);
@@ -228,7 +221,7 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 async function runEvalReportCommand(parsed: ParsedEvalArgs): Promise<number> {
 	try {
 		const dataDir = clioDataDir();
-		const artifact = await loadEvalArtifactAny(dataDir, parsed.evalId ?? "");
+		const artifact = await loadEvalArtifactV3(dataDir, parsed.evalId ?? "");
 		process.stdout.write(renderArtifactReport(artifact, parsed.format, dataDir));
 		return 0;
 	} catch (error) {
@@ -242,15 +235,9 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 	const candidateEvalId = parsed.compareIds[1] ?? "";
 	try {
 		const dataDir = clioDataDir();
-		const baseline = await loadEvalArtifactAny(dataDir, baselineEvalId);
-		const candidate = await loadEvalArtifactAny(dataDir, candidateEvalId);
-		if (isV2Artifact(baseline) && isV2Artifact(candidate)) {
-			process.stdout.write(renderEvalComparisonV2(compareEvalArtifactsV2(baseline, candidate)));
-		} else {
-			process.stdout.write(
-				renderEvalComparison(compareEvalArtifacts(baseline as EvalRunArtifact, candidate as EvalRunArtifact)),
-			);
-		}
+		const baseline = await loadEvalArtifactV3(dataDir, baselineEvalId);
+		const candidate = await loadEvalArtifactV3(dataDir, candidateEvalId);
+		process.stdout.write(renderEvalComparisonV3(compareEvalArtifactsV3(baseline, candidate)));
 		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
@@ -261,13 +248,8 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 	try {
 		const dataDir = clioDataDir();
-		const candidate = await loadEvalArtifactAny(dataDir, parsed.evalId ?? "");
-		await loadEvalArtifactAny(dataDir, parsed.baseline ?? "");
-		if (!isV2Artifact(candidate)) {
-			const pass = candidate.summary.failed === 0;
-			process.stdout.write(pass ? "gate: pass\n" : "gate: fail\n");
-			return pass ? 0 : 1;
-		}
+		const candidate = await loadEvalArtifactV3(dataDir, parsed.evalId ?? "");
+		await loadEvalArtifactV3(dataDir, parsed.baseline ?? "");
 		const thresholds =
 			parsed.thresholds === undefined
 				? { fail: [{ metric: "result.pass", op: "eq" as const, value: false }] }
@@ -293,21 +275,12 @@ async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {
 	}
 }
 
-function renderArtifactReport(
-	artifact: EvalArtifactV2 | EvalRunArtifact,
-	format: EvalReportFormat,
-	dataDir: string,
-): string {
-	if (isV2Artifact(artifact)) {
-		if (format === "json") return renderEvalJsonReportV2(artifact);
-		if (format === "md") return renderEvalMarkdownReportV2(artifact);
-		if (format === "swe-jsonl") return renderEvalSweJsonlReportV2(artifact);
-		if (format === "junit") return renderEvalJunitReportV2(artifact);
-		return renderEvalTextReportV2(artifact);
-	}
-	if (format === "json") return `${JSON.stringify(artifact, null, 2)}\n`;
-	if (format === "swe-jsonl") return renderSweJsonl(artifact);
-	return renderEvalReport(artifact, evalArtifactPath(dataDir, artifact.evalId));
+function renderArtifactReport(artifact: EvalArtifactV3, format: EvalReportFormat, _dataDir: string): string {
+	if (format === "json") return renderEvalJsonReportV3(artifact);
+	if (format === "md") return renderEvalMarkdownReportV3(artifact);
+	if (format === "swe-jsonl") return renderEvalSweJsonlReportV3(artifact);
+	if (format === "junit") return renderEvalJunitReportV3(artifact);
+	return renderEvalTextReportV3(artifact);
 }
 
 function handleEvalLoadError(error: unknown, fallback = 2): number {
@@ -337,8 +310,4 @@ function positiveInteger(value: string, flag: string): number {
 function reportFormat(value: string): EvalReportFormat {
 	if (value === "text" || value === "json" || value === "md" || value === "swe-jsonl" || value === "junit") return value;
 	throw new Error("--format must be text, json, md, swe-jsonl, or junit");
-}
-
-function isV2Artifact(value: EvalArtifactV2 | EvalRunArtifact): value is EvalArtifactV2 {
-	return value.version === 2;
 }

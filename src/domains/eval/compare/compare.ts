@@ -1,6 +1,6 @@
-import type { EvalArtifactV2 } from "../schema/artifact.js";
+import type { EvalArtifactV3 } from "../schema/artifact.js";
 
-export interface EvalCompareV2Summary {
+export interface EvalCompareV3Summary {
 	baselineEvalId: string;
 	candidateEvalId: string;
 	passRateDelta: number;
@@ -8,7 +8,7 @@ export interface EvalCompareV2Summary {
 	wallTimeDelta: number;
 }
 
-export function compareEvalArtifactsV2(baseline: EvalArtifactV2, candidate: EvalArtifactV2): EvalCompareV2Summary {
+export function compareEvalArtifactsV3(baseline: EvalArtifactV3, candidate: EvalArtifactV3): EvalCompareV3Summary {
 	return {
 		baselineEvalId: baseline.evalId,
 		candidateEvalId: candidate.evalId,
@@ -18,7 +18,7 @@ export function compareEvalArtifactsV2(baseline: EvalArtifactV2, candidate: Eval
 	};
 }
 
-export function renderEvalComparisonV2(summary: EvalCompareV2Summary): string {
+export function renderEvalComparisonV3(summary: EvalCompareV3Summary): string {
 	return [
 		`baseline eval: ${summary.baselineEvalId}`,
 		`candidate eval: ${summary.candidateEvalId}`,

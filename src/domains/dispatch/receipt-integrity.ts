@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity } from "./types.js";
+import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, RunReceiptQuality } from "./types.js";
 
 /**
  * The single receipt integrity contract. Clio is pre-1.0 with no installed
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 7;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 8;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -115,6 +115,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	toolStats: true,
 	toolActivity: true,
 	verification: true,
+	quality: true,
 	skillActivations: true,
 	autonomyEnforcement: true,
 	safety: true,
@@ -218,7 +219,36 @@ export function computeReceiptIntegrity(
 	};
 }
 
+function isReceiptQuality(value: unknown): value is RunReceiptQuality {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const quality = value as Record<string, unknown>;
+	if (quality.version !== 1 || !Array.isArray(quality.typedValidations)) return false;
+	if (
+		!quality.typedValidations.every(
+			(fact) =>
+				fact !== null &&
+				typeof fact === "object" &&
+				typeof (fact as Record<string, unknown>).sourceId === "string" &&
+				typeof (fact as Record<string, unknown>).validatorDigest === "string" &&
+				/^[0-9a-f]{64}$/.test(String((fact as Record<string, unknown>).validatorDigest)) &&
+				typeof (fact as Record<string, unknown>).passed === "boolean",
+		)
+	)
+		return false;
+	const schema = quality.responseSchema;
+	if (!schema || typeof schema !== "object" || Array.isArray(schema)) return false;
+	const responseSchema = schema as Record<string, unknown>;
+	return (
+		(responseSchema.sourceId === null || typeof responseSchema.sourceId === "string") &&
+		(responseSchema.schemaDigest === null ||
+			(typeof responseSchema.schemaDigest === "string" && /^[0-9a-f]{64}$/.test(responseSchema.schemaDigest))) &&
+		typeof responseSchema.runtimeEnforceable === "boolean" &&
+		(responseSchema.enforcementPassed === null || typeof responseSchema.enforcementPassed === "boolean")
+	);
+}
+
 export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnvelope): RunReceipt {
+	if (!isReceiptQuality(receipt.quality)) throw new Error("receipt integrity: required quality block invalid");
 	return {
 		...receipt,
 		integrity: computeReceiptIntegrity(receipt, envelope),
@@ -273,7 +303,7 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 }
 
 export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelope): ReceiptIntegrityResult {
-	if (!isReceiptIntegrity(receipt.integrity)) {
+	if (!isReceiptQuality(receipt.quality) || !isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
 	const mismatch = firstLedgerMismatch(receipt, envelope);
