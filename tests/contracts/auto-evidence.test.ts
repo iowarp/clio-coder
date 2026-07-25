@@ -42,6 +42,7 @@ function runEnvelope(runId: string, sessionId: string | null = null): Record<str
 	return {
 		id: runId,
 		agentId: "agent-smoke",
+		executionRole: "builder",
 		task: "run pytest to validate the change",
 		targetId: "target-smoke",
 		wireModelId: "model-smoke",
@@ -132,6 +133,7 @@ async function sealRunWithConservativeReceiptSummary(input: { stateDir: string; 
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		agentId: "agent-smoke",
+		executionRole: "builder",
 		task: "validate transcript-level evidence",
 		targetId: "target-smoke",
 		wireModelId: "model-smoke",
@@ -172,6 +174,7 @@ async function sealRunWithConservativeReceiptSummary(input: { stateDir: string; 
 		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "agent-smoke",
+		executionRole: "builder",
 		task: "validate transcript-level evidence",
 		targetId: "target-smoke",
 		wireModelId: "model-smoke",

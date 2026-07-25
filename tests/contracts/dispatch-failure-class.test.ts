@@ -127,12 +127,12 @@ describe("dispatch failure classification", () => {
 			});
 			await bundle.extension.start();
 			try {
-				const first = await bundle.contract.dispatch({ agentId: "coder", task: kind });
+				const first = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: kind });
 				if (kind === "cancel") bundle.contract.abort(first.runId);
 				const firstReceipt = await first.finalPromise;
 				strictEqual(firstReceipt.outcome, kind === "cancel" ? "canceled" : "failed");
 				strictEqual(bundle.contract.snapshot().retrying.length, 0);
-				const next = await bundle.contract.dispatch({ agentId: "coder", task: `after ${kind}` });
+				const next = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: `after ${kind}` });
 				strictEqual((await next.finalPromise).outcome, "succeeded");
 				strictEqual(spawns, 2);
 			} finally {
@@ -156,9 +156,13 @@ describe("dispatch failure classification", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const first = await bundle.contract.dispatch({ agentId: "coder", task: "capacity" });
+			const first = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "capacity" });
 			strictEqual((await first.finalPromise).outcome, "failed");
-			const second = await bundle.contract.dispatch({ agentId: "coder", task: "after capacity" });
+			const second = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "after capacity",
+			});
 			strictEqual((await second.finalPromise).outcome, "succeeded");
 			strictEqual(affectsTargetBreaker("internal"), false);
 		} finally {
@@ -179,9 +183,17 @@ describe("dispatch failure classification", () => {
 		});
 		await internalBundle.extension.start();
 		try {
-			const first = await internalBundle.contract.dispatch({ agentId: "coder", task: "internal" });
+			const first = await internalBundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "internal",
+			});
 			await rejects(first.finalPromise, /synthetic finalization failure/);
-			const second = await internalBundle.contract.dispatch({ agentId: "coder", task: "after internal" });
+			const second = await internalBundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "after internal",
+			});
 			strictEqual((await second.finalPromise).outcome, "succeeded");
 		} finally {
 			await internalBundle.extension.stop?.();
@@ -195,9 +207,12 @@ describe("dispatch failure classification", () => {
 		});
 		await authBundle.extension.start();
 		try {
-			const first = await authBundle.contract.dispatch({ agentId: "coder", task: "auth" });
+			const first = await authBundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "auth" });
 			strictEqual((await first.finalPromise).outcome, "failed");
-			await rejects(authBundle.contract.dispatch({ agentId: "coder", task: "after auth" }), /cooling down/);
+			await rejects(
+				authBundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "after auth" }),
+				/cooling down/,
+			);
 		} finally {
 			await authBundle.extension.stop?.();
 		}
@@ -235,6 +250,7 @@ describe("dispatch failure classification", () => {
 		try {
 			const handle = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "channel failure",
 				node: "blade",
 				failover: "automatic",
@@ -305,6 +321,7 @@ describe("dispatch failure classification", () => {
 		try {
 			const handle = await qualityBundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "quality gate",
 				failover: "automatic",
 				target: "quality-target",
@@ -349,6 +366,7 @@ describe("dispatch failure classification", () => {
 		try {
 			const handle = await authBundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "auth failover",
 				failover: "automatic",
 				target: "primary",
@@ -390,6 +408,7 @@ describe("dispatch failure classification", () => {
 		try {
 			const handle = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "rate limited",
 				failover: "automatic",
 				target: "primary",
@@ -430,6 +449,7 @@ describe("dispatch failure classification", () => {
 		try {
 			const handle = await bundle.contract.dispatch({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "pinned permanent failure",
 				target: targetId,
 			});
@@ -449,7 +469,10 @@ describe("dispatch failure classification", () => {
 			ok(last.atMs - first.atMs < cooldownMs, `attempts spanned ${last.atMs - first.atMs}ms`);
 
 			// The cooldown still protects new work against the same failing target.
-			await rejects(bundle.contract.dispatch({ agentId: "coder", task: "new work", target: targetId }), /cooling down/);
+			await rejects(
+				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "new work", target: targetId }),
+				/cooling down/,
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -470,7 +493,7 @@ describe("dispatch failure classification", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "retry denied" });
+			const handle = await bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "retry denied" });
 			strictEqual((await handle.finalPromise).outcome, "failed");
 			const assignment = bundle.contract.assignments?.get(handle.runId);
 			ok(assignment);

@@ -26,6 +26,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { ExecutionRole } from "./execution-role.js";
 import {
 	clearsPostureFloors,
 	compareRankedRoutes,
@@ -46,7 +47,7 @@ import {
 export interface RouteCandidate {
 	agentId: string;
 	specFingerprint: string;
-	executionRole: string;
+	executionRole: ExecutionRole;
 	targetId: string;
 	modelId: string;
 	runtimeId: string;
@@ -143,25 +144,15 @@ export interface RouteIdentityInput {
 	toolSignature: string;
 }
 
-/** The request facts that decide a tuple's role and prompt composition. */
+/**
+ * The request facts that decide a tuple's prompt composition. The role itself is
+ * derived once by `execution-role.ts` and passed in, so candidate construction
+ * cannot invent a second, divergent role policy.
+ */
 export interface RouteRoleInput {
-	/** Zero-based lineage attempt; anything past the first is recovery work. */
-	attempt: number;
-	gateRole?: "builder" | "reviewer" | "candidate" | "judge";
+	executionRole: ExecutionRole;
 	/** Persona override prompt when the request substituted one, else undefined. */
 	personaPrompt?: string;
-}
-
-/**
- * The semantic role this run plays, which is what route statistics must be
- * grouped by: a Coder run under a reviewer persona is reviewer evidence, not
- * builder evidence, and a retry is recovery evidence for neither.
- */
-export function executionRoleFor(role: RouteRoleInput): string {
-	if (role.attempt > 0) return "recovery";
-	if (role.gateRole === "reviewer") return "reviewer";
-	if (role.gateRole === "judge") return "judge";
-	return "builder";
 }
 
 /**
@@ -193,7 +184,7 @@ export function toRouteCandidate(identity: RouteIdentityInput, role: RouteRoleIn
 	return {
 		agentId: identity.agentId,
 		specFingerprint: identity.specFingerprint,
-		executionRole: executionRoleFor(role),
+		executionRole: role.executionRole,
 		targetId: identity.targetId,
 		modelId: identity.wireModelId,
 		runtimeId: identity.runtimeId,

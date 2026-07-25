@@ -15,6 +15,7 @@ function receiptWithQuality(quality: "pass" | "fail" | "unmeasured") {
 	const envelope: RunEnvelope = {
 		id: "run-verifier",
 		agentId: "verifier",
+		executionRole: "builder",
 		task: "verify",
 		targetId: "target",
 		wireModelId: "model",
@@ -36,6 +37,7 @@ function receiptWithQuality(quality: "pass" | "fail" | "unmeasured") {
 	const draft: RunReceiptDraft = {
 		runId: envelope.id,
 		agentId: envelope.agentId,
+		executionRole: "builder",
 		task: envelope.task,
 		targetId: envelope.targetId,
 		wireModelId: envelope.wireModelId,

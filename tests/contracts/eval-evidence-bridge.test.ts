@@ -15,6 +15,7 @@ function receipt(partial: Partial<RunReceipt> = {}): RunReceipt {
 	return {
 		runId: "run-1",
 		agentId: "scout",
+		executionRole: "builder",
 		task: "map the dispatch domain",
 		targetId: "local",
 		wireModelId: "model-a",
@@ -42,7 +43,7 @@ function receipt(partial: Partial<RunReceipt> = {}): RunReceipt {
 			resultContract: null,
 		},
 		sessionId: null,
-		integrity: { version: 9, algorithm: "sha256", digest: "d".repeat(64) },
+		integrity: { version: 10, algorithm: "sha256", digest: "d".repeat(64) },
 		...partial,
 	} as RunReceipt;
 }

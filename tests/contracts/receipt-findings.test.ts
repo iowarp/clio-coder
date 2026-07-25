@@ -20,6 +20,7 @@ function envelope(partial: Partial<RunEnvelope> = {}): RunEnvelope {
 	return {
 		id: "run-root",
 		agentId: "coder",
+		executionRole: "builder",
 		task: "validate the change",
 		targetId: "local",
 		wireModelId: "model-a",
@@ -64,6 +65,7 @@ function draft(partial: Partial<RunReceiptDraft> = {}): RunReceiptDraft {
 	return {
 		runId: "run-root",
 		agentId: "coder",
+		executionRole: "builder",
 		task: "validate the change",
 		targetId: "local",
 		wireModelId: "model-a",

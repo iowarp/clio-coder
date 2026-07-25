@@ -348,6 +348,7 @@ describe("dispatch board terminal taxonomy", () => {
 			bus.emit(BusChannels.DispatchCompleted, {
 				runId: "run-cost",
 				agentId: "coder",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
@@ -383,6 +384,7 @@ describe("dispatch board terminal taxonomy", () => {
 				bus.emit(BusChannels.DispatchStarted, {
 					runId: `run-${reason}`,
 					agentId: "coder",
+					executionRole: "builder",
 					targetId: "default",
 					wireModelId: "model",
 					runtimeId: "runtime",
@@ -391,6 +393,7 @@ describe("dispatch board terminal taxonomy", () => {
 				bus.emit(BusChannels.DispatchFailed, {
 					runId: `run-${reason}`,
 					agentId: "coder",
+					executionRole: "builder",
 					targetId: "default",
 					wireModelId: "model",
 					runtimeId: "runtime",
@@ -414,6 +417,7 @@ describe("dispatch board terminal taxonomy", () => {
 			bus.emit(BusChannels.DispatchStarted, {
 				runId: "run-dead",
 				agentId: "coder",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
@@ -429,6 +433,7 @@ describe("dispatch board terminal taxonomy", () => {
 			bus.emit(BusChannels.DispatchFailed, {
 				runId: "run-dead",
 				agentId: "coder",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
@@ -454,6 +459,7 @@ describe("dispatch board operator lifecycle", () => {
 			bus.emit(BusChannels.DispatchStarted, {
 				runId: "run-task",
 				agentId: "coder",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
@@ -475,6 +481,7 @@ describe("dispatch board operator lifecycle", () => {
 			bus.emit(BusChannels.DispatchStarted, {
 				runId: "run-cancel",
 				agentId: "coder",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
@@ -505,6 +512,7 @@ describe("dispatch board operator lifecycle", () => {
 				bus.emit(BusChannels.DispatchStarted, {
 					runId: `run-${terminal}`,
 					agentId: "coder",
+					executionRole: "builder",
 					targetId: "default",
 					wireModelId: "model",
 					runtimeId: "runtime",
@@ -521,6 +529,7 @@ describe("dispatch board operator lifecycle", () => {
 				bus.emit(terminal, {
 					runId: `run-${terminal}`,
 					agentId: "coder",
+					executionRole: "builder",
 					targetId: "default",
 					wireModelId: "model",
 					runtimeId: "runtime",
@@ -544,6 +553,7 @@ describe("dispatch board operator lifecycle", () => {
 			bus.emit(BusChannels.DispatchStarted, {
 				runId: "run-steer",
 				agentId: "coder",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
@@ -582,6 +592,7 @@ describe("dispatch board operator lifecycle", () => {
 			bus.emit(BusChannels.DispatchFailed, {
 				runId: "run-retry",
 				agentId: "coder",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",
@@ -636,6 +647,7 @@ describe("dispatch board operator lifecycle", () => {
 			bus.emit(BusChannels.DispatchStarted, {
 				runId: "run-live-cost",
 				agentId: "scout",
+				executionRole: "builder",
 				targetId: "default",
 				wireModelId: "model",
 				runtimeId: "runtime",

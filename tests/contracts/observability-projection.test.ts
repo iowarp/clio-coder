@@ -105,7 +105,13 @@ describe("contracts/observability-projection", () => {
 		strictEqual(seen.length, 1);
 		strictEqual(seen[0]?.runs.length, 0);
 
-		emit(bus, BusChannels.DispatchEnqueued, { runId: "r1", agentId: "a1", targetId: "t1", wireModelId: "m1" });
+		emit(bus, BusChannels.DispatchEnqueued, {
+			runId: "r1",
+			agentId: "a1",
+			executionRole: "builder",
+			targetId: "t1",
+			wireModelId: "m1",
+		});
 		emit(bus, BusChannels.DispatchStarted, { runId: "r1", agentId: "a1" });
 		await delay(FLUSH_WAIT_MS);
 		// Two events coalesced into a single notification.
@@ -113,7 +119,12 @@ describe("contracts/observability-projection", () => {
 		strictEqual(findRun(seen[1] as ObservabilitySnapshot, "r1")?.status, "running");
 
 		unsubscribe();
-		emit(bus, BusChannels.DispatchCompleted, { runId: "r1", agentId: "a1", outcome: "succeeded" });
+		emit(bus, BusChannels.DispatchCompleted, {
+			runId: "r1",
+			agentId: "a1",
+			executionRole: "builder",
+			outcome: "succeeded",
+		});
 		await delay(FLUSH_WAIT_MS);
 		strictEqual(seen.length, 2);
 		projection.stop();
@@ -121,10 +132,17 @@ describe("contracts/observability-projection", () => {
 
 	it("projects a completed dispatch into a recent run summary", () => {
 		const { bus, projection } = makeHarness();
-		emit(bus, BusChannels.DispatchEnqueued, { runId: "r1", agentId: "a1", targetId: "t1", wireModelId: "m1" });
+		emit(bus, BusChannels.DispatchEnqueued, {
+			runId: "r1",
+			agentId: "a1",
+			executionRole: "builder",
+			targetId: "t1",
+			wireModelId: "m1",
+		});
 		emit(bus, BusChannels.DispatchCompleted, {
 			runId: "r1",
 			agentId: "a1",
+			executionRole: "builder",
 			targetId: "t1",
 			wireModelId: "m1",
 			outcome: "succeeded",
@@ -168,8 +186,20 @@ describe("contracts/observability-projection", () => {
 		strictEqual(run.outcomeDetail, "turn timeout exceeded");
 
 		// A canceled reason maps to aborted; a stalled reason maps to dead.
-		emit(bus, BusChannels.DispatchFailed, { runId: "r3", agentId: "a1", outcome: "canceled", reason: "canceled" });
-		emit(bus, BusChannels.DispatchFailed, { runId: "r4", agentId: "a1", outcome: "stalled", reason: "stalled" });
+		emit(bus, BusChannels.DispatchFailed, {
+			runId: "r3",
+			agentId: "a1",
+			executionRole: "builder",
+			outcome: "canceled",
+			reason: "canceled",
+		});
+		emit(bus, BusChannels.DispatchFailed, {
+			runId: "r4",
+			agentId: "a1",
+			executionRole: "builder",
+			outcome: "stalled",
+			reason: "stalled",
+		});
 		const snap = projection.snapshot();
 		strictEqual(findRun(snap, "r3")?.status, "aborted");
 		strictEqual(findRun(snap, "r4")?.status, "dead");

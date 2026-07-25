@@ -32,6 +32,7 @@ const SESSION_ID = "sessredact1";
 async function sealRunWithSession(scratch: string, task: string): Promise<string> {
 	const ledger = openLedger();
 	const envelope = ledger.create({
+		executionRole: "builder",
 		agentId: "coder",
 		task,
 		targetId: "mini",
@@ -86,6 +87,7 @@ async function sealRunWithSession(scratch: string, task: string): Promise<string
 		costUsd: 0,
 	});
 	ledger.recordReceipt(envelope.id, {
+		executionRole: "builder",
 		verification: { state: "unverified", basis: "no-validation-tool" },
 		quality: {
 			version: 1,

@@ -144,6 +144,7 @@ function envelopeForDraft(draft: RunReceiptDraft): RunEnvelope {
 	return {
 		id: draft.runId,
 		agentId: draft.agentId,
+		executionRole: "builder",
 		task: draft.task,
 		targetId: draft.targetId,
 		wireModelId: draft.wireModelId,
@@ -186,6 +187,7 @@ function envelopeForDraft(draft: RunReceiptDraft): RunEnvelope {
 function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> = {}): RunReceipt {
 	const { integrity: _ignored, ...cleanOverrides } = overrides;
 	const draft: RunReceiptDraft = {
+		executionRole: "builder",
 		verification: { state: "unverified", basis: "no-validation-tool" },
 		quality: {
 			version: 1,
@@ -229,6 +231,7 @@ function runEnvelope(runId: string): RunEnvelope {
 	return {
 		id: runId,
 		agentId: "coder",
+		executionRole: "builder",
 		task: "do work",
 		targetId: "e",
 		wireModelId: "m",

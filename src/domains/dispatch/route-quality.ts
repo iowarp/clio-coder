@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { gateRouteCorrelation } from "./execution-role.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "./gate-decisions.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
@@ -16,6 +17,8 @@ export interface CorrelatedGateEvidence {
 	sourceDigest: string;
 	outcome: "pass" | "fail";
 	reason: "same-agent" | "same-model-family";
+	/** Every correlated route dimension, so a small fleet reports rather than hides it. */
+	dimensions: string[];
 }
 
 export interface RouteQualityReduction {
@@ -62,15 +65,6 @@ function compareStrings(left: string, right: string): number {
 	return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function modelFamily(model: string): string {
-	// Provider model ids commonly append dated snapshots. The stable family is
-	// the part before that suffix; an unfamiliar id remains its exact identity.
-	return model
-		.trim()
-		.toLowerCase()
-		.replace(/[-_:]?\d{4}[-_]?\d{2}[-_]?\d{2}$/u, "");
-}
-
 function authenticated(source: RouteQualityReceiptSource): boolean {
 	return verifyReceiptIntegrity(source.receipt, source.envelope).ok;
 }
@@ -103,10 +97,26 @@ function gateOutcome(artifact: GateDecisionArtifact): "pass" | "fail" | null {
 	return null;
 }
 
-function gateCorrelation(subject: RunReceipt, decider: RunReceipt): CorrelatedGateEvidence["reason"] | null {
-	if (subject.agentId === decider.agentId) return "same-agent";
-	if (modelFamily(subject.wireModelId) === modelFamily(decider.wireModelId)) return "same-model-family";
-	return null;
+function correlationFacts(receipt: RunReceipt): Parameters<typeof gateRouteCorrelation>[0] {
+	return {
+		agentId: receipt.agentId,
+		targetId: receipt.targetId,
+		wireModelId: receipt.wireModelId,
+		runtimeId: receipt.runtimeId,
+		nodeId: receipt.node?.id ?? "local",
+	};
+}
+
+function gateCorrelation(
+	subject: RunReceipt,
+	decider: RunReceipt,
+): Pick<CorrelatedGateEvidence, "reason" | "dimensions"> | null {
+	const correlation = gateRouteCorrelation(correlationFacts(subject), correlationFacts(decider));
+	if (correlation.independent) return null;
+	return {
+		reason: correlation.agent ? "same-agent" : "same-model-family",
+		dimensions: correlation.dimensions,
+	};
 }
 
 function evalAssignmentId(receipt: RunReceipt): string {
@@ -166,7 +176,7 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 		const correlation = gateCorrelation(subject, decider);
 		sourceDigests.add(artifact.integrity.digest);
 		if (correlation !== null && !operatorConfirmed) {
-			correlatedGates.push({ sourceDigest: artifact.integrity.digest, outcome: verdict, reason: correlation });
+			correlatedGates.push({ sourceDigest: artifact.integrity.digest, outcome: verdict, ...correlation });
 			continue;
 		}
 		checks.push({ kind: "independent-gate", sourceDigest: artifact.integrity.digest, passed: verdict === "pass" });

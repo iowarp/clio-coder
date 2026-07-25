@@ -1,14 +1,14 @@
-import { agentRecipeFixture } from "./agent-recipe.js";
 /**
  * Minimal DomainContext stub for dispatch-bundle contract tests: one healthy
- * openai-compat target, a permissive safety contract, a single `coder`
- * recipe, and an under-budget scheduling gate. Callers override individual
- * contracts by wrapping getContract.
+ * openai-compat target, a permissive safety contract, a `coder` recipe plus the
+ * builtin `verifier` every quality gate defaults to, and an under-budget
+ * scheduling gate. Callers override individual contracts by wrapping getContract.
  */
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
@@ -20,6 +20,7 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
+import { agentRecipeFixture } from "./agent-recipe.js";
 
 export interface DispatchStubOptions {
 	settings?: typeof DEFAULT_SETTINGS;
@@ -111,6 +112,21 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 			source: "builtin" as const,
 			filepath: "/test/coder.md",
 			body: "# Test Recipe",
+		},
+		{
+			// Review and compete gates default to the builtin Verifier, so the stub
+			// fleet must offer it or every gated dispatch fails admission.
+			...agentRecipeFixture(),
+			tools: [ToolNames.Verify],
+			toolRequirements: { required: [ToolNames.Verify], optional: [] },
+			id: "verifier",
+			name: "verifier",
+			description: "test verifier recipe",
+			capabilityClass: "verification" as const,
+			resultContract: { kind: "verifier-report" as const },
+			source: "builtin" as const,
+			filepath: "/test/verifier.md",
+			body: "# Test Verifier Recipe",
 		},
 	];
 	const agents: AgentsContract = {

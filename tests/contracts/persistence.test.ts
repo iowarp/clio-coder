@@ -59,6 +59,7 @@ describe("contracts/persistence", () => {
 		const ledger = openLedger({ maxRuns: 10 });
 		const env = ledger.create({
 			agentId: "coder",
+			executionRole: "builder",
 			task: "persistence task",
 			targetId: "anthropic-default",
 			wireModelId: "claude-sonnet-4-6",
@@ -100,6 +101,7 @@ describe("contracts/persistence", () => {
 			outcome: "succeeded",
 			runId: env.id,
 			agentId: "coder",
+			executionRole: "builder",
 			task: "persistence task",
 			targetId: "anthropic-default",
 			wireModelId: "claude-sonnet-4-6",

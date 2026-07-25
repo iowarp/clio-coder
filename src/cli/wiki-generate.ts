@@ -104,6 +104,7 @@ export async function generateWikiWithDocumenter(dispatch: DispatchContract, inp
 	});
 	const handle = await dispatch.dispatch({
 		agentId: "documenter",
+		executionRole: "builder",
 		task: input.prompt,
 		cwd: input.cwd,
 		requestOrigin: "internal",

@@ -188,14 +188,17 @@ describe("fleet placement resolution order", () => {
 	it("returns null (pre-fleet behavior) when no nodes are configured and nothing is requested", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		const { resolve } = resolver({ settings, registry: createFleetRegistry(() => []) });
-		strictEqual(resolve({ agentId: "coder", task: "t" }), null);
+		strictEqual(resolve({ agentId: "coder", executionRole: "builder", task: "t" }), null);
 	});
 
 	it("previews explicit, profile-bound, and automatic placement without taking capacity", () => {
 		const automatic = resolver();
-		strictEqual(automatic.preview({ agentId: "coder", task: "t" }).node.id, "blade");
+		strictEqual(automatic.preview({ agentId: "coder", executionRole: "builder", task: "t" }).node.id, "blade");
 		strictEqual(automatic.registry.get("blade")?.activeWorkers, 0, "preview must not reserve capacity");
-		strictEqual(automatic.preview({ agentId: "coder", task: "t", node: "mini" }).node.id, "mini");
+		strictEqual(
+			automatic.preview({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" }).node.id,
+			"mini",
+		);
 		strictEqual(automatic.registry.get("mini")?.activeWorkers, 0);
 
 		const profileBound = resolver({
@@ -204,16 +207,16 @@ describe("fleet placement resolution order", () => {
 				agentBindings: { coder: "pinned" },
 			}),
 		});
-		strictEqual(profileBound.preview({ agentId: "coder", task: "t" }).node.id, "mini");
+		strictEqual(profileBound.preview({ agentId: "coder", executionRole: "builder", task: "t" }).node.id, "mini");
 		strictEqual(profileBound.registry.get("mini")?.activeWorkers, 0);
 	});
 
 	it("pins a previewed automatic node so later load cannot drift execution", () => {
 		const { preview, resolve, registry } = resolver();
-		const planned = preview({ agentId: "coder", task: "t" }).node;
+		const planned = preview({ agentId: "coder", executionRole: "builder", task: "t" }).node;
 		strictEqual(planned.id, "blade");
 		strictEqual(registry.tryAcquire("mini"), true, "unrelated load changes after approval");
-		const launched = resolve({ agentId: "coder", task: "t", node: planned.id });
+		const launched = resolve({ agentId: "coder", executionRole: "builder", task: "t", node: planned.id });
 		strictEqual(launched?.node.id, "blade", "execution honors the approved pin");
 	});
 
@@ -224,7 +227,7 @@ describe("fleet placement resolution order", () => {
 				agentBindings: { coder: "pinned" },
 			}),
 		});
-		const placement = resolve({ agentId: "coder", task: "t", node: "mini" });
+		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" });
 		strictEqual(placement?.node.id, "mini");
 	});
 
@@ -235,47 +238,53 @@ describe("fleet placement resolution order", () => {
 				agentBindings: { coder: "pinned" },
 			}),
 		});
-		const placement = resolve({ agentId: "coder", task: "t" });
+		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
 		strictEqual(placement?.node.id, "mini");
 	});
 
 	it("places on the least-loaded eligible node, then declaration order, then local", () => {
 		const { resolve, registry } = resolver();
-		const first = resolve({ agentId: "coder", task: "t" });
+		const first = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
 		strictEqual(first?.node.id, "blade", "declaration order breaks the tie");
-		const second = resolve({ agentId: "coder", task: "t" });
+		const second = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
 		strictEqual(second?.node.id, "mini", "blade now carries load");
-		const third = resolve({ agentId: "coder", task: "t" });
+		const third = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
 		strictEqual(third?.node.id, "blade", "blade has spare capacity, mini is full");
-		const fourth = resolve({ agentId: "coder", task: "t" });
+		const fourth = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
 		strictEqual(fourth?.node.id, "local", "all remote capacity consumed");
 		strictEqual(registry.get("blade")?.activeWorkers, 2);
 	});
 
 	it("rejects explicit pins on unknown, offline, unpreflighted, or full nodes", () => {
 		const base = resolver();
-		throws(() => base.resolve({ agentId: "coder", task: "t", node: "ghost" }), /unknown fleet node 'ghost'/);
+		throws(
+			() => base.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "ghost" }),
+			/unknown fleet node 'ghost'/,
+		);
 
 		base.registry.markOffline("blade", "classified dead");
-		throws(() => base.resolve({ agentId: "coder", task: "t", node: "blade" }), /offline.*classified dead/);
+		throws(
+			() => base.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "blade" }),
+			/offline.*classified dead/,
+		);
 
 		const unpreflighted = resolver({
 			preflight: (node) => ({ ok: false, reason: `node '${node.id}' has not passed the fleet preflight` }),
 		});
 		throws(
-			() => unpreflighted.resolve({ agentId: "coder", task: "t", node: "mini" }),
+			() => unpreflighted.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" }),
 			/has not passed the fleet preflight/,
 		);
 
 		const full = resolver();
 		strictEqual(full.registry.tryAcquire("mini"), true);
-		throws(() => full.resolve({ agentId: "coder", task: "t", node: "mini" }), /at capacity/);
+		throws(() => full.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" }), /at capacity/);
 	});
 
 	it("skips ineligible nodes on the least-loaded path instead of failing", () => {
 		const { resolve, registry } = resolver();
 		registry.markOffline("blade", "dead");
-		const placement = resolve({ agentId: "coder", task: "t" });
+		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
 		strictEqual(placement?.node.id, "mini");
 	});
 
@@ -284,7 +293,7 @@ describe("fleet placement resolution order", () => {
 		const reroutes: RunNodeReroute[] = [
 			{ attempt: 1, fromNode: "mini", toNode: "", reason: "node mini classified dead" },
 		];
-		const placement = resolve({ agentId: "coder", task: "t", node: "blade", reroutes });
+		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "blade", reroutes });
 		deepStrictEqual(placement?.reroutes, [
 			{ attempt: 1, fromNode: "mini", toNode: "blade", reason: "node mini classified dead" },
 		]);

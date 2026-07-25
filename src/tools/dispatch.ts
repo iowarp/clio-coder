@@ -15,17 +15,26 @@ import type {
 } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import {
+	type AgentRoleFactsResolver,
+	gateDeciderAgentId,
+	gateRouteCorrelation,
+	type RouteCorrelationFacts,
+	requestExecutionRole,
+} from "../domains/dispatch/execution-role.js";
+import {
+	decideReviewGate,
 	finalizePendingGateDecision,
 	type GateDecisionArtifact,
+	type GateDecisionCorrelation,
 	type GateDecisionDraft,
 	materializePendingGateDecision,
 	type PendingGateDecisionHandle,
+	parseCompeteGateResult,
 	readGateDecisionArtifacts,
 	readPendingGateDecisions,
 	resolvePendingGateDecision,
 	stagePendingGateDecision,
 	stagePendingGateOutput,
-	writeGateDecisionArtifact,
 } from "../domains/dispatch/gate-decisions.js";
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
@@ -97,6 +106,8 @@ export interface DispatchToolDeps {
 	};
 	/** Renders the agent fleet catalog for the `list: true` action. */
 	getAgentCatalog?: () => string;
+	/** Strict recipe facts each request's execution role is derived from. */
+	getAgentRoleFacts?: AgentRoleFactsResolver;
 	/**
 	 * Session-effective autonomy level. Plan provenance records how the plan
 	 * gate resolved (operator approval versus full-auto logging) and compete
@@ -409,12 +420,15 @@ function timeoutMsArg(args: Record<string, unknown>): number | undefined {
 
 function dispatchRequestFromArgs(
 	args: Record<string, unknown>,
+	resolveFacts?: AgentRoleFactsResolver,
 ): { ok: true; request: DispatchRequest } | { ok: false; message: string } {
 	const task = stringArg(args, "task");
 	if (!task) return { ok: false, message: "missing task (pass list:true to see available agents)" };
 
+	const agentId = stringArg(args, "agent", "agent_id") ?? DEFAULT_AGENT_ID;
 	const request: DispatchRequest = {
-		agentId: stringArg(args, "agent", "agent_id") ?? DEFAULT_AGENT_ID,
+		agentId,
+		executionRole: requestExecutionRole({ agentId, ...(resolveFacts ? { resolveFacts } : {}) }),
 		task,
 	};
 	if ("briefing" in args && args.briefing !== undefined) {
@@ -493,6 +507,7 @@ function dispatchRequestFromArgs(
 
 function dispatchRequestsFromArgs(
 	args: Record<string, unknown>,
+	resolveFacts?: AgentRoleFactsResolver,
 ): { ok: true; requests: DispatchRequest[] } | { ok: false; message: string } {
 	if (Object.hasOwn(args, "task") && Object.hasOwn(args, "tasks")) {
 		return { ok: false, message: "dispatch: pass either task for one run or tasks for a batch, not both" };
@@ -525,7 +540,7 @@ function dispatchRequestsFromArgs(
 				Reflect.deleteProperty(itemArgs, "agent_id");
 			}
 		}
-		const parsed = dispatchRequestFromArgs(itemArgs);
+		const parsed = dispatchRequestFromArgs(itemArgs, resolveFacts);
 		if (!parsed.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${parsed.message}` };
 		requests.push(parsed.request);
 	}
@@ -864,14 +879,33 @@ function subjectRef(receipt: RunReceipt): RunGateSubjectRef {
 	return { runId: receipt.runId, digest: receipt.integrity?.digest ?? null };
 }
 
-/** Verdict protocol: the reviewer's LAST "VERDICT: ..." line decides. */
-export function parseReviewVerdict(text: string): "pass" | "fail" | "revise" | null {
-	let verdict: "pass" | "fail" | "revise" | null = null;
-	for (const match of text.matchAll(/^\s*VERDICT:\s*(pass|fail|revise)\b/gim)) {
-		const raw = match[1]?.toLowerCase();
-		if (raw === "pass" || raw === "fail" || raw === "revise") verdict = raw;
-	}
-	return verdict;
+/**
+ * Sealed correlation between a decider route and the subject route it graded.
+ * Reported on every decision, including when no independent route exists.
+ */
+function gateCorrelationOf(subject: RunReceipt, decider: RunReceipt): GateDecisionCorrelation {
+	const facts = (receipt: RunReceipt): RouteCorrelationFacts => ({
+		agentId: receipt.agentId,
+		targetId: receipt.targetId,
+		wireModelId: receipt.wireModelId,
+		runtimeId: receipt.runtimeId,
+		nodeId: receipt.node?.id ?? "local",
+	});
+	const { agent, target, modelFamily, runtime, node, independent } = gateRouteCorrelation(
+		facts(subject),
+		facts(decider),
+	);
+	return { agent, target, modelFamily, runtime, node, independent };
+}
+
+/** Compete candidates share the base request's agent and model, so the first is representative. */
+function competeCorrelation(
+	candidates: ReadonlyArray<{ receipt: RunReceipt }>,
+	decider: RunReceipt,
+): GateDecisionCorrelation {
+	const subject = candidates[0]?.receipt;
+	if (subject === undefined) throw new Error("compete decision requires at least one candidate receipt");
+	return gateCorrelationOf(subject, decider);
 }
 
 function reviewerTask(originalTask: string, builderRunId: string, cycle: number): string {
@@ -880,7 +914,6 @@ function reviewerTask(originalTask: string, builderRunId: string, cycle: number)
 		"The builder's final answer is provided as input data; verify it against the workspace, do not trust it blindly.",
 		"Original task the builder was given:",
 		originalTask,
-		'End with exactly one line "VERDICT: pass", "VERDICT: revise", or "VERDICT: fail".',
 	].join("\n\n");
 }
 
@@ -955,7 +988,9 @@ async function runReviewGated(
 		draft: GateDecisionDraft,
 		pending?: PendingGateDecisionHandle,
 	): { artifact: GateDecisionArtifact; path: string } => {
-		const decision = pending ? finalizePendingGateDecision(pending, draft) : writeGateDecisionArtifact(draft);
+		const decision = pending
+			? finalizePendingGateDecision(pending, draft)
+			: materializePendingGateDecision(stagePendingGateDecision(draft));
 		decisions.push(decision);
 		return decision;
 	};
@@ -1028,6 +1063,7 @@ async function runReviewGated(
 			};
 			const builderRequest: DispatchRequest = {
 				...base,
+				executionRole: "builder",
 				gate: builderGate,
 				...(findings !== null
 					? { pipelineInput: { fromRunId: findings.reviewer.receipt.runId, position: cycle, text: findings.text } }
@@ -1057,7 +1093,8 @@ async function runReviewGated(
 				};
 			}
 			const reviewerRequest: DispatchRequest = {
-				agentId: review.reviewer ?? base.agentId,
+				agentId: gateDeciderAgentId(review.reviewer),
+				executionRole: "reviewer",
 				task: reviewerTask(base.task, builder.receipt.runId, cycle),
 				systemPrompt: REVIEWER_GATE_PROMPT,
 				autonomy: "read-only",
@@ -1092,6 +1129,7 @@ async function runReviewGated(
 						outcome: "exhausted",
 						subjects: [subjectRef(builder.receipt)],
 						decider: subjectRef(reviewer.receipt),
+						correlation: gateCorrelationOf(builder.receipt, reviewer.receipt),
 						detail: `reviewer ended ${pipelineFailureReason(reviewer.receipt)}`,
 					},
 					reviewer.pendingGate,
@@ -1104,62 +1142,26 @@ async function runReviewGated(
 					needsDecision: `reviewer run ${reviewer.receipt.runId} ended ${pipelineFailureReason(reviewer.receipt)} in cycle ${cycle}`,
 				};
 			}
-			const verdict = parseReviewVerdict(normalizedAssistantText(reviewer.summary));
-			if (verdict === "pass" || verdict === "fail") {
-				recordDecision(
-					{
-						group,
-						topology: "review",
-						cycle,
-						outcome: verdict,
-						subjects: [subjectRef(builder.receipt)],
-						decider: subjectRef(reviewer.receipt),
-					},
-					reviewer.pendingGate,
-				);
-				return { runs, decisions, verdict, cycles: cycle };
-			}
-			// An unparseable answer counts as revise: the findings text is the
-			// whole reviewer answer, and the cycle bound still terminates the gate.
-			const exhaustionDraft: GateDecisionDraft | null =
-				cycle === review.maxCycles
-					? {
-							group,
-							topology: "review",
-							cycle,
-							outcome: "exhausted",
-							subjects: [subjectRef(builder.receipt)],
-							decider: subjectRef(reviewer.receipt),
-							detail: `review gate exhausted after ${review.maxCycles} cycle(s)`,
-						}
-					: null;
-			const pendingExhaustion =
-				exhaustionDraft === null
-					? null
-					: stagePendingGateDecision(exhaustionDraft, { finalOutput: normalizedAssistantText(reviewer.summary) });
-			recordDecision(
-				{
-					group,
-					topology: "review",
-					cycle,
-					outcome: "revise",
-					subjects: [subjectRef(builder.receipt)],
-					decider: subjectRef(reviewer.receipt),
-					detail: verdict === "revise" ? "reviewer requested revision" : "unparseable verdict treated as revision",
-				},
-				reviewer.pendingGate,
-			);
-			if (pendingExhaustion !== null) {
-				decisions.push(materializePendingGateDecision(pendingExhaustion));
+			const decided = decideReviewGate({
+				group,
+				cycle,
+				terminalCycle: cycle === review.maxCycles,
+				subjects: [subjectRef(builder.receipt)],
+				decider: subjectRef(reviewer.receipt),
+				correlation: gateCorrelationOf(builder.receipt, reviewer.receipt),
+				output: normalizedAssistantText(reviewer.summary),
+			});
+			recordDecision(decided.draft, reviewer.pendingGate);
+			if (decided.findings === null) {
 				return {
 					runs,
 					decisions,
-					verdict: null,
+					verdict: decided.verdict,
 					cycles: cycle,
-					needsDecision: `review gate exhausted after ${review.maxCycles} cycle(s) without a pass; the operator decides whether to accept, retry, or revert`,
+					...(decided.needsDecision !== null ? { needsDecision: decided.needsDecision } : {}),
 				};
 			}
-			findings = { reviewer, text: normalizedAssistantText(reviewer.summary) };
+			findings = { reviewer, text: decided.findings };
 		}
 		throw new Error("review gate exhausted without terminal decision evidence");
 	} finally {
@@ -1178,19 +1180,8 @@ function judgeTask(originalTask: string, candidates: ReadonlyArray<CandidateWork
 			(candidate, index) =>
 				`  ${candidate.index}. branch=${candidate.branch} worktree=${candidate.path} (${stats[index] ?? "?"})`,
 		),
-		'End with exactly one line "WINNER: <candidate number>".',
 	];
 	return lines.join("\n\n");
-}
-
-/** The judge's LAST "WINNER: n" line decides. */
-export function parseJudgeWinner(text: string, candidateCount: number): number | null {
-	let winner: number | null = null;
-	for (const match of text.matchAll(/^\s*WINNER:\s*(\d+)\b/gim)) {
-		const raw = Number.parseInt(match[1] ?? "", 10);
-		if (Number.isInteger(raw) && raw >= 1 && raw <= candidateCount) winner = raw;
-	}
-	return winner;
 }
 
 function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunReceipt | null {
@@ -1209,6 +1200,17 @@ function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunRece
 	if (!verification.ok) throw new Error(`pending gate receipt ${runId} failed integrity: ${verification.reason}`);
 	if (receipt.integrity?.digest === undefined) throw new Error(`pending gate receipt ${runId} has no integrity digest`);
 	return receipt;
+}
+
+function recoveredCorrelation(
+	deps: DispatchToolDeps,
+	subjects: ReadonlyArray<RunGateSubjectRef>,
+	decider: RunReceipt,
+): GateDecisionCorrelation {
+	const first = subjects[0];
+	const subject = first === undefined ? null : readVerifiedGateReceipt(deps, first.runId);
+	if (subject === null) throw new Error("recovered gate decision has no verified subject receipt for correlation");
+	return gateCorrelationOf(subject, decider);
 }
 
 function settlePendingCompeteResource(handle: PendingGateDecisionHandle, draft: GateDecisionDraft): void {
@@ -1259,48 +1261,28 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 					outcome: "exhausted",
 					subjects: record.subjects,
 					decider,
+					correlation: recoveredCorrelation(deps, record.subjects, deciderReceipt),
 					detail: `reviewer ended ${pipelineFailureReason(deciderReceipt)}`,
 				};
 			} else {
-				const verdict = parseReviewVerdict(record.finalOutput);
-				draft = {
+				draft = decideReviewGate({
 					group: record.group,
-					topology: "review",
 					cycle: record.cycle,
-					outcome: verdict === "pass" || verdict === "fail" ? verdict : "revise",
+					terminalCycle: record.terminalCycle === true,
 					subjects: record.subjects,
 					decider,
-					...(verdict === "pass" || verdict === "fail"
-						? {}
-						: {
-								detail: verdict === "revise" ? "reviewer requested revision" : "unparseable verdict treated as revision",
-							}),
-				};
-				if (draft.outcome === "revise" && record.terminalCycle === true) {
-					const exhausted = stagePendingGateDecision(
-						{
-							group: record.group,
-							topology: "review",
-							cycle: record.cycle,
-							outcome: "exhausted",
-							subjects: record.subjects,
-							decider,
-							detail: `review gate exhausted after ${record.cycle} cycle(s)`,
-						},
-						{ finalOutput: record.finalOutput },
-					);
-					finalizePendingGateDecision(handle, draft);
-					materializePendingGateDecision(exhausted);
-					continue;
-				}
+					correlation: recoveredCorrelation(deps, record.subjects, deciderReceipt),
+					output: record.finalOutput,
+				}).draft;
 			}
 			finalizePendingGateDecision(handle, draft);
 			continue;
 		}
 
-		const pick = isPipelineStepFailure(deciderReceipt)
+		const judged = isPipelineStepFailure(deciderReceipt)
 			? null
-			: parseJudgeWinner(record.finalOutput, record.subjects.length);
+			: parseCompeteGateResult(record.finalOutput, record.subjects.length);
+		const pick = judged?.ok ? judged.result.winner : null;
 		const pickedSubject = pick === null ? undefined : record.subjects[pick - 1];
 		const candidateReceipt = pickedSubject === undefined ? null : readVerifiedGateReceipt(deps, pickedSubject.runId);
 		if (pickedSubject !== undefined && candidateReceipt === null) {
@@ -1332,6 +1314,7 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 				outcome: "winner",
 				subjects: record.subjects,
 				decider,
+				correlation: recoveredCorrelation(deps, record.subjects, deciderReceipt),
 				winner: {
 					index: pick,
 					subject: pickedSubject,
@@ -1346,10 +1329,11 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 				outcome: "no-winner",
 				subjects: record.subjects,
 				decider,
+				correlation: recoveredCorrelation(deps, record.subjects, deciderReceipt),
 				detail: isPipelineStepFailure(deciderReceipt)
 					? `judge ended ${pipelineFailureReason(deciderReceipt)}`
-					: pick === null
-						? "judge returned no parseable WINNER line"
+					: judged !== null && !judged.ok
+						? judged.reason
 						: blockedProtected.length > 0
 							? `judge-selected candidate ${pick} changes protected artifact(s): ${blockedProtected.join(", ")}`
 							: `judge picked failed or missing candidate ${pick}`,
@@ -1643,6 +1627,7 @@ async function runCompete(
 				worktrees.map((worktree) => {
 					const request: DispatchRequest = {
 						...base,
+						executionRole: "builder",
 						cwd: worktree.path,
 						protectedArtifactRemap: { sourceRoot: root, workerRoot: worktree.path },
 						gate: { role: "candidate", group, cycle: worktree.index },
@@ -1693,7 +1678,8 @@ async function runCompete(
 				return { runs, decisions, group, winner: null, needsDecision: "every candidate builder failed; nothing to judge" };
 			}
 			const judgeRequest: DispatchRequest = {
-				agentId: compete.judge?.agent ?? base.agentId,
+				agentId: gateDeciderAgentId(compete.judge?.agent),
+				executionRole: "judge",
 				task: judgeTask(base.task, worktrees, stats),
 				systemPrompt: JUDGE_GATE_PROMPT,
 				autonomy: "read-only",
@@ -1727,19 +1713,20 @@ async function runCompete(
 			throwIfStopped();
 			const judgeReceipt = judgeRun.receipt;
 			const judgeSummary = judgeRun.summary;
+			// Every judged outcome names the same subjects, decider, and correlation;
+			// only the reason the gate produced no applicable winner differs.
+			const noWinner = (detail: string): GateDecisionDraft => ({
+				group,
+				topology: "compete",
+				cycle: 1,
+				outcome: "no-winner",
+				subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
+				decider: subjectRef(judgeReceipt),
+				correlation: competeCorrelation(candidateRuns, judgeReceipt),
+				detail,
+			});
 			if (isPipelineStepFailure(judgeReceipt)) {
-				recordDecision(
-					{
-						group,
-						topology: "compete",
-						cycle: 1,
-						outcome: "no-winner",
-						subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
-						decider: subjectRef(judgeReceipt),
-						detail: `judge ended ${pipelineFailureReason(judgeReceipt)}`,
-					},
-					judgeRun.pendingGate,
-				);
+				recordDecision(noWinner(`judge ended ${pipelineFailureReason(judgeReceipt)}`), judgeRun.pendingGate);
 				return {
 					runs,
 					decisions,
@@ -1748,44 +1735,22 @@ async function runCompete(
 					needsDecision: `judge run ${judgeReceipt.runId} ended ${pipelineFailureReason(judgeReceipt)}; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly`,
 				};
 			}
-			const pick = parseJudgeWinner(normalizedAssistantText(judgeSummary), compete.candidates);
-			if (pick === null) {
-				recordDecision(
-					{
-						group,
-						topology: "compete",
-						cycle: 1,
-						outcome: "no-winner",
-						subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
-						decider: subjectRef(judgeReceipt),
-						detail: "judge returned no parseable WINNER line",
-					},
-					judgeRun.pendingGate,
-				);
+			const judged = parseCompeteGateResult(normalizedAssistantText(judgeSummary), compete.candidates);
+			if (!judged.ok) {
+				recordDecision(noWinner(judged.reason), judgeRun.pendingGate);
 				return {
 					runs,
 					decisions,
 					group,
 					winner: null,
-					needsDecision:
-						"judge returned no parseable WINNER line; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly",
+					needsDecision: `${judged.reason}; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly`,
 				};
 			}
+			const pick = judged.result.winner;
 			const pickedWorktree = worktrees.find((worktree) => worktree.index === pick);
 			const pickedRun = candidateRuns[pick - 1];
 			if (!pickedWorktree || pickedRun === undefined || isPipelineStepFailure(pickedRun.receipt)) {
-				recordDecision(
-					{
-						group,
-						topology: "compete",
-						cycle: 1,
-						outcome: "no-winner",
-						subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
-						decider: subjectRef(judgeReceipt),
-						detail: `judge picked failed or missing candidate ${pick}`,
-					},
-					judgeRun.pendingGate,
-				);
+				recordDecision(noWinner(`judge picked failed or missing candidate ${pick}`), judgeRun.pendingGate);
 				return {
 					runs,
 					decisions,
@@ -1797,15 +1762,7 @@ async function runCompete(
 			const protectedChanges = protectedPathsChangedByCompeteBranch(root, pickedWorktree.branch, protectedPaths);
 			if (protectedChanges.length > 0) {
 				recordDecision(
-					{
-						group,
-						topology: "compete",
-						cycle: 1,
-						outcome: "no-winner",
-						subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
-						decider: subjectRef(judgeReceipt),
-						detail: `judge-selected candidate ${pick} changes protected artifact(s): ${protectedChanges.join(", ")}`,
-					},
+					noWinner(`judge-selected candidate ${pick} changes protected artifact(s): ${protectedChanges.join(", ")}`),
 					judgeRun.pendingGate,
 				);
 				return {
@@ -1829,6 +1786,7 @@ async function runCompete(
 					outcome: "winner",
 					subjects: candidateRuns.map((run) => subjectRef(run.receipt)),
 					decider: subjectRef(judgeReceipt),
+					correlation: competeCorrelation(candidateRuns, judgeReceipt),
 					winner: winnerRef,
 				},
 				judgeRun.pendingGate,
@@ -2015,22 +1973,24 @@ function runApplyWinner(
 		};
 	}
 	const writeConfirmation = (): { artifact: GateDecisionArtifact; path: string } =>
-		writeGateDecisionArtifact({
-			group,
-			topology: "compete",
-			cycle: 1,
-			outcome: authority.outcome,
-			subjects: [winnerRef.subject],
-			winner: winnerRef,
-			confirmation: {
-				id: winnerDecision.artifact.id,
-				digest: winnerDecision.artifact.integrity.digest,
-			},
-			detail:
-				authority.outcome === "operator-confirmed"
-					? `operator confirmation ${authority.requestId} (${authority.requestedBy}) approved ${branch} under dispatch plan ${describeDispatchPlan(args).hash}`
-					: `full-auto applied ${branch} under dispatch plan ${describeDispatchPlan(args).hash}`,
-		});
+		materializePendingGateDecision(
+			stagePendingGateDecision({
+				group,
+				topology: "compete",
+				cycle: 1,
+				outcome: authority.outcome,
+				subjects: [winnerRef.subject],
+				winner: winnerRef,
+				confirmation: {
+					id: winnerDecision.artifact.id,
+					digest: winnerDecision.artifact.integrity.digest,
+				},
+				detail:
+					authority.outcome === "operator-confirmed"
+						? `operator confirmation ${authority.requestId} (${authority.requestedBy}) approved ${branch} under dispatch plan ${describeDispatchPlan(args).hash}`
+						: `full-auto applied ${branch} under dispatch plan ${describeDispatchPlan(args).hash}`,
+			}),
+		);
 	let confirmation: { artifact: GateDecisionArtifact; path: string } | null = null;
 	if (authority.outcome === "operator-confirmed") {
 		try {
@@ -2318,7 +2278,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			}
 		}
 		if (deps.dispatch.preview === undefined) return markPrepared(args);
-		const parsed = dispatchRequestsFromArgs(args);
+		const parsed = dispatchRequestsFromArgs(args, deps.getAgentRoleFacts);
 		if (!parsed.ok) return markPrepared(args);
 		if (args.mode !== undefined && !["parallel", "sequential", "pipeline", "compete"].includes(String(args.mode))) {
 			return markPrepared(args);
@@ -2342,11 +2302,18 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				const base = parsed.requests[0];
 				for (let cycle = 1; cycle <= reviewResult.review.maxCycles; cycle += 1) {
 					const builderSubject: RunGateSubjectRef = { runId: `plan-builder-${cycle}`, digest: null };
-					tasks.push(resolveTask({ ...base, gate: { role: "builder", group: "plan-preview", cycle } }, "builder", cycle));
+					tasks.push(
+						resolveTask(
+							{ ...base, executionRole: "builder", gate: { role: "builder", group: "plan-preview", cycle } },
+							"builder",
+							cycle,
+						),
+					);
 					tasks.push(
 						resolveTask(
 							{
-								agentId: reviewResult.review.reviewer ?? base.agentId,
+								agentId: gateDeciderAgentId(reviewResult.review.reviewer),
+								executionRole: "reviewer",
 								task: reviewerTask(base.task, builderSubject.runId, cycle),
 								systemPrompt: REVIEWER_GATE_PROMPT,
 								autonomy: "read-only",
@@ -2371,7 +2338,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					subjects.push({ runId: `plan-candidate-${candidate}`, digest: null });
 					tasks.push(
 						resolveTask(
-							{ ...base, gate: { role: "candidate", group: "plan-preview", cycle: candidate } },
+							{ ...base, executionRole: "builder", gate: { role: "candidate", group: "plan-preview", cycle: candidate } },
 							"candidate",
 							candidate,
 						),
@@ -2380,7 +2347,8 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				tasks.push(
 					resolveTask(
 						{
-							agentId: competeResult.compete.judge?.agent ?? base.agentId,
+							agentId: gateDeciderAgentId(competeResult.compete.judge?.agent),
+							executionRole: "judge",
 							task: `Plan-time capability check for the ${competeResult.compete.candidates}-candidate judge.`,
 							systemPrompt: JUDGE_GATE_PROMPT,
 							autonomy: "read-only",
@@ -2631,7 +2599,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				}
 				return runApplyWinner(args, authority, deps.competeWorktrees?.mergeWinner, protectedPaths);
 			}
-			const parsed = dispatchRequestsFromArgs(args);
+			const parsed = dispatchRequestsFromArgs(args, deps.getAgentRoleFacts);
 			if (!parsed.ok) return { kind: "error", message: parsed.message };
 			const validModes = ["parallel", "sequential", "pipeline", "compete"];
 			if (args.mode !== undefined && !validModes.includes(String(args.mode))) {

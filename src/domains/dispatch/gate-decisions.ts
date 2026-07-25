@@ -14,6 +14,8 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, rea
 import { dirname, join, resolve } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import { parseVerifierResult, type VerifierCheck, type VerifierResult } from "../agents/result-contract.js";
+import type { GateRouteCorrelation } from "./execution-role.js";
 import type { RunGateSubjectRef } from "./types.js";
 
 export type GateDecisionOutcome =
@@ -31,8 +33,21 @@ export interface GateDecisionRef {
 	digest: string;
 }
 
+/**
+ * Sealed correlation between the decider route and the subject route it graded.
+ *
+ * A verdict from a route that shares the subject's agent or model family is a
+ * measurement of the same system twice. Recording the correlation on the
+ * decision means a small fleet still produces a usable audit trail: the gate is
+ * visible and its independence is a stated fact rather than an assumption.
+ */
+export type GateDecisionCorrelation = Pick<
+	GateRouteCorrelation,
+	"agent" | "target" | "modelFamily" | "runtime" | "node" | "independent"
+>;
+
 export interface GateDecisionArtifact {
-	version: 1;
+	version: 2;
 	id: string;
 	group: string;
 	topology: "review" | "compete";
@@ -40,12 +55,161 @@ export interface GateDecisionArtifact {
 	outcome: GateDecisionOutcome;
 	subjects: RunGateSubjectRef[];
 	decider?: RunGateSubjectRef;
+	/** Required whenever a decider run produced this decision. */
+	correlation?: GateDecisionCorrelation;
 	winner?: { index: number; subject: RunGateSubjectRef; branch: string };
 	/** Prior judge decision explicitly confirmed by a supervised operator. */
 	confirmation?: GateDecisionRef;
 	detail?: string;
 	createdAt: string;
 	integrity: { algorithm: "sha256"; digest: string };
+}
+
+// ---------------------------------------------------------------------------
+// Structured gate results
+// ---------------------------------------------------------------------------
+
+/**
+ * A gate result is a typed answer to the coordinator's question, not a trailing
+ * prose line. Two schemas exist because the two topologies ask different
+ * questions:
+ *
+ *   - Review asks "does this work pass?", which is exactly the Slice 2
+ *     `verifier-report` contract. There is deliberately no `revise` verdict:
+ *     whether a failure is worth another cycle is the coordinator's bounded
+ *     continuation policy, not a decision the reviewed model gets to author.
+ *   - Compete asks "which candidate wins?", which no recipe contract expresses
+ *     because it is a property of the topology rather than of any one agent.
+ *     That schema therefore lives here, next to the winner shape the decision
+ *     artifact already validates, and reuses the same typed check evidence.
+ */
+export type GateCheck = VerifierCheck;
+
+export type ReviewGateResult = VerifierResult;
+
+export interface CompeteGateResult {
+	/** 1-based candidate ordinal, validated against the enumerated subjects. */
+	winner: number;
+	checks: ReadonlyArray<GateCheck>;
+}
+
+export type GateResultParse<T> = { ok: true; result: T } | { ok: false; reason: string };
+
+/** Parse a reviewer answer under the Slice 2 Verifier contract. */
+export function parseReviewGateResult(output: string): GateResultParse<ReviewGateResult> {
+	const result = parseVerifierResult(output);
+	return result === null
+		? { ok: false, reason: "reviewer did not return a valid verifier report" }
+		: { ok: true, result };
+}
+
+export interface ReviewGateDecisionInput {
+	group: string;
+	cycle: number;
+	/** True when this cycle is the configured bound, so a failure is terminal. */
+	terminalCycle: boolean;
+	subjects: RunGateSubjectRef[];
+	decider: RunGateSubjectRef;
+	correlation: GateDecisionCorrelation;
+	output: string;
+}
+
+export interface ReviewGateDecision {
+	draft: GateDecisionDraft;
+	/** Terminal verdict, or null when the gate continues or needs the operator. */
+	verdict: "pass" | "fail" | null;
+	/** Structured findings threaded to the next builder, or null when the gate ended. */
+	findings: string | null;
+	/** Operator-facing reason when the gate ended without a verdict. */
+	needsDecision: string | null;
+}
+
+/**
+ * Apply the coordinator's review policy to one reviewer answer.
+ *
+ * The reviewer answers pass or fail under its Slice 2 contract and nothing
+ * else. `revise` is this function's bounded continuation decision: a failure
+ * with cycles left earns another builder attempt, the same failure at the bound
+ * is simply the terminal fail, and an answer that does not satisfy the contract
+ * is a broken gate rather than a free extra cycle. The live loop and the
+ * crash-replay path share this so a recovered decision is byte-identical to the
+ * one the original process would have written.
+ */
+export function decideReviewGate(input: ReviewGateDecisionInput): ReviewGateDecision {
+	const base = {
+		group: input.group,
+		topology: "review" as const,
+		cycle: input.cycle,
+		subjects: input.subjects,
+		decider: input.decider,
+		correlation: input.correlation,
+	};
+	const parsed = parseReviewGateResult(input.output);
+	if (!parsed.ok) {
+		return {
+			draft: { ...base, outcome: "exhausted", detail: parsed.reason },
+			verdict: null,
+			findings: null,
+			needsDecision: `review gate produced no structured verdict in cycle ${input.cycle}: ${parsed.reason}`,
+		};
+	}
+	if (parsed.result.verdict === "pass" || input.terminalCycle) {
+		return {
+			draft: { ...base, outcome: parsed.result.verdict },
+			verdict: parsed.result.verdict,
+			findings: null,
+			needsDecision: null,
+		};
+	}
+	const failed = parsed.result.checks.filter((check) => !check.passed);
+	return {
+		draft: { ...base, outcome: "revise", detail: `reviewer reported ${failed.length} failed check(s)` },
+		verdict: null,
+		findings: JSON.stringify({ verdict: "fail", checks: failed }),
+		needsDecision: null,
+	};
+}
+
+function parseGateChecks(value: unknown): GateCheck[] | null {
+	if (!Array.isArray(value) || value.length === 0) return null;
+	const checks: GateCheck[] = [];
+	for (const entry of value) {
+		if (!isRecord(entry)) return null;
+		const keys = Object.keys(entry);
+		if (
+			keys.some((key) => key !== "name" && key !== "passed" && key !== "evidence") ||
+			typeof entry.name !== "string" ||
+			entry.name.trim().length === 0 ||
+			typeof entry.passed !== "boolean" ||
+			typeof entry.evidence !== "string" ||
+			entry.evidence.trim().length === 0
+		) {
+			return null;
+		}
+		checks.push({ name: entry.name, passed: entry.passed, evidence: entry.evidence });
+	}
+	return checks;
+}
+
+/** Parse a judge answer. The winner must name an enumerated candidate ordinal. */
+export function parseCompeteGateResult(output: string, candidateCount: number): GateResultParse<CompeteGateResult> {
+	let value: unknown;
+	try {
+		value = JSON.parse(output) as unknown;
+	} catch {
+		return { ok: false, reason: "judge result must be valid JSON" };
+	}
+	if (!isRecord(value)) return { ok: false, reason: "judge result must be a JSON object" };
+	if (Object.keys(value).some((key) => key !== "winner" && key !== "checks")) {
+		return { ok: false, reason: "judge result has unknown fields" };
+	}
+	const winner = value.winner;
+	if (typeof winner !== "number" || !Number.isSafeInteger(winner) || winner < 1 || winner > candidateCount) {
+		return { ok: false, reason: `judge winner must be an integer 1..${candidateCount}` };
+	}
+	const checks = parseGateChecks(value.checks);
+	if (checks === null) return { ok: false, reason: "judge result must carry typed checks with evidence" };
+	return { ok: true, result: { winner, checks } };
 }
 
 export type GateDecisionDraft = Omit<GateDecisionArtifact, "version" | "id" | "createdAt" | "integrity"> & {
@@ -152,9 +316,19 @@ function isSafeDecisionId(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0 && value.length <= 256 && /^[A-Za-z0-9._-]+$/.test(value);
 }
 
+function isCorrelation(value: unknown): value is GateDecisionCorrelation {
+	if (!isRecord(value)) return false;
+	const fields = ["agent", "target", "modelFamily", "runtime", "node", "independent"] as const;
+	if (Object.keys(value).some((key) => !(fields as ReadonlyArray<string>).includes(key))) return false;
+	if (!fields.every((field) => typeof value[field] === "boolean")) return false;
+	// The independence rule is part of the sealed fact, not the writer's opinion:
+	// a shared agent or model family is what makes a verdict self-confirming.
+	return value.independent === (!value.agent && !value.modelFamily);
+}
+
 function semanticError(value: unknown): string | null {
 	if (!isRecord(value)) return "gate decision is not an object";
-	if (value.version !== 1) return "unsupported gate decision version";
+	if (value.version !== 2) return "unsupported gate decision version";
 	if (!isSafeDecisionId(value.id)) return "gate decision id invalid";
 	if (typeof value.group !== "string" || value.group.length === 0) return "gate decision group invalid";
 	if (value.topology !== "review" && value.topology !== "compete") return "gate decision topology invalid";
@@ -175,6 +349,11 @@ function semanticError(value: unknown): string | null {
 		return "gate decision subjects invalid";
 	}
 	if (value.decider !== undefined && !isSubjectRef(value.decider)) return "gate decision decider invalid";
+	if (value.decider === undefined) {
+		if (value.correlation !== undefined) return "gate decision correlation requires a decider";
+	} else if (!isCorrelation(value.correlation)) {
+		return "gate decision correlation invalid";
+	}
 	if (typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))) {
 		return "gate decision timestamp invalid";
 	}
@@ -254,6 +433,7 @@ function decisionPayload(decision: Omit<GateDecisionArtifact, "integrity">): Rec
 		...(decision.decider !== undefined
 			? { decider: { runId: decision.decider.runId, digest: decision.decider.digest } }
 			: {}),
+		...(decision.correlation !== undefined ? { correlation: { ...decision.correlation } } : {}),
 		...(decision.winner !== undefined
 			? {
 					winner: {
@@ -292,6 +472,7 @@ function artifactWithoutIntegrity(artifact: GateDecisionArtifact): Omit<GateDeci
 		createdAt: artifact.createdAt,
 	};
 	if (artifact.decider !== undefined) result.decider = { ...artifact.decider };
+	if (artifact.correlation !== undefined) result.correlation = { ...artifact.correlation };
 	if (artifact.winner !== undefined) {
 		result.winner = {
 			index: artifact.winner.index,
@@ -323,7 +504,7 @@ function buildGateDecisionArtifact(
 		throw new Error("gate decision cycle must be a positive integer");
 	if (draft.subjects.length === 0) throw new Error("gate decision requires at least one subject receipt");
 	const withoutIntegrity: Omit<GateDecisionArtifact, "integrity"> = {
-		version: 1,
+		version: 2,
 		id,
 		group: draft.group,
 		topology: draft.topology,
@@ -333,6 +514,7 @@ function buildGateDecisionArtifact(
 		createdAt,
 	};
 	if (draft.decider !== undefined) withoutIntegrity.decider = { ...draft.decider };
+	if (draft.correlation !== undefined) withoutIntegrity.correlation = { ...draft.correlation };
 	if (draft.winner !== undefined) {
 		withoutIntegrity.winner = {
 			index: draft.winner.index,
@@ -810,14 +992,6 @@ export function recoverPendingGateDecisions(stateDir = clioStateDir()): PendingG
 		materialized: ready.map((handle) => materializePendingGateDecision(handle)),
 		unresolved: pending.records.filter((handle) => handle.record.kind === "output"),
 	};
-}
-
-/**
- * Compatibility writer. It now uses the pending journal internally, so every
- * ordinary decision call is recoverable if final materialization is interrupted.
- */
-export function writeGateDecisionArtifact(draft: GateDecisionDraft): { artifact: GateDecisionArtifact; path: string } {
-	return materializePendingGateDecision(stagePendingGateDecision(draft));
 }
 
 export function readGateDecisionArtifacts(

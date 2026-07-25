@@ -9,7 +9,12 @@ import type {
 	RunStatus,
 	ToolCallStat,
 } from "../dispatch/index.js";
-import { readGateDecisionArtifactsForRunIds, verifyReceiptIntegrity } from "../dispatch/index.js";
+import {
+	type ExecutionRole,
+	isExecutionRole,
+	readGateDecisionArtifactsForRunIds,
+	verifyReceiptIntegrity,
+} from "../dispatch/index.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import {
 	type AuditJsonRow,
@@ -1254,6 +1259,12 @@ async function readReceipt(
 	return { receipt, error: null, integrityFailed: false };
 }
 
+function readExecutionRole(value: Record<string, unknown>, source: string): ExecutionRole {
+	const role = value.executionRole;
+	if (!isExecutionRole(role)) throw new Error(`${source}: executionRole is missing or not a known execution role`);
+	return role;
+}
+
 function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
@@ -1265,6 +1276,7 @@ function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 		...(value as Partial<RunEnvelope>),
 		id: readString(value, source, "id"),
 		agentId: readString(value, source, "agentId"),
+		executionRole: readExecutionRole(value, source),
 		task: readString(value, source, "task"),
 		targetId: readString(value, source, "targetId"),
 		wireModelId: readString(value, source, "wireModelId"),

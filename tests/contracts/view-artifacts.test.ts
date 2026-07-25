@@ -60,6 +60,7 @@ function fixtureEnvelope(stateDir: string, runId = "run-view-1"): RunEnvelope {
 	return {
 		id: runId,
 		agentId: "coder",
+		executionRole: "builder",
 		task: "fix lint errors",
 		targetId: "local",
 		wireModelId: "model-a",
@@ -99,6 +100,7 @@ function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
 		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: envelope.agentId,
+		executionRole: "builder",
 		task: envelope.task,
 		targetId: envelope.targetId,
 		wireModelId: envelope.wireModelId,
@@ -333,6 +335,7 @@ describe("contracts/view-artifacts", () => {
 			const ledger = openLedger({ maxRuns: 10 });
 			const created = ledger.create({
 				agentId: "coder",
+				executionRole: "builder",
 				task: "persist across reload",
 				targetId: "fixture-openai",
 				wireModelId: "fixture-alpha",

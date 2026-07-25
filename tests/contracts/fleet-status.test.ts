@@ -32,6 +32,7 @@ function withIsolatedClioHome<T>(fn: (scratch: string) => T | Promise<T>): Promi
 function completedRow(overrides: Partial<RunEnvelope> & { id: string }): RunEnvelope {
 	return {
 		agentId: "coder",
+		executionRole: "builder",
 		task: "test task",
 		targetId: "mini",
 		wireModelId: "test-model",

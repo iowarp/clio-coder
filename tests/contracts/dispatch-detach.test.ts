@@ -634,7 +634,7 @@ describe("detached dispatch + collect", () => {
 		await first.extension.start();
 		let runId = "";
 		try {
-			const handle = await first.contract.dispatch({ agentId: "coder", task: "durable answer" });
+			const handle = await first.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "durable answer" });
 			runId = handle.runId;
 			await handle.finalPromise;
 		} finally {

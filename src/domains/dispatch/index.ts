@@ -24,6 +24,25 @@ export type {
 export type { DurableAssignmentRecord } from "./assignment-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
 export {
+	type AgentRoleFacts,
+	type AgentRoleFactsResolver,
+	agentRoleFactsResolver,
+	DEFAULT_GATE_DECIDER_AGENT_ID,
+	deriveExecutionRole,
+	EXECUTION_ROLES,
+	type ExecutionRole,
+	type GateRouteCorrelation,
+	type GateTopologyRole,
+	gateDeciderAgentId,
+	gateRouteCorrelation,
+	isExecutionRole,
+	modelFamily,
+	preferIndependentRoute,
+	type RouteCorrelationFacts,
+	requestExecutionRole,
+	withAttemptRole,
+} from "./execution-role.js";
+export {
 	affectsNodeBreaker,
 	affectsTargetBreaker,
 	classifyFailure,

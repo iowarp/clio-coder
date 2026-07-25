@@ -49,6 +49,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	const envelope: RunEnvelope = {
 		id: receipt.runId,
 		agentId: receipt.agentId,
+		executionRole: receipt.executionRole,
 		...(receipt.agentAudience !== undefined ? { agentAudience: receipt.agentAudience } : {}),
 		...(receipt.requestOrigin !== undefined ? { requestOrigin: receipt.requestOrigin } : {}),
 		task: receipt.task,

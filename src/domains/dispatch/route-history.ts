@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import { type ExecutionRole, isExecutionRole } from "./execution-role.js";
 import { type RouteCandidate, routeCandidateKey } from "./route-decision.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 import type { RunPhaseDurations } from "./types.js";
@@ -15,7 +16,7 @@ export interface RouteHistoryRecord {
 	receiptDigest: string;
 	assignmentId: string;
 	route: RouteCandidate;
-	executionRole: string;
+	executionRole: ExecutionRole;
 	qualityLabel: RouteQualityLabel;
 	reliability: RouteReliabilityOutcome;
 	/** Assignment-level observation; retries are never independent first-pass work. */
@@ -58,9 +59,7 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 	if (typeof value.assignmentId !== "string" || value.assignmentId.length === 0)
 		throw new Error("route history assignment id invalid");
 	if (!isRouteCandidate(value.route)) throw new Error("route history route invalid");
-	if (typeof value.executionRole !== "string" || value.executionRole.length === 0) {
-		throw new Error("route history execution role invalid");
-	}
+	if (!isExecutionRole(value.executionRole)) throw new Error("route history execution role invalid");
 	if (value.qualityLabel !== "pass" && value.qualityLabel !== "fail" && value.qualityLabel !== "unmeasured") {
 		throw new Error("route history quality label invalid");
 	}
@@ -172,10 +171,10 @@ function isDigest(value: unknown): value is string {
 
 function isRouteCandidate(value: unknown): value is RouteCandidate {
 	if (!isRecord(value)) return false;
+	if (!isExecutionRole(value.executionRole)) return false;
 	return [
 		value.agentId,
 		value.specFingerprint,
-		value.executionRole,
 		value.targetId,
 		value.modelId,
 		value.runtimeId,

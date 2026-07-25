@@ -69,6 +69,7 @@ function minimalWorkerSpec(overrides: Record<string, unknown> = {}): Record<stri
 		specVersion: WORKER_SPEC_VERSION,
 		systemPrompt: "",
 		agentId: "coder",
+		executionRole: "builder",
 		task: "t",
 		target: { id: "target", runtime: "http-worker" },
 		runtime: {
@@ -594,6 +595,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 					specVersion: WORKER_SPEC_VERSION,
 					systemPrompt: "",
 					agentId: "coder",
+					executionRole: "builder",
 					task: "t",
 					target: { id: "target", runtime: "legacy-sdk" },
 					runtime: {
@@ -621,6 +623,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 				specVersion: WORKER_SPEC_VERSION,
 				systemPrompt: "",
 				agentId: "coder",
+				executionRole: "builder",
 				task: "t",
 				target: { id: `${runtime.id}-target`, runtime: runtime.id },
 				runtime: {

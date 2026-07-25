@@ -188,6 +188,16 @@ function approvalOptions(level: "auto-edit" | "full-auto") {
 			};
 }
 
+/** Gate deciders answer their typed contract, not a trailing prose line. */
+const REVIEW_PASS_REPORT = JSON.stringify({
+	verdict: "pass",
+	checks: [{ name: "review", passed: true, evidence: "inspected the workspace" }],
+});
+const JUDGE_WINNER_1_REPORT = JSON.stringify({
+	winner: 1,
+	checks: [{ name: "ranking", passed: true, evidence: "compared the candidate branches" }],
+});
+
 describe("ACP gate role authority", () => {
 	beforeEach(() => {
 		isolateDispatchState();
@@ -205,7 +215,7 @@ describe("ACP gate role authority", () => {
 			const bundle = makeDispatchBundle(context, {
 				startAcpDelegationRun: (input) => {
 					inputs.push(input);
-					return acpHandle(input.task.startsWith("Review the work") ? "VERDICT: pass" : "builder done", inputs.length);
+					return acpHandle(input.task.startsWith("Review the work") ? REVIEW_PASS_REPORT : "builder done", inputs.length);
 				},
 			});
 			await bundle.extension.start();
@@ -213,10 +223,12 @@ describe("ACP gate role authority", () => {
 				const contract = capturingContract(bundle.contract, requests);
 				const tool = createDispatchTool({ dispatch: contract, getAutonomy: () => autonomy });
 				const result = (await tool.run(
-					{ agent: "acp-gate", tasks: ["build the change"], review: { max_cycles: 2 } },
+					// The reviewer now defaults to the builtin Verifier, so an ACP reviewer
+					// is an explicit operator pin rather than an inherited builder agent.
+					{ agent: "acp-gate", tasks: ["build the change"], review: { reviewer: "acp-gate", max_cycles: 2 } },
 					approvalOptions(autonomy),
 				)) as ToolRunResult;
-				strictEqual(result.kind, "ok");
+				strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
 				strictEqual(inputs.length, 2, "early pass executes the first builder/reviewer prefix");
 				strictEqual(requests[0]?.gate?.role, "builder");
 				strictEqual(requests[1]?.gate?.role, "reviewer");
@@ -264,7 +276,7 @@ describe("ACP gate role authority", () => {
 			spawnWorker: fabric.spawn,
 			startAcpDelegationRun: (input) => {
 				inputs.push(input);
-				return acpHandle("WINNER: 1", inputs.length);
+				return acpHandle(JUDGE_WINNER_1_REPORT, inputs.length);
 			},
 		});
 		await bundle.extension.start();
@@ -280,7 +292,7 @@ describe("ACP gate role authority", () => {
 				},
 				{},
 			)) as ToolRunResult;
-			strictEqual(result.kind, "ok");
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
 			strictEqual(fabric.spawns.length, 2);
 			strictEqual(inputs.length, 1);
 			const judgeRequest = requests.find((request) => request.gate?.role === "judge");
@@ -383,7 +395,12 @@ describe("ACP gate role authority", () => {
 		await bundle.extension.start();
 		try {
 			await rejects(
-				bundle.contract.dispatch({ agentId: "acp-gate", delegationAgentId: "acp-gate", task: "bypass protection" }),
+				bundle.contract.dispatch({
+					agentId: "acp-gate",
+					delegationAgentId: "acp-gate",
+					executionRole: "builder",
+					task: "bypass protection",
+				}),
 				/cannot enforce 1 protected artifact hard block/,
 			);
 			strictEqual(starts, 0);
@@ -408,6 +425,7 @@ describe("ACP gate role authority", () => {
 		await stalledBundle.extension.start();
 		try {
 			const handle = await stalledBundle.contract.dispatch({
+				executionRole: "builder",
 				agentId: "acp-gate",
 				delegationAgentId: "acp-gate",
 				task: "stall",
@@ -426,6 +444,7 @@ describe("ACP gate role authority", () => {
 		});
 		await drainBundle.extension.start();
 		const handle = await drainBundle.contract.dispatch({
+			executionRole: "builder",
 			agentId: "acp-gate",
 			delegationAgentId: "acp-gate",
 			task: "drain",

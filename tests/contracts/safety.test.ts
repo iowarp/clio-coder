@@ -233,7 +233,16 @@ describe("contracts/safety", () => {
 								runIds: ["run-abc"],
 								receiptCount: 1,
 								failedCount: 0,
-								runs: [{ runId: "run-abc", agentId: "coder", exitCode: 0, receiptPath: "/r/run-abc.json", eventCount: 3 }],
+								runs: [
+									{
+										runId: "run-abc",
+										agentId: "coder",
+										executionRole: "builder",
+										exitCode: 0,
+										receiptPath: "/r/run-abc.json",
+										eventCount: 3,
+									},
+								],
 							},
 						},
 					},
@@ -292,8 +301,8 @@ describe("contracts/safety", () => {
 								receiptCount: 2,
 								failedCount: 1,
 								runs: [
-									{ runId: "run-1", agentId: "coder", exitCode: 0 },
-									{ runId: "run-2", agentId: "coder", exitCode: 1 },
+									{ runId: "run-1", agentId: "coder", executionRole: "builder", exitCode: 0 },
+									{ runId: "run-2", agentId: "coder", executionRole: "builder", exitCode: 1 },
 								],
 							},
 						},

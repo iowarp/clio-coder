@@ -59,7 +59,11 @@ describe("assignment event stream", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "assignment stream" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "assignment stream",
+			});
 			const frames: unknown[] = [];
 			for await (const frame of handle.events) frames.push(frame);
 			const receipt = await handle.finalPromise;
@@ -112,7 +116,11 @@ describe("assignment event stream", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "answer visibility" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "answer visibility",
+			});
 			let lastAssistantText = "";
 			for await (const frame of handle.events) {
 				const text = assistantText(frame);
@@ -148,7 +156,11 @@ describe("assignment event stream", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "cancel closes stream" });
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "cancel closes stream",
+			});
 			const drained = (async () => {
 				const frames: unknown[] = [];
 				for await (const frame of handle.events) frames.push(frame);

@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { writeGateDecisionArtifact } from "../../src/domains/dispatch/gate-decisions.js";
+import {
+	type GateDecisionArtifact,
+	type GateDecisionDraft,
+	materializePendingGateDecision,
+	stagePendingGateDecision,
+} from "../../src/domains/dispatch/gate-decisions.js";
 import { canonicalResponseSchemaDigest, createRunReceiptQuality } from "../../src/domains/dispatch/receipt-findings.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { decideRoute, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
@@ -26,6 +31,7 @@ function envelope(id: string, overrides: Partial<RunEnvelope> = {}): RunEnvelope
 	return {
 		id,
 		agentId: "builder",
+		executionRole: "builder",
 		task: "implement",
 		targetId: "local",
 		wireModelId: "builder-model",
@@ -61,6 +67,7 @@ function receipt(
 	const draft: RunReceiptDraft = {
 		runId: run.id,
 		agentId: run.agentId,
+		executionRole: "builder",
 		task: run.task,
 		targetId: run.targetId,
 		wireModelId: run.wireModelId,
@@ -123,6 +130,16 @@ function routeSample(qualityLabel: RouteObservation["qualityLabel"]): RouteObser
 	};
 }
 
+/** Independent decider correlation, the ordinary case for a gated fixture. */
+const INDEPENDENT_GATE_CORRELATION = {
+	agent: false,
+	target: true,
+	modelFamily: false,
+	runtime: true,
+	node: true,
+	independent: true,
+} as const;
+
 describe("dispatch route quality", { concurrency: false }, () => {
 	it("not_applicable is unmeasured rather than successful quality", () => {
 		const subject = receipt("read-only", { verification: { state: "not_applicable", basis: "read-only-agent" } });
@@ -150,13 +167,14 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		const reviewer = receipt("reviewer", {
 			envelope: { agentId: "reviewer", wireModelId: "reviewer-model" },
 		});
-		const gate = writeGateDecisionArtifact({
+		const gate = writeGateDecision({
 			group: "quality",
 			topology: "review",
 			cycle: 1,
 			outcome: "pass",
 			subjects: [{ runId: builder.receipt.runId, digest: builder.receipt.integrity.digest }],
 			decider: { runId: reviewer.receipt.runId, digest: reviewer.receipt.integrity.digest },
+			correlation: INDEPENDENT_GATE_CORRELATION,
 		});
 		strictEqual(
 			reduceRouteQuality({
@@ -180,13 +198,14 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		isolated = isolateClioEnv("clio-route-quality-correlated-");
 		const builder = receipt("builder");
 		const reviewer = receipt("reviewer", { envelope: { agentId: "builder", wireModelId: "builder-model-v2" } });
-		const gate = writeGateDecisionArtifact({
+		const gate = writeGateDecision({
 			group: "correlated",
 			topology: "review",
 			cycle: 1,
 			outcome: "pass",
 			subjects: [{ runId: builder.receipt.runId, digest: builder.receipt.integrity.digest }],
 			decider: { runId: reviewer.receipt.runId, digest: reviewer.receipt.integrity.digest },
+			correlation: INDEPENDENT_GATE_CORRELATION,
 		});
 		const reduced = reduceRouteQuality({
 			subject: builder,
@@ -201,13 +220,14 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		isolated = isolateClioEnv("clio-route-quality-tampered-");
 		const builder = receipt("builder");
 		const reviewer = receipt("reviewer", { envelope: { agentId: "reviewer", wireModelId: "reviewer-model" } });
-		const gate = writeGateDecisionArtifact({
+		const gate = writeGateDecision({
 			group: "tampered",
 			topology: "review",
 			cycle: 1,
 			outcome: "pass",
 			subjects: [{ runId: builder.receipt.runId, digest: "f".repeat(64) }],
 			decider: { runId: reviewer.receipt.runId, digest: reviewer.receipt.integrity.digest },
+			correlation: INDEPENDENT_GATE_CORRELATION,
 		});
 		const tampered = { ...gate.artifact, integrity: { ...gate.artifact.integrity, digest: "0".repeat(64) } };
 		strictEqual(
@@ -275,7 +295,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 			receiptDigest: "a".repeat(64),
 			assignmentId: "assignment",
 			route: candidate(),
-			executionRole: "builder",
+			executionRole: "builder" as const,
 			qualityLabel: "pass" as const,
 			reliability: "success" as const,
 			firstPass: true,
@@ -347,3 +367,8 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		deepStrictEqual([failed.expectedCostUsd, failed.expectedEndToEndMs], [1, 120_000]);
 	});
 });
+
+/** Every decision crosses the staged durable boundary; there is no direct writer. */
+function writeGateDecision(draft: GateDecisionDraft): { artifact: GateDecisionArtifact; path: string } {
+	return materializePendingGateDecision(stagePendingGateDecision(draft));
+}

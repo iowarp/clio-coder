@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isExecutionRole } from "./execution-role.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, RunReceiptQuality } from "./types.js";
 
 /**
@@ -6,7 +7,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 9;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 10;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -68,6 +69,7 @@ function serializeCanonical(value: unknown): string {
 export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	runId: true,
 	agentId: true,
+	executionRole: true,
 	agentAudience: true,
 	requestOrigin: true,
 	task: true,
@@ -157,6 +159,7 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 	return {
 		id: envelope.id,
 		agentId: envelope.agentId,
+		executionRole: envelope.executionRole,
 		task: envelope.task,
 		targetId: envelope.targetId,
 		wireModelId: envelope.wireModelId,
@@ -264,6 +267,7 @@ function isReceiptQuality(value: unknown): value is RunReceiptQuality {
 
 export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnvelope): RunReceipt {
 	if (!isReceiptQuality(receipt.quality)) throw new Error("receipt integrity: required quality block invalid");
+	if (!isExecutionRole(receipt.executionRole)) throw new Error("receipt integrity: required execution role invalid");
 	return {
 		...receipt,
 		integrity: computeReceiptIntegrity(receipt, envelope),
@@ -285,6 +289,7 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
 	const sharedFields: Array<[string, unknown, unknown]> = [
 		["runId", receipt.runId, envelope.id],
 		["agentId", receipt.agentId, envelope.agentId],
+		["executionRole", receipt.executionRole, envelope.executionRole],
 		["agentAudience", receipt.agentAudience, envelope.agentAudience],
 		["requestOrigin", receipt.requestOrigin, envelope.requestOrigin],
 		["task", receipt.task, envelope.task],
@@ -321,6 +326,7 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 	if (!isReceiptQuality(receipt.quality) || !isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}
+	if (!isExecutionRole(receipt.executionRole)) return { ok: false, reason: "execution role invalid" };
 	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };

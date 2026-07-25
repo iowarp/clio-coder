@@ -264,6 +264,7 @@ export async function generateBootstrapWithScout(
 	const dispatchScout = (nativeSchema: boolean) =>
 		dispatch.dispatch({
 			agentId: "scout",
+			executionRole: "researcher",
 			task: prompt,
 			cwd: input.cwd,
 			requestOrigin: "internal",

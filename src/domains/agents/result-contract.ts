@@ -22,6 +22,8 @@ export interface ResultContractValidation {
 	validatorDigest: string;
 	/** Parsed Scout data for the model-facing dispatch projection. */
 	scout?: ScoutResult;
+	/** Parsed Verifier data for the dispatch review-gate projection. */
+	verifier?: VerifierResult;
 	reason?: string;
 }
 
@@ -64,10 +66,16 @@ export interface ScoutResult {
 	proposedSubtasks: ReadonlyArray<string>;
 }
 
-interface VerifierCheck {
+export interface VerifierCheck {
 	name: string;
 	passed: boolean;
 	evidence: string;
+}
+
+/** Parsed `verifier-report` payload, for callers that need the verdict itself. */
+export interface VerifierResult {
+	verdict: "pass" | "fail";
+	checks: ReadonlyArray<VerifierCheck>;
 }
 
 function canonical(value: unknown): string {
@@ -114,7 +122,7 @@ function success(
 	contract: ResultContract,
 	quality: ResultContractQuality,
 	value: unknown,
-	extra: Pick<ResultContractValidation, "scout"> = {},
+	extra: Pick<ResultContractValidation, "scout" | "verifier"> = {},
 ): ResultContractValidation {
 	return {
 		conformance: "pass",
@@ -264,7 +272,19 @@ function validateVerifier(contract: ResultContract, output: string | null): Resu
 	if (checks === null || (value.verdict === "pass") !== checks.every((check) => check.passed)) {
 		return failure(contract, "fail", "Verifier verdict must agree with every typed check");
 	}
-	return success(contract, value.verdict, { verdict: value.verdict, checks });
+	const verifier: VerifierResult = { verdict: value.verdict, checks };
+	return success(contract, value.verdict, verifier, { verifier });
+}
+
+/**
+ * Parse a Verifier structured result under the same schema its recipe contract
+ * enforces. The review gate needs the verdict itself, not just its conformance
+ * label, so this exposes the parsed payload the way `parseScoutResult` does for
+ * reconnaissance. It defines no new schema.
+ */
+export function parseVerifierResult(output: string | null): VerifierResult | null {
+	const validation = validateVerifier({ kind: "verifier-report" }, output);
+	return validation.verifier ?? null;
 }
 
 function validateDebugger(contract: ResultContract, output: string | null): ResultContractValidation {
