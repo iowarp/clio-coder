@@ -1,6 +1,6 @@
-import type { EvalArtifactV2 } from "../schema/artifact.js";
+import type { EvalArtifactV3 } from "../schema/artifact.js";
 
-export function renderEvalJunitReportV2(artifact: EvalArtifactV2): string {
+export function renderEvalJunitReportV3(artifact: EvalArtifactV3): string {
 	const cases = artifact.results
 		.map((result) => {
 			const name = escapeXml(

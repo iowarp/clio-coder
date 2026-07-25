@@ -12,11 +12,88 @@
  * fold it without hitting a non-finite or undefined value.
  */
 
+import { createHash } from "node:crypto";
 import { type EvidenceTag, FAILURE_CAUSE_TAG_ORDER, FAILURE_CAUSE_TAGS } from "../evidence/index.js";
-import type { RunEnvelope, RunReceiptDraft, RunReceiptFindingsSummary, RunReceiptVerification } from "./types.js";
+import type {
+	RunEnvelope,
+	RunReceiptDraft,
+	RunReceiptFindingsSummary,
+	RunReceiptQuality,
+	RunReceiptTypedValidationFact,
+	RunReceiptVerification,
+} from "./types.js";
 
 function lower(value: string | null | undefined): string {
 	return (value ?? "").toLowerCase();
+}
+
+function canonicalJson(value: unknown): string {
+	if (value === null) return "null";
+	if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) throw new Error("response schema digest requires finite numbers");
+		return JSON.stringify(value);
+	}
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	if (typeof value === "object") {
+		const record = value as Record<string, unknown>;
+		return `{${Object.keys(record)
+			.sort()
+			.map((key) => {
+				if (record[key] === undefined) throw new Error("response schema digest cannot contain undefined");
+				return `${JSON.stringify(key)}:${canonicalJson(record[key])}`;
+			})
+			.join(",")}}`;
+	}
+	throw new Error(`response schema digest cannot represent ${typeof value}`);
+}
+
+export function canonicalResponseSchemaDigest(schema: Record<string, unknown>): string {
+	return createHash("sha256").update(canonicalJson(schema), "utf8").digest("hex");
+}
+
+export interface CreateRunReceiptQualityInput {
+	responseSchema?: Record<string, unknown>;
+	runtimeEnforceable: boolean;
+	enforcementPassed: boolean | null;
+	typedValidations?: ReadonlyArray<RunReceiptTypedValidationFact>;
+}
+
+/**
+ * `verify` is Clio's typed verifier tool. Its sealed aggregate records the
+ * tool identity and pass/fail result; generic process exit and shell commands
+ * never enter this channel.
+ */
+export function typedValidationFactsFromToolStats(
+	toolStats: ReadonlyArray<Pick<RunReceiptDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
+): RunReceiptTypedValidationFact[] {
+	return toolStats
+		.filter((stat) => stat.tool === "verify" && stat.count > 0)
+		.map((stat) => ({
+			sourceId: "tool:verify",
+			validatorDigest: createHash("sha256").update(canonicalJson(stat), "utf8").digest("hex"),
+			passed: stat.ok === stat.count && stat.errors === 0 && stat.blocked === 0,
+		}));
+}
+
+/** Create the required, JSON-clean quality block for one receipt finalization. */
+export function createRunReceiptQuality(input: CreateRunReceiptQualityInput): RunReceiptQuality {
+	const schemaDigest = input.responseSchema === undefined ? null : canonicalResponseSchemaDigest(input.responseSchema);
+	return {
+		version: 1,
+		typedValidations: [...(input.typedValidations ?? [])]
+			.map((fact) => ({ ...fact }))
+			.sort(
+				(left, right) =>
+					left.sourceId.localeCompare(right.sourceId) || left.validatorDigest.localeCompare(right.validatorDigest),
+			),
+		responseSchema: {
+			sourceId: schemaDigest === null ? null : `dispatch.response-schema:${schemaDigest}`,
+			schemaDigest,
+			runtimeEnforceable: input.responseSchema === undefined ? false : input.runtimeEnforceable,
+			enforcementPassed: input.responseSchema === undefined ? null : input.enforcementPassed,
+		},
+	};
 }
 
 function toolNamesLower(draft: RunReceiptDraft): string[] {

@@ -60,6 +60,8 @@ export function evidenceMetricsFromReceipt(receipt: RunReceipt): Record<string, 
 		...(receipt.findingsSummary === undefined
 			? {}
 			: { "evidence.firstPassSuccess": receipt.findingsSummary.firstPassSuccess === true }),
+		"evidence.quality.typedValidationCount": receipt.quality.typedValidations.length,
+		"evidence.responseSchema.digest": receipt.quality.responseSchema.schemaDigest ?? "none",
 		...(typeof receipt.costUsd === "number" && Number.isFinite(receipt.costUsd) ? { "cost.usd": receipt.costUsd } : {}),
 	};
 }

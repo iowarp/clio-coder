@@ -87,6 +87,11 @@ function sealOrphan(provenance: {
 	});
 	const draft: RunReceiptDraft = {
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		quality: {
+			version: 1,
+			typedValidations: [],
+			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+		},
 		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "coder",

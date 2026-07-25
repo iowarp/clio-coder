@@ -266,9 +266,34 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 7;
+	version: 8;
 	algorithm: "sha256";
 	digest: string;
+}
+
+/** One correctness-bearing validation result sealed at receipt finalization. */
+export interface RunReceiptTypedValidationFact {
+	sourceId: string;
+	validatorDigest: string;
+	passed: boolean;
+}
+
+/** The exact response-schema enforcement fact, distinct from answer correctness. */
+export interface RunReceiptResponseSchemaFact {
+	sourceId: string | null;
+	schemaDigest: string | null;
+	runtimeEnforceable: boolean;
+	enforcementPassed: boolean | null;
+}
+
+/**
+ * Required run-local quality facts. Later gate and evaluation artifacts link to
+ * the sealed receipt digest rather than mutating this block after finalization.
+ */
+export interface RunReceiptQuality {
+	version: 1;
+	typedValidations: RunReceiptTypedValidationFact[];
+	responseSchema: RunReceiptResponseSchemaFact;
 }
 
 /**
@@ -599,6 +624,8 @@ export interface RunReceipt {
 	toolActivity?: ToolActivitySummary;
 	/** Integrity-sealed evidence confidence. Sealed on every receipt. */
 	verification: RunReceiptVerification;
+	/** Required routing-quality facts known at receipt finalization. */
+	quality: RunReceiptQuality;
 	skillActivations?: SkillActivation[];
 	/** How this runtime enforced the run's captured autonomy level. */
 	autonomyEnforcement?: RunReceiptAutonomyEnforcement;

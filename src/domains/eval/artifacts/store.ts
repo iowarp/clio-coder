@@ -2,22 +2,19 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../../core/safe-id.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import type { EvalArtifactV2 } from "../schema/artifact.js";
-import { evalRoot, loadEvalArtifact } from "../store.js";
-import type { EvalRunArtifact } from "../types.js";
+import type { EvalArtifactV3 } from "../schema/artifact.js";
+import { evalRoot } from "../store.js";
 import { redactArtifactForStorage } from "./redact.js";
 
-export type LoadedEvalArtifactAny = EvalArtifactV2 | EvalRunArtifact;
-
-export function evalArtifactPathV2(dataDir: string, evalId: string): string {
+export function evalArtifactPathV3(dataDir: string, evalId: string): string {
 	assertSafeId(evalId, "eval");
 	return join(evalRoot(dataDir), `${evalId}.json`);
 }
 
-export async function writeEvalArtifactV2(dataDir: string, artifact: EvalArtifactV2, out?: string): Promise<string> {
+export async function writeEvalArtifactV3(dataDir: string, artifact: EvalArtifactV3, out?: string): Promise<string> {
 	const path =
 		out === undefined
-			? evalArtifactPathV2(dataDir, artifact.evalId)
+			? evalArtifactPathV3(dataDir, artifact.evalId)
 			: out.endsWith(".json")
 				? out
 				: join(out, `${artifact.evalId}.json`);
@@ -25,22 +22,21 @@ export async function writeEvalArtifactV2(dataDir: string, artifact: EvalArtifac
 	return path;
 }
 
-export async function loadEvalArtifactAny(dataDir: string, evalId: string): Promise<LoadedEvalArtifactAny> {
-	const raw = await readFile(evalArtifactPathV2(dataDir, evalId), "utf8");
-	const parsed = JSON.parse(raw) as { version?: unknown };
-	if (parsed.version === 2) return parseEvalArtifactV2(parsed, evalId);
-	return loadEvalArtifact(dataDir, evalId);
+/** Read only the current explicit-link artifact format; retired shapes are rejected. */
+export async function loadEvalArtifactV3(dataDir: string, evalId: string): Promise<EvalArtifactV3> {
+	const raw = await readFile(evalArtifactPathV3(dataDir, evalId), "utf8");
+	return parseEvalArtifactV3(JSON.parse(raw) as unknown, evalId);
 }
 
-export function parseEvalArtifactV2(value: unknown, source: string): EvalArtifactV2 {
+export function parseEvalArtifactV3(value: unknown, source: string): EvalArtifactV3 {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
-	if (value.version !== 2) throw new Error(`${source}.version: expected 2`);
+	if (value.version !== 3) throw new Error(`${source}.version: expected current version 3`);
 	const summary = asRecord(value.summary, `${source}.summary`);
 	const tokens = asRecord(summary.tokens, `${source}.summary.tokens`);
 	const matrix = asRecord(value.matrix, `${source}.matrix`);
 	const suite = asRecord(value.suite, `${source}.suite`);
 	return {
-		version: 2,
+		version: 3,
 		evalId: readString(value, source, "evalId"),
 		suite: { id: readString(suite, `${source}.suite`, "id"), hash: readString(suite, `${source}.suite`, "hash") },
 		clio: {
@@ -71,33 +67,23 @@ export function parseEvalArtifactV2(value: unknown, source: string): EvalArtifac
 			},
 			wallTimeMs: readNumber(summary, `${source}.summary`, "wallTimeMs"),
 		},
-		results: readArray(value, source, "results").map((entry, index) =>
-			parseResult(entry, `${source}.results[${index}]`, {
-				id: readString(matrix, `${source}.matrix`, "target"),
-				model: readNullableString(matrix, `${source}.matrix`, "model"),
-				thinking: readNullableString(matrix, `${source}.matrix`, "thinking"),
-			}),
-		),
+		results: readArray(value, source, "results").map((entry, index) => parseResult(entry, `${source}.results[${index}]`)),
 	};
 }
 
-function parseResult(
-	value: unknown,
-	source: string,
-	legacyTarget: EvalArtifactV2["results"][number]["target"],
-): EvalArtifactV2["results"][number] {
+function parseResult(value: unknown, source: string): EvalArtifactV3["results"][number] {
 	const record = asRecord(value, source);
-	const target = record.target === undefined ? null : asRecord(record.target, `${source}.target`);
+	const target = asRecord(record.target, `${source}.target`);
 	return {
+		assignmentId: readNullableString(record, source, "assignmentId"),
+		terminalReceiptDigest: readNullableDigest(record, source, "terminalReceiptDigest"),
 		taskId: readString(record, source, "taskId"),
 		repeatIndex: readNumber(record, source, "repeatIndex"),
-		target: target
-			? {
-					id: readString(target, `${source}.target`, "id"),
-					model: readNullableString(target, `${source}.target`, "model"),
-					thinking: readNullableString(target, `${source}.target`, "thinking"),
-				}
-			: legacyTarget,
+		target: {
+			id: readString(target, `${source}.target`, "id"),
+			model: readNullableString(target, `${source}.target`, "model"),
+			thinking: readNullableString(target, `${source}.target`, "thinking"),
+		},
 		pass: readBoolean(record, source, "pass"),
 		failureClass: readNullableString(record, source, "failureClass"),
 		metrics: asRecord(record.metrics, `${source}.metrics`) as Record<string, number | string | boolean | null>,
@@ -124,6 +110,13 @@ function readNullableString(record: Record<string, unknown>, source: string, fie
 	const value = record[field];
 	if (value === null) return null;
 	if (typeof value !== "string" || value.length === 0) throw new Error(`${source}.${field}: expected string or null`);
+	return value;
+}
+
+function readNullableDigest(record: Record<string, unknown>, source: string, field: string): string | null {
+	const value = readNullableString(record, source, field);
+	if (value !== null && !/^[0-9a-f]{64}$/u.test(value))
+		throw new Error(`${source}.${field}: expected sha256 digest or null`);
 	return value;
 }
 

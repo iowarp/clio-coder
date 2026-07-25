@@ -1,6 +1,6 @@
 import type { EvalClioProvenance, EvalEnvironmentProvenance } from "../types.js";
 
-export interface EvalTokenMetricsV2 {
+export interface EvalTokenMetricsV3 {
 	input: number;
 	output: number;
 	total: number;
@@ -8,16 +8,22 @@ export interface EvalTokenMetricsV2 {
 	cacheWrite: number;
 }
 
-export interface EvalArtifactSummaryV2 {
+export interface EvalArtifactSummaryV3 {
 	runs: number;
 	passed: number;
 	failed: number;
 	passRate: number;
-	tokens: EvalTokenMetricsV2;
+	tokens: EvalTokenMetricsV3;
 	wallTimeMs: number;
 }
 
-export interface EvalArtifactResultV2 {
+/** Required explicit linkage; null means this runner did not evaluate a dispatch assignment. */
+export interface EvalArtifactAssignmentReference {
+	assignmentId: string | null;
+	terminalReceiptDigest: string | null;
+}
+
+export interface EvalArtifactResultV3 extends EvalArtifactAssignmentReference {
 	taskId: string;
 	repeatIndex: number;
 	target: {
@@ -31,8 +37,9 @@ export interface EvalArtifactResultV2 {
 	artifacts: Record<string, string | string[] | null>;
 }
 
-export interface EvalArtifactV2 {
-	version: 2;
+/** The only current eval artifact format. Routing accepts this version only. */
+export interface EvalArtifactV3 {
+	version: 3;
 	evalId: string;
 	suite: {
 		id: string;
@@ -45,11 +52,11 @@ export interface EvalArtifactV2 {
 		model: string | null;
 		thinking: string | null;
 	};
-	summary: EvalArtifactSummaryV2;
-	results: EvalArtifactResultV2[];
+	summary: EvalArtifactSummaryV3;
+	results: EvalArtifactResultV3[];
 }
 
-export const ZERO_TOKEN_METRICS_V2: EvalTokenMetricsV2 = {
+export const ZERO_TOKEN_METRICS_V3: EvalTokenMetricsV3 = {
 	input: 0,
 	output: 0,
 	total: 0,

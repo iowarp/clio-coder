@@ -1,6 +1,6 @@
-import { type EvalTokenMetricsV2, ZERO_TOKEN_METRICS_V2 } from "../schema/artifact.js";
+import { type EvalTokenMetricsV3, ZERO_TOKEN_METRICS_V3 } from "../schema/artifact.js";
 
-export function tokenMetricsFrom(metrics: Readonly<Record<string, unknown>>): EvalTokenMetricsV2 {
+export function tokenMetricsFrom(metrics: Readonly<Record<string, unknown>>): EvalTokenMetricsV3 {
 	return {
 		input: numberMetric(metrics, "tokens.input"),
 		output: numberMetric(metrics, "tokens.output"),
@@ -10,7 +10,7 @@ export function tokenMetricsFrom(metrics: Readonly<Record<string, unknown>>): Ev
 	};
 }
 
-export function addTokenMetrics(left: EvalTokenMetricsV2, right: EvalTokenMetricsV2): EvalTokenMetricsV2 {
+export function addTokenMetrics(left: EvalTokenMetricsV3, right: EvalTokenMetricsV3): EvalTokenMetricsV3 {
 	return {
 		input: left.input + right.input,
 		output: left.output + right.output,
@@ -20,8 +20,8 @@ export function addTokenMetrics(left: EvalTokenMetricsV2, right: EvalTokenMetric
 	};
 }
 
-export function zeroTokenMetrics(): EvalTokenMetricsV2 {
-	return { ...ZERO_TOKEN_METRICS_V2 };
+export function zeroTokenMetrics(): EvalTokenMetricsV3 {
+	return { ...ZERO_TOKEN_METRICS_V3 };
 }
 
 function numberMetric(metrics: Readonly<Record<string, unknown>>, key: string): number {

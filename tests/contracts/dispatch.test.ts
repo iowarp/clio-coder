@@ -4030,6 +4030,11 @@ rl.once("line", (line) => {
 			});
 			const receiptDraft: RunReceiptDraft = {
 				verification: { state: "unverified", basis: "no-validation-tool" },
+				quality: {
+					version: 1,
+					typedValidations: [],
+					responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+				},
 				costProvenance: "unknown",
 				runId: env.id,
 				agentId: "coder",
@@ -4119,7 +4124,7 @@ rl.once("line", (line) => {
 		});
 	});
 
-	it("skips a verifiable orphan receipt that lacks a reproducibility cwd", async () => {
+	it("rejects a retired orphan receipt that lacks a reproducibility cwd", async () => {
 		await withIsolatedClioHome(async (scratch) => {
 			const receiptsDir = join(scratch, "state", "receipts");
 			mkdirSync(receiptsDir, { recursive: true });
@@ -4139,11 +4144,11 @@ rl.once("line", (line) => {
 
 			const ledger = openLedger({ maxRuns: 10 });
 			const summary = recoverOrphanReceipts(ledger);
-			strictEqual(summary.skipped, 1);
-			strictEqual(summary.corrupt, 0);
+			strictEqual(summary.skipped, 0);
+			strictEqual(summary.corrupt, 1);
 			strictEqual(summary.recovered, 0);
-			ok(existsSync(orphanPath), "skipped receipt is preserved in place");
-			ok(!existsSync(`${orphanPath}.corrupt`), "skipped receipt is not quarantined");
+			ok(!existsSync(orphanPath), "retired receipt is moved out of the trusted directory");
+			ok(existsSync(`${orphanPath}.corrupt`), "retired receipt is quarantined");
 		});
 	});
 

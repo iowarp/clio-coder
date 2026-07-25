@@ -95,6 +95,11 @@ function draft(partial: Partial<RunReceiptDraft> = {}): RunReceiptDraft {
 		sessionId: "session-1",
 		...partial,
 		verification: partial.verification ?? { state: "unverified", basis: "no-validation-tool" },
+		quality: partial.quality ?? {
+			version: 1,
+			typedValidations: [],
+			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+		},
 		costProvenance: partial.costProvenance ?? "unknown",
 		outcome: partial.outcome ?? "succeeded",
 	};

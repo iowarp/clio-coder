@@ -2,6 +2,9 @@ import { spawn } from "node:child_process";
 import type { EvalRunnerV2 } from "../schema/suite.js";
 
 export interface EvalRunnerOutput {
+	/** Exact terminal assignment/receipt linkage when this runner dispatched Clio. */
+	assignmentId: string | null;
+	terminalReceiptDigest: string | null;
 	exitCode: number;
 	stdout: string;
 	stderr: string;
@@ -44,6 +47,8 @@ export async function runExternalCommandRunner(
 		wallTimeMs += result.wallTimeMs;
 		if (result.exitCode !== 0) {
 			return {
+				assignmentId: null,
+				terminalReceiptDigest: null,
 				exitCode: result.exitCode,
 				stdout,
 				stderr,
@@ -54,6 +59,8 @@ export async function runExternalCommandRunner(
 		}
 	}
 	return {
+		assignmentId: null,
+		terminalReceiptDigest: null,
 		exitCode: 0,
 		stdout,
 		stderr,

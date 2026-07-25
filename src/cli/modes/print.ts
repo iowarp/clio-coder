@@ -6,6 +6,7 @@ import {
 	skillActivationFromToolDetails,
 } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { createRunReceiptQuality } from "../../domains/dispatch/receipt-findings.js";
 import { openLedger } from "../../domains/dispatch/state.js";
 import type { RunKind, RunOutcome, RunReceiptDraft, ToolCallStat } from "../../domains/dispatch/types.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
@@ -240,6 +241,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 		// validation tool gates it, and its cost comes from the session usage
 		// meter rather than a resolved worker pricing table.
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
 		costProvenance: "unknown",
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,

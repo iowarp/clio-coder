@@ -417,14 +417,11 @@ async function readRunLedger(stateDir: string): Promise<RunEnvelope[]> {
 }
 
 function evalRunMatches(artifact: EvalRunArtifact, envelope: RunEnvelope): boolean {
-	const cwds = new Set(artifact.results.map((result) => result.cwd));
-	if (!cwds.has(envelope.cwd)) return false;
-	const evalStart = Date.parse(artifact.startedAt);
-	const evalEnd = Date.parse(artifact.endedAt);
-	const runStart = Date.parse(envelope.startedAt);
-	const runEnd = envelope.endedAt === null ? runStart : Date.parse(envelope.endedAt);
-	if (![evalStart, evalEnd, runStart, runEnd].every(Number.isFinite)) return false;
-	return runStart <= evalEnd && runEnd >= evalStart;
+	// Time windows and cwd are merely co-location hints. They are never evidence
+	// links: only an exact durable run identity may enter the legacy evidence
+	// renderer. Current v3 routing evidence further requires assignment and
+	// terminal-receipt-digest linkage in its own strict artifact reader.
+	return artifact.results.some((result) => result.runId === envelope.id);
 }
 
 async function readReceiptForRun(stateDir: string, envelope: RunEnvelope): Promise<RunReceipt | null> {

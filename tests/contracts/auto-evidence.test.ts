@@ -163,6 +163,11 @@ async function sealRunWithConservativeReceiptSummary(input: { stateDir: string; 
 	});
 	const receipt = ledger.recordReceipt(envelope.id, {
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		quality: {
+			version: 1,
+			typedValidations: [],
+			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+		},
 		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "agent-smoke",

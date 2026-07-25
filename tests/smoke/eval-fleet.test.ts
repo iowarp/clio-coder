@@ -4,15 +4,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
-const ZERO_HARNESS = {
-	receiptCount: 0,
-	toolCalls: 0,
-	retries: 0,
-	safetyBlocks: 0,
-	correctionLatencyMs: 0,
-	validationEvidence: 0,
-};
-
 describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 	let scratch: ReturnType<typeof makeScratchHome>;
 
@@ -24,61 +15,40 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 		scratch.cleanup();
 	});
 
-	it("eval report renders text and SWE JSONL from a stored artifact", async () => {
+	it("eval report renders text and SWE JSONL from a current stored artifact", async () => {
 		const dataDir = scratch.env.CLIO_DATA_DIR;
 		if (dataDir === undefined) throw new Error("scratch CLIO_DATA_DIR missing");
-		const stateDir = scratch.env.CLIO_STATE_DIR;
-		if (stateDir === undefined) throw new Error("scratch CLIO_STATE_DIR missing");
 		const evalDir = join(dataDir, "evals");
-		const receiptDir = join(stateDir, "receipts");
 		mkdirSync(evalDir, { recursive: true });
-		mkdirSync(receiptDir, { recursive: true });
-		const receiptPath = join(receiptDir, "eval-smoke-run.json");
-		writeFileSync(receiptPath, JSON.stringify({ model_patch: "diff --git a/app.py b/app.py\n+print('ok')\n" }), "utf8");
 		writeFileSync(
 			join(evalDir, "eval-smoke.json"),
 			`${JSON.stringify(
 				{
-					version: 1,
+					version: 3,
 					evalId: "eval-smoke",
-					taskFile: "/tmp/tasks.yaml",
-					taskFileHash: "abc123",
-					clio: { version: "0.2.8", commit: "fixture-commit", entry: "dist/cli/index.js" },
+					suite: { id: "smoke", hash: "abc123" },
+					clio: { version: "test", commit: null, entry: "dist/cli/index.js" },
 					environment: { platform: "linux-x64", node: "v24.0.0" },
-					target: null,
-					model: null,
-					thinking: null,
-					paths: { taskFile: "/tmp/tasks.yaml", receipts: [], sessionLedgers: [] },
-					repeat: 1,
-					startedAt: "2026-06-24T00:00:00.000Z",
-					endedAt: "2026-06-24T00:00:01.000Z",
+					matrix: { target: "local", model: null, thinking: null },
 					summary: {
 						runs: 1,
 						passed: 1,
 						failed: 0,
 						passRate: 1,
-						tokens: 0,
-						costUsd: 0,
+						tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 },
 						wallTimeMs: 12,
-						harness: ZERO_HARNESS,
-						failureClasses: [],
 					},
 					results: [
 						{
+							assignmentId: null,
+							terminalReceiptDigest: null,
 							taskId: "task-a",
-							runId: "eval-smoke-run",
 							repeatIndex: 0,
-							cwd: "/tmp",
-							prompt: "prompt",
-							tags: ["smoke"],
+							target: { id: "local", model: null, thinking: null },
 							pass: true,
-							exitCode: 0,
-							tokens: 0,
-							costUsd: 0,
-							wallTimeMs: 12,
-							harness: ZERO_HARNESS,
-							commands: [],
-							receiptPath,
+							failureClass: null,
+							metrics: {},
+							artifacts: { patch: "diff --git a/app.py b/app.py\n+print('ok')\n" },
 						},
 					],
 				},
@@ -146,7 +116,7 @@ describe("clio eval and fleet smoke tests", { concurrency: false }, () => {
 			matrix?: { target?: unknown; model?: unknown; thinking?: unknown };
 			results?: Array<{ artifacts?: { verifierStdout?: unknown; verifierStderr?: unknown } }>;
 		};
-		strictEqual(parsed.version, 2);
+		strictEqual(parsed.version, 3);
 		strictEqual(parsed.suite?.id, "v1-task-file");
 		strictEqual(typeof parsed.suite?.hash, "string");
 		strictEqual(typeof parsed.clio?.version, "string");

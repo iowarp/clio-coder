@@ -14,6 +14,8 @@ export async function runContextIndexRunner(
 	);
 	const parsed = parseContextIndexOutput(result.stdout);
 	return {
+		assignmentId: null,
+		terminalReceiptDigest: null,
 		exitCode: result.exitCode,
 		stdout: result.stdout,
 		stderr: result.stderr,

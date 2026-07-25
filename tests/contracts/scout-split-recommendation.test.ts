@@ -91,6 +91,11 @@ function toolForAnswer(answer: string, runId = "run-scout") {
 				toolStats: [],
 				sessionId: null,
 				verification,
+				quality: {
+					version: 1,
+					typedValidations: [],
+					responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+				},
 				output: {
 					state: "final",
 					text: answer,
@@ -195,7 +200,7 @@ describe("contracts/dispatch Scout split recommendation promotion", () => {
 				"dispatch (parallel) total=1 failed=0",
 				"runs=run-scout",
 				"",
-				"- run-scout agent=scout exit=0 target=target model=model tokens=0 receipt=/tmp/run-scout.json receipt_integrity=verified/v7/sha256 evidence_verification=not_applicable/read-only-agent briefing=none project_context=absent",
+				"- run-scout agent=scout exit=0 target=target model=model tokens=0 receipt=/tmp/run-scout.json receipt_integrity=verified/v8/sha256 evidence_verification=not_applicable/read-only-agent briefing=none project_context=absent",
 				"  reconnaissance output (advisory leads, not validation evidence):",
 				"  SPLIT RECOMMENDATION: The request spans independent domains",
 				"  - Inspect src/tools/dispatch.ts:576 and report the details seam",

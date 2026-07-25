@@ -125,7 +125,11 @@ import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
-import { deriveReceiptVerification } from "./receipt-findings.js";
+import {
+	createRunReceiptQuality,
+	deriveReceiptVerification,
+	typedValidationFactsFromToolStats,
+} from "./receipt-findings.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
 	cleanupDispatchReservations,
@@ -157,6 +161,7 @@ import {
 	toRouteCandidate,
 } from "./route-decision.js";
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
+import { reduceRouteQuality } from "./route-quality.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, openLedger } from "./state.js";
 import {
@@ -315,11 +320,6 @@ export interface DispatchBundleOptions {
 	 * Tests inject a fixed stub to keep the receipt path off the process spawner.
 	 */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
-	/**
-	 * Shadow-mode route observer toggle (default on). Observer-only: disabling
-	 * it changes no dispatch behavior; it stops the bounded decision-versus-
-	 * outcome JSONL from being written and leaves `routeDecision` off receipts.
-	 */
 	routeObserver?: boolean;
 }
 
@@ -328,29 +328,11 @@ const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
 /** ACP event-inactivity stall window (Symphony §5.3.6 semantics); <= 0 disables. */
 const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
-/**
- * An external ACP agent runs its own tool loop and ships no recipe, so neither
- * its tool surface nor its spec surface is observable from here. These are that
- * unknown named once rather than a synthetic empty surface pretending to be a
- * measurement.
- */
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
-
-/**
- * Fold the shadow decision onto a receipt draft before it is sealed. Route
- * regret has to be recomputable from receipts alone for an offline replay to
- * reproduce it, so the decision travels with the run rather than only with the
- * observer's log. Absent only when the observer is disabled.
- */
 function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1 | undefined): RunReceiptDraft {
 	return decision === undefined ? draft : { ...draft, routeDecision: decision };
 }
-/**
- * The hard filters every candidate passes through before it can be scored.
- * These are the constraints `preview` actually enforces; they eliminate
- * candidates and are never traded against cost, quality, or latency.
- */
 const ROUTE_HARD_CONSTRAINTS: ReadonlyArray<string> = [
 	"agent-audience",
 	"agent-autonomy",
@@ -363,7 +345,6 @@ const ROUTE_HARD_CONSTRAINTS: ReadonlyArray<string> = [
 	"worker-permission-mode",
 	"node-eligibility",
 ];
-/** Conservative cold-route prior used only when no configured or catalog rates exist. */
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
 function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["rates"]): number {
@@ -3404,6 +3385,7 @@ export function createDispatchBundle(
 				// own tools, so no zero-activity note is derived from this record.
 				toolActivity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
+				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
 				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
 					lifecycle.autonomy,
 					lifecycle.agentConfig.toolGovernance ?? "clio-policy",
@@ -3693,15 +3675,24 @@ export function createDispatchBundle(
 				.then((receipt) => {
 					const envelope = ledger?.get(receipt.runId);
 					const phases = envelope ? deriveEnvelopePhaseDurations(envelope) : undefined;
+					if (envelope === null || envelope === undefined) return;
 					const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
+					const quality = reduceRouteQuality({
+						subject: { receipt, envelope },
+						receipts: [{ receipt, envelope }],
+					});
 					routeObserver?.recordOutcome(observation.id, {
 						route: observation.decision.executedRoute,
 						outcome,
-						verified: receipt.verification?.state === "verified",
+						qualityLabel: quality.label,
 						firstPass: outcome === "succeeded" && (receipt.lineage?.attempt ?? 0) === 0,
 						attempt: receipt.lineage?.attempt ?? 0,
 						costUsd: receipt.costUsd,
 						endToEndMs: phases?.totalEndToEndMs ?? 0,
+						receipt,
+						envelope,
+						quality,
+						phaseTiming: phases,
 					});
 				})
 				.catch(() => {});
@@ -4364,6 +4355,15 @@ export function createDispatchBundle(
 					{ toolStats: finalToolStats },
 					{ capabilityClass: lifecycle.capabilityClass },
 				),
+				quality: createRunReceiptQuality({
+					...(req.responseSchema === undefined ? {} : { responseSchema: req.responseSchema }),
+					runtimeEnforceable:
+						lifecycle.target.runtime.id === "llamacpp" &&
+						lifecycle.target.modelCapabilities?.structuredOutputs === "json-schema",
+					enforcementPassed:
+						req.responseSchema === undefined ? null : outcome === "succeeded" && capturedOutput?.state === "final",
+					typedValidations: typedValidationFactsFromToolStats(finalToolStats),
+				}),
 				...(skillActivations.length > 0 ? { skillActivations: [...skillActivations] } : {}),
 				autonomyEnforcement: autonomyEnforcementForWorkerSpec(
 					spec,

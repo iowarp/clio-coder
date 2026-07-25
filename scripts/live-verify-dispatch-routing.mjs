@@ -8,15 +8,17 @@
  * model-authored tool call -> plan resolution -> reservation -> admission ->
  * worker spawn -> receipt.
  *
- * Three scenarios, each with its own control:
+ * Four scenarios, each with its own control:
  *
- *   1. capacity   Two parallel tasks pinned to a capacity-one node are denied
+ *   1. quality  A pinned local Verifier records one typed `verify` result as a
+ *                measured pass; a read-only Scout remains unmeasured and cold.
+ *   2. capacity   Two parallel tasks pinned to a capacity-one node are denied
  *                 as one unit with one aggregate message naming the total. The
  *                 same two tasks, submitted as an explicit sequence, both run.
- *   2. budget     A plan whose aggregate conservative estimate crosses the cost
+ *   3. budget     A plan whose aggregate conservative estimate crosses the cost
  *                 ceiling is denied at plan time, before any worker spawns. One
  *                 task of the same shape, under the same ceiling, is admitted.
- *   3. failover   A plan-approved two-step pipeline whose step-1 target answers
+ *   4. failover   A plan-approved two-step pipeline whose step-1 target answers
  *                 503 fails over to an approved candidate, and step 2 receives
  *                 the successful attempt's output, not the failed attempt's.
  *
@@ -37,7 +39,7 @@
  *   CLIO_LIVE_FLEET_HOST        SSH host for the capacity-one node (default localhost)
  *   CLIO_LIVE_DEAD_PORT         port for the always-503 target (default 8599)
  *   CLIO_LIVE_VERIFY_TIMEOUT_MS per-turn timeout (default 900000)
- *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: capacity,budget,failover (default all)
+ *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover (default all)
  *   CLIO_LIVE_KEEP=1            retain the isolated scratch tree on success
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -66,7 +68,7 @@ const url = process.env.CLIO_LIVE_BASE_URL || undefined;
 const fleetHost = process.env.CLIO_LIVE_FLEET_HOST || "localhost";
 const deadPort = Number.parseInt(process.env.CLIO_LIVE_DEAD_PORT || "8599", 10);
 const timeoutMs = Number.parseInt(process.env.CLIO_LIVE_VERIFY_TIMEOUT_MS || "900000", 10);
-const ALL_SCENARIOS = ["capacity", "budget", "failover"];
+const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover"];
 const scenarios = (process.env.CLIO_LIVE_VERIFY_SCENARIOS || ALL_SCENARIOS.join(","))
 	.split(",")
 	.map((name) => name.trim())
@@ -98,6 +100,12 @@ if (!apiKey) {
 	}
 }
 const keylessRuntimes = new Set(["openai-compat", "llamacpp", "ollama", "lmstudio"]);
+if (scenarios.includes("quality") && !keylessRuntimes.has(runtimeId)) {
+	console.error(
+		"Error: the quality scenario requires a free local runtime (llamacpp, ollama, lmstudio, or openai-compat).",
+	);
+	process.exit(1);
+}
 if (!apiKey && !keylessRuntimes.has(runtimeId)) {
 	console.error(
 		"Error: CLIO_LIVE_EVAL=1 is active, but no API key was found in CLIO_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
@@ -170,6 +178,11 @@ function git(args) {
 }
 
 writeFileSync(join(workspaceDir, "README.md"), "live dispatch routing verification workspace\n", "utf8");
+writeFileSync(
+	join(workspaceDir, "package.json"),
+	`${JSON.stringify({ private: true, scripts: { typecheck: "node --check src/alpha.ts" } }, null, 2)}\n`,
+	"utf8",
+);
 mkdirSync(join(workspaceDir, "src"), { recursive: true });
 mkdirSync(join(workspaceDir, "tests"), { recursive: true });
 writeFileSync(join(workspaceDir, "src", "alpha.ts"), "export const alpha = 1;\n", "utf8");
@@ -316,6 +329,58 @@ function requireCall(calls, predicate, description) {
 		return null;
 	}
 	return call;
+}
+
+async function scenarioQuality() {
+	currentScenario = "quality";
+	clearState();
+	const settings = baseSettings();
+	// Pin both agent runs to the one isolated local route. The scenario never
+	// consults operator settings and rejects a paid runtime before this point.
+	settings.workers.default = { target: targetId, model, thinkingLevel: "off" };
+	writeSettings(settings);
+	const verifier = await runCli(
+		[
+			"run",
+			"--agent",
+			"verifier",
+			"--target",
+			targetId,
+			"--model",
+			model,
+			"--autonomy",
+			"full-auto",
+			"Use the verify tool to run the declared typecheck in the scratch project. Report the result and stop.",
+		],
+		"quality-verifier",
+	);
+	check(!verifier.timedOut && verifier.code === 0, `typed verifier run failed: ${verifier.stderr}`);
+	const verifierReceipt = workerReceipts().find((receipt) => receipt.agentId === "verifier");
+	check(Boolean(verifierReceipt), "no Verifier receipt was written");
+	if (verifierReceipt) {
+		check(
+			verifierReceipt.quality?.typedValidations?.some((fact) => fact.sourceId === "tool:verify" && fact.passed === true),
+			`Verifier receipt did not seal a typed passing validation: ${JSON.stringify(verifierReceipt.quality)}`,
+		);
+	}
+
+	// Scout is intentionally a shadow agent, so use the production internal
+	// bootstrap path rather than weakening user-origin admission for this check.
+	const scout = await runCli(
+		["context", "init", "--yes", "--target", targetId, "--model", model, "--thinking", "off"],
+		"quality-scout",
+	);
+	check(!scout.timedOut && scout.code === 0, `read-only Scout run failed: ${scout.stderr}`);
+	const scoutReceipt = workerReceipts().find((receipt) => receipt.agentId === "scout");
+	check(Boolean(scoutReceipt), "no Scout receipt was written");
+	if (scoutReceipt) {
+		check(
+			scoutReceipt.verification?.state === "not_applicable" && scoutReceipt.quality?.typedValidations?.length === 0,
+			`read-only Scout must remain unmeasured: ${JSON.stringify(scoutReceipt.quality)}`,
+		);
+	}
+	const labeled = workerReceipts().filter((receipt) => receipt.quality?.typedValidations?.length > 0).length;
+	check(labeled < 6, `cold isolated history unexpectedly meets active readiness (${labeled} labeled outcomes)`);
 }
 
 async function scenarioCapacity() {
@@ -572,7 +637,12 @@ async function scenarioFailover() {
 	}
 }
 
-const runners = { capacity: scenarioCapacity, budget: scenarioBudget, failover: scenarioFailover };
+const runners = {
+	quality: scenarioQuality,
+	capacity: scenarioCapacity,
+	budget: scenarioBudget,
+	failover: scenarioFailover,
+};
 
 let passed = false;
 try {

@@ -42,7 +42,7 @@ function artifact(cwd: string): EvalRunArtifact {
 		results: [
 			{
 				taskId: "voipi",
-				runId: "eval-linked-voipi-001",
+				runId: "run-nested",
 				repeatIndex: 0,
 				cwd,
 				prompt: "fix the target",
@@ -67,7 +67,7 @@ function artifact(cwd: string): EvalRunArtifact {
 }
 
 describe("contracts/eval evidence linking", () => {
-	it("links nested clio run rows by cwd and eval time window", async () => {
+	it("links nested clio run rows only by exact durable run id", async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-eval-evidence-"));
 		try {
 			const dataDir = join(root, "data");

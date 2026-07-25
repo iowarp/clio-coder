@@ -40,6 +40,9 @@ export {
 } from "./gate-decisions.js";
 export { DispatchManifest } from "./manifest.js";
 export { verifyReceiptIntegrity } from "./receipt-integrity.js";
+export { createRouteHistoryStore } from "./route-history.js";
+export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.js";
+export { reduceRouteQuality } from "./route-quality.js";
 export type {
 	ReceiptVerificationState,
 	RunBriefingProvenance,
@@ -48,6 +51,7 @@ export type {
 	RunOutcomeCode,
 	RunReceipt,
 	RunReceiptIntegrity,
+	RunReceiptQuality,
 	RunReceiptVerification,
 	RunStatus,
 	ToolCallStat,

@@ -36,6 +36,8 @@ export async function runClioRunRunner(
 	// them fails closed instead of reading prose labels.
 	const receipt = receiptFromRunJsonStdout(result.stdout);
 	return {
+		assignmentId: receipt === null ? null : (receipt.lineage?.rootRunId ?? receipt.runId),
+		terminalReceiptDigest: receipt?.integrity.digest ?? null,
 		exitCode: result.exitCode,
 		stdout: result.stdout,
 		stderr: result.stderr,
@@ -55,6 +57,9 @@ export async function runClioRunRunner(
 			"dispatch.scoutCount": scoutDispatchCountFromJsonl(toolMetricStream),
 			"wiki.staleAcknowledged": wikiStaleAcknowledgedFromJsonl(toolMetricStream),
 			...(receipt === null ? {} : evidenceMetricsFromReceipt(receipt)),
+			...(receipt === null
+				? {}
+				: { "evidence.qualityLabel": receipt.quality.typedValidations.length > 0 ? "measured" : "unmeasured" }),
 		},
 		artifacts: {
 			stdout: result.stdout,

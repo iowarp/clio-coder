@@ -8,7 +8,7 @@ import { runClioRunRunner } from "../runners/clio-run.js";
 import { runContextIndexRunner } from "../runners/context-index.js";
 import { runContextInitRunner } from "../runners/context-init.js";
 import { type EvalRunnerOutput, runExternalCommandRunner } from "../runners/external-command.js";
-import type { EvalArtifactResultV2, EvalArtifactV2 } from "../schema/artifact.js";
+import type { EvalArtifactResultV3, EvalArtifactV3 } from "../schema/artifact.js";
 import type { EvalMetricAssertion, EvalSuiteTargetV2, LoadedEvalSuiteV2 } from "../schema/suite.js";
 import { createEvalId } from "../store.js";
 import { runCommandVerifiers } from "../verifiers/command.js";
@@ -28,11 +28,11 @@ export interface RunEvalSuiteV2Options {
 export async function runEvalSuiteV2(
 	loaded: LoadedEvalSuiteV2,
 	options: RunEvalSuiteV2Options,
-): Promise<EvalArtifactV2> {
+): Promise<EvalArtifactV3> {
 	const now = options.now ?? (() => new Date());
 	const started = now();
 	const evalId = createEvalId(started, loaded.hash);
-	const results: EvalArtifactResultV2[] = [];
+	const results: EvalArtifactResultV3[] = [];
 	const maxCostUsd = loaded.suite.matrix.maxCostUsd;
 	let spentUsd = 0;
 	for (const item of expandEvalMatrix(loaded.suite)) {
@@ -51,7 +51,7 @@ export async function runEvalSuiteV2(
 }
 
 /** Known receipt cost of one finished matrix item; unpriced runs count zero. */
-export function resultCostUsd(result: Pick<EvalArtifactResultV2, "metrics">): number {
+export function resultCostUsd(result: Pick<EvalArtifactResultV3, "metrics">): number {
 	const value = result.metrics["cost.usd"];
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -62,8 +62,10 @@ function budgetExhaustedResult(
 	repeatIndex: number,
 	spentUsd: number,
 	maxCostUsd: number,
-): EvalArtifactResultV2 {
+): EvalArtifactResultV3 {
 	return {
+		assignmentId: null,
+		terminalReceiptDigest: null,
 		taskId,
 		repeatIndex,
 		target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
@@ -87,7 +89,7 @@ async function runMatrixItem(
 	target: EvalSuiteTargetV2,
 	repeatIndex: number,
 	clioEntry: string,
-): Promise<EvalArtifactResultV2> {
+): Promise<EvalArtifactResultV3> {
 	let workspace: PreparedEvalWorkspace | null = null;
 	try {
 		workspace = await prepareWorkspace(loaded.baseDir, task);
@@ -112,6 +114,8 @@ async function runMatrixItem(
 		metrics["result.pass"] = pass;
 		metrics["result.failureClass"] = failureClass;
 		return {
+			assignmentId: runner.assignmentId,
+			terminalReceiptDigest: runner.terminalReceiptDigest,
 			taskId: task.id,
 			repeatIndex,
 			target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
@@ -126,6 +130,8 @@ async function runMatrixItem(
 		};
 	} catch (error) {
 		return {
+			assignmentId: null,
+			terminalReceiptDigest: null,
 			taskId: task.id,
 			repeatIndex,
 			target: { id: target.id, model: target.model ?? null, thinking: target.thinking ?? null },
@@ -209,16 +215,16 @@ async function runVerifiers(
 function buildArtifact(
 	loaded: LoadedEvalSuiteV2,
 	evalId: string,
-	results: EvalArtifactResultV2[],
+	results: EvalArtifactResultV3[],
 	clioEntry: string,
-): EvalArtifactV2 {
+): EvalArtifactV3 {
 	const passed = results.filter((result) => result.pass).length;
 	const tokenTotals = results.reduce(
 		(total, result) => addTokenMetrics(total, tokenMetricsFrom(result.metrics)),
 		zeroTokenMetrics(),
 	);
 	return {
-		version: 2,
+		version: 3,
 		evalId,
 		suite: { id: loaded.suite.suite.id, hash: loaded.hash },
 		clio: evalClioProvenance({ entry: clioEntry }),
