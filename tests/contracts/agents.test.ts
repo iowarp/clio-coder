@@ -25,7 +25,9 @@ describe("contracts/agents", () => {
 					"---",
 					"name: Scientific Validator",
 					"description: HPC artifact validation planner.",
-					"tools: [read, grep, find, ls, context]",
+					"tools:",
+					"  required: [read, context]",
+					"  optional: [grep, find, ls]",
 					"audience: custom",
 					"category: science",
 					"capabilityClass: read-only",
@@ -82,46 +84,26 @@ describe("contracts/agents", () => {
 		});
 	});
 
-	it("derives conservative legacy requirements by capability, skill binding, and orchestration", () => {
-		const cases = [
-			{ id: "coder", capabilityClass: "workspace-edit" as const, tools: ["read", "write", "edit"] },
-			{ id: "verifier", capabilityClass: "verification" as const, tools: ["read", "verify"] },
-			{ id: "debugger", capabilityClass: "verification" as const, tools: ["read", "verify"] },
-			{ id: "architect", capabilityClass: "artifact-write" as const, tools: ["read", "artifact"] },
-			{ id: "researcher", capabilityClass: "read-only" as const, tools: ["read", "web_fetch"] },
-			{ id: "scout", capabilityClass: "read-only" as const, tools: ["read", "code_nav"] },
-			{ id: "tester", capabilityClass: "workspace-edit" as const, tools: ["read", "edit"] },
-			{ id: "documenter", capabilityClass: "workspace-edit" as const, tools: ["read", "write"] },
-			{ id: "skill-bound", capabilityClass: "read-only" as const, tools: ["read", "context"], skills: ["hpc"] },
-			{ id: "orchestrator", capabilityClass: "orchestration" as const, tools: ["read", "dispatch"] },
-		];
-		const requirements = Object.fromEntries(
-			cases.map((entry) => {
-				const spec = normalizeAgentSpec({
-					...entry,
-					name: entry.id,
-					description: entry.id,
+	it("fails loudly when a recipe declares tools without required/optional groups", () => {
+		throws(
+			() =>
+				normalizeAgentSpec({
+					id: "undeclared",
+					name: "Undeclared",
+					description: "Declares tools but no requirement groups.",
+					tools: ["read", "write"],
+					capabilityClass: "workspace-edit",
 					source: "project",
-					filepath: `/tmp/${entry.id}.md`,
-					body: entry.id,
-				});
-				return [entry.id, spec.toolRequirements.required];
-			}),
+					filepath: "/tmp/undeclared.md",
+					body: "undeclared",
+				} as unknown as Parameters<typeof normalizeAgentSpec>[0]),
+			/must declare tools.required and tools.optional/,
 		);
-		deepStrictEqual(requirements.coder, ["read", { anyOf: ["write", "edit"] }]);
-		deepStrictEqual(requirements.verifier, ["verify"]);
-		deepStrictEqual(requirements.debugger, ["verify"]);
-		deepStrictEqual(requirements.architect, ["artifact"]);
-		deepStrictEqual(requirements.researcher, []);
-		deepStrictEqual(requirements.scout, []);
-		deepStrictEqual(requirements.tester, ["read", { anyOf: ["write", "edit"] }]);
-		deepStrictEqual(requirements.documenter, ["read", { anyOf: ["write", "edit"] }]);
-		deepStrictEqual(requirements["skill-bound"], ["context"]);
-		deepStrictEqual(requirements.orchestrator, ["dispatch"]);
 	});
 
 	it("flags capability declarations that contradict tool access", () => {
 		const spec = normalizeAgentSpec({
+			toolRequirements: { required: ["read", { anyOf: ["edit"] }], optional: [] },
 			id: "bad-scout",
 			name: "Bad Scout",
 			description: "Invalid read-only recipe.",
@@ -141,6 +123,7 @@ describe("contracts/agents", () => {
 	it("renders catalog entries from normalized specs instead of raw role prose", () => {
 		const catalog = renderAgentCatalog([
 			{
+				toolRequirements: { required: ["read"], optional: ["verify"] },
 				id: "verifier",
 				name: "Verifier",
 				description: "Run gates.",
@@ -155,6 +138,7 @@ describe("contracts/agents", () => {
 				body: "# Verifier",
 			},
 			{
+				toolRequirements: { required: [], optional: ["read", "grep"] },
 				id: "scout",
 				name: "Scout",
 				description: "Map code.",
@@ -190,6 +174,7 @@ describe("contracts/agents", () => {
 	it("includes config-synthesized delegation specs in the spec-based roster", () => {
 		const sections = renderAgentCatalogSectionsFromSpecs([
 			normalizeAgentSpec({
+				toolRequirements: { required: [], optional: [] },
 				id: "coder",
 				name: "Coder",
 				description: "Code.",
@@ -229,6 +214,7 @@ describe("contracts/agents", () => {
 	it("keeps shadow agents hidden from user-visible lists", () => {
 		const visible = [
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "coder",
 				name: "Coder",
 				description: "Code.",
@@ -237,6 +223,7 @@ describe("contracts/agents", () => {
 				body: "# Coder",
 			},
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "scout",
 				name: "Scout",
 				description: "Scout.",
@@ -254,6 +241,7 @@ describe("contracts/agents", () => {
 	it("prevents user and project recipes from overriding reserved shipped agents", () => {
 		const builtin = [
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "scout",
 				name: "Scout",
 				description: "Shadow scout.",
@@ -263,6 +251,7 @@ describe("contracts/agents", () => {
 				body: "# Scout",
 			},
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "coder",
 				name: "Coder",
 				description: "Base coder.",
@@ -274,6 +263,7 @@ describe("contracts/agents", () => {
 		];
 		const user = [
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "scout",
 				name: "User Scout",
 				description: "Should not override shadow.",
@@ -282,6 +272,7 @@ describe("contracts/agents", () => {
 				body: "# User Scout",
 			},
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "coder",
 				name: "User Coder",
 				description: "May customize base.",
@@ -292,6 +283,7 @@ describe("contracts/agents", () => {
 		];
 		const project = [
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "coder",
 				name: "Project Coder",
 				description: "Project must not override shipped ids.",
@@ -300,6 +292,7 @@ describe("contracts/agents", () => {
 				body: "# Project Coder",
 			},
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "domain-helper",
 				name: "Domain Helper",
 				description: "Project custom agent.",
@@ -316,6 +309,7 @@ describe("contracts/agents", () => {
 
 	it("requires context when a recipe declares agent-bound skills", () => {
 		const spec = normalizeAgentSpec({
+			toolRequirements: { required: [], optional: ["read"] },
 			id: "skillful",
 			name: "Skillful",
 			description: "Invalid skill recipe.",
@@ -327,9 +321,12 @@ describe("contracts/agents", () => {
 			filepath: "/tmp/skillful.md",
 			body: "# Skillful",
 		});
+		// A skill-bound recipe must both require and expose context. Nothing
+		// derives the requirement for it any more, so both faults are reported.
 		const errors = agentSpecPolicyErrors(spec);
-		strictEqual(errors.length, 1);
-		match(errors[0] ?? "", /declares skills but does not expose context/);
+		strictEqual(errors.length, 2);
+		match(errors[0] ?? "", /must require context for bound skills/);
+		match(errors[1] ?? "", /declares skills but does not expose context/);
 	});
 
 	it("keeps shipped built-in recipes aligned with their declared capability class and semantic requirements", () => {
@@ -416,6 +413,7 @@ describe("contracts/agents", () => {
 			deepStrictEqual(project.budget, user.budget);
 			strictEqual(
 				normalizeAgentSpec({
+					toolRequirements: { required: [], optional: [] },
 					id: "legacy",
 					name: "Legacy",
 					description: "No declared budget.",
@@ -481,6 +479,7 @@ describe("contracts/agents", () => {
 	it("renders deterministic declared and operator-default budget metadata", () => {
 		const catalog = renderAgentCatalog([
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "bounded",
 				name: "Bounded",
 				description: "Bounded agent.",
@@ -490,6 +489,7 @@ describe("contracts/agents", () => {
 				body: "Bounded.",
 			},
 			{
+				toolRequirements: { required: [], optional: [] },
 				id: "legacy",
 				name: "Legacy",
 				description: "Default policy.",
@@ -504,6 +504,7 @@ describe("contracts/agents", () => {
 			catalog,
 			renderAgentCatalog([
 				{
+					toolRequirements: { required: [], optional: [] },
 					id: "legacy",
 					name: "Legacy",
 					description: "Default policy.",
@@ -512,6 +513,7 @@ describe("contracts/agents", () => {
 					body: "Legacy.",
 				},
 				{
+					toolRequirements: { required: [], optional: [] },
 					id: "bounded",
 					name: "Bounded",
 					description: "Bounded agent.",

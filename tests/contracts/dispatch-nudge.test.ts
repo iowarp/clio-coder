@@ -238,8 +238,8 @@ describe("contracts/detached dispatch nudge outcome copy", () => {
 					{
 						id: "batch-mixed",
 						runs: [
-							{ runId: "run-canceled", agentId: "scout" },
-							{ runId: "run-failed", agentId: "scout" },
+							{ runId: "run-canceled", assignmentId: "run-canceled", agentId: "scout" },
+							{ runId: "run-failed", assignmentId: "run-failed", agentId: "scout" },
 						],
 						sessionId: "test-session",
 						createdAt: "2026-07-11T00:00:00.000Z",

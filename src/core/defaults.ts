@@ -47,7 +47,12 @@ export interface WorkersSettings {
 	default: WorkerTarget;
 	profiles: WorkerProfiles;
 	agentBindings: WorkerAgentBindings;
-	/** Bounded automatic retries for retryable run outcomes. 0 disables. */
+	/**
+	 * Bounded automatic retries for a dispatched worker run whose outcome is
+	 * retryable. 0 disables. This is the sole governor of a dispatch assignment's
+	 * retry chain; the unrelated top-level `retry` block governs the interactive
+	 * session's own provider calls.
+	 */
 	maxRetries: number;
 	onPermission: WorkerPermissionMode;
 	/** Escalate-posture bounds; defaults 120000 ms with a deny fallback. */
@@ -86,7 +91,8 @@ export interface CompactionSettings {
 
 /**
  * Transient provider retry controls for the interactive chat loop. These are
- * intentionally small and mirror the session retry helper defaults.
+ * intentionally small and mirror the session retry helper defaults. Dispatched
+ * worker runs are governed by `workers.maxRetries` instead; the two never meet.
  */
 export interface RetrySettings {
 	enabled: boolean;
@@ -521,6 +527,7 @@ compaction:
 # Transient provider/stream retry controls for interactive chat.
 # Retryable errors include overloads, rate limits, 5xx responses, network
 # resets, and timeouts. Context overflow uses compaction recovery instead.
+# Dispatched worker runs retry under workers.maxRetries, not this block.
 retry:
   enabled: true
   maxRetries: 3

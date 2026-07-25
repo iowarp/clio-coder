@@ -86,6 +86,8 @@ async function sealRunWithSession(scratch: string, task: string): Promise<string
 		costUsd: 0,
 	});
 	ledger.recordReceipt(envelope.id, {
+		verification: { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "coder",
 		task,

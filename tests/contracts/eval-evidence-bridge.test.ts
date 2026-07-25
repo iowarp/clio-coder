@@ -83,11 +83,13 @@ describe("contracts/eval evidence bridge", () => {
 				"cost.usd": 0.042,
 			},
 		);
-		// Legacy receipt: verification reads unknown, and firstPassSuccess is
-		// omitted (not defaulted) so a gate on it fails closed.
-		const legacy = evidenceMetricsFromReceipt(receipt());
-		strictEqual(legacy["evidence.verification"], "unknown");
-		ok(!("evidence.firstPassSuccess" in legacy));
+		// A receipt with no findings summary omits firstPassSuccess (never defaults
+		// it) so a gate on that metric fails closed rather than reading as success.
+		const unverified = evidenceMetricsFromReceipt(
+			receipt({ verification: { state: "unverified", basis: "no-validation-tool" } }),
+		);
+		strictEqual(unverified["evidence.verification"], "unverified");
+		ok(!("evidence.firstPassSuccess" in unverified));
 	});
 
 	it("counts terminal dispatch tool calls with the canonical-stream preference", () => {

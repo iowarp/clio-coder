@@ -216,8 +216,23 @@ A plan-scale dispatch call (more than one task, review, compete, effective
 remote placement, or `apply_winner`) maps to an approval ask at supervised
 autonomy levels. Before asking, Clio resolves the effective agent, target,
 model, node, bounded review cycles/candidates/judge, and scheduling cost
-ceiling without reserving capacity. The parked call shows that sanitized
-artifact, and one approval covers the whole plan. Execution consumes the
+ceiling, then reserves the plan's capacity and budget as a unit. The parked
+call shows that sanitized artifact, including the approved fallback candidates
+in preference order, and one approval covers the whole plan. Declining the plan
+rolls the whole reservation back.
+
+A reservation holds three scarce things and nothing else: a global concurrency
+slot, a per-node slot, and a budget upper bound. It never pins route identity.
+Capacity and budget are checked for the plan as a unit at approval time, per
+wave, so a three-step sequential plan holds one slot rather than three and N
+parallel tasks whose individual estimates each fit but whose sum breaches the
+ceiling are denied together with the aggregate figure. A member is consumed
+once by its assignment and released once when that assignment settles; a retry
+that lands on a different node or a differently priced route rebinds the member
+atomically and fails closed if the new node has no free slot or the new
+estimate breaches the ceiling. Reservations owned by a dead process are
+reclaimed at startup, with a TTL as the backstop, and live sibling processes'
+reservations are preserved. Execution consumes the
 same pins, including each expanded builder/reviewer/candidate/judge role and
 the SSH node's transport kind and host. A placement, host, capability, or
 cost-ceiling change fails before launch rather than silently choosing an
@@ -235,6 +250,14 @@ is canceled, or exhausts its retry policy; the returned receipt is the
 terminal attempt's unchanged receipt. Earlier attempts stay independently
 addressable and integrity-verifiable.
 
+The assignment owns the event stream as well as the terminal receipt. The
+stream returned by `dispatch()` yields attempt 1's frames, then a synthetic
+`attempt_start` frame for each retry, then that attempt's frames, and ends when
+the assignment settles. A consumer therefore observes the same run the receipt
+describes, and the marker tells it to discard state accumulated from an attempt
+that has been superseded. The stream is single-consumer and bounded
+(drop-oldest), so a slow reader degrades live display and never stalls a worker.
+
 Manual `target`, `model`, or `node` pins default to exact failover (`none`): a
 retry may repeat the tuple but cannot silently move away from it. `approved`
 failover requires an ordered `allowedCandidates` envelope of exact
@@ -244,6 +267,20 @@ part—for example, an SSH channel failure can move the node while retaining the
 agent, target, and model. Cancellation, policy rejection, and permission
 refusal neither retry nor penalize infrastructure.
 
+A plan-approved task is never `automatic`. An explicitly pinned task seals its
+exact tuple with `failover: "none"`; any other planned task seals
+`failover: "approved"` with a bounded candidate list enumerated by
+`route-candidates.ts` and rendered into the plan text the operator approves.
+Validation rejects `automatic` on a request carrying plan provenance, so an
+approved dispatch can only reroute to a tuple the approval actually showed.
+
+Retries are governed by `workers.maxRetries` and backoff, and by nothing else.
+A target cooldown protects new work from a known-bad target; it does not gate
+an assignment already in flight, because that assignment's own retry budget is
+the correct and sufficient bound. A retry denied at admission settles the
+assignment failed, reports the reason on stderr, and records it in the
+assignment's `outcomeDetail`.
+
 Individual receipt schemas are intentionally unchanged. Assignment status,
 attempt ids, and terminal run id are stored separately in `assignments.json`.
 Pipelines and batches await assignment terminals, so downstream stages consume
@@ -251,7 +288,7 @@ the successful fallback output rather than an earlier failed attempt.
 
 ## Receipts
 
-New receipts use integrity v6 (`RUN_RECEIPT_INTEGRITY_VERSION = 6`), which authenticates the complete receipt and reconstructible ledger provenance surface. Verification retains exact, dedicated v4 and v5 paths for already sealed historical receipts; their canonical projections are frozen. A v4 artifact cannot carry v5/v6-only own-properties, and a v5 artifact cannot carry the v6-only steering field, even when an injected value is null or undefined. Versions other than 4, 5, and 6 remain invalid. The fleet provenance fields covered by the digest
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 6`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`).

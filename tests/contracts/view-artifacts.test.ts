@@ -89,6 +89,8 @@ function fixtureEnvelope(stateDir: string, runId = "run-view-1"): RunEnvelope {
 
 function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
 	return {
+		verification: { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: envelope.agentId,
 		task: envelope.task,

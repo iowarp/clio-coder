@@ -102,6 +102,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 	};
 	const recipes: ReadonlyArray<AgentRecipe> = [
 		{
+			toolRequirements: { required: [], optional: [] },
 			id: "coder",
 			name: "coder",
 			description: "test recipe",

@@ -29,7 +29,7 @@ import {
 import { antigravitySubprocessConfigForAutonomy } from "../../engine/antigravity/subprocess-runtime.js";
 import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude/subprocess-runtime.js";
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
-import { workerRuntimeMediatesClioDispatch } from "../../engine/worker-tools.js";
+import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-tools.js";
 import { toolPromptHintsForNames } from "../../tools/bootstrap.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
@@ -83,6 +83,7 @@ import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { admit } from "./admission.js";
 import { AssignmentRegistry, asAssignmentId } from "./assignment.js";
+import type { AssignmentAttemptStartEvent } from "./assignment-events.js";
 import { reconcileOrphanAssignments } from "./assignment-reconcile.js";
 import {
 	cancelStoredAssignment,
@@ -130,12 +131,20 @@ import {
 	consumeDispatchReservation,
 	createDispatchReservation,
 	getDispatchReservation,
+	type ReservationCapacitySnapshot,
+	rebindDispatchReservationMember,
 	releaseDispatchReservationMember,
 	reservedBudgetUsd,
 	reservedCapacity,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
 } from "./reservation-store.js";
+import {
+	type RouteUniverse,
+	routeCandidateOrder,
+	sameRouteCandidate,
+	selectRouteCandidates,
+} from "./route-candidates.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { createSpeculationObserver, type SpeculationObserver } from "./speculation.js";
 import { type Ledger, openLedger } from "./state.js";
@@ -1124,7 +1133,7 @@ function assertPostRuntimeToolCompatibility(
 	target: ResolvedTarget,
 ): void {
 	const compatibility = resolveAgentToolCompatibility(spec, effectiveTools, {
-		mediatesDispatch: workerRuntimeMediatesClioDispatch(target.runtime.id),
+		mediatesDispatch: WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH,
 	});
 	if (compatibility.compatible) return;
 	throw new Error(
@@ -1937,9 +1946,10 @@ export function createDispatchBundle(
 	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 	const ownedReservations = new Set<string>();
 
-	function prepareReservation(input: Parameters<NonNullable<DispatchContract["reservations"]>["prepare"]>[0]) {
+	function reservationCapacitySnapshot(
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): ReservationCapacitySnapshot {
 		const preflight = scheduling.preflight();
-		const settings = getEffectiveSettings();
 		const nodes: Record<string, { active: number; limit: number }> = {};
 		for (const node of scheduling.fleet?.list() ?? []) {
 			nodes[node.id] = { active: node.activeWorkers, limit: node.maxWorkers };
@@ -1947,25 +1957,23 @@ export function createDispatchBundle(
 		if (nodes.local === undefined) {
 			nodes.local = { active: scheduling.activeWorkers(), limit: configuredGlobalCapacity(settings) };
 		}
+		return {
+			global: { active: scheduling.activeWorkers(), limit: configuredGlobalCapacity(settings) },
+			nodes,
+			budget: { currentUsd: preflight.currentUsd, ceilingUsd: preflight.ceilingUsd },
+		};
+	}
+
+	function prepareReservation(input: Parameters<NonNullable<DispatchContract["reservations"]>["prepare"]>[0]) {
 		const record = createDispatchReservation({
 			topology: input.topology,
 			tasks: input.tasks.map((task) => ({
 				memberId: task.memberId,
 				wave: task.wave,
-				agentId: task.resolution.agentId,
-				targetId: task.resolution.targetId,
-				wireModelId: task.resolution.wireModelId,
 				nodeId: task.resolution.node.id,
 				costUpperBoundUsd: task.resolution.costUpperBoundUsd,
-				...(task.allowedCandidates !== undefined
-					? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
-					: {}),
 			})),
-			capacity: {
-				global: { active: scheduling.activeWorkers(), limit: configuredGlobalCapacity(settings) },
-				nodes,
-				budget: { currentUsd: preflight.currentUsd, ceilingUsd: preflight.ceilingUsd },
-			},
+			capacity: reservationCapacitySnapshot(getEffectiveSettings()),
 			nowMs: now(),
 		});
 		ownedReservations.add(record.ownerId);
@@ -2039,11 +2047,32 @@ export function createDispatchBundle(
 		}
 	}
 
-	function consumeReservationForRoute(req: DispatchRequest, route: DispatchFailoverCandidate): void {
+	/**
+	 * A reservation member holds capacity and budget, never route identity. The
+	 * assignment consumes it once on its first attempt; every retry rebinds it to
+	 * the node and estimate that attempt actually resolved, so failover moves
+	 * capacity instead of breaking the reservation.
+	 */
+	function consumeReservationSlot(req: DispatchRequest): void {
 		const reservation = req.reservation;
-		if (reservation === undefined) return;
-		consumeDispatchReservation(reservation.ownerId, reservation.memberId, route, {
-			allowAlreadyConsumed: req.lineage !== undefined,
+		if (reservation === undefined || req.lineage !== undefined) return;
+		consumeDispatchReservation(reservation.ownerId, reservation.memberId, { nowMs: now() });
+	}
+
+	function rebindReservationSlot(
+		req: DispatchRequest,
+		nodeId: string,
+		costUpperBoundUsd: number,
+		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	): void {
+		const reservation = req.reservation;
+		if (reservation === undefined || req.lineage === undefined) return;
+		rebindDispatchReservationMember({
+			ownerId: reservation.ownerId,
+			memberId: reservation.memberId,
+			nodeId,
+			costUpperBoundUsd,
+			capacity: reservationCapacitySnapshot(settings),
 			nowMs: now(),
 		});
 	}
@@ -2068,7 +2097,9 @@ export function createDispatchBundle(
 	const retryQueue = new Map<string, RetryQueueEntry>();
 	const retryBackoff = new Map<string, BackoffState>();
 	const retryReasons = new Map<string, string>();
-	const assignments = new AssignmentRegistry();
+	const assignments = new AssignmentRegistry({
+		onStreamError: (error) => reportDispatchDiagnostic("assignment event stream", error),
+	});
 	const assignmentWrites = new Set<Promise<unknown>>();
 	let draining = false;
 
@@ -2126,10 +2157,11 @@ export function createDispatchBundle(
 		assignmentId: import("./assignment.js").AssignmentId,
 		receipt: RunReceipt,
 		status: "succeeded" | "failed" | "canceled",
+		outcomeDetail?: string,
 	): void {
 		trackAssignmentWrite(settleStoredAssignment(assignmentId, receipt.runId, status))
 			.catch((error) => reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error))
-			.finally(() => assignments.settle(assignmentId, receipt, status));
+			.finally(() => assignments.settle(assignmentId, receipt, status, outcomeDetail));
 	}
 
 	/**
@@ -2174,17 +2206,9 @@ export function createDispatchBundle(
 		const backoff = retryBackoff.get(rootRunId) ?? createBackoff();
 		const { state: nextBackoff, delayMs: backoffDelayMs } = nextDelay(backoff);
 		retryBackoff.set(rootRunId, nextBackoff);
-		// Retries re-pass every admission gate, including the target cooldown.
-		// Honoring the gate means waiting it out, not skipping it: schedule no
-		// earlier than the cooldown expiry so the retry is not denied on
-		// arrival by a cooldown this same failure created.
-		const cooldown = targetCooldowns.get(cooldownKey(run.targetId, run.runtimeId, run.wireModelId));
-		const cooldownRemainingMs = cooldown ? Math.max(0, cooldown.until - now()) : 0;
-		const delayMs = Math.max(
-			backoffDelayMs,
-			decision.retryAfterMs ?? 0,
-			cooldownRemainingMs > 0 ? cooldownRemainingMs + 250 : 0,
-		);
+		// An in-flight assignment is governed by maxRetries and backoff alone. The
+		// target cooldown it just created protects new work, not this chain.
+		const delayMs = Math.max(backoffDelayMs, decision.retryAfterMs ?? 0);
 		const attempt = run.lineage.attempt + 1;
 		const reason = detail !== null ? `${outcome}: ${detail}` : outcome;
 		const dueAt = now() + delayMs;
@@ -2301,15 +2325,18 @@ export function createDispatchBundle(
 			throw new Error("dispatch: approved failover envelope does not contain the current route");
 		}
 		const excluded = new Set(decision.excludedRouteParts);
+		// Runtime is not part of the approved route identity, so an envelope cannot
+		// authorize changing it. A worker-runtime failure (and an internal failure,
+		// which excludes nothing) therefore retries the same approved tuple: the
+		// fault is in the worker process, not the route, and re-running inside the
+		// envelope is both permitted and usually sufficient.
+		if (decision.excludedRouteParts.every((part) => part === "runtime")) return { ...current };
 		const candidate = allowed.find((entry) => {
 			if (sameCandidate(entry, current)) return false;
 			if (!excluded.has("agent") && entry.agentId !== current.agentId) return false;
 			if (!excluded.has("target") && entry.target !== current.target) return false;
 			if (!excluded.has("model") && entry.model !== current.model) return false;
 			if (!excluded.has("node") && entry.node !== current.node) return false;
-			// Runtime is not part of the minimal approved identity, so an envelope
-			// cannot authorize changing it.
-			if (excluded.has("runtime")) return false;
 			return decision.excludedRouteParts.some((part) => {
 				if (part === "agent") return entry.agentId !== current.agentId;
 				if (part === "target") return entry.target !== current.target;
@@ -2383,14 +2410,30 @@ export function createDispatchBundle(
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
 			const handle = await dispatch(retryReq);
-			// No interactive consumer exists for a retry; accounting is folded by
-			// the domain event pump regardless, so this drain only keeps the
-			// bounded tee empty.
-			void (async () => {
-				for await (const _ of handle.events) {
-					// drained
-				}
-			})().catch((error) => reportDispatchDiagnostic(`drain retry run ${handle.runId}`, error));
+			// The assignment owns the event stream, so this attempt's frames
+			// continue the same stream the caller of the public dispatch() is
+			// iterating. The marker lets that consumer discard state it
+			// accumulated from the attempt that just failed.
+			const marker: AssignmentAttemptStartEvent = {
+				type: "attempt_start",
+				attempt,
+				runId: handle.runId,
+				previousRunId: run.runId,
+				reason,
+			};
+			assignments.attachAttempt(asAssignmentId(run.lineage.rootRunId), handle.events, marker);
+			context.bus.emit(BusChannels.DispatchProgress, {
+				runId: run.lineage.rootRunId,
+				agentId: run.agentId,
+				task: run.task,
+				...(run.agentAudience !== undefined ? { agentAudience: run.agentAudience } : {}),
+				...(run.requestOrigin !== undefined ? { requestOrigin: run.requestOrigin } : {}),
+				targetId: run.targetId,
+				wireModelId: run.wireModelId,
+				runtimeId: run.runtimeId,
+				runtimeKind: run.runtimeKind,
+				event: marker,
+			});
 			handle.finalPromise.catch((error) => {
 				assignments.reject(asAssignmentId(run.lineage.rootRunId), error);
 				reportDispatchDiagnostic(`finalize retry run ${handle.runId}`, error);
@@ -2398,15 +2441,20 @@ export function createDispatchBundle(
 		} catch (err) {
 			retryReasons.delete(reasonKey);
 			retryBackoff.delete(run.lineage.rootRunId);
+			const message = err instanceof Error ? err.message : String(err);
+			const denial = `retry attempt ${attempt} rejected: ${message}`;
+			// A denied retry ends the assignment. The DispatchFailed bus event is
+			// invisible on headless surfaces, so the reason also goes to stderr and
+			// onto the assignment, whose terminal receipt cannot record it.
+			reportDispatchDiagnostic(`run ${run.runId}`, new Error(denial));
 			// Admission failed before another immutable run existed. The last
 			// completed attempt therefore remains the assignment's terminal evidence.
 			try {
 				const previousReceipt = await run.finalPromise;
-				settleAssignmentDurably(asAssignmentId(run.lineage.rootRunId), previousReceipt, "failed");
+				settleAssignmentDurably(asAssignmentId(run.lineage.rootRunId), previousReceipt, "failed", denial);
 			} catch (finalizationError) {
 				assignments.reject(asAssignmentId(run.lineage.rootRunId), finalizationError);
 			}
-			const message = err instanceof Error ? err.message : String(err);
 			context.bus.emit(BusChannels.DispatchFailed, {
 				runId: run.runId,
 				agentId: run.agentId,
@@ -2418,7 +2466,7 @@ export function createDispatchBundle(
 				runtimeKind: run.runtimeKind,
 				reason: "retry_denied",
 				outcome: "denied_by_policy" satisfies RunOutcome,
-				outcomeDetail: `retry attempt ${attempt} rejected: ${message}`,
+				outcomeDetail: denial,
 			});
 		}
 	}
@@ -2571,7 +2619,20 @@ export function createDispatchBundle(
 		return `${targetId}\0${runtimeId}\0${wireModelId}`;
 	}
 
-	function assertTargetNotCoolingDown(targetId: string, runtimeId: string, wireModelId: string): void {
+	/**
+	 * A target cooldown protects *new* work from a known-bad target. It must not
+	 * govern an assignment already in flight: that assignment's own retry policy
+	 * (`workers.maxRetries` plus backoff) is the correct and sufficient governor,
+	 * and gating its retries here strands the assignment mid-chain with no
+	 * remaining attempts. A request carrying lineage is an in-assignment retry.
+	 */
+	function assertTargetNotCoolingDown(
+		req: DispatchRequest,
+		targetId: string,
+		runtimeId: string,
+		wireModelId: string,
+	): void {
+		if (req.lineage !== undefined) return;
 		const key = cooldownKey(targetId, runtimeId, wireModelId);
 		const cooldown = targetCooldowns.get(key);
 		if (!cooldown) return;
@@ -2829,7 +2890,7 @@ export function createDispatchBundle(
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = lifecycle.agentConfig.id;
-		assertTargetNotCoolingDown(targetId, runtimeId, wireModelId);
+		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId);
 
 		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
@@ -3542,19 +3603,20 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			consumeReservationForRoute(req, {
-				agentId: req.agentId,
-				target: `delegation:${req.delegationAgentId}`,
-				model: req.delegationAgentId,
-				node: "local",
-			});
+			consumeReservationSlot(req);
+			rebindReservationSlot(req, "local", UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			return attachSpeculation(await dispatchAcpDelegation(req, settings, timing, observer));
 		}
 
 		const lifecycle = await resolveLifecycle(req, settings);
 		timing.decisionCompletedAt = new Date(now()).toISOString();
 		assertResponseSchemaEnforceable(lifecycle.target.runtime, lifecycle.target.modelCapabilities, req.responseSchema);
-		assertTargetNotCoolingDown(lifecycle.target.target.id, lifecycle.target.runtime.id, lifecycle.target.wireModelId);
+		assertTargetNotCoolingDown(
+			req,
+			lifecycle.target.target.id,
+			lifecycle.target.runtime.id,
+			lifecycle.target.wireModelId,
+		);
 
 		assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings);
 
@@ -3573,7 +3635,16 @@ export function createDispatchBundle(
 				node: placement?.node?.id ?? "local",
 			};
 			assertRouteWithinApprovedEnvelope(req, effectiveRoute);
-			consumeReservationForRoute(req, effectiveRoute);
+			consumeReservationSlot(req);
+			// A retry may have resolved a different node or a differently priced
+			// route. Move the held capacity to match, or fail closed here rather
+			// than let the attempt run outside what the plan reserved.
+			rebindReservationSlot(
+				req,
+				effectiveRoute.node,
+				conservativeRouteAdmissionEstimateUsd(lifecycle.target.effectivePricing, settings?.defaults.maxTokens ?? 32768),
+				settings,
+			);
 		} catch (error) {
 			try {
 				placement?.release?.();
@@ -4473,6 +4544,9 @@ export function createDispatchBundle(
 
 		const assignment = assignments.open(handle.runId, assignmentPolicyFor(req));
 		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
+		// Attach before any await so a fast-finishing attempt cannot settle the
+		// assignment (and close its stream) before attempt 1's frames are folded.
+		assignments.attachAttempt(assignment.id, handle.events);
 		// A finalization failure has no immutable receipt to settle with; preserve
 		// the attempt error rather than leaving the assignment pending forever.
 		handle.finalPromise.catch((error) => assignments.reject(assignment.id, error));
@@ -4483,7 +4557,7 @@ export function createDispatchBundle(
 				: assignment.terminal.finally(() => {
 						releaseDispatchReservationMember(reservation.ownerId, reservation.memberId, now());
 					});
-		return { runId: handle.runId, events: handle.events, finalPromise: terminal };
+		return { runId: handle.runId, events: assignment.events, finalPromise: terminal };
 	}
 
 	function preview(req: DispatchRequest): DispatchPlanTaskResolution {
@@ -4561,6 +4635,62 @@ export function createDispatchBundle(
 				settings?.defaults.maxTokens ?? 32768,
 			),
 		};
+	}
+
+	/**
+	 * Enumerate the bounded route envelope a plan can approve for this request.
+	 * Every proposed tuple is probed through `preview`, which is the same hard
+	 * admission chain a real dispatch runs (agent admission, tool compatibility
+	 * after runtime narrowing, target auth and health, node eligibility,
+	 * capability gate). A tuple that throws is rejected; nothing is scored.
+	 */
+	function routeCandidates(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate> {
+		const settings = getEffectiveSettings();
+		const resolution = preview(req);
+		const resolved: DispatchFailoverCandidate = {
+			agentId: resolution.agentId,
+			target: resolution.targetId,
+			model: resolution.wireModelId,
+			node: resolution.node.id,
+		};
+		if (req.delegationAgentId !== undefined) return [resolved];
+		const universe: RouteUniverse = {
+			agentId: resolution.agentId,
+			resolved,
+			targets: (settings?.targets ?? [])
+				.filter((target) => target.id !== resolution.targetId && target.defaultModel !== undefined)
+				.map((target) => ({ id: target.id, model: target.defaultModel as string })),
+			nodes: [...(scheduling.fleet?.list() ?? []).map((node) => node.id), "local"].filter(
+				(nodeId) => nodeId !== resolution.node.id,
+			),
+		};
+		const probes = routeCandidateOrder(universe)
+			.filter((candidate) => !sameRouteCandidate(candidate, resolved))
+			.map((candidate) => {
+				try {
+					const probed = preview({
+						...req,
+						agentId: candidate.agentId,
+						target: candidate.target,
+						model: candidate.model,
+						node: candidate.node,
+					});
+					// Resolution may narrow the wire model; the envelope must record
+					// the tuple that would actually run.
+					return {
+						candidate: {
+							agentId: probed.agentId,
+							target: probed.targetId,
+							model: probed.wireModelId,
+							node: probed.node.id,
+						},
+						rejection: null,
+					};
+				} catch (error) {
+					return { candidate, rejection: error instanceof Error ? error.message : String(error) };
+				}
+			});
+		return selectRouteCandidates(resolved, probes);
 	}
 
 	function mergeBatchEvents(
@@ -4884,6 +5014,7 @@ export function createDispatchBundle(
 		publishesProgress: true,
 		ownsProgressBus: (bus) => bus === context.bus,
 		preview,
+		routeCandidates,
 		reservations: {
 			prepare: prepareReservation,
 			rollback: (ownerId) => rollbackDispatchReservation(ownerId, now()),

@@ -119,6 +119,8 @@ async function sealRun(
 		dynamicHash: null,
 	});
 	const receipt = ledger.recordReceipt(envelope.id, {
+		verification: { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "coder",
 		task: "evidence fixture task",

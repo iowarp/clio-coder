@@ -38,6 +38,7 @@ function receiptEnvelope(draft: RunReceiptDraft): RunEnvelope {
 		startedAt: draft.startedAt,
 		endedAt: draft.endedAt,
 		status: "completed",
+		outcome: draft.outcome,
 		exitCode: draft.exitCode,
 		pid: null,
 		heartbeatAt: null,
@@ -66,6 +67,8 @@ function toolForAnswer(answer: string, runId = "run-scout") {
 					? ({ state: "not_applicable", basis: "read-only-agent" } as const)
 					: ({ state: "verified", basis: "validation-tool" } as const);
 			const draft: RunReceiptDraft = {
+				costProvenance: "unknown",
+				outcome: "succeeded",
 				runId,
 				agentId: request.agentId,
 				task: request.task,

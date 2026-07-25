@@ -198,6 +198,7 @@ describe("contracts/ask_user", () => {
 
 	it("policy errors fire for recipes declaring ask_user", () => {
 		const spec = normalizeAgentSpec({
+			toolRequirements: { required: [], optional: ["read", "ask_user"] },
 			id: "interviewer",
 			name: "Interviewer",
 			description: "Invalid worker recipe.",

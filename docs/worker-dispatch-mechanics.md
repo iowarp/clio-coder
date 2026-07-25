@@ -136,6 +136,19 @@ resolution, and cancellation also accept the assignment id and address the
 current attempt. Cancellation prevents queued or future attempts. Pipelines
 therefore receive terminal fallback output as their next-stage input.
 
+The assignment also owns the event stream. `dispatch()` returns a single
+stream carrying every attempt's frames in order, separated by a synthetic
+`attempt_start` frame (`attempt`, `runId`, `previousRunId`, `reason`). The
+stream ends when the assignment settles, not when one attempt's worker exits,
+so a consumer that drains it has seen exactly the run the terminal receipt
+describes. A canceled assignment ends its stream immediately.
+
+Retry timing is governed by `workers.maxRetries` and exponential backoff alone.
+Target cooldowns gate *new* dispatches to a known-bad target and are not
+applied to retries of an in-flight assignment, whose retry budget already
+bounds it. A retry refused at admission settles the assignment failed and
+records the denial reason in the assignment's `outcomeDetail`.
+
 Failover modes are:
 
 - `none`: exact pins remain fail-closed; retries can only repeat the same tuple.
@@ -168,9 +181,9 @@ The coordinator classifies failures into 13 explicit categories (`src/domains/di
 | `worker-runtime` | `failed` outcome after more-specific classifiers do not match | `runtime` | Yes |
 | `internal` | No more-specific termination evidence; coordinator fallback | None | Yes |
 
-### 5.2 Canonical Receipt Integrity Serialization (v6)
+### 5.2 Canonical Receipt Integrity Serialization
 
-Receipt integrity v6 (`RUN_RECEIPT_INTEGRITY_VERSION = 6`) computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 6`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
 
 - **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.

@@ -517,7 +517,13 @@ export type ReceiptVerificationState = "verified" | "unverified" | "not_applicab
 
 export interface RunReceiptVerification {
 	state: ReceiptVerificationState;
-	basis: "validation-tool" | "read-only-agent" | "no-validation-tool" | "acp-external-unobserved" | "legacy-receipt";
+	basis:
+		| "validation-tool"
+		| "read-only-agent"
+		| "no-validation-tool"
+		| "acp-external-unobserved"
+		/** No sealed receipt to read: it is missing, unreadable, or failed integrity. */
+		| "receipt-unavailable";
 }
 
 export interface RunReceipt {
@@ -536,8 +542,8 @@ export interface RunReceipt {
 	runtimeKind: RunKind;
 	startedAt: string;
 	endedAt: string;
-	/** Terminal outcome; present on every receipt written after the taxonomy landed. */
-	outcome?: RunOutcome;
+	/** Terminal outcome. Sealed on every receipt. */
+	outcome: RunOutcome;
 	outcomeDetail?: string | null;
 	outcomeCode?: RunOutcomeCode | null;
 	lineage?: RunLineage;
@@ -568,8 +574,8 @@ export interface RunReceipt {
 	/** Bounded final/partial assistant output; absent when none was captured. */
 	output?: RunReceiptOutput;
 	costUsd: number;
-	/** Pricing-source truth; absent on receipts written before provenance landed. */
-	costProvenance?: CostProvenance;
+	/** Pricing-source truth. Sealed on every receipt; unknown pricing says so. */
+	costProvenance: CostProvenance;
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	staticShellHash?: string | null;
@@ -584,8 +590,8 @@ export interface RunReceipt {
 	toolCalls: number;
 	toolStats: ToolCallStat[];
 	toolActivity?: ToolActivitySummary;
-	/** Integrity-sealed evidence confidence; absent on legacy receipts. */
-	verification?: RunReceiptVerification;
+	/** Integrity-sealed evidence confidence. Sealed on every receipt. */
+	verification: RunReceiptVerification;
 	skillActivations?: SkillActivation[];
 	/** How this runtime enforced the run's captured autonomy level. */
 	autonomyEnforcement?: RunReceiptAutonomyEnforcement;

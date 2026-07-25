@@ -395,6 +395,13 @@ async function runDispatch(
 				continue;
 			}
 			const e = event as { type?: string; text?: string };
+			// A failover hop supersedes the previous attempt: its text is not the
+			// assignment's answer, and the terminal receipt describes the last one.
+			if (e.type === "attempt_start") {
+				accumulatedText = "";
+				lastAssistantText = "";
+				continue;
+			}
 			if (e.type === "text_delta" && typeof e.text === "string") {
 				accumulatedText += e.text;
 			}

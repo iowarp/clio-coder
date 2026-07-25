@@ -6,12 +6,17 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { ROUTE_CANDIDATE_LIMIT } from "../../src/domains/dispatch/route-candidates.js";
 import type { RunNodeIdentity, RunReceipt } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createPermissionOverlayBody } from "../../src/interactive/permission-overlay.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
-import { describeDispatchPlan, RESOLVED_DISPATCH_PLAN_ARGUMENT } from "../../src/tools/dispatch-plan.js";
+import {
+	describeDispatchPlan,
+	RESOLVED_DISPATCH_PLAN_ARGUMENT,
+	resolvedDispatchPlanFromArgs,
+} from "../../src/tools/dispatch-plan.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -151,6 +156,119 @@ describe("resolved dispatch plan admission", () => {
 		// Order is the approved preference and must be part of the hash.
 		const reordered = describeDispatchPlan(resolvedTask({ failover: "approved", allowedCandidates: [c2, c1] }));
 		strictEqual(twoCandidates.hash === reordered.hash, false, "candidate order is part of the approved envelope");
+	});
+
+	it("seals an approved envelope for an unpinned task and an exact pin for a pinned one", async () => {
+		const settings = baseSettings();
+		settings.targets = [
+			{ id: "primary", runtime: "openai", defaultModel: "base-model" },
+			{ id: "secondary", runtime: "openai", defaultModel: "base-model" },
+		];
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			previewNode: () => ({ node: { id: "local", kind: "local" } }),
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const unpinned = tool.prepareAdmissionArguments?.({ tasks: ["one", "two"] });
+			ok(unpinned);
+			const unpinnedTasks = resolvedDispatchPlanFromArgs(unpinned)?.tasks ?? [];
+			ok(unpinnedTasks.length > 0);
+			for (const task of unpinnedTasks) {
+				strictEqual(task.failover, "approved", "an unpinned planned task seals a bounded envelope");
+				ok(task.allowedCandidates && task.allowedCandidates.length > 0);
+				ok(task.allowedCandidates.length <= ROUTE_CANDIDATE_LIMIT);
+				// The resolved route is always the first approved candidate.
+				strictEqual(task.allowedCandidates[0]?.target, task.target);
+				strictEqual(task.allowedCandidates[0]?.node, task.node);
+			}
+			// Enumeration is deterministic, so the same request seals the same hash.
+			const repeat = tool.prepareAdmissionArguments?.({ tasks: ["one", "two"] });
+			ok(repeat);
+			deepStrictEqual(resolvedDispatchPlanFromArgs(repeat)?.tasks, unpinnedTasks);
+
+			const pinned = tool.prepareAdmissionArguments?.({ tasks: ["one", "two"], target: "primary" });
+			ok(pinned);
+			for (const task of resolvedDispatchPlanFromArgs(pinned)?.tasks ?? []) {
+				strictEqual(task.failover, "none", "an explicit pin seals an exact route with no failover");
+				strictEqual(task.allowedCandidates, undefined);
+			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("fails a plan-approved pipeline step over to an approved candidate and pipes its output on", async () => {
+		const settings = baseSettings();
+		settings.targets = [
+			{ id: "primary", runtime: "openai", defaultModel: "base-model" },
+			{ id: "secondary", runtime: "openai", defaultModel: "base-model" },
+		];
+		settings.workers.maxRetries = 1;
+		settings.fleet.nodes = [];
+		const spawns: Array<{ target: string; task: string; messages: string }> = [];
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 0,
+			previewNode: () => ({ node: { id: "local", kind: "local" } }),
+			spawnWorker: (spec) => {
+				spawns.push({
+					target: spec.target.id,
+					task: spec.task,
+					messages: JSON.stringify(spec.dynamicPromptMessages ?? []),
+				});
+				// Only step 1's first attempt fails, so the pipeline's second step
+				// proves it received the output of the failed-over first step.
+				const failing = spawns.length === 1;
+				return {
+					pid: 950 + spawns.length,
+					promise: Promise.resolve(
+						failing
+							? { exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" }
+							: { exitCode: 0, signal: null },
+					),
+					events: (async function* () {
+						if (failing) return;
+						yield {
+							type: "message_end",
+							message: {
+								role: "assistant",
+								content: `OUTPUT-OF(${spec.task})`,
+								usage: { input: 1, output: 1 },
+							},
+						};
+					})(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const args = tool.prepareAdmissionArguments?.({ tasks: ["step one", "step two"], mode: "pipeline" });
+			ok(args);
+			const planned = resolvedDispatchPlanFromArgs(args)?.tasks ?? [];
+			strictEqual(planned.length, 2);
+			strictEqual(planned[0]?.failover, "approved");
+			ok(planned[0]?.allowedCandidates?.some((candidate) => candidate.target === "secondary"));
+
+			const result = await tool.run(args, {});
+			strictEqual(result.kind, "ok", JSON.stringify(result));
+			// Step 1 failed over from primary to an approved candidate, and step 2
+			// ran with step 1's successful output as its input data.
+			deepStrictEqual(
+				spawns.map((entry) => entry.target),
+				["primary", "secondary", "primary"],
+			);
+			const stepTwo = spawns[2];
+			ok(stepTwo);
+			strictEqual(stepTwo.task, "step two");
+			// Step 2's pipeline input is the terminal (failed-over) attempt's output,
+			// not the failed first attempt's.
+			ok(stepTwo.messages.includes("OUTPUT-OF(step one)"), `step two context was ${stepTwo.messages}`);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("binds briefing presence, bytes, hash, and a bounded preview into approval", () => {

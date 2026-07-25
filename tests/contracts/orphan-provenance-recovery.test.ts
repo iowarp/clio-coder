@@ -86,6 +86,8 @@ function sealOrphan(provenance: {
 		costUsd: 0,
 	});
 	const draft: RunReceiptDraft = {
+		verification: { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: "coder",
 		task: "orphan provenance task",

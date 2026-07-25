@@ -404,4 +404,84 @@ describe("dispatch failure classification", () => {
 			await bundle.extension.stop?.();
 		}
 	});
+
+	it("spends the whole retry budget on a pinned failing target without waiting out its cooldown", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 2;
+		const cooldownMs = 5_000;
+		const routes: Array<{ agentId: string; targetId: string; model: string; atMs: number }> = [];
+		const clock = (): number => Date.now();
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: cooldownMs,
+			now: clock,
+			spawnWorker: (spec) => {
+				routes.push({
+					agentId: spec.agentId,
+					targetId: spec.target.id,
+					model: spec.wireModelId,
+					atMs: clock(),
+				});
+				return worker({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" });
+			},
+		});
+		await bundle.extension.start();
+		const targetId = settings.targets[0]?.id;
+		ok(targetId);
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "coder",
+				task: "pinned permanent failure",
+				target: targetId,
+			});
+			const terminal = await handle.finalPromise;
+			strictEqual(terminal.outcome, "failed");
+			// maxRetries: 2 means the initial attempt plus two retries.
+			strictEqual(routes.length, 3);
+			for (const route of routes) {
+				strictEqual(route.targetId, targetId);
+				strictEqual(route.agentId, "coder");
+			}
+			// Backoff alone separates the attempts. The cooldown this same failure
+			// created would have pushed the third attempt past the window entirely.
+			const first = routes[0];
+			const last = routes[2];
+			ok(first && last);
+			ok(last.atMs - first.atMs < cooldownMs, `attempts spanned ${last.atMs - first.atMs}ms`);
+
+			// The cooldown still protects new work against the same failing target.
+			await rejects(bundle.contract.dispatch({ agentId: "coder", task: "new work", target: targetId }), /cooling down/);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("settles the assignment failed with the denial reason when a retry is refused at admission", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		let placements = 0;
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 0,
+			resolveNode: (): DispatchNodePlacement => {
+				placements += 1;
+				if (placements > 1) throw new Error("fleet node 'blade' is not eligible");
+				return { node: { id: "local", kind: "local" } };
+			},
+			spawnWorker: () => worker({ exitCode: 1, signal: null, stderrTail: "provider queue full" }),
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "retry denied" });
+			strictEqual((await handle.finalPromise).outcome, "failed");
+			const assignment = bundle.contract.assignments?.get(handle.runId);
+			ok(assignment);
+			strictEqual(assignment.status, "failed");
+			ok(
+				assignment.outcomeDetail?.includes("not eligible"),
+				`outcomeDetail was ${JSON.stringify(assignment.outcomeDetail)}`,
+			);
+			ok(assignment.outcomeDetail?.startsWith("retry attempt 1 rejected:"));
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
 });

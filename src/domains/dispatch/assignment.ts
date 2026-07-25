@@ -1,3 +1,8 @@
+import {
+	type AssignmentAttemptStartEvent,
+	type AssignmentEventStream,
+	createAssignmentEventStream,
+} from "./assignment-events.js";
 import type { RunNodeIdentity, RunOutcome, RunReceipt } from "./types.js";
 import type { DispatchFailoverCandidate, DispatchFailoverMode } from "./validation.js";
 
@@ -33,7 +38,19 @@ export interface DispatchAssignment {
 	attempts: ReadonlyArray<AttemptRef>;
 	status: AssignmentStatus;
 	terminalReceipt: RunReceipt | null;
+	/**
+	 * Why the assignment ended here when the terminal receipt does not say so
+	 * itself: a retry denied at admission leaves the previous attempt's sealed
+	 * receipt as terminal evidence, and that receipt cannot record the denial.
+	 */
+	outcomeDetail: string | null;
 	terminal: Promise<RunReceipt>;
+	/**
+	 * Every attempt's frames in order, separated by `attempt_start`. Shared
+	 * single-consumer iterator: the snapshot hands out the same stream the
+	 * assignment owns, exactly as it hands out the same terminal promise.
+	 */
+	events: AsyncIterableIterator<unknown>;
 }
 
 interface MutableAssignment {
@@ -42,7 +59,9 @@ interface MutableAssignment {
 	attempts: AttemptRef[];
 	status: AssignmentStatus;
 	terminalReceipt: RunReceipt | null;
+	outcomeDetail: string | null;
 	terminal: Promise<RunReceipt>;
+	stream: AssignmentEventStream;
 	resolve: (receipt: RunReceipt) => void;
 	reject: (reason: unknown) => void;
 }
@@ -50,6 +69,11 @@ interface MutableAssignment {
 /** In-memory assignment manager. Attempt receipts remain owned by the run ledger. */
 export class AssignmentRegistry {
 	readonly #assignments = new Map<AssignmentId, MutableAssignment>();
+	readonly #onStreamError: ((error: unknown) => void) | undefined;
+
+	constructor(options: { onStreamError?: (error: unknown) => void } = {}) {
+		this.#onStreamError = options.onStreamError;
+	}
 
 	open(rootRunId: string, policy: AssignmentPolicy): DispatchAssignment {
 		const id = asAssignmentId(rootRunId);
@@ -71,12 +95,23 @@ export class AssignmentRegistry {
 			attempts: [],
 			status: "running",
 			terminalReceipt: null,
+			outcomeDetail: null,
 			terminal,
+			stream: createAssignmentEventStream(this.#onStreamError !== undefined ? { onError: this.#onStreamError } : {}),
 			resolve,
 			reject,
 		};
 		this.#assignments.set(id, assignment);
 		return this.#snapshot(assignment);
+	}
+
+	/**
+	 * Fold one attempt's frames into the assignment stream. The marker precedes
+	 * the frames so a consumer resets accumulated state before the new attempt's
+	 * output arrives; attempt 1 carries no marker.
+	 */
+	attachAttempt(id: AssignmentId, source: AsyncIterable<unknown>, marker?: AssignmentAttemptStartEvent): void {
+		this.#require(id).stream.attach(source, marker);
 	}
 
 	recordAttempt(id: AssignmentId, attempt: AttemptRef): void {
@@ -89,9 +124,12 @@ export class AssignmentRegistry {
 	cancel(id: AssignmentId): void {
 		const assignment = this.#require(id);
 		if (assignment.status === "running") assignment.status = "canceled";
+		// A canceled assignment produces no further attempts, so the stream ends
+		// now rather than waiting on a worker that is being torn down.
+		assignment.stream.abort();
 	}
 
-	settle(id: AssignmentId, terminalReceipt: RunReceipt, status: AssignmentStatus): void {
+	settle(id: AssignmentId, terminalReceipt: RunReceipt, status: AssignmentStatus, outcomeDetail?: string): void {
 		const assignment = this.#require(id);
 		// A canceled assignment still needs its current attempt's immutable receipt
 		// to resolve the terminal promise.
@@ -99,6 +137,8 @@ export class AssignmentRegistry {
 			return;
 		assignment.status = assignment.status === "canceled" ? "canceled" : status;
 		assignment.terminalReceipt = terminalReceipt;
+		if (outcomeDetail !== undefined) assignment.outcomeDetail = outcomeDetail;
+		assignment.stream.close();
 		assignment.resolve(terminalReceipt);
 	}
 
@@ -108,6 +148,7 @@ export class AssignmentRegistry {
 		if (assignment.status !== "running" && !(assignment.status === "canceled" && assignment.terminalReceipt === null))
 			return;
 		if (assignment.status === "running") assignment.status = "failed";
+		assignment.stream.close();
 		assignment.reject(reason);
 	}
 
@@ -135,7 +176,9 @@ export class AssignmentRegistry {
 			})),
 			status: assignment.status,
 			terminalReceipt: assignment.terminalReceipt,
+			outcomeDetail: assignment.outcomeDetail,
 			terminal: assignment.terminal,
+			events: assignment.stream.events,
 		};
 	}
 }

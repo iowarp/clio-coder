@@ -186,6 +186,9 @@ function envelopeForDraft(draft: RunReceiptDraft): RunEnvelope {
 function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> = {}): RunReceipt {
 	const { integrity: _ignored, ...cleanOverrides } = overrides;
 	const draft: RunReceiptDraft = {
+		verification: { state: "unverified", basis: "no-validation-tool" },
+		costProvenance: "unknown",
+		outcome: "succeeded",
 		runId,
 		agentId: "coder",
 		task,
@@ -2285,20 +2288,6 @@ describe("contracts/tools dispatch evidence labeling", () => {
 			ok(result.output.includes("worker claims (validation not observable at this layer):"), result.output);
 			ok(result.output.includes(SPOT_CHECK_PHRASE), result.output);
 			strictEqual(result.output.includes("verification=unverified"), false, result.output);
-		}
-	});
-
-	it("reads a legacy receipt without verification as unknown, never verified", async () => {
-		const tool = singleRunTool("run-legacy", "Legacy worker answer.");
-		const result = await tool.run({ task: "legacy run", agent_id: "coder" });
-		strictEqual(result.kind, "ok");
-		if (result.kind === "ok") {
-			ok(result.output.includes("verification=unknown/legacy-receipt"), result.output);
-			ok(result.output.includes("worker claims (validation not observable at this layer):"), result.output);
-			ok(result.output.includes(SPOT_CHECK_PHRASE), result.output);
-			strictEqual(result.output.includes("verification=verified"), false, result.output);
-			const details = result.details as { runs?: Array<{ verification?: unknown }> };
-			deepStrictEqual(details.runs?.[0]?.verification, { state: "unknown", basis: "legacy-receipt" });
 		}
 	});
 

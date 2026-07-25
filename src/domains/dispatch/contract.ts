@@ -6,7 +6,7 @@ import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { RunEnvelope, RunLineage, RunNodeIdentity, RunPhaseDurations, RunReceipt, RunStatus } from "./types.js";
-import type { JobSpec } from "./validation.js";
+import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 
 export interface DispatchRequest extends JobSpec {
 	systemPrompt?: string;
@@ -113,16 +113,17 @@ export interface DispatchContract {
 	 * failure aborts rather than choosing a different unapproved node.
 	 */
 	preview?(req: DispatchRequest): DispatchPlanTaskResolution;
+	/**
+	 * Bounded, deterministic route envelope a plan may approve for this request:
+	 * the resolved route first, then hard-constraint-eligible alternates. Plan
+	 * approval seals this list so failover stays inside what the operator saw.
+	 */
+	routeCandidates?(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate>;
 	/** Durable transactional reservations prepared before a plan can be approved. */
 	readonly reservations?: {
 		prepare(input: {
 			topology: ReservationTopology;
-			tasks: ReadonlyArray<{
-				memberId: string;
-				wave: number;
-				resolution: DispatchPlanTaskResolution;
-				allowedCandidates?: JobSpec["allowedCandidates"];
-			}>;
+			tasks: ReadonlyArray<{ memberId: string; wave: number; resolution: DispatchPlanTaskResolution }>;
 		}): DispatchReservationRecord;
 		rollback(ownerId: string): DispatchReservationRecord | null;
 		rollbackUnconsumed(ownerId: string): DispatchReservationRecord | null;

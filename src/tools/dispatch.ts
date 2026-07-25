@@ -27,10 +27,14 @@ import {
 	writeGateDecisionArtifact,
 } from "../domains/dispatch/gate-decisions.js";
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
-import { readReceiptVerification } from "../domains/dispatch/receipt-findings.js";
+import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
-import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
+import {
+	DISPATCH_BRIEFING_MAX_BYTES,
+	type DispatchFailoverMode,
+	type JobThinkingLevel,
+} from "../domains/dispatch/validation.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import {
@@ -122,11 +126,11 @@ function withResolvedTaskPin(
 	options: { pinTask?: boolean } = {},
 ): DispatchRequest {
 	if (task === undefined) return request;
-	// Omit the raw briefing and failover envelope before restoring the approved
+	// Drop the raw briefing and failover envelope before restoring the approved
 	// values. With exact optional properties, approved absence means the field
-	// must be absent—not present as undefined—and must clear any untrusted raw
-	// default. The failover mode and allowedCandidates are execution-authoritative
-	// route policy, so a post-approval raw mutation cannot widen the envelope.
+	// must be absent, not present as undefined. This is the only thing standing
+	// between a post-approval raw argument and a widened envelope, so it stays:
+	// the artifact is authoritative for route policy, the raw call never is.
 	const {
 		briefing: _untrustedBriefing,
 		failover: _untrustedFailover,
@@ -139,7 +143,9 @@ function withResolvedTaskPin(
 		...(request.reservation !== undefined && task.role !== undefined && task.position !== undefined
 			? { reservation: { ownerId: request.reservation.ownerId, memberId: `${task.role}-${task.position}` } }
 			: {}),
-		...(task.failover !== undefined ? { failover: task.failover } : {}),
+		// A resolved task always carries a sealed mode, and carries candidates
+		// exactly when that mode is "approved".
+		failover: task.failover,
 		...(task.allowedCandidates !== undefined
 			? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
 			: {}),
@@ -189,6 +195,12 @@ function eventDetail(event: unknown): string | undefined {
 		const tool = typeof event.payload.tool === "string" ? event.payload.tool : "tool";
 		const outcome = typeof event.payload.outcome === "string" ? event.payload.outcome : "";
 		return `${tool} ${outcome}`.trim();
+	}
+	if (event.type === "attempt_start") {
+		const attempt = typeof event.attempt === "number" ? event.attempt : "?";
+		const runId = typeof event.runId === "string" ? event.runId : "?";
+		const reason = typeof event.reason === "string" ? event.reason : "retry";
+		return truncateUtf8(`attempt ${attempt} -> ${runId}: ${reason}`, RUN_TAIL_TEXT_LIMIT, "...");
 	}
 	return undefined;
 }
@@ -275,6 +287,9 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 			summary.count += 1;
 			const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
 			summary.types.push(type);
+			// A superseded attempt's answer is not the assignment's answer: the
+			// failover marker discards it before the next attempt speaks.
+			if (type === "attempt_start") summary.lastAssistantText = "";
 			const text = rawAssistantTextFromEvent(event);
 			if (text.trim().length > 0) summary.lastAssistantText = text;
 			recordRunEvent(runId, agentId, event);
@@ -730,7 +745,7 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 		.map((run) => integrityFailureBanner(run))
 		.filter((banner): banner is string => banner !== null);
 	const needsSpotCheck = runs.some((run) => {
-		const state = readReceiptVerification(run.receipt).state;
+		const state = run.receipt.verification.state;
 		return state === "unverified" || state === "unknown";
 	});
 	const lines = [
@@ -755,9 +770,9 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 			// Provenance suffix is empty when a run carries no
 			// pipeline/persona/escalation fields, so the line format is unchanged.
 			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
-			// Evidence confidence comes from the sealed receipt; a legacy receipt
-			// without the field reads unknown/legacy-receipt, never verified.
-			const verification = run.integrity.ok ? readReceiptVerification(receipt) : readReceiptVerification({});
+			// Evidence confidence comes from the sealed receipt. A receipt that fails
+			// integrity cannot be read as evidence at all.
+			const verification = run.integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION;
 			const evidenceSuffix = ` ${receiptEvidenceLabels(receipt, verification, run.integrity).join(" ")}${
 				run.integrity.ok ? "" : " evidence_verification=unknown/receipt-integrity-failed"
 			}`;
@@ -828,9 +843,9 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 				receiptPath,
 				eventCount: summary.count,
 				// Structured evidence state for downstream consumers: mirrors the
-				// sealed receipt read-only (legacy receipts read unknown), plus the
-				// integrity check so a tampered receipt is machine-visible here too.
-				verification: integrity.ok ? readReceiptVerification(receipt) : readReceiptVerification({}),
+				// sealed receipt read-only, plus the integrity check so a tampered
+				// receipt is machine-visible here too.
+				verification: integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION,
 				receiptIntegrity: integrity,
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
@@ -2208,11 +2223,14 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	): ResolvedDispatchPlanArtifact["tasks"][number] => {
 		const resolution = deps.dispatch.preview?.(request);
 		if (resolution === undefined) throw new Error("dispatch preview is unavailable");
-		// Seal the effective failover mode and the exact approved envelope into the
-		// artifact so the plan hash distinguishes different fallback envelopes and
-		// execution restores an operator-approved value, not raw arguments.
-		const failover =
-			request.failover ?? (request.node !== undefined || request.target !== undefined ? "none" : "automatic");
+		// An approved exact route and automatic failover are semantically opposed,
+		// so a planned task is never "automatic". An explicit pin seals that exact
+		// tuple with no failover; anything else seals a bounded envelope the
+		// operator saw. The plan hash covers the rendered candidate list, so
+		// distinct envelopes get distinct hashes.
+		const pinned = request.node !== undefined || request.target !== undefined || request.model !== undefined;
+		const approvedCandidates = pinned ? [] : (deps.dispatch.routeCandidates?.(request) ?? []);
+		const failover: DispatchFailoverMode = pinned || approvedCandidates.length === 0 ? "none" : "approved";
 		const task: ResolvedDispatchPlanArtifact["tasks"][number] = {
 			agent: resolution.agentId,
 			task: request.task,
@@ -2223,9 +2241,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			nodeKind: resolution.node.kind,
 			...(resolution.node.host !== undefined ? { nodeHost: resolution.node.host } : {}),
 			failover,
-			...(failover === "approved" && request.allowedCandidates && request.allowedCandidates.length > 0
-				? { allowedCandidates: request.allowedCandidates.map((candidate) => ({ ...candidate })) }
-				: {}),
+			...(failover === "approved" ? { allowedCandidates: approvedCandidates.map((candidate) => ({ ...candidate })) } : {}),
 			role,
 			position,
 		};
@@ -2265,9 +2281,6 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				memberId: `${task.role}-${task.position}`,
 				wave: reservationWave(artifact.topology, task, index),
 				resolution,
-				...(task.allowedCandidates !== undefined
-					? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
-					: {}),
 			};
 		});
 		const reservation = deps.dispatch.reservations.prepare({ topology: artifact.topology, tasks });

@@ -89,6 +89,9 @@ describe("contracts/persistence", () => {
 		});
 
 		const receipt = ledger.recordReceipt(env.id, {
+			verification: { state: "unverified", basis: "no-validation-tool" },
+			costProvenance: "unknown",
+			outcome: "succeeded",
 			runId: env.id,
 			agentId: "coder",
 			task: "persistence task",

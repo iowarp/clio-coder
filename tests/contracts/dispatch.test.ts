@@ -333,6 +333,7 @@ function stubContext(
 
 	const recipes: ReadonlyArray<AgentRecipe> = options.recipes ?? [
 		{
+			toolRequirements: { required: [], optional: [] },
 			id: "coder",
 			name: "coder",
 			description: "test recipe",
@@ -737,8 +738,8 @@ describe("contracts/dispatch", () => {
 			await bundle.extension.start();
 			try {
 				const handle = await bundle.contract.dispatch({ agentId: "coder", task: `protected ${transport} worker` });
-				await drainEvents(handle.events);
 				exit.resolve({ exitCode: 0, signal: null });
+				await drainEvents(handle.events);
 				const receipt = await handle.finalPromise;
 				const launchedSpec = capturedSpec as unknown as WorkerSpec;
 				strictEqual(launchedSpec.protectedArtifactState?.version, 1);
@@ -806,6 +807,7 @@ describe("contracts/dispatch", () => {
 			runtime,
 			recipes: [
 				{
+					toolRequirements: { required: [], optional: [] },
 					id: "coder",
 					name: "coder",
 					description: "bounded coder",
@@ -1454,6 +1456,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					toolRequirements: { required: [], optional: ["read", "verify"] },
 					id: "bad-validator",
 					name: "Bad Validator",
 					description: "Invalid validation recipe.",
@@ -1481,6 +1484,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					toolRequirements: { required: [], optional: ["read", "verify"] },
 					id: "bad-validator",
 					name: "Bad Validator",
 					description: "Invalid validation recipe.",
@@ -1513,6 +1517,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					toolRequirements: { required: [], optional: ["read"] },
 					id: "scout",
 					name: "Scout",
 					description: "Shadow scout.",
@@ -1561,6 +1566,7 @@ describe("contracts/dispatch", () => {
 		const context = stubContext({
 			recipes: [
 				{
+					toolRequirements: { required: [], optional: ["read"] },
 					id: "scout",
 					name: "Scout",
 					description: "Shadow scout.",
@@ -1604,6 +1610,7 @@ describe("contracts/dispatch", () => {
 
 	it("injects declared skills as compact prompt guidance", () => {
 		const recipe: AgentRecipe = {
+			toolRequirements: { required: ["context"], optional: ["read"] },
 			id: "researcher",
 			name: "Researcher",
 			description: "Docs researcher.",
@@ -1691,6 +1698,7 @@ describe("contracts/dispatch", () => {
 
 		// Recipe frontmatter override flows through normalizeAgentSpec.
 		const optedInReviewer = normalizeAgentSpec({
+			toolRequirements: { required: ["read"], optional: [] },
 			id: "reviewer",
 			name: "Reviewer",
 			description: "Read-only reviewer that opts into project context.",
@@ -2153,6 +2161,7 @@ describe("contracts/dispatch", () => {
 
 	it("keeps memory before pipeline input and the stable system prompt untouched by dynamic context", () => {
 		const recipe: AgentRecipe = {
+			toolRequirements: { required: ["read", { anyOf: ["edit"] }], optional: [] },
 			id: "coder",
 			name: "Coder",
 			description: "Coding worker.",
@@ -2194,6 +2203,7 @@ describe("contracts/dispatch", () => {
 
 	it("records persona override provenance only for composed stable prompts", async () => {
 		const recipe: AgentRecipe = {
+			toolRequirements: { required: ["read", { anyOf: ["edit"] }], optional: [] },
 			id: "coder",
 			name: "Coder",
 			description: "Coding worker.",
@@ -3290,8 +3300,8 @@ describe("contracts/dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "hit worker tool cap" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 1, signal: null, stderrTail: `[worker] ${reason}` });
+			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "failed");
 			strictEqual(receipt.exitCode, 1);
@@ -4019,6 +4029,8 @@ rl.once("line", (line) => {
 				costUsd: 0,
 			});
 			const receiptDraft: RunReceiptDraft = {
+				verification: { state: "unverified", basis: "no-validation-tool" },
+				costProvenance: "unknown",
 				runId: env.id,
 				agentId: "coder",
 				task: "orphan task",
@@ -4120,7 +4132,7 @@ rl.once("line", (line) => {
 				orphanPath,
 				JSON.stringify({
 					runId: "nocwd0000001",
-					integrity: { version: 4, algorithm: "sha256", digest: "a".repeat(64) },
+					integrity: { version: 6, algorithm: "sha256", digest: "a".repeat(64) },
 				}),
 				"utf8",
 			);
@@ -4344,8 +4356,8 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "need operator permission" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
 			await handle.finalPromise;
 
 			const request = requests[0] as
@@ -4549,8 +4561,8 @@ rl.once("line", (line) => {
 				delegationAgentId: "opencode",
 				task: "delegate permission ask",
 			});
-			await drainEvents(handle.events);
 			acpExit.resolve(acpResult);
+			await drainEvents(handle.events);
 			await handle.finalPromise;
 
 			const request = requests[0] as { requestId?: string; origin?: string; requestedBy?: string } | undefined;
@@ -4650,8 +4662,8 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "count escalations" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			const counters = receipt.safety?.decisions as
 				| ({ allowed: number; blocked: number; permissionRequested: number } & EscalationSafetyCounters)
@@ -4723,8 +4735,8 @@ rl.once("line", (line) => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "need permission" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual((capturedSpec as WorkerSpec | null)?.onPermission, "deny");
 			strictEqual(receipt.outcome, "succeeded");
@@ -5145,6 +5157,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 	afterEach(restoreDispatchState);
 	const mutatingCoderRecipes: ReadonlyArray<AgentRecipe> = [
 		{
+			toolRequirements: { required: ["read", { anyOf: ["write"] }], optional: ["verify"] },
 			id: "coder",
 			name: "coder",
 			description: "mutating test recipe",
@@ -5296,8 +5309,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "read something" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.outcomeDetail, null);
@@ -5358,8 +5371,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "edit src/app.ts" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual(completionRows.length, 1);
 			strictEqual(completionRows[0]?.runId, handle.runId);
@@ -5429,8 +5442,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "edit and test" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual(completionRows.length, 1);
 			strictEqual(completionRows[0]?.runId, handle.runId);
@@ -5474,8 +5487,8 @@ describe("contracts/dispatch tool activity honesty", () => {
 		await bundle.extension.start();
 		try {
 			const handle = await bundle.contract.dispatch({ agentId: "coder", task: "try and fail" });
-			await drainEvents(handle.events);
 			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
 			const receipt = await handle.finalPromise;
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.outcomeDetail, "completed without a successful tool call (2 attempted: 1 failed, 1 blocked)");
@@ -5599,6 +5612,8 @@ describe("contracts/dispatch agent alias precedence", () => {
 					tokenCount: 0,
 					exitCode: 0,
 					outcome: "succeeded" as const,
+					costProvenance: "unknown" as const,
+					verification: { state: "unverified", basis: "no-validation-tool" } as const,
 				};
 				return {
 					runId: "r1",
