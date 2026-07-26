@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isExecutionRole } from "./execution-role.js";
+import { isRoutingIntent } from "./routing-intent.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, RunReceiptQuality } from "./types.js";
 
 /**
@@ -7,7 +8,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 10;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 11;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -117,6 +118,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	toolStats: true,
 	toolActivity: true,
 	verification: true,
+	routingIntent: true,
 	quality: true,
 	skillActivations: true,
 	autonomyEnforcement: true,
@@ -268,8 +270,12 @@ function isReceiptQuality(value: unknown): value is RunReceiptQuality {
 export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnvelope): RunReceipt {
 	if (!isReceiptQuality(receipt.quality)) throw new Error("receipt integrity: required quality block invalid");
 	if (!isExecutionRole(receipt.executionRole)) throw new Error("receipt integrity: required execution role invalid");
+	if (!isRoutingIntent(receipt.routingIntent)) {
+		throw new Error("receipt integrity: required routing intent invalid");
+	}
 	return {
 		...receipt,
+		routingIntent: receipt.routingIntent,
 		integrity: computeReceiptIntegrity(receipt, envelope),
 	};
 }
@@ -327,6 +333,9 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 		return { ok: false, reason: "integrity invalid" };
 	}
 	if (!isExecutionRole(receipt.executionRole)) return { ok: false, reason: "execution role invalid" };
+	if (!isRoutingIntent(receipt.routingIntent)) {
+		return { ok: false, reason: "routing intent invalid" };
+	}
 	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {
 		return { ok: false, reason: `ledger mismatch: ${mismatch}` };

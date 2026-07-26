@@ -66,6 +66,8 @@ export { verifyReceiptIntegrity } from "./receipt-integrity.js";
 export { createRouteHistoryStore } from "./route-history.js";
 export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.js";
 export { reduceRouteQuality } from "./route-quality.js";
+export type { RouteExplanation, RoutingIntent } from "./routing-intent.js";
+export { explainRouteDecision, parseRoutingIntent, preferLocalTie, routingIntentRejection } from "./routing-intent.js";
 export type {
 	ReceiptVerificationState,
 	RunBriefingProvenance,

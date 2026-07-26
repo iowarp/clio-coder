@@ -73,6 +73,15 @@ function toolForAnswer(answer: string) {
 				toolStats: [],
 				sessionId: null,
 				verification: { state: "not_applicable", basis: "read-only-agent" },
+				routingIntent: {
+					posture: "balanced",
+					maxCostUsd: null,
+					deadlineMs: null,
+					minimumQuality: null,
+					requiredCapabilities: [],
+					locality: "any",
+					failover: "none",
+				},
 				quality: {
 					version: 1,
 					typedValidations: [],

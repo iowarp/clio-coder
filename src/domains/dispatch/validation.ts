@@ -15,6 +15,7 @@ import {
 	type ExecutionHandoff,
 } from "./execution-handoff.js";
 import { isExecutionRole } from "./execution-role.js";
+import { isRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type {
 	DispatchRequestOrigin,
 	RunGateProvenance,
@@ -47,6 +48,7 @@ export interface ProtectedArtifactPathRemap {
 	workerRoot: string;
 }
 
+/** `automatic` is internal retry policy only and is never accepted on the model-facing tool. */
 export type DispatchFailoverMode = "none" | "approved" | "automatic";
 
 /** One exact route tuple in an operator-approved fallback envelope. */
@@ -70,6 +72,8 @@ export interface JobSpec {
 	thinkingLevel?: JobThinkingLevel;
 	/** Explicit fleet node pin; `local` or a configured fleet.nodes id. */
 	node?: string;
+	/** Sealed normalized routing intent. Raw callers use the model-facing `routing` object. */
+	routingIntent?: RoutingIntent;
 	/** Manual pins default to none; approved retries stay inside allowedCandidates. */
 	failover?: DispatchFailoverMode;
 	/** Exact route tuples approved for failover, in preference order. */
@@ -144,6 +148,7 @@ const KNOWN_KEYS = new Set([
 	"model",
 	"thinkingLevel",
 	"node",
+	"routingIntent",
 	"failover",
 	"allowedCandidates",
 	"plannedNode",
@@ -257,6 +262,9 @@ export function validateJobSpec(spec: unknown): Validated {
 		}
 	}
 
+	if ("routingIntent" in spec && spec.routingIntent !== undefined && !isRoutingIntent(spec.routingIntent)) {
+		errors.push("routingIntent must be a normalized routing intent");
+	}
 	if ("failover" in spec && spec.failover !== undefined) {
 		if (typeof spec.failover !== "string" || !VALID_FAILOVER_MODES.has(spec.failover)) {
 			errors.push("failover must be one of: none|approved|automatic");
@@ -278,13 +286,8 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (spec.failover !== "approved" && spec.allowedCandidates !== undefined) {
 		errors.push("allowedCandidates requires failover approved");
 	}
-	// A plan freezes a route envelope the operator saw. "automatic" would let an
-	// approved dispatch reroute to a tuple that was never in the approval, so a
-	// planned task is either an exact pin (none) or a bounded envelope (approved).
 	if (spec.failover === "automatic" && spec.plan !== undefined) {
-		errors.push(
-			"failover automatic is not allowed on a plan-approved dispatch; a planned task is either an exact pin (none) or a bounded approved envelope",
-		);
+		errors.push("failover automatic is not allowed on a plan-approved dispatch");
 	}
 
 	if ("plannedNode" in spec && spec.plannedNode !== undefined) {
@@ -462,6 +465,7 @@ export function validateJobSpec(spec: unknown): Validated {
 	if (typeof spec.target === "string") out.target = spec.target;
 	if (typeof spec.model === "string") out.model = spec.model;
 	if (typeof spec.node === "string") out.node = spec.node.trim();
+	if (isRoutingIntent(spec.routingIntent)) out.routingIntent = structuredClone(spec.routingIntent);
 	if (typeof spec.failover === "string" && VALID_FAILOVER_MODES.has(spec.failover)) {
 		out.failover = spec.failover as DispatchFailoverMode;
 	}

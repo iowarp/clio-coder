@@ -39,6 +39,7 @@ import {
 import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gate-role-prompts.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import { defaultRoutingIntent, explainRouteDecision, parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
 import {
 	DISPATCH_BRIEFING_MAX_BYTES,
@@ -158,6 +159,7 @@ function withResolvedTaskPin(
 			: {}),
 		// A resolved task always carries a sealed mode, and carries candidates
 		// exactly when that mode is "approved".
+		routingIntent: structuredClone(task.routingIntent),
 		failover: task.failover,
 		...(task.allowedCandidates !== undefined
 			? { allowedCandidates: task.allowedCandidates.map((candidate) => ({ ...candidate })) }
@@ -455,34 +457,18 @@ function dispatchRequestFromArgs(
 	if (model) request.model = model;
 	const node = stringArg(args, "node");
 	if (node) request.node = node;
-	const failover = stringArg(args, "failover");
-	if (failover) {
-		if (failover !== "none" && failover !== "approved" && failover !== "automatic") {
-			return { ok: false, message: "failover must be one of none|approved|automatic" };
-		}
-		request.failover = failover;
+	if (args.failover !== undefined || args.allowed_candidates !== undefined || args.allowedCandidates !== undefined) {
+		return { ok: false, message: "use routing.failover; model-authored candidate envelopes are not accepted" };
 	}
-	if (args.allowed_candidates !== undefined) {
-		if (!Array.isArray(args.allowed_candidates) || args.allowed_candidates.length === 0) {
-			return { ok: false, message: "allowed_candidates must be a non-empty array" };
-		}
-		const candidates = [];
-		for (const candidate of args.allowed_candidates) {
-			if (!isRecord(candidate)) return { ok: false, message: "allowed_candidates entries must be objects" };
-			const agentId = stringArg(candidate, "agent", "agentId");
-			const candidateTarget = stringArg(candidate, "target");
-			const candidateModel = stringArg(candidate, "model");
-			const candidateNode = stringArg(candidate, "node");
-			if (!agentId || !candidateTarget || !candidateModel || !candidateNode) {
-				return {
-					ok: false,
-					message: "allowed_candidates entries require non-empty agent, target, model, and node",
-				};
-			}
-			candidates.push({ agentId, target: candidateTarget, model: candidateModel, node: candidateNode });
-		}
-		request.allowedCandidates = candidates;
-	}
+	const routing = parseRoutingIntent(args.routing, {
+		...(target ? { target } : {}),
+		...(model ? { model } : {}),
+		...(node ? { node } : {}),
+	});
+	if (!routing.ok) return { ok: false, message: routing.errors.join("; ") };
+	request.routingIntent = routing.intent;
+	request.failover = routing.intent.failover;
+	request.requiredCapabilities = routing.intent.requiredCapabilities;
 	const cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
 
@@ -797,6 +783,10 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 			const evidenceSuffix = ` ${receiptEvidenceLabels(receipt, verification, run.integrity).join(" ")}${
 				run.integrity.ok ? "" : " evidence_verification=unknown/receipt-integrity-failed"
 			}`;
+			const routingSuffix =
+				run.integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
+					? ` route_decision=${receipt.routeDecision.decisionHash} route_mode=${receipt.routeDecision.mode}`
+					: "";
 			// The sealed receipt is authoritative. Live summaries remain useful for
 			// monitoring but can contain transient tool-use prose and never override
 			// a missing, partial, or integrity-invalid durable answer.
@@ -812,7 +802,7 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 						? "(no receipt-sealed assistant text captured)"
 						: "(worker text withheld because receipt integrity failed)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}`,
 				`  ${workerTextLabel(verification)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(receipt, verification, answerText).map((notice) => `  ${notice}`),
@@ -873,6 +863,9 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 				...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 				...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
 				...(provenance.autonomyEnforcement !== undefined ? { autonomyEnforcement: provenance.autonomyEnforcement } : {}),
+				...(integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
+					? { routing: explainRouteDecision(receipt.routeDecision, receipt.routingIntent) }
+					: {}),
 			};
 		}),
 	};
@@ -2204,6 +2197,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			node: resolution.node.id,
 			nodeKind: resolution.node.kind,
 			...(resolution.node.host !== undefined ? { nodeHost: resolution.node.host } : {}),
+			routingIntent: request.routingIntent ?? defaultRoutingIntent(request),
 			failover,
 			...(failover === "approved" ? { allowedCandidates: approvedCandidates.map((candidate) => ({ ...candidate })) } : {}),
 			role,
@@ -2425,17 +2419,6 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 							target: Type.Optional(Type.String()),
 							model: Type.Optional(Type.String()),
 							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
-							failover: Type.Optional(stringEnum(["none", "approved", "automatic"] as const)),
-							allowed_candidates: Type.Optional(
-								Type.Array(
-									Type.Object({
-										agent: Type.String(),
-										target: Type.String(),
-										model: Type.String(),
-										node: Type.String(),
-									}),
-								),
-							),
 							cwd: Type.Optional(Type.String()),
 						}),
 					]),
@@ -2521,21 +2504,21 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			node: Type.Optional(
 				Type.String({ description: "Default fleet node pin: local or a fleet.nodes id (omit for automatic placement)." }),
 			),
-			failover: Type.Optional(
-				stringEnum(
-					["none", "approved", "automatic"] as const,
-					"Exact pins default to none; approved requires allowed_candidates.",
-				),
-			),
-			allowed_candidates: Type.Optional(
-				Type.Array(
-					Type.Object({
-						agent: Type.String(),
-						target: Type.String(),
-						model: Type.String(),
-						node: Type.String(),
-					}),
-					{ description: "Exact operator-approved fallback route tuples, in preference order." },
+			routing: Type.Optional(
+				Type.Object(
+					{
+						posture: Type.Optional(stringEnum(["manual", "quality", "balanced", "latency", "economy"] as const)),
+						maxCostUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+						deadlineMs: Type.Optional(Type.Integer({ exclusiveMinimum: 0 })),
+						minimumQuality: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+						requiredCapabilities: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+						locality: Type.Optional(stringEnum(["local-only", "prefer-local", "any"] as const)),
+						failover: Type.Optional(stringEnum(["none", "approved"] as const)),
+					},
+					{
+						additionalProperties: false,
+						description: "Advisory posture plus hard routing bounds. Exact target/model/node pins remain manual.",
+					},
 				),
 			),
 			thinking_level: Type.Optional(stringEnum(THINKING_LEVELS)),

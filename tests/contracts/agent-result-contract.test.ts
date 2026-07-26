@@ -59,6 +59,15 @@ function receiptWithQuality(quality: "pass" | "fail" | "unmeasured") {
 		toolCalls: 0,
 		toolStats: [],
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "balanced",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: {
 			version: 1,
 			typedValidations: [],

@@ -91,7 +91,16 @@ describe("resolved dispatch plan admission", () => {
 						node: "blade\rforged",
 						nodeKind: "ssh",
 						nodeHost: "host\nforged",
-						failover: "automatic",
+						routingIntent: {
+							posture: "balanced",
+							maxCostUsd: null,
+							deadlineMs: null,
+							minimumQuality: null,
+							requiredCapabilities: [],
+							locality: "any",
+							failover: "none",
+						},
+						failover: "none",
 						role: "task",
 						position: 1,
 					},
@@ -104,7 +113,7 @@ describe("resolved dispatch plan admission", () => {
 		strictEqual(plan.text.split("\n").length, 3, "embedded line breaks cannot forge plan rows");
 		match(
 			plan.text,
-			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged failover=automatic task="inspect\?the repo\?\[31m"/,
+			/agent=coder\?forged target=primary\?\[2J model=model\?suffix node=blade\?forged kind=ssh host=host\?forged failover=none .* task="inspect\?the repo\?\[31m"/,
 		);
 	});
 
@@ -133,6 +142,15 @@ describe("resolved dispatch plan admission", () => {
 						nodeHost: "blade.example.test",
 						role: "task",
 						position: 1,
+						routingIntent: {
+							posture: "balanced",
+							maxCostUsd: null,
+							deadlineMs: null,
+							minimumQuality: null,
+							requiredCapabilities: [],
+							locality: "any",
+							failover: "none",
+						},
 						...extra,
 					},
 				],
@@ -141,10 +159,6 @@ describe("resolved dispatch plan admission", () => {
 		});
 		const c1 = { agentId: "coder", target: "primary", model: "base-model", node: "blade" };
 		const c2 = { agentId: "coder", target: "primary", model: "base-model", node: "local" };
-
-		const automatic = describeDispatchPlan(resolvedTask({ failover: "automatic" }));
-		const none = describeDispatchPlan(resolvedTask({ failover: "none" }));
-		strictEqual(automatic.hash === none.hash, false, "changing only the failover mode must change the plan hash");
 
 		const oneCandidate = describeDispatchPlan(resolvedTask({ failover: "approved", allowedCandidates: [c1] }));
 		const twoCandidates = describeDispatchPlan(resolvedTask({ failover: "approved", allowedCandidates: [c1, c2] }));
