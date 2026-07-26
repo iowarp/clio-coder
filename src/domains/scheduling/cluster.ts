@@ -60,6 +60,12 @@ export interface FleetRegistry {
 	 */
 	recordChannelFailure(id: string, reason: string): FleetNodeState;
 	recordChannelSuccess(id: string): void;
+	/**
+	 * Attach the durable per-node usage source. The dispatch domain owns the
+	 * capacity leases, so it binds the reader once at bundle construction; until
+	 * then a snapshot reports zero rather than inventing a process-local count.
+	 */
+	bindActiveWorkers(source: (nodeId: string) => number): void;
 }
 
 export const LOCAL_NODE_ID = "local";
@@ -92,6 +98,7 @@ export function createFleetRegistry(
 ): FleetRegistry {
 	const now = options?.now ?? (() => Date.now());
 	const runtime = new Map<string, NodeRuntimeState>();
+	let activeWorkers = options?.activeWorkers;
 
 	function stateFor(id: string): NodeRuntimeState {
 		let state = runtime.get(id);
@@ -111,7 +118,7 @@ export function createFleetRegistry(
 				kind: "local",
 				state: state.state,
 				stateReason: state.stateReason,
-				activeWorkers: options?.activeWorkers?.(LOCAL_NODE_ID) ?? 0,
+				activeWorkers: activeWorkers?.(LOCAL_NODE_ID) ?? 0,
 				maxWorkers: options?.localMaxWorkers?.() ?? Number.POSITIVE_INFINITY,
 				labels: [],
 				lastSeenAt: state.lastSeenMs !== null ? new Date(state.lastSeenMs).toISOString() : null,
@@ -123,7 +130,7 @@ export function createFleetRegistry(
 			kind: "ssh",
 			state: state.state,
 			stateReason: state.stateReason,
-			activeWorkers: options?.activeWorkers?.(id) ?? 0,
+			activeWorkers: activeWorkers?.(id) ?? 0,
 			maxWorkers: config.maxWorkers,
 			labels: [...(config.labels ?? [])],
 			lastSeenAt: state.lastSeenMs !== null ? new Date(state.lastSeenMs).toISOString() : null,
@@ -176,6 +183,9 @@ export function createFleetRegistry(
 				state.stateReason = `classified dead after ${state.consecutiveFailures} consecutive channel failures (${reason})`;
 			}
 			return state.state;
+		},
+		bindActiveWorkers(source) {
+			activeWorkers = source;
 		},
 		recordChannelSuccess(id) {
 			const state = stateFor(id);

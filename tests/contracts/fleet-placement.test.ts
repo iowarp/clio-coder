@@ -239,10 +239,30 @@ describe("fleet placement resolution order", () => {
 		strictEqual(placement?.node.id, "mini");
 	});
 
-	it("uses declaration order while durable admission owns capacity", () => {
-		const { resolve } = resolver();
-		strictEqual(resolve({ agentId: "coder", executionRole: "builder", task: "t" })?.node.id, "blade");
-		strictEqual(resolve({ agentId: "coder", executionRole: "builder", task: "t" })?.node.id, "blade");
+	it("spreads across nodes by durable lease usage, then declaration order", () => {
+		const settings = settingsWithFleet();
+		// blade caps at 2, mini at 1: exactly the usage a durable lease read reports.
+		const usage: Record<string, number> = { blade: 0, mini: 0 };
+		const registry = createFleetRegistry(() => settings.fleet.nodes);
+		registry.bindActiveWorkers((nodeId) => usage[nodeId] ?? 0);
+		const { resolve } = resolver({ settings, registry });
+		const place = () => resolve({ agentId: "coder", executionRole: "builder", task: "t" })?.node.id;
+		strictEqual(place(), "blade", "declaration order breaks the tie");
+		usage.blade = 1;
+		strictEqual(place(), "mini", "blade now carries load");
+		usage.mini = 1;
+		strictEqual(place(), "blade", "blade has spare capacity, mini is full");
+		usage.blade = 2;
+		strictEqual(place(), "local", "all remote capacity is taken");
+	});
+
+	it("still places a pinned node that is momentarily full so admission can queue it", () => {
+		const settings = settingsWithFleet();
+		const registry = createFleetRegistry(() => settings.fleet.nodes);
+		registry.bindActiveWorkers((nodeId) => (nodeId === "mini" ? 1 : 0));
+		const { resolve } = resolver({ settings, registry });
+		const placement = resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" });
+		strictEqual(placement?.node.id, "mini", "capacity is the lease's decision, not placement's");
 	});
 
 	it("rejects explicit pins on unknown offline or unpreflighted nodes", () => {

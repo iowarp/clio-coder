@@ -6,7 +6,6 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { capacityStatePath, listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import {
-	consumeDispatchReservation,
 	createDispatchReservation,
 	getDispatchReservation,
 	listDispatchReservations,
@@ -14,6 +13,7 @@ import {
 	releaseDispatchReservationMember,
 	reservedCapacity,
 	rollbackDispatchReservation,
+	transferDispatchReservationToLease,
 } from "../../src/domains/dispatch/reservation-store.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
@@ -55,7 +55,7 @@ function schedulingFor(settings: typeof DEFAULT_SETTINGS, maxWorkers: number, cu
 }
 
 function remotePlacement(): DispatchNodePlacement {
-	return { node: { id: "mini", kind: "ssh", host: "mini.test" }, release: () => {} };
+	return { node: { id: "mini", kind: "ssh", host: "mini.test" } };
 }
 
 function retryWorker(result: SpawnedWorkerResult, text?: string): SpawnedWorker {
@@ -292,7 +292,13 @@ describe("dispatch batch reservations", () => {
 				budget: { currentUsd: 0, ceilingUsd: 5 },
 			},
 		});
-		consumeDispatchReservation(record.ownerId, task.memberId);
+		transferDispatchReservationToLease({
+			ownerId: record.ownerId,
+			memberId: task.memberId,
+			assignmentId: "assignment-1",
+			nodeId: task.nodeId,
+			limits: { global: 1, nodes: { local: 1 } },
+		});
 		releaseDispatchReservationMember(record.ownerId, task.memberId);
 		releaseDispatchReservationMember(record.ownerId, task.memberId);
 		rollbackDispatchReservation(record.ownerId);
@@ -469,8 +475,8 @@ describe("dispatch batch reservations", () => {
 			resolveNode: (): DispatchNodePlacement => {
 				placements += 1;
 				return placements === 1
-					? { node: { id: "mini", kind: "ssh", host: "mini.test" }, release: () => {} }
-					: { node: { id: "blade", kind: "ssh", host: "blade.test" }, release: () => {} };
+					? { node: { id: "mini", kind: "ssh", host: "mini.test" } }
+					: { node: { id: "blade", kind: "ssh", host: "blade.test" } };
 			},
 			spawnWorker: () => {
 				spawns += 1;
@@ -574,8 +580,8 @@ describe("dispatch batch reservations", () => {
 			resolveNode: (): DispatchNodePlacement => {
 				placements += 1;
 				return placements === 1
-					? { node: { id: "mini", kind: "ssh", host: "mini.test" }, release: () => {} }
-					: { node: { id: "blade", kind: "ssh", host: "blade.test" }, release: () => {} };
+					? { node: { id: "mini", kind: "ssh", host: "mini.test" } }
+					: { node: { id: "blade", kind: "ssh", host: "blade.test" } };
 			},
 			spawnWorker: () => retryWorker({ exitCode: 255, signal: null, stderrTail: "ssh channel failed" }),
 		});
@@ -597,7 +603,7 @@ describe("dispatch batch reservations", () => {
 			});
 			strictEqual((await handle.finalPromise).outcome, "failed");
 			const assignment = bundle.contract.assignments?.get(handle.runId);
-			match(String(assignment?.outcomeDetail), /capacity unavailable/);
+			match(String(assignment?.outcomeDetail), /rebind denied/);
 			// The member never escaped its reservation and is released exactly once.
 			const settled = getDispatchReservation(reservation.ownerId);
 			strictEqual(settled?.members[0]?.nodeId, "mini");

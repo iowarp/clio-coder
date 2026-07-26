@@ -50,8 +50,49 @@ export interface CapacityAdmissionController {
 	rename(leaseId: string, assignmentId: string): CapacityLease;
 	release(leaseId: string): boolean;
 	releaseAssignment(assignmentId: string): boolean;
+	/** Requests this process admitted for a plan and has not settled yet. */
+	activePlanCount(planId: string): number;
+	/**
+	 * Process-local shutdown drain. New admissions fail closed and everything
+	 * still queued is canceled. This never touches the durable machine-wide
+	 * drain, which belongs to the operator and outlives one process.
+	 */
+	drain(): void;
 	stop(): void;
 }
+
+/**
+ * Guards the window between admission and the assignment owning its lease. Until
+ * the lease carries a durable assignment id, a failure on the way to launch must
+ * hand the slot back; once the assignment owns it, settlement releases it and an
+ * early release would drop capacity the run still holds. Releasing is idempotent.
+ */
+export interface LeaseSlotGuard {
+	transferToAssignment(): void;
+	release(): void;
+}
+export function createLeaseSlotGuard(
+	controller: Pick<CapacityAdmissionController, "release">,
+	leaseId: string,
+	ownedByAssignment: boolean,
+): LeaseSlotGuard {
+	let held = true;
+	let owned = ownedByAssignment;
+	return {
+		transferToAssignment: () => {
+			owned = true;
+		},
+		release: () => {
+			if (!held || owned) return;
+			held = false;
+			controller.release(leaseId);
+		},
+	};
+}
+
+/** Retry cadence while queued requests are blocked behind live capacity. */
+const PUMP_MIN_MS = 10;
+const PUMP_MAX_MS = 500;
 
 export function createCapacityAdmissionController(options: {
 	limits: () => CapacityLimits;
@@ -59,17 +100,27 @@ export function createCapacityAdmissionController(options: {
 	maxQueueSize?: number;
 	queueCeilingMs?: number;
 	heartbeatMs?: number;
+	/** Reserved concurrent peak for a plan; one plan never exceeds it. */
+	reservedPlanPeak?: (planId: string) => number | undefined;
 }): CapacityAdmissionController {
 	const now = options.now ?? Date.now;
 	const leases = new Map<string, CapacityLease>();
 	const pending = new Map<string, string>();
 	const acquired = new Map<string, CapacityLease>();
+	let draining = false;
 	const queue = createAdmissionQueue<() => CapacityLease>({
 		maxSize: options.maxQueueSize ?? 256,
 		finiteCeilingMs: options.queueCeilingMs ?? 60_000,
 		now,
+		...(options.reservedPlanPeak !== undefined ? { reservedPlanPeak: options.reservedPlanPeak } : {}),
 	});
+	// Every admission attempt takes the cross-process admission lock, so a
+	// request blocked behind someone else's lease backs off instead of hammering
+	// the lock and starving lease heartbeats and reservation writes.
+	let pumpBackoffMs = PUMP_MIN_MS;
+	let pumpTimer: ReturnType<typeof setTimeout> | null = null;
 	const pump = (): void => {
+		let progressed = false;
 		for (;;) {
 			let admittedLease: CapacityLease | null = null;
 			const admitted = queue.admitNext(now(), (request) => {
@@ -77,93 +128,135 @@ export function createCapacityAdmissionController(options: {
 					admittedLease = request.value();
 					return true;
 				} catch (error) {
+					// Capacity is a wait, not a failure. Anything else fails the request.
 					if (error instanceof Error && /capacity reached/.test(error.message)) return false;
 					queue.fail(request.requestId, error instanceof Error ? error : new Error(String(error)));
 					return false;
 				}
 			});
-			if (!admitted || !admittedLease) return;
+			if (!admitted || !admittedLease) break;
 			acquired.set(admitted.assignmentId, admittedLease);
 			pending.delete(admitted.assignmentId);
+			progressed = true;
+		}
+		pumpBackoffMs = progressed ? PUMP_MIN_MS : Math.min(PUMP_MAX_MS, pumpBackoffMs * 2);
+		if (queue.size() > 0 && pumpTimer === null) {
+			pumpTimer = setTimeout(() => {
+				pumpTimer = null;
+				pump();
+			}, pumpBackoffMs);
+			pumpTimer.unref();
 		}
 	};
-	const pumpTimer = setInterval(pump, 10);
+	/** Capacity just changed, so retry immediately rather than after a backoff. */
+	const pumpNow = (): void => {
+		pumpBackoffMs = PUMP_MIN_MS;
+		pump();
+	};
 	const heartbeatTimer = setInterval(() => {
 		for (const lease of leases.values()) {
 			const renewed = heartbeatCapacityLease(lease.leaseId);
 			if (renewed) leases.set(renewed.leaseId, renewed);
 		}
 	}, options.heartbeatMs ?? 10_000);
-	pumpTimer.unref();
 	heartbeatTimer.unref();
-	return {
+	const controller: CapacityAdmissionController = {
 		async admit(input) {
+			if (draining) throw new Error("dispatch: admission denied: this process is shutting down");
 			const queuedAt = now();
 			const requestId = `admit-${queuedAt.toString(36)}-${randomBytes(5).toString("hex")}`;
 			pending.set(input.assignmentId, requestId);
-			const outcomePromise = queue.enqueue({
-				requestId,
-				assignmentId: input.assignmentId,
-				priority: input.priority ?? 0,
-				queuedAt,
-				deadlineAt: input.deadlineAt,
-				planId: input.planId ?? null,
-				planOrder: input.planOrder ?? null,
-				value: () =>
-					input.reservation
-						? transferDispatchReservationToLease({
-								ownerId: input.reservation.ownerId,
-								memberId: input.reservation.memberId,
-								assignmentId: input.assignmentId,
-								nodeId: input.nodeId,
-								limits: options.limits(),
-								nowMs: now(),
-							})
-						: acquireCapacityLease({
-								assignmentId: input.assignmentId,
-								nodeId: input.nodeId,
-								limits: options.limits(),
-								nowMs: now(),
-							}),
-			});
-			pump();
-			const outcome = await outcomePromise;
-			pending.delete(input.assignmentId);
-			if (outcome.state !== "admitted") throw new Error(`dispatch: admission ${outcome.state}`);
-			const lease = acquired.get(input.assignmentId);
-			if (!lease) throw new Error("dispatch: admitted request has no capacity lease");
-			acquired.delete(input.assignmentId);
-			leases.set(lease.leaseId, lease);
-			return { lease, queuedAt, admittedAt: outcome.admittedAt };
+			try {
+				const outcomePromise = queue.enqueue({
+					requestId,
+					assignmentId: input.assignmentId,
+					priority: input.priority ?? 0,
+					queuedAt,
+					deadlineAt: input.deadlineAt,
+					planId: input.planId ?? null,
+					planOrder: input.planOrder ?? null,
+					value: () =>
+						input.reservation
+							? transferDispatchReservationToLease({
+									ownerId: input.reservation.ownerId,
+									memberId: input.reservation.memberId,
+									assignmentId: input.assignmentId,
+									nodeId: input.nodeId,
+									limits: options.limits(),
+									nowMs: now(),
+								})
+							: acquireCapacityLease({
+									assignmentId: input.assignmentId,
+									nodeId: input.nodeId,
+									limits: options.limits(),
+									nowMs: now(),
+								}),
+				});
+				pumpNow();
+				const outcome = await outcomePromise;
+				if (outcome.state !== "admitted") throw new Error(`dispatch: admission ${outcome.state}`);
+				const lease = acquired.get(input.assignmentId);
+				if (!lease) throw new Error("dispatch: admitted request has no capacity lease");
+				acquired.delete(input.assignmentId);
+				leases.set(lease.leaseId, lease);
+				return { lease, queuedAt, admittedAt: outcome.admittedAt };
+			} finally {
+				// Runs on rejection too: a queue-full, duplicate, or failed request
+				// must not leave its assignment marked pending, or a later cancel
+				// would target a request id that no longer exists.
+				if (pending.get(input.assignmentId) === requestId) pending.delete(input.assignmentId);
+			}
 		},
 		cancel(assignmentId) {
 			const requestId = pending.get(assignmentId);
-			return requestId ? queue.cancel(requestId) : false;
+			if (requestId === undefined) return false;
+			pending.delete(assignmentId);
+			return queue.cancel(requestId);
 		},
 		rename(leaseId, assignmentId) {
+			const previous = leases.get(leaseId)?.assignmentId;
 			const lease = renameCapacityLeaseAssignment(leaseId, assignmentId);
 			leases.set(leaseId, lease);
+			// The plan slot follows the assignment id the lease now carries.
+			if (previous !== undefined && previous !== assignmentId) queue.complete(previous);
 			return lease;
 		},
 		release(leaseId) {
+			const assignmentId = leases.get(leaseId)?.assignmentId;
 			leases.delete(leaseId);
 			const released = releaseCapacityLease(leaseId);
-			pump();
+			if (assignmentId !== undefined) queue.complete(assignmentId);
+			pumpNow();
 			return released;
 		},
 		releaseAssignment(assignmentId) {
 			const lease = [...leases.values()].find((entry) => entry.assignmentId === assignmentId);
-			return lease ? this.release(lease.leaseId) : false;
+			if (!lease) {
+				queue.complete(assignmentId);
+				return false;
+			}
+			return controller.release(lease.leaseId);
 		},
-		stop() {
-			clearInterval(pumpTimer);
-			clearInterval(heartbeatTimer);
-			for (const [assignmentId, requestId] of pending) {
-				queue.cancel(requestId);
+		activePlanCount(planId) {
+			return queue.activePlanCount(planId);
+		},
+		drain() {
+			draining = true;
+			for (const [assignmentId, requestId] of [...pending]) {
 				pending.delete(assignmentId);
+				queue.cancel(requestId);
 			}
 		},
+		stop() {
+			controller.drain();
+			if (pumpTimer !== null) {
+				clearTimeout(pumpTimer);
+				pumpTimer = null;
+			}
+			clearInterval(heartbeatTimer);
+		},
 	};
+	return controller;
 }
 
 export function admit(

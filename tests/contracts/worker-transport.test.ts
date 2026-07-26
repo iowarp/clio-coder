@@ -527,16 +527,12 @@ describe("dispatch records fleet placement", () => {
 	const NODE: RunNodeIdentity = { id: "blade", kind: "ssh", host: "blade.lan" };
 
 	it("seals node identity and reroute lineage into a verifying receipt", async () => {
-		let released = 0;
 		const placement: DispatchNodePlacement = {
 			node: NODE,
 			spawn: () =>
 				fakeSpawnedWorker([
 					{ type: "message_end", message: { role: "assistant", content: "done", usage: { input: 1, output: 1 } } },
 				]),
-			release: () => {
-				released += 1;
-			},
 			reroutes: [{ attempt: 1, fromNode: "mini", toNode: "blade", reason: "node mini classified dead" }],
 		};
 		const bundle = makeDispatchBundle(stubContext(), { resolveNode: () => placement });
@@ -555,7 +551,6 @@ describe("dispatch records fleet placement", () => {
 			if (envelope) {
 				deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
 			}
-			strictEqual(released, 1, "node capacity released exactly once");
 		} finally {
 			await bundle.extension.stop?.();
 		}

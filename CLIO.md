@@ -24,8 +24,11 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 
 ## Process-safe dispatch admission
 
-- `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock.
-- `src/domains/dispatch/admission-queue.ts` owns bounded deterministic priority/FIFO ordering, finite queue deadlines, cancellation, and reserved plan-peak admission.
+- `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock. The lease bound fails admission closed rather than dropping a lease, and lease reclamation needs owner-liveness evidence wherever a process birth token cannot prove death.
+- `setCapacityDraining` is the operator's machine-wide drain. It is TTL-bounded so an abandoned drain cannot wedge the host, and process shutdown never writes it; a shutting-down bundle drains its own admission controller instead.
+- `src/domains/dispatch/admission-queue.ts` owns bounded deterministic priority/FIFO ordering, finite queue deadlines, cancellation, and reserved plan-peak admission. A plan slot belongs to an assignment rather than an attempt, so a retry never queues behind itself.
+- Placement spreads work by durable lease usage read through `FleetRegistry.bindActiveWorkers`, then by declaration order. That preference is advisory: leases decide capacity under the lock, and a pinned node that is momentarily full is queued rather than refused.
+- A retry rebinds its reservation member to the node and cost bound it actually resolved, so a costlier recovery route cannot escape the plan's aggregate ceiling.
 
 ## Dispatch routing intent
 

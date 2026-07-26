@@ -84,7 +84,7 @@ import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
-import { admit, createCapacityAdmissionController } from "./admission.js";
+import { admit, createCapacityAdmissionController, createLeaseSlotGuard } from "./admission.js";
 import { AssignmentRegistry, asAssignmentId } from "./assignment.js";
 import type { AssignmentAttemptStartEvent } from "./assignment-events.js";
 import { reconcileOrphanAssignments } from "./assignment-reconcile.js";
@@ -107,7 +107,7 @@ import {
 	registerDetachedBatch,
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
-import { capacityLeaseUsage, setCapacityDraining } from "./capacity-lease.js";
+import { capacityLeaseUsage, createNodeLeaseUsageReader } from "./capacity-lease.js";
 import type {
 	DispatchAdmissionObserver,
 	DispatchContract,
@@ -141,9 +141,12 @@ import {
 	cleanupDispatchReservations,
 	createDispatchReservation,
 	getDispatchReservation,
+	planQueueSlot,
 	type ReservationCapacitySnapshot,
+	rebindDispatchReservationMember,
 	releaseDispatchReservationMember,
 	reservedBudgetUsd,
+	reservedPlanPeakSlots,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
 } from "./reservation-store.js";
@@ -273,12 +276,13 @@ interface DispatchFinishContractSnapshot {
 }
 
 /** One resolved fleet placement: where the worker runs and how to launch it there. */
+/** The settings snapshot a dispatch resolves against; absent in minimal bundles. */
+type EffectiveSettings = Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+
 export interface DispatchNodePlacement {
 	node: RunNodeIdentity;
 	/** Transport launch; absent for local placements, which use the bundle's spawnWorker. */
 	spawn?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
-	/** Returns the node's capacity slot; invoked exactly once at finalization. */
-	release?: () => void;
 	/** Failover hops that preceded this placement, oldest first. */
 	reroutes?: ReadonlyArray<RunNodeReroute>;
 }
@@ -311,7 +315,7 @@ export interface DispatchBundleOptions {
 	 * not whatever another process last wrote to settings.yaml. Falls back to
 	 * the shared config snapshot when absent (headless boots, tests).
 	 */
-	getSettings?: () => Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+	getSettings?: () => EffectiveSettings;
 	/**
 	 * Live orchestrator protection state. It is cloned and canonicalized once at
 	 * dispatch admission, then carried immutably on every mediated worker spec.
@@ -1176,7 +1180,7 @@ function assertPostRuntimeToolCompatibility(
 function resolveEffectiveWorkerBudget(input: {
 	declared: ReturnType<typeof normalizeAgentSpec>["budget"];
 	allowedTools: ReadonlyArray<ToolName>;
-	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined;
+	settings: EffectiveSettings;
 }): WorkerBudget {
 	const rawEnvCap = process.env.CLIO_WORKER_TOOL_CALL_CAP?.trim();
 	const parsedEnvCap = rawEnvCap && /^[1-9]\d*$/.test(rawEnvCap) ? Number(rawEnvCap) : Number.NaN;
@@ -1914,8 +1918,7 @@ export function createDispatchBundle(
 	const scheduling: SchedulingContract = maybeScheduling;
 	const prompts: PromptsContract = maybePrompts;
 	const config = context.getContract<ConfigContract>("config");
-	const getEffectiveSettings = (): Readonly<ReturnType<ConfigContract["get"]>> | undefined =>
-		options?.getSettings?.() ?? config?.get();
+	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
 	const getProtectedArtifactState = (): ProtectedArtifactState =>
 		frozenProtectedArtifactState(options?.getProtectedArtifactState?.());
 	// Optional: absent in minimal test bundles. Workers just get no project
@@ -1975,12 +1978,19 @@ export function createDispatchBundle(
 			return { global: configuredGlobalCapacity(settings), nodes };
 		},
 		now,
+		reservedPlanPeak: (planId) =>
+			reservedPlanPeakSlots(planId, (error) => reportDispatchDiagnostic("read reserved plan peak", error)),
 	});
+	scheduling.fleet?.bindActiveWorkers(
+		createNodeLeaseUsageReader({
+			now,
+			onError: (error) => reportDispatchDiagnostic("read capacity lease usage", error),
+		}),
+	);
 
-	function reservationCapacitySnapshot(
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
-	): ReservationCapacitySnapshot {
+	function reservationCapacitySnapshot(settings: EffectiveSettings): ReservationCapacitySnapshot {
 		const preflight = scheduling.preflight();
+		// Reservation planning compares against a fresh read, never the display cache.
 		const usage = capacityLeaseUsage();
 		const nodes: Record<string, { active: number; limit: number }> = {
 			local: { active: usage.nodes.local ?? 0, limit: configuredGlobalCapacity(settings) },
@@ -2033,11 +2043,7 @@ export function createDispatchBundle(
 		throw new Error(`dispatch: admission denied: ${reason}`);
 	}
 
-	function assertBudgetAdmitsRoute(
-		req: DispatchRequest,
-		pricing: EffectivePricing,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
-	): void {
+	function assertBudgetAdmitsRoute(req: DispatchRequest, pricing: EffectivePricing, settings: EffectiveSettings): void {
 		const preflight = scheduling.preflight();
 		assertApprovedCostCeiling(req, preflight.ceilingUsd);
 		if (preflight.verdict === "over" || preflight.verdict === "at") {
@@ -2054,7 +2060,7 @@ export function createDispatchBundle(
 		}
 	}
 
-	function configuredGlobalCapacity(settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined): number {
+	function configuredGlobalCapacity(settings: EffectiveSettings): number {
 		const configured = settings?.budget.concurrency;
 		return scheduling.maxWorkers?.() ?? (configured === "auto" || configured === undefined ? 4 : Math.max(1, configured));
 	}
@@ -2066,11 +2072,19 @@ export function createDispatchBundle(
 		const requestedAt = Date.parse(timing.requestedAt ?? timing.queuedAt);
 		const deadlineAt = requestedAt + (req.routingIntent?.deadlineMs ?? 60_000);
 		if (req.lineage === undefined) await registerAssignment(assignmentId);
+		// A plan's queued members keep their wave order and their reserved peak.
+		const plan =
+			req.reservation === undefined
+				? {}
+				: planQueueSlot(req.reservation.ownerId, req.reservation.memberId, (error) =>
+						reportDispatchDiagnostic("read plan queue identity", error),
+					);
 		try {
 			const admitted = await capacityAdmission.admit({
 				assignmentId,
 				nodeId,
 				deadlineAt,
+				...plan,
 				...(req.reservation !== undefined && req.lineage === undefined ? { reservation: req.reservation } : {}),
 			});
 			timing.admittedAt = new Date(admitted.admittedAt).toISOString();
@@ -2082,6 +2096,19 @@ export function createDispatchBundle(
 			}
 			throw error;
 		}
+	}
+
+	/** Retries only: the first attempt's member was consumed with the planned bound. */
+	function rebindReservationSlot(
+		req: DispatchRequest,
+		nodeId: string,
+		costUsd: number,
+		settings: EffectiveSettings,
+	): void {
+		if (req.reservation === undefined || req.lineage === undefined) return;
+		const capacity = reservationCapacitySnapshot(settings);
+		const rebind = { ...req.reservation, nodeId, costUpperBoundUsd: costUsd, capacity, nowMs: now() };
+		rebindDispatchReservationMember(rebind);
 	}
 
 	/**
@@ -2663,7 +2690,7 @@ export function createDispatchBundle(
 	/** The target identity a request resolves to, without composing a worker. */
 	function resolveTargetIdentity(
 		req: DispatchRequest,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+		settings: EffectiveSettings,
 	): { targetId: string; runtimeId: string; wireModelId: string } {
 		const recipe = agents.get(req.agentId);
 		if (!recipe) throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
@@ -2693,10 +2720,7 @@ export function createDispatchBundle(
 	 * resolved route is usable or when no member can take the work, in which case
 	 * `assertTargetNotCoolingDown` reports the resolved route's own reason.
 	 */
-	function routeAroundCoolingTarget(
-		req: DispatchRequest,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
-	): DispatchRequest | null {
+	function routeAroundCoolingTarget(req: DispatchRequest, settings: EffectiveSettings): DispatchRequest | null {
 		if (req.lineage !== undefined || req.delegationAgentId !== undefined) return null;
 		const mode = failoverModeFor(req);
 		if (mode === "none") return null;
@@ -2750,10 +2774,7 @@ export function createDispatchBundle(
 		targetCooldowns.set(key, { until: now() + cooldownMs, reason: failureClass });
 	}
 
-	async function resolveLifecycle(
-		req: DispatchRequest,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
-	): Promise<DispatchLifecycleStage> {
+	async function resolveLifecycle(req: DispatchRequest, settings: EffectiveSettings): Promise<DispatchLifecycleStage> {
 		const recipe = agents.get(req.agentId);
 		if (!recipe) {
 			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
@@ -2876,7 +2897,7 @@ export function createDispatchBundle(
 
 	function resolveAcpDelegationLifecycle(
 		req: DispatchRequest,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+		settings: EffectiveSettings,
 	): AcpDelegationLifecycleStage {
 		const agentId = req.delegationAgentId;
 		if (!agentId) throw new Error("dispatch: missing delegationAgentId");
@@ -2962,7 +2983,7 @@ export function createDispatchBundle(
 
 	async function dispatchAcpDelegation(
 		req: DispatchRequest,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+		settings: EffectiveSettings,
 		timing: RunPhaseMarks,
 		routeDecision: RouteDecisionV1 | undefined,
 		observer?: DispatchAdmissionObserver,
@@ -2981,13 +3002,7 @@ export function createDispatchBundle(
 		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
 		const capacityLease = await admitAssignmentCapacity(req, "local", timing);
-		let leaseAssignmentOwned = req.lineage !== undefined;
-		let workerSlotHeld = true;
-		const releaseWorkerSlot = (): void => {
-			if (!workerSlotHeld || leaseAssignmentOwned) return;
-			workerSlotHeld = false;
-			capacityAdmission.release(capacityLease.leaseId);
-		};
+		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
 
 		// Resolve the ledger before starting the ACP process: an external agent
 		// must never outlive a failure to create its tracking row.
@@ -2995,7 +3010,7 @@ export function createDispatchBundle(
 			try {
 				return requireLedger();
 			} catch (error) {
-				releaseWorkerSlot();
+				leaseSlot.release();
 				if (req.lineage === undefined)
 					persistAssignment(failQueuedAssignment(capacityLease.assignmentId), `${capacityLease.assignmentId}:admission`);
 				throw error;
@@ -3014,7 +3029,7 @@ export function createDispatchBundle(
 				clientVersion: readClioVersion(),
 			});
 		} catch (error) {
-			releaseWorkerSlot();
+			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
 		}
@@ -3181,7 +3196,7 @@ export function createDispatchBundle(
 			if (req.lineage === undefined) {
 				capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
 				await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
-				leaseAssignmentOwned = true;
+				leaseSlot.transferToAssignment();
 			}
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
@@ -3231,7 +3246,7 @@ export function createDispatchBundle(
 			} catch (killError) {
 				reportDispatchDiagnostic("kill orphaned ACP agent after ledger failure", killError);
 			}
-			releaseWorkerSlot();
+			leaseSlot.release();
 			throw error;
 		}
 
@@ -3611,7 +3626,7 @@ export function createDispatchBundle(
 				});
 				throw error;
 			} finally {
-				releaseWorkerSlot();
+				leaseSlot.release();
 			}
 		})();
 
@@ -3700,6 +3715,7 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
+			rebindReservationSlot(req, "local", UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req);
 			return attachRouteObservation(
 				await dispatchAcpDelegation(req, settings, timing, routeObservation?.decision, observer),
@@ -3720,53 +3736,33 @@ export function createDispatchBundle(
 		assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings);
 
 		const placement = resolveNode(req) ?? null;
-		try {
-			assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
-			const effectiveRoute = {
-				agentId: req.agentId,
-				target: lifecycle.target.target.id,
-				model: lifecycle.target.wireModelId,
-				node: placement?.node?.id ?? "local",
-			};
-			assertRouteWithinApprovedEnvelope(req, effectiveRoute);
-		} catch (error) {
-			try {
-				placement?.release?.();
-			} catch (releaseError) {
-				reportDispatchDiagnostic("release drifted fleet node slot", releaseError);
-			}
-			throw error;
-		}
+		assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
+		const effectiveRoute = {
+			agentId: req.agentId,
+			target: lifecycle.target.target.id,
+			model: lifecycle.target.wireModelId,
+			node: placement?.node?.id ?? "local",
+		};
+		assertRouteWithinApprovedEnvelope(req, effectiveRoute);
+		rebindReservationSlot(
+			req,
+			effectiveRoute.node,
+			conservativeRouteAdmissionEstimateUsd(lifecycle.target.effectivePricing, settings?.defaults.maxTokens ?? 32768),
+			settings,
+		);
 		if (placement?.reroutes !== undefined && placement.reroutes.length > 0) {
 			req = { ...req, reroutes: [...placement.reroutes] };
 		}
 		routeObservation = observeShadowRoute(req, placement?.node ?? { id: "local", kind: "local" });
-		let nodeSlotHeld = placement?.release !== undefined;
-		const releaseNodeSlot = (): void => {
-			if (!nodeSlotHeld) return;
-			nodeSlotHeld = false;
-			try {
-				placement?.release?.();
-			} catch (error) {
-				reportDispatchDiagnostic("release fleet node slot", error);
-			}
-		};
 
 		const capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing);
-		let leaseAssignmentOwned = req.lineage !== undefined;
-		let workerSlotHeld = true;
-		const releaseWorkerSlot = (): void => {
-			if (!workerSlotHeld || leaseAssignmentOwned) return;
-			workerSlotHeld = false;
-			capacityAdmission.release(capacityLease.leaseId);
-		};
+		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
 
 		const ledgerRef = (() => {
 			try {
 				return requireLedger();
 			} catch (error) {
-				releaseWorkerSlot();
-				releaseNodeSlot();
+				leaseSlot.release();
 				throw error;
 			}
 		})();
@@ -3798,8 +3794,7 @@ export function createDispatchBundle(
 		try {
 			worker = (placement?.spawn ?? spawnWorker)(spec, { cwd: lifecycle.cwd });
 		} catch (error) {
-			releaseWorkerSlot();
-			releaseNodeSlot();
+			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
 		}
@@ -4082,7 +4077,7 @@ export function createDispatchBundle(
 			if (req.lineage === undefined) {
 				capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
 				await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
-				leaseAssignmentOwned = true;
+				leaseSlot.transferToAssignment();
 			}
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
@@ -4154,8 +4149,7 @@ export function createDispatchBundle(
 			} catch (abortError) {
 				reportDispatchDiagnostic("abort orphaned worker after ledger failure", abortError);
 			}
-			releaseWorkerSlot();
-			releaseNodeSlot();
+			leaseSlot.release();
 			throw error;
 		}
 
@@ -4620,8 +4614,7 @@ export function createDispatchBundle(
 				});
 				throw error;
 			} finally {
-				releaseWorkerSlot();
-				releaseNodeSlot();
+				leaseSlot.release();
 			}
 		})();
 
@@ -5029,19 +5022,19 @@ export function createDispatchBundle(
 			startHeartbeatWatchdog();
 		},
 		async stop() {
+			// Shutdown is process-local. The durable machine-wide drain belongs to
+			// the operator: setting it here would deny admission in every sibling
+			// Clio process, and a crash before the clearing write would wedge the
+			// machine.
 			draining = true;
-			setCapacityDraining(true);
-			try {
-				settleQueuedAssignmentsForShutdown();
-				stopHeartbeatWatchdog();
-				await drain();
-				capacityAdmission.stop();
-				for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
-				ownedReservations.clear();
-				await Promise.allSettled([...assignmentWrites]);
-			} finally {
-				setCapacityDraining(false);
-			}
+			capacityAdmission.drain();
+			settleQueuedAssignmentsForShutdown();
+			stopHeartbeatWatchdog();
+			await drain();
+			capacityAdmission.stop();
+			for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
+			ownedReservations.clear();
+			await Promise.allSettled([...assignmentWrites]);
 		},
 	};
 

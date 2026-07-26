@@ -4040,6 +4040,17 @@ rl.once("line", (line) => {
 			const receipts = await batch.finalPromise;
 			strictEqual(receipts.length, 5);
 			strictEqual(spawnCount, 5);
+			// The member that actually waited for a slot seals its queue wait, so
+			// completed-route latency observations can see it.
+			const waited = receipts[4];
+			ok(waited, "fifth receipt exists");
+			const envelope = waited ? bundle.contract.getRun(waited.runId) : undefined;
+			ok(envelope, "fifth ledger row exists");
+			const phases = envelope ? deriveEnvelopePhaseDurations(envelope) : undefined;
+			ok(
+				phases !== undefined && phases.queueWaitMs !== null && phases.queueWaitMs > 0,
+				`queued member sealed its queue wait, got ${String(phases?.queueWaitMs)}`,
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}
