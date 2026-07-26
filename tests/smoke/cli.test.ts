@@ -192,58 +192,6 @@ describe("clio cli smoke tests", { concurrency: false }, () => {
 		match(result.stdout, /settings.yaml/);
 	});
 
-	it("doctor --fix self-heals a legacy v0.2.2 settings.yaml without losing targets", async () => {
-		const configDir = join(scratch.dir, "config");
-		mkdirSync(configDir, { recursive: true });
-		const settingsFile = join(configDir, "settings.yaml");
-		writeFileSync(
-			settingsFile,
-			[
-				"version: 1",
-				"safetyLevel: auto-edit",
-				"endpoints:",
-				"  - id: keepme",
-				"    runtime: ollama-native",
-				"    url: http://localhost:11434",
-				"    defaultModel: m1",
-				"orchestrator:",
-				"  endpoint: keepme",
-				"  model: m1",
-				"state:",
-				"  recentModels:",
-				"    - keepme/m1",
-				"",
-			].join("\n"),
-			"utf8",
-		);
-		writeFileSync(join(configDir, "credentials.yaml"), "{}\n", { mode: 0o600 });
-
-		// Without --fix the strict validator refuses the legacy keys.
-		const before = await runCli(["doctor"], { env: scratch.env });
-		strictEqual(before.code, 1);
-		match(before.stdout, /safetyLevel/);
-		match(before.stdout, /clio doctor --fix/);
-
-		// --fix repairs the known legacy keys and the whole gate goes green.
-		const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
-		strictEqual(fixed.code, 0);
-		match(fixed.stdout, /repaired legacy keys/);
-
-		// The renamed target survived and the dropped recents were seeded.
-		const repaired = readFileSync(settingsFile, "utf8");
-		match(repaired, /autonomy: auto-edit/);
-		match(repaired, /target: keepme/);
-		strictEqual(/safetyLevel|endpoints:|\bstate:/.test(repaired), false);
-		ok(existsSync(join(scratch.dir, "config", "settings.yaml.bak")), "the original file is backed up");
-		const recents = JSON.parse(readFileSync(join(scratch.dir, "state", "recent-models.json"), "utf8")) as string[];
-		deepStrictEqual(recents, ["keepme/m1"]);
-
-		// Re-running --fix is a no-op: the file is already current.
-		const again = await runCli(["doctor", "--fix"], { env: scratch.env });
-		strictEqual(again.code, 0);
-		strictEqual(/repaired legacy keys/.test(again.stdout), false);
-	});
-
 	it("paths --json prints the resolved directories read-only", async () => {
 		const result = await runCli(["paths", "--json"], { env: scratch.env });
 		strictEqual(result.code, 0);

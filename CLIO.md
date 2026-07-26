@@ -22,6 +22,10 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 
 `CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `clio context init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
 
+## Configuration lifecycle
+
+`settings.yaml` is validated directly against the current schema. Lifecycle commands do not transform removed settings keys.
+
 ## Middleware
 
 Middleware hook budgets are strictly phase aware through `DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS`.

@@ -1,5 +1,7 @@
-import { match, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { after, describe, it } from "node:test";
+import { parse as parseYaml } from "yaml";
+import { validateSettings } from "../../src/core/config.js";
 import { makeScratchHome, runCli } from "../harness/spawn.js";
 
 // BUG-007: a partial non-interactive `configure` invocation (only --id, or only
@@ -8,6 +10,16 @@ import { makeScratchHome, runCli } from "../harness/spawn.js";
 // With no TTY it must instead fail with exit 2 and name the missing half.
 
 describe("contracts/configure-cli non-interactive gating", () => {
+	it("rejects removed settings keys through strict current-schema validation", () => {
+		const validation = validateSettings(
+			parseYaml("version: 1\nsafetyLevel: auto-edit\nendpoints: []\nstate: {}\ntargets: []\n"),
+		);
+		const issuePaths = validation.issues.map((issue) => issue.path);
+		for (const path of ["safetyLevel", "endpoints", "state"]) {
+			ok(issuePaths.includes(path), `expected strict validation issue for ${path}`);
+		}
+	});
+
 	const scratch = makeScratchHome("clio-configure-cli-");
 	after(() => scratch.cleanup());
 
