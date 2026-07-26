@@ -15,8 +15,6 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 
-/** Budget-free compatibility document accepted from pre-budget dispatchers. */
-export const LEGACY_WORKER_SPEC_VERSION = 1;
 /** Current budget-bearing dispatch document emitted by this release. */
 export const WORKER_SPEC_VERSION = 2;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
@@ -130,19 +128,13 @@ interface WorkerSpecFields {
 	writeRoots?: ReadonlyArray<string>;
 }
 
-/** Budget-free compatibility shape used only by pre-v2 dispatchers. */
-export type LegacyWorkerSpec = WorkerSpecFields & {
-	specVersion: typeof LEGACY_WORKER_SPEC_VERSION;
-	budget?: never;
-};
-
-/** Current wire shape. Every v2 document carries its concrete admitted budget. */
+/** Current wire shape. Every document carries its concrete admitted budget. */
 export type CurrentWorkerSpec = WorkerSpecFields & {
 	specVersion: typeof WORKER_SPEC_VERSION;
 	budget: WorkerBudget;
 };
 
-export type WorkerSpec = LegacyWorkerSpec | CurrentWorkerSpec;
+export type WorkerSpec = CurrentWorkerSpec;
 
 export interface WorkerPromptMessage {
 	id: string;
@@ -488,13 +480,10 @@ function validateProtectedArtifactState(value: unknown): void {
 
 export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
-	if (spec.specVersion !== LEGACY_WORKER_SPEC_VERSION && spec.specVersion !== WORKER_SPEC_VERSION) {
+	if (spec.specVersion !== WORKER_SPEC_VERSION) {
 		throw new Error(
-			`WorkerSpec version ${String(spec.specVersion)} is unsupported; expected ${LEGACY_WORKER_SPEC_VERSION} or ${WORKER_SPEC_VERSION}`,
+			`WorkerSpec version ${String(spec.specVersion)} is unsupported (expected version 2). Re-dispatch the request to generate a valid budget-bearing worker specification.`,
 		);
-	}
-	if (spec.specVersion === LEGACY_WORKER_SPEC_VERSION && spec.budget !== undefined) {
-		throw new Error("WorkerSpec version 1 is the budget-free legacy compatibility form and must not include budget");
 	}
 	if (spec.specVersion === WORKER_SPEC_VERSION && spec.budget === undefined) {
 		throw new Error(`WorkerSpec version ${WORKER_SPEC_VERSION} requires budget`);

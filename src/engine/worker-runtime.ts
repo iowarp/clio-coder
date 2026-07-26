@@ -58,7 +58,6 @@ import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
 import {
 	createLoopGuardRegistration,
 	isLoopGuardSynthesisBackstopReason,
-	readWorkerToolCallCap,
 	sanitizeLockedSynthesisMessage,
 } from "./loop-guard.js";
 import { patchWorkerRequestPayload } from "./provider-payload.js";
@@ -93,7 +92,7 @@ export interface WorkerRunInput {
 	/** Tool ids the worker is allowed to expose for this run. */
 	allowedTools: ReadonlyArray<ToolName>;
 	/** Dispatch-resolved agent phase policy and independent hard attempt cap. */
-	budget?: WorkerBudget;
+	budget: WorkerBudget;
 	/**
 	 * Dispatch-time tool profile that narrowed `allowedTools`. Carried so
 	 * black-box external CLI runtimes (claude-code, antigravity) that cannot
@@ -291,23 +290,9 @@ function assertResponseSchemaRuntime(input: WorkerRunInput): void {
 	);
 }
 
-/**
- * Resolve the effective runtime budget for an admitted worker spec.
- *
- * Current v2 specs always take the first branch. An accepted legacy v1 spec
- * intentionally arrives without `budget`; preserve its historical runtime
- * policy by deriving the agent boundary from the operator-owned worker cap
- * and reserving up to five final slots for canonical reads.
- */
-export function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "allowedTools" | "budget">): WorkerBudget {
-	if (input.budget !== undefined) return input.budget;
-	const hardCap = readWorkerToolCallCap();
-	return {
-		toolCalls: hardCap,
-		readReserve: input.allowedTools.includes(ToolNames.Read) ? Math.min(5, Math.max(0, hardCap - 1)) : 0,
-		synthesis: true,
-		hardCap,
-	};
+/** Return the admitted worker specification budget unchanged. */
+export function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "budget">): WorkerBudget {
+	return input.budget;
 }
 
 /**

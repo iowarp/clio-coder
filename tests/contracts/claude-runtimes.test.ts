@@ -276,6 +276,7 @@ describe("contracts/external CLI worker tool-profile enforcement", () => {
 			runtime: claudeCodeRuntime,
 			wireModelId: "sonnet",
 			allowedTools: ["read", "grep", "find", "ls", "git", "context", "code_nav"],
+			budget: { toolCalls: 18, readReserve: 4, synthesis: true, hardCap: 50 },
 		};
 
 		throws(
@@ -492,6 +493,7 @@ describe("contracts/claude subprocess permission gate", () => {
 			runtime: claudeCodeRuntime,
 			wireModelId: "sonnet",
 			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
 			autonomy: "suggest" as const,
 		};
 		throws(() => buildClaudeCodeArgs(base), /claude-code runtime cannot enforce autonomy 'suggest'/);
@@ -507,6 +509,7 @@ describe("contracts/claude subprocess permission gate", () => {
 			runtime: claudeCodeRuntime,
 			wireModelId: "sonnet",
 			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
 		};
 		const invalid = buildClaudeCodeArgs({ ...base, sessionId: "clio-session-1" });
 		ok(!invalid.includes("--session-id"));

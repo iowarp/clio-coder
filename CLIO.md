@@ -61,6 +61,10 @@ Remote marketplace cache files require explicit finite `listingTimestamp` and `d
 - `src/domains/agents/recipe-schema.ts` is the only versioned frontmatter schema; malformed custom recipes are quarantined with `AgentsContract.diagnostics()` and builtins fail startup.
 - `src/domains/agents/result-contract.ts` validates typed terminal contracts. Result conformance is sealed in receipt quality facts, while only correctness-bearing contracts can label routing quality.
 
+## Worker runtime
+
+Worker processes accept only WorkerSpec version 2 with a concrete `budget` block. Runtime budgets are inherited directly from the admitted worker specification.
+
 ## Execution plans and fleets
 
 - `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves.

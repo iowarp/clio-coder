@@ -191,6 +191,7 @@ function fauxRuntimeInput(
 			runtime,
 			wireModelId: "faux-worker-permission",
 			allowedTools: [ToolNames.Bash],
+			budget: { toolCalls: 50, readReserve: 0, synthesis: true, hardCap: 50 },
 			autonomy: "suggest",
 			...overrides,
 		} as unknown as WorkerRunInput,
@@ -771,7 +772,11 @@ describe("contracts/worker-steer", () => {
 				};
 				const { input, unregister } = fauxRuntimeInput(
 					[readCall(1), readCall(2), readCall(3), fauxAssistantMessage("synthesized after cap from gathered context")],
-					{ allowedTools: [ToolNames.Read], task: "summarize the scratch files" },
+					{
+						allowedTools: [ToolNames.Read],
+						task: "summarize the scratch files",
+						budget: { toolCalls: 3, readReserve: 0, synthesis: true, hardCap: 3 },
+					},
 				);
 				try {
 					const result = await startWorkerRun(input, (event) => events.push(event)).promise;
@@ -803,7 +808,10 @@ describe("contracts/worker-steer", () => {
 							stopReason: "toolUse",
 						}),
 					),
-					{ onPermission: "deny" },
+					{
+						onPermission: "deny",
+						budget: { toolCalls: 3, readReserve: 0, synthesis: true, hardCap: 3 },
+					},
 				);
 				try {
 					const result = await startWorkerRun(input, (event) => events.push(event)).promise;

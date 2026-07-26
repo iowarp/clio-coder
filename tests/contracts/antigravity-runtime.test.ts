@@ -64,6 +64,7 @@ describe("contracts/antigravity subprocess permission gate", () => {
 			runtime: antigravityCodeRuntime,
 			wireModelId: "Gemini 3.5 Flash (High)",
 			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
 			autonomy: "suggest" as const,
 		};
 		throws(() => buildAgyArgs(base), /antigravity-code runtime cannot enforce autonomy 'suggest'/);
@@ -79,6 +80,7 @@ describe("contracts/antigravity subprocess permission gate", () => {
 			runtime: antigravityCodeRuntime,
 			wireModelId: "Gemini 3.5 Flash (High)",
 			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
 			autonomy: "auto-edit" as const,
 		};
 		const args = buildAgyArgs(base);
@@ -99,6 +101,7 @@ describe("contracts/antigravity subprocess permission gate", () => {
 			runtime: antigravityCodeRuntime,
 			wireModelId: "   ",
 			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
 		});
 		ok(!args.includes("--model"));
 		strictEqual(args[args.length - 1], "read");
@@ -114,6 +117,7 @@ describe("contracts/antigravity subprocess permission gate", () => {
 			runtime: antigravityCodeRuntime,
 			wireModelId: "Gemini 3.5 Flash (High)",
 			allowedTools: [],
+			budget: { toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 50 },
 		});
 		strictEqual(prompt, "You read code.\n\nFocus on src/.\n\nList the entry points.");
 	});
