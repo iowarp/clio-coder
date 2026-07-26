@@ -5,7 +5,6 @@ import { clioConfigDir } from "../../core/xdg.js";
 import { assertAgentIdNamespace } from "../config/agent-namespace.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { AgentsContract } from "./contract.js";
-import { parseFleet } from "./fleet-parser.js";
 import type { AgentRecipe } from "./recipe.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir, mergeRecipes } from "./registry.js";
 import { type AgentSpec, normalizeAgentSpec } from "./spec.js";
@@ -104,9 +103,6 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		},
 		reload() {
 			discover();
-		},
-		parseFleet(input: string) {
-			return parseFleet(input);
 		},
 	};
 

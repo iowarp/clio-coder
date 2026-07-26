@@ -28,8 +28,7 @@ export function createBatch(assignmentIds: ReadonlyArray<string>): BatchState {
 
 export interface BatchSnapshot {
 	id: string;
-	/** Compatibility name: each assignment id equals its first-attempt run id. */
-	runIds: ReadonlyArray<string>;
+	assignmentIds: ReadonlyArray<string>;
 	completed: ReadonlyArray<string>;
 	failed: ReadonlyArray<string>;
 	startedAt: string;
@@ -58,7 +57,7 @@ export function isBatchDone(batch: BatchState): boolean {
 export function snapshotBatch(batch: BatchState): BatchSnapshot {
 	return {
 		id: batch.id,
-		runIds: batch.assignmentIds,
+		assignmentIds: batch.assignmentIds,
 		completed: [...batch.completed],
 		failed: [...batch.failed],
 		startedAt: batch.startedAt,

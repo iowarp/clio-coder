@@ -185,7 +185,6 @@ function fakeAgents(): AgentsContract {
 		listSpecs: () => specs,
 		getSpec: (id: string) => specs.find((entry) => entry.id === id) ?? null,
 		reload() {},
-		parseFleet: () => ({ steps: [] }),
 	};
 }
 

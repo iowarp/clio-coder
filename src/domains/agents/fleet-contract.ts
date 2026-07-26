@@ -20,11 +20,14 @@ export type FleetStepScope = "readonly" | "workspace";
 export type FleetOnFailure = "stop" | "continue";
 
 export interface FleetContractStep {
+	id: string;
 	agent: string;
 	scope: FleetStepScope;
+	dependencies: ReadonlyArray<string>;
 }
 
 export interface FleetContract {
+	version: 1;
 	name: string;
 	description: string;
 	steps: ReadonlyArray<FleetContractStep>;
@@ -45,24 +48,29 @@ export interface FleetContractListing {
 
 const FleetScopeSchema = Type.Union([Type.Literal("readonly"), Type.Literal("workspace")]);
 
-/**
- * Unknown top-level keys are tolerated for forward compatibility (Symphony
- * §5.3); unknown values inside known keys are not.
- */
-const FleetFrontmatterSchema = Type.Object({
-	name: Type.String({ minLength: 1 }),
-	description: Type.Optional(Type.String()),
-	steps: Type.Array(
-		Type.Object({
-			agent: Type.String({ minLength: 1 }),
-			scope: Type.Optional(FleetScopeSchema),
-		}),
-		{ minItems: 1 },
-	),
-	maxWorkers: Type.Optional(Type.Integer({ minimum: 1 })),
-	budgetUsd: Type.Optional(Type.Number()),
-	onFailure: Type.Optional(Type.Union([Type.Literal("stop"), Type.Literal("continue")])),
-});
+const FleetFrontmatterSchema = Type.Object(
+	{
+		version: Type.Literal(1),
+		name: Type.String({ minLength: 1 }),
+		description: Type.Optional(Type.String()),
+		steps: Type.Array(
+			Type.Object(
+				{
+					id: Type.String({ minLength: 1 }),
+					agent: Type.String({ minLength: 1 }),
+					scope: FleetScopeSchema,
+					dependencies: Type.Array(Type.String({ minLength: 1 })),
+				},
+				{ additionalProperties: false },
+			),
+			{ minItems: 1 },
+		),
+		maxWorkers: Type.Integer({ minimum: 1 }),
+		budgetUsd: Type.Optional(Type.Number()),
+		onFailure: Type.Union([Type.Literal("stop"), Type.Literal("continue")]),
+	},
+	{ additionalProperties: false },
+);
 
 function firstSchemaError(frontmatter: Record<string, unknown>): string | null {
 	if (Value.Check(FleetFrontmatterSchema, frontmatter)) return null;
@@ -81,12 +89,13 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 		throw new Error(`fleet contract ${sourcePath}: ${schemaError}`);
 	}
 	const fm = frontmatter as {
+		version: 1;
 		name: string;
 		description?: string;
-		steps: Array<{ agent: string; scope?: FleetStepScope }>;
-		maxWorkers?: number;
+		steps: Array<{ id: string; agent: string; scope: FleetStepScope; dependencies: string[] }>;
+		maxWorkers: number;
 		budgetUsd?: number;
-		onFailure?: FleetOnFailure;
+		onFailure: FleetOnFailure;
 	};
 	if (fm.budgetUsd !== undefined && !(fm.budgetUsd > 0)) {
 		throw new Error(`fleet contract ${sourcePath}: budgetUsd must be a positive number`);
@@ -96,12 +105,18 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 		throw new Error(`fleet contract ${sourcePath}: prompt body is empty`);
 	}
 	return {
+		version: 1,
 		name: fm.name,
 		description: fm.description ?? "",
-		steps: fm.steps.map((step) => ({ agent: step.agent, scope: step.scope ?? "workspace" })),
-		maxWorkers: fm.maxWorkers ?? 1,
+		steps: fm.steps.map((step) => ({
+			id: step.id,
+			agent: step.agent,
+			scope: step.scope,
+			dependencies: [...step.dependencies],
+		})),
+		maxWorkers: fm.maxWorkers,
 		budgetUsd: fm.budgetUsd ?? null,
-		onFailure: fm.onFailure ?? "stop",
+		onFailure: fm.onFailure,
 		body: trimmedBody,
 		path: sourcePath,
 	};

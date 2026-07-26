@@ -32,6 +32,13 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 - `src/domains/agents/recipe-schema.ts` is the only versioned frontmatter schema; malformed custom recipes are quarantined with `AgentsContract.diagnostics()` and builtins fail startup.
 - `src/domains/agents/result-contract.ts` validates typed terminal contracts. Result conformance is sealed in receipt quality facts, while only correctness-bearing contracts can label routing quality.
 
+## Execution plans and fleets
+
+- `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves.
+- `src/domains/dispatch/execution-scheduler.ts` performs whole-plan preflight and reservation before spawning, then admits dependency-ready waves with stop/continue semantics.
+- Fleet contracts are strict version 1 DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs.
+- Logical work is named by assignment id. Terminal attempts are named separately as terminal run ids; `dispatchBatch` has no `runIds` compatibility alias.
+
 ## Execution roles and quality gates
 
 - `src/domains/dispatch/execution-role.ts` owns the one `ExecutionRole` union (`builder`, `reviewer`, `judge`, `researcher`, `verifier`, `recovery`), its derivation from strict recipe facts, the gate decider default, and the route correlation and independence policy.

@@ -27,8 +27,11 @@ import {
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import { compileExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { executePlan } from "../domains/dispatch/execution-scheduler.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
+import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { ensureClioState, LifecycleDomainModule } from "../domains/lifecycle/index.js";
@@ -201,62 +204,102 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 
 	const fleetRootId = newFleetRootId();
-	process.stderr.write(`fleet ${contract.name}: root=${fleetRootId} steps=${contract.steps.length}\n`);
-	let spentUsd = 0;
-	let failedSteps = 0;
+	const plan = compileExecutionPlan({
+		topology: "fleet",
+		rootTask: prompt,
+		maxWorkers: contract.maxWorkers,
+		onFailure: contract.onFailure,
+		steps: contract.steps.map((step) => ({
+			id: step.id,
+			agentId: step.agent,
+			scope: step.scope,
+			dependencies: step.dependencies,
+			task: prompt,
+			executionRole: requestExecutionRole({ agentId: step.agent, resolveFacts: roleFacts }),
+		})),
+	});
+	process.stderr.write(`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${contract.steps.length}\n`);
 	const receipts: RunReceipt[] = [];
 	try {
-		for (const [index, step] of contract.steps.entries()) {
-			if (contract.budgetUsd !== null && spentUsd >= contract.budgetUsd) {
-				process.stderr.write(
-					`fleet ${contract.name}: budget $${contract.budgetUsd.toFixed(2)} exhausted after $${spentUsd.toFixed(4)}; stopping\n`,
-				);
-				failedSteps += 1;
-				break;
-			}
-			const req: DispatchRequest = {
-				agentId: step.agent,
-				executionRole: requestExecutionRole({ agentId: step.agent, resolveFacts: roleFacts }),
-				task: prompt,
-				requestOrigin: "user",
-				lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
-				...(step.scope === "readonly" ? { toolProfile: "minimal-local" as const } : {}),
-			};
-			process.stderr.write(`fleet step ${index + 1}/${contract.steps.length}: ${step.agent} [${step.scope}]\n`);
-			const handle = await dispatch.dispatch(req);
-			const onSignal = (): void => dispatch.abort(handle.runId);
-			process.on("SIGINT", onSignal);
-			process.on("SIGTERM", onSignal);
-			try {
-				let text = "";
-				for await (const event of handle.events) {
-					const e = event as { type?: string; text?: string };
-					if (e.type === "text_delta" && typeof e.text === "string") text += e.text;
-				}
-				const receipt = await handle.finalPromise;
-				receipts.push(receipt);
-				spentUsd += receipt.costUsd;
-				const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
-				if (json) {
-					process.stdout.write(`${JSON.stringify(receipt)}\n`);
-				} else {
-					if (text.trim().length > 0) process.stdout.write(`${text.trim()}\n`);
-					process.stdout.write(
-						`step ${index + 1} ${step.agent}: ${outcome} run=${receipt.runId} cost=$${receipt.costUsd.toFixed(4)}\n`,
-					);
-				}
-				if (outcome !== "succeeded") {
-					failedSteps += 1;
-					if (contract.onFailure === "stop") {
-						process.stderr.write(`fleet ${contract.name}: step '${step.agent}' ended ${outcome}; onFailure=stop\n`);
-						break;
+		await executePlan(plan, {
+			preflight(step) {
+				const request: DispatchRequest = {
+					agentId: step.agentId,
+					executionRole: step.executionRole,
+					task: step.task,
+					requestOrigin: "user",
+					lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
+					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+				};
+				const resolution = dispatch.preview?.(request);
+				if (!resolution) throw new Error(`fleet preflight cannot resolve step '${step.id}'`);
+				return { step, costUpperBoundUsd: resolution.costUpperBoundUsd, nodeId: resolution.node.id };
+			},
+			reserve(_plan, admissions) {
+				const reservation = dispatch.reservations?.prepare({
+					topology: "parallel",
+					tasks: admissions.map((admission) => ({
+						memberId: admission.step.id,
+						wave: plan.waves.findIndex((wave) => wave.includes(admission.step.id)),
+						resolution: dispatch.preview?.({
+							agentId: admission.step.agentId,
+							executionRole: admission.step.executionRole,
+							task: admission.step.task,
+						}) as NonNullable<ReturnType<NonNullable<DispatchContract["preview"]>>>,
+					})),
+				});
+				if (!reservation) throw new Error("fleet whole-plan reservation is unavailable");
+				return { ownerId: reservation.ownerId };
+			},
+			async run(step, handoffs, reservation) {
+				const request: DispatchRequest = {
+					agentId: step.agentId,
+					executionRole: step.executionRole,
+					task: step.task,
+					predecessorHandoffs: handoffs,
+					requestOrigin: "user",
+					lineage: { parentRunId: fleetRootId, rootRunId: fleetRootId, attempt: 0, depth: 1 },
+					reservation,
+					...(step.scope === "readonly" ? { autonomy: "read-only" as const } : {}),
+				};
+				const handle = await dispatch.dispatch(request);
+				void (async () => {
+					for await (const _event of handle.events) {
+						/* background display drain */
 					}
-				}
-			} finally {
-				process.off("SIGINT", onSignal);
-				process.off("SIGTERM", onSignal);
-			}
-		}
+				})().catch(() => {});
+				return {
+					assignmentId: handle.runId,
+					result: handle.finalPromise.then((receipt) => {
+						receipts.push(receipt);
+						const envelope = dispatch.getRun(receipt.runId);
+						const integrityValid = envelope !== null && verifyReceiptIntegrity(receipt, envelope).ok;
+						const succeeded = receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded");
+						if (json) process.stdout.write(`${JSON.stringify(receipt)}\n`);
+						else
+							process.stdout.write(
+								`step ${step.id} ${step.agentId}: ${succeeded ? "succeeded" : "failed"} assignment=${handle.runId} terminal-run=${receipt.runId} cost=$${receipt.costUsd.toFixed(4)}\n`,
+							);
+						return {
+							stepId: step.id,
+							assignmentId: handle.runId,
+							terminalRunId: receipt.runId,
+							receiptDigest: receipt.integrity.digest,
+							output: receipt.output?.state === "final" ? receipt.output.text : "",
+							succeeded,
+							integrityValid,
+						};
+					}),
+				};
+			},
+			cancel: (assignmentId) => dispatch.abort(assignmentId),
+			release: (ownerId) => {
+				dispatch.reservations?.rollbackUnconsumed(ownerId);
+			},
+			releaseUnconsumed: (ownerId) => {
+				dispatch.reservations?.rollbackUnconsumed(ownerId);
+			},
+		});
 	} catch (err) {
 		await dispatch.drain();
 		await loaded.stop();
@@ -265,6 +308,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	await dispatch.drain();
 	await loaded.stop();
 	if (!json) {
+		const spentUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
 		const succeeded = receipts.filter(
 			(receipt) => (receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed")) === "succeeded",
 		).length;
@@ -272,7 +316,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 			`fleet ${contract.name}: ${succeeded}/${contract.steps.length} steps succeeded, total cost $${spentUsd.toFixed(4)}\n`,
 		);
 	}
-	return failedSteps === 0 ? 0 : 1;
+	return receipts.length === contract.steps.length && receipts.every((receipt) => receipt.exitCode === 0) ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------

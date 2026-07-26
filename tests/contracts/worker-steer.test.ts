@@ -307,7 +307,6 @@ function stubContext(): DomainContext {
 			return recipe ? normalizeAgentSpec(recipe) : null;
 		},
 		reload: () => {},
-		parseFleet: () => ({ steps: [] }),
 	};
 
 	const middleware = createMiddlewareBundle().contract;

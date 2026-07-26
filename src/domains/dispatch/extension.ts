@@ -4964,8 +4964,7 @@ export function createDispatchBundle(
 
 	async function dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
 		batchId: string;
-		assignmentIds?: ReadonlyArray<string>;
-		runIds: ReadonlyArray<string>;
+		assignmentIds: ReadonlyArray<string>;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
 	}> {
@@ -5017,8 +5016,6 @@ export function createDispatchBundle(
 		return {
 			batchId: batchRef.current.id,
 			assignmentIds: batchRef.current.assignmentIds,
-			// Public compatibility: an assignment id is its first-attempt run id.
-			runIds: batchRef.current.assignmentIds,
 			events: mergeBatchEvents(batchRef.current.id, handles, batchRef),
 			finalPromise,
 		};

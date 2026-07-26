@@ -179,7 +179,7 @@ describe("detached dispatch + collect", () => {
 			ok(result.kind === "ok");
 			match(result.output, /dispatch \(detached\) batch=/);
 			const batchId = result.details?.batchId as string;
-			const runIds = result.details?.runIds as string[];
+			const runIds = result.details?.assignmentIds as string[];
 			strictEqual(runIds.length, 2);
 
 			// Durable record exists immediately and is open.
@@ -245,7 +245,7 @@ describe("detached dispatch + collect", () => {
 			const synchronous = (await dispatch.run({ task: "synchronous missing final" }, approvedDispatch)) as ToolRunResult;
 			strictEqual(synchronous.kind, "error");
 			ok(synchronous.kind === "error");
-			const synchronousRunId = (synchronous.details?.runIds as string[] | undefined)?.[0];
+			const synchronousRunId = (synchronous.details?.assignmentIds as string[] | undefined)?.[0];
 			ok(synchronousRunId);
 			const synchronousRow = bundle.contract.getRun(synchronousRunId);
 			strictEqual(synchronousRow?.outcome, "failed");
@@ -258,7 +258,7 @@ describe("detached dispatch + collect", () => {
 			)) as ToolRunResult;
 			ok(detached.kind === "ok", detached.kind === "error" ? detached.message : "detached dispatch failed");
 			const batchId = detached.details?.batchId as string;
-			const detachedRunId = (detached.details?.runIds as string[])[0];
+			const detachedRunId = (detached.details?.assignmentIds as string[])[0];
 			ok(detachedRunId);
 			await waitFor(() => bundle.contract.getRun(detachedRunId)?.status === "failed", "detached run classified");
 			await waitFor(
@@ -383,9 +383,9 @@ describe("detached dispatch + collect", () => {
 			const tool = createDispatchTool({ dispatch: failingContract, runEvents });
 			const result = (await tool.run({ tasks: ["already live"], detach: true }, approvedDispatch)) as ToolRunResult;
 			strictEqual(result.kind, "error");
-			ok(result.kind === "error" && result.message.includes("detached runs started"));
+			ok(result.kind === "error" && result.message.includes("detached assignments started"));
 			ok(result.kind === "error" && result.message.includes("batch store unavailable"));
-			const runId = (result.details?.runIds as string[])[0];
+			const runId = (result.details?.assignmentIds as string[])[0];
 			ok(runId);
 			strictEqual(bundle.contract.getRun(runId)?.status, "running");
 
@@ -411,7 +411,7 @@ describe("detached dispatch + collect", () => {
 			const monitor = createMonitorTool({ dispatch: bundle.contract });
 			const dispatched = (await tool.run({ tasks: ["monitor alias"], detach: true }, approvedDispatch)) as ToolRunResult;
 			strictEqual(dispatched.kind, "ok");
-			const runId = (dispatched.details?.runIds as string[])[0];
+			const runId = (dispatched.details?.assignmentIds as string[])[0];
 			ok(runId !== undefined);
 			await waitFor(() => bundle.contract.getRun(runId)?.status === "completed", "aliased monitor run finalized");
 
@@ -475,7 +475,7 @@ describe("detached dispatch + collect", () => {
 			const result = (await tool.run({ tasks: ["quick", "slow"], detach: true }, approvedDispatch)) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			const batchId = result.details?.batchId as string;
-			const runIds = result.details?.runIds as string[];
+			const runIds = result.details?.assignmentIds as string[];
 
 			const quickRunId = runIds[0];
 			ok(quickRunId !== undefined);
@@ -552,7 +552,7 @@ describe("detached dispatch + collect", () => {
 			const result = (await tool.run({ tasks: ["nudge me"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			const batchId = result.details?.batchId as string;
-			const runIds = result.details?.runIds as string[];
+			const runIds = result.details?.assignmentIds as string[];
 			const runId = runIds[0];
 			ok(runId !== undefined);
 			await waitFor(() => bundle.contract.getRun(runId)?.status === "completed", "detached run finalized");
@@ -596,7 +596,7 @@ describe("detached dispatch + collect", () => {
 			const monitor = createMonitorTool({ dispatch: bundle.contract });
 			const result = (await tool.run({ tasks: ["long haul"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
-			const runIds = result.details?.runIds as string[];
+			const runIds = result.details?.assignmentIds as string[];
 			const runId = runIds[0];
 			ok(runId !== undefined);
 
@@ -714,7 +714,7 @@ describe("detached dispatch + collect", () => {
 			const result = (await tool.run({ tasks: ["mark failure"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			const batchId = result.details?.batchId as string;
-			const runIds = result.details?.runIds as string[];
+			const runIds = result.details?.assignmentIds as string[];
 			const runId = runIds[0];
 			ok(runId !== undefined);
 			await waitFor(() => bundle.contract.getRun(runId)?.status === "completed", "detached run finalized");
@@ -759,7 +759,7 @@ describe("detached dispatch + collect", () => {
 			const result = (await tool.run({ tasks: ["survive exit"], detach: true }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			batchId = result.details?.batchId as string;
-			runIds = result.details?.runIds as string[];
+			runIds = result.details?.assignmentIds as string[];
 			const runId = runIds[0];
 			ok(runId !== undefined);
 			await waitFor(() => first.contract.getRun(runId)?.status === "completed", "run finalized before exit");

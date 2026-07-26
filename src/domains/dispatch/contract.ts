@@ -161,10 +161,8 @@ export interface DispatchContract {
 	/** Spawn a group of dispatches and expose one merged batch event stream. */
 	dispatchBatch(reqs: ReadonlyArray<DispatchRequest>): Promise<{
 		batchId: string;
-		/** Logical ids; present on the real contract and equal root run ids. */
-		assignmentIds?: ReadonlyArray<string>;
-		/** Compatibility alias for assignmentIds. */
-		runIds: ReadonlyArray<string>;
+		/** Logical work ids, one per request in admission order. */
+		assignmentIds: ReadonlyArray<string>;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
 	}>;

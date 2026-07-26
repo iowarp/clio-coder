@@ -23,6 +23,8 @@ export type {
 } from "./assignment.js";
 export type { DurableAssignmentRecord } from "./assignment-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
+export type { ExecutionPlan, ExecutionPlanStep } from "./execution-plan.js";
+export { compileExecutionPlan, compileLinearExecutionPlan, executionPlanWaves } from "./execution-plan.js";
 export {
 	type AgentRoleFacts,
 	type AgentRoleFactsResolver,
@@ -42,6 +44,8 @@ export {
 	requestExecutionRole,
 	withAttemptRole,
 } from "./execution-role.js";
+export type { ExecutionPlanResult, ExecutionSchedulerAdapter } from "./execution-scheduler.js";
+export { executePlan } from "./execution-scheduler.js";
 export {
 	affectsNodeBreaker,
 	affectsTargetBreaker,

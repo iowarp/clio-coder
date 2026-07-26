@@ -16,8 +16,6 @@ export type {
 	FleetStepScope,
 } from "./fleet-contract.js";
 export { listFleetContracts, loadFleetContract, parseFleetContract, renderFleetPrompt } from "./fleet-contract.js";
-export type { Fleet, FleetStep } from "./fleet-parser.js";
-export { parseFleet } from "./fleet-parser.js";
 export { AgentsManifest } from "./manifest.js";
 export type {
 	AgentBudget,

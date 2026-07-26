@@ -58,7 +58,7 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 			strictEqual(detached.kind, "ok");
 			if (detached.kind !== "ok") return;
 			const batchId = detached.details?.batchId as string;
-			const assignmentId = (detached.details?.runIds as string[])[0];
+			const assignmentId = (detached.details?.assignmentIds as string[])[0];
 			ok(assignmentId);
 			strictEqual(bundle.contract.detached?.get(batchId)?.runs[0]?.assignmentId, assignmentId);
 			await waitFor(
@@ -140,9 +140,9 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 			const handle = await bundle.contract.dispatchBatch([
 				{ agentId: "coder", executionRole: "builder", task: "cancel queued retry" },
 			]);
-			const assignmentId = handle.runIds[0];
+			const assignmentId = handle.assignmentIds[0];
 			ok(assignmentId);
-			deepStrictEqual(handle.assignmentIds, handle.runIds);
+			deepStrictEqual(handle.assignmentIds, handle.assignmentIds);
 			await waitFor(() => bundle.contract.snapshot().retrying.length === 1, "retry was not queued");
 			bundle.contract.abort(assignmentId);
 			const [terminal] = await handle.finalPromise;
