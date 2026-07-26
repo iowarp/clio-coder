@@ -225,7 +225,7 @@ interface RegisteredSingleDispatch {
 
 interface RegisteredBatchDispatch {
 	batchId: string;
-	runIds: ReadonlyArray<string>;
+	assignmentIds: ReadonlyArray<string>;
 	completion: Promise<{ receipts: ReadonlyArray<RunReceipt>; summaries: Map<string, EventSummary> }>;
 }
 
@@ -366,16 +366,18 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 			if (activeBatches.has(handle.batchId)) {
 				throw new Error(`dispatch event registry: batch '${handle.batchId}' is already registered`);
 			}
-			const duplicateRunId = handle.runIds.find((runId, index) => handle.runIds.slice(0, index).includes(runId));
+			const duplicateRunId = handle.assignmentIds.find((runId, index) =>
+				handle.assignmentIds.slice(0, index).includes(runId),
+			);
 			if (duplicateRunId !== undefined) {
 				throw new Error(`dispatch event registry: batch '${handle.batchId}' repeats run '${duplicateRunId}'`);
 			}
-			const activeRunId = handle.runIds.find((runId) => activeRuns.has(runId));
+			const activeRunId = handle.assignmentIds.find((runId) => activeRuns.has(runId));
 			if (activeRunId !== undefined) {
 				throw new Error(`dispatch event registry: run '${activeRunId}' is already registered`);
 			}
 			activeBatches.add(handle.batchId);
-			for (const runId of handle.runIds) activeRuns.add(runId);
+			for (const runId of handle.assignmentIds) activeRuns.add(runId);
 			const completion = Promise.allSettled([drainBatch(handle.batchId, handle.events, bus), handle.finalPromise]).then(
 				([summariesResult, receiptsResult]) => {
 					if (summariesResult.status === "rejected") throw summariesResult.reason;
@@ -386,17 +388,17 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 			void completion
 				.finally(() => {
 					activeBatches.delete(handle.batchId);
-					for (const runId of handle.runIds) activeRuns.delete(runId);
+					for (const runId of handle.assignmentIds) activeRuns.delete(runId);
 					pruneRunTails();
 				})
 				.catch(() => {});
 			// Seed agent routing even when a run completes before its first event.
-			for (const [index, runId] of handle.runIds.entries()) {
+			for (const [index, runId] of handle.assignmentIds.entries()) {
 				if (!runTails.has(runId)) {
 					runTails.set(runId, { agentId: agentIds[index] ?? "unknown", entries: [], lastSeenAt: Date.now() });
 				}
 			}
-			return { batchId: handle.batchId, runIds: handle.runIds, completion };
+			return { batchId: handle.batchId, assignmentIds: handle.assignmentIds, completion };
 		},
 		recordEvent: recordRunEvent,
 		eventTail(runId) {
@@ -581,11 +583,6 @@ export function prepareDispatchArguments(args: Record<string, unknown>): Record<
 	return next;
 }
 
-/**
- * The worker's answer is the text of the last assistant `message_end` event.
- * Shared with the headless `clio run --agent` path so both surfaces extract
- * the final answer from the same event shape.
- */
 function rawAssistantTextFromEvent(event: unknown): string {
 	return durableAssistantTextFromEvent(event);
 }
@@ -655,9 +652,8 @@ async function runDetached(
 		requests.map((request) => request.agentId),
 		fallbackProgressBus(deps),
 	);
-	// dispatchBatch admits requests in order, so runIds[i] belongs to requests[i].
-	const assignmentIds = handle.assignmentIds ?? handle.runIds;
-	const runs = handle.runIds.map((runId, index) => ({
+	const assignmentIds = handle.assignmentIds;
+	const runs = handle.assignmentIds.map((runId, index) => ({
 		runId,
 		assignmentId: assignmentIds[index] ?? runId,
 		agentId: requests[index]?.agentId ?? "unknown",
@@ -675,8 +671,8 @@ async function runDetached(
 		const message = err instanceof Error ? err.message : String(err);
 		return {
 			kind: "error",
-			message: `dispatch: detached runs started (batch=${handle.batchId}, runs=${handle.runIds.join(", ")}) but the durable batch record failed: ${message}`,
-			details: { mode: "detached", batchId: handle.batchId, runIds: [...handle.runIds] },
+			message: `dispatch: detached assignments started (batch=${handle.batchId}, assignments=${handle.assignmentIds.join(", ")}) but the durable batch record failed: ${message}`,
+			details: { mode: "detached", batchId: handle.batchId, assignmentIds: [...handle.assignmentIds] },
 		};
 	}
 	const lines = [
@@ -691,7 +687,7 @@ async function runDetached(
 		details: {
 			mode: "detached",
 			batchId: handle.batchId,
-			runIds: [...handle.runIds],
+			assignmentIds: [...handle.assignmentIds],
 			runs: runs.map((run) => ({ runId: run.runId, assignmentId: run.assignmentId, agentId: run.agentId })),
 		},
 	};
@@ -850,7 +846,8 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 	}
 	return {
 		mode,
-		runIds: runs.map((run) => run.receipt.runId),
+		assignmentIds: runs.map((run) => run.receipt.lineage?.rootRunId ?? run.receipt.runId),
+		terminalRunIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
 		...(splitRecommendation !== null ? { splitRecommendation } : {}),
@@ -2956,7 +2953,7 @@ async function runBatch(
 	// carries a cause so each killed run's receipt names it.
 	const abort = (bySignal: boolean): void => {
 		const reason = bySignal ? undefined : ({ cause: "timeout", detail: `timed out after ${timeoutMs}ms` } as const);
-		for (const runId of handle.runIds) deps.dispatch.abort(runId, reason);
+		for (const runId of handle.assignmentIds) deps.dispatch.abort(runId, reason);
 	};
 	const onSignalAbort = (): void => abort(true);
 	const timer = timeoutMs !== undefined ? setTimeout(() => abort(false), timeoutMs) : null;

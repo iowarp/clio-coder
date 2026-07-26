@@ -88,7 +88,7 @@ describe("dispatch execution roles", () => {
 				approvedDispatchOptions(),
 			)) as ToolRunResult;
 			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
-			const runIds = (result.details?.runIds ?? []) as ReadonlyArray<string>;
+			const runIds = (result.details?.assignmentIds ?? []) as ReadonlyArray<string>;
 			ok(runIds.length > 0, "the gated dispatch sealed receipts");
 			const roles: string[] = [];
 			for (const runId of runIds) {

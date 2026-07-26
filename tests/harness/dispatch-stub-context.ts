@@ -139,7 +139,6 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 			return recipe ? normalizeAgentSpec(recipe) : null;
 		},
 		reload: () => {},
-		parseFleet: () => ({ steps: [] }),
 	};
 	const middleware = createMiddlewareBundle().contract;
 	const scheduling: SchedulingContract = {

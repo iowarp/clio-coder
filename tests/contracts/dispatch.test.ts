@@ -354,7 +354,6 @@ function stubContext(
 			return recipe ? normalizeAgentSpec(recipe) : null;
 		},
 		reload: () => {},
-		parseFleet: () => ({ steps: [] }),
 	};
 
 	const middleware = createMiddlewareBundle().contract;
@@ -1490,7 +1489,7 @@ describe("contracts/dispatch", () => {
 				{ agentId: "coder", executionRole: "builder", task: "batch task 2" },
 			]);
 
-			strictEqual(batch.runIds.length, 2);
+			strictEqual(batch.assignmentIds.length, 2);
 			deepStrictEqual(spawnedTasks, ["batch task 1", "batch task 2"]);
 
 			const drained: unknown[] = [];
@@ -5489,7 +5488,7 @@ describe("contracts/dispatch tool activity honesty", () => {
 				undefined as never,
 			);
 			strictEqual(result.kind, "error");
-			const runId = (result.details as { runIds?: string[] } | undefined)?.runIds?.[0];
+			const runId = (result.details as { assignmentIds?: string[] } | undefined)?.assignmentIds?.[0];
 			ok(runId, "dispatch tool did not surface a run id");
 			const row = bundle.contract.getRun(runId);
 			strictEqual(row?.outcome, "canceled");

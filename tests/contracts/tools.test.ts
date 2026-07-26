@@ -1159,8 +1159,8 @@ describe("contracts/tools dispatch run paths", () => {
 		if (result.kind === "ok") {
 			ok(result.output.includes("dispatch (parallel) total=1 failed=0"));
 			ok(result.output.includes("run-123"));
-			const details = result.details as { runIds?: unknown; receiptCount?: unknown } | undefined;
-			ok(Array.isArray(details?.runIds) && details.runIds[0] === "run-123");
+			const details = result.details as { assignmentIds?: unknown; receiptCount?: unknown } | undefined;
+			ok(Array.isArray(details?.assignmentIds) && details.assignmentIds[0] === "run-123");
 			strictEqual(details?.receiptCount, 1);
 		}
 	});
@@ -1368,7 +1368,7 @@ describe("contracts/tools dispatch run paths", () => {
 			},
 			dispatchBatch: async () => ({
 				batchId: "batch-background-failure",
-				runIds: ["run-background-failure"],
+				assignmentIds: ["run-background-failure"],
 				events: {
 					[Symbol.asyncIterator]() {
 						return this;
@@ -1581,7 +1581,7 @@ describe("contracts/tools dispatch run paths", () => {
 				strictEqual(reqs[1]?.task, "task 2");
 				return {
 					batchId: "batch-1",
-					runIds: ["run-1", "run-2"],
+					assignmentIds: ["run-1", "run-2"],
 					events: (async function* () {
 						yield {
 							type: "batch_run_event",
@@ -1793,14 +1793,14 @@ describe("contracts/tools dispatch run paths", () => {
 			const details = result.details as
 				| {
 						mode?: unknown;
-						runIds?: unknown;
+						assignmentIds?: unknown;
 						receiptCount?: unknown;
 						failedCount?: unknown;
 						runs?: Array<{ runId?: unknown; exitCode?: unknown; receiptPath?: unknown }>;
 				  }
 				| undefined;
 			strictEqual(details?.mode, "pipeline");
-			deepStrictEqual(details?.runIds, ["run-1", "run-2"]);
+			deepStrictEqual(details?.assignmentIds, ["run-1", "run-2"]);
 			strictEqual(details?.receiptCount, 2);
 			strictEqual(details?.failedCount, 1);
 			strictEqual(details?.runs?.[0]?.runId, "run-1");
@@ -1942,7 +1942,7 @@ describe("contracts/tools dispatch run paths", () => {
 			},
 			dispatchBatch: async () => ({
 				batchId: "batch-board",
-				runIds: ["run-b1", "run-b2"],
+				assignmentIds: ["run-b1", "run-b2"],
 				events: guarded.iterator,
 				finalPromise: Promise.resolve([
 					runReceipt("run-b1", "task 1"),
@@ -1973,7 +1973,7 @@ describe("contracts/tools dispatch run paths", () => {
 		);
 		strictEqual(result.kind, "ok");
 		strictEqual(guarded.consumers(), 1, "the merged batch iterator has one consumer");
-		deepStrictEqual(result.details?.runIds, ["run-b1", "run-b2"]);
+		deepStrictEqual(result.details?.assignmentIds, ["run-b1", "run-b2"]);
 		deepStrictEqual(progress, [
 			{ runId: "run-b2", agentId: "reviewer", type: "clio_tool_finish" },
 			{ runId: "run-b1", agentId: "coder", type: "message_end" },

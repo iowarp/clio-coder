@@ -9,6 +9,11 @@ import path from "node:path";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import { type AutonomyLevel, isAutonomyLevel } from "../safety/autonomy.js";
+import {
+	EXECUTION_HANDOFF_MAX_ITEMS,
+	EXECUTION_HANDOFF_MAX_TEXT_BYTES,
+	type ExecutionHandoff,
+} from "./execution-handoff.js";
 import { isExecutionRole } from "./execution-role.js";
 import type {
 	DispatchRequestOrigin,
@@ -103,6 +108,8 @@ export interface JobSpec {
 	 * never substituted into the task string.
 	 */
 	pipelineInput?: PipelineInput;
+	/** Integrity-verified terminal outputs from this plan step's named predecessors. */
+	predecessorHandoffs?: ReadonlyArray<ExecutionHandoff>;
 	/**
 	 * Caller-supplied lineage for retries and nested dispatch (fleet steps).
 	 * Omitted for root runs; the dispatch extension then mints a root lineage
@@ -153,6 +160,7 @@ const KNOWN_KEYS = new Set([
 	"writeRoots",
 	"requestOrigin",
 	"pipelineInput",
+	"predecessorHandoffs",
 	"lineage",
 	"autonomy",
 	"gate",
@@ -401,6 +409,15 @@ export function validateJobSpec(spec: unknown): Validated {
 			errors.push("pipelineInput must carry fromRunId (string|null), position (integer >= 1), text (string)");
 		}
 	}
+	if (
+		"predecessorHandoffs" in spec &&
+		spec.predecessorHandoffs !== undefined &&
+		!isValidPredecessorHandoffs(spec.predecessorHandoffs)
+	) {
+		errors.push(
+			`predecessorHandoffs must contain at most ${EXECUTION_HANDOFF_MAX_ITEMS} authenticated bounded terminal outputs`,
+		);
+	}
 
 	if ("lineage" in spec && spec.lineage !== undefined) {
 		if (!isValidLineage(spec.lineage)) {
@@ -481,11 +498,43 @@ export function validateJobSpec(spec: unknown): Validated {
 		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;
 	}
 	if (isValidPipelineInput(spec.pipelineInput)) out.pipelineInput = spec.pipelineInput;
+	if (isValidPredecessorHandoffs(spec.predecessorHandoffs))
+		out.predecessorHandoffs = spec.predecessorHandoffs.map((handoff) => ({ ...handoff }));
 	if (isValidLineage(spec.lineage)) out.lineage = spec.lineage;
 	if (isAutonomyLevel(spec.autonomy)) out.autonomy = spec.autonomy;
 	if (isValidGate(spec.gate)) out.gate = cloneGate(spec.gate);
 	if (isValidPlan(spec.plan)) out.plan = { ...spec.plan };
 	return { ok: true, spec: out };
+}
+
+function isValidPredecessorHandoffs(value: unknown): value is ExecutionHandoff[] {
+	if (
+		!Array.isArray(value) ||
+		value.length > EXECUTION_HANDOFF_MAX_ITEMS ||
+		Buffer.byteLength(JSON.stringify(value), "utf8") > EXECUTION_HANDOFF_MAX_TEXT_BYTES * 2
+	)
+		return false;
+	return value.every((candidate) => {
+		if (!isPlainObject(candidate)) return false;
+		const fields = [
+			candidate.stepId,
+			candidate.assignmentId,
+			candidate.terminalRunId,
+			candidate.receiptDigest,
+			candidate.output,
+		];
+		return (
+			fields.every((field) => typeof field === "string") &&
+			typeof candidate.stepId === "string" &&
+			candidate.stepId.length > 0 &&
+			typeof candidate.assignmentId === "string" &&
+			candidate.assignmentId.length > 0 &&
+			typeof candidate.terminalRunId === "string" &&
+			candidate.terminalRunId.length > 0 &&
+			typeof candidate.receiptDigest === "string" &&
+			/^[a-f0-9]{64}$/.test(candidate.receiptDigest)
+		);
+	});
 }
 
 function isValidPipelineInput(value: unknown): value is PipelineInput {
