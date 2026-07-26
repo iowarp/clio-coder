@@ -1,9 +1,13 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
-import { clioStateDir } from "../../core/xdg.js";
-import { atomicWrite } from "../../engine/session.js";
+import {
+	acquireCapacityLease,
+	type CapacityLease,
+	type CapacityLimits,
+	capacityStateLockPath,
+	readCapacityStateUnsafe,
+	writeCapacityStateUnsafe,
+} from "./capacity-lease.js";
 
 const MAX_RESERVATION_RECORDS = 500;
 export const DEFAULT_RESERVATION_TTL_MS = 15 * 60_000;
@@ -45,11 +49,6 @@ export interface DispatchReservationRecord {
 	members: ReservationMember[];
 }
 
-interface ReservationStoreFile {
-	version: 1;
-	reservations: DispatchReservationRecord[];
-}
-
 export interface ReservationCapacitySnapshot {
 	global: { active: number; limit: number };
 	nodes: Readonly<Record<string, { active: number; limit: number }>>;
@@ -63,10 +62,6 @@ export interface ReservationAllocation {
 }
 
 export type ReservationPlanResult = { ok: true; allocation: ReservationAllocation } | { ok: false; reason: string };
-
-function storePath(): string {
-	return join(clioStateDir(), "dispatch-reservations.json");
-}
 
 function copyRecord(record: DispatchReservationRecord): DispatchReservationRecord {
 	return { ...record, members: record.members.map((member) => ({ ...member })) };
@@ -109,29 +104,19 @@ function validRecord(value: unknown): value is DispatchReservationRecord {
 	);
 }
 
+function parseReservations(values: ReadonlyArray<unknown>): DispatchReservationRecord[] {
+	if (!values.every(validRecord)) throw new Error("dispatch admission store has invalid reservation records");
+	return values.map((record) => copyRecord(record));
+}
+
 function readStore(): DispatchReservationRecord[] {
-	const path = storePath();
-	if (!existsSync(path)) return [];
-	let parsed: ReservationStoreFile;
-	try {
-		parsed = JSON.parse(readFileSync(path, "utf8")) as ReservationStoreFile;
-	} catch (error) {
-		throw new Error(
-			`dispatch reservation store is unreadable: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	}
-	if (parsed?.version !== 1 || !Array.isArray(parsed.reservations) || !parsed.reservations.every(validRecord)) {
-		throw new Error("dispatch reservation store has an invalid schema");
-	}
-	return parsed.reservations.map(copyRecord);
+	return parseReservations(readCapacityStateUnsafe().reservations);
 }
 
 function writeStore(records: ReadonlyArray<DispatchReservationRecord>): void {
-	const file: ReservationStoreFile = {
-		version: 1,
-		reservations: records.slice(0, MAX_RESERVATION_RECORDS).map(copyRecord),
-	};
-	atomicWrite(storePath(), JSON.stringify(file, null, 2));
+	const state = readCapacityStateUnsafe();
+	state.reservations = records.slice(0, MAX_RESERVATION_RECORDS).map(copyRecord);
+	writeCapacityStateUnsafe(state);
 }
 
 function peakBy(tasks: ReadonlyArray<Pick<ReservationPlanTask, "wave"> & { key: string }>): Record<string, number> {
@@ -218,7 +203,7 @@ export function createDispatchReservation(input: {
 	nowMs?: number;
 	ttlMs?: number;
 }): DispatchReservationRecord {
-	return withStateFileLockSync(storePath(), () => {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const nowMs = input.nowMs ?? Date.now();
 		const records = expireRecords(readStore(), nowMs, false);
 		const planned = allocateReservation(input.tasks, records, input.capacity);
@@ -251,7 +236,7 @@ export function consumeDispatchReservation(
 	memberId: string,
 	options?: { nowMs?: number },
 ): DispatchReservationRecord {
-	return withStateFileLockSync(storePath(), () => {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const nowMs = options?.nowMs ?? Date.now();
 		const records = expireRecords(readStore(), nowMs, false);
 		const record = records.find((entry) => entry.ownerId === ownerId);
@@ -264,6 +249,37 @@ export function consumeDispatchReservation(
 		member.consumedAt = new Date(nowMs).toISOString();
 		writeStore(records);
 		return copyRecord(record);
+	});
+}
+
+/** Atomically convert one held plan member into the assignment's durable lease. */
+export function transferDispatchReservationToLease(input: {
+	ownerId: string;
+	memberId: string;
+	assignmentId: string;
+	nodeId: string;
+	limits: CapacityLimits;
+	nowMs?: number;
+	ttlMs?: number;
+}): CapacityLease {
+	const nowMs = input.nowMs ?? Date.now();
+	return acquireCapacityLease({
+		assignmentId: input.assignmentId,
+		nodeId: input.nodeId,
+		limits: input.limits,
+		nowMs,
+		...(input.ttlMs !== undefined ? { ttlMs: input.ttlMs } : {}),
+		reservation: { ownerId: input.ownerId, memberId: input.memberId },
+		onAcquiredUnderLock: (state) => {
+			const records = expireRecords(parseReservations(state.reservations), nowMs, false);
+			const record = records.find((entry) => entry.ownerId === input.ownerId);
+			if (record?.status !== "active") throw new Error(`dispatch: reservation '${input.ownerId}' is not active`);
+			const member = record.members.find((entry) => entry.memberId === input.memberId);
+			if (member?.status !== "held") throw new Error(`dispatch: reservation member '${input.memberId}' is not held`);
+			member.status = "consumed";
+			member.consumedAt = new Date(nowMs).toISOString();
+			state.reservations = records.map(copyRecord);
+		},
 	});
 }
 
@@ -283,7 +299,7 @@ export function rebindDispatchReservationMember(input: {
 	capacity: ReservationCapacitySnapshot;
 	nowMs?: number;
 }): DispatchReservationRecord {
-	return withStateFileLockSync(storePath(), () => {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const nowMs = input.nowMs ?? Date.now();
 		const records = expireRecords(readStore(), nowMs, false);
 		const record = records.find((entry) => entry.ownerId === input.ownerId);
@@ -342,7 +358,7 @@ export function releaseDispatchReservationMember(
 	memberId: string,
 	nowMs = Date.now(),
 ): DispatchReservationRecord | null {
-	return withStateFileLockSync(storePath(), () => {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const records = readStore();
 		const record = records.find((entry) => entry.ownerId === ownerId);
 		if (!record) return null;
@@ -360,7 +376,7 @@ export function releaseDispatchReservationMember(
 }
 
 export function rollbackDispatchReservation(ownerId: string, nowMs = Date.now()): DispatchReservationRecord | null {
-	return withStateFileLockSync(storePath(), () => {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const records = readStore();
 		const record = records.find((entry) => entry.ownerId === ownerId);
 		if (!record) return null;
@@ -420,7 +436,7 @@ function expireRecords(
 }
 
 export function cleanupDispatchReservations(options?: { startup?: boolean; nowMs?: number }): number {
-	return withStateFileLockSync(storePath(), () => {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
 		const records = readStore();
 		const before = records.filter((record) => record.status === "active").length;
 		expireRecords(records, options?.nowMs ?? Date.now(), options?.startup === true);

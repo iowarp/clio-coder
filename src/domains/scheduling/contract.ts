@@ -1,5 +1,5 @@
 import type { BudgetVerdict } from "./budget.js";
-import type { ClusterNode, FleetRegistry } from "./cluster.js";
+import type { FleetRegistry } from "./cluster.js";
 
 export interface BudgetPreflight {
 	verdict: BudgetVerdict;
@@ -18,12 +18,8 @@ export interface SchedulingContract {
 	 * when above. Dispatch treats "at" and "over" as admission failures.
 	 */
 	preflight(): BudgetPreflight;
-	activeWorkers(): number;
-	/** Configured global worker capacity used by transactional batch planning. */
-	maxWorkers?(): number;
-	tryAcquireWorker(): boolean;
-	releaseWorker(): void;
-	listNodes(): ReadonlyArray<ClusterNode>;
+	/** Configured global worker capacity; durable leases own active usage. */
+	maxWorkers(): number;
 	/**
 	 * Fleet node registry backing multi-node placement: per-node states,
 	 * capacity accounting, and channel-failure classification. Optional so

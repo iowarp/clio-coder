@@ -88,12 +88,7 @@ export function createFleetPlacementResolver(
 
 		const localPlacement = (): DispatchNodePlacement => {
 			const reroutes = completedReroutes(req.reroutes, LOCAL_NODE_ID);
-			fleet?.tryAcquire(LOCAL_NODE_ID);
-			return {
-				node: localNodeIdentity(),
-				...(reroutes !== undefined ? { reroutes } : {}),
-				...(fleet !== undefined ? { release: () => fleet.release(LOCAL_NODE_ID) } : {}),
-			};
+			return { node: localNodeIdentity(), ...(reroutes !== undefined ? { reroutes } : {}) };
 		};
 
 		const sshPlacement = (node: FleetNodeSettings): DispatchNodePlacement => {
@@ -103,7 +98,6 @@ export function createFleetPlacementResolver(
 			return {
 				node: transport.node,
 				spawn: (spec, opts) => transport.spawn(spec, opts),
-				release: () => fleet.release(node.id),
 				...(reroutes !== undefined ? { reroutes } : {}),
 			};
 		};
@@ -123,11 +117,6 @@ export function createFleetPlacementResolver(
 			}
 			const preflight = verdictFor(node, projectRoot);
 			if (!preflight.ok) throw admissionError(preflight.reason ?? `node '${node.id}' is not preflighted`);
-			if (!fleet.tryAcquire(node.id)) {
-				throw admissionError(
-					`fleet node '${node.id}' is at capacity (${snapshot?.activeWorkers ?? "?"}/${node.maxWorkers} workers)`,
-				);
-			}
 			return sshPlacement(node);
 		}
 
@@ -139,12 +128,10 @@ export function createFleetPlacementResolver(
 				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
 				.filter((entry) => !excludedNodeIds.has(entry.node.id))
 				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
-				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
 				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
-				.sort((a, b) => (a.snapshot?.activeWorkers ?? 0) - (b.snapshot?.activeWorkers ?? 0) || a.order - b.order);
-			for (const entry of eligible) {
-				if (fleet.tryAcquire(entry.node.id)) return sshPlacement(entry.node);
-			}
+				.sort((a, b) => a.order - b.order);
+			const selected = eligible[0];
+			if (selected) return sshPlacement(selected.node);
 		}
 		// A node exclusion that also excludes local has no eligible node left:
 		// fail closed rather than silently re-running on the excluded local node.
@@ -189,11 +176,6 @@ export function createFleetPlacementPreviewResolver(
 			}
 			const preflight = verdictFor(node, projectRoot);
 			if (!preflight.ok) throw admissionError(preflight.reason ?? `node '${node.id}' is not preflighted`);
-			if ((snapshot?.activeWorkers ?? 0) >= node.maxWorkers) {
-				throw admissionError(
-					`fleet node '${node.id}' is at capacity (${snapshot?.activeWorkers ?? "?"}/${node.maxWorkers} workers)`,
-				);
-			}
 			return remote(node);
 		}
 
@@ -202,9 +184,8 @@ export function createFleetPlacementPreviewResolver(
 			const eligible = nodes
 				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
 				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
-				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
 				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
-				.sort((a, b) => (a.snapshot?.activeWorkers ?? 0) - (b.snapshot?.activeWorkers ?? 0) || a.order - b.order);
+				.sort((a, b) => a.order - b.order);
 			const selected = eligible[0]?.node;
 			if (selected !== undefined) return remote(selected);
 		}

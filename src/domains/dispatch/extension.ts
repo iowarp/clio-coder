@@ -9,7 +9,7 @@
  * behind the engine boundary.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
@@ -84,17 +84,20 @@ import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
-import { admit } from "./admission.js";
+import { admit, createCapacityAdmissionController } from "./admission.js";
 import { AssignmentRegistry, asAssignmentId } from "./assignment.js";
 import type { AssignmentAttemptStartEvent } from "./assignment-events.js";
 import { reconcileOrphanAssignments } from "./assignment-reconcile.js";
 import {
 	cancelStoredAssignment,
+	failQueuedAssignment,
 	getStoredAssignment,
 	listStoredAssignments,
 	recordAssignmentAttempt,
 	registerAssignment,
+	renameStoredAssignment,
 	settleStoredAssignment,
+	timeoutStoredAssignment,
 } from "./assignment-store.js";
 import { type BackoffState, createBackoff, nextDelay } from "./backoff.js";
 import {
@@ -104,13 +107,13 @@ import {
 	registerDetachedBatch,
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
-import {
-	type DispatchAdmissionObserver,
-	DispatchConcurrencyError,
-	type DispatchContract,
-	type DispatchPlanTaskResolution,
-	type DispatchRequest,
-	type DispatchSnapshot,
+import { capacityLeaseUsage, setCapacityDraining } from "./capacity-lease.js";
+import type {
+	DispatchAdmissionObserver,
+	DispatchContract,
+	DispatchPlanTaskResolution,
+	DispatchRequest,
+	DispatchSnapshot,
 } from "./contract.js";
 import { createWorkerOutputCapture, startDispatchEventPump } from "./event-pump.js";
 import { appliesRecipeResultContract, withAttemptRole } from "./execution-role.js";
@@ -136,14 +139,11 @@ import {
 import { collectReproducibilityMetadata } from "./reproducibility.js";
 import {
 	cleanupDispatchReservations,
-	consumeDispatchReservation,
 	createDispatchReservation,
 	getDispatchReservation,
 	type ReservationCapacitySnapshot,
-	rebindDispatchReservationMember,
 	releaseDispatchReservationMember,
 	reservedBudgetUsd,
-	reservedCapacity,
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
 } from "./reservation-store.js";
@@ -1967,20 +1967,28 @@ export function createDispatchBundle(
 	const active = new Map<string, ActiveRun>();
 	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 	const ownedReservations = new Set<string>();
+	const capacityAdmission = createCapacityAdmissionController({
+		limits: () => {
+			const settings = getEffectiveSettings();
+			const nodes: Record<string, number> = { local: configuredGlobalCapacity(settings) };
+			for (const node of settings?.fleet?.nodes ?? []) nodes[node.id] = node.maxWorkers;
+			return { global: configuredGlobalCapacity(settings), nodes };
+		},
+		now,
+	});
 
 	function reservationCapacitySnapshot(
 		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
 	): ReservationCapacitySnapshot {
 		const preflight = scheduling.preflight();
-		const nodes: Record<string, { active: number; limit: number }> = {};
-		for (const node of scheduling.fleet?.list() ?? []) {
-			nodes[node.id] = { active: node.activeWorkers, limit: node.maxWorkers };
-		}
-		if (nodes.local === undefined) {
-			nodes.local = { active: scheduling.activeWorkers(), limit: configuredGlobalCapacity(settings) };
-		}
+		const usage = capacityLeaseUsage();
+		const nodes: Record<string, { active: number; limit: number }> = {
+			local: { active: usage.nodes.local ?? 0, limit: configuredGlobalCapacity(settings) },
+		};
+		for (const node of settings?.fleet?.nodes ?? [])
+			nodes[node.id] = { active: usage.nodes[node.id] ?? 0, limit: node.maxWorkers };
 		return {
-			global: { active: scheduling.activeWorkers(), limit: configuredGlobalCapacity(settings) },
+			global: { active: usage.global, limit: configuredGlobalCapacity(settings) },
 			nodes,
 			budget: { currentUsd: preflight.currentUsd, ceilingUsd: preflight.ceilingUsd },
 		};
@@ -2051,55 +2059,29 @@ export function createDispatchBundle(
 		return scheduling.maxWorkers?.() ?? (configured === "auto" || configured === undefined ? 4 : Math.max(1, configured));
 	}
 
-	function assertUnreservedCapacity(
-		req: DispatchRequest,
-		nodeId: string,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
-	): void {
-		if (req.reservation !== undefined) return;
-		const held = reservedCapacity();
-		const globalLimit = configuredGlobalCapacity(settings);
-		if (scheduling.activeWorkers() + held.globalSlots >= globalLimit) {
-			throw new DispatchConcurrencyError(scheduling.activeWorkers());
+	async function admitAssignmentCapacity(req: DispatchRequest, nodeId: string, timing: RunPhaseMarks) {
+		const queuedAt = now();
+		timing.queuedAt = new Date(queuedAt).toISOString();
+		const assignmentId = req.lineage?.rootRunId ?? `pending-${queuedAt.toString(36)}-${randomBytes(6).toString("hex")}`;
+		const requestedAt = Date.parse(timing.requestedAt ?? timing.queuedAt);
+		const deadlineAt = requestedAt + (req.routingIntent?.deadlineMs ?? 60_000);
+		if (req.lineage === undefined) await registerAssignment(assignmentId);
+		try {
+			const admitted = await capacityAdmission.admit({
+				assignmentId,
+				nodeId,
+				deadlineAt,
+				...(req.reservation !== undefined && req.lineage === undefined ? { reservation: req.reservation } : {}),
+			});
+			timing.admittedAt = new Date(admitted.admittedAt).toISOString();
+			return admitted.lease;
+		} catch (error) {
+			if (req.lineage === undefined) {
+				if (error instanceof Error && /timed_out/.test(error.message)) await timeoutStoredAssignment(assignmentId);
+				else await failQueuedAssignment(assignmentId);
+			}
+			throw error;
 		}
-		const node = scheduling.fleet?.get(nodeId);
-		if (
-			node &&
-			Number.isFinite(node.maxWorkers) &&
-			node.activeWorkers + (held.nodeSlots[nodeId] ?? 0) > node.maxWorkers
-		) {
-			throw new Error(`dispatch: admission denied: fleet node '${nodeId}' capacity is reserved`);
-		}
-	}
-
-	/**
-	 * A reservation member holds capacity and budget, never route identity. The
-	 * assignment consumes it once on its first attempt; every retry rebinds it to
-	 * the node and estimate that attempt actually resolved, so failover moves
-	 * capacity instead of breaking the reservation.
-	 */
-	function consumeReservationSlot(req: DispatchRequest): void {
-		const reservation = req.reservation;
-		if (reservation === undefined || req.lineage !== undefined) return;
-		consumeDispatchReservation(reservation.ownerId, reservation.memberId, { nowMs: now() });
-	}
-
-	function rebindReservationSlot(
-		req: DispatchRequest,
-		nodeId: string,
-		costUpperBoundUsd: number,
-		settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
-	): void {
-		const reservation = req.reservation;
-		if (reservation === undefined || req.lineage === undefined) return;
-		rebindDispatchReservationMember({
-			ownerId: reservation.ownerId,
-			memberId: reservation.memberId,
-			nodeId,
-			costUpperBoundUsd,
-			capacity: reservationCapacitySnapshot(settings),
-			nowMs: now(),
-		});
 	}
 
 	/**
@@ -2186,7 +2168,10 @@ export function createDispatchBundle(
 	): void {
 		trackAssignmentWrite(settleStoredAssignment(assignmentId, receipt.runId, status))
 			.catch((error) => reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error))
-			.finally(() => assignments.settle(assignmentId, receipt, status, outcomeDetail));
+			.finally(() => {
+				assignments.settle(assignmentId, receipt, status, outcomeDetail);
+				capacityAdmission.releaseAssignment(assignmentId);
+			});
 	}
 
 	/**
@@ -2198,6 +2183,7 @@ export function createDispatchBundle(
 	 */
 	function settleAssignmentDurablyWithoutReceipt(rootRunId: string, attemptRunId: string): void {
 		persistAssignment(settleStoredAssignment(rootRunId, attemptRunId, "failed"), `${rootRunId}:finalize-error`);
+		capacityAdmission.releaseAssignment(rootRunId);
 	}
 
 	function maybeScheduleRetry(
@@ -2994,18 +2980,14 @@ export function createDispatchBundle(
 
 		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
 
-		let workerSlotHeld = false;
+		const capacityLease = await admitAssignmentCapacity(req, "local", timing);
+		let leaseAssignmentOwned = req.lineage !== undefined;
+		let workerSlotHeld = true;
 		const releaseWorkerSlot = (): void => {
-			if (!workerSlotHeld) return;
+			if (!workerSlotHeld || leaseAssignmentOwned) return;
 			workerSlotHeld = false;
-			scheduling.releaseWorker();
+			capacityAdmission.release(capacityLease.leaseId);
 		};
-		timing.queuedAt = new Date(now()).toISOString();
-		workerSlotHeld = scheduling.tryAcquireWorker();
-		if (!workerSlotHeld) {
-			throw new DispatchConcurrencyError(scheduling.activeWorkers());
-		}
-		timing.admittedAt = new Date(now()).toISOString();
 
 		// Resolve the ledger before starting the ACP process: an external agent
 		// must never outlive a failure to create its tracking row.
@@ -3014,6 +2996,8 @@ export function createDispatchBundle(
 				return requireLedger();
 			} catch (error) {
 				releaseWorkerSlot();
+				if (req.lineage === undefined)
+					persistAssignment(failQueuedAssignment(capacityLease.assignmentId), `${capacityLease.assignmentId}:admission`);
 				throw error;
 			}
 		})();
@@ -3031,6 +3015,7 @@ export function createDispatchBundle(
 			});
 		} catch (error) {
 			releaseWorkerSlot();
+			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
 		}
 		timing.workerSpawnedAt = new Date(now()).toISOString();
@@ -3193,6 +3178,11 @@ export function createDispatchBundle(
 			});
 			runIdForPermissionAudit = envelope.id;
 			lineage = lineageFor(req, envelope.id);
+			if (req.lineage === undefined) {
+				capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
+				await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
+				leaseAssignmentOwned = true;
+			}
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
 				status: "running",
@@ -3696,7 +3686,6 @@ export function createDispatchBundle(
 		};
 		if (req.delegationAgentId) {
 			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
-			assertUnreservedCapacity(req, "local", settings);
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
@@ -3711,8 +3700,6 @@ export function createDispatchBundle(
 					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
 				);
 			}
-			consumeReservationSlot(req);
-			rebindReservationSlot(req, "local", UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req);
 			return attachRouteObservation(
 				await dispatchAcpDelegation(req, settings, timing, routeObservation?.decision, observer),
@@ -3734,7 +3721,6 @@ export function createDispatchBundle(
 
 		const placement = resolveNode(req) ?? null;
 		try {
-			assertUnreservedCapacity(req, placement?.node.id ?? "local", settings);
 			assertPlannedNodeIdentity(req, placement?.node ?? { id: "local", kind: "local" });
 			const effectiveRoute = {
 				agentId: req.agentId,
@@ -3743,16 +3729,6 @@ export function createDispatchBundle(
 				node: placement?.node?.id ?? "local",
 			};
 			assertRouteWithinApprovedEnvelope(req, effectiveRoute);
-			consumeReservationSlot(req);
-			// A retry may have resolved a different node or a differently priced
-			// route. Move the held capacity to match, or fail closed here rather
-			// than let the attempt run outside what the plan reserved.
-			rebindReservationSlot(
-				req,
-				effectiveRoute.node,
-				conservativeRouteAdmissionEstimateUsd(lifecycle.target.effectivePricing, settings?.defaults.maxTokens ?? 32768),
-				settings,
-			);
 		} catch (error) {
 			try {
 				placement?.release?.();
@@ -3776,20 +3752,14 @@ export function createDispatchBundle(
 			}
 		};
 
-		let workerSlotHeld = false;
+		const capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing);
+		let leaseAssignmentOwned = req.lineage !== undefined;
+		let workerSlotHeld = true;
 		const releaseWorkerSlot = (): void => {
-			if (!workerSlotHeld) return;
+			if (!workerSlotHeld || leaseAssignmentOwned) return;
 			workerSlotHeld = false;
-			scheduling.releaseWorker();
+			capacityAdmission.release(capacityLease.leaseId);
 		};
-
-		timing.queuedAt = new Date(now()).toISOString();
-		workerSlotHeld = scheduling.tryAcquireWorker();
-		if (!workerSlotHeld) {
-			releaseNodeSlot();
-			throw new DispatchConcurrencyError(scheduling.activeWorkers());
-		}
-		timing.admittedAt = new Date(now()).toISOString();
 
 		const ledgerRef = (() => {
 			try {
@@ -3830,6 +3800,7 @@ export function createDispatchBundle(
 		} catch (error) {
 			releaseWorkerSlot();
 			releaseNodeSlot();
+			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
 		}
 		timing.workerSpawnedAt = new Date(now()).toISOString();
@@ -4108,6 +4079,11 @@ export function createDispatchBundle(
 			});
 			runIdForPermissionAudit = envelope.id;
 			lineage = lineageFor(req, envelope.id);
+			if (req.lineage === undefined) {
+				capacityAdmission.rename(capacityLease.leaseId, lineage.rootRunId);
+				await renameStoredAssignment(capacityLease.assignmentId, lineage.rootRunId);
+				leaseAssignmentOwned = true;
+			}
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
 				status: "running",
@@ -4970,30 +4946,10 @@ export function createDispatchBundle(
 	}> {
 		if (reqs.length === 0) throw new Error("dispatch: batch requires at least one request");
 		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
-		const settledRunIds = new Set<string>();
-		// Admission is sequential so the concurrency gate can throttle instead
-		// of failing the whole batch: when a slot is unavailable the batch
-		// waits for one of its own in-flight runs (or a short delay covering
-		// externally-held slots) and retries that member. Every other
-		// admission failure still aborts the batch.
-		const slotWaitMs = 250;
 		try {
 			for (const req of reqs) {
-				for (;;) {
-					try {
-						const handle = await dispatch(req);
-						handle.finalPromise.finally(() => settledRunIds.add(handle.runId)).catch(() => {});
-						handles.push({ ...handle, agentId: req.agentId });
-						break;
-					} catch (err) {
-						if (!(err instanceof DispatchConcurrencyError)) throw err;
-						const waiters: Array<Promise<unknown>> = handles
-							.filter((handle) => !settledRunIds.has(handle.runId))
-							.map((handle) => handle.finalPromise.catch(() => undefined));
-						waiters.push(new Promise((resolve) => setTimeout(resolve, slotWaitMs)));
-						await Promise.race(waiters);
-					}
-				}
+				const handle = await dispatch(req);
+				handles.push({ ...handle, agentId: req.agentId });
 			}
 		} catch (err) {
 			for (const handle of handles) {
@@ -5074,12 +5030,18 @@ export function createDispatchBundle(
 		},
 		async stop() {
 			draining = true;
-			settleQueuedAssignmentsForShutdown();
-			stopHeartbeatWatchdog();
-			await drain();
-			for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
-			ownedReservations.clear();
-			await Promise.allSettled([...assignmentWrites]);
+			setCapacityDraining(true);
+			try {
+				settleQueuedAssignmentsForShutdown();
+				stopHeartbeatWatchdog();
+				await drain();
+				capacityAdmission.stop();
+				for (const ownerId of ownedReservations) rollbackDispatchReservation(ownerId, now());
+				ownedReservations.clear();
+				await Promise.allSettled([...assignmentWrites]);
+			} finally {
+				setCapacityDraining(false);
+			}
 		},
 	};
 

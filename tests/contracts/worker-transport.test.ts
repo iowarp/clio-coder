@@ -8,6 +8,7 @@ import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
+import { listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import {
@@ -581,8 +582,7 @@ describe("dispatch records fleet placement", () => {
 		}
 	});
 
-	it("releases the node slot when placement resolution precedes a failed admission", async () => {
-		let released = 0;
+	it("releases the durable lease when worker spawn fails after admission", async () => {
 		const context = stubContext();
 		const baseGet = context.getContract.bind(context);
 		const blockedContext: DomainContext = {
@@ -594,10 +594,7 @@ describe("dispatch records fleet placement", () => {
 						checkCeiling: () => "under",
 						raiseCeiling: () => {},
 						preflight: () => ({ verdict: "under", currentUsd: 0, ceilingUsd: 5 }),
-						activeWorkers: () => 4,
-						tryAcquireWorker: () => false,
-						releaseWorker: () => {},
-						listNodes: () => [],
+						maxWorkers: () => 1,
 					};
 				return baseGet(name);
 			}) as DomainContext["getContract"],
@@ -605,9 +602,8 @@ describe("dispatch records fleet placement", () => {
 		const bundle = makeDispatchBundle(blockedContext, {
 			resolveNode: () => ({
 				node: NODE,
-				spawn: () => fakeSpawnedWorker([]),
-				release: () => {
-					released += 1;
+				spawn: () => {
+					throw new Error("spawn failed");
 				},
 			}),
 		});
@@ -615,9 +611,9 @@ describe("dispatch records fleet placement", () => {
 		try {
 			await rejects(
 				bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "blocked" }),
-				/concurrency limit/,
+				/spawn failed/,
 			);
-			strictEqual(released, 1);
+			strictEqual(listCapacityLeases().length, 0);
 		} finally {
 			await bundle.extension.stop?.();
 		}

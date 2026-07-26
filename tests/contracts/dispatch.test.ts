@@ -373,10 +373,7 @@ function stubContext(
 					const currentUsd = options.budgetCurrentUsd ?? (verdict === "under" ? 0 : 5);
 					return { verdict, currentUsd, ceilingUsd: 5 };
 				},
-				activeWorkers: () => 0,
-				tryAcquireWorker: () => true,
-				releaseWorker: () => {},
-				listNodes: () => [],
+				maxWorkers: () => 4,
 			};
 		if (name === "providers") return providers;
 		if (name === "middleware") return middleware;
@@ -2766,20 +2763,11 @@ describe("contracts/dispatch", () => {
 
 	it("keeps every receipt correct when batch admission throttles later members past an early fast finisher", async () => {
 		const context = stubContext();
-		// One-slot concurrency gate: the second batch member is admitted only
-		// after the first run settles, so the first worker finishes long before
-		// the merged iterator is returned to any consumer.
-		let activeWorkers = 0;
-		const scheduling = context.getContract<{ tryAcquireWorker(): boolean; releaseWorker(): void }>("scheduling");
+		// One durable slot: the second batch member is admitted only after the
+		// first assignment settles.
+		const scheduling = context.getContract<{ maxWorkers(): number }>("scheduling");
 		if (!scheduling) throw new Error("test requires scheduling contract");
-		scheduling.tryAcquireWorker = () => {
-			if (activeWorkers >= 1) return false;
-			activeWorkers += 1;
-			return true;
-		};
-		scheduling.releaseWorker = () => {
-			activeWorkers -= 1;
-		};
+		scheduling.maxWorkers = () => 1;
 		let spawned = 0;
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
@@ -4004,24 +3992,14 @@ rl.once("line", (line) => {
 		}
 	});
 
-	it("dispatchBatch throttles at the concurrency cap instead of throwing", async () => {
+	it("dispatchBatch queues at the durable concurrency cap instead of throwing", async () => {
 		const base = stubContext();
-		let activeWorkers = 0;
 		const scheduling = {
 			ceilingUsd: () => 5,
 			checkCeiling: () => "under" as const,
 			raiseCeiling: () => {},
 			preflight: () => ({ verdict: "under" as const, currentUsd: 0, ceilingUsd: 5 }),
-			activeWorkers: () => activeWorkers,
-			tryAcquireWorker: () => {
-				if (activeWorkers >= 2) return false;
-				activeWorkers += 1;
-				return true;
-			},
-			releaseWorker: () => {
-				activeWorkers = Math.max(0, activeWorkers - 1);
-			},
-			listNodes: () => [],
+			maxWorkers: () => 2,
 		};
 		const context: DomainContext = {
 			...base,

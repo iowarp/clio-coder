@@ -49,9 +49,6 @@ export interface FleetRegistry {
 	get(id: string): FleetNodeSnapshot | null;
 	/** Raw settings entry for a remote node; null for local/unknown ids. */
 	config(id: string): FleetNodeSettings | null;
-	/** Per-node capacity slot. Local has no per-node cap (the global gate bounds it). */
-	tryAcquire(id: string): boolean;
-	release(id: string): void;
 	/** Record a probe or worker heartbeat for staleness display. */
 	seen(id: string): void;
 	markOnline(id: string): void;
@@ -73,19 +70,20 @@ const NODE_DEATH_FAILURE_THRESHOLD = 2;
 interface NodeRuntimeState {
 	state: FleetNodeState;
 	stateReason: string | null;
-	active: number;
 	consecutiveFailures: number;
 	lastSeenMs: number | null;
 }
 
 export interface FleetRegistryOptions {
 	now?: () => number;
-	/** Display-only cap for the implicit local node (the global gate enforces it). */
+	/** Display-only cap for the implicit local node. */
 	localMaxWorkers?: () => number;
+	/** Durable lease-derived usage; never a process-local counter. */
+	activeWorkers?: (nodeId: string) => number;
 }
 
 function freshState(): NodeRuntimeState {
-	return { state: "online", stateReason: null, active: 0, consecutiveFailures: 0, lastSeenMs: null };
+	return { state: "online", stateReason: null, consecutiveFailures: 0, lastSeenMs: null };
 }
 
 export function createFleetRegistry(
@@ -113,7 +111,7 @@ export function createFleetRegistry(
 				kind: "local",
 				state: state.state,
 				stateReason: state.stateReason,
-				activeWorkers: state.active,
+				activeWorkers: options?.activeWorkers?.(LOCAL_NODE_ID) ?? 0,
 				maxWorkers: options?.localMaxWorkers?.() ?? Number.POSITIVE_INFINITY,
 				labels: [],
 				lastSeenAt: state.lastSeenMs !== null ? new Date(state.lastSeenMs).toISOString() : null,
@@ -125,7 +123,7 @@ export function createFleetRegistry(
 			kind: "ssh",
 			state: state.state,
 			stateReason: state.stateReason,
-			activeWorkers: state.active,
+			activeWorkers: options?.activeWorkers?.(id) ?? 0,
 			maxWorkers: config.maxWorkers,
 			labels: [...(config.labels ?? [])],
 			lastSeenAt: state.lastSeenMs !== null ? new Date(state.lastSeenMs).toISOString() : null,
@@ -150,20 +148,6 @@ export function createFleetRegistry(
 		},
 		config(id) {
 			return id === LOCAL_NODE_ID ? null : findConfig(id);
-		},
-		tryAcquire(id) {
-			const state = stateFor(id);
-			if (id !== LOCAL_NODE_ID) {
-				const config = findConfig(id);
-				if (!config) return false;
-				if (state.active >= config.maxWorkers) return false;
-			}
-			state.active += 1;
-			return true;
-		},
-		release(id) {
-			const state = stateFor(id);
-			if (state.active > 0) state.active -= 1;
 		},
 		seen(id) {
 			stateFor(id).lastSeenMs = now();
@@ -204,17 +188,4 @@ export function createFleetRegistry(
 			}
 		},
 	};
-}
-
-/** Legacy single-node view kept for pre-fleet consumers of listNodes(). */
-export function legacyClusterNodes(registry?: FleetRegistry): ReadonlyArray<ClusterNode> {
-	if (!registry) {
-		return [{ id: LOCAL_NODE_ID, host: "localhost", available: true, lastSeenAt: null }];
-	}
-	return registry.list().map((node) => ({
-		id: node.id,
-		host: node.host,
-		available: node.state === "online",
-		lastSeenAt: node.lastSeenAt,
-	}));
 }

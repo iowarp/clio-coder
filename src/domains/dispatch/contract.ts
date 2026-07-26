@@ -45,18 +45,6 @@ export interface DispatchPlanTaskResolution {
 }
 
 /**
- * Thrown by dispatch() when the concurrency gate is at capacity. Interactive
- * callers keep the fail-fast contract; dispatchBatch catches this error and
- * throttles remaining batch members until a slot frees.
- */
-export class DispatchConcurrencyError extends Error {
-	constructor(activeWorkers: number) {
-		super(`dispatch: admission denied: concurrency limit reached (${activeWorkers} active workers)`);
-		this.name = "DispatchConcurrencyError";
-	}
-}
-
-/**
  * Read-only operator snapshot of orchestrator state. Drawn from in-memory
  * dispatch state plus the ledger mirror; performs no I/O and is never
  * required for correctness. Consumers wrap their own rendering errors.

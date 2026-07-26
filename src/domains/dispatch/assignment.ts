@@ -24,7 +24,7 @@ export interface AttemptRef {
 	retryReason: string | null;
 }
 
-export type AssignmentStatus = "running" | "succeeded" | "failed" | "canceled";
+export type AssignmentStatus = "running" | "succeeded" | "failed" | "canceled" | "timed_out";
 
 export interface AssignmentPolicy {
 	maxRetries: number;
