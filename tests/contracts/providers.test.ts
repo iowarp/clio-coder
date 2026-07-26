@@ -23,7 +23,6 @@ import { synthesizeOpenAICompatModel } from "../../src/domains/providers/runtime
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
-import { resolveWorkerRuntimeBudget } from "../../src/engine/worker-runtime.js";
 import {
 	parseWorkerSpec,
 	WORKER_RUNTIME_DESCRIPTOR_VERSION,
@@ -670,34 +669,14 @@ describe("contracts/providers/runtime-cleanup", () => {
 		}
 	});
 
-	it("versions the worker budget contract without smuggling policy into legacy workers", () => {
-		const legacy = minimalWorkerSpec({ specVersion: 1, budget: undefined });
-		const parsedLegacy = parseWorkerSpec(legacy);
-		strictEqual(parsedLegacy.budget, undefined, "v1 carries no budget policy on the wire");
-		throws(() => parseWorkerSpec(minimalWorkerSpec({ specVersion: 1 })), /version 1.*must not include budget/);
+	it("requires the current worker budget contract", () => {
+		const unsupportedVersion =
+			/WorkerSpec version 1 is unsupported \(expected version 2\)\. Re-dispatch the request to generate a valid budget-bearing worker specification\./;
+		throws(() => parseWorkerSpec(minimalWorkerSpec({ specVersion: 1, budget: undefined })), unsupportedVersion);
+		throws(() => parseWorkerSpec(minimalWorkerSpec({ specVersion: 1 })), unsupportedVersion);
 		throws(() => parseWorkerSpec(minimalWorkerSpec({ budget: undefined })), /version 2 requires budget/);
 		const budget = { toolCalls: 7, readReserve: 2, synthesis: false, hardCap: 20 };
 		deepStrictEqual(parseWorkerSpec(minimalWorkerSpec({ budget })).budget, budget);
-
-		const previousCap = process.env.CLIO_WORKER_TOOL_CALL_CAP;
-		try {
-			process.env.CLIO_WORKER_TOOL_CALL_CAP = "9";
-			deepStrictEqual(resolveWorkerRuntimeBudget({ allowedTools: ["read"] }), {
-				toolCalls: 9,
-				readReserve: 5,
-				synthesis: true,
-				hardCap: 9,
-			});
-			deepStrictEqual(resolveWorkerRuntimeBudget({ allowedTools: [] }), {
-				toolCalls: 9,
-				readReserve: 0,
-				synthesis: true,
-				hardCap: 9,
-			});
-		} finally {
-			if (previousCap === undefined) delete process.env.CLIO_WORKER_TOOL_CALL_CAP;
-			else process.env.CLIO_WORKER_TOOL_CALL_CAP = previousCap;
-		}
 	});
 
 	it("rejects invalid worker permission escalation spec shapes", () => {

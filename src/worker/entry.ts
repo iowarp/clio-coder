@@ -77,7 +77,7 @@ async function main(): Promise<number> {
 		runtime,
 		wireModelId: spec.wireModelId,
 		allowedTools: spec.allowedTools,
-		...(spec.budget !== undefined ? { budget: spec.budget } : {}),
+		budget: spec.budget,
 		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
 		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),
 		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),
