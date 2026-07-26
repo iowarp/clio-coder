@@ -90,6 +90,15 @@ function receipt(
 		toolCalls: 0,
 		toolStats: [],
 		verification: options.verification ?? { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "balanced",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: options.quality ?? createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
 		sessionId: null,
 	};

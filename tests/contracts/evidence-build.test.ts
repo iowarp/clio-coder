@@ -126,6 +126,15 @@ async function sealRun(
 	});
 	const receipt = ledger.recordReceipt(envelope.id, {
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "balanced",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: {
 			version: 1,
 			typedValidations: [],
@@ -174,7 +183,7 @@ async function sealRun(
 	await ledger.persist();
 	const receiptPath = ledger.get(envelope.id)?.receiptPath;
 	if (!receiptPath) throw new Error("fixture receipt path missing");
-	strictEqual(receipt.integrity.version, 10);
+	strictEqual(receipt.integrity.version, 11);
 	return { runId: envelope.id, receiptPath };
 }
 

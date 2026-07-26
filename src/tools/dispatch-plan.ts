@@ -16,6 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { isRoutingIntent, type RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { DispatchFailoverCandidate, DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import { prepareDispatchArguments } from "./dispatch.js";
 
@@ -38,6 +39,8 @@ export interface DispatchPlanTaskView {
 	role?: "task" | "builder" | "reviewer" | "candidate" | "judge";
 	/** One-based source task or gate cycle/candidate number. */
 	position?: number;
+	/** Normalized advisory posture and hard bounds sealed into the plan. */
+	routingIntent?: RoutingIntent;
 	/** Approved failover mode sealed into the plan. */
 	failover?: DispatchFailoverMode;
 	/** Exact approved fallback tuples, order-significant, present only for approved failover. */
@@ -69,6 +72,7 @@ export interface ResolvedDispatchPlanArtifact {
 	tasks: Array<
 		Required<Pick<DispatchPlanTaskView, "agent" | "task" | "model" | "node" | "target">> &
 			Required<Pick<DispatchPlanTaskView, "nodeKind" | "failover">> &
+			Required<Pick<DispatchPlanTaskView, "routingIntent">> &
 			Pick<DispatchPlanTaskView, "briefing" | "nodeHost" | "role" | "position" | "allowedCandidates">
 	>;
 	costCeilingUsd: number;
@@ -124,7 +128,7 @@ function taskViews(args: Record<string, unknown>): DispatchPlanTaskView[] {
 }
 
 function failoverModeOf(value: unknown): DispatchFailoverMode | undefined {
-	return value === "none" || value === "approved" || value === "automatic" ? value : undefined;
+	return value === "none" || value === "approved" ? value : undefined;
 }
 
 /**
@@ -181,8 +185,13 @@ function renderPlanText(
 		const role =
 			task.role !== undefined ? ` role=${task.role}${task.position !== undefined ? `#${task.position}` : ""}` : "";
 		const failover = task.failover !== undefined ? ` failover=${task.failover}` : "";
+		const routing = task.routingIntent;
+		const routingText =
+			routing === undefined
+				? ""
+				: ` posture=${routing.posture} maxCostUsd=${routing.maxCostUsd ?? "none"} deadlineMs=${routing.deadlineMs ?? "none"} minimumQuality=${routing.minimumQuality ?? "none"} locality=${routing.locality}`;
 		lines.push(
-			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover} task=${JSON.stringify(safeField(task.task))}`,
+			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover}${routingText} task=${JSON.stringify(safeField(task.task))}`,
 		);
 		if (task.allowedCandidates !== undefined) {
 			for (const [candidateIndex, candidate] of task.allowedCandidates.entries()) {
@@ -220,6 +229,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	if (value.briefing !== undefined && (typeof value.briefing !== "string" || value.briefing.trim().length === 0))
 		return false;
 	if (failoverModeOf(value.failover) === undefined) return false;
+	if (!isRoutingIntent(value.routingIntent)) return false;
 	if (value.failover === "approved") {
 		if (canonicalCandidates(value.allowedCandidates) === null) return false;
 	} else if (value.allowedCandidates !== undefined) {
@@ -279,6 +289,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			nodeKind: task.nodeKind,
 			target: task.target.trim(),
 			failover: task.failover,
+			routingIntent: structuredClone(task.routingIntent),
 			...(task.failover === "approved" && canonicalCandidates(task.allowedCandidates) !== null
 				? { allowedCandidates: canonicalCandidates(task.allowedCandidates) as DispatchFailoverCandidate[] }
 				: {}),

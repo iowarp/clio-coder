@@ -243,6 +243,15 @@ async function recordHeadlessMainAgentReceipt(input: {
 		// validation tool gates it, and its cost comes from the session usage
 		// meter rather than a resolved worker pricing table.
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "manual",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null }),
 		costProvenance: "unknown",
 		startedAt: input.startedAt,

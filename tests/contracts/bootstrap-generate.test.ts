@@ -43,6 +43,15 @@ async function bootstrapInput(): Promise<BootstrapGenerateInput> {
 function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 	return {
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "balanced",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: {
 			version: 1,
 			typedValidations: [],
@@ -82,7 +91,7 @@ function receipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
 		toolCalls: 2,
 		toolStats: [],
 		sessionId: null,
-		integrity: { version: 10, algorithm: "sha256", digest: "0".repeat(64) },
+		integrity: { version: 11, algorithm: "sha256", digest: "0".repeat(64) },
 		...overrides,
 	};
 }

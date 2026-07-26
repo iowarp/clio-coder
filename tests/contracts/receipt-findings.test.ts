@@ -97,6 +97,15 @@ function draft(partial: Partial<RunReceiptDraft> = {}): RunReceiptDraft {
 		sessionId: "session-1",
 		...partial,
 		verification: partial.verification ?? { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "balanced",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: partial.quality ?? {
 			version: 1,
 			typedValidations: [],

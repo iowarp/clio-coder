@@ -189,6 +189,15 @@ function runReceipt(runId: string, task: string, overrides: Partial<RunReceipt> 
 	const draft: RunReceiptDraft = {
 		executionRole: "builder",
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "balanced",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: {
 			version: 1,
 			typedValidations: [],

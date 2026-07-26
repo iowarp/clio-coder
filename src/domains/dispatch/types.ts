@@ -13,6 +13,7 @@ import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeTargetSnapshot } from "../providers/index.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
+import type { RoutingIntent } from "./routing-intent.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
@@ -267,7 +268,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 10;
+	version: 11;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -638,6 +639,8 @@ export interface RunReceipt {
 	toolActivity?: ToolActivitySummary;
 	/** Integrity-sealed evidence confidence. Sealed on every receipt. */
 	verification: RunReceiptVerification;
+	/** Required normalized routing request, sealed without task or prompt data. */
+	routingIntent: RoutingIntent;
 	/** Required routing-quality facts known at receipt finalization. */
 	quality: RunReceiptQuality;
 	skillActivations?: SkillActivation[];
@@ -662,4 +665,5 @@ export interface RunReceipt {
 	integrity: RunReceiptIntegrity;
 }
 
-export type RunReceiptDraft = Omit<RunReceipt, "integrity">;
+export type RunReceiptDraft = Omit<RunReceipt, "integrity" | "routingIntent"> &
+	Partial<Pick<RunReceipt, "routingIntent">>;

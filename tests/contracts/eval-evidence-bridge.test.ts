@@ -43,7 +43,7 @@ function receipt(partial: Partial<RunReceipt> = {}): RunReceipt {
 			resultContract: null,
 		},
 		sessionId: null,
-		integrity: { version: 10, algorithm: "sha256", digest: "d".repeat(64) },
+		integrity: { version: 11, algorithm: "sha256", digest: "d".repeat(64) },
 		...partial,
 	} as RunReceipt;
 }

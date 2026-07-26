@@ -74,6 +74,15 @@ function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
 	return {
 		verification: { state: "unverified", basis: "no-validation-tool" },
+		routingIntent: {
+			posture: "balanced",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
 		quality: {
 			version: 1,
 			typedValidations: [],
@@ -191,11 +200,12 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-retired-version");
 		const draft = fixtureReceiptDraft(envelope);
 		const current = computeReceiptIntegrity(draft, envelope);
+		if (draft.routingIntent === undefined) throw new Error("fixture routing intent missing");
 
-		// v9 is the shape Slice 3 retired; it is rejected, never upgraded.
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+		// Every shape before routing intent became required is rejected, never upgraded.
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
-			const receipt: RunReceipt = { ...draft, integrity };
+			const receipt: RunReceipt = { ...draft, routingIntent: draft.routingIntent, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
 		}
 	});
@@ -204,7 +214,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 10);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 11);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");

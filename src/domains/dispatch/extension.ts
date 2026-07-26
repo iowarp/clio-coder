@@ -165,6 +165,7 @@ import {
 } from "./route-decision.js";
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
 import { reduceRouteQuality } from "./route-quality.js";
+import { defaultRoutingIntent } from "./routing-intent.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, openLedger } from "./state.js";
 import {
@@ -2035,6 +2036,9 @@ export function createDispatchBundle(
 			denyDispatchForBudget(preflight, req.agentId);
 		}
 		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, settings?.defaults.maxTokens ?? 32768);
+		const intentCeiling = req.routingIntent?.maxCostUsd;
+		if (intentCeiling !== null && intentCeiling !== undefined && estimateUsd > intentCeiling)
+			denyDispatchForBudget({ currentUsd: estimateUsd, ceilingUsd: intentCeiling }, req.agentId, estimateUsd);
 		const heldUsd = reservedBudgetUsd();
 		const projectedUsd = preflight.currentUsd + heldUsd + (req.reservation === undefined ? estimateUsd : 0);
 		if (scheduling.checkCeiling(projectedUsd) !== "under") {
@@ -3381,6 +3385,7 @@ export function createDispatchBundle(
 				// own tools, so no zero-activity note is derived from this record.
 				toolActivity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
+				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
 				autonomyEnforcement: autonomyEnforcementForAcpDelegation(
 					lifecycle.autonomy,
@@ -4335,6 +4340,7 @@ export function createDispatchBundle(
 					{ toolStats: finalToolStats },
 					{ capabilityClass: lifecycle.capabilityClass },
 				),
+				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				quality: createRunReceiptQuality({
 					...(req.responseSchema === undefined ? {} : { responseSchema: req.responseSchema }),
 					runtimeEnforceable:
@@ -4866,17 +4872,11 @@ export function createDispatchBundle(
 		return selectRouteCandidates(resolved, probes);
 	}
 
-	/**
-	 * Build and record the shadow decision for a route that is already resolved
-	 * and about to execute.
-	 *
-	 * Shadow means advisory: this returns a handle the caller seals onto the
-	 * receipt and hands the outcome to, and nothing else. No caller reads
-	 * `decision.selected` back into placement, so a shadow decision cannot move
-	 * the executed route across a success, a target failover, or a node failover.
-	 * The whole function is failure-isolated: observation must never sink a
-	 * dispatch that admission already approved.
-	 */
+	/** Build and record the shadow decision for an already resolved route.
+	 * Shadow returns a handle the caller seals onto the receipt and outcome. No caller reads
+	 * `decision.selected` back into placement, so it cannot move the executed route.
+	 * Observation is failure-isolated and must never sink a
+	 * dispatch that admission already approved. */
 	function observeShadowRoute(req: DispatchRequest, placedNode?: RunNodeIdentity): RouteObservationHandle | null {
 		if (routeObserver === null) return null;
 		try {
