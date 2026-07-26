@@ -29,10 +29,10 @@ export interface RemoteSkillDetail {
 }
 
 interface CacheData {
-	/** Epoch ms of the last successful listing fetch; absent until one succeeds. */
-	listingTimestamp?: number;
-	/** Epoch ms of the last successful detail fetch; absent until one succeeds. */
-	detailTimestamp?: number;
+	/** Epoch ms of the last successful listing fetch. */
+	listingTimestamp: number;
+	/** Epoch ms of the last successful detail fetch. */
+	detailTimestamp: number;
 	skills: RemoteSkill[];
 	details: Record<string, { description?: string; version?: string; body: string }>;
 }
@@ -70,14 +70,14 @@ function loadCache(cacheDir: string): CacheData | null {
 		const record = data as Record<string, unknown>;
 		if (!Array.isArray(record.skills)) return null;
 		const details = typeof record.details === "object" && record.details !== null ? record.details : {};
-		// Legacy caches used one shared `timestamp` for both listing and details;
-		// map it onto both so older cache files keep working after the upgrade.
-		const legacy = typeof record.timestamp === "number" ? record.timestamp : undefined;
-		const listingTimestamp = typeof record.listingTimestamp === "number" ? record.listingTimestamp : legacy;
-		const detailTimestamp = typeof record.detailTimestamp === "number" ? record.detailTimestamp : legacy;
+		if (!Number.isFinite(record.listingTimestamp) || !Number.isFinite(record.detailTimestamp)) {
+			throw new Error(
+				`marketplace cache has an invalid schema: missing listingTimestamp or detailTimestamp in ${file}. Remove the file to refresh remote marketplace cache.`,
+			);
+		}
 		return {
-			...(listingTimestamp !== undefined ? { listingTimestamp } : {}),
-			...(detailTimestamp !== undefined ? { detailTimestamp } : {}),
+			listingTimestamp: record.listingTimestamp as number,
+			detailTimestamp: record.detailTimestamp as number,
 			skills: record.skills.filter(isRemoteSkill),
 			details: details as CacheData["details"],
 		};
@@ -130,12 +130,7 @@ export async function fetchRemoteMarketplace(
 ): Promise<RemoteSkill[]> {
 	const now = options.nowFn?.() ?? Date.now();
 	const cache = loadCache(cacheDir);
-	if (
-		!options.forceRefresh &&
-		cache &&
-		cache.listingTimestamp !== undefined &&
-		now - cache.listingTimestamp < CACHE_TTL_MS
-	) {
+	if (!options.forceRefresh && cache && now - cache.listingTimestamp < CACHE_TTL_MS) {
 		return cache.skills;
 	}
 	const fetcher = options.fetchFn ?? fetch;
@@ -156,7 +151,7 @@ export async function fetchRemoteMarketplace(
 			}));
 		saveCache(cacheDir, {
 			listingTimestamp: now,
-			...(cache?.detailTimestamp !== undefined ? { detailTimestamp: cache.detailTimestamp } : {}),
+			detailTimestamp: cache?.detailTimestamp ?? now - CACHE_TTL_MS,
 			skills,
 			details: cache?.details ?? {},
 		});
@@ -201,13 +196,7 @@ export async function fetchRemoteSkillDetail(
 	const now = options.nowFn?.() ?? Date.now();
 	const cache = loadCache(cacheDir);
 	const cached = cache?.details[name];
-	if (
-		!options.forceRefresh &&
-		cache &&
-		cached &&
-		cache.detailTimestamp !== undefined &&
-		now - cache.detailTimestamp < CACHE_TTL_MS
-	) {
+	if (!options.forceRefresh && cache && cached && now - cache.detailTimestamp < CACHE_TTL_MS) {
 		return { ...cached, source: "cache" };
 	}
 	const fetcher = options.fetchFn ?? fetch;
@@ -216,10 +205,14 @@ export async function fetchRemoteSkillDetail(
 		const res = await fetcher(rawUrl, { headers: { "User-Agent": "clio-coder" }, signal: requestSignal(options.signal) });
 		if (!res.ok) throw new Error(`Failed to fetch SKILL.md: ${res.status}`);
 		const detail = parseSkillMarkdown(await res.text());
-		// A detail fetch owns only the detail timestamp; it must never stamp the
-		// listing timestamp, or a cold-cache detail fetch would publish an empty
-		// `skills` listing that looks fresh for the full TTL.
-		const next: CacheData = cache ?? { skills: [], details: {} };
+		// A detail fetch owns only the detail timestamp. A cold cache receives an
+		// already expired listing timestamp so its empty listing is never fresh.
+		const next: CacheData = cache ?? {
+			listingTimestamp: now - CACHE_TTL_MS,
+			detailTimestamp: now - CACHE_TTL_MS,
+			skills: [],
+			details: {},
+		};
 		next.details[name] = detail;
 		next.detailTimestamp = now;
 		saveCache(cacheDir, next);

@@ -31,6 +31,15 @@ describe("contracts/cli-args-contract", () => {
 		});
 	}
 
+	for (const flag of ["--probe", "--no-probe"]) {
+		it(`clio models ${flag} rejects the removed flag`, async () => {
+			const result = await runCli(["models", flag], { env: scratch.env });
+			strictEqual(result.code, 2, `stderr=${result.stderr}`);
+			strictEqual(result.stdout, "", `unexpected stdout: ${result.stdout}`);
+			match(result.stderr, new RegExp(`unknown flag: ${flag}`));
+		});
+	}
+
 	// A real value followed by a subcommand is the advertised form and must keep
 	// working: the value is consumed and the subcommand runs.
 	it("clio --api-key <key> paths --json still runs the subcommand", async () => {

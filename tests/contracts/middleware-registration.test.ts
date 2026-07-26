@@ -10,7 +10,6 @@ import {
 } from "../../src/domains/middleware/budget.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import {
-	MIDDLEWARE_HOOK_BUDGET_MS,
 	type MiddlewareDiagnostic,
 	type MiddlewareHookRegistration,
 	type MiddlewareRuleDefinition,
@@ -249,8 +248,7 @@ function budgetSteadyStateFlags(diagnostics: ReadonlyArray<MiddlewareDiagnostic>
 }
 
 describe("phase-aware hook budgets", () => {
-	it("keeps the legacy flat constant exported and hot-path phases tighter than once-per-turn phases", () => {
-		strictEqual(MIDDLEWARE_HOOK_BUDGET_MS, 10);
+	it("keeps hot-path phase budgets tighter than once-per-turn phase budgets", () => {
 		ok(DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS.before_tool < DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS.turn_end);
 		ok(DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS.after_tool < DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS.turn_end);
 		ok(DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS.turn_end < DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS.on_compaction);

@@ -5,7 +5,7 @@ import { join, resolve, sep } from "node:path";
 const commandResultCache = new Map<string, string | undefined>();
 
 export interface ConfigValueWarning {
-	code: "dynamic-command-in-generic-resolution" | "dynamic-command-in-static-resolution";
+	code: "dynamic-command-in-static-resolution";
 	message: string;
 	command: string;
 }
@@ -40,14 +40,6 @@ function executeCommand(commandConfig: string): string | undefined {
 	const value = shellCommand(commandConfig.slice(1));
 	commandResultCache.set(commandConfig, value);
 	return value;
-}
-
-function warnLegacyCommand(config: string, options?: ResolveConfigValueOptions): void {
-	options?.onWarning?.({
-		code: "dynamic-command-in-generic-resolution",
-		message: "bang-prefixed config command is no longer executed through generic config value resolution",
-		command: config.slice(1),
-	});
 }
 
 function warnStaticCommand(config: string, options?: ResolveConfigValueOptions): void {
@@ -92,12 +84,5 @@ export function resolveStaticConfigValue(config: string, options?: ResolveConfig
 
 export function resolveDynamicConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
 	if (config.startsWith("!")) return executeCommand(config);
-	return resolveStaticConfigValue(config, options);
-}
-
-export function resolveConfigValue(config: string, options?: ResolveConfigValueOptions): string | undefined {
-	if (config.startsWith("!")) {
-		warnLegacyCommand(config, options);
-	}
 	return resolveStaticConfigValue(config, options);
 }

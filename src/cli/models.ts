@@ -21,18 +21,16 @@ export interface ModelRow {
 	state: string;
 }
 
-const HELP = `clio models [search] [--target <id>] [--json] [--offline] [--probe]
+const HELP = `clio models [search] [--target <id>] [--json] [--offline]
 
 List live-discovered models for configured targets.
 
 Options:
   --offline   use cached/configured/catalog model hints without probing targets
-  --probe     accepted for compatibility; live probing is the default
 `;
 
 interface ModelArgs {
 	json: boolean;
-	probe: boolean;
 	offline: boolean;
 	target?: string;
 	search?: string;
@@ -40,7 +38,7 @@ interface ModelArgs {
 }
 
 function parseModelArgs(args: ReadonlyArray<string>): ModelArgs {
-	const parsed: ModelArgs = { json: false, probe: false, offline: false, help: false };
+	const parsed: ModelArgs = { json: false, offline: false, help: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === undefined) continue;
@@ -52,11 +50,7 @@ function parseModelArgs(args: ReadonlyArray<string>): ModelArgs {
 			parsed.json = true;
 			continue;
 		}
-		if (arg === "--probe") {
-			parsed.probe = true;
-			continue;
-		}
-		if (arg === "--offline" || arg === "--no-probe") {
+		if (arg === "--offline") {
 			parsed.offline = true;
 			continue;
 		}
@@ -96,7 +90,7 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 		await loaded.stop();
 		return 1;
 	}
-	if (!parsed.offline || parsed.probe) {
+	if (!parsed.offline) {
 		try {
 			await providers.probeAllLive();
 		} catch (err) {

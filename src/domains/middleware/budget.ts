@@ -17,13 +17,6 @@
 import { MIDDLEWARE_HOOKS, type MiddlewareHook } from "./types.js";
 
 /**
- * Legacy flat budget. Retained as an exported constant for back-compat with
- * importers and as the ultimate fallback; the phase-aware map below supersedes
- * it for every live hook.
- */
-export const MIDDLEWARE_HOOK_BUDGET_MS = 10;
-
-/**
  * Forgiving, phase-aware defaults (ms). Tuned against the measured cost of the
  * once-per-turn assessors: the finish-contract's first turn_end warms the
  * session reader (~23ms observed), well under the 75ms turn_end budget, so it is

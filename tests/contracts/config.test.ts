@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
-import { expandConfigPath, expandConfigValue, resolveConfigValue } from "../../src/core/resolve-config-value.js";
+import { expandConfigPath, expandConfigValue } from "../../src/core/resolve-config-value.js";
 import { diffSettings } from "../../src/domains/config/classify.js";
 import { advanceScopedTarget } from "../../src/entry/orchestrator.js";
 
@@ -329,15 +329,7 @@ describe("contracts/config", () => {
 		strictEqual(advanceScopedTarget(settings, "forward"), null);
 	});
 
-	it("resolves environment variable references and literals", () => {
-		const value = resolveConfigValue("CLIO_TOKEN", { env: { CLIO_TOKEN: "secret" } });
-		strictEqual(value, "secret");
-
-		strictEqual(
-			resolveConfigValue("https://$CLIO_HOST/v1", { env: { CLIO_HOST: "example.test" } }),
-			"https://example.test/v1",
-		);
-
+	it("expands environment variable references", () => {
 		strictEqual(expandConfigValue(`Bearer $${"{CLIO_TOKEN}"}`, { env: { CLIO_TOKEN: "secret" } }), "Bearer secret");
 	});
 
