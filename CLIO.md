@@ -22,6 +22,22 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 
 `CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `clio context init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
 
+## Middleware
+
+Middleware hook budgets are strictly phase aware through `DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS`.
+
+## Providers
+
+Provider authentication credentials are managed through `openAuthStorage()`.
+
+## Model discovery CLI
+
+`clio models` probes live targets by default. The `--offline` flag disables live probing. The former `--probe` and `--no-probe` flags are not supported.
+
+## Remote marketplace cache
+
+Remote marketplace cache files require explicit finite `listingTimestamp` and `detailTimestamp` fields. Invalid cache files are refreshed from the remote marketplace.
+
 ## Process-safe dispatch admission
 
 - `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock. The lease bound fails admission closed rather than dropping a lease, and lease reclamation needs owner-liveness evidence wherever a process birth token cannot prove death.

@@ -87,7 +87,6 @@ export type {
 	RunMiddlewareRegistrationsOptions,
 } from "./runtime.js";
 export {
-	MIDDLEWARE_HOOK_BUDGET_MS,
 	registrationFromRuleDefinition,
 	runMiddlewareHook,
 	runMiddlewareRegistrations,

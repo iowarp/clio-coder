@@ -93,6 +93,34 @@ describe("contracts/marketplace-remote", () => {
 		strictEqual(skills.length, 2);
 	});
 
+	for (const missingField of ["listingTimestamp", "detailTimestamp"] as const) {
+		it(`rejects a cache missing ${missingField} and refreshes it`, async () => {
+			const cacheDir = tempDataDir();
+			const cacheFile = path.join(cacheDir, "marketplace-cache.json");
+			const cache: Record<string, unknown> = {
+				listingTimestamp: 1,
+				detailTimestamp: 1,
+				skills: [],
+				details: {},
+			};
+			delete cache[missingField];
+			writeFileSync(cacheFile, JSON.stringify(cache), "utf8");
+			let calls = 0;
+			const fetchFn = (async () => {
+				calls += 1;
+				return jsonResponse(LISTING_FIXTURE);
+			}) as typeof fetch;
+
+			const skills = await fetchRemoteMarketplace(cacheDir, { fetchFn, nowFn: () => 2 });
+
+			strictEqual(calls, 1);
+			strictEqual(skills.length, 2);
+			const refreshed = JSON.parse(readFileSync(cacheFile, "utf8")) as Record<string, unknown>;
+			strictEqual(Number.isFinite(refreshed.listingTimestamp), true);
+			strictEqual(Number.isFinite(refreshed.detailTimestamp), true);
+		});
+	}
+
 	it("fetches, parses, and caches a SKILL.md detail", async () => {
 		const cacheDir = tempDataDir();
 		let calls = 0;

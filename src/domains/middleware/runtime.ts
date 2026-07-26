@@ -9,9 +9,6 @@ import {
 	type MiddlewareRule,
 } from "./types.js";
 
-/** Re-exported for back-compat; the phase-aware map in budget.ts supersedes it. */
-export { MIDDLEWARE_HOOK_BUDGET_MS } from "./budget.js";
-
 /**
  * Runtime pairing of a declarative middleware rule with the data it needs to
  * act. The declarative `MiddlewareRule` is what validate.ts validates and what
