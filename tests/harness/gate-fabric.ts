@@ -33,6 +33,10 @@ export interface GateFabricScript {
 	builderWritesFile?: string;
 	reviewerAnswers?: string[];
 	judgeAnswers?: string[];
+	/** Number of retryable reviewer attempts to fail before scripted answers succeed. */
+	reviewerFailures?: number;
+	/** Number of retryable judge attempts to fail before scripted answers succeed. */
+	judgeFailures?: number;
 }
 
 export function scriptedGateFabric(script: GateFabricScript): {
@@ -42,13 +46,28 @@ export function scriptedGateFabric(script: GateFabricScript): {
 	const spawns: GateSpawnRecord[] = [];
 	const reviewerAnswers = [...(script.reviewerAnswers ?? [])];
 	const judgeAnswers = [...(script.judgeAnswers ?? [])];
+	let reviewerFailures = script.reviewerFailures ?? 0;
+	let judgeFailures = script.judgeFailures ?? 0;
 	const spawn = (spec: WorkerSpec, opts?: { cwd?: string }): SpawnedWorker => {
 		spawns.push({ spec, cwd: opts?.cwd });
 		let text: string;
+		let exitCode = 0;
 		if (spec.task.startsWith("Review the work of builder run")) {
-			text = reviewerAnswers.shift() ?? reviewReport("pass");
+			if (reviewerFailures > 0) {
+				reviewerFailures -= 1;
+				exitCode = 1;
+				text = "";
+			} else {
+				text = reviewerAnswers.shift() ?? reviewReport("pass");
+			}
 		} else if (spec.task.startsWith("Rank ")) {
-			text = judgeAnswers.shift() ?? judgeReport(1);
+			if (judgeFailures > 0) {
+				judgeFailures -= 1;
+				exitCode = 1;
+				text = "";
+			} else {
+				text = judgeAnswers.shift() ?? judgeReport(1);
+			}
 		} else {
 			text = script.builderText ?? "built it";
 			if (script.builderWritesFile !== undefined && opts?.cwd !== undefined) {
@@ -60,7 +79,7 @@ export function scriptedGateFabric(script: GateFabricScript): {
 		})();
 		return {
 			pid: 300 + spawns.length,
-			promise: Promise.resolve({ exitCode: 0, signal: null }),
+			promise: Promise.resolve({ exitCode, signal: null }),
 			events,
 			abort: () => {},
 			heartbeatAt: { current: Date.now() },

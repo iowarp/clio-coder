@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { DispatchConcurrencyError, type DispatchContract } from "../../src/domains/dispatch/contract.js";
 import {
@@ -223,6 +224,84 @@ describe("reviewer-gated dispatch", () => {
 	});
 	after(() => {
 		restoreDispatchState();
+	});
+
+	it("a retried reviewer resolves its staged output against the terminal attempt", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		const fabric = scriptedGateFabric({
+			reviewerFailures: 1,
+			reviewerAnswers: [reviewReport("pass", "retry verified the work")],
+		});
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 0,
+			spawnWorker: fabric.spawn,
+		});
+		await bundle.extension.start();
+		try {
+			const result = (await createDispatchTool({ dispatch: bundle.contract }).run(
+				{ tasks: ["fix after reviewer retry"], review: true },
+				approvedDispatchOptions(),
+			)) as ToolRunResult;
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			const artifacts = readGateDecisionArtifacts();
+			const passed = artifacts.find(({ artifact }) => artifact.topology === "review" && artifact.outcome === "pass");
+			ok(passed?.artifact.decider);
+			const reviewerReceipt = receiptsByRole(result.details, bundle.contract).get("reviewer")?.[0];
+			strictEqual(passed.artifact.decider.runId, reviewerReceipt?.runId);
+			ok(reviewerReceipt?.lineage);
+			notStrictEqual(passed.artifact.decider.runId, reviewerReceipt.lineage.rootRunId);
+			deepStrictEqual(readPendingGateDecisions(), { records: [], errors: [] });
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("crash recovery rebuilds a retried decider decision from verified receipts", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		const fabric = scriptedGateFabric({ reviewerFailures: 1 });
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 0,
+			spawnWorker: fabric.spawn,
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const subjectResult = (await tool.run({ tasks: ["recovery subject"] }, approvedDispatchOptions())) as ToolRunResult;
+			strictEqual(subjectResult.kind, "ok");
+			const subject = receiptsByRole(subjectResult.details, bundle.contract).get("none")?.[0];
+			ok(subject);
+			const group = "retried-reviewer-recovery";
+			const handle = await bundle.contract.dispatch({
+				agentId: DEFAULT_GATE_DECIDER_AGENT_ID,
+				executionRole: "reviewer",
+				task: `Review the work of builder run ${subject.runId}`,
+				gate: { role: "reviewer", group, cycle: 1, subjects: [subjectRefForTest(subject)] },
+			});
+			for await (const _event of handle.events) {
+				// Simulate the coordinator draining and durably staging terminal output.
+			}
+			const terminal = await handle.finalPromise;
+			ok(terminal.lineage);
+			notStrictEqual(terminal.runId, terminal.lineage.rootRunId);
+			stagePendingGateOutput({
+				group,
+				topology: "review",
+				cycle: 1,
+				subjects: [subjectRefForTest(subject)],
+				deciderRunId: terminal.runId,
+				finalOutput: reviewReport("pass", "recovered terminal retry"),
+			});
+
+			const trigger = (await tool.run({ tasks: ["trigger recovery"] }, approvedDispatchOptions())) as ToolRunResult;
+			strictEqual(trigger.kind, "ok", trigger.kind === "error" ? trigger.message : "");
+			const recovered = readGateDecisionArtifacts(group).find(({ artifact }) => artifact.outcome === "pass");
+			strictEqual(recovered?.artifact.decider?.runId, terminal.runId);
+			deepStrictEqual(readPendingGateDecisions(), { records: [], errors: [] });
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("passes on the first cycle with chained receipts and a read-only reviewer", async () => {
@@ -469,6 +548,32 @@ describe("reviewer-gated dispatch", () => {
 });
 
 describe("compete dispatch", () => {
+	it("a retried judge resolves its staged output against the terminal attempt", async () => {
+		const repo = makeCompeteRepo();
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.workers.maxRetries = 1;
+		const fabric = scriptedGateFabric({ judgeFailures: 1, judgeAnswers: [judgeReport(2, "retry chose two")] });
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			resilienceCooldownMs: 0,
+			spawnWorker: fabric.spawn,
+		});
+		await bundle.extension.start();
+		try {
+			const result = (await createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" }).run(
+				{ tasks: [{ task: "retry the judge", cwd: repo }], mode: "compete", candidates: 2 },
+				{},
+			)) as ToolRunResult;
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			const winner = readGateDecisionArtifacts().find(({ artifact }) => artifact.outcome === "winner");
+			ok(winner?.artifact.decider);
+			const judge = receiptsByRole(result.details, bundle.contract).get("judge")?.[0];
+			strictEqual(winner.artifact.decider.runId, judge?.runId);
+			deepStrictEqual(readPendingGateDecisions(), { records: [], errors: [] });
+		} finally {
+			await bundle.extension.stop?.();
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
 	let repo = "";
 	beforeEach(() => {
 		isolateDispatchState();
