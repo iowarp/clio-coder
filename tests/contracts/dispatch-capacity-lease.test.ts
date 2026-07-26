@@ -1,45 +1,51 @@
-import { match, ok, strictEqual } from "node:assert";
+import { match, ok, strictEqual, throws } from "node:assert";
 import { fork } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
 	acquireCapacityLease,
+	capacityDrain,
 	heartbeatCapacityLease,
 	listCapacityLeases,
-	rebindCapacityLease,
+	MAX_CAPACITY_LEASES,
+	processBirthToken,
 	setCapacityDraining,
+	writeCapacityStateUnsafe,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import {
 	createDispatchReservation,
 	getDispatchReservation,
 	transferDispatchReservationToLease,
 } from "../../src/domains/dispatch/reservation-store.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
-const homes: string[] = [];
+// The state dir is memoized, so a bare env edit would silently leave every test
+// in this file sharing one store. Reset the cache with the env.
+let isolated: IsolatedClioEnv | null = null;
 function home(): string {
-	const value = mkdtempSync(join(tmpdir(), "clio-lease-"));
-	homes.push(value);
-	process.env.HOME = value;
-	process.env.XDG_STATE_HOME = join(value, "state");
-	return value;
+	isolated = isolateClioEnv("clio-lease-");
+	return isolated.dir;
 }
 afterEach(() => {
-	for (const value of homes.splice(0)) rmSync(value, { recursive: true, force: true });
-	delete process.env.XDG_STATE_HOME;
+	isolated?.restore();
+	isolated = null;
 });
 const limits = { global: 1, nodes: { local: 1, mini: 1 } };
 
 describe("durable dispatch capacity leases", () => {
 	it("two processes cannot acquire one capacity slot", async () => {
-		const scratch = home();
-		const spawn = (id: string) =>
-			fork(join(process.cwd(), "tests/fixtures/capacity-lease-child.ts"), [id], {
-				execArgv: ["--import", "tsx"],
-				env: { ...process.env, HOME: scratch, XDG_STATE_HOME: join(scratch, "state") },
-				stdio: ["ignore", "ignore", "ignore", "ipc"],
-			});
+		home();
+		const spawn = (id: string, startAtMs?: number) =>
+			fork(
+				join(process.cwd(), "tests/fixtures/capacity-lease-child.ts"),
+				startAtMs === undefined ? [id] : [id, String(startAtMs)],
+				{
+					execArgv: ["--import", "tsx"],
+					// The scratch CLIO_* dirs are already in this process's env.
+					env: { ...process.env },
+					stdio: ["ignore", "ignore", "ignore", "ipc"],
+				},
+			);
 		const first = spawn("one");
 		const firstMessage = await new Promise<{ ok: boolean }>((resolve) => first.once("message", resolve));
 		strictEqual(firstMessage.ok, true);
@@ -51,6 +57,29 @@ describe("durable dispatch capacity leases", () => {
 		match(secondMessage.message ?? "", /capacity reached/);
 		first.kill();
 		second.kill();
+	});
+	it("concurrent processes racing one slot produce exactly one lease", async () => {
+		home();
+		const startAtMs = Date.now() + 1_500;
+		const children = ["a", "b", "c", "d"].map((id) =>
+			fork(join(process.cwd(), "tests/fixtures/capacity-lease-child.ts"), [id, String(startAtMs)], {
+				execArgv: ["--import", "tsx"],
+				env: { ...process.env },
+				stdio: ["ignore", "ignore", "ignore", "ipc"],
+			}),
+		);
+		try {
+			const results = await Promise.all(
+				children.map(
+					(child) => new Promise<{ ok: boolean; message?: string }>((resolve) => child.once("message", resolve)),
+				),
+			);
+			strictEqual(results.filter((result) => result.ok).length, 1, JSON.stringify(results));
+			for (const denied of results.filter((result) => !result.ok)) match(denied.message ?? "", /capacity reached/);
+			strictEqual(listCapacityLeases().length, 1);
+		} finally {
+			for (const child of children) child.kill();
+		}
 	});
 	it("plan reservation transfers atomically into an assignment lease", () => {
 		home();
@@ -75,8 +104,11 @@ describe("durable dispatch capacity leases", () => {
 	});
 	it("retry rebinds one lease instead of acquiring a second", () => {
 		home();
-		acquireCapacityLease({ assignmentId: "a", nodeId: "local", limits });
-		rebindCapacityLease("a", "mini", limits);
+		// The production retry path re-enters acquisition with the assignment id it
+		// already holds, on whichever node the retry resolved.
+		const first = acquireCapacityLease({ assignmentId: "a", nodeId: "local", limits });
+		const second = acquireCapacityLease({ assignmentId: "a", nodeId: "mini", limits });
+		strictEqual(second.leaseId, first.leaseId);
 		strictEqual(listCapacityLeases().length, 1);
 		strictEqual(listCapacityLeases()[0]?.nodeId, "mini");
 	});
@@ -122,5 +154,61 @@ describe("durable dispatch capacity leases", () => {
 		}
 		ok(error instanceof Error);
 		match(error.message, /draining/);
+	});
+	it("an abandoned operator drain expires instead of wedging the machine", () => {
+		home();
+		const drain = setCapacityDraining(true, { nowMs: 1_000, ttlMs: 10 });
+		strictEqual(drain?.requestedByPid, process.pid);
+		strictEqual(capacityDrain(1_005)?.requestedByPid, process.pid);
+		strictEqual(capacityDrain(1_011), null);
+		const lease = acquireCapacityLease({ assignmentId: "a", nodeId: "local", limits, nowMs: 1_011 });
+		strictEqual(lease.assignmentId, "a");
+	});
+	it("an unsupported birth-token source falls back to owner liveness", () => {
+		home();
+		acquireCapacityLease({
+			assignmentId: "a",
+			nodeId: "local",
+			limits,
+			nowMs: 10,
+			ttlMs: 100,
+			ownerPid: 42,
+			processBirthToken: "pid-42",
+		});
+		const synthetic = { birthToken: (pid: number) => `pid-${pid}`, tokenProvesDeath: false };
+		strictEqual(listCapacityLeases({ nowMs: 20, probe: { ...synthetic, alive: () => true } }).length, 1);
+		strictEqual(listCapacityLeases({ nowMs: 20, probe: { ...synthetic, alive: () => false } }).length, 0);
+	});
+	it("the lease bound fails admission closed instead of dropping a lease", () => {
+		home();
+		const at = new Date(1_000).toISOString();
+		writeCapacityStateUnsafe({
+			version: 2,
+			draining: null,
+			reservations: [],
+			leases: Array.from({ length: MAX_CAPACITY_LEASES }, (_, index) => ({
+				leaseId: `lease-${index}`,
+				assignmentId: `assignment-${index}`,
+				nodeId: "local",
+				ownerPid: process.pid,
+				processBirthToken: processBirthToken() ?? "unknown",
+				acquiredAt: at,
+				expiresAt: new Date(9_000_000).toISOString(),
+				heartbeatAt: at,
+				reservationOwnerId: null,
+				reservationMemberId: null,
+			})),
+		});
+		throws(
+			() =>
+				acquireCapacityLease({
+					assignmentId: "overflow",
+					nodeId: "local",
+					limits: { global: MAX_CAPACITY_LEASES + 10, nodes: {} },
+					nowMs: 2_000,
+				}),
+			/lease store is full/,
+		);
+		strictEqual(listCapacityLeases({ nowMs: 2_000 }).length, MAX_CAPACITY_LEASES);
 	});
 });

@@ -12,6 +12,12 @@
  * ineligible node is an admission failure with the reason spelled out; the
  * least-loaded path silently skips ineligible nodes and falls back to local.
  * No scored or learned placement authority exists here by design.
+ *
+ * Capacity here is advisory spreading, not authority. Durable assignment leases
+ * decide admission under the state lock, so this pass only avoids sending a
+ * request to a node whose slots are already taken while a sibling node is idle.
+ * A pinned node that is momentarily full is still placed, because the bounded
+ * admission queue is the right place to wait for its slot.
  */
 
 import type { ClioSettings } from "../../core/config.js";
@@ -128,8 +134,9 @@ export function createFleetPlacementResolver(
 				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
 				.filter((entry) => !excludedNodeIds.has(entry.node.id))
 				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
+				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
 				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
-				.sort((a, b) => a.order - b.order);
+				.sort((a, b) => (a.snapshot?.activeWorkers ?? 0) - (b.snapshot?.activeWorkers ?? 0) || a.order - b.order);
 			const selected = eligible[0];
 			if (selected) return sshPlacement(selected.node);
 		}
@@ -184,8 +191,9 @@ export function createFleetPlacementPreviewResolver(
 			const eligible = nodes
 				.map((node, order) => ({ node, order, snapshot: fleet.get(node.id) }))
 				.filter((entry) => entry.snapshot !== null && entry.snapshot.state === "online")
+				.filter((entry) => (entry.snapshot?.activeWorkers ?? 0) < entry.node.maxWorkers)
 				.filter((entry) => verdictFor(entry.node, projectRoot, preflightRecords).ok)
-				.sort((a, b) => a.order - b.order);
+				.sort((a, b) => (a.snapshot?.activeWorkers ?? 0) - (b.snapshot?.activeWorkers ?? 0) || a.order - b.order);
 			const selected = eligible[0]?.node;
 			if (selected !== undefined) return remote(selected);
 		}

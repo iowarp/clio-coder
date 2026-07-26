@@ -1,6 +1,14 @@
 import { acquireCapacityLease } from "../../src/domains/dispatch/capacity-lease.js";
 
 const assignmentId = process.argv[2] ?? "child";
+// Optional barrier: every child races for the same slot at the same instant, so
+// the test exercises real lock contention instead of sequential visibility.
+const startAtMs = Number.parseInt(process.argv[3] ?? "", 10);
+if (Number.isFinite(startAtMs)) {
+	while (Date.now() < startAtMs) {
+		// spin: a timer would let the children drift apart
+	}
+}
 try {
 	const lease = acquireCapacityLease({
 		assignmentId,

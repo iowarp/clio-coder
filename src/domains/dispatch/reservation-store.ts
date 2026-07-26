@@ -227,31 +227,6 @@ export function createDispatchReservation(input: {
 	});
 }
 
-/**
- * Claim a member's held slot for execution. A member is consumed exactly once,
- * by the assignment, not once per attempt: a retry rebinds the member instead.
- */
-export function consumeDispatchReservation(
-	ownerId: string,
-	memberId: string,
-	options?: { nowMs?: number },
-): DispatchReservationRecord {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const nowMs = options?.nowMs ?? Date.now();
-		const records = expireRecords(readStore(), nowMs, false);
-		const record = records.find((entry) => entry.ownerId === ownerId);
-		if (record?.status !== "active") throw new Error(`dispatch: reservation '${ownerId}' is not active`);
-		const member = record.members.find((entry) => entry.memberId === memberId);
-		if (!member) throw new Error(`dispatch: reservation '${ownerId}' has no member '${memberId}'`);
-		if (member.status !== "held")
-			throw new Error(`dispatch: reservation member '${memberId}' was already ${member.status}`);
-		member.status = "consumed";
-		member.consumedAt = new Date(nowMs).toISOString();
-		writeStore(records);
-		return copyRecord(record);
-	});
-}
-
 /** Atomically convert one held plan member into the assignment's durable lease. */
 export function transferDispatchReservationToLease(input: {
 	ownerId: string;
@@ -285,7 +260,10 @@ export function transferDispatchReservationToLease(input: {
 
 /**
  * Move a member's held capacity to the node a retry actually resolved, and
- * re-check the aggregate budget against the retry's own estimate. Atomic under
+ * re-check the aggregate budget against the retry's own estimate. The durable
+ * lease moves the capacity slot on a retry, but nothing else re-checks money, so
+ * a retry that resolves a costlier route would otherwise run outside what the
+ * plan reserved. Atomic under
  * the state-file lock: the old node's slot is released and the new one acquired
  * in a single write, so a concurrent plan can never observe both held. Fails
  * closed with a named reason, which the caller surfaces as an admission denial
@@ -444,6 +422,38 @@ export function cleanupDispatchReservations(options?: { startup?: boolean; nowMs
 		if (before !== after) writeStore(records);
 		return before - after;
 	});
+}
+
+/**
+ * The concurrent peak a plan reserved, which is the widest wave it was admitted
+ * against. Members settle as the plan runs, but the bound does not move.
+ */
+export function reservedPlanPeakSlots(ownerId: string, onError?: (error: unknown) => void): number | undefined {
+	try {
+		const record = getDispatchReservation(ownerId);
+		if (record === null || record.status !== "active") return undefined;
+		return reservationAllocation(record.members).globalSlots;
+	} catch (error) {
+		// An unreadable store cannot bound a plan; capacity still bounds admission.
+		onError?.(error);
+		return undefined;
+	}
+}
+
+/** Queue identity for a reserved member: its plan, ordered by reserved wave. */
+export function planQueueSlot(
+	ownerId: string,
+	memberId: string,
+	onError?: (error: unknown) => void,
+): { planId: string; planOrder?: number } {
+	try {
+		const wave = getDispatchReservation(ownerId)?.members.find((member) => member.memberId === memberId)?.wave;
+		return { planId: ownerId, ...(wave !== undefined ? { planOrder: wave } : {}) };
+	} catch (error) {
+		// Plan identity still holds without wave order; ordering falls back to FIFO.
+		onError?.(error);
+		return { planId: ownerId };
+	}
 }
 
 export function getDispatchReservation(ownerId: string): DispatchReservationRecord | null {

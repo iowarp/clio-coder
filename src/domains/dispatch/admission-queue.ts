@@ -37,13 +37,17 @@ export interface AdmissionQueue<T> {
 	cancel(requestId: string): boolean;
 	fail(requestId: string, error: Error): boolean;
 	admitNext(nowMs?: number, canAdmit?: (request: AdmissionQueueRequest<T>) => boolean): AdmissionQueueRequest<T> | null;
-	complete(requestId: string): void;
+	/** Return an assignment's plan slot once its work has settled. */
+	complete(assignmentId: string): void;
 	size(): number;
+	/** Assignments admitted and not yet completed, by plan. */
+	activePlanCount(planId: string): number;
 }
 export function createAdmissionQueue<T>(options: {
 	maxSize: number;
 	finiteCeilingMs: number;
-	reservedPlanPeaks?: Readonly<Record<string, number>>;
+	/** Reserved concurrent peak for a plan, resolved when the plan is seen. */
+	reservedPlanPeak?: (planId: string) => number | undefined;
 	now?: () => number;
 	onRelease?: (request: AdmissionQueueRequest<T>, reason: "canceled" | "timed_out") => void;
 }): AdmissionQueue<T> {
@@ -52,7 +56,9 @@ export function createAdmissionQueue<T>(options: {
 	if (!Number.isFinite(options.finiteCeilingMs) || options.finiteCeilingMs <= 0)
 		throw new Error("admission queue ceiling must be finite and positive");
 	const now = options.now ?? Date.now;
-	const activePlans = new Map<string, { count: number; requestIds: Set<string> }>();
+	// A plan slot belongs to an assignment, not to an attempt: a retry re-enters
+	// the queue with the slot it already holds and must not be blocked by itself.
+	const activePlans = new Map<string, Set<string>>();
 	const entries = new Map<
 		string,
 		{
@@ -106,17 +112,17 @@ export function createAdmissionQueue<T>(options: {
 				const entry = entries.get(request.requestId);
 				if (!entry) continue;
 				if (request.planId !== null) {
-					const active = activePlans.get(request.planId)?.count ?? 0;
-					const peak = options.reservedPlanPeaks?.[request.planId];
-					if (peak !== undefined && active >= peak) continue;
+					const active = activePlans.get(request.planId);
+					const peak = options.reservedPlanPeak?.(request.planId);
+					if (peak !== undefined && active !== undefined && !active.has(request.assignmentId) && active.size >= peak)
+						continue;
 				}
 				if (!canAdmit(request)) continue;
 				entries.delete(request.requestId);
 				clearTimeout(entry.timer);
 				if (request.planId !== null) {
-					const active = activePlans.get(request.planId) ?? { count: 0, requestIds: new Set<string>() };
-					active.count += 1;
-					active.requestIds.add(request.requestId);
+					const active = activePlans.get(request.planId) ?? new Set<string>();
+					active.add(request.assignmentId);
 					activePlans.set(request.planId, active);
 				}
 				entry.resolve({
@@ -129,14 +135,14 @@ export function createAdmissionQueue<T>(options: {
 			}
 			return null;
 		},
-		complete(requestId) {
+		complete(assignmentId) {
 			for (const [planId, active] of activePlans) {
-				if (!active.requestIds.delete(requestId)) continue;
-				active.count -= 1;
-				if (active.count === 0) activePlans.delete(planId);
+				if (!active.delete(assignmentId)) continue;
+				if (active.size === 0) activePlans.delete(planId);
 				return;
 			}
 		},
 		size: () => entries.size,
+		activePlanCount: (planId) => activePlans.get(planId)?.size ?? 0,
 	};
 }

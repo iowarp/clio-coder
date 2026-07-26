@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { ROUTE_CANDIDATE_LIMIT } from "../../src/domains/dispatch/route-candidates.js";
@@ -328,7 +329,7 @@ describe("resolved dispatch plan admission", () => {
 			const resolveNode = (request: { node?: string; agentId: string }): DispatchNodePlacement => {
 				const id = selectedNode(request);
 				placementRequests.push(id);
-				return { node: remoteNode(id), spawn: fabric.spawn, release: () => {} };
+				return { node: remoteNode(id), spawn: fabric.spawn };
 			};
 			const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 				spawnWorker: fabric.spawn,
@@ -530,7 +531,6 @@ describe("resolved dispatch plan admission", () => {
 			let ceilingUsd = 5;
 			const settings = baseSettings();
 			const fabric = successfulFabric();
-			let releases = 0;
 			const context = dispatchStubContext({
 				settings,
 				scheduling: {
@@ -542,13 +542,7 @@ describe("resolved dispatch plan admission", () => {
 			const bundle = makeDispatchBundle(context, {
 				spawnWorker: fabric.spawn,
 				previewNode: () => ({ node: { id: "blade", kind: "ssh", host: hostForBlade() } }),
-				resolveNode: () => ({
-					node: { id: "blade", kind: "ssh", host: hostForBlade() },
-					spawn: fabric.spawn,
-					release: () => {
-						releases += 1;
-					},
-				}),
+				resolveNode: () => ({ node: { id: "blade", kind: "ssh", host: hostForBlade() }, spawn: fabric.spawn }),
 			});
 			await bundle.extension.start();
 			try {
@@ -580,7 +574,8 @@ describe("resolved dispatch plan admission", () => {
 					match(verdict.result.message, drift === "ceiling" ? /cost ceiling drifted/ : /node identity drifted/);
 				}
 				strictEqual(fabric.spawns.length, 0, `${drift}: drift must fail before worker launch`);
-				strictEqual(releases, drift === "host" ? 1 : 0);
+				// Drift is caught before admission, so no capacity lease was taken.
+				strictEqual(listCapacityLeases().length, 0);
 			} finally {
 				await bundle.extension.stop?.();
 			}
