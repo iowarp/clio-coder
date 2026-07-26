@@ -123,6 +123,8 @@ interface EventSummary {
 	count: number;
 	types: string[];
 	lastAssistantText: string;
+	/** Immutable run id of the latest attempt represented by this assignment stream. */
+	terminalAttemptRunId: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -293,7 +295,7 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 		events: AsyncIterableIterator<unknown>,
 		bus: SafeEventBus | undefined,
 	): Promise<EventSummary> => {
-		const summary: EventSummary = { count: 0, types: [], lastAssistantText: "" };
+		const summary: EventSummary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: runId };
 		for await (const event of events) {
 			summary.count += 1;
 			const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
@@ -320,7 +322,12 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 			const runId = typeof event.runId === "string" ? event.runId : batchId;
 			const agentId = typeof event.agentId === "string" ? event.agentId : "batch";
 			const inner = event.event;
-			const summary = summaries.get(runId) ?? { count: 0, types: [], lastAssistantText: "" };
+			const summary = summaries.get(runId) ?? {
+				count: 0,
+				types: [],
+				lastAssistantText: "",
+				terminalAttemptRunId: runId,
+			};
 			summary.count += 1;
 			const type = isRecord(inner) && typeof inner.type === "string" ? inner.type : "unknown";
 			summary.types.push(type);
@@ -608,12 +615,15 @@ async function consumeGateSensitiveDispatchEvents(
 	agentId: string,
 	events: AsyncIterableIterator<unknown>,
 ): Promise<EventSummary> {
-	const summary: EventSummary = { count: 0, types: [], lastAssistantText: "" };
+	const summary: EventSummary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: runId };
 	const bus = fallbackProgressBus(deps);
 	for await (const event of events) {
 		summary.count += 1;
 		const type = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
 		summary.types.push(type);
+		if (type === "attempt_start" && isRecord(event) && typeof event.runId === "string" && event.runId.length > 0) {
+			summary.terminalAttemptRunId = event.runId;
+		}
 		const text = rawAssistantTextFromEvent(event);
 		if (text.trim().length > 0) summary.lastAssistantText = text;
 		deps.runEvents.recordEvent(runId, agentId, event);
@@ -1026,7 +1036,7 @@ async function runReviewGated(
 					topology: "review",
 					cycle: request.gate.cycle,
 					subjects: request.gate.subjects ?? [],
-					deciderRunId: handle.runId,
+					deciderRunId: summary.terminalAttemptRunId,
 					finalOutput: normalizedAssistantText(summary),
 					terminalCycle: request.gate.cycle === review.maxCycles,
 				});
@@ -1524,7 +1534,7 @@ async function runCompete(
 								topology: "compete",
 								cycle: request.gate.cycle,
 								subjects: request.gate.subjects ?? [],
-								deciderRunId: handle.runId,
+								deciderRunId: summary.terminalAttemptRunId,
 								finalOutput: normalizedAssistantText(summary),
 								...(request.cwd !== undefined ? { resourceRoot: request.cwd } : {}),
 							})
@@ -2954,7 +2964,16 @@ async function runBatch(
 	try {
 		const { summaries, receipts } = await registered.completion;
 		return receipts.map((receipt) =>
-			completeRun(deps, receipt, summaries.get(receipt.runId) ?? { count: 0, types: [], lastAssistantText: "" }),
+			completeRun(
+				deps,
+				receipt,
+				summaries.get(receipt.runId) ?? {
+					count: 0,
+					types: [],
+					lastAssistantText: "",
+					terminalAttemptRunId: receipt.runId,
+				},
+			),
 		);
 	} finally {
 		if (timer) clearTimeout(timer);
