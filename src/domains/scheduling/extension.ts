@@ -11,8 +11,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
 import { createBudgetState } from "./budget.js";
-import { createFleetRegistry, legacyClusterNodes } from "./cluster.js";
-import { createConcurrencyGate } from "./concurrency.js";
+import { createFleetRegistry } from "./cluster.js";
 import type { SchedulingContract } from "./contract.js";
 
 const DEFAULT_MAX_WORKERS = 4;
@@ -30,7 +29,6 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 
 	const settings = config.get();
 	let budget = createBudgetState(settings.budget.sessionCeilingUsd);
-	const gate = createConcurrencyGate(resolveMaxWorkers(settings.budget.concurrency));
 	const fleet = createFleetRegistry(() => config.get().fleet?.nodes ?? [], {
 		localMaxWorkers: () => resolveMaxWorkers(config.get().budget.concurrency),
 	});
@@ -85,11 +83,7 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
 		},
-		activeWorkers: () => gate.activeWorkers(),
-		maxWorkers: () => gate.maxWorkers,
-		tryAcquireWorker: () => gate.tryAcquire(),
-		releaseWorker: () => gate.release(),
-		listNodes: () => legacyClusterNodes(fleet),
+		maxWorkers: () => resolveMaxWorkers(config.get().budget.concurrency),
 		fleet,
 	};
 

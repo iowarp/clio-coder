@@ -22,6 +22,11 @@ Before handoff, run `npm run typecheck` and `npm run lint` for TypeScript and st
 
 `CLIO.md` is the versioned, human-owned project handbook and should be reviewed like source when intentionally changed. `.clio/codewiki.json`, `.clio/state.json`, `.clio/proposals/`, and `.clio/handoffs/` are ignored local context-engine artifacts. Do not commit `.clio/*` unless the user explicitly asks to force-add a shared artifact. `clio context init --propose` writes ignored drafts; `--apply` updates from the existing handbook; `--rewrite` generates a fresh handbook from repository structure and sibling context.
 
+## Process-safe dispatch admission
+
+- `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock.
+- `src/domains/dispatch/admission-queue.ts` owns bounded deterministic priority/FIFO ordering, finite queue deadlines, cancellation, and reserved plan-peak admission.
+
 ## Dispatch routing intent
 
 - `src/domains/dispatch/routing-intent.ts` strictly parses the model-facing routing object, applies shadow-balanced defaults, preserves exact route pins as fail-closed manual intent, and evaluates cost, deadline, quality, capability, and locality hard bounds.

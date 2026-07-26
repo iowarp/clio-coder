@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { DispatchConcurrencyError, type DispatchContract } from "../../src/domains/dispatch/contract.js";
+import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import {
 	DEFAULT_GATE_DECIDER_AGENT_ID,
 	gateRouteCorrelation,
@@ -94,7 +94,7 @@ function rejectingAdmissionContract(options: { abortThrowsFor?: string } = {}): 
 	const contract: DispatchContract = {
 		async dispatch(request) {
 			const cycle = request.gate?.role === "candidate" ? request.gate.cycle : 0;
-			if (cycle === 2) throw new DispatchConcurrencyError(1);
+			if (cycle === 2) throw new Error("dispatch: admission denied");
 			if (cycle === 3) await new Promise<void>((resolve) => setImmediate(resolve));
 			const runId = `candidate-run-${cycle}`;
 			accepted.push(runId);
@@ -642,7 +642,7 @@ describe("compete dispatch", () => {
 			strictEqual(result.kind, "error");
 			ok(result.kind === "error");
 			match(result.message, /candidate admission failed/);
-			match(result.message, /concurrency limit reached/);
+			match(result.message, /admission denied/);
 			deepStrictEqual(fake.accepted, ["candidate-run-1", "candidate-run-3"]);
 			deepStrictEqual(fake.abortAttempts, ["candidate-run-1", "candidate-run-3"]);
 			deepStrictEqual(fake.settled, ["candidate-run-1", "candidate-run-3"]);

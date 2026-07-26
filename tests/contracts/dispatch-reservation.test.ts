@@ -1,10 +1,9 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { clioStateDir } from "../../src/core/xdg.js";
+import { capacityStatePath, listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import {
 	consumeDispatchReservation,
@@ -18,7 +17,6 @@ import {
 } from "../../src/domains/dispatch/reservation-store.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
-import { createConcurrencyGate } from "../../src/domains/scheduling/concurrency.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import {
@@ -41,7 +39,6 @@ function settingsWithNode(maxWorkers = 1): typeof DEFAULT_SETTINGS {
 }
 
 function schedulingFor(settings: typeof DEFAULT_SETTINGS, maxWorkers: number, currentUsd = 0, ceilingUsd = 5) {
-	const gate = createConcurrencyGate(maxWorkers);
 	const fleet = createFleetRegistry(() => settings.fleet.nodes, { localMaxWorkers: () => maxWorkers });
 	return {
 		fleet,
@@ -53,10 +50,7 @@ function schedulingFor(settings: typeof DEFAULT_SETTINGS, maxWorkers: number, cu
 			currentUsd,
 			ceilingUsd,
 		}),
-		activeWorkers: () => gate.activeWorkers(),
-		maxWorkers: () => gate.maxWorkers,
-		tryAcquireWorker: () => gate.tryAcquire(),
-		releaseWorker: () => gate.release(),
+		maxWorkers: () => maxWorkers,
 	};
 }
 
@@ -391,15 +385,18 @@ describe("dispatch batch reservations", () => {
 			capacity,
 		});
 		// Rewrite the owning pids: one process that cannot exist, one that does.
-		const path = join(clioStateDir(), "dispatch-reservations.json");
+		const path = capacityStatePath();
 		const store = JSON.parse(readFileSync(path, "utf8")) as {
+			version: 1;
+			draining: boolean;
+			leases: unknown[];
 			reservations: Array<{ ownerId: string; ownerPid: number }>;
 		};
 		for (const record of store.reservations) {
 			// pid 1 is init: always alive, never this process.
 			record.ownerPid = record.ownerId === dead.ownerId ? 0x7ffffffe : 1;
 		}
-		writeFileSync(path, JSON.stringify({ version: 1, reservations: store.reservations }, null, 2));
+		writeFileSync(path, JSON.stringify(store, null, 2));
 
 		const bundle = makeDispatchBundle(dispatchStubContext());
 		await bundle.extension.start();
@@ -502,8 +499,11 @@ describe("dispatch batch reservations", () => {
 			const terminal = await handle.finalPromise;
 			strictEqual(terminal.outcome, "succeeded");
 			strictEqual(terminal.node?.id, "blade");
-			// The member's slot moved with the retry: mini is free, blade is held.
-			strictEqual(getDispatchReservation(reservation.ownerId)?.members[0]?.nodeId, "blade");
+			strictEqual(getDispatchReservation(reservation.ownerId)?.members[0]?.status, "released");
+			strictEqual(
+				listCapacityLeases().some((lease) => lease.assignmentId === handle.runId),
+				false,
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -597,7 +597,7 @@ describe("dispatch batch reservations", () => {
 			});
 			strictEqual((await handle.finalPromise).outcome, "failed");
 			const assignment = bundle.contract.assignments?.get(handle.runId);
-			match(String(assignment?.outcomeDetail), /rebind denied/);
+			match(String(assignment?.outcomeDetail), /capacity unavailable/);
 			// The member never escaped its reservation and is released exactly once.
 			const settled = getDispatchReservation(reservation.ownerId);
 			strictEqual(settled?.members[0]?.nodeId, "mini");

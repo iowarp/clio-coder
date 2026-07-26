@@ -127,17 +127,15 @@ describe("fleet settings validation", () => {
 });
 
 describe("fleet registry", () => {
-	it("lists local first, enforces per-node capacity, and frees on release", () => {
-		const registry = createFleetRegistry(() => [NODE_MINI], { localMaxWorkers: () => 4 });
+	it("lists local first and projects durable lease usage", () => {
+		const registry = createFleetRegistry(() => [NODE_MINI], {
+			localMaxWorkers: () => 4,
+			activeWorkers: (nodeId) => (nodeId === "mini" ? 1 : 0),
+		});
 		deepStrictEqual(
 			registry.list().map((node) => node.id),
 			["local", "mini"],
 		);
-		strictEqual(registry.tryAcquire("mini"), true);
-		strictEqual(registry.tryAcquire("mini"), false, "mini caps at 1 worker");
-		registry.release("mini");
-		strictEqual(registry.tryAcquire("mini"), true);
-		strictEqual(registry.tryAcquire("local"), true, "local has no per-node cap");
 		strictEqual(registry.get("mini")?.activeWorkers, 1);
 	});
 
@@ -211,11 +209,10 @@ describe("fleet placement resolution order", () => {
 		strictEqual(profileBound.registry.get("mini")?.activeWorkers, 0);
 	});
 
-	it("pins a previewed automatic node so later load cannot drift execution", () => {
-		const { preview, resolve, registry } = resolver();
+	it("pins a previewed automatic node so later state cannot drift execution", () => {
+		const { preview, resolve } = resolver();
 		const planned = preview({ agentId: "coder", executionRole: "builder", task: "t" }).node;
 		strictEqual(planned.id, "blade");
-		strictEqual(registry.tryAcquire("mini"), true, "unrelated load changes after approval");
 		const launched = resolve({ agentId: "coder", executionRole: "builder", task: "t", node: planned.id });
 		strictEqual(launched?.node.id, "blade", "execution honors the approved pin");
 	});
@@ -242,20 +239,13 @@ describe("fleet placement resolution order", () => {
 		strictEqual(placement?.node.id, "mini");
 	});
 
-	it("places on the least-loaded eligible node, then declaration order, then local", () => {
-		const { resolve, registry } = resolver();
-		const first = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
-		strictEqual(first?.node.id, "blade", "declaration order breaks the tie");
-		const second = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
-		strictEqual(second?.node.id, "mini", "blade now carries load");
-		const third = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
-		strictEqual(third?.node.id, "blade", "blade has spare capacity, mini is full");
-		const fourth = resolve({ agentId: "coder", executionRole: "builder", task: "t" });
-		strictEqual(fourth?.node.id, "local", "all remote capacity consumed");
-		strictEqual(registry.get("blade")?.activeWorkers, 2);
+	it("uses declaration order while durable admission owns capacity", () => {
+		const { resolve } = resolver();
+		strictEqual(resolve({ agentId: "coder", executionRole: "builder", task: "t" })?.node.id, "blade");
+		strictEqual(resolve({ agentId: "coder", executionRole: "builder", task: "t" })?.node.id, "blade");
 	});
 
-	it("rejects explicit pins on unknown, offline, unpreflighted, or full nodes", () => {
+	it("rejects explicit pins on unknown offline or unpreflighted nodes", () => {
 		const base = resolver();
 		throws(
 			() => base.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "ghost" }),
@@ -275,10 +265,6 @@ describe("fleet placement resolution order", () => {
 			() => unpreflighted.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" }),
 			/has not passed the fleet preflight/,
 		);
-
-		const full = resolver();
-		strictEqual(full.registry.tryAcquire("mini"), true);
-		throws(() => full.resolve({ agentId: "coder", executionRole: "builder", task: "t", node: "mini" }), /at capacity/);
 	});
 
 	it("skips ineligible nodes on the least-loaded path instead of failing", () => {

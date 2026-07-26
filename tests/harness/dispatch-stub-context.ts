@@ -146,10 +146,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		checkCeiling: () => "under",
 		raiseCeiling: () => {},
 		preflight: () => ({ verdict: "under", currentUsd: 0, ceilingUsd: 5 }),
-		activeWorkers: () => 0,
-		tryAcquireWorker: () => true,
-		releaseWorker: () => {},
-		listNodes: () => [],
+		maxWorkers: () => 4,
 		...options.scheduling,
 	};
 	const bus = createSafeEventBus();

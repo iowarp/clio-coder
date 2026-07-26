@@ -39,7 +39,8 @@ function validRecord(value: unknown): value is DurableAssignmentRecord {
 		(record.status === "running" ||
 			record.status === "succeeded" ||
 			record.status === "failed" ||
-			record.status === "canceled")
+			record.status === "canceled" ||
+			record.status === "timed_out")
 	);
 }
 
@@ -93,6 +94,26 @@ export function listStoredAssignments(): ReadonlyArray<DurableAssignmentRecord> 
 	return readStore();
 }
 
+export async function renameStoredAssignment(
+	fromAssignmentId: string,
+	toAssignmentId: string,
+): Promise<DurableAssignmentRecord> {
+	let result!: DurableAssignmentRecord;
+	await withStateFileLock(storePath(), () => {
+		const records = readStore();
+		const from = records.findIndex((record) => record.assignmentId === fromAssignmentId);
+		if (from === -1) throw new Error(`unknown queued assignment '${fromAssignmentId}'`);
+		if (records.some((record) => record.assignmentId === toAssignmentId))
+			throw new Error(`assignment '${toAssignmentId}' already exists`);
+		const current = records[from];
+		if (!current) throw new Error(`unknown queued assignment '${fromAssignmentId}'`);
+		result = { ...current, assignmentId: toAssignmentId };
+		records[from] = result;
+		writeStore(records);
+	});
+	return copyRecord(result);
+}
+
 export function registerAssignment(assignmentId: string): Promise<DurableAssignmentRecord> {
 	return updateRecord(
 		assignmentId,
@@ -104,6 +125,20 @@ export function recordAssignmentAttempt(assignmentId: string, runId: string): Pr
 	return updateRecord(assignmentId, (current) => {
 		const base = current ?? { assignmentId, attempts: [], terminalRunId: null, status: "running" as const };
 		return base.attempts.includes(runId) ? base : { ...base, attempts: [...base.attempts, runId] };
+	});
+}
+
+export function failQueuedAssignment(assignmentId: string): Promise<DurableAssignmentRecord> {
+	return updateRecord(assignmentId, (current) => {
+		const base = current ?? { assignmentId, attempts: [], terminalRunId: null, status: "running" as const };
+		return base.status === "running" ? { ...base, status: "failed" } : base;
+	});
+}
+
+export function timeoutStoredAssignment(assignmentId: string): Promise<DurableAssignmentRecord> {
+	return updateRecord(assignmentId, (current) => {
+		const base = current ?? { assignmentId, attempts: [], terminalRunId: null, status: "running" as const };
+		return base.status === "running" ? { ...base, status: "timed_out" } : base;
 	});
 }
 
