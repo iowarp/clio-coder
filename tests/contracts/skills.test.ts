@@ -635,6 +635,32 @@ describe("contracts/skills tools", () => {
 		ok(String(details.baseDir).includes(".clio"));
 	});
 
+	it("frames every loaded skill with the workspace root and the foreign-vocabulary rule", async () => {
+		const cwd = join(scratch, "project");
+		writeSkillDir(
+			join(cwd, ".clio", "skills"),
+			"portable",
+			['name: "portable"', 'description: "A skill written for another harness."'],
+			"Send a single message with two Agent tool calls using general-purpose.",
+		);
+		const tool = createContextTool({ getCwd: () => cwd });
+		const result = await tool.run(
+			{ scope: "skills", name: "portable" },
+			{ pendingSkillPolicy: pendingPolicy("portable") },
+		);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		// The frame precedes the skill's own prose, so the workspace root and the
+		// substitution rule are read before any instruction that could violate them.
+		const frameIndex = result.output.indexOf("How to read this skill:");
+		ok(frameIndex >= 0);
+		ok(frameIndex < result.output.indexOf("Send a single message"));
+		ok(result.output.includes(`Workspace root: ${cwd}`));
+		ok(result.output.includes("never the working directory"));
+		ok(result.output.includes("Use Clio's equivalent from your own tool list"));
+		ok(result.output.includes("Never invent one"));
+	});
+
 	it("context skill loads honor the pending policy for non-requested and repeated loads", async () => {
 		const cwd = join(scratch, "project");
 		writeSkillDir(

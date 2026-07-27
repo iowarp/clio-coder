@@ -170,7 +170,7 @@ The coordinator classifies failures into 13 explicit categories (`src/domains/di
 | `operator-cancel` | User abort, `canceled` outcome | None (Neutral) | No |
 | `policy` | Policy denial, `denied_by_policy` | None (Neutral) | No |
 | `permission` | `WORKER_EXIT_PERMISSION_REQUIRED` (code 3) | None (Neutral) | No |
-| `deterministic-task` | `isDeterministicOutcomeCode()` (e.g. `scout_synthesis_contract_exhausted`) | None | No |
+| `deterministic-task` | `isDeterministicOutcomeCode()` (e.g. `result_contract_exhausted`) | None | No |
 | `model-quality` | Quality gate failure | `model` | Yes |
 | `node-channel` | Stall killed, `spawn_failed`, SSH exit code 255 | `node` | Yes |
 | `node-resource` | VRAM/GPU OOM error pattern | `node` | Yes |
