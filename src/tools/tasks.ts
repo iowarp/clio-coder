@@ -95,7 +95,7 @@ function mutationFromArgs(action: TasksAction, args: Record<string, unknown>): T
 			if (!id) return { error: `tasks: ${action} requires id (e.g. id="t2")` };
 			const note = stringArg(args, "note");
 			if (action === "start") return { op: "start", id };
-			if (action === "done") return note ? { op: "done", id, evidence: note } : { op: "done", id };
+			if (action === "done") return { op: "done", id, evidence: note ?? "" };
 			if (action === "block") return { op: "block", id, reason: note ?? "" };
 			return note ? { op: "drop", id, reason: note } : { op: "drop", id };
 		}
@@ -109,14 +109,17 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 		name: ToolNames.Tasks,
 		description:
 			"Session task board. plan declares a titled board (replaces any prior board); add appends tasks; " +
-			"start marks one task active (the current focus); done completes it (note = validation evidence); " +
-			"block parks it with a required reason; drop cancels it; list shows the board.",
+			"start marks one task active (the current focus); done completes a started task and requires note as the " +
+			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
+			"Work that did not happen is blocked or dropped, never done.",
 		parameters: Type.Object({
 			action: stringEnum(TASKS_ACTIONS, "Board action."),
 			title: Type.Optional(Type.String({ description: "Board title (plan)." })),
 			tasks: Type.Optional(Type.Array(Type.String(), { description: "Task titles (plan, add)." })),
 			id: Type.Optional(Type.String({ description: 'Task id like "t2" (start, done, block, drop).' })),
-			note: Type.Optional(Type.String({ description: "Evidence of completion (done) or the reason (block, drop)." })),
+			note: Type.Optional(
+				Type.String({ description: "Evidence of completion (required for done) or the reason (block, drop)." }),
+			),
 		}),
 		baseActionClass: "read",
 		executionMode: "sequential",

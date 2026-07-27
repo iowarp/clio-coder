@@ -54,7 +54,7 @@ export type TaskBoardMutation =
 	| { op: "plan"; title: string; tasks: ReadonlyArray<string> }
 	| { op: "add"; tasks: ReadonlyArray<string> }
 	| { op: "start"; id: string }
-	| { op: "done"; id: string; evidence?: string }
+	| { op: "done"; id: string; evidence: string }
 	| { op: "block"; id: string; reason: string }
 	| { op: "drop"; id: string; reason?: string };
 
@@ -263,6 +263,26 @@ function applyMutation(
 	if (mutation.op === "block" && mutation.reason.trim().length === 0) {
 		return { error: "block requires a reason so the ledger records why work stopped" };
 	}
+	// Completion is the ledger's only load-bearing claim, so it carries two
+	// structural conditions rather than a bare status flip. Evidence is
+	// mandatory: a completed row becomes a passed validation record, and a row
+	// without evidence would assert a validation that nobody performed. The
+	// task must also have been started, because work that was never entered
+	// cannot have produced a result; the honest closes for it are block and
+	// drop, which record a reason instead.
+	if (mutation.op === "done") {
+		if (mutation.evidence.trim().length === 0) {
+			return {
+				error:
+					"done requires note as the evidence that the task actually finished (the command you ran, the file:line you verified). If the work did not happen, use block with a reason or drop it.",
+			};
+		}
+		if (target.status === "pending") {
+			return {
+				error: `task ${target.id} was never started, so it cannot be completed. Start it and do the work, or record the truth with block (reason) or drop.`,
+			};
+		}
+	}
 	const notes: string[] = [];
 	const tasks = board.tasks.map((task): TaskBoardTask => {
 		if (task.id !== target.id) {
@@ -287,9 +307,8 @@ function applyStatusMutation(
 		case "start":
 			return { ...task, status: "active" };
 		case "done": {
-			const done: TaskBoardTask = { ...task, status: "completed" };
+			const done: TaskBoardTask = { ...task, status: "completed", evidence: mutation.evidence.trim() };
 			delete done.reason;
-			if (mutation.evidence?.trim()) done.evidence = mutation.evidence.trim();
 			return done;
 		}
 		case "block":

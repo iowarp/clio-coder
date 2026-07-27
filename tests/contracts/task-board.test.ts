@@ -73,6 +73,7 @@ describe("contracts/task-board store", () => {
 
 	it("records completion evidence and block reasons on the board", () => {
 		const { store } = plannedStore();
+		ok(store.apply({ op: "start", id: "t1" }).ok);
 		const done = store.apply({ op: "done", id: "t1", evidence: "npm test green" });
 		ok(done.ok);
 		strictEqual(done.board.tasks[0]?.evidence, "npm test green");
@@ -83,6 +84,25 @@ describe("contracts/task-board store", () => {
 		const counts = taskBoardCounts(blocked.board);
 		strictEqual(counts.open, 1);
 		strictEqual(counts.blocked, 1);
+	});
+
+	it("refuses to complete a task that was never started", () => {
+		const { store } = plannedStore();
+		const unstarted = store.apply({ op: "done", id: "t1", evidence: "npm test green" });
+		ok(!unstarted.ok);
+		ok(unstarted.message.includes("never started"));
+		// The honest closes for work that did not happen stay available.
+		ok(store.apply({ op: "block", id: "t1", reason: "capacity was full" }).ok);
+		ok(store.apply({ op: "drop", id: "t2", reason: "superseded" }).ok);
+	});
+
+	it("refuses to complete a task without evidence", () => {
+		const { store } = plannedStore();
+		ok(store.apply({ op: "start", id: "t1" }).ok);
+		const bare = store.apply({ op: "done", id: "t1", evidence: "   " });
+		ok(!bare.ok);
+		ok(bare.message.includes("evidence"));
+		strictEqual(store.snapshot()?.tasks[0]?.status, "active");
 	});
 
 	it("rejects a block without a reason and mutations against unknown ids", () => {
@@ -201,9 +221,25 @@ describe("contracts/task-board tool", () => {
 		strictEqual(planned.kind, "ok");
 		ok(planned.kind === "ok" && planned.output.includes('board "Ship it" 0/2 done'));
 		ok(planned.kind === "ok" && planned.output.includes("[ ] t1 one"));
+		ok((await tool.run({ action: "start", id: "t1" })).kind === "ok");
 		const done = await tool.run({ action: "done", id: "t1", note: "lint green" });
 		strictEqual(done.kind, "ok");
 		ok(done.kind === "ok" && done.output.includes("[x] t1 one — evidence: lint green"));
+	});
+
+	it("refuses done for unexecuted work and points at block or drop", async () => {
+		const { store } = storeWithLog();
+		const tool = createTasksTool({ board: store });
+		await tool.run({ action: "plan", title: "Board", tasks: ["one", "two"] });
+		const unstarted = await tool.run({ action: "done", id: "t1", note: "not executed" });
+		strictEqual(unstarted.kind, "error");
+		await tool.run({ action: "start", id: "t1" });
+		const noEvidence = await tool.run({ action: "done", id: "t1" });
+		strictEqual(noEvidence.kind, "error");
+		ok(noEvidence.kind === "error" && noEvidence.message.includes("block"));
+		const blocked = await tool.run({ action: "block", id: "t1", note: "capacity was full" });
+		strictEqual(blocked.kind, "ok");
+		ok(blocked.kind === "ok" && blocked.output.includes("[!] t1 one — blocked: capacity was full"));
 	});
 
 	it("reports actionable errors for missing arguments and an empty board", async () => {
@@ -237,7 +273,8 @@ describe("contracts/task-board tool", () => {
 		const { store } = storeWithLog();
 		const tool = createTasksTool({ board: store });
 		await tool.run({ action: "plan", title: "Board", tasks: ["one", "two"] });
-		const done = await tool.run({ action: "done", id: "t1" });
+		await tool.run({ action: "start", id: "t1" });
+		const done = await tool.run({ action: "done", id: "t1", note: "npm test green" });
 		ok(done.kind === "ok");
 		const counts = (done.details as { counts: { completed: number; total: number } }).counts;
 		strictEqual(counts.completed, 1);
@@ -289,6 +326,7 @@ describe("contracts/task-board nudge", () => {
 		const bare = createTaskNudgeRegistration({ getBoard: () => null });
 		deepStrictEqual(bare.evaluate(turnEndInput(), undefined), []);
 		// Every task closed or honestly parked: completed/blocked/dropped is settled.
+		ok(store.apply({ op: "start", id: "t1" }).ok);
 		ok(store.apply({ op: "done", id: "t1", evidence: "tests green" }).ok);
 		ok(store.apply({ op: "block", id: "t2", reason: "needs operator decision" }).ok);
 		ok(store.apply({ op: "drop", id: "t3", reason: "superseded" }).ok);
