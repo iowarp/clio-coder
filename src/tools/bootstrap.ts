@@ -224,7 +224,8 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use the dispatch receipt paths or ask a narrower worker follow-up for omitted output.",
 		),
 		costLatency: "agent",
-		promptHint: "Call dispatch with list:true to see the agent fleet.",
+		promptHint:
+			"Call dispatch with list:true only when the operator asks about agents, workers, or the fleet; never use it to inventory direct tools.",
 	},
 	[ToolNames.Monitor]: {
 		objective: "Inspect dispatched runs: state, recent events, receipts.",

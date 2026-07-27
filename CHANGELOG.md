@@ -10,6 +10,7 @@ still change interfaces.
 
 ## Unreleased
 
+- Clarified the compact main and worker harness prompts with an explicit direct-tool inventory and a strict distinction between tools, fleet agents, and operator-activated skills, preventing capability questions from triggering irrelevant fleet queries.
 - Grounded generated wikis in detected repository instructions and their declared source-of-truth documents, added dirty-working-tree evidence and source-tree freshness metadata, tightened capability-claim guidance, let the bound documenter worker profile control its thinking level, and raised the local tool-bearing turn ceiling to the configured 32K default so long-context documenters are not artificially constrained to 16K.
 
 ## 0.2.9 - 2026-07-13

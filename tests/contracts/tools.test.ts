@@ -2419,7 +2419,10 @@ describe("contracts/tools prompt hints", () => {
 			hinted.get("context"),
 			'Call context with scope="skills" to list available skills; when one matches the task, suggest the operator run /skill:<name> and never load it uninvited. When the user message carries a skill request, first load that skill via context (scope="skills", name=<skill>) before doing anything else.',
 		);
-		strictEqual(hinted.get("dispatch"), "Call dispatch with list:true to see the agent fleet.");
+		strictEqual(
+			hinted.get("dispatch"),
+			"Call dispatch with list:true only when the operator asks about agents, workers, or the fleet; never use it to inventory direct tools.",
+		);
 		strictEqual(
 			hinted.get("tasks"),
 			'When a request contains three or more distinct steps, declare the board before your first edit: tasks action="plan" with a title and the task list. ' +
