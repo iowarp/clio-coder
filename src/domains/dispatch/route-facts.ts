@@ -13,6 +13,9 @@
  * requirement satisfied by ignorance is not a requirement.
  */
 
+import { decideRetry, type FailureClass } from "./failure-classification.js";
+import type { RouteCandidate } from "./route-decision.js";
+
 /** Explicit tri-state. Unknown is never coerced toward either verdict. */
 export type FactState = "true" | "false" | "unknown";
 
@@ -51,6 +54,7 @@ export interface RouteFactRequirement {
 	nodeId: string;
 	targetId: string;
 	wireModelId: string | null;
+	endpointIdentityHash: string;
 	/** Hard requirements. Each named requirement must be a proven positive. */
 	requireReachable: boolean;
 	requireRuntimeCompatible: boolean;
@@ -97,13 +101,22 @@ export function evaluateRouteFacts(
 
 	const fact = facts.find((entry) => entry.nodeId === requirement.nodeId && entry.targetId === requirement.targetId);
 	if (!fact) {
+		const unknowns = ["reachable", "runtimeCompatible", "modelAvailable"];
+		if (requirement.mode === "shadow") return { ok: true, unknowns };
 		return {
 			ok: false,
 			reason: `no probe fact for target '${requirement.targetId}' on node '${requirement.nodeId}'; run 'clio doctor'`,
-			unknowns: ["reachable", "runtimeCompatible", "modelAvailable"],
+			unknowns,
 		};
 	}
 	const fresh = isFresh(fact.probedAt, now, freshnessMs);
+	if (fact.endpointIdentityHash !== requirement.endpointIdentityHash) {
+		return {
+			ok: false,
+			reason: `node '${requirement.nodeId}' endpoint identity for target '${requirement.targetId}' does not match settings`,
+			unknowns,
+		};
+	}
 
 	const checks: Array<[string, boolean, FactState]> = [
 		["reachable", requirement.requireReachable, fact.reachable],
@@ -174,4 +187,39 @@ export function evaluateRouteFacts(
 		}
 	}
 	return { ok: true, unknowns };
+}
+
+/** Exact breaker tuple. Cooldown on one tuple cannot poison a sibling model or runtime. */
+export function targetTupleKey(candidate: Pick<RouteCandidate, "targetId" | "runtimeId" | "modelId">): string {
+	return `${candidate.targetId}\0${candidate.runtimeId}\0${candidate.modelId}`;
+}
+
+/**
+ * Whether typed failure evidence excludes a candidate. Only dimensions named
+ * by the failure classifier participate, so node evidence does not condemn a
+ * target on another node and target evidence does not condemn a healthy node.
+ */
+export function failureExcludesCandidate(
+	failed: RouteCandidate,
+	candidate: RouteCandidate,
+	failureClass: FailureClass,
+): boolean {
+	const dimensions = decideRetry(failureClass, 0, 1).excludedRouteParts;
+	if (dimensions.length === 0) return false;
+	return dimensions.every((dimension) => {
+		switch (dimension) {
+			case "agent":
+				return failed.agentId === candidate.agentId;
+			case "target":
+				return targetTupleKey(failed) === targetTupleKey(candidate);
+			case "model":
+				return failed.targetId === candidate.targetId && failed.modelId === candidate.modelId;
+			case "runtime":
+				return failed.targetId === candidate.targetId && failed.runtimeId === candidate.runtimeId;
+			case "node":
+				return failed.nodeId === candidate.nodeId;
+			default:
+				return false;
+		}
+	});
 }

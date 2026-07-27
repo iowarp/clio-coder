@@ -40,6 +40,8 @@ export interface DispatchPlanTaskResolution {
 	thinkingLevel: string | null;
 	/** Effective tool surface after the runtime narrows it; part of route identity. */
 	toolSignature: string;
+	endpointIdentityHash: string;
+	settingsFingerprint: string;
 	/** Conservative effective-pricing estimate; unknown pricing is never zero. */
 	costUpperBoundUsd: number;
 }

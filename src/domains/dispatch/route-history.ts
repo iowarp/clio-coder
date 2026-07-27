@@ -12,7 +12,7 @@ export type RouteReliabilityOutcome = "success" | "failure" | "neutral";
 
 /** One reconstructable, terminal observation for a concrete route identity. */
 export interface RouteHistoryRecord {
-	version: 1;
+	version: 2;
 	receiptDigest: string;
 	assignmentId: string;
 	route: RouteCandidate;
@@ -24,6 +24,8 @@ export interface RouteHistoryRecord {
 	/** Only completed, non-quality-failed work may contribute timing or cost. */
 	completedCostUsd: number | null;
 	completedPhaseTiming: RunPhaseDurations | null;
+	/** Whether the completed route consumed cache tokens for this exact identity. */
+	cacheRead: boolean;
 	sourceDigests: string[];
 	settledAt: string;
 }
@@ -54,7 +56,7 @@ function compareRecords(left: RouteHistoryRecord, right: RouteHistoryRecord): nu
 }
 
 function validateRecord(value: unknown): RouteHistoryRecord {
-	if (!isRecord(value) || value.version !== 1) throw new Error("route history record has unsupported version");
+	if (!isRecord(value) || value.version !== 2) throw new Error("route history record has unsupported version");
 	if (!isDigest(value.receiptDigest)) throw new Error("route history receipt digest invalid");
 	if (typeof value.assignmentId !== "string" || value.assignmentId.length === 0)
 		throw new Error("route history assignment id invalid");
@@ -76,6 +78,7 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 	if (value.completedPhaseTiming !== null && !isPhaseTiming(value.completedPhaseTiming)) {
 		throw new Error("route history phase timing invalid");
 	}
+	if (typeof value.cacheRead !== "boolean") throw new Error("route history cache affinity invalid");
 	if (!Array.isArray(value.sourceDigests) || !value.sourceDigests.every(isDigest)) {
 		throw new Error("route history source digests invalid");
 	}
@@ -83,7 +86,7 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 		throw new Error("route history settlement timestamp invalid");
 	}
 	return {
-		version: 1,
+		version: 2,
 		receiptDigest: value.receiptDigest,
 		assignmentId: value.assignmentId,
 		route: { ...value.route },
@@ -93,6 +96,7 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 		firstPass: value.firstPass,
 		completedCostUsd: value.completedCostUsd,
 		completedPhaseTiming: value.completedPhaseTiming === null ? null : { ...value.completedPhaseTiming },
+		cacheRead: value.cacheRead,
 		sourceDigests: [...value.sourceDigests].sort(),
 		settledAt: value.settledAt,
 	};
@@ -108,14 +112,14 @@ function readHistory(path: string): RouteHistoryRecord[] {
 	} catch (error) {
 		throw new Error(`route history unreadable: ${error instanceof Error ? error.message : String(error)}`);
 	}
-	if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.records)) {
+	if (!isRecord(parsed) || parsed.version !== 2 || !Array.isArray(parsed.records)) {
 		throw new Error("route history has unsupported format");
 	}
 	return parsed.records.map(validateRecord).sort(compareRecords);
 }
 
 function writeHistory(path: string, records: ReadonlyArray<RouteHistoryRecord>): void {
-	atomicWrite(path, JSON.stringify({ version: 1, records: [...records].sort(compareRecords) }, null, 2));
+	atomicWrite(path, JSON.stringify({ version: 2, records: [...records].sort(compareRecords) }, null, 2));
 }
 
 /**
@@ -181,6 +185,8 @@ function isRouteCandidate(value: unknown): value is RouteCandidate {
 		value.nodeId,
 		value.toolSignature,
 		value.promptCompositionHash,
+		value.endpointIdentityHash,
+		value.settingsFingerprint,
 	].every((field) => typeof field === "string");
 }
 

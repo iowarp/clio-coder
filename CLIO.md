@@ -8,11 +8,11 @@ Clio Coder is a TypeScript/Node.js project. Coding agent for HPC and scientific-
 
 ## Context retrieval
 
-The codewiki currently indexes 901 source files. Start orientation with these indexed entry points: `src/cli/index.ts`, `src/domains/agents/index.ts`, `src/domains/components/index.ts`, `src/domains/config/index.ts`, `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`, `src/domains/dispatch/index.ts`, `src/domains/eval/index.ts`. Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.
+The codewiki currently indexes 927 source files. Start orientation with these indexed entry points: `src/cli/index.ts`, `src/domains/agents/index.ts`, `src/domains/components/index.ts`, `src/domains/config/index.ts`, `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`, `src/domains/dispatch/index.ts`, `src/domains/eval/index.ts`. Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.
 
 ## Repository shape
 
-Largest indexed areas: src/domains (382), tests/contracts (228), src/interactive (83), src/cli (48), src/tools (43), src/engine (40), src/core (35), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
+Largest indexed areas: src/domains (392), tests/contracts (236), src/interactive (83), src/cli (48), src/tools (42), src/engine (40), src/core (35), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
 
 ## Verification expectations
 
@@ -66,6 +66,12 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 
 - `src/domains/dispatch/routing-intent.ts` strictly parses the model-facing routing object, applies shadow-balanced defaults, preserves exact route pins as fail-closed manual intent, and evaluates cost, deadline, quality, capability, and locality hard bounds.
 - Plan artifacts and receipt integrity v12 seal normalized routing intent. Candidate envelopes remain coordinator-authored; route explanations are bounded projections of the sealed decision and never accept task text, prompts, endpoints, or credentials.
+
+## Joint route shadow resolution
+
+- `src/domains/dispatch/joint-route-resolver.ts` purely enumerates the bounded target, model, runtime, and node cross-product for one requested agent and execution role. It fails explicitly on universe overflow, applies hard filters before deterministic Pareto ranking, and bounds only the approved fallback projection.
+- Route identity includes endpoint and settings fingerprints. Durable route history preserves eligible quality, reliability, completed cost, latency, queue wait, and cache-affinity evidence across restart.
+- Shadow recommendations never feed target resolution or placement. Observer failure seals a fixed one-candidate decision on the production receipt.
 
 ## Dispatch routing quality
 

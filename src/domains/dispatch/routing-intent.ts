@@ -197,6 +197,8 @@ function safeIdentity(candidate: RouteCandidate): RouteCandidate {
 		...(candidate.thinkingLevel !== undefined ? { thinkingLevel: safe(candidate.thinkingLevel) } : {}),
 		toolSignature: safe(candidate.toolSignature),
 		promptCompositionHash: safe(candidate.promptCompositionHash),
+		endpointIdentityHash: safe(candidate.endpointIdentityHash),
+		settingsFingerprint: safe(candidate.settingsFingerprint),
 	};
 }
 

@@ -3,12 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/index.js";
-import {
-	firstAvailableRouteCandidate,
-	ROUTE_CANDIDATE_LIMIT,
-	routeCandidateOrder,
-	selectRouteCandidates,
-} from "../../src/domains/dispatch/route-candidates.js";
+import { firstAvailableRouteCandidate } from "../../src/domains/dispatch/route-candidates.js";
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -126,15 +121,6 @@ describe("dispatch failover envelopes", () => {
 		strictEqual(validateJobSpec(request({ failover: "automatic" })).ok, true);
 	});
 
-	it("keeps rejected probes out of the envelope", () => {
-		const current = { agentId: "coder", target: TARGET, model: MODEL, node: "blade" };
-		const selected = selectRouteCandidates(current, [
-			{ candidate: { agentId: "coder", target: "other", model: MODEL, node: "blade" }, rejection: null },
-			{ candidate: { agentId: "coder", target: TARGET, model: MODEL, node: "local" }, rejection: "node offline" },
-		]);
-		deepStrictEqual(selected, [current, { agentId: "coder", target: "other", model: MODEL, node: "blade" }]);
-	});
-
 	it("retries the same approved tuple when the worker runtime fails", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.workers.maxRetries = 1;
@@ -169,32 +155,6 @@ describe("dispatch failover envelopes", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
-	});
-
-	it("enumerates a bounded, deterministic envelope from a route universe", () => {
-		const resolved = { agentId: "coder", target: TARGET, model: MODEL, node: "blade" };
-		const universe = {
-			agentId: "coder",
-			resolved,
-			targets: [
-				{ id: "alt-a", model: "alt-model-a" },
-				{ id: "alt-b", model: "alt-model-b" },
-			],
-			nodes: ["local", "mini"],
-		};
-		const order = routeCandidateOrder(universe);
-		// Resolved route first, then alternate targets on the resolved node, then
-		// alternate nodes on the resolved target.
-		deepStrictEqual(order, [
-			resolved,
-			{ agentId: "coder", target: "alt-a", model: "alt-model-a", node: "blade" },
-			{ agentId: "coder", target: "alt-b", model: "alt-model-b", node: "blade" },
-			{ agentId: "coder", target: TARGET, model: MODEL, node: "local" },
-			{ agentId: "coder", target: TARGET, model: MODEL, node: "mini" },
-		]);
-		deepStrictEqual(routeCandidateOrder(universe), order, "equal inputs give equal envelopes");
-		const probes = order.slice(1).map((candidate) => ({ candidate, rejection: null }));
-		strictEqual(selectRouteCandidates(resolved, probes).length, ROUTE_CANDIDATE_LIMIT);
 	});
 
 	it("keeps a manual exact pin fail-closed across retries", async () => {

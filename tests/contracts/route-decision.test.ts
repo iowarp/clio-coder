@@ -26,6 +26,8 @@ function candidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
 		nodeId: "local",
 		toolSignature: "tools-a",
 		promptCompositionHash: "prompt-a",
+		endpointIdentityHash: "endpoint-a",
+		settingsFingerprint: "settings-a",
 		...overrides,
 	};
 }
@@ -136,6 +138,27 @@ describe("route decision", () => {
 				),
 			/posture-floors-unsatisfiable/,
 		);
+	});
+
+	it("shadow success target failover and node failover preserve executed route bytes", () => {
+		const executed = candidate();
+		const executedBytes = JSON.stringify(executed);
+		for (const alternate of [
+			candidate({ targetId: "fallback-target", endpointIdentityHash: "endpoint-b" }),
+			candidate({ nodeId: "fallback-node" }),
+		]) {
+			const decision = decideRoute(
+				input({
+					executedRoute: executed,
+					candidates: [
+						{ candidate: executed, estimate: estimate(6, { completedCostUsd: 5 }), rejection: null },
+						{ candidate: alternate, estimate: estimate(6, { completedCostUsd: 0.01 }), rejection: null },
+					],
+				}),
+			);
+			strictEqual(JSON.stringify(decision.executedRoute), executedBytes);
+			strictEqual(routeCandidateKey(decision.selected), routeCandidateKey(alternate));
+		}
 	});
 
 	it("keeps route identity and statistics separated by execution role", () => {

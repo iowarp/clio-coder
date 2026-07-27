@@ -39,7 +39,7 @@ const RECIPE_FACTS = agentRoleFactsResolver((agentId) => {
 
 function historyRecord(route: RouteCandidate, executionRole: ExecutionRole, digest: string): RouteHistoryRecord {
 	return {
-		version: 1,
+		version: 2,
 		receiptDigest: digest,
 		assignmentId: "assignment-1",
 		route,
@@ -49,6 +49,7 @@ function historyRecord(route: RouteCandidate, executionRole: ExecutionRole, dige
 		firstPass: true,
 		completedCostUsd: 0.1,
 		completedPhaseTiming: null,
+		cacheRead: false,
 		sourceDigests: [digest],
 		settledAt: "2026-07-20T00:00:00.000Z",
 	};
@@ -65,6 +66,8 @@ function routeFixture(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
 		nodeId: "local",
 		toolSignature: "tools-a",
 		promptCompositionHash: "prompt-a",
+		endpointIdentityHash: "endpoint-a",
+		settingsFingerprint: "settings-a",
 		...overrides,
 	};
 }
