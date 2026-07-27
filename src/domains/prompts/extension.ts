@@ -24,6 +24,7 @@ export interface PromptsBundleOptions {
 }
 
 const CLIO_REPO_AWARENESS_ID = "context.clio-repo-awareness";
+const WORKSPACE_ROOT_ID = "context.workspace-root";
 
 export function createPromptsBundle(
 	context: DomainContext,
@@ -91,6 +92,7 @@ export function createPromptsBundle(
 				safety: `safety.${safety}`,
 				sessionInputs,
 				additionalFragments: [
+					...workspaceRootFragment(cwd),
 					...clioRepoAwarenessFragments(cwd),
 					...customizationFragments(cwd, input.workingContextPaths ?? []),
 				],
@@ -185,6 +187,30 @@ function normalizeWorkingContextPaths(cwd: string, paths: ReadonlyArray<string>)
 		normalized.add(rel.replace(/\\/g, "/"));
 	}
 	return [...normalized].sort();
+}
+
+/**
+ * The absolute workspace root, stated once. Tools take paths and working
+ * directories, and a model that was never told the root guesses one: an
+ * observed run passed the container convention `/workspace` to bash and had
+ * the call blocked as a workspace escape. Naming the real root removes the
+ * guess for every tool at once, which no single tool description can do.
+ */
+function workspaceRootFragment(cwd: string): RenderedPromptFragment[] {
+	const body = [
+		"# Workspace",
+		`Absolute workspace root: ${cwd}`,
+		"Relative paths resolve here. Do not invent a root such as /workspace or /repo, and do not pass a working directory unless the command must run in a subdirectory of this root.",
+	].join("\n");
+	return [
+		{
+			id: WORKSPACE_ROOT_ID,
+			relPath: "inline/workspace-root",
+			body,
+			contentHash: sha256(body),
+			dynamic: true,
+		},
+	];
 }
 
 function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
