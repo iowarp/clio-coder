@@ -27,7 +27,7 @@ export type ClioSessionMetaExtension = {
 	 */
 	firstMessagePreview?: string;
 	/**
-	 * Count of user-role message entries (legacy or v2). Approximates "how
+	 * Count of structured user-role message entries. Approximates "how
 	 * many things did I ask?" for the picker; tool calls and bookkeeping
 	 * entries do not contribute. Discovered alongside firstMessagePreview.
 	 */

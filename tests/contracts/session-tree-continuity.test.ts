@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
-import type { TaskLedgerEntry } from "../../src/domains/session/entries.js";
+import type { SessionEntry, TaskLedgerEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
-import { openSession } from "../../src/engine/session.js";
+import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
@@ -21,6 +21,11 @@ function stubContext(): DomainContext {
 		bus: { emit: () => {}, on: () => () => {} } as unknown as DomainContext["bus"],
 		getContract: () => undefined,
 	};
+}
+
+function sessionEntries(sessionId: string): SessionEntry[] {
+	const reader = openSession(sessionId);
+	return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
 }
 
 function textBlocks(messages: ReadonlyArray<AgentMessage>): string[] {
@@ -75,7 +80,7 @@ describe("contracts/session-tree-continuity", () => {
 		const bundle = createSessionBundle(stubContext());
 		const { sessionId } = seedBranchedSession(bundle.contract);
 
-		const texts = textBlocks(buildReplayAgentMessagesFromTurns(openSession(sessionId).turns()));
+		const texts = textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(sessionId)));
 		deepStrictEqual(texts, ["u1", "a1", "u3", "a3"]);
 
 		await bundle.contract.close();
@@ -85,7 +90,7 @@ describe("contracts/session-tree-continuity", () => {
 		const bundle = createSessionBundle(stubContext());
 		const { sessionId, a2 } = seedBranchedSession(bundle.contract);
 
-		const texts = textBlocks(buildReplayAgentMessagesFromTurns(openSession(sessionId).turns(), { uptoTurnId: a2 }));
+		const texts = textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(sessionId), { uptoTurnId: a2 }));
 		deepStrictEqual(texts, ["u1", "a1", "u2", "a2"]);
 
 		await bundle.contract.close();
@@ -119,7 +124,7 @@ describe("contracts/session-tree-continuity", () => {
 			truncated: false,
 		});
 
-		const replay = textBlocks(buildReplayAgentMessagesFromTurns(openSession(meta.id).turns())).join("\n");
+		const replay = textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(meta.id))).join("\n");
 		ok(replay.includes("echo active"), "sidecar anchored to the active branch replays");
 		ok(!replay.includes("echo abandoned"), "sidecar anchored to the abandoned branch must not replay");
 
@@ -142,7 +147,7 @@ describe("contracts/session-tree-continuity", () => {
 		});
 		contract.append({ parentId: u1.id, kind: "assistant", payload: { text: "a1" } });
 
-		const texts = textBlocks(buildReplayAgentMessagesFromTurns(openSession(meta.id).turns()));
+		const texts = textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(meta.id)));
 		strictEqual(texts.length, 3, "linear replay keeps every message and the unanchored sidecar");
 		ok(texts.some((text) => text.includes("echo loose")));
 
@@ -172,7 +177,7 @@ describe("contracts/session-tree-continuity", () => {
 		});
 
 		const forkedMeta = contract.fork(a1.id);
-		const forkedTurns = openSession(forkedMeta.id).turns();
+		const forkedTurns = sessionEntries(forkedMeta.id);
 
 		const ledgers = forkedTurns.filter(
 			(entry): entry is TaskLedgerEntry => (entry as { kind?: string }).kind === "taskLedger",
@@ -204,7 +209,7 @@ describe("contracts/session-tree-continuity", () => {
 		});
 
 		const forkedMeta = contract.fork(a1.id);
-		const forkedTurns = openSession(forkedMeta.id).turns();
+		const forkedTurns = sessionEntries(forkedMeta.id);
 		ok(
 			!forkedTurns.some((entry) => (entry as { kind?: string }).kind === "compactionSummary"),
 			"a summary that did not exist at the fork point must not be copied",
@@ -229,7 +234,7 @@ describe("contracts/session-tree-continuity", () => {
 
 		// The compaction input seam applies the same active-path filter, so a
 		// summary prompt never sees the abandoned branch.
-		const active = filterEntriesToActivePath(collectSessionEntries(openSession(meta.id).turns()));
+		const active = filterEntriesToActivePath(sessionEntries(meta.id));
 		const activeTexts = active
 			.filter((entry) => entry.kind === "message")
 			.map((entry) => (entry as { payload?: { text?: string } }).payload?.text ?? "");
@@ -242,7 +247,7 @@ describe("contracts/session-tree-continuity", () => {
 			tokensBefore: 1000,
 			firstKeptTurnId: u3.id,
 		});
-		const replay = textBlocks(buildReplayAgentMessagesFromTurns(openSession(meta.id).turns()));
+		const replay = textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(meta.id)));
 		ok(
 			replay.some((text) => text.includes("active-branch summary")),
 			"the active-path summary replays as the boundary",
@@ -272,9 +277,7 @@ describe("contracts/session-tree-continuity", () => {
 		const u3 = contract.append({ parentId: a1.id, kind: "user", payload: { text: "u3" } });
 		contract.append({ parentId: u3.id, kind: "assistant", payload: { text: "a3" } });
 
-		const replay = textBlocks(
-			buildReplayAgentMessagesFromTurns(openSession(meta.id).turns(), { uptoTurnId: sidecar.turnId }),
-		);
+		const replay = textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(meta.id), { uptoTurnId: sidecar.turnId }));
 		ok(
 			replay.some((text) => text.includes("u2")),
 			"a sidecar pin follows the sidecar's branch",
@@ -302,7 +305,7 @@ describe("contracts/session-tree-continuity", () => {
 		const u4 = contract.append({ parentId: a3, kind: "user", payload: { text: "u4" } });
 		contract.append({ parentId: u4.id, kind: "assistant", payload: { text: "a4" } });
 
-		const texts = textBlocks(buildReplayAgentMessagesFromTurns(openSession(sessionId).turns()));
+		const texts = textBlocks(buildReplayAgentMessagesFromTurns(sessionEntries(sessionId)));
 		deepStrictEqual(texts, ["u1", "a1", "u3", "a3", "u4", "a4"]);
 
 		await contract.close();

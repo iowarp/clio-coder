@@ -4,7 +4,7 @@ import {
 	type SessionResumeVia as ResumeVia,
 } from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { openSession } from "../../engine/session.js";
+import { openSession, sessionPaths } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
 import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
@@ -79,7 +79,9 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		// happens only when the overlay opens.
 		const previews = new Map<string, string>();
 		try {
-			for (const entry of collectSessionEntries(openSession(sessionId).turns())) {
+			const reader = openSession(sessionId);
+			const filePath = sessionPaths(reader.meta()).current;
+			for (const entry of collectSessionEntries(reader.turns(), filePath)) {
 				if (entry.kind !== "message") continue;
 				const text = buildTurnPreview({ kind: entry.role, payload: entry.payload });
 				if (text.length > 0) previews.set(entry.turnId, text);

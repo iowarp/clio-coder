@@ -48,7 +48,7 @@ Remote marketplace cache files require explicit finite `listingTimestamp` and `d
 
 ## Session persistence
 
-Session metadata must declare format version 3. Earlier session formats are rejected and operators must remove the session directory before starting a new session.
+Session metadata must declare format version 3. Earlier session formats are rejected and operators must remove the session directory before starting a new session. The ledger accepts only structured `SessionEntry` JSON lines with a `kind` discriminant.
 
 ## Evaluation and evidence
 

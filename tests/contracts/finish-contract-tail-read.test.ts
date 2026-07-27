@@ -18,6 +18,7 @@ import {
 	readSessionFileEntries,
 	readSessionFileTailEntries,
 	readSessionTailTurns,
+	sessionPaths,
 } from "../../src/engine/session.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
@@ -151,15 +152,16 @@ describe("contracts/finish-contract-tail-read", () => {
 			try {
 				const fullTurns = openSession(meta.id).turns();
 				const tail = readSessionTailTurns(meta.id, TAIL);
+				const filePath = sessionPaths(meta).current;
 
 				const fullAssessment = assessFinishContract({
 					assistantText: scenario.assistantText,
-					sessionEntries: collectSessionEntries(fullTurns),
+					sessionEntries: collectSessionEntries(fullTurns, filePath),
 					assistantTurnId: ASSISTANT_TURN_ID,
 				});
 				const tailAssessment = assessFinishContract({
 					assistantText: scenario.assistantText,
-					sessionEntries: collectSessionEntries(tail.entries),
+					sessionEntries: collectSessionEntries(tail.entries, filePath),
 					assistantTurnId: ASSISTANT_TURN_ID,
 				});
 

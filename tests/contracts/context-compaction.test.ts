@@ -1,8 +1,9 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_COMPACTION_THRESHOLD, shouldCompact } from "../../src/domains/session/compaction/auto.js";
 import { compact, textFromAssistant } from "../../src/domains/session/compaction/compact.js";
 import { maskStaleObservations } from "../../src/domains/session/compaction/mask-observations.js";
+import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
@@ -125,6 +126,28 @@ describe("contracts/context compaction trigger", () => {
 
 	it("accepts plain string assistant summaries from compaction models", () => {
 		strictEqual(textFromAssistant({ content: "## Goal\nKeep the useful summary." }), "## Goal\nKeep the useful summary.");
+	});
+
+	it("rejects a removed turn record with the ledger remedy", () => {
+		const filePath = "/tmp/session/current.jsonl";
+		throws(
+			() =>
+				collectSessionEntries(
+					[
+						{
+							id: "old-user-1",
+							parentId: null,
+							at: "2026-07-26T00:00:00.000Z",
+							kind: "user",
+							payload: { text: "removed record" },
+						},
+					],
+					filePath,
+				),
+			{
+				message: `session ledger contains an unreadable entry (missing kind discriminant): ${filePath}. Remove or compact the session to reset.`,
+			},
+		);
 	});
 });
 

@@ -75,7 +75,22 @@ export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTu
 		kind: input.kind,
 		payload: input.payload,
 	};
-	state.writer.append(record);
+	const entry: SessionEntry = {
+		kind: "message",
+		turnId: record.id,
+		parentTurnId: record.parentId,
+		timestamp: record.at,
+		role: record.kind,
+		payload: record.payload,
+	};
+	state.writer.appendEntry(entry, {
+		treeNode: {
+			id: record.id,
+			parentId: record.parentId,
+			at: record.at,
+			kind: record.kind,
+		},
+	});
 	return record;
 }
 

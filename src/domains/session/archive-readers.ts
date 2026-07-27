@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isSessionEntry, type MessageEntry, type MessageRole, type SessionEntry } from "./index.js";
+import { isSessionEntry, isSessionHeader, type SessionEntry } from "./index.js";
 
 /**
  * Shared read-only readers over the local usage archive: the per-day audit
@@ -139,11 +139,7 @@ export async function readSessionEntriesForId(stateDir: string, sessionId: strin
 	return { entries: [], missing: true, errors: [] };
 }
 
-/**
- * Parse a session ledger's JSONL content. Lines that are not valid JSON are
- * reported in `errors`; JSON lines that do not resolve to a session entry are
- * silently skipped (the ledger carries engine rows this reader does not model).
- */
+/** Parse a session ledger containing a header and structured entries. */
 export function parseSessionEntries(raw: string, source: string): SessionReadResult {
 	const entries: SessionEntry[] = [];
 	const errors: string[] = [];
@@ -159,8 +155,14 @@ export function parseSessionEntries(raw: string, source: string): SessionReadRes
 			errors.push(`${source}:${index + 1}: invalid JSON: ${message}`);
 			continue;
 		}
-		const entry = parseSessionEntryLine(parsed);
-		if (entry !== null) entries.push(entry);
+		if (isSessionHeader(parsed)) continue;
+		if (isSessionEntry(parsed)) {
+			entries.push(parsed);
+			continue;
+		}
+		errors.push(
+			`session ledger contains an unreadable entry (missing kind discriminant): ${source}. Remove or compact the session to reset.`,
+		);
 	}
 	return { entries, missing: false, errors };
 }
@@ -193,49 +195,8 @@ export async function listSessionLedgerRefs(stateDir: string, onlyCwdHash?: stri
 	return refs;
 }
 
-function parseSessionEntryLine(value: unknown): SessionEntry | null {
-	if (isSessionEntry(value)) return value;
-	if (!isRecord(value)) return null;
-	const id = readOptionalString(value.id);
-	const parentId = readOptionalNullableString(value.parentId);
-	const at = readOptionalString(value.at);
-	const kind = readOptionalMessageRole(value.kind);
-	if (id === null || parentId === undefined || at === null || kind === null || !Object.hasOwn(value, "payload")) {
-		return null;
-	}
-	const entry: MessageEntry = {
-		kind: "message",
-		turnId: id,
-		parentTurnId: parentId,
-		timestamp: at,
-		role: kind,
-		payload: value.payload,
-	};
-	return entry;
-}
-
-const MESSAGE_ROLES: ReadonlySet<MessageRole> = new Set([
-	"user",
-	"assistant",
-	"tool_call",
-	"tool_result",
-	"system",
-	"checkpoint",
-]);
-
-function readOptionalMessageRole(value: unknown): MessageRole | null {
-	if (typeof value !== "string") return null;
-	return MESSAGE_ROLES.has(value as MessageRole) ? (value as MessageRole) : null;
-}
-
 function readOptionalString(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readOptionalNullableString(value: unknown): string | null | undefined {
-	if (value === null) return null;
-	if (typeof value === "string") return value;
-	return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

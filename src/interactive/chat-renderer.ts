@@ -11,7 +11,6 @@
  * synchronously so finalizers like `message_end` are never deferred.
  */
 
-import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -639,10 +638,10 @@ function repairToolResultOrphans(
  * buildSessionContext behavior.
  */
 export function selectReplayEntries(
-	turns: ReadonlyArray<unknown>,
+	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): SessionEntry[] {
-	const active = filterEntriesToActivePath(collectSessionEntries(turns), options.uptoTurnId);
+	const active = filterEntriesToActivePath(turns, options.uptoTurnId);
 	const entries = truncateAtTurn(active, options.uptoTurnId);
 	const compactionIndex = latestCompactionIndex(entries);
 	if (compactionIndex < 0) return dropLegacyToolResultAssistantDuplicates(entries);
@@ -720,7 +719,7 @@ function skillActivationContextText(entry: Extract<SessionEntry, { kind: "skillA
 }
 
 export function buildReplayAgentMessagesFromTurns(
-	turns: ReadonlyArray<unknown>,
+	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): AgentMessage[] {
 	const out: AgentMessage[] = [];
@@ -783,10 +782,9 @@ export function buildReplayAgentMessagesFromTurns(
  * session contract updated meta but left the visible chat untouched
  * (Row 51 and Row 52 on the Phase 12 ledger).
  *
- * Replays a normalized SessionEntry stream. Legacy ClioTurnRecord lines are
- * normalized into message entries; v2 entries such as compaction summaries,
- * branch summaries, bash executions, custom entries, and metadata entries
- * are rendered explicitly. Tool call/result entries are best-effort: when a
+ * Replays a structured SessionEntry stream. Compaction summaries, branch
+ * summaries, bash executions, custom entries, and metadata entries are
+ * rendered explicitly. Tool call/result entries are best-effort: when a
  * result can be paired to a prior call id it updates that tool segment,
  * otherwise it falls back to a standalone transcript line.
  *
@@ -796,7 +794,7 @@ export function buildReplayAgentMessagesFromTurns(
  */
 export function rehydrateChatPanelFromTurns(
 	chatPanel: ChatPanel,
-	turns: ReadonlyArray<unknown>,
+	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): void {
 	const pendingToolIds: string[] = [];

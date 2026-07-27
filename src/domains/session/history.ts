@@ -2,8 +2,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite, cwdHash, readSessionFileEntries, sessionPaths } from "../../engine/session.js";
+import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionMeta } from "./contract.js";
-import { isSessionEntry, type LabelEntry, type SessionInfoEntry } from "./entries.js";
+import { isSessionHeader, type LabelEntry, type SessionInfoEntry } from "./entries.js";
 
 /**
  * Walks `clioStateDir()/sessions/<cwdHash>/` and returns every session meta
@@ -20,15 +21,17 @@ export function listSessionsForCwd(cwd: string): SessionMeta[] {
 		const sessionDir = join(dir, entry.name);
 		const metaPath = join(sessionDir, "meta.json");
 		if (!existsSync(metaPath)) continue;
+		let meta: SessionMeta;
 		try {
 			if (!statSync(metaPath).isFile()) continue;
 			const raw = readFileSync(metaPath, "utf8");
-			const meta = JSON.parse(raw) as SessionMeta;
-			enrichMetaForListing(meta, join(sessionDir, "current.jsonl"));
-			metas.push(meta);
+			meta = JSON.parse(raw) as SessionMeta;
 		} catch {
-			// skip unreadable / malformed meta files
+			// Skip unreadable or malformed metadata files.
+			continue;
 		}
+		enrichMetaForListing(meta, join(sessionDir, "current.jsonl"));
+		metas.push(meta);
 	}
 	metas.sort((a, b) => {
 		const aKey = a.lastActivityAt ?? a.createdAt ?? "";
@@ -46,11 +49,8 @@ function collapseWhitespace(text: string): string {
 
 /**
  * Pull the first non-empty piece of user-authored text out of a payload.
- * Handles three shapes the engine has used over time:
- *   - bare string (oldest)
- *   - `{ text: string }` (legacy turn payload, current chat-loop output)
- *   - `{ content: [{ type: "text", text }] }` (pi-ai message shape that some
- *     dispatch glue persists verbatim)
+ * Structured message payloads may contain a bare string, a text property,
+ * or pi-ai content blocks.
  */
 function extractUserText(payload: unknown): string | null {
 	if (typeof payload === "string") {
@@ -98,26 +98,19 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 		labels: new Map(),
 	};
 	if (!existsSync(currentPath)) return result;
-	for (const parsed of readSessionFileEntries(currentPath)) {
-		if (!parsed || typeof parsed !== "object") continue;
-		const obj = parsed as Record<string, unknown>;
-		const ts = typeof obj.timestamp === "string" ? obj.timestamp : typeof obj.at === "string" ? obj.at : null;
-		if (ts !== null && (result.lastTimestamp === null || ts > result.lastTimestamp)) {
-			result.lastTimestamp = ts;
+	const records = readSessionFileEntries(currentPath).filter((entry) => !isSessionHeader(entry));
+	for (const parsed of collectSessionEntries(records, currentPath)) {
+		if (result.lastTimestamp === null || parsed.timestamp > result.lastTimestamp) {
+			result.lastTimestamp = parsed.timestamp;
 		}
-		const isLegacyUser = obj.kind === "user";
-		const isV2UserMessage =
-			obj.kind === "message" &&
-			(obj as { role?: unknown }).role === "user" &&
-			(obj as { dispatch?: unknown }).dispatch !== true;
-		if (isLegacyUser || isV2UserMessage) {
+		if (parsed.kind === "message" && parsed.role === "user") {
 			result.messageCount += 1;
 			if (result.firstUserMessage === null) {
-				const text = extractUserText(obj.payload);
+				const text = extractUserText(parsed.payload);
 				if (text !== null) result.firstUserMessage = text;
 			}
 		}
-		if (isSessionEntry(parsed) && parsed.kind === "sessionInfo") {
+		if (parsed.kind === "sessionInfo") {
 			const info = parsed as SessionInfoEntry;
 			if (info.name !== undefined) {
 				const trimmed = info.name.trim();
@@ -130,7 +123,7 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 				}
 			}
 		}
-		if (isSessionEntry(parsed) && parsed.kind === "label") {
+		if (parsed.kind === "label") {
 			const label = parsed as LabelEntry;
 			const existing = result.labels.get(label.targetTurnId);
 			if (!existing || existing.timestamp <= label.timestamp) {

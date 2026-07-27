@@ -138,7 +138,7 @@ import {
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
-import { openSession, readSessionTailTurns } from "../engine/session.js";
+import { openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
 import type { ImageContent, Model } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import { buildReplayAgentMessagesFromTurns } from "../interactive/chat-renderer.js";
@@ -372,7 +372,7 @@ async function resolveCompactionModel(
 
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
-	return collectSessionEntries(reader.turns());
+	return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
 }
 
 /**
@@ -387,7 +387,10 @@ function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 const FINISH_CONTRACT_TAIL_ENTRIES = DEFAULT_RECENT_ENTRY_LIMIT * 2;
 
 function readRecentSessionEntriesForContract(sessionId: string): SessionEntry[] {
-	return collectSessionEntries(readSessionTailTurns(sessionId, FINISH_CONTRACT_TAIL_ENTRIES).entries);
+	return collectSessionEntries(
+		readSessionTailTurns(sessionId, FINISH_CONTRACT_TAIL_ENTRIES).entries,
+		sessionCurrentPath(sessionId),
+	);
 }
 
 function protectedArtifactStateForCurrentSession(

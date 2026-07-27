@@ -161,6 +161,45 @@ describe("contracts/persistence", () => {
 		strictEqual(isSessionEntry({ kind: "invalid" }), false);
 	});
 
+	it("persists ordinary turns as structured messages while preserving tree continuity", () => {
+		const bundle = createSessionBundle(stubContext());
+		const contract = bundle.contract;
+		const meta = contract.create({ cwd: scratch });
+		const userTurn = contract.append({ parentId: null, kind: "user", payload: { text: "question" } });
+		const assistantTurn = contract.append({
+			parentId: userTurn.id,
+			kind: "assistant",
+			payload: { text: "answer" },
+		});
+
+		const reader = openSession(meta.id);
+		const entries = reader.turns();
+		strictEqual(entries.length, 2);
+		ok(entries.every(isSessionEntry));
+		deepStrictEqual(entries, [
+			{
+				kind: "message",
+				turnId: userTurn.id,
+				parentTurnId: null,
+				timestamp: userTurn.at,
+				role: "user",
+				payload: { text: "question" },
+			},
+			{
+				kind: "message",
+				turnId: assistantTurn.id,
+				parentTurnId: userTurn.id,
+				timestamp: assistantTurn.at,
+				role: "assistant",
+				payload: { text: "answer" },
+			},
+		]);
+		deepStrictEqual(reader.tree(), [
+			{ id: userTurn.id, parentId: null, at: userTurn.at, kind: "user" },
+			{ id: assistantTurn.id, parentId: userTurn.id, at: assistantTurn.at, kind: "assistant" },
+		]);
+	});
+
 	it("persists skill activation entries and session metadata", () => {
 		const bundle = createSessionBundle(stubContext());
 		const contract = bundle.contract;

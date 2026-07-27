@@ -3,14 +3,14 @@
  *
  * The /tree overlay flattens a TreeSnapshot into one row per turn. The raw
  * snapshot only carries kind + ids + label; this module computes a short,
- * single-line description for each row from the underlying ClioTurnRecord
+ * single-line description for each row from the underlying structured message
  * payload so users can recognise turns at a glance instead of seeing a wall
  * of generic `[role]` placeholders.
  *
  * The function is pure: it takes a turn-shape input and returns a string. No
  * I/O, no time, no width-aware truncation (the overlay layer applies its own
- * width budget after calling). Defensive against unknown payload shapes
- * because legacy and v2 sessions both flow through here.
+ * width budget after calling). It is defensive against the supported message
+ * payload shapes.
  */
 import type { ClioTurnRecord } from "../../../engine/session.js";
 import { stripTokenizerSentinels } from "../../../engine/strip-tokenizer-sentinels.js";
@@ -67,13 +67,9 @@ function clamp(text: string, max: number): string {
 }
 
 /**
- * Pull the user-authored or assistant text out of a payload. Handles every
- * shape the engine has persisted over time:
- *   - bare string (oldest legacy)
- *   - `{ text: string }` (current chat-loop output for user; legacy assistant)
- *   - `{ content: [{ type: "text", text }, ...] }` (pi-ai message shape used
- *     by some dispatch glue and assistant turns whose text lives in content)
- * Returns null when no usable text is found.
+ * Pull user-authored or assistant text from supported message payloads.
+ * Payloads may be bare strings, objects with a text property, or pi-ai
+ * content blocks. Returns null when no usable text is found.
  */
 function extractPlainText(payload: unknown): string | null {
 	if (typeof payload === "string") {

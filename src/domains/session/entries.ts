@@ -1,7 +1,7 @@
 /**
- * Rich session entry union (Phase 12 slice 12a).
+ * Rich session entry union.
  *
- * Entries are the v2 persistence vocabulary for session events. Each entry
+ * Entries are the persistence vocabulary for session events. Each entry
  * carries its `kind` discriminant, a `turnId` (uuid v7 where possible so
  * entries sort by creation), a parent pointer, and an ISO timestamp.
  *
@@ -9,10 +9,6 @@
  *   - compactionSummary is produced by compaction/compact.ts (slice 12c).
  *   - branchSummary is produced by the fork path (slice 12b).
  *   - bashExecution / fileEntry become the wire shape for Phase 14 extensions.
- *
- * Legacy v1 ClioTurnRecord lines in current.jsonl are normalized into
- * MessageEntry instances via `fromLegacyTurn` so callers see a uniform
- * SessionEntry[] surface regardless of session format version.
  */
 
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
@@ -229,10 +225,7 @@ export const SESSION_ENTRY_KINDS = [
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number];
 
 /**
- * Structural guard: true when `value` has a `turnId` string and a `kind`
- * that matches the SessionEntry union. Legacy ClioTurnRecord records use
- * `id`/`at` and fail this check, so reader code can dispatch via:
- *   if (isSessionEntry(raw)) { ...rich... } else { ...legacy... }
+ * Structural guard for the single accepted session ledger entry format.
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object";
@@ -412,22 +405,4 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 
 export function isSessionFileEntry(value: unknown): value is SessionFileEntry {
 	return isSessionHeader(value) || isSessionEntry(value);
-}
-
-/**
- * Normalize a legacy ClioTurnRecord into a MessageEntry. Used by the
- * session domain on read to present a uniform entries[] view of pre-v2
- * sessions; pre-existing on-disk lines are untouched until the next
- * checkpoint rewrites them.
- */
-export function fromLegacyTurn(record: ClioTurnRecord): MessageEntry {
-	const entry: MessageEntry = {
-		kind: "message",
-		turnId: record.id,
-		parentTurnId: record.parentId,
-		timestamp: record.at,
-		role: record.kind,
-		payload: record.payload,
-	};
-	return entry;
 }
