@@ -219,8 +219,14 @@ function heldReservationUsage(values: ReadonlyArray<unknown>): { global: number;
 function assertCapacity(file: CapacityStateFile, nodeId: string, limits: CapacityLimits): void {
 	const held = heldReservationUsage(file.reservations);
 	const globalUsed = file.leases.length + held.global;
-	if (globalUsed >= limits.global)
-		throw new Error(`dispatch: admission denied: global capacity reached (${globalUsed}/${limits.global})`);
+	// The denial names the compliant next move, not just the gate. A model told
+	// only that it is full re-dispatches with a different agent; the work it is
+	// waiting on is already running under its own detached assignments.
+	if (globalUsed >= limits.global) {
+		throw new Error(
+			`dispatch: admission denied: global capacity reached (${globalUsed}/${limits.global}). Collect the runs already in flight before dispatching more; re-dispatching with a different agent or options does not free a slot.`,
+		);
+	}
 	const nodeLimit = limits.nodes[nodeId];
 	if (nodeLimit !== undefined) {
 		if (nodeLimit < 1) throw new Error(`dispatch: admission denied: node '${nodeId}' capacity unavailable`);
