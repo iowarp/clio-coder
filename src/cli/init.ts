@@ -129,7 +129,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	const bootstrapOptions = bootstrapInputFromInitOptions(parsed.options);
-	// Model-driven exploration is the default. --heuristic (or legacy --no-generate)
+	// Model-driven exploration is the default. --heuristic
 	// forces the deterministic generator; preview never spawns a model.
 	const useModel = parsed.options.heuristic !== true && parsed.options.preview !== true;
 	const startedAt = performance.now();

@@ -1310,9 +1310,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			toolRegistry.cancelParkedCalls(headlessPermissionReason);
 		});
 		try {
-			const parsedSkillRequest = resources?.parsePendingSkillRequests(options.headless.prompt, process.cwd(), {
-				naturalLanguageTriggers: false,
-			}) ?? { text: options.headless.prompt, pendingSkillRequests: [] };
+			const parsedSkillRequest = resources?.parsePendingSkillRequests(options.headless.prompt, process.cwd()) ?? {
+				text: options.headless.prompt,
+				pendingSkillRequests: [],
+			};
 			const promptExpansion = resources?.expandPromptTemplate(parsedSkillRequest.text, process.cwd());
 			const fileExpansion = await expandInlineFileReferencesAsync(
 				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,

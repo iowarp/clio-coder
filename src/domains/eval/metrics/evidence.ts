@@ -48,11 +48,10 @@ function isReceiptShaped(value: unknown): value is RunReceipt {
 }
 
 /**
- * Evidence metrics for one sealed receipt. `evidence.verification` reads the
- * integrity-covered field through the shared legacy-safe reader (absent field
- * → "unknown", never "verified"). `evidence.firstPassSuccess` mirrors the
- * durable findings summary and is omitted when the receipt predates it, so a
- * gate on the metric fails closed instead of inventing a value.
+ * Evidence metrics for one sealed receipt. `evidence.verification` is read
+ * strictly from `receipt.verification.state`. `evidence.firstPassSuccess`
+ * mirrors the durable findings summary and is omitted when that summary is
+ * absent, so a gate on the metric fails closed instead of inventing a value.
  */
 export function evidenceMetricsFromReceipt(receipt: RunReceipt): Record<string, string | boolean | number> {
 	return {

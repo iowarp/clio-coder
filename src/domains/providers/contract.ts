@@ -117,17 +117,6 @@ export interface ProvidersContract {
 	};
 
 	/**
-	 * Legacy API-key-only shim kept for setup and older call sites while
-	 * everything migrates to `auth`.
-	 */
-	credentials: {
-		hasKey(providerId: string): boolean;
-		get(providerId: string): string | null;
-		set(providerId: string, key: string): void;
-		remove(providerId: string): void;
-	};
-
-	/**
 	 * Model knowledge base used by chat-loop and overlays to synthesize pi-ai
 	 * `Model<Api>` instances via `RuntimeDescriptor.synthesizeModel(target,
 	 * wireModelId, kb)`. Null when the bundled YAMLs are unreadable at boot.

@@ -336,7 +336,7 @@ export async function expandInteractiveSubmitAsync(
 	resources: ResourcesContract | undefined,
 	cwd = process.cwd(),
 ): Promise<InteractiveSubmitExpansion> {
-	const parsed = resources?.parsePendingSkillRequests(text, cwd, { naturalLanguageTriggers: false }) ?? {
+	const parsed = resources?.parsePendingSkillRequests(text, cwd) ?? {
 		text,
 		pendingSkillRequests: [],
 	};

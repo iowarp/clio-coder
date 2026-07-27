@@ -84,7 +84,7 @@ describe("contracts/context-init-options", () => {
 			rewriteClioMd: true,
 		});
 		deepStrictEqual(slashInitOptions("/context init"), {});
-		for (const flag of ["--rewrite", "--apply", "--include-global", "--no-generate"]) {
+		for (const flag of ["--rewrite", "--apply", "--include-global"]) {
 			deepStrictEqual(parseSlashCommand(`/context init ${flag}`), {
 				kind: "unknown",
 				text: `/context init ${flag}`,
@@ -92,13 +92,13 @@ describe("contracts/context-init-options", () => {
 		}
 	});
 
-	it("keeps advanced shell init flags table-driven, including legacy aliases", () => {
+	it("keeps advanced shell init flags table-driven", () => {
 		deepStrictEqual(contextInitOptionsFromCliArgs(["--rewrite"]), {
 			applyClioMd: true,
 			rewriteClioMd: true,
 		});
 		deepStrictEqual(contextInitOptionsFromCliArgs(["--include-global"]), { includeGlobalImports: true });
-		deepStrictEqual(contextInitOptionsFromCliArgs(["--no-generate"]), { heuristic: true });
+		deepStrictEqual(contextInitOptionsFromCliArgs(["--heuristic"]), { heuristic: true });
 	});
 
 	it("regenerates from scratch on --rewrite instead of using the existing CLIO.md as source", async () => {

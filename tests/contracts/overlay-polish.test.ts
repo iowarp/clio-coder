@@ -171,12 +171,6 @@ function providersFor(
 			setRuntimeOverrideForTarget: () => {},
 			clearRuntimeOverrideForTarget: () => {},
 		},
-		credentials: {
-			hasKey: () => false,
-			get: () => null,
-			set: () => {},
-			remove: () => {},
-		},
 		knowledgeBase: null,
 	};
 	return { ...base, ...overrides } as unknown as ProvidersContract;

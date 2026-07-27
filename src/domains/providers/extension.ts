@@ -449,22 +449,6 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		probeReasoningForModel(targetId, modelId) {
 			return probeReasoningForModelInternal(targetId, modelId);
 		},
-		credentials: {
-			hasKey(providerId) {
-				const stored = authStore.get(providerId);
-				return stored?.type === "api_key";
-			},
-			get(providerId) {
-				const stored = authStore.get(providerId);
-				return stored?.type === "api_key" ? stored.key : null;
-			},
-			set(providerId, key) {
-				authStore.setApiKey(providerId, key);
-			},
-			remove(providerId) {
-				authStore.remove(providerId);
-			},
-		},
 		auth: {
 			statusForTarget(target, runtime) {
 				if (!targetRequiresAuth(target, runtime)) {

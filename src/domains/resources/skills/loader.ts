@@ -110,8 +110,6 @@ export interface SkillList {
 }
 
 export interface SkillExpansionOptions {
-	/** @deprecated Ignored. Skill invocation is explicit slash/selector only. */
-	naturalLanguageTriggers?: boolean;
 	/** Working directory used for marketplace catalog discovery. */
 	cwd?: string;
 }

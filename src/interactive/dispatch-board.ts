@@ -1069,8 +1069,12 @@ export function createDispatchBoardStore(
 				entry.startedAtMs = Date.now();
 			}
 			if (type === "message_update") {
-				// biome-ignore lint/suspicious/noExplicitAny: The assistantMessageEvent property is dynamic on workerEvent.
-				const assistantEvent = (workerEvent as any).assistantMessageEvent || {};
+				const assistantEvent =
+					"assistantMessageEvent" in workerEvent &&
+					typeof workerEvent.assistantMessageEvent === "object" &&
+					workerEvent.assistantMessageEvent !== null
+						? (workerEvent.assistantMessageEvent as { type?: unknown })
+						: {};
 				const hasDelta =
 					assistantEvent.type === "text_delta" ||
 					assistantEvent.type === "thinking_delta" ||
