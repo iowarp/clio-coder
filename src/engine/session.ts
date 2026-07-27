@@ -56,10 +56,8 @@ export interface ClioSessionMeta {
 	platform: string;
 	nodeVersion: string;
 	/**
-	 * v3 on every new session. v1 files on disk omit the field; readers
-	 * treat missing as 1 and run the migration chain in
-	 * src/domains/session/migrations on resume. Bumped by a future
-	 * migration when the entry-union vocabulary changes again.
+	 * Version 3 on every new session. Readers reject earlier versions and
+	 * sessions that omit this field.
 	 */
 	sessionFormatVersion?: number;
 }

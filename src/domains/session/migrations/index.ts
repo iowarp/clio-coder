@@ -1,22 +1,13 @@
 /**
- * Session-format migration chain.
+ * Strict session-format version reader.
  *
- * Runs on every session read via manager.resumeSessionState. Each migrator
- * mutates SessionMeta in place; the chain stops at CURRENT_SESSION_FORMAT_VERSION.
- * Migrations are idempotent: a freshly-created session that passes through
- * here again is a no-op.
- *
- * To add a future v3→v4 migration: create v3-to-v4.ts, import it here, and
- * extend the switch in runMigrations. Bump CURRENT_SESSION_FORMAT_VERSION
- * in src/engine/session.ts to the new ceiling.
+ * Runs before every session resume. Earlier pre-1.0 formats are disposable
+ * local state and must not be transformed into the current format.
  */
 
 import { CURRENT_SESSION_FORMAT_VERSION } from "../../../engine/session.js";
 import type { SessionMeta } from "../contract.js";
-import { migrateV1ToV2 } from "./v1-to-v2.js";
-import { migrateV2ToV3 } from "./v2-to-v3.js";
 
-export { stripV2PromptArtifacts } from "./v2-to-v3.js";
 export { CURRENT_SESSION_FORMAT_VERSION };
 
 export interface MigrationResult {
@@ -25,12 +16,12 @@ export interface MigrationResult {
 	to: number;
 }
 
-export function runMigrations(meta: SessionMeta): MigrationResult {
+export function runMigrations(meta: SessionMeta, sessionPath: string): MigrationResult {
 	const from = meta.sessionFormatVersion ?? 1;
-	if (from >= CURRENT_SESSION_FORMAT_VERSION) {
-		return { migrated: false, from, to: from };
+	if (from < CURRENT_SESSION_FORMAT_VERSION) {
+		throw new Error(
+			`session metadata has an unsupported format version (expected version 3, got ${from}): ${sessionPath}. Remove the session directory to start a new session.`,
+		);
 	}
-	if (from < 2) migrateV1ToV2(meta);
-	if (from < 3) migrateV2ToV3(meta);
-	return { migrated: true, from, to: CURRENT_SESSION_FORMAT_VERSION };
+	return { migrated: false, from, to: from };
 }

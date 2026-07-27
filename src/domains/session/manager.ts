@@ -4,14 +4,14 @@ import {
 	type ClioSessionWriter,
 	type ClioTurnRecord,
 	createSession as engineCreateSession,
+	openSession as engineOpenSession,
 	resumeSession as engineResumeSession,
-	readSessionFileEntries,
 	type SessionTreeNode,
 	sessionPaths,
 } from "../../engine/session.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { isSessionEntry, type SessionEntry } from "./entries.js";
-import { runMigrations, stripV2PromptArtifacts } from "./migrations/index.js";
+import { runMigrations } from "./migrations/index.js";
 
 /**
  * Wraps engine/session.ts so the session domain can track the single in-memory
@@ -60,21 +60,11 @@ export function persistSessionMeta(state: SessionManagerState): void {
 }
 
 export function resumeSessionState(sessionId: string): SessionManagerState {
-	const { meta, writer } = engineResumeSession(sessionId);
-	const sessionMeta = meta as SessionMeta;
-	// Migration runs on every resume so older sessions opt into the current
-	// vocabulary transparently. Meta mutation is in place; ledger-shape
-	// migrations rewrite current.jsonl through the writer exactly once.
-	const result = runMigrations(sessionMeta);
-	const state = { meta: sessionMeta, writer };
-	if (result.migrated) {
-		if (result.from < 3) {
-			const entries = readSessionFileEntries(sessionPaths(sessionMeta).current);
-			writer.replaceEntries(entries.map(stripV2PromptArtifacts));
-		}
-		persistSessionMeta(state);
-	}
-	return state;
+	const sessionMeta = engineOpenSession(sessionId).meta() as SessionMeta;
+	const paths = sessionPaths(sessionMeta);
+	runMigrations(sessionMeta, paths.meta);
+	const { writer } = engineResumeSession(sessionId);
+	return { meta: sessionMeta, writer };
 }
 
 export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTurnRecord {

@@ -3,7 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
-import { createSession, openSession, resumeSession } from "../../src/engine/session.js";
+import { resumeSessionState } from "../../src/domains/session/manager.js";
+import { createSession, openSession, resumeSession, sessionPaths } from "../../src/engine/session.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 // BUG-013: session ids are identifiers, not paths. findSessionDir joined a
@@ -59,4 +60,17 @@ describe("contracts/session-boundary", () => {
 		strictEqual(openSession(meta.id).meta().id, meta.id);
 		strictEqual(resumeSession(meta.id).meta.id, meta.id);
 	});
+
+	for (const version of [1, 2] as const) {
+		it(`rejects session format version ${version} with an operator remedy`, async () => {
+			const { meta, writer } = createSession({ cwd: scratch });
+			await writer.close();
+			const paths = sessionPaths(meta);
+			writeFileSync(paths.meta, JSON.stringify({ ...meta, sessionFormatVersion: version }));
+
+			throws(() => resumeSessionState(meta.id), {
+				message: `session metadata has an unsupported format version (expected version 3, got ${version}): ${paths.meta}. Remove the session directory to start a new session.`,
+			});
+		});
+	}
 });
