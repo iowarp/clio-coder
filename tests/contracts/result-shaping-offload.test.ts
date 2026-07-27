@@ -16,7 +16,7 @@ import { Type } from "typebox";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import type { ToolResult, ToolSpec } from "../../src/tools/registry.js";
-import { shapeToolResult } from "../../src/tools/result-shaping.js";
+import { OFFLOAD_POINTER_NOTE, shapeToolResult } from "../../src/tools/result-shaping.js";
 
 const roots: string[] = [];
 const savedEnv = {
@@ -127,7 +127,34 @@ describe("contracts/result-shaping offload", () => {
 		strictEqual(path, join(stateDir, "scratch", "session-1", "call-1.txt"));
 		strictEqual(readFileSync(path, "utf8"), text);
 		ok(outputText(shaped).includes("[tool result truncated]"));
-		ok(outputText(shaped).includes(`Full output saved to ${path}; read it with offset and limit to inspect the rest.`));
+		ok(outputText(shaped).includes(`full: ${path} (overflow copy, read-only; not the workspace)`));
+		ok(outputText(shaped).includes("read it with offset and limit to inspect the rest."));
+	});
+
+	it("names the offload path as an artifact rather than a place to work", () => {
+		useStateDir();
+		const text = "x".repeat(1024);
+		// A bare absolute path under the state directory reads to a model like a
+		// working location; an observed run took it as its cwd and wrote there
+		// instead of in the repository. Every surface that hands the path over
+		// carries the same correction.
+		const shaped = shapeToolResult(
+			mockToolSpec(ToolNames.Bash, 64),
+			{ kind: "ok", output: text },
+			{
+				sessionId: "session-1",
+				toolCallId: "call-1",
+			},
+		);
+		ok(outputText(shaped).includes(OFFLOAD_POINTER_NOTE));
+		const json = shapeToolResult(
+			mockToolSpec(ToolNames.Grep, 64),
+			{ kind: "ok", output: text, details: { observation: { format: "json" } } },
+			{ sessionId: "session-2", toolCallId: "call-2" },
+		);
+		const stub = JSON.parse(outputText(json)) as { offloadPath?: string; offloadPathNote?: string };
+		strictEqual(typeof stub.offloadPath, "string");
+		strictEqual(stub.offloadPathNote, OFFLOAD_POINTER_NOTE);
 	});
 
 	it("keeps one offload file and path when a shaped result is shaped again", () => {
@@ -141,7 +168,7 @@ describe("contracts/result-shaping offload", () => {
 		strictEqual(second, first);
 		strictEqual(offloadPath(second), offloadPath(first));
 		strictEqual(readdirSync(join(stateDir, "scratch", "session-1")).length, 1);
-		strictEqual(outputText(second).match(/Full output saved/g)?.length, 1);
+		strictEqual(outputText(second).match(/overflow copy, read-only/g)?.length, 1);
 	});
 
 	it("falls back to the old truncation shape when the offload write fails", () => {

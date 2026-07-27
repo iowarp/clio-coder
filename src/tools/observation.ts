@@ -1,6 +1,6 @@
 import { GUARDRAIL_DEFAULTS, GUARDRAIL_ENV_VARS, resolveGuardrail } from "../core/guardrails.js";
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
-import { writeToolOffload } from "./result-shaping.js";
+import { offloadPointer, writeToolOffload } from "./result-shaping.js";
 import { formatSize } from "./truncate.js";
 
 /**
@@ -331,7 +331,7 @@ function noticeLine(
 	const parts = [
 		`${input.tool}: ${input.shownCount}/${totalSegment} ${input.unit} shown (${formatSize(bodyBytes)} of ${formatSize(totalBytes)})`,
 	];
-	if (offloadPath !== null) parts.push(`full: ${offloadPath}`);
+	if (offloadPath !== null) parts.push(offloadPointer(offloadPath));
 	if (next !== undefined && next.length > 0) parts.push(`next: ${next}`);
 	return `[${parts.join(" | ")}]`;
 }

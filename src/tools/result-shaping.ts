@@ -103,6 +103,21 @@ export function writeToolOffload(
 }
 
 /**
+ * The one framing for an offload pointer, shared by every truncation notice.
+ * The path is a read-only overflow copy under Clio's state directory, and a
+ * bare absolute path there reads to a model like somewhere it is working: an
+ * observed run took the pointer as its working directory, wrote its notes
+ * beside it, and never touched the repository again. Naming what the path is
+ * costs a few tokens on truncated results and removes that reading.
+ */
+export const OFFLOAD_POINTER_NOTE = "overflow copy, read-only; not the workspace";
+
+/** `full: <path> (<note>)`, the exact form every truncation notice carries. */
+export function offloadPointer(offloadPath: string): string {
+	return `full: ${offloadPath} (${OFFLOAD_POINTER_NOTE})`;
+}
+
+/**
  * True when filePath points inside this session's offload scratch directory
  * (where {@link writeToolOffload} spills full results). Reads of the session's
  * own offloaded output are exempt from the per-turn observation pool: the
@@ -118,7 +133,7 @@ export function isSessionOffloadPath(filePath: string, sessionId: string | undef
 function bracketedHint(spec: ToolSpec, offloadPath: string | null): string {
 	const hint = followUpHint(spec);
 	if (offloadPath === null) return hint;
-	return `${hint} Full output saved to ${offloadPath}; read it with offset and limit to inspect the rest.`;
+	return `${hint} ${offloadPointer(offloadPath)}; read it with offset and limit to inspect the rest.`;
 }
 
 /**
@@ -141,7 +156,7 @@ function shapeJsonOverflow(
 		typeof observation?.next === "string" && observation.next.length > 0 ? observation.next : followUpHint(spec);
 	const stub = JSON.stringify({
 		error: `result exceeded ${maxBytes} bytes`,
-		...(offloadPath !== null ? { offloadPath } : {}),
+		...(offloadPath !== null ? { offloadPath, offloadPathNote: OFFLOAD_POINTER_NOTE } : {}),
 		next,
 	});
 	const resultSize = {
