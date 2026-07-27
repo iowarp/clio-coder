@@ -29,6 +29,8 @@ function fixtureRouteCandidate(overrides: Partial<RouteCandidate> = {}): RouteCa
 		nodeId: "local",
 		toolSignature: "e".repeat(64),
 		promptCompositionHash: "f".repeat(64),
+		endpointIdentityHash: "1".repeat(64),
+		settingsFingerprint: "2".repeat(64),
 		...overrides,
 	};
 }

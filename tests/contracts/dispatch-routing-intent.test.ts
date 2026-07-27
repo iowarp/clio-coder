@@ -20,6 +20,8 @@ const candidate = (nodeId = "local", targetId = "target"): RouteCandidate => ({
 	nodeId,
 	toolSignature: "tools",
 	promptCompositionHash: "prompt",
+	endpointIdentityHash: "endpoint",
+	settingsFingerprint: "settings",
 });
 const intent = () => {
 	const parsed = parseRoutingIntent(undefined);

@@ -28,6 +28,7 @@ import {
 	type CandidateEvaluation,
 	decideRoute,
 	evaluateRouteDecision,
+	fixedRouteDecision,
 	type RouteCandidate,
 	type RouteDecisionInput,
 	type RouteDecisionV1,
@@ -352,8 +353,8 @@ export interface RouteObservedOutcome extends RouteRealizedOutcome {
 }
 
 export interface RouteObserver {
-	/** Build the shadow decision for a dispatch; null when observation failed. */
-	observe(input: RouteObserveInput): RouteObservationHandle | null;
+	/** Build a shadow decision or a fixed decision when observation fails. */
+	observe(input: RouteObserveInput): RouteObservationHandle;
 	/** Reduce and durably record the real terminal route outcome. */
 	recordOutcome(observationId: string, outcome: RouteObservedOutcome): void;
 	summary(): RouteObserverSummary;
@@ -443,7 +444,8 @@ function loggableEvaluation(evaluation: CandidateEvaluation): Record<string, unk
 
 export function createRouteObserver(options: CreateRouteObserverOptions): RouteObserver {
 	const learner = createRouteLearner();
-	const history = options.history ?? createRouteHistoryStore();
+	const history =
+		options.history ?? createRouteHistoryStore(options.stateDir === undefined ? {} : { stateDir: options.stateDir });
 	const samples = options.samples;
 	const pending = new Map<string, { decision: RouteDecisionV1; taskType: RouteTaskType }>();
 	const PENDING_LIMIT = 512;
@@ -538,8 +540,14 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				});
 				return { id: observationId, decision };
 			} catch {
-				// Observation must never disturb dispatch.
-				return null;
+				// Observation must never disturb dispatch or remove the sealed route
+				// evidence. The fixed artifact names the exact route that will run.
+				const decision = fixedRouteDecision(input.executedRoute);
+				sequence += 1;
+				const observationId = `route-fixed-${decision.decisionHash.slice(0, 12)}-${sequence.toString(36)}`;
+				totalObservations += 1;
+				pending.set(observationId, { decision, taskType: classifyRouteIntent(input.task).taskType });
+				return { id: observationId, decision };
 			}
 		},
 		recordOutcome(observationId, outcome) {
@@ -572,7 +580,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				};
 				samples?.record(realized.route, sample);
 				history.upsert({
-					version: 1,
+					version: 2,
 					receiptDigest: outcome.receipt.integrity.digest,
 					assignmentId: outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
 					route: realized.route,
@@ -595,6 +603,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 									totalEndToEndMs: outcome.phaseTiming.totalEndToEndMs,
 								}
 							: null,
+					cacheRead: completed && (outcome.receipt.cacheReadTokenCount ?? 0) > 0,
 					sourceDigests: outcome.quality.sourceDigests,
 					settledAt: outcome.receipt.endedAt,
 				});

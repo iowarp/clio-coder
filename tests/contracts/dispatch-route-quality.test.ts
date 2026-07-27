@@ -124,6 +124,8 @@ function candidate(): RouteCandidate {
 		nodeId: "local",
 		toolSignature: "tools",
 		promptCompositionHash: "prompt",
+		endpointIdentityHash: "endpoint",
+		settingsFingerprint: "settings",
 	};
 }
 
@@ -300,7 +302,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		roots.push(stateDir);
 		const history = createRouteHistoryStore({ stateDir });
 		const record = {
-			version: 1 as const,
+			version: 2 as const,
 			receiptDigest: "a".repeat(64),
 			assignmentId: "assignment",
 			route: candidate(),
@@ -310,6 +312,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 			firstPass: true,
 			completedCostUsd: 0.1,
 			completedPhaseTiming: null,
+			cacheRead: false,
 			sourceDigests: ["a".repeat(64)],
 			settledAt: "2026-07-20T00:00:01.000Z",
 		};

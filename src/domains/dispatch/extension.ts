@@ -125,8 +125,19 @@ import {
 	isInfrastructureFailure,
 	type RetryDecision,
 } from "./failure-classification.js";
+import { routeFactVerdict } from "./fleet-preflight.js";
 import { isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
+import {
+	configuredJointNodes,
+	configuredJointTargets,
+	emptyJointHardFilterVerdicts,
+	enumerateJointRouteUniverse,
+	JOINT_ROUTE_FALLBACK_LIMIT,
+	JOINT_ROUTE_HARD_FILTERS,
+	type JointRouteResolverInput,
+	resolveJointRoute,
+} from "./joint-route-resolver.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
@@ -150,20 +161,12 @@ import {
 	rollbackDispatchReservation,
 	rollbackUnconsumedDispatchReservation,
 } from "./reservation-store.js";
-import {
-	firstAvailableRouteCandidate,
-	ROUTE_CANDIDATE_LIMIT,
-	type RouteAvailability,
-	type RouteCandidateProbe,
-	type RouteUniverse,
-	routeCandidateOrder,
-	sameRouteCandidate,
-	selectRouteCandidates,
-} from "./route-candidates.js";
+import { firstAvailableRouteCandidate, ROUTE_CANDIDATE_LIMIT, type RouteAvailability } from "./route-candidates.js";
 import {
 	type RouteDecisionV1,
 	type RouteIdentityInput,
 	type RouteRoleInput,
+	routeCandidateKey,
 	toRouteCandidate,
 } from "./route-decision.js";
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
@@ -211,7 +214,7 @@ import {
 	type PipelineInput,
 	validateJobSpec,
 } from "./validation.js";
-import { computeSettingsFingerprint, receiptAttestationFields } from "./worker-protocol.js";
+import { computeSettingsFingerprint, endpointIdentityHash, receiptAttestationFields } from "./worker-protocol.js";
 import { type SpawnedWorker, type SpawnedWorkerResult, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
 interface RunTokenMeter {
@@ -330,7 +333,8 @@ export interface DispatchBundleOptions {
 	 * Tests inject a fixed stub to keep the receipt path off the process spawner.
 	 */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
-	routeObserver?: boolean;
+	/** Observer injection seam. Production constructs the durable observer. */
+	routeObserver?: RouteObserver;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -340,21 +344,9 @@ const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
-function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1 | undefined): RunReceiptDraft {
-	return decision === undefined ? draft : { ...draft, routeDecision: decision };
+function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): RunReceiptDraft {
+	return { ...draft, routeDecision: decision };
 }
-const ROUTE_HARD_CONSTRAINTS: ReadonlyArray<string> = [
-	"agent-audience",
-	"agent-autonomy",
-	"required-tools-after-runtime-narrowing",
-	"response-schema-enforceable",
-	"write-roots-enforceable",
-	"protected-artifacts-enforceable",
-	"target-auth-and-availability",
-	"model-capabilities",
-	"worker-permission-mode",
-	"node-eligibility",
-];
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
 function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["rates"]): number {
@@ -1949,22 +1941,21 @@ export function createDispatchBundle(
 	// have produced for every dispatch and records decision-versus-outcome into
 	// a bounded JSONL under the state dir. Observer-only: it never influences
 	// admission, placement, or execution, and every call is failure-isolated.
-	const routeObserver: RouteObserver | null =
-		options?.routeObserver === false
-			? null
-			: createRouteObserver({
-					getAgents: () => {
-						try {
-							return agents.listSpecs().map((spec) => ({
-								id: spec.id,
-								description: spec.description,
-								latencyClass: spec.latencyClass,
-							}));
-						} catch {
-							return [];
-						}
-					},
-				});
+	const routeObserver: RouteObserver =
+		options?.routeObserver ??
+		createRouteObserver({
+			getAgents: () => {
+				try {
+					return agents.listSpecs().map((spec) => ({
+						id: spec.id,
+						description: spec.description,
+						latencyClass: spec.latencyClass,
+					}));
+				} catch {
+					return [];
+				}
+			},
+		});
 
 	let ledger: Ledger | null = null;
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -2658,13 +2649,6 @@ export function createDispatchBundle(
 		return `${targetId}\0${runtimeId}\0${wireModelId}`;
 	}
 
-	/**
-	 * A target cooldown protects *new* work from a known-bad target. It must not
-	 * govern an assignment already in flight: that assignment's own retry policy
-	 * (`workers.maxRetries` plus backoff) is the correct and sufficient governor,
-	 * and gating its retries here strands the assignment mid-chain with no
-	 * remaining attempts. A request carrying lineage is an in-assignment retry.
-	 */
 	function targetCooldownReason(targetId: string, runtimeId: string, wireModelId: string): string | null {
 		const key = cooldownKey(targetId, runtimeId, wireModelId);
 		const cooldown = targetCooldowns.get(key);
@@ -2708,19 +2692,6 @@ export function createDispatchBundle(
 		return { targetId: target.target.id, runtimeId: target.runtime.id, wireModelId: target.wireModelId };
 	}
 
-	/**
-	 * Move a *new* assignment off a cooling target onto the next member of its
-	 * failover envelope.
-	 *
-	 * A target cooldown protects new work from a known-bad target, but a dispatch
-	 * that already carries alternates must use them rather than die: the first
-	 * step of a pipeline can cool the shared default target and strand every
-	 * later step on a route the plan never required. Only the route moves; the
-	 * failover mode is carried explicitly so pinning the alternate does not
-	 * silently downgrade the request to an exact pin. Returns null when the
-	 * resolved route is usable or when no member can take the work, in which case
-	 * `assertTargetNotCoolingDown` reports the resolved route's own reason.
-	 */
 	function routeAroundCoolingTarget(req: DispatchRequest, settings: EffectiveSettings): DispatchRequest | null {
 		if (req.lineage !== undefined || req.delegationAgentId !== undefined) return null;
 		const mode = failoverModeFor(req);
@@ -2748,8 +2719,6 @@ export function createDispatchBundle(
 			target: next.target,
 			model: next.model,
 			failover: mode,
-			// An approved envelope binds the node too, so the alternate's node is
-			// pinned with it. Automatic failover leaves placement free.
 			...(mode === "approved" ? { node: next.node } : {}),
 		};
 		if (rerouted.plannedNode !== undefined && rerouted.plannedNode.id !== next.node) delete rerouted.plannedNode;
@@ -2986,7 +2955,7 @@ export function createDispatchBundle(
 		req: DispatchRequest,
 		settings: EffectiveSettings,
 		timing: RunPhaseMarks,
-		routeDecision: RouteDecisionV1 | undefined,
+		routeDecision: RouteDecisionV1,
 		observer?: DispatchAdmissionObserver,
 	): Promise<{
 		runId: string;
@@ -3667,12 +3636,10 @@ export function createDispatchBundle(
 
 		// Shadow route decision. It is computed once the production route is
 		// resolved, is never fed back into placement, and its outcome is recorded
-		// when the run's receipt seals. Failure-isolated on both ends; a null
-		// observation means the decision could not be built and nothing is sealed.
-		let routeObservation: RouteObservationHandle | null = null;
+		// when the run's receipt seals. Observer failures produce a fixed decision.
+		let routeObservation: RouteObservationHandle;
 		const attachRouteObservation = <T extends { finalPromise: Promise<RunReceipt> }>(handle: T): T => {
 			const observation = routeObservation;
-			if (observation === null) return handle;
 			handle.finalPromise
 				.then((receipt) => {
 					const envelope = ledger?.get(receipt.runId);
@@ -3683,7 +3650,7 @@ export function createDispatchBundle(
 						subject: { receipt, envelope },
 						receipts: [{ receipt, envelope }],
 					});
-					routeObserver?.recordOutcome(observation.id, {
+					routeObserver.recordOutcome(observation.id, {
 						route: observation.decision.executedRoute,
 						outcome,
 						qualityLabel: quality.label,
@@ -3719,7 +3686,7 @@ export function createDispatchBundle(
 			rebindReservationSlot(req, "local", UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req);
 			return attachRouteObservation(
-				await dispatchAcpDelegation(req, settings, timing, routeObservation?.decision, observer),
+				await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer),
 			);
 		}
 
@@ -4542,7 +4509,7 @@ export function createDispatchBundle(
 					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
 				}
 				ledgerRef.update(envelope.id, ledgerPatch);
-				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation?.decision));
+				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeObservation.decision));
 				await ledgerRef.persist();
 				active.delete(envelope.id);
 				recordTargetOutcome(
@@ -4703,6 +4670,8 @@ export function createDispatchBundle(
 				// An external ACP agent runs its own tool loop, so Clio cannot observe
 				// its surface. The named signature is that unknown, stated once.
 				toolSignature: ACP_TOOL_SIGNATURE,
+				endpointIdentityHash: sha256(`delegation:${lifecycle.agentConfig.id}`),
+				settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 				costUpperBoundUsd: UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD,
 			};
 		}
@@ -4749,6 +4718,8 @@ export function createDispatchBundle(
 			node: previewNode(req).node,
 			thinkingLevel: target.thinkingLevel,
 			toolSignature: toolSignature(effectiveTools),
+			endpointIdentityHash: endpointIdentityHash(target.target.url),
+			settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(
 				target.effectivePricing,
 				settings?.defaults.maxTokens ?? 32768,
@@ -4756,132 +4727,161 @@ export function createDispatchBundle(
 		};
 	}
 
-	/**
-	 * Enumerate the bounded route envelope a plan can approve for this request.
-	 * Every proposed tuple is probed through `preview`, which is the same hard
-	 * admission chain a real dispatch runs (agent admission, tool compatibility
-	 * after runtime narrowing, target auth and health, node eligibility,
-	 * capability gate). A tuple that throws is rejected; nothing is scored.
-	 */
-	interface RouteProbeSet {
-		resolution: DispatchPlanTaskResolution;
-		resolved: DispatchFailoverCandidate;
-		/** Alternates in probe order, each carrying its own resolution when it passed. */
-		probes: ReadonlyArray<RouteCandidateProbe & { resolution: DispatchPlanTaskResolution | null }>;
-	}
-
-	/**
-	 * Probe every alternate tuple through `preview`, which is the same hard
-	 * admission chain a real dispatch runs (agent admission, tool compatibility
-	 * after runtime narrowing, target auth and health, node eligibility,
-	 * capability gate). Rejections are kept, not discarded: the failover envelope
-	 * only wants the survivors, but the route decision has to explain why a tuple
-	 * was excluded, and a rejected tuple must be provably unable to be selected.
-	 */
-	function routeProbes(req: DispatchRequest): RouteProbeSet {
+	function jointRouteInput(
+		req: DispatchRequest,
+		placedNode?: RunNodeIdentity,
+	): { input: JointRouteResolverInput; resolution: DispatchPlanTaskResolution } {
 		const settings = getEffectiveSettings();
-		const resolution = preview(req);
-		const resolved: DispatchFailoverCandidate = {
-			agentId: resolution.agentId,
-			target: resolution.targetId,
-			model: resolution.wireModelId,
-			node: resolution.node.id,
-		};
-		if (req.delegationAgentId !== undefined) return { resolution, resolved, probes: [] };
-		const universe: RouteUniverse = {
-			agentId: resolution.agentId,
-			resolved,
-			targets: (settings?.targets ?? [])
-				.filter((target) => target.id !== resolution.targetId && target.defaultModel !== undefined)
-				.map((target) => ({ id: target.id, model: target.defaultModel as string })),
-			nodes: [...(scheduling.fleet?.list() ?? []).map((node) => node.id), "local"].filter(
-				(nodeId) => nodeId !== resolution.node.id,
-			),
-		};
-		const probes = routeCandidateOrder(universe)
-			.filter((candidate) => !sameRouteCandidate(candidate, resolved))
-			.map((candidate) => {
-				try {
-					const probed = preview({
-						...req,
-						agentId: candidate.agentId,
-						target: candidate.target,
-						model: candidate.model,
-						node: candidate.node,
-					});
-					// Resolution may narrow the wire model; the envelope must record
-					// the tuple that would actually run.
-					return {
-						candidate: {
-							agentId: probed.agentId,
-							target: probed.targetId,
-							model: probed.wireModelId,
-							node: probed.node.id,
-						},
-						rejection: null,
-						resolution: probed,
-					};
-				} catch (error) {
-					return {
-						candidate,
-						rejection: error instanceof Error ? error.message : String(error),
-						resolution: null,
-					};
-				}
-			});
-		return { resolution, resolved, probes };
-	}
-
-	/**
-	 * Bounded, deterministic route envelope a plan may approve for this request:
-	 * the resolved route first, then the alternates that passed every hard filter.
-	 */
-	function routeCandidates(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate> {
-		const { resolved, probes } = routeProbes(req);
-		return selectRouteCandidates(resolved, probes);
-	}
-
-	/** Build and record the shadow decision for an already resolved route.
-	 * Shadow returns a handle the caller seals onto the receipt and outcome. No caller reads
-	 * `decision.selected` back into placement, so it cannot move the executed route.
-	 * Observation is failure-isolated and must never sink a
-	 * dispatch that admission already approved. */
-	function observeShadowRoute(req: DispatchRequest, placedNode?: RunNodeIdentity): RouteObservationHandle | null {
-		if (routeObserver === null) return null;
+		let resolution: DispatchPlanTaskResolution;
 		try {
-			const { resolution, probes } = routeProbes(req);
-			const role: RouteRoleInput = { executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0) };
-			if (req.systemPrompt !== undefined) role.personaPrompt = req.systemPrompt;
-			// Placement, not preview, decides the node a run lands on; the executed
-			// candidate must name the node that is actually about to be used.
-			const identity = (p: DispatchPlanTaskResolution, nodeId: string): RouteIdentityInput => ({ ...p, nodeId });
-			const executedRoute = toRouteCandidate(identity(resolution, placedNode?.id ?? resolution.node.id), role);
-			const candidates = [
-				{ candidate: executedRoute, rejection: null },
-				...probes.map((probe) => ({
-					candidate:
-						probe.resolution !== null
-							? toRouteCandidate(identity(probe.resolution, probe.resolution.node.id), role)
-							: {
-									...executedRoute,
-									targetId: probe.candidate.target,
-									modelId: probe.candidate.model,
-									nodeId: probe.candidate.node,
-								},
-					rejection: probe.rejection,
-				})),
-			];
-			return routeObserver.observe({
-				task: req.task,
-				requestedAgentId: req.agentId,
-				executedRoute,
-				candidates,
-				hardConstraints: ROUTE_HARD_CONSTRAINTS,
-				maxFallbacks: ROUTE_CANDIDATE_LIMIT - 1,
-			});
-		} catch {
-			return null;
+			resolution = preview(req);
+		} catch (error) {
+			if (placedNode === undefined) throw error;
+			resolution = { ...preview({ ...req, node: "local" }), node: placedNode };
 		}
+		const role: RouteRoleInput = { executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0) };
+		if (req.systemPrompt !== undefined) role.personaPrompt = req.systemPrompt;
+		const identity = (value: DispatchPlanTaskResolution, nodeId: string): RouteIdentityInput => ({ ...value, nodeId });
+		const executedRoute = toRouteCandidate(identity(resolution, placedNode?.id ?? resolution.node.id), role);
+		const recipe = agents.get(req.agentId);
+		const latencyClass = recipe === null ? "balanced" : normalizeAgentSpec(recipe).latencyClass;
+		const settingsFingerprint = computeSettingsFingerprint(settings ?? null);
+		const fixedDelegation = resolution.runtimeId === "acp";
+		const fallbackTarget = {
+			targetId: resolution.targetId,
+			modelId: resolution.wireModelId,
+			runtimeId: resolution.runtimeId,
+			endpointIdentityHash: resolution.endpointIdentityHash,
+		};
+		const targets = configuredJointTargets(
+			fixedDelegation ? [] : (settings?.targets ?? []),
+			fallbackTarget,
+			endpointIdentityHash,
+		);
+		const nodes = configuredJointNodes(
+			(settings?.fleet?.nodes ?? []).map((node) => node.id),
+			resolution.node.id,
+			fixedDelegation,
+		);
+		const capacity = reservationCapacitySnapshot(settings);
+		const input: JointRouteResolverInput = {
+			agentId: req.agentId,
+			executionRole: role.executionRole,
+			executedRoute,
+			targets,
+			nodes,
+			intent: req.routingIntent ?? defaultRoutingIntent(req),
+			project(target, node) {
+				const filters = emptyJointHardFilterVerdicts();
+				if (
+					(req.target !== undefined && req.target !== target.targetId) ||
+					(req.model !== undefined && req.model !== target.modelId) ||
+					(req.node !== undefined && req.node !== node.nodeId)
+				) {
+					filters["manual-pins"] = "tuple differs from an exact request pin";
+				}
+				if (
+					req.failover === "approved" &&
+					!(req.allowedCandidates ?? []).some(
+						(candidate) =>
+							candidate.agentId === req.agentId &&
+							candidate.target === target.targetId &&
+							candidate.model === target.modelId &&
+							candidate.node === node.nodeId,
+					)
+				) {
+					filters["approved-envelope"] = "tuple is outside the approved envelope";
+				}
+				const cooldown = targetCooldownReason(target.targetId, target.runtimeId, target.modelId);
+				if (cooldown !== null) filters.cooldown = cooldown;
+				const nodeCapacity = capacity.nodes[node.nodeId];
+				if (
+					capacity.global.active >= capacity.global.limit ||
+					nodeCapacity === undefined ||
+					nodeCapacity.active >= nodeCapacity.limit
+				) {
+					filters["capacity-lease-availability"] = `node '${node.nodeId}' has no fresh capacity lease slot`;
+				}
+				const routeFacts = routeFactVerdict(
+					{
+						nodeId: node.nodeId,
+						targetId: target.targetId,
+						wireModelId: target.modelId,
+						endpointIdentityHash: target.endpointIdentityHash,
+						requireReachable: true,
+						requireRuntimeCompatible: true,
+						requireModelAvailable: true,
+						requireGpuCount: null,
+						requireVramBytes: null,
+						mode: "shadow",
+					},
+					undefined,
+					{ now: now() },
+				);
+				if (!routeFacts.ok) filters["endpoint-reachability"] = routeFacts.reason;
+				let candidate = {
+					...executedRoute,
+					targetId: target.targetId,
+					modelId: target.modelId,
+					runtimeId: target.runtimeId,
+					nodeId: node.nodeId,
+					endpointIdentityHash: target.endpointIdentityHash,
+					settingsFingerprint,
+				};
+				let capabilities: string[] = [];
+				try {
+					const probed = preview({ ...req, target: target.targetId, model: target.modelId, node: node.nodeId });
+					candidate = toRouteCandidate(identity(probed, node.nodeId), role);
+					const info = capabilityInfoForModel(providers, probed.targetId, probed.wireModelId);
+					capabilities =
+						info === null
+							? []
+							: Object.entries(info)
+									.filter(([, value]) => value !== false && value !== undefined && value !== 0)
+									.map(([name]) => name);
+					if (
+						req.routingIntent?.maxCostUsd !== null &&
+						req.routingIntent?.maxCostUsd !== undefined &&
+						probed.costUpperBoundUsd > req.routingIntent.maxCostUsd
+					)
+						filters.budget = "route cost upper bound exceeds the request ceiling";
+				} catch (error) {
+					filters.authority = error instanceof Error ? error.message : String(error);
+				}
+				return { candidate, hardFilters: filters, observations: [], latencyClass, capabilities };
+			},
+		};
+		return { input, resolution };
+	}
+
+	function routeCandidates(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate> {
+		const { input } = jointRouteInput(req);
+		const decision = resolveJointRoute(input).decision;
+		const ordered = [input.executedRoute, decision.selected, ...decision.approvedFallbacks];
+		const unique = new Map(ordered.map((candidate) => [routeCandidateKey(candidate), candidate]));
+		return [...unique.values()].slice(0, ROUTE_CANDIDATE_LIMIT).map((candidate) => ({
+			agentId: candidate.agentId,
+			target: candidate.targetId,
+			model: candidate.modelId,
+			node: candidate.nodeId,
+		}));
+	}
+
+	/** Build and record a joint shadow decision without feeding it into execution. */
+	function observeShadowRoute(req: DispatchRequest, placedNode?: RunNodeIdentity): RouteObservationHandle {
+		const { input } = jointRouteInput(req, placedNode);
+		const candidates = enumerateJointRouteUniverse(input).map((route) => ({
+			candidate: route.projection.candidate,
+			rejection: route.rejection,
+		}));
+		return routeObserver.observe({
+			task: req.task,
+			requestedAgentId: req.agentId,
+			executedRoute: input.executedRoute,
+			candidates,
+			hardConstraints: JOINT_ROUTE_HARD_FILTERS,
+			maxFallbacks: JOINT_ROUTE_FALLBACK_LIMIT,
+		});
 	}
 
 	function mergeBatchEvents(

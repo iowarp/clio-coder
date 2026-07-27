@@ -357,6 +357,7 @@ describe("fleet preflight store", () => {
 			nodeId: "blade",
 			targetId: "mini",
 			wireModelId: "Qwopus-MoE-35B",
+			endpointIdentityHash: endpointIdentityHash("http://localhost:8080"),
 			requireReachable: true,
 			requireRuntimeCompatible: true,
 			requireModelAvailable: true,

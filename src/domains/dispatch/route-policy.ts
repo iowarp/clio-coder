@@ -120,7 +120,7 @@ export function routeObservationFromHistory(record: RouteHistoryRecord): RouteOb
 		firstPass: record.firstPass,
 		completedCostUsd: record.completedCostUsd,
 		completedEndToEndMs: record.completedPhaseTiming?.totalEndToEndMs ?? null,
-		cacheRead: false,
+		cacheRead: record.cacheRead,
 		queueWaitMs: record.completedPhaseTiming?.queueWaitMs ?? null,
 	};
 }
@@ -236,16 +236,21 @@ export interface RouteScoreScale {
 	maxCostUsd: number;
 	minLatencyMs: number;
 	maxLatencyMs: number;
+	minQueueWaitMs: number;
+	maxQueueWaitMs: number;
 }
 
 export function routeScoreScale(estimates: ReadonlyArray<RouteEstimate>): RouteScoreScale {
 	const costs = estimates.map((estimate) => estimate.expectedCostUsd);
 	const latencies = estimates.map((estimate) => estimate.p95EndToEndMs);
+	const queueWaits = estimates.map((estimate) => estimate.queueWaitMs);
 	return {
 		minCostUsd: costs.length > 0 ? Math.min(...costs) : 0,
 		maxCostUsd: costs.length > 0 ? Math.max(...costs) : 0,
 		minLatencyMs: latencies.length > 0 ? Math.min(...latencies) : 0,
 		maxLatencyMs: latencies.length > 0 ? Math.max(...latencies) : 0,
+		minQueueWaitMs: queueWaits.length > 0 ? Math.min(...queueWaits) : 0,
+		maxQueueWaitMs: queueWaits.length > 0 ? Math.max(...queueWaits) : 0,
 	};
 }
 
@@ -263,23 +268,33 @@ export function scoreRoute(estimate: RouteEstimate, posture: RoutingPosture, sca
 		scale.minLatencyMs,
 		scale.maxLatencyMs,
 	);
+	const queuePenalty = normalize(estimate.queueWaitMs, scale.minQueueWaitMs, scale.maxQueueWaitMs);
+	const health = estimate.qualityLowerBound * 0.7 + estimate.reliability * 0.3;
+	const affinityBonus = estimate.cacheHitProbability * 0.01;
 	return round(
-		policy.weights.quality * estimate.qualityLowerBound -
+		policy.weights.quality * health -
 			policy.weights.cost * costPenalty -
-			policy.weights.latency * latencyPenalty,
+			policy.weights.latency * (latencyPenalty * 0.9 + queuePenalty * 0.1) +
+			affinityBonus,
 	);
 }
 
 export function dominatesRoute(left: RouteEstimate, right: RouteEstimate): boolean {
 	const noWorse =
 		left.qualityLowerBound >= right.qualityLowerBound &&
+		left.reliability >= right.reliability &&
 		left.expectedCostUsd <= right.expectedCostUsd &&
-		left.p95EndToEndMs <= right.p95EndToEndMs;
+		left.p95EndToEndMs <= right.p95EndToEndMs &&
+		left.queueWaitMs <= right.queueWaitMs &&
+		left.cacheHitProbability >= right.cacheHitProbability;
 	return (
 		noWorse &&
 		(left.qualityLowerBound > right.qualityLowerBound ||
+			left.reliability > right.reliability ||
 			left.expectedCostUsd < right.expectedCostUsd ||
-			left.p95EndToEndMs < right.p95EndToEndMs)
+			left.p95EndToEndMs < right.p95EndToEndMs ||
+			left.queueWaitMs < right.queueWaitMs ||
+			left.cacheHitProbability > right.cacheHitProbability)
 	);
 }
 
@@ -295,8 +310,17 @@ export function compareRankedRoutes(left: RankedRoute, right: RankedRoute): numb
 	if (left.estimate.expectedCostUsd !== right.estimate.expectedCostUsd) {
 		return left.estimate.expectedCostUsd - right.estimate.expectedCostUsd;
 	}
+	if (left.estimate.reliability !== right.estimate.reliability) {
+		return right.estimate.reliability - left.estimate.reliability;
+	}
 	if (left.estimate.p95EndToEndMs !== right.estimate.p95EndToEndMs) {
 		return left.estimate.p95EndToEndMs - right.estimate.p95EndToEndMs;
+	}
+	if (left.estimate.queueWaitMs !== right.estimate.queueWaitMs) {
+		return left.estimate.queueWaitMs - right.estimate.queueWaitMs;
+	}
+	if (left.estimate.cacheHitProbability !== right.estimate.cacheHitProbability) {
+		return right.estimate.cacheHitProbability - left.estimate.cacheHitProbability;
 	}
 	if (left.order !== right.order) return left.order - right.order;
 	return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;

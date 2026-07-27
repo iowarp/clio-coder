@@ -8,7 +8,7 @@
  * model-authored tool call -> plan resolution -> reservation -> admission ->
  * worker spawn -> receipt.
  *
- * Five scenarios, each with its own control:
+ * Six scenarios, each with its own control:
  *
  *   1. quality  A pinned local Verifier records one typed `verify` result as a
  *                measured pass; a read-only Scout remains unmeasured and cold.
@@ -21,7 +21,9 @@
  *   4. failover   A plan-approved two-step pipeline whose step-1 target answers
  *                 503 fails over to an approved candidate, and step 2 receives
  *                 the successful attempt's output, not the failed attempt's.
- *   5. attestation  A run pinned to mini, Qwopus-MoE-35B, llamacpp, and
+ *   5. joint-shadow  A local worker keeps its executed route while the joint
+ *                 observer evaluates a live target and an always-503 target.
+ *   6. attestation  A run pinned to mini, Qwopus-MoE-35B, llamacpp, and
  *                 http://192.168.86.141:8080 attests that exact host, target,
  *                 model, runtime, and settings fingerprint into its receipt.
  *                 Its control gives the same target `baseUrl` instead of `url`
@@ -44,7 +46,7 @@
  *   CLIO_LIVE_FLEET_HOST        SSH host for the capacity-one node (default localhost)
  *   CLIO_LIVE_DEAD_PORT         port for the always-503 target (default 8599)
  *   CLIO_LIVE_VERIFY_TIMEOUT_MS per-turn timeout (default 900000)
- *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,attestation (default all)
+ *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,joint-shadow,attestation (default all)
  *   CLIO_LIVE_KEEP=1            retain the isolated scratch tree on success
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -74,7 +76,7 @@ const url = process.env.CLIO_LIVE_BASE_URL || undefined;
 const fleetHost = process.env.CLIO_LIVE_FLEET_HOST || "localhost";
 const deadPort = Number.parseInt(process.env.CLIO_LIVE_DEAD_PORT || "8599", 10);
 const timeoutMs = Number.parseInt(process.env.CLIO_LIVE_VERIFY_TIMEOUT_MS || "900000", 10);
-const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover", "attestation"];
+const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover", "joint-shadow", "attestation"];
 /**
  * The attestation scenario pins one exact local route so the receipt can be
  * checked field by field. These are fixed rather than environment-driven: the
@@ -122,7 +124,8 @@ if (scenarios.includes("quality") && !keylessRuntimes.has(runtimeId)) {
 	);
 	process.exit(1);
 }
-if (!apiKey && !keylessRuntimes.has(runtimeId)) {
+const needsEnvironmentTarget = scenarios.some((name) => ["quality", "capacity", "budget", "failover"].includes(name));
+if (needsEnvironmentTarget && !apiKey && !keylessRuntimes.has(runtimeId)) {
 	console.error(
 		"Error: CLIO_LIVE_EVAL=1 is active, but no API key was found in CLIO_LIVE_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.",
 	);
@@ -653,6 +656,104 @@ async function scenarioFailover() {
 	}
 }
 
+function probePinnedJointTarget() {
+	return new Promise((resolvePromise) => {
+		const request = get(`${ATTESTATION_URL}/v1/models`, { timeout: 5000 }, (response) => {
+			response.resume();
+			resolvePromise((response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 500);
+		});
+		request.on("timeout", () => {
+			request.destroy();
+			resolvePromise(false);
+		});
+		request.on("error", () => resolvePromise(false));
+	});
+}
+
+async function scenarioJointShadow() {
+	currentScenario = "joint-shadow";
+	clearState();
+	if (!(await probePinnedJointTarget())) {
+		throw new Error(
+			`[joint-shadow] pinned local infrastructure is unavailable: ${ATTESTATION_URL} did not answer for mini on the local node. ` +
+				`This scenario requires ${ATTESTATION_RUNTIME} serving ${ATTESTATION_MODEL}; no substitute target is permitted.`,
+		);
+	}
+	const settings = baseSettings();
+	const pinnedLiveTarget = {
+		id: "mini",
+		runtime: ATTESTATION_RUNTIME,
+		url: ATTESTATION_URL,
+		defaultModel: ATTESTATION_MODEL,
+		wireModels: [ATTESTATION_MODEL],
+	};
+	settings.targets = [
+		{
+			id: "always-503",
+			runtime: ATTESTATION_RUNTIME,
+			url: `http://127.0.0.1:${deadPort}`,
+			defaultModel: ATTESTATION_MODEL,
+			wireModels: [ATTESTATION_MODEL],
+		},
+		pinnedLiveTarget,
+	];
+	settings.orchestrator = { target: "mini", model: ATTESTATION_MODEL, thinkingLevel: "off" };
+	settings.workers = {
+		default: { target: "mini", model: ATTESTATION_MODEL, thinkingLevel: "off" },
+		profiles: {},
+	};
+	writeSettings(settings);
+
+	const server = await startDeadTarget();
+	try {
+		const run = await turn(
+			'Call dispatch once with exactly {"agent":"scout","task":"Read README.md and report its first line."}.',
+			"joint-shadow-run",
+		);
+		check(!run.timedOut, `joint shadow turn exceeded ${timeoutMs}ms`);
+		const call = requireCall(
+			dispatchCalls(parseJsonLines(run.stdout)),
+			(args) => args.agent === "scout" && taskCount(args) === 1,
+			"one Scout dispatch",
+		);
+		if (!call) return;
+		const routed = workerReceipts().filter((receipt) => receipt.routeDecision !== undefined);
+		check(routed.length > 0, "joint shadow dispatch sealed no route decision");
+		for (const receipt of routed) {
+			const decision = receipt.routeDecision;
+			const executed = decision.executedRoute;
+			check(decision.mode === "shadow", `decision mode was ${decision.mode}`);
+			check(receipt.integrity?.version === 12, `receipt ${receipt.runId} did not use integrity v12`);
+			check(
+				executed.targetId === receipt.targetId &&
+					executed.modelId === receipt.wireModelId &&
+					executed.runtimeId === receipt.runtimeId &&
+					executed.nodeId === (receipt.node?.id ?? "local"),
+				`executed route drifted from receipt identity: ${JSON.stringify({ executed, receipt: { targetId: receipt.targetId, wireModelId: receipt.wireModelId, runtimeId: receipt.runtimeId, node: receipt.node } })}`,
+			);
+			check(
+				executed.endpointIdentityHash === receipt.attestation?.endpointIdentityHash &&
+					executed.settingsFingerprint === receipt.attestation?.settingsFingerprint,
+				"executed endpoint or settings identity changed under shadow observation",
+			);
+			const selected = JSON.stringify(decision.selected);
+			const executedBytes = JSON.stringify(decision.executedRoute);
+			if (selected !== executedBytes) {
+				check(
+					JSON.stringify(decision.executedRoute) === executedBytes,
+					"shadow recommendation changed the executed route bytes",
+				);
+			}
+			check(
+				decision.candidateEvaluations.every((entry) => entry.rejection !== null || entry.candidate.agentId === "scout"),
+				"joint decision widened beyond the requested agent",
+			);
+		}
+	} finally {
+		await new Promise((resolvePromise) => server.close(resolvePromise));
+	}
+}
+
 /**
  * Attestation: the worker that executes a pinned route must announce that exact
  * route back, and the receipt must seal it. The control proves the settings
@@ -811,6 +912,7 @@ const runners = {
 	capacity: scenarioCapacity,
 	budget: scenarioBudget,
 	failover: scenarioFailover,
+	"joint-shadow": scenarioJointShadow,
 	attestation: scenarioAttestation,
 };
 

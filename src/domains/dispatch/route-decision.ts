@@ -30,7 +30,9 @@ import type { ExecutionRole } from "./execution-role.js";
 import {
 	clearsPostureFloors,
 	compareRankedRoutes,
+	DEFAULT_ROUTE_PRIOR,
 	dominatesRoute,
+	estimateRoute,
 	ROUTE_POLICY_VERSION,
 	type RouteEstimate,
 	type RoutingPosture,
@@ -55,6 +57,10 @@ export interface RouteCandidate {
 	thinkingLevel?: string;
 	toolSignature: string;
 	promptCompositionHash: string;
+	/** Hash of the effective endpoint URL. Raw endpoint data never enters the decision. */
+	endpointIdentityHash: string;
+	/** Fingerprint of the immutable settings snapshot used to construct this route. */
+	settingsFingerprint: string;
 }
 
 export type RouteDecisionMode = "fixed" | "shadow" | "active";
@@ -125,6 +131,8 @@ export function routeCandidateKey(candidate: RouteCandidate): string {
 		candidate.thinkingLevel ?? "",
 		candidate.toolSignature,
 		candidate.promptCompositionHash,
+		candidate.endpointIdentityHash,
+		candidate.settingsFingerprint,
 	].join("\u0000");
 }
 
@@ -142,6 +150,8 @@ export interface RouteIdentityInput {
 	nodeId: string;
 	thinkingLevel: string | null;
 	toolSignature: string;
+	endpointIdentityHash: string;
+	settingsFingerprint: string;
 }
 
 /**
@@ -192,6 +202,8 @@ export function toRouteCandidate(identity: RouteIdentityInput, role: RouteRoleIn
 		...(identity.thinkingLevel !== null ? { thinkingLevel: identity.thinkingLevel } : {}),
 		toolSignature: identity.toolSignature,
 		promptCompositionHash: promptCompositionIdentity(identity, role),
+		endpointIdentityHash: identity.endpointIdentityHash,
+		settingsFingerprint: identity.settingsFingerprint,
 	};
 }
 
@@ -361,6 +373,28 @@ export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 		decisionHash: routeDecisionHash(input),
 		executedRoute: { ...input.executedRoute },
 	};
+}
+
+/**
+ * Failure-isolated production fallback. Observation cannot make a receipt lose
+ * its routing evidence, so callers seal this exact one-candidate decision when
+ * the shadow observer or its durable inputs fail.
+ */
+export function fixedRouteDecision(
+	executedRoute: RouteCandidate,
+	reasonCode = "observer-failure-fixed-route",
+): RouteDecisionV1 {
+	const input: RouteDecisionInput = {
+		mode: "fixed",
+		posture: "manual",
+		executedRoute,
+		candidates: [{ candidate: executedRoute, estimate: estimateRoute([], DEFAULT_ROUTE_PRIOR), rejection: null }],
+		hardConstraints: ["fixed-executed-route"],
+		maxFallbacks: 0,
+		decisionDurationMs: 0,
+	};
+	const decision = decideRoute(input);
+	return { ...decision, reasonCodes: [...decision.reasonCodes, reasonCode] };
 }
 
 // ---------------------------------------------------------------------------

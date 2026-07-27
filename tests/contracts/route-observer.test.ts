@@ -26,6 +26,8 @@ function candidate(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
 		nodeId: "local",
 		toolSignature: "tools-a",
 		promptCompositionHash: "prompt-a",
+		endpointIdentityHash: "endpoint-a",
+		settingsFingerprint: "settings-a",
 		...overrides,
 	};
 }
@@ -103,7 +105,7 @@ function receiptDraft(run: RunEnvelope): RunReceiptDraft {
 }
 
 describe("route observer durable history", () => {
-	it("keeps restart-stable history and supports offline replay", () => {
+	it("restart preserves route history and decision replay", () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-route-history-"));
 		roots.push(stateDir);
 		const history = createRouteHistoryStore({ stateDir });
@@ -147,5 +149,31 @@ describe("route observer durable history", () => {
 		// The persisted record itself is the offline replay input; re-opening it
 		// yields byte-identical durable observations without a running observer.
 		deepStrictEqual(reopened.all(), history.all());
+	});
+
+	it("observer failure seals a fixed decision instead of omitting routeDecision", () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-route-observer-failure-"));
+		roots.push(stateDir);
+		const observer = createRouteObserver({
+			getAgents: () => [{ id: "coder", description: "coding" }],
+			stateDir,
+			logDir: join(stateDir, "decisions"),
+			estimate: () => {
+				throw new Error("history unavailable");
+			},
+		});
+		const route = candidate();
+		const handle = observer.observe({
+			task: "inspect the code",
+			requestedAgentId: "coder",
+			executedRoute: route,
+			candidates: [{ candidate: route, rejection: null }],
+			hardConstraints: ["authority"],
+			maxFallbacks: 0,
+		});
+		strictEqual(handle.decision.mode, "fixed");
+		deepStrictEqual(handle.decision.executedRoute, route);
+		deepStrictEqual(handle.decision.selected, route);
+		ok(handle.decision.reasonCodes.includes("observer-failure-fixed-route"));
 	});
 });
