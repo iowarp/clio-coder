@@ -81,7 +81,10 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 ## Strict agent recipes
 
 - `src/domains/agents/recipe-schema.ts` is the only versioned frontmatter schema; malformed custom recipes are quarantined with `AgentsContract.diagnostics()` and builtins fail startup.
-- `src/domains/agents/result-contract.ts` validates typed terminal contracts. Result conformance is sealed in receipt quality facts, while only correctness-bearing contracts can label routing quality.
+- `src/domains/agents/result-contract.ts` validates typed terminal contracts and owns each contract's wire shape. Result conformance is sealed in receipt quality facts, while only correctness-bearing contracts can label routing quality.
+- The admitted recipe's contract rides the WorkerSpec. The worker validates its own terminal result and spends up to `RESULT_CONTRACT_REPAIR_LIMIT` bounded repair rounds, replaying the validator's reason, the accepted shape, and this run's live-read anchors; exhausting them fails the run with `result_contract_exhausted`. The orchestrator's sealed validation stays the authority.
+- A `scout-report` carries findings as `{claim, path, line}`. Grounding is structural, not a regex over prose, and a split recommendation is the one case that carries subtasks instead of findings.
+- Citation grounding needs the run's own read spans, which exist only in the worker. Where `observedReadRanges` is supplied, a cited line must fall inside a span this run actually read, so an estimated line number cannot pass as observation. The orchestrator revalidates without those spans and checks shape and file/line existence; a grounding failure has already ended the run at the worker.
 
 ## Worker runtime
 

@@ -86,6 +86,23 @@ function skillSourceOrigin(skill: Skill): string {
 	return skill.sourceInfo.source ?? `${skill.source}-${skill.scope}`;
 }
 
+/**
+ * The frame every loaded skill is read under. Skills are portable documents:
+ * most were written against another harness, so they name tools and subagents
+ * Clio does not have, and they live outside the project the operator is working
+ * in. Both mistakes are silent and expensive, so the frame states the workspace
+ * root and the substitution rule before the skill's own prose begins.
+ */
+function skillExecutionFrame(skill: Skill, workspaceRoot: string): string[] {
+	return [
+		"How to read this skill:",
+		`- Workspace root: ${workspaceRoot}. Run every command and resolve every repository path there. ${skill.baseDir} holds only this skill's own resource files; it is never the working directory.`,
+		"- This skill may name tools, subagents, or commands from another harness. Use Clio's equivalent from your own tool list; if there is no equivalent, say so and continue without that step. Never invent one, and never substitute repeated calls to a different agent for an agent the skill named.",
+		"- The skill describes a workflow. Your safety policy, permissions, and tool surface still bind it.",
+		"",
+	];
+}
+
 function renderSkillBody(skill: Skill, tree: string[] | null): string {
 	const sourceOrigin = skillSourceOrigin(skill);
 	const lines = [
@@ -324,6 +341,7 @@ function runSkillsScope(
 	const body = [
 		...(driftWarning !== null ? [driftWarning] : []),
 		...renderPendingSkillTask(name, options),
+		...skillExecutionFrame(skill, cwdFromDeps(deps)),
 		renderSkillBody(skill, tree),
 	].join("\n");
 	const pendingPolicy = options?.pendingSkillPolicy;
