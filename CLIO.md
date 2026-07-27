@@ -42,6 +42,10 @@ Provider authentication credentials are managed through `openAuthStorage()`.
 
 Remote marketplace cache files require explicit finite `listingTimestamp` and `detailTimestamp` fields. Invalid cache files are refreshed from the remote marketplace.
 
+## Session persistence
+
+Session metadata must declare format version 3. Earlier session formats are rejected and operators must remove the session directory before starting a new session.
+
 ## Process-safe dispatch admission
 
 - `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock. The lease bound fails admission closed rather than dropping a lease, and lease reclamation needs owner-liveness evidence wherever a process birth token cannot prove death.
