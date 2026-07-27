@@ -1,5 +1,5 @@
-import { ok, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -9,6 +9,8 @@ import {
 	writeEvalArtifactV3,
 } from "../../src/domains/eval/artifacts/store.js";
 import type { EvalArtifactV3 } from "../../src/domains/eval/schema/artifact.js";
+import { loadEvalArtifact } from "../../src/domains/eval/store.js";
+import type { EvalRunArtifact } from "../../src/domains/eval/types.js";
 
 function artifact(): EvalArtifactV3 {
 	return {
@@ -42,6 +44,43 @@ function artifact(): EvalArtifactV3 {
 	};
 }
 
+function storedArtifact(): EvalRunArtifact {
+	return {
+		version: 1,
+		evalId: "eval-provenance",
+		taskFile: "/tmp/tasks.yaml",
+		taskFileHash: "abc123",
+		clio: { version: "test", commit: null, entry: "/tmp/clio" },
+		environment: { platform: "linux", node: "v24" },
+		target: null,
+		model: null,
+		thinking: null,
+		paths: { taskFile: "/tmp/tasks.yaml", receipts: [], sessionLedgers: [] },
+		repeat: 1,
+		startedAt: "2026-07-01T00:00:00.000Z",
+		endedAt: "2026-07-01T00:00:01.000Z",
+		summary: {
+			runs: 0,
+			passed: 0,
+			failed: 0,
+			passRate: 0,
+			tokens: 0,
+			costUsd: 0,
+			wallTimeMs: 1000,
+			harness: {
+				receiptCount: 0,
+				toolCalls: 0,
+				retries: 0,
+				safetyBlocks: 0,
+				correctionLatencyMs: 0,
+				validationEvidence: 0,
+			},
+			failureClasses: [],
+		},
+		results: [],
+	};
+}
+
 describe("contracts/eval artifacts", () => {
 	it("records explicit assignment and terminal receipt linkage", async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-eval-artifact-v3-"));
@@ -64,4 +103,24 @@ describe("contracts/eval artifacts", () => {
 		delete (missingReference.results[0] as { assignmentId?: string }).assignmentId;
 		throws(() => parseEvalArtifactV3(missingReference, "missing-reference"), /assignmentId/);
 	});
+
+	for (const field of ["clio", "environment", "paths"] as const) {
+		it(`rejects a stored eval artifact missing ${field} provenance`, async () => {
+			const root = mkdtempSync(join(tmpdir(), "clio-eval-provenance-"));
+			try {
+				const dataDir = join(root, "data");
+				const artifactPath = join(dataDir, "evals", "eval-provenance.json");
+				mkdirSync(join(dataDir, "evals"), { recursive: true });
+				const incomplete = storedArtifact() as EvalRunArtifact & Record<string, unknown>;
+				delete incomplete[field];
+				writeFileSync(artifactPath, JSON.stringify(incomplete));
+
+				await rejects(loadEvalArtifact(dataDir, "eval-provenance"), {
+					message: `eval artifact has an invalid schema: missing required field '${field}' in ${artifactPath}. Re-run the evaluation suite to generate a complete artifact.`,
+				});
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+	}
 });
