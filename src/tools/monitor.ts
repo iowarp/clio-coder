@@ -353,7 +353,7 @@ async function runWait(
 }
 
 interface CollectRow {
-	/** Terminal attempt id when known, otherwise the original legacy run id. */
+	/** Terminal attempt id when known, otherwise the root run id. */
 	runId: string;
 	assignmentId: string | null;
 	attemptRunIds: ReadonlyArray<string>;

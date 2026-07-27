@@ -430,7 +430,7 @@ describe("contracts/skills slash-command parity", () => {
 		}
 	});
 
-	it("ignores quoted trigger phrases even when the deprecated opt-in flag is passed", () => {
+	it("ignores quoted trigger phrases in explicit invocation mode", () => {
 		const root = scratchDir();
 		writeSkillDir(
 			root,
@@ -439,15 +439,13 @@ describe("contracts/skills slash-command parity", () => {
 			"ASK ONE QUESTION",
 		);
 		const list = loadSkills({ roots: [projectRoot(root)] });
-		const expansion = expandSkillInvocationInput("grill me about adding science skills", list, {
-			naturalLanguageTriggers: true,
-		});
+		const expansion = expandSkillInvocationInput("grill me about adding science skills", list);
 		strictEqual(expansion.expanded, false);
 		strictEqual(expansion.text, "grill me about adding science skills");
 		strictEqual(expansion.text.includes("ASK ONE QUESTION"), false);
 	});
 
-	it("does not expand quoted trigger phrases unless interactive mode opts in", () => {
+	it("does not expand quoted trigger phrases from plain text", () => {
 		const root = scratchDir();
 		writeSkillDir(
 			root,
@@ -469,9 +467,7 @@ describe("contracts/skills slash-command parity", () => {
 			"disable-model-invocation: true",
 		]);
 		const list = loadSkills({ roots: [projectRoot(root)] });
-		const expansion = expandSkillInvocationInput("grill me about hidden things", list, {
-			naturalLanguageTriggers: true,
-		});
+		const expansion = expandSkillInvocationInput("grill me about hidden things", list);
 		strictEqual(expansion.expanded, false);
 		strictEqual(expansion.text, "grill me about hidden things");
 	});
@@ -501,9 +497,7 @@ describe("contracts/skills slash-command parity", () => {
 		const root = scratchDir();
 		writeSkillDir(root, "grill-me", ['name: "grill-me"', 'description: "Interview skill."'], "ASK ONE QUESTION");
 		const list = loadSkills({ roots: [projectRoot(root)] });
-		const parsed = parsePendingSkillRequests("adding more science skills to clio coder", list, {
-			naturalLanguageTriggers: true,
-		});
+		const parsed = parsePendingSkillRequests("adding more science skills to clio coder", list);
 		strictEqual(parsed.text, "adding more science skills to clio coder");
 		strictEqual(parsed.pendingSkillRequests.length, 0);
 	});

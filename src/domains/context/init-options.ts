@@ -23,7 +23,7 @@ export const CONTEXT_INIT_FLAG_TABLE: ReadonlyArray<ContextInitFlag> = [
 	{ flag: "--rewrite", field: "rewriteClioMd" },
 	{ flag: "--propose", field: "proposeClioMd" },
 	{ flag: "--global", aliases: ["--include-global"], field: "includeGlobalImports" },
-	{ flag: "--heuristic", aliases: ["--no-generate"], field: "heuristic" },
+	{ flag: "--heuristic", field: "heuristic" },
 ];
 
 /** The ONE place the rewrite => apply implication lives. */

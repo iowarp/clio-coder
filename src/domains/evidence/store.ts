@@ -49,10 +49,9 @@ export interface EvidenceRunProvenance {
 }
 
 /**
- * Read the per-run provenance views from a bundle's `receipt.json`. Only runs
- * whose receipt carries at least one provenance field set are returned, so a
- * legacy bundle yields an empty array and CLI surfaces render nothing new.
- * A missing receipt file is treated as no provenance.
+ * Read per-run provenance views from a bundle's `receipt.json`. Only runs whose
+ * receipt carries at least one provenance field set are returned. A missing
+ * receipt file produces an empty provenance list.
  */
 export async function loadEvidenceRunProvenance(dataDir: string, evidenceId: string): Promise<EvidenceRunProvenance[]> {
 	let raw: string;

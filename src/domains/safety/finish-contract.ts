@@ -362,8 +362,8 @@ function dispatchCallDescriptor(args: Record<string, unknown> | null): { agentId
 		const itemTask = typeof firstRecord?.task === "string" ? firstRecord.task.trim() : "";
 		return { agentId: itemAgent ?? defaultAgent ?? "coder", task: itemTask };
 	}
-	const legacyTask = typeof args?.task === "string" ? args.task.trim() : "";
-	return { agentId: defaultAgent ?? "coder", task: legacyTask };
+	const singleTask = typeof args?.task === "string" ? args.task.trim() : "";
+	return { agentId: defaultAgent ?? "coder", task: singleTask };
 }
 
 function validationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {

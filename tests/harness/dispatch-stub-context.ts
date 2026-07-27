@@ -88,7 +88,6 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 			setRuntimeOverrideForTarget: () => {},
 			clearRuntimeOverrideForTarget: () => {},
 		},
-		credentials: { hasKey: () => false, get: () => null, set: () => {}, remove: () => {} },
 		getDetectedReasoning: () => null,
 		probeReasoningForModel: async () => null,
 		knowledgeBase: null,

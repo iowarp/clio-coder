@@ -32,11 +32,15 @@ Middleware hook budgets are strictly phase aware through `DEFAULT_MIDDLEWARE_HOO
 
 ## Providers
 
-Provider authentication credentials are managed through `openAuthStorage()`.
+Provider authentication is exposed through `providers.auth` and persisted through `openAuthStorage()`.
 
 ## Model discovery CLI
 
 `clio models` probes live targets by default. The `--offline` flag disables live probing. The former `--probe` and `--no-probe` flags are not supported.
+
+## Context initialization
+
+`clio context init` uses model-driven exploration by default. `--heuristic` is the sole flag for deterministic generation.
 
 ## Remote marketplace cache
 

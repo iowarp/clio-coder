@@ -166,11 +166,10 @@ export function middlewareHookFailedNotice(
 }
 
 /**
- * Interactive-notice gate. Only steady-state slowness surfaces to the operator:
- * a lone post-warmup spike still rides the bus for telemetry but is suppressed
- * here (`steadyStateWarn === false`). Absent flag surfaces, for back-compat with
- * producers that predate the field. The once-per-(registration, hook) set is the
- * floor so even a genuine steady-state warning is shown once, not every turn.
+ * Interactive-notice gate. Only steady-state slowness surfaces to the operator.
+ * Notice gating relies on `steadyStateWarn`; a false value suppresses a lone
+ * post-warmup spike that still rides the bus for telemetry. The warning set
+ * ensures each registration and hook pair is shown only once.
  */
 export function middlewareHookFailedSessionNotice(payload: unknown, seenBudgetWarnings: Set<string>): BusNotice | null {
 	if (
