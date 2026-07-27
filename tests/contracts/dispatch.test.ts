@@ -55,6 +55,7 @@ import { agentDisplayLabel } from "../../src/interactive/dispatch-board.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/worker-attestation.js";
 
 interface Deferred<T> {
 	promise: Promise<T>;
@@ -3434,11 +3435,12 @@ describe("contracts/dispatch", () => {
 		writeFileSync(
 			stubEntry,
 			`
+${STUB_ANNOUNCE_SOURCE}
 const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin });
 rl.once("line", (line) => {
 	const spec = JSON.parse(line);
-	process.stdout.write(JSON.stringify({ type: "worker_announce", pid: process.pid, host: "test", specVersion: spec.specVersion }) + "\\n");
+	announceSpec(spec);
 	process.stdout.write("not json\\n");
 	process.stderr.write("x".repeat(5000) + "\\n[worker] fatal: expected diagnostic\\n");
 	process.exit(1);
@@ -3544,11 +3546,12 @@ rl.once("line", (line) => {
 		writeFileSync(
 			stubEntry,
 			`
+${STUB_ANNOUNCE_SOURCE}
 const readline = require("readline");
 const rl = readline.createInterface({ input: process.stdin });
 rl.once("line", (line) => {
 	const spec = JSON.parse(line);
-	process.stdout.write(JSON.stringify({ type: "worker_announce", pid: process.pid, host: "test", specVersion: spec.specVersion }) + "\\n");
+	announceSpec(spec);
 	process.stdout.write(JSON.stringify({ type: "clio_tool_approval_request", payload: { requestId: "abc" } }) + "\\n");
 	process.exit(0);
 });
@@ -3560,6 +3563,7 @@ rl.once("line", (line) => {
 			const worker = spawnNativeWorker(
 				{
 					specVersion: WORKER_SPEC_VERSION,
+					settingsFingerprint: fixtureSettingsFingerprint(),
 					systemPrompt: "",
 					agentId: "coder",
 					task: "t",

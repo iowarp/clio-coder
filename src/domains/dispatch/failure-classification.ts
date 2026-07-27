@@ -45,6 +45,10 @@ export function classifyFailure(
 	if (evidence.permissionFailure || evidence.exitCode === WORKER_EXIT_PERMISSION_REQUIRED) return "permission";
 	if (isDeterministicOutcomeCode(code)) return "deterministic-task";
 	if (evidence.qualityGateFailure === true) return "model-quality";
+	// A typed control-channel failure is node evidence on its own. It is checked
+	// before the diagnostic text so a stderr tail that happens to mention a
+	// target error cannot reclassify a channel that demonstrably failed.
+	if (result?.channelFailure !== undefined) return "node-channel";
 	if (evidence.stallKilled || outcome === "stalled" || outcome === "spawn_failed" || result?.exitCode === 255) {
 		return "node-channel";
 	}

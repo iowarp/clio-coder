@@ -30,6 +30,7 @@ import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../sr
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { fixtureSettingsFingerprint, STUB_ANNOUNCE_SOURCE } from "../harness/worker-attestation.js";
 
 const SCOUT_TOOL_CALLS = 18;
 const SCOUT_BUDGET = { toolCalls: 18, readReserve: 4, synthesis: true, hardCap: 50 } as const;
@@ -72,6 +73,7 @@ async function expectPending<T>(promise: Promise<T>, label: string, delayMs = 25
 
 const MINIMAL_SPEC_LINE = `${JSON.stringify({
 	specVersion: WORKER_SPEC_VERSION,
+	settingsFingerprint: fixtureSettingsFingerprint(),
 	runtime: {
 		version: WORKER_RUNTIME_DESCRIPTOR_VERSION,
 		id: "x",
@@ -1147,6 +1149,7 @@ describe("contracts/worker-steer", () => {
 			writeFileSync(
 				stubEntry,
 				`
+${STUB_ANNOUNCE_SOURCE}
 const readline = require("readline");
 const rl = readline.createInterface({ input: process.stdin });
 let sawSpec = false;
@@ -1154,7 +1157,7 @@ rl.on("line", (line) => {
 	if (!sawSpec) {
 		sawSpec = true;
 		const spec = JSON.parse(line);
-		process.stdout.write(JSON.stringify({ type: "worker_announce", pid: process.pid, host: "test", specVersion: spec.specVersion }) + "\\n");
+		announceSpec(spec);
 		return;
 	}
 	process.stdout.write(JSON.stringify({ type: "stub_echo", line: JSON.parse(line) }) + "\\n");
@@ -1167,6 +1170,7 @@ rl.on("line", (line) => {
 				const worker = spawnNativeWorker(
 					{
 						specVersion: WORKER_SPEC_VERSION,
+						settingsFingerprint: fixtureSettingsFingerprint(),
 						systemPrompt: "",
 						agentId: "coder",
 						executionRole: "builder",

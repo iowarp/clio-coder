@@ -211,6 +211,7 @@ import {
 	type PipelineInput,
 	validateJobSpec,
 } from "./validation.js";
+import { computeSettingsFingerprint, receiptAttestationFields } from "./worker-protocol.js";
 import { type SpawnedWorker, type SpawnedWorkerResult, spawnNativeWorker, type WorkerSpec } from "./worker-spawn.js";
 
 interface RunTokenMeter {
@@ -1383,8 +1384,10 @@ function resolveDelegationAdmissionStage(req: DispatchRequest, safety: SafetyCon
 
 export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: ConfigContract): WorkerSpec {
 	assertResponseSchemaEnforceable(input.target.runtime, input.target.modelCapabilities, input.req.responseSchema);
+	const settings = input.settings ?? config?.get();
 	const spec: WorkerSpec = {
 		specVersion: WORKER_SPEC_VERSION,
+		settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 		systemPrompt: input.systemPrompt,
 		dynamicPromptMessages: input.dynamicPromptMessages,
 		...(input.promptSignature !== null ? { promptSignature: input.promptSignature } : {}),
@@ -1416,9 +1419,7 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
-	// Carry the operator's configured model ids so the worker subprocess (whose
-	// residency registry starts empty) never evicts another profile's model.
-	const settings = input.settings ?? config?.get();
+	// Configured model ids, so the worker's empty residency registry evicts nothing.
 	if (settings) {
 		const protectedModels = protectedResidencyModelIds(settings);
 		if (protectedModels.length > 0) spec.protectedModels = protectedModels;
@@ -4163,7 +4164,6 @@ export function createDispatchBundle(
 				? { prelude: [{ type: "route_warning", level: "warning", message: lifecycle.target.routeWarning }] }
 				: {}),
 			onEvent: (event) => {
-				if (isRecord(event) && event.type === "heartbeat") return;
 				context.bus.emit(BusChannels.DispatchProgress, {
 					runId: envelope.id,
 					agentId: req.agentId,
@@ -4267,6 +4267,7 @@ export function createDispatchBundle(
 				lineage,
 				identity,
 				...(placement ? { node: placement.node } : {}),
+				...receiptAttestationFields(worker.attestation?.() ?? null),
 				...(placement?.reroutes !== undefined && placement.reroutes.length > 0
 					? { reroutes: [...placement.reroutes] }
 					: {}),
@@ -4328,8 +4329,7 @@ export function createDispatchBundle(
 					req.autonomy,
 				),
 				safety: {
-					// Escalation tallies are folded in only when at least one ask was
-					// escalated, so deny/fail receipts stay byte-identical.
+					// Escalation tallies fold in only when an ask escalated, so deny and fail receipts stay byte-identical.
 					decisions:
 						escalationCounts.requested > 0
 							? {

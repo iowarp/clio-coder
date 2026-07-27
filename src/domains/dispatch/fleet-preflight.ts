@@ -17,7 +17,17 @@ import { join } from "node:path";
 import { readClioVersion } from "../../core/package-root.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import { buildSshArgs, type SshNodeEndpoint, shellQuote } from "./transport.js";
+import {
+	evaluateRouteFacts,
+	type FactState,
+	type NodeResourceFact,
+	type NodeTargetFact,
+	type RouteFactEvaluationOptions,
+	type RouteFactRequirement,
+	type RouteFactVerdict,
+} from "./route-facts.js";
+import { buildSshArgs, LOCAL_NODE_ID, type SshNodeEndpoint, shellQuote } from "./transport.js";
+import { endpointIdentityHash } from "./worker-protocol.js";
 
 export interface FleetPreflightChecks {
 	reachable: boolean;
@@ -25,6 +35,14 @@ export interface FleetPreflightChecks {
 	versionMatch: boolean;
 	pathParity: boolean;
 	stateDirWritable: boolean;
+}
+
+/** Targets to probe from the node, resolved from settings by the caller. */
+export interface FleetPreflightTarget {
+	id: string;
+	url?: string;
+	wireModelId?: string;
+	runtimeId: string;
 }
 
 export interface FleetPreflightRecord {
@@ -38,10 +56,18 @@ export interface FleetPreflightRecord {
 	remoteVersion: string | null;
 	detail: string | null;
 	checks: FleetPreflightChecks;
+	/**
+	 * Per-target facts observed from this node. A `localhost` endpoint means a
+	 * different machine on every node, so these are the only endpoint facts that
+	 * may decide whether this node can serve that target.
+	 */
+	targets: NodeTargetFact[];
+	/** Bounded resource facts for this node; unknown values stay null. */
+	resources: NodeResourceFact | null;
 }
 
 interface FleetPreflightStoreFile {
-	version: 1;
+	version: 2;
 	records: FleetPreflightRecord[];
 }
 
@@ -54,7 +80,10 @@ export function readFleetPreflightRecords(): FleetPreflightRecord[] {
 	if (!existsSync(path)) return [];
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as FleetPreflightStoreFile;
-		if (parsed?.version !== 1 || !Array.isArray(parsed.records)) return [];
+		// One current version. A store written by an earlier release carries no
+		// node-local target facts, so it is discarded and re-probed rather than
+		// read as if its silence meant "no requirement".
+		if (parsed?.version !== 2 || !Array.isArray(parsed.records)) return [];
 		return parsed.records;
 	} catch {
 		return [];
@@ -67,7 +96,7 @@ export function recordFleetPreflight(records: ReadonlyArray<FleetPreflightRecord
 	const merged = new Map<string, FleetPreflightRecord>();
 	for (const record of existing) merged.set(`${record.nodeId}\0${record.projectRoot}`, record);
 	for (const record of records) merged.set(`${record.nodeId}\0${record.projectRoot}`, record);
-	const file: FleetPreflightStoreFile = { version: 1, records: [...merged.values()] };
+	const file: FleetPreflightStoreFile = { version: 2, records: [...merged.values()] };
 	atomicWrite(storePath(), JSON.stringify(file, null, 2));
 }
 
@@ -114,6 +143,53 @@ export function fleetPreflightVerdict(
 	return { ok: true, reason: null };
 }
 
+/**
+ * Route-admission view of the stored node-local facts. Every fact is keyed by
+ * the node that observed it, so a requirement for node B is never satisfied by
+ * evidence node A produced.
+ */
+export function routeFactVerdict(
+	requirement: RouteFactRequirement,
+	records: ReadonlyArray<FleetPreflightRecord> = readFleetPreflightRecords(),
+	options?: RouteFactEvaluationOptions,
+): RouteFactVerdict {
+	const targets: NodeTargetFact[] = [];
+	const resources: NodeResourceFact[] = [];
+	for (const record of records) {
+		targets.push(...record.targets);
+		if (record.resources !== null) resources.push(record.resources);
+	}
+	return evaluateRouteFacts(targets, resources, requirement, options);
+}
+
+/**
+ * Record the local node's own facts. The orchestrator host is the local node,
+ * so an orchestrator-side probe is a node-local probe here, and only here.
+ */
+export function recordLocalNodeFacts(
+	projectRoot: string,
+	targets: ReadonlyArray<NodeTargetFact>,
+	resources: NodeResourceFact | null,
+	options?: { now?: () => Date },
+): void {
+	const checkedAt = (options?.now?.() ?? new Date()).toISOString();
+	recordFleetPreflight([
+		{
+			nodeId: LOCAL_NODE_ID,
+			host: LOCAL_NODE_ID,
+			projectRoot,
+			ok: true,
+			checkedAt,
+			localVersion: readClioVersion(),
+			remoteVersion: null,
+			detail: null,
+			checks: { reachable: true, clioPresent: true, versionMatch: true, pathParity: true, stateDirWritable: true },
+			targets: targets.map((fact) => ({ ...fact, nodeId: LOCAL_NODE_ID })),
+			resources: resources === null ? null : { ...resources, nodeId: LOCAL_NODE_ID },
+		},
+	]);
+}
+
 const PREFLIGHT_MARKER = "clio-preflight/1";
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
 
@@ -123,7 +199,11 @@ const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
  * mirrors the local xdg resolution's Linux default; per-node CLIO_* dir
  * overrides are not visible over this channel and are unsupported.
  */
-export function buildPreflightScript(node: SshNodeEndpoint, projectRoot: string): string {
+export function buildPreflightScript(
+	node: SshNodeEndpoint,
+	projectRoot: string,
+	targets: ReadonlyArray<FleetPreflightTarget> = [],
+): string {
 	const entry = node.clioEntry !== undefined && node.clioEntry.trim().length > 0 ? node.clioEntry.trim() : "clio worker";
 	// Version-check the CLI the worker invocation resolves to: strip the
 	// trailing `worker` subcommand to get the base CLI invocation.
@@ -132,12 +212,36 @@ export function buildPreflightScript(node: SshNodeEndpoint, projectRoot: string)
 		cliBase !== null
 			? `v=$(${cliBase} --version 2>/dev/null | head -n 1); if [ -n "$v" ]; then echo "clio=$v"; else echo clio=missing; fi`
 			: `echo clio=custom-entry`;
-	return [
+	const lines = [
 		`echo ${shellQuote(PREFLIGHT_MARKER)}`,
 		`if cd ${shellQuote(projectRoot)} 2>/dev/null; then echo cwd=ok; else echo cwd=missing; fi`,
 		versionProbe,
 		`d="\${XDG_STATE_HOME:-$HOME/.local/state}/clio"; if mkdir -p "$d" 2>/dev/null && [ -w "$d" ]; then echo state=ok; else echo state=fail; fi`,
-	].join("; ");
+		// Resource observation runs on the node. A node without nvidia-smi reports
+		// unknown; it never reports zero GPUs, which a fit requirement would read
+		// as a proven absence rather than an absence of evidence.
+		`echo "cpu=$(nproc 2>/dev/null || echo unknown)"`,
+		`echo "memkb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo unknown)"`,
+		`g=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null); if [ -n "$g" ]; then echo "gpu=$(echo "$g" | wc -l)"; echo "vrammb=$(echo "$g" | paste -sd+ - | bc 2>/dev/null || echo unknown)"; else echo gpu=unknown; echo vrammb=unknown; fi`,
+	];
+	for (const target of targets) {
+		// The endpoint is resolved here, on the node. An orchestrator-local probe
+		// of the same URL would describe a different machine entirely.
+		if (target.url === undefined || target.url.trim().length === 0) {
+			lines.push(`echo ${shellQuote(`target=${target.id}:noendpoint`)}`);
+			continue;
+		}
+		const modelsUrl = `${target.url.replace(/\/+$/u, "")}/v1/models`;
+		lines.push(
+			`b=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' ${shellQuote(modelsUrl)} 2>/dev/null || echo 000); ` +
+				`m=$(curl -sS -m 5 ${shellQuote(modelsUrl)} 2>/dev/null || echo ""); ` +
+				`echo ${shellQuote(`target=${target.id}:`)}"$b"; ` +
+				(target.wireModelId !== undefined
+					? `case "$m" in *${shellQuote(target.wireModelId).slice(1, -1)}*) echo ${shellQuote(`model=${target.id}:true`)};; *) echo ${shellQuote(`model=${target.id}:false`)};; esac`
+					: `echo ${shellQuote(`model=${target.id}:unknown`)}`),
+		);
+	}
+	return lines.join("; ");
 }
 
 function parseSemver(text: string): string | null {
@@ -149,6 +253,61 @@ export interface FleetPreflightRunOptions {
 	sshBinary?: string;
 	timeoutMs?: number;
 	now?: () => Date;
+	/** Targets to probe from this node; omitted means node health only. */
+	targets?: ReadonlyArray<FleetPreflightTarget>;
+}
+
+function parseUnknownableNumber(lines: ReadonlyArray<string>, prefix: string, scale = 1): number | null {
+	const line = lines.find((entry) => entry.startsWith(prefix));
+	if (line === undefined) return null;
+	const raw = line.slice(prefix.length).trim();
+	const value = Number.parseInt(raw, 10);
+	return Number.isFinite(value) && value >= 0 ? value * scale : null;
+}
+
+/**
+ * Turn the node's probe output into per-target facts. Anything the node did
+ * not answer stays `unknown`: an absent line is missing evidence, and reading
+ * it as a negative would let one flaky probe permanently condemn a route.
+ */
+function parseTargetFacts(
+	lines: ReadonlyArray<string>,
+	targets: ReadonlyArray<FleetPreflightTarget>,
+	probedAt: string,
+	probeDurationMs: number,
+): NodeTargetFact[] {
+	return targets.map((target) => {
+		const statusLine = lines.find((entry) => entry.startsWith(`target=${target.id}:`));
+		const status = statusLine?.slice(`target=${target.id}:`.length).trim() ?? "";
+		const code = Number.parseInt(status, 10);
+		const reachable: FactState =
+			status === ""
+				? "unknown"
+				: status === "noendpoint"
+					? "unknown"
+					: Number.isFinite(code) && code >= 200 && code < 500
+						? "true"
+						: "false";
+		const modelLine = lines.find((entry) => entry.startsWith(`model=${target.id}:`));
+		const modelValue = modelLine?.slice(`model=${target.id}:`.length).trim();
+		const modelAvailable: FactState = modelValue === "true" ? "true" : modelValue === "false" ? "false" : "unknown";
+		return {
+			nodeId: "",
+			targetId: target.id,
+			reachable,
+			// The runtime the target names is registered in this same release on
+			// every node, and the version check already proved release parity.
+			runtimeCompatible: reachable === "true" ? "true" : "unknown",
+			modelAvailable,
+			// A worker observes only the models it loads itself, so residency is
+			// never inferred from an endpoint listing.
+			modelResident: "unknown",
+			endpointIdentityHash: endpointIdentityHash(target.url),
+			wireModelId: target.wireModelId ?? null,
+			probedAt,
+			probeDurationMs,
+		};
+	});
 }
 
 function runSsh(
@@ -186,6 +345,7 @@ export async function runFleetNodePreflight(
 		pathParity: false,
 		stateDirWritable: false,
 	};
+	const targets = options?.targets ?? [];
 	const record: FleetPreflightRecord = {
 		nodeId: node.id,
 		host: node.host,
@@ -196,9 +356,13 @@ export async function runFleetNodePreflight(
 		remoteVersion: null,
 		detail: null,
 		checks,
+		targets: [],
+		resources: null,
 	};
-	const script = buildPreflightScript(node, projectRoot);
+	const script = buildPreflightScript(node, projectRoot, targets);
+	const probeStartedAt = Date.now();
 	const result = await runSsh(sshBinary, buildSshArgs(node, script), timeoutMs);
+	const probeDurationMs = Date.now() - probeStartedAt;
 	if (!result.stdout.includes(PREFLIGHT_MARKER)) {
 		const stderr = result.stderr.trim().split("\n").slice(-1)[0] ?? "";
 		record.detail = `unreachable (ssh exit ${result.code}${stderr.length > 0 ? `: ${stderr}` : ""})`;
@@ -206,6 +370,19 @@ export async function runFleetNodePreflight(
 	}
 	checks.reachable = true;
 	const lines = result.stdout.split("\n").map((line) => line.trim());
+	record.targets = parseTargetFacts(lines, targets, checkedAt, probeDurationMs).map((fact) => ({
+		...fact,
+		nodeId: node.id,
+	}));
+	record.resources = {
+		nodeId: node.id,
+		labels: [...(node.labels ?? [])],
+		cpuCount: parseUnknownableNumber(lines, "cpu="),
+		totalMemoryBytes: parseUnknownableNumber(lines, "memkb=", 1024),
+		gpuCount: parseUnknownableNumber(lines, "gpu="),
+		vramBytes: parseUnknownableNumber(lines, "vrammb=", 1024 * 1024),
+		observedAt: checkedAt,
+	};
 	checks.pathParity = lines.includes("cwd=ok");
 	checks.stateDirWritable = lines.includes("state=ok");
 	const clioLine = lines.find((line) => line.startsWith("clio="));

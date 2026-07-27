@@ -47,6 +47,7 @@ import {
 	type ToolRegistry,
 	type ToolSpec,
 } from "../tools/registry.js";
+import { toolSignatureOf } from "../worker/protocol.js";
 import { validateEngineToolArguments } from "./ai.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 
@@ -407,19 +408,8 @@ export function createWorkerToolRegistry(
  * When `allowedTools` is undefined, step 3 is skipped.
  */
 export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
-	const profileContext = {
-		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
-		...(input.task !== undefined ? { task: input.task } : {}),
-	};
-	const toolIds = new Set(applyToolProfile(input.registry.listRegistered(), input.toolProfile, profileContext));
-	const allowed = input.allowedTools ? new Set(input.allowedTools) : null;
-	const includeInteractiveTools = input.includeInteractiveTools !== false;
 	const specs: ToolSpec[] = [];
-	for (const name of toolIds) {
-		// Orchestrator-only tools. Workers resolve their full surface once at
-		// admission, so neither operator interviews nor self-activation apply.
-		if (!includeInteractiveTools && name === ToolNames.AskUser) continue;
-		if (allowed && !allowed.has(name)) continue;
+	for (const name of effectiveWorkerToolNames(input)) {
 		const spec = input.registry.get(name);
 		if (spec) specs.push(spec);
 	}
@@ -427,6 +417,61 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	return specs.map((spec) =>
 		toAgentTool(spec, input.registry, input.telemetry, input.invokeOptions),
 	) as unknown as AgentTool[];
+}
+
+/**
+ * The effective tool surface for one worker run, as names. This is the single
+ * narrowing used both to build the executable tool set and to compute the
+ * signature the worker attests, so an attested identity can never describe a
+ * different surface than the one the agent actually gets.
+ */
+export function effectiveWorkerToolNames(
+	input: Omit<ResolveAgentToolsInput, "telemetry" | "invokeOptions">,
+): ToolName[] {
+	const profileContext = {
+		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+		...(input.task !== undefined ? { task: input.task } : {}),
+	};
+	const toolIds = applyToolProfile(input.registry.listRegistered(), input.toolProfile, profileContext);
+	const allowed = input.allowedTools ? new Set<string>(input.allowedTools) : null;
+	const includeInteractiveTools = input.includeInteractiveTools !== false;
+	const names: ToolName[] = [];
+	for (const name of new Set(toolIds)) {
+		// Orchestrator-only tools. Workers resolve their full surface once at
+		// admission, so neither operator interviews nor self-activation apply.
+		if (!includeInteractiveTools && name === ToolNames.AskUser) continue;
+		if (allowed && !allowed.has(name)) continue;
+		names.push(name);
+	}
+	return names;
+}
+
+export interface AttestedToolIdentityInput {
+	allowedTools: ReadonlyArray<ToolName>;
+	/** False when the resolved runtime mediates no tool calls at all. */
+	toolsSupported: boolean;
+	toolProfile?: ToolProfileName;
+	agentId?: string;
+	task?: string;
+}
+
+/**
+ * The effective tool signature a worker announces before model execution. The
+ * orchestrator compares it against the surface the plan approved, so a worker
+ * whose registry resolved a different tool set is refused rather than run.
+ */
+export function attestedToolSignature(input: AttestedToolIdentityInput): string {
+	const registry = createWorkerToolRegistry();
+	return toolSignatureOf(
+		effectiveWorkerToolNames({
+			registry,
+			allowedTools: input.toolsSupported ? input.allowedTools : [],
+			includeInteractiveTools: false,
+			...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
+			...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+			...(input.task !== undefined ? { task: input.task } : {}),
+		}),
+	);
 }
 
 /**

@@ -65,12 +65,12 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 ## Dispatch routing intent
 
 - `src/domains/dispatch/routing-intent.ts` strictly parses the model-facing routing object, applies shadow-balanced defaults, preserves exact route pins as fail-closed manual intent, and evaluates cost, deadline, quality, capability, and locality hard bounds.
-- Plan artifacts and receipt integrity v11 seal normalized routing intent. Candidate envelopes remain coordinator-authored; route explanations are bounded projections of the sealed decision and never accept task text, prompts, endpoints, or credentials.
+- Plan artifacts and receipt integrity v12 seal normalized routing intent. Candidate envelopes remain coordinator-authored; route explanations are bounded projections of the sealed decision and never accept task text, prompts, endpoints, or credentials.
 
 ## Dispatch routing quality
 
 - `src/domains/dispatch/route-quality.ts` is the pure reducer for integrity-valid receipt, gate, and eval evidence. Descriptive receipt verification never establishes routing quality.
-- `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity v10 requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.
+- `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.
 
 ## Strict agent recipes
 
@@ -79,7 +79,16 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 
 ## Worker runtime
 
-Worker processes accept only WorkerSpec version 2 with a concrete `budget` block. Runtime budgets are inherited directly from the admitted worker specification.
+Worker processes accept only WorkerSpec version 3 with a concrete `budget` block and a `settingsFingerprint`. Runtime budgets are inherited directly from the admitted worker specification.
+
+## Worker protocol and attestation
+
+- `src/worker/protocol.ts` is the one wire schema: lane bounds, frame parsers that check byte length before JSON parsing, and the attestation shape. `src/domains/dispatch/worker-protocol.ts` adds the orchestrator half, which is fingerprint computation, attestation admission, the bounded event queue, and the typed `WorkerChannelFailure`.
+- The bulk lane is worker stdout and the control lane is marked stderr. Announce, heartbeat, steer acknowledgements, and cancellation acknowledgements never share the bulk queue, so a flood cannot delay them.
+- The orchestrator event queue is bounded and drops only display frames. Receipt-bearing frames are never dropped.
+- A worker attests protocol version, pid, process-group id, host, settings fingerprint, WorkerSpec digest, runtime, target, endpoint identity hash, wire model, effective tool signature, and bounded resource facts before any model call. Any drift from the approved identity kills the worker. Unknown resource values are explicit and never optimistic.
+- Local and remote workers lead a process group and abort escalates against the whole group.
+- `src/domains/dispatch/route-facts.ts` evaluates node-scoped target facts. Evidence from one node never answers a question about another, and unknown cannot satisfy an active hard requirement. Doctor records these facts per node through the fleet preflight store, which is version 2.
 
 ## Execution plans and fleets
 

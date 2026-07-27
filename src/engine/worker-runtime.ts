@@ -268,7 +268,11 @@ function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 	return messages;
 }
 
-function workerProviderSupportsTools(input: WorkerRunInput): boolean {
+/**
+ * Whether the resolved runtime mediates tool calls at all. Exported so the
+ * worker entry attests the same tool surface this run will actually build.
+ */
+export function workerProviderSupportsTools(input: WorkerRunInput): boolean {
 	const runtimeDecision = input.runtimeResolution?.capabilities.tools;
 	if (runtimeDecision !== undefined) return runtimeDecision === true;
 	if (typeof input.modelCapabilities?.tools === "boolean") return input.modelCapabilities.tools;

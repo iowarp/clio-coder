@@ -154,7 +154,16 @@ export async function runDoctorFleetChecks(projectRoot: string = process.cwd()):
 	const nodes = settings.fleet?.nodes ?? [];
 	if (nodes.length === 0) return [];
 	const { recordFleetPreflight, runFleetNodePreflight } = await import("../dispatch/fleet-preflight.js");
-	const records = await Promise.all(nodes.map((node) => runFleetNodePreflight(node, projectRoot)));
+	// Endpoint facts are per node. Every configured target is probed from every
+	// node, because a `localhost` URL names a different machine on each one and
+	// an orchestrator-side probe would describe none of them.
+	const targets = (settings.targets ?? []).map((target) => ({
+		id: target.id,
+		runtimeId: target.runtime,
+		...(target.url !== undefined ? { url: target.url } : {}),
+		...(target.defaultModel !== undefined ? { wireModelId: target.defaultModel } : {}),
+	}));
+	const records = await Promise.all(nodes.map((node) => runFleetNodePreflight(node, projectRoot, { targets })));
 	try {
 		recordFleetPreflight(records);
 	} catch {
@@ -166,7 +175,9 @@ export async function runDoctorFleetChecks(projectRoot: string = process.cwd()):
 		level: record.ok ? "ok" : "warn",
 		name: `fleet node ${record.nodeId}`,
 		detail: record.ok
-			? `eligible: ${record.host} clio ${record.remoteVersion ?? "(custom entry)"}, path parity for ${record.projectRoot}`
+			? `eligible: ${record.host} clio ${record.remoteVersion ?? "(custom entry)"}, path parity for ${record.projectRoot}, ${
+					record.targets.filter((fact) => fact.reachable === "true").length
+				}/${record.targets.length} targets reachable from the node`
 			: `ineligible: ${record.detail ?? "preflight failed"}`,
 	}));
 }
