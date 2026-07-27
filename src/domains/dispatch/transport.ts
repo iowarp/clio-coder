@@ -24,13 +24,7 @@
 import { spawn } from "node:child_process";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
-import {
-	announceEnabledWorkerEnvironment,
-	type SpawnedWorker,
-	type SpawnOptions,
-	spawnNativeWorker,
-	spawnWorkerProcess,
-} from "./worker-spawn.js";
+import { type SpawnedWorker, type SpawnOptions, spawnNativeWorker, spawnWorkerProcess } from "./worker-spawn.js";
 
 export type WorkerTransportKind = "local" | "ssh";
 
@@ -65,6 +59,12 @@ export interface SshNodeEndpoint {
 	 */
 	residency?: "observe" | "manage";
 	connectTimeoutSec?: number;
+	/**
+	 * Operator-declared capability labels for this node, exported to the remote
+	 * worker so its announcement attests the configured labels alongside the
+	 * resource values it observes.
+	 */
+	labels?: ReadonlyArray<string>;
 }
 
 export interface SshTransportOptions {
@@ -106,8 +106,13 @@ export function shellQuote(value: string): string {
  */
 function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	const residency = node.residency ?? "observe";
-	const env = announceEnabledWorkerEnvironment({ CLIO_RESIDENCY: residency });
-	return `CLIO_RESIDENCY=${env.CLIO_RESIDENCY} CLIO_WORKER_ANNOUNCE=${env.CLIO_WORKER_ANNOUNCE}`;
+	// `$$` is the login shell's pid, and it leads the process group the remote
+	// command runs in. `exec` replaces that shell in place, so the worker
+	// inherits both the pid and the group leadership, and the value it announces
+	// is the group an abort must signal.
+	const labels = (node.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0);
+	const labelAssignment = labels.length > 0 ? ` CLIO_WORKER_LABELS=${shellQuote(labels.join(","))}` : "";
+	return `CLIO_RESIDENCY=${residency} CLIO_WORKER_PGID=$$${labelAssignment}`;
 }
 
 export function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
@@ -142,14 +147,24 @@ export function createSshWorkerTransport(node: SshNodeEndpoint, opts?: SshTransp
 		node: identity,
 		spawn(spec, spawnOpts) {
 			const cwd = spawnOpts?.cwd ?? process.cwd();
-			const remote: { pid: number | null } = { pid: null };
+			const remote: { pid: number | null; processGroupId: number | null } = { pid: null, processGroupId: null };
 			const killRemote = (): void => {
-				if (remote.pid === null) return;
+				// The negative pid targets the whole remote process group, so a
+				// runtime's own children go with it. Without an announced group the
+				// single pid is the most the orchestrator can prove it may signal.
+				const group = remote.processGroupId;
+				const command =
+					group !== null
+						? `kill -TERM -${group} 2>/dev/null || kill -TERM ${remote.pid ?? group} 2>/dev/null || true`
+						: remote.pid !== null
+							? `kill -TERM ${remote.pid} 2>/dev/null || true`
+							: null;
+				if (command === null) return;
 				// Best-effort second channel: the primary signal is the channel
 				// close (the worker's parent monitor aborts and exits on stdin
 				// EOF); this covers a worker that stopped reading its stdin.
 				try {
-					const fallback = spawn(sshBinary, buildSshArgs(node, `kill -TERM ${remote.pid} 2>/dev/null || true`), {
+					const fallback = spawn(sshBinary, buildSshArgs(node, command), {
 						stdio: "ignore",
 						detached: true,
 					});
@@ -162,8 +177,9 @@ export function createSshWorkerTransport(node: SshNodeEndpoint, opts?: SshTransp
 				// No cwd for the local ssh client; the remote command cds itself.
 				env: process.env,
 				...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
-				onAnnounce: (announce) => {
-					remote.pid = announce.pid;
+				onAnnounce: (attestation) => {
+					remote.pid = attestation.pid;
+					remote.processGroupId = attestation.processGroupId;
 				},
 				onForcedKill: killRemote,
 			});

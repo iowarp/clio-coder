@@ -1,3 +1,4 @@
+import { WORKER_STDIN_FRAME_MAX_BYTES, withinFrameBudget } from "./protocol.js";
 import { parseWorkerSpec, type WorkerSpec } from "./spec-contract.js";
 
 export interface WorkerStdinDemux {
@@ -115,6 +116,18 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 
 	function processLine(line: string): void {
 		if (line.length === 0) return;
+		// The byte ceiling is checked before JSON.parse so an oversized or
+		// adversarial line costs a length comparison, not a parse and an
+		// allocation proportional to its size.
+		if (!withinFrameBudget(line, WORKER_STDIN_FRAME_MAX_BYTES)) {
+			if (!specReceived) {
+				specReceived = true;
+				rejectSpec(new Error(`WorkerSpec line exceeds the ${WORKER_STDIN_FRAME_MAX_BYTES} byte stdin frame limit`));
+				return;
+			}
+			droppedLines += 1;
+			return;
+		}
 		if (!specReceived) {
 			specReceived = true;
 			try {
@@ -127,6 +140,13 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		processPostSpecLine(line);
 	}
 
+	/**
+	 * Discard an unterminated run that already exceeds the frame ceiling. A peer
+	 * that never sends a newline cannot grow this buffer without bound; the
+	 * oversized remainder is dropped up to the next newline.
+	 */
+	let discardingOversizedLine = false;
+
 	return {
 		feed(chunk: string): void {
 			if (closed) return;
@@ -135,8 +155,21 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			while (idx >= 0) {
 				const line = buffer.slice(0, idx);
 				buffer = buffer.slice(idx + 1);
-				processLine(line);
+				if (discardingOversizedLine) {
+					discardingOversizedLine = false;
+					droppedLines += 1;
+				} else {
+					processLine(line);
+				}
 				idx = buffer.indexOf("\n");
+			}
+			if (!withinFrameBudget(buffer, WORKER_STDIN_FRAME_MAX_BYTES)) {
+				if (!specReceived) {
+					specReceived = true;
+					rejectSpec(new Error(`WorkerSpec line exceeds the ${WORKER_STDIN_FRAME_MAX_BYTES} byte stdin frame limit`));
+				}
+				buffer = "";
+				discardingOversizedLine = true;
 			}
 		},
 		eof(): void {

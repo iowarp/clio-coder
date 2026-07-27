@@ -8,15 +8,20 @@ import {
 	fleetPreflightVerdict,
 	readFleetPreflightRecords,
 	recordFleetPreflight,
+	routeFactVerdict,
 } from "../../src/domains/dispatch/fleet-preflight.js";
 import {
 	createFleetPlacementPreviewResolver,
 	createFleetPlacementResolver,
 } from "../../src/domains/dispatch/placement.js";
+import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { NodeTargetFact, RouteFactRequirement } from "../../src/domains/dispatch/route-facts.js";
 import type { WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import type { RunNodeReroute } from "../../src/domains/dispatch/types.js";
+import { endpointIdentityHash } from "../../src/domains/dispatch/worker-protocol.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
 import { isolateDispatchState, restoreDispatchState } from "../harness/dispatch.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 const NODE_BLADE = { id: "blade", host: "blade.lan", maxWorkers: 2 };
 const NODE_MINI = { id: "mini", host: "mini.lan", maxWorkers: 1 };
@@ -325,6 +330,39 @@ describe("fleet preflight store", () => {
 			remoteVersion: readClioVersion(),
 			detail: null,
 			checks: { reachable: true, clioPresent: true, versionMatch: true, pathParity: true, stateDirWritable: true },
+			targets: [],
+			resources: null,
+			...overrides,
+		};
+	}
+
+	function targetFact(overrides: Partial<NodeTargetFact> = {}): NodeTargetFact {
+		return {
+			nodeId: "blade",
+			targetId: "mini",
+			reachable: "true",
+			runtimeCompatible: "true",
+			modelAvailable: "true",
+			modelResident: "unknown",
+			endpointIdentityHash: endpointIdentityHash("http://localhost:8080"),
+			wireModelId: "Qwopus-MoE-35B",
+			probedAt: new Date().toISOString(),
+			probeDurationMs: 12,
+			...overrides,
+		};
+	}
+
+	function requirement(overrides: Partial<RouteFactRequirement> = {}): RouteFactRequirement {
+		return {
+			nodeId: "blade",
+			targetId: "mini",
+			wireModelId: "Qwopus-MoE-35B",
+			requireReachable: true,
+			requireRuntimeCompatible: true,
+			requireModelAvailable: true,
+			requireGpuCount: null,
+			requireVramBytes: null,
+			mode: "active",
 			...overrides,
 		};
 	}
@@ -354,5 +392,126 @@ describe("fleet preflight store", () => {
 			/failed its last fleet preflight: clio missing/,
 		);
 		strictEqual(fleetPreflightVerdict(node, "/shared/app", [record()]).ok, true);
+	});
+
+	it("localhost target is probed on the selected remote node", () => {
+		// The same URL string on two nodes is two different machines. Evidence
+		// from 'blade' must not answer a question about 'mini'.
+		const records = [record({ targets: [targetFact({ nodeId: "blade" })] })];
+		strictEqual(routeFactVerdict(requirement({ nodeId: "blade" }), records).ok, true);
+		const other = routeFactVerdict(requirement({ nodeId: "mini" }), records);
+		strictEqual(other.ok, false);
+		match(other.ok ? "" : other.reason, /no probe fact for target 'mini' on node 'mini'/);
+
+		// A node that proved the endpoint unreachable from itself is refused even
+		// though another node reached the identical URL.
+		const mixed = [
+			record({
+				targets: [targetFact({ nodeId: "blade" }), targetFact({ nodeId: "mini", reachable: "false" })],
+			}),
+		];
+		const refused = routeFactVerdict(requirement({ nodeId: "mini" }), mixed);
+		strictEqual(refused.ok, false);
+		match(refused.ok ? "" : refused.reason, /node 'mini' proved reachable=false/);
+	});
+
+	it("stale target facts cannot satisfy an active hard requirement", () => {
+		const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+		const records = [record({ targets: [targetFact({ probedAt: stale })] })];
+		const active = routeFactVerdict(requirement({ mode: "active" }), records);
+		strictEqual(active.ok, false);
+		match(active.ok ? "" : active.reason, /evidence for target 'mini' is stale/);
+		// Shadow evaluation may still rank a route on aged evidence; only active
+		// admission treats staleness as disqualifying.
+		strictEqual(routeFactVerdict(requirement({ mode: "shadow" }), records).ok, true);
+	});
+
+	it("unknown GPU or VRAM cannot satisfy a declared fit requirement", () => {
+		const records = [
+			record({
+				targets: [targetFact()],
+				resources: {
+					nodeId: "blade",
+					labels: [],
+					cpuCount: 16,
+					totalMemoryBytes: 68719476736,
+					gpuCount: null,
+					vramBytes: null,
+					observedAt: new Date().toISOString(),
+				},
+			}),
+		];
+		const declared = requirement({ requireGpuCount: 1, requireVramBytes: 16 * 1024 * 1024 * 1024 });
+		const active = routeFactVerdict(declared, records);
+		strictEqual(active.ok, false);
+		match(
+			active.ok ? "" : active.reason,
+			/reports unknown gpuCount; a declared fit requirement cannot be satisfied by unknown/,
+		);
+
+		// Unknown is reported, not silently treated as a pass, in shadow mode too.
+		const shadow = routeFactVerdict({ ...declared, mode: "shadow" }, records);
+		strictEqual(shadow.ok, true);
+		deepStrictEqual([...shadow.unknowns], ["gpuCount", "vramBytes"]);
+
+		// A proven value below the declared floor is a hard rejection in any mode.
+		const small = [
+			record({
+				targets: [targetFact()],
+				resources: {
+					nodeId: "blade",
+					labels: [],
+					cpuCount: 16,
+					totalMemoryBytes: 68719476736,
+					gpuCount: 1,
+					vramBytes: 8 * 1024 * 1024 * 1024,
+					observedAt: new Date().toISOString(),
+				},
+			}),
+		];
+		const belowFloor = routeFactVerdict({ ...declared, mode: "shadow" }, small);
+		strictEqual(belowFloor.ok, false);
+		match(belowFloor.ok ? "" : belowFloor.reason, /vramBytes \d+ is below the declared requirement/);
+	});
+
+	it("attested host target model runtime and tool identity enter the receipt digest", () => {
+		const envelope = fixtureEnvelope("run-attested");
+		const attestation = {
+			protocolVersion: 1,
+			host: "mini.lan",
+			pid: 991,
+			processGroupId: 991,
+			settingsFingerprint: "a".repeat(64),
+			specDigest: "b".repeat(64),
+			targetId: envelope.targetId,
+			endpointIdentityHash: endpointIdentityHash("http://192.168.86.141:8080"),
+			wireModelId: envelope.wireModelId,
+			runtimeId: envelope.runtimeId,
+			toolSignature: "c".repeat(64),
+			resources: { labels: ["gpu"], cpuCount: 16, totalMemoryBytes: 1, gpuCount: null, vramBytes: null },
+		};
+		const sealed = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), attestation }, envelope);
+		deepStrictEqual(verifyReceiptIntegrity(sealed, envelope), { ok: true });
+		for (const mutation of [
+			{ host: "someone-else.lan" },
+			{ targetId: "other-target" },
+			{ wireModelId: "other-model" },
+			{ runtimeId: "other-runtime" },
+			{ toolSignature: "d".repeat(64) },
+			{ endpointIdentityHash: endpointIdentityHash("http://192.168.86.142:8080") },
+			{ settingsFingerprint: "e".repeat(64) },
+			{ specDigest: "f".repeat(64) },
+		]) {
+			const tampered = { ...sealed, attestation: { ...attestation, ...mutation } };
+			strictEqual(
+				verifyReceiptIntegrity(tampered, envelope).ok,
+				false,
+				`mutating ${Object.keys(mutation)[0]} must break the digest`,
+			);
+		}
+		// An absent attestation is a distinct sealed state, not an empty one.
+		const unattested = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
+		strictEqual("attestation" in unattested, false);
+		deepStrictEqual(verifyReceiptIntegrity(unattested, envelope), { ok: true });
 	});
 });

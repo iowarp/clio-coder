@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
@@ -10,6 +10,7 @@ import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { listCapacityLeases } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchNodePlacement } from "../../src/domains/dispatch/extension.js";
+import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import {
 	buildRemoteWorkerCommand,
@@ -19,7 +20,21 @@ import {
 	shellQuote,
 } from "../../src/domains/dispatch/transport.js";
 import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
-import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
+import {
+	approvedIdentityForSpec,
+	createBoundedEventQueue,
+	endpointIdentityHash,
+	verifyWorkerAttestation,
+	WORKER_STDIN_FRAME_MAX_BYTES,
+	WorkerChannelFailure,
+	workerSpecDigest,
+} from "../../src/domains/dispatch/worker-protocol.js";
+import {
+	type SpawnedWorker,
+	type SpawnedWorkerResult,
+	spawnWorkerProcess,
+	type WorkerSpec,
+} from "../../src/domains/dispatch/worker-spawn.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
@@ -30,9 +45,11 @@ import { WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { type FakeSsh, installFakeSsh } from "../harness/fake-ssh.js";
+import { fixtureSettingsFingerprint } from "../harness/worker-attestation.js";
 
 const TEST_SPEC = {
 	specVersion: WORKER_SPEC_VERSION,
+	settingsFingerprint: fixtureSettingsFingerprint(),
 	systemPrompt: "",
 	agentId: "coder",
 	executionRole: "builder",
@@ -59,6 +76,16 @@ async function drain(events: AsyncIterableIterator<unknown>): Promise<unknown[]>
 	return out;
 }
 
+/** Liveness by signal 0: it probes without delivering anything. */
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 function eventTypes(events: ReadonlyArray<unknown>): string[] {
 	return events.map((event) =>
 		typeof event === "object" && event !== null ? String((event as { type?: unknown }).type) : "unknown",
@@ -73,10 +100,7 @@ describe("ssh argv and remote command construction", () => {
 
 	it("builds the remote worker command with cwd, env whitelist, and default entry", () => {
 		const command = buildRemoteWorkerCommand(SSH_NODE, "/shared/projects/app");
-		strictEqual(
-			command,
-			"cd '/shared/projects/app' && exec env CLIO_RESIDENCY=observe CLIO_WORKER_ANNOUNCE=1 clio worker",
-		);
+		strictEqual(command, "cd '/shared/projects/app' && exec env CLIO_RESIDENCY=observe CLIO_WORKER_PGID=$$ clio worker");
 	});
 
 	it("honors per-node residency and clioEntry overrides", () => {
@@ -84,7 +108,7 @@ describe("ssh argv and remote command construction", () => {
 			{ ...SSH_NODE, residency: "manage", clioEntry: "/opt/clio/bin/clio worker" },
 			"/w",
 		);
-		strictEqual(command, "cd '/w' && exec env CLIO_RESIDENCY=manage CLIO_WORKER_ANNOUNCE=1 /opt/clio/bin/clio worker");
+		strictEqual(command, "cd '/w' && exec env CLIO_RESIDENCY=manage CLIO_WORKER_PGID=$$ /opt/clio/bin/clio worker");
 	});
 
 	it("builds non-interactive ssh args with port, identity, and user", () => {
@@ -164,7 +188,7 @@ describe("ssh worker transport channel contract", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced 1/);
+		match(result.stderrTail ?? "", /WorkerSpec version drift: dispatched 3, worker announced 2/);
 	});
 
 	it("rejects a worker announce with no specVersion", async () => {
@@ -174,7 +198,7 @@ describe("ssh worker transport channel contract", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced undefined/);
+		match(result.stderrTail ?? "", /announce specVersion must be a finite number/);
 	});
 
 	it("fails closed when the first remote protocol event is not an announce", async () => {
@@ -184,7 +208,10 @@ describe("ssh worker transport channel contract", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /Missing worker_announce handshake: first protocol event was message_end/);
+		match(
+			result.stderrTail ?? "",
+			/Missing worker attestation: the peer produced output without announcing its route identity/,
+		);
 	});
 
 	it("fails closed when the remote peer exits cleanly without an announce", async () => {
@@ -194,7 +221,7 @@ describe("ssh worker transport channel contract", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, null);
-		match(result.stderrTail ?? "", /Missing worker_announce handshake: peer exited before announcing specVersion 2/);
+		match(result.stderrTail ?? "", /Missing worker attestation: peer exited before announcing its route identity/);
 	});
 
 	it("round-trips a steer line over the channel", async () => {
@@ -255,7 +282,9 @@ describe("ssh worker transport channel contract", () => {
 			if (killCommand === "") await new Promise((resolve) => setTimeout(resolve, 25));
 		}
 		ok(killCommand !== "", "remote kill fallback invoked over a second channel");
-		match(killCommand, /^kill -TERM \d+/);
+		// The negative pid is the whole remote process group, so a runtime's own
+		// children die with it; the single pid stays as the fallback's fallback.
+		match(killCommand, /^kill -TERM -\d+ 2>\/dev\/null \|\| kill -TERM \d+/);
 	});
 });
 
@@ -291,13 +320,6 @@ describe("local worker transport", () => {
 		);
 	});
 
-	it("forces CLIO_WORKER_ANNOUNCE=1 over a caller-supplied disabling value", async () => {
-		const worker = localWorker("require-announce-env", { ...process.env, CLIO_WORKER_ANNOUNCE: "0" });
-		const events = await drain(worker.events);
-		strictEqual((await worker.promise).exitCode, 0);
-		deepStrictEqual(eventTypes(events), ["message_end"]);
-	});
-
 	it("fails closed when the first local protocol event is not announce", async () => {
 		const worker = localWorker("no-announce-event");
 		const events = await drain(worker.events);
@@ -305,7 +327,10 @@ describe("local worker transport", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /Missing worker_announce handshake: first protocol event was message_end/);
+		match(
+			result.stderrTail ?? "",
+			/Missing worker attestation: the peer produced output without announcing its route identity/,
+		);
 	});
 
 	it("fails closed when the first local protocol event is malformed JSON", async () => {
@@ -315,8 +340,7 @@ describe("local worker transport", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /first protocol event was malformed JSON/);
-		strictEqual(result.malformedStdoutLines, 1);
+		match(result.stderrTail ?? "", /Invalid worker attestation: control frame is not JSON/);
 	});
 
 	it("fails closed on local announce version mismatch", async () => {
@@ -326,7 +350,7 @@ describe("local worker transport", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced 1/);
+		match(result.stderrTail ?? "", /WorkerSpec version drift: dispatched 3, worker announced 2/);
 	});
 
 	it("fails closed when the local announce omits specVersion", async () => {
@@ -336,7 +360,7 @@ describe("local worker transport", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, "SIGKILL");
-		match(result.stderrTail ?? "", /WorkerSpec version mismatch: dispatched 2, worker announced undefined/);
+		match(result.stderrTail ?? "", /announce specVersion must be a finite number/);
 	});
 
 	it("fails closed when a local worker exits before announce", async () => {
@@ -346,7 +370,7 @@ describe("local worker transport", () => {
 		deepStrictEqual(events, []);
 		strictEqual(result.exitCode, 1);
 		strictEqual(result.signal, null);
-		match(result.stderrTail ?? "", /Missing worker_announce handshake: peer exited before announcing specVersion 2/);
+		match(result.stderrTail ?? "", /Missing worker attestation: peer exited before announcing its route identity/);
 	});
 
 	it("keeps local stdin steering operational after announce", async () => {
@@ -377,6 +401,239 @@ describe("local worker transport", () => {
 		} finally {
 			rmSync(fake.dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("worker attestation and transport bounds", () => {
+	let fake: FakeSsh;
+
+	before(() => {
+		fake = installFakeSsh();
+	});
+	after(() => {
+		rmSync(fake.dir, { recursive: true, force: true });
+	});
+
+	function localWorker(scenario: string, extraEnv: NodeJS.ProcessEnv = {}): SpawnedWorker {
+		return createLocalWorkerTransport({
+			workerEntryPath: fake.binary,
+			env: {
+				...process.env,
+				FAKE_SSH_SCENARIO: scenario,
+				FAKE_SSH_ARGV_LOG: fake.argvLog,
+				FAKE_SSH_DESCENDANT_LOG: fake.descendantLog,
+				...extraEnv,
+			},
+		}).spawn(TEST_SPEC, { cwd: fake.dir });
+	}
+
+	it("worker attestation matches the approved settings and spec fingerprints", async () => {
+		const worker = localWorker("ok");
+		await drain(worker.events);
+		strictEqual((await worker.promise).exitCode, 0);
+		const attestation = worker.attestation?.();
+		ok(attestation, "the worker attested before executing");
+		if (!attestation) return;
+		const approved = approvedIdentityForSpec(TEST_SPEC);
+		strictEqual(attestation.settingsFingerprint, approved.settingsFingerprint);
+		// The peer recomputed the digest from the bytes it received, so equality
+		// here proves it parsed the document that was actually dispatched.
+		strictEqual(attestation.specDigest, approved.specDigest);
+		strictEqual(attestation.specDigest, workerSpecDigest(TEST_SPEC));
+		strictEqual(attestation.targetId, "default");
+		strictEqual(attestation.runtimeId, "openai");
+		strictEqual(attestation.wireModelId, "gpt-4o");
+		strictEqual(attestation.endpointIdentityHash, endpointIdentityHash(undefined));
+		deepStrictEqual(verifyWorkerAttestation(attestation, approved), { ok: true });
+		// Unknown is explicit, never an optimistic zero.
+		deepStrictEqual(attestation.resources.gpuCount, { known: false });
+		deepStrictEqual(attestation.resources.vramBytes, { known: false });
+		deepStrictEqual(attestation.resources.residentModels, { known: false });
+	});
+
+	it("settings fingerprint drift kills the worker before model execution", async () => {
+		const worker = localWorker("settings-drift");
+		const events = await drain(worker.events);
+		const result = await worker.promise;
+		deepStrictEqual(events, [], "no bulk frame is accepted from a drifting peer");
+		strictEqual(result.signal, "SIGKILL");
+		match(result.stderrTail ?? "", /Worker attestation rejected: settings fingerprint drift/);
+		strictEqual(worker.attestation?.(), null);
+	});
+
+	it("spec digest and target drift are refused with the same fail-closed rule", async () => {
+		for (const [scenario, pattern] of [
+			["spec-drift", /WorkerSpec digest drift/],
+			["target-drift", /target drift/],
+		] as const) {
+			const worker = localWorker(scenario);
+			const events = await drain(worker.events);
+			const result = await worker.promise;
+			deepStrictEqual(events, [], `${scenario} produced no executable events`);
+			strictEqual(result.signal, "SIGKILL");
+			match(result.stderrTail ?? "", pattern);
+		}
+	});
+
+	it("oversized bulk and control frames fail within fixed memory bounds", async () => {
+		const bulk = localWorker("oversized-bulk");
+		const bulkEvents = await drain(bulk.events);
+		const bulkResult = await bulk.promise;
+		// The oversized line is discarded before parsing; the next frame still
+		// arrives, so one bad frame does not poison the stream.
+		deepStrictEqual(eventTypes(bulkEvents), ["message_end"]);
+		ok((bulkResult.malformedStdoutLines ?? 0) >= 1, "the oversized bulk frame was counted and dropped");
+		match(bulkResult.stderrTail ?? "", /dropped a bulk frame over the \d+ byte lane limit/);
+
+		const control = localWorker("oversized-control");
+		const controlEvents = await drain(control.events);
+		const controlResult = await control.promise;
+		deepStrictEqual(controlEvents, []);
+		match(controlResult.stderrTail ?? "", /control frame exceeds \d+ bytes/);
+		strictEqual(control.attestation?.(), null);
+	});
+
+	it("bulk backpressure does not block heartbeat or cancellation acknowledgement", async () => {
+		const controlFrames: string[] = [];
+		const worker = spawnWorkerProcess(process.execPath, [fake.binary], TEST_SPEC, {
+			cwd: fake.dir,
+			env: { ...process.env, FAKE_SSH_SCENARIO: "bulk-flood", FAKE_SSH_ARGV_LOG: fake.argvLog },
+			onControl: (frame) => controlFrames.push(frame.kind),
+		});
+		// Deliberately do not consume the bulk stream until the worker settles, so
+		// every flooded frame is sitting in the bounded queue while the control
+		// lane is expected to keep answering.
+		const result = await worker.promise;
+		strictEqual(result.exitCode, 0);
+		ok(controlFrames.includes("heartbeat"), `heartbeat crossed the saturated channel: ${controlFrames.join(",")}`);
+		ok(controlFrames.includes("cancel_ack"), `cancel ack crossed the saturated channel: ${controlFrames.join(",")}`);
+	});
+
+	it("receipt-bearing frames are never dropped with display frames", async () => {
+		const worker = localWorker("display-flood");
+		// Settle first, so every frame is queued at once and the ceiling is
+		// actually reached; a concurrent consumer would drain it as it fills.
+		const result = await worker.promise;
+		const events = await drain(worker.events);
+		strictEqual(result.exitCode, 0);
+		const types = eventTypes(events);
+		ok((result.droppedDisplayFrames ?? 0) > 0, "the queue shed display frames under pressure");
+		ok(types.includes("clio_run_outcome"), "the outcome frame survived the drop policy");
+		ok(types.includes("message_end"), "the terminal message survived the drop policy");
+		ok(types.filter((type) => type === "message_update").length < 6000, "display frames were the ones actually dropped");
+	});
+
+	it("stdin backpressure is bounded and reports node-channel failure", async () => {
+		const worker = localWorker("deaf-stdin");
+		try {
+			// One frame past the per-frame ceiling is refused outright.
+			strictEqual(worker.send?.({ type: "steer", text: "x".repeat(WORKER_STDIN_FRAME_MAX_BYTES + 16) }), false);
+			const oversize = worker.lastChannelFailure?.();
+			ok(oversize instanceof WorkerChannelFailure, "an oversized control write is a typed channel failure");
+			strictEqual(oversize?.operation, "steer");
+			strictEqual(oversize?.failureClass, "node-channel");
+			match(oversize?.message ?? "", /exceeds the \d+ byte limit/);
+
+			// A peer that stopped reading backs the queue up to its ceiling and no
+			// further; the write is refused rather than buffered without bound.
+			const chunk = { type: "steer", text: "y".repeat(512 * 1024) };
+			let refusedAt = -1;
+			for (let index = 0; index < 64 && refusedAt < 0; index += 1) {
+				if (worker.send?.(chunk) === false) refusedAt = index;
+			}
+			ok(refusedAt >= 0, "the bounded stdin queue eventually refuses instead of growing");
+			const full = worker.lastChannelFailure?.();
+			strictEqual(full?.failureClass, "node-channel");
+			match(full?.message ?? "", /stdin queue is full/);
+
+			// The typed failure reaches classification as node evidence, not as a
+			// target or model fault.
+			strictEqual(
+				classifyFailure(
+					{
+						abortedByOperator: false,
+						policyDenied: null,
+						permissionFailure: false,
+						stallKilled: false,
+						timedOut: false,
+						exitCode: 1,
+					} as never,
+					{ exitCode: 1, signal: null, channelFailure: "steer" },
+					"failed",
+					null,
+				),
+				"node-channel",
+			);
+		} finally {
+			worker.abort();
+			await worker.promise;
+		}
+	});
+
+	it("abort kills local and remote process-group descendants", async () => {
+		writeFileSync(fake.descendantLog, "", "utf8");
+		const worker = localWorker("group-descendant");
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		const descendantPid = Number.parseInt(readFileSync(fake.descendantLog, "utf8").trim().split("\n")[0] ?? "", 10);
+		ok(Number.isSafeInteger(descendantPid), "the stub spawned a descendant in the worker's group");
+		ok(isProcessAlive(descendantPid), "the descendant is running before the abort");
+		worker.abort();
+		await worker.promise;
+		// The descendant is not the immediate child, so it only dies if the signal
+		// went to the whole process group.
+		const deadline = Date.now() + 3000;
+		while (Date.now() < deadline && isProcessAlive(descendantPid)) {
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		strictEqual(isProcessAlive(descendantPid), false, "the group descendant was terminated with its leader");
+
+		// The remote half of the same rule: the fallback names the group.
+		process.env.FAKE_SSH_SCENARIO = "hang-hard";
+		process.env.FAKE_SSH_ARGV_LOG = fake.argvLog;
+		writeFileSync(fake.argvLog, "", "utf8");
+		const remote = createSshWorkerTransport(SSH_NODE, { sshBinary: fake.binary, shutdownGraceMs: 60 }).spawn(TEST_SPEC, {
+			cwd: "/w",
+		});
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		remote.abort();
+		await remote.promise;
+		const killDeadline = Date.now() + 2000;
+		let groupKill = "";
+		while (Date.now() < killDeadline && groupKill === "") {
+			for (const line of readFileSync(fake.argvLog, "utf8").trim().split("\n").filter(Boolean)) {
+				const argv = JSON.parse(line) as string[];
+				const command = argv[argv.length - 1] ?? "";
+				if (command.startsWith("kill -TERM -")) groupKill = command;
+			}
+			if (groupKill === "") await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		match(groupKill, /^kill -TERM -\d+/);
+	});
+});
+
+describe("bounded worker event queue", () => {
+	it("drops the oldest display frame and never an evidence frame", () => {
+		const queue = createBoundedEventQueue(3);
+		strictEqual(queue.push({ type: "message_update", index: 0 }), true);
+		strictEqual(queue.push({ type: "message_end" }), true);
+		strictEqual(queue.push({ type: "message_update", index: 1 }), true);
+		strictEqual(queue.push({ type: "clio_run_outcome" }), true);
+		strictEqual(queue.size, 3);
+		strictEqual(queue.stats().droppedDisplayFrames, 1);
+		deepStrictEqual(
+			[queue.shift(), queue.shift(), queue.shift()].map((frame) => (frame as { type: string }).type),
+			["message_end", "message_update", "clio_run_outcome"],
+		);
+	});
+
+	it("accepts an evidence frame even when the queue holds nothing droppable", () => {
+		const queue = createBoundedEventQueue(2);
+		queue.push({ type: "message_end" });
+		queue.push({ type: "clio_run_outcome" });
+		strictEqual(queue.push({ type: "tool_execution_end" }), true, "evidence outranks the ceiling");
+		strictEqual(queue.push({ type: "message_update" }), false, "a display frame is refused instead");
+		strictEqual(queue.stats().droppedDisplayFrames, 1);
+		strictEqual(queue.size, 3);
 	});
 });
 

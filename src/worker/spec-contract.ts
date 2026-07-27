@@ -15,8 +15,8 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 
-/** Current budget-bearing dispatch document emitted by this release. */
-export const WORKER_SPEC_VERSION = 2;
+/** Current attested, budget-bearing dispatch document emitted by this release. */
+export const WORKER_SPEC_VERSION = 3;
 export const WORKER_RUNTIME_DESCRIPTOR_VERSION = 2;
 export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
 
@@ -54,6 +54,13 @@ export interface WorkerBudget {
 }
 
 interface WorkerSpecFields {
+	/**
+	 * sha256 of the immutable settings snapshot this dispatch was admitted
+	 * under. The worker echoes it in its announcement so the orchestrator can
+	 * refuse a peer running against a different configuration before any model
+	 * call happens.
+	 */
+	settingsFingerprint: string;
 	systemPrompt: string;
 	dynamicPromptMessages?: ReadonlyArray<WorkerPromptMessage>;
 	promptSignature?: string;
@@ -355,7 +362,6 @@ function validateAllowedTools(value: unknown): void {
 }
 
 function validateWorkerBudget(value: unknown): void {
-	if (value === undefined) return;
 	const budget = readRecord(value, "WorkerSpec.budget");
 	const expected = ["hardCap", "readReserve", "synthesis", "toolCalls"];
 	const actual = Object.keys(budget).sort();
@@ -482,11 +488,14 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const spec = readRecord(value, "WorkerSpec");
 	if (spec.specVersion !== WORKER_SPEC_VERSION) {
 		throw new Error(
-			`WorkerSpec version ${String(spec.specVersion)} is unsupported (expected version 2). Re-dispatch the request to generate a valid budget-bearing worker specification.`,
+			`WorkerSpec version ${String(spec.specVersion)} is unsupported (expected version ${WORKER_SPEC_VERSION}). Re-dispatch the request to generate a valid attested, budget-bearing worker specification.`,
 		);
 	}
-	if (spec.specVersion === WORKER_SPEC_VERSION && spec.budget === undefined) {
+	if (spec.budget === undefined) {
 		throw new Error(`WorkerSpec version ${WORKER_SPEC_VERSION} requires budget`);
+	}
+	if (typeof spec.settingsFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(spec.settingsFingerprint)) {
+		throw new Error(`WorkerSpec version ${WORKER_SPEC_VERSION} requires settingsFingerprint as a sha256 hex digest`);
 	}
 	const runtime = readRecord(spec.runtime, "WorkerSpec.runtime");
 	if (runtime.version !== WORKER_RUNTIME_DESCRIPTOR_VERSION) {

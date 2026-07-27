@@ -23,8 +23,8 @@ When the orchestrator dispatches a task to a fleet agent (such as via the `dispa
    The parent process spawns a Node.js subprocess pointing to `dist/worker/entry.js`.
 2. **Environment Scrubbing:**
    To ensure clean execution, the child process runs with a sanitized environment. The orchestrator scrubs user-interactive flags (e.g., `CLIO_INTERACTIVE` is removed from `process.env`) to prevent child workers from attempting to mount TUI elements or intercept standard input signals.
-3. **Spec Injection & `worker_announce` Handshake:**
-   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. Both local and SSH workers emit `worker_announce` as their first protocol event (`CLIO_WORKER_ANNOUNCE=1`) to confirm wire-contract protocol compatibility before ordinary NDJSON streaming begins.
+3. **Spec Injection & Attestation Handshake:**
+   The orchestrator serializes a `WorkerSpec` JSON document and writes it as the very first line of `stdin` to the child worker. Before reaching a model, every worker announces its attestation on the structured stderr control lane: protocol version, pid, process-group id, host, settings fingerprint, a digest it recomputed from the specification bytes it received, runtime, target, endpoint identity hash, wire model, effective tool signature, and bounded resource facts. The orchestrator compares each field against the approved plan and terminates a drifting peer instead of running it. Bulk NDJSON on `stdout` is accepted only once that attestation verifies.
 
 ```mermaid
 sequenceDiagram

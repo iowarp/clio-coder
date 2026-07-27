@@ -8,7 +8,7 @@
  * model-authored tool call -> plan resolution -> reservation -> admission ->
  * worker spawn -> receipt.
  *
- * Four scenarios, each with its own control:
+ * Five scenarios, each with its own control:
  *
  *   1. quality  A pinned local Verifier records one typed `verify` result as a
  *                measured pass; a read-only Scout remains unmeasured and cold.
@@ -21,6 +21,11 @@
  *   4. failover   A plan-approved two-step pipeline whose step-1 target answers
  *                 503 fails over to an approved candidate, and step 2 receives
  *                 the successful attempt's output, not the failed attempt's.
+ *   5. attestation  A run pinned to mini, Qwopus-MoE-35B, llamacpp, and
+ *                 http://192.168.86.141:8080 attests that exact host, target,
+ *                 model, runtime, and settings fingerprint into its receipt.
+ *                 Its control gives the same target `baseUrl` instead of `url`
+ *                 and asserts settings validation rejects it before dispatch.
  *
  * Never runs in an ordinary test or CI lane: CLIO_LIVE_EVAL=1 is required.
  * Build first, then invoke with:
@@ -39,12 +44,13 @@
  *   CLIO_LIVE_FLEET_HOST        SSH host for the capacity-one node (default localhost)
  *   CLIO_LIVE_DEAD_PORT         port for the always-503 target (default 8599)
  *   CLIO_LIVE_VERIFY_TIMEOUT_MS per-turn timeout (default 900000)
- *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover (default all)
+ *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,attestation (default all)
  *   CLIO_LIVE_KEEP=1            retain the isolated scratch tree on success
  */
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify } from "yaml";
@@ -68,7 +74,17 @@ const url = process.env.CLIO_LIVE_BASE_URL || undefined;
 const fleetHost = process.env.CLIO_LIVE_FLEET_HOST || "localhost";
 const deadPort = Number.parseInt(process.env.CLIO_LIVE_DEAD_PORT || "8599", 10);
 const timeoutMs = Number.parseInt(process.env.CLIO_LIVE_VERIFY_TIMEOUT_MS || "900000", 10);
-const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover"];
+const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover", "attestation"];
+/**
+ * The attestation scenario pins one exact local route so the receipt can be
+ * checked field by field. These are fixed rather than environment-driven: the
+ * point of the check is that the worker attests this identity, and a value the
+ * harness could vary would prove nothing about drift.
+ */
+const ATTESTATION_NODE = "mini";
+const ATTESTATION_MODEL = "Qwopus-MoE-35B";
+const ATTESTATION_RUNTIME = "llamacpp";
+const ATTESTATION_URL = "http://192.168.86.141:8080";
 const scenarios = (process.env.CLIO_LIVE_VERIFY_SCENARIOS || ALL_SCENARIOS.join(","))
 	.split(",")
 	.map((name) => name.trim())
@@ -637,11 +653,165 @@ async function scenarioFailover() {
 	}
 }
 
+/**
+ * Attestation: the worker that executes a pinned route must announce that exact
+ * route back, and the receipt must seal it. The control proves the settings
+ * endpoint key is `url` and nothing else: a target given `baseUrl` is rejected
+ * by settings validation before any dispatch happens.
+ *
+ * Every identity is pinned in isolated settings rather than asked of the model,
+ * because what is under test is Clio's attestation path, not a model's ability
+ * to repeat four fields.
+ */
+async function scenarioAttestation() {
+	currentScenario = "attestation";
+	clearState();
+
+	const attestedTarget = {
+		id: ATTESTATION_NODE,
+		runtime: ATTESTATION_RUNTIME,
+		url: ATTESTATION_URL,
+		defaultModel: ATTESTATION_MODEL,
+		wireModels: [ATTESTATION_MODEL],
+	};
+
+	// Control first: it must fail before anything is dispatched, and it must
+	// fail on the key name, not on reachability.
+	const baseUrlSettings = baseSettings();
+	const { url: _dropped, ...withoutUrl } = attestedTarget;
+	baseUrlSettings.targets = [{ ...withoutUrl, baseUrl: ATTESTATION_URL }];
+	baseUrlSettings.orchestrator = { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" };
+	baseUrlSettings.workers = {
+		default: { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" },
+		profiles: {},
+	};
+	writeSettings(baseUrlSettings);
+	const rejected = await runCli(["doctor"], "attestation-baseurl-control");
+	const rejectionText = `${rejected.stdout}${rejected.stderr}`;
+	// The rejection must name the offending key. A generic settings complaint
+	// would let an unrelated failure masquerade as this control passing.
+	check(
+		/targets\[0\]\.baseUrl/.test(rejectionText) && /unknown key/i.test(rejectionText),
+		`settings validation did not reject a target with baseUrl instead of url: ${rejectionText.slice(0, 600)}`,
+	);
+	check(
+		workerReceipts().length === 0,
+		`a worker ran under the rejected baseUrl configuration: ${workerReceipts().map((receipt) => receipt.runId)}`,
+	);
+
+	// Now the real pinned route.
+	clearState();
+	const settings = baseSettings();
+	settings.targets = [structuredClone(attestedTarget)];
+	settings.orchestrator = { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" };
+	settings.workers = {
+		default: { target: ATTESTATION_NODE, model: ATTESTATION_MODEL, thinkingLevel: "off" },
+		profiles: {},
+	};
+	writeSettings(settings);
+
+	const reachable = await new Promise((resolvePromise) => {
+		const request = get(`${ATTESTATION_URL}/v1/models`, (res) => {
+			res.resume();
+			resolvePromise((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 500);
+		});
+		request.setTimeout(5000, () => {
+			request.destroy();
+			resolvePromise(false);
+		});
+		request.on("error", () => resolvePromise(false));
+	});
+	if (!reachable) {
+		failures.push(
+			`[attestation] pinned local infrastructure is unavailable: ${ATTESTATION_URL} did not answer. ` +
+				`This scenario requires ${ATTESTATION_RUNTIME} serving ${ATTESTATION_MODEL} on ${ATTESTATION_NODE}; ` +
+				"it does not substitute another target.",
+		);
+		return;
+	}
+
+	const run = await runCli(
+		[
+			"run",
+			"--agent",
+			"verifier",
+			"--target",
+			ATTESTATION_NODE,
+			"--model",
+			ATTESTATION_MODEL,
+			"--autonomy",
+			"full-auto",
+			"Name one file under src/ and stop.",
+		],
+		"attestation-run",
+	);
+	// The subject here is attestation, not answer quality. A worker that reached
+	// the model and sealed a receipt has exercised the whole attestation path;
+	// whether the model then satisfied the agent's result contract is Slice 2's
+	// concern and would make this check hostage to one model's prose habits.
+	check(!run.timedOut, `pinned attestation run exceeded ${timeoutMs}ms`);
+
+	const receipt = workerReceipts().find((entry) => entry.agentId === "verifier");
+	check(Boolean(receipt), "no worker receipt was written for the pinned route");
+	if (!receipt) return;
+
+	const attestation = receipt.attestation;
+	check(Boolean(attestation), `receipt sealed no attestation: ${JSON.stringify(Object.keys(receipt))}`);
+	if (!attestation) return;
+	check(
+		typeof attestation.host === "string" && attestation.host.length > 0,
+		`attestation carries no host identity: ${JSON.stringify(attestation)}`,
+	);
+	check(
+		attestation.targetId === ATTESTATION_NODE,
+		`attested target ${attestation.targetId} is not the pinned ${ATTESTATION_NODE}`,
+	);
+	check(
+		attestation.wireModelId === ATTESTATION_MODEL,
+		`attested model ${attestation.wireModelId} is not the pinned ${ATTESTATION_MODEL}`,
+	);
+	check(
+		attestation.runtimeId === ATTESTATION_RUNTIME,
+		`attested runtime ${attestation.runtimeId} is not the pinned ${ATTESTATION_RUNTIME}`,
+	);
+	const expectedEndpoint = createHash("sha256").update(`clio.endpoint:http://192.168.86.141:8080`, "utf8").digest("hex");
+	check(
+		attestation.endpointIdentityHash === expectedEndpoint,
+		`attested endpoint identity ${attestation.endpointIdentityHash} does not hash ${ATTESTATION_URL}`,
+	);
+	check(
+		/^[0-9a-f]{64}$/.test(attestation.settingsFingerprint ?? ""),
+		`attested settings fingerprint is not a digest: ${attestation.settingsFingerprint}`,
+	);
+	check(
+		/^[0-9a-f]{64}$/.test(attestation.specDigest ?? ""),
+		`attested WorkerSpec digest is not a digest: ${attestation.specDigest}`,
+	);
+	check(
+		/^[0-9a-f]{64}$/.test(attestation.toolSignature ?? ""),
+		`attested tool signature is not a digest: ${attestation.toolSignature}`,
+	);
+	// The endpoint appears only as a hash: no receipt carries the raw URL.
+	check(
+		!JSON.stringify(receipt).includes(ATTESTATION_URL),
+		"the receipt leaked the raw endpoint URL instead of its identity hash",
+	);
+	// Unknown resource facts stay null rather than becoming an optimistic zero.
+	for (const key of ["gpuCount", "vramBytes"]) {
+		const value = attestation.resources?.[key];
+		check(
+			value === null || (typeof value === "number" && value > 0),
+			`attested ${key} is ${JSON.stringify(value)}; unknown must be null, never zero`,
+		);
+	}
+}
+
 const runners = {
 	quality: scenarioQuality,
 	capacity: scenarioCapacity,
 	budget: scenarioBudget,
 	failover: scenarioFailover,
+	attestation: scenarioAttestation,
 };
 
 let passed = false;

@@ -280,6 +280,48 @@ describe("fleet preflight runner", () => {
 		strictEqual(record.remoteVersion, "0.0.1");
 	});
 
+	it("records node-local target facts from the node's own probe output", async () => {
+		const { readClioVersion } = await import("../../src/core/package-root.js");
+		process.env.FAKE_PREFLIGHT_EXIT = "0";
+		process.env.FAKE_PREFLIGHT_STDOUT = [
+			"clio-preflight/1",
+			"cwd=ok",
+			`clio=Clio Coder ${readClioVersion()}`,
+			"state=ok",
+			"cpu=16",
+			"memkb=67108864",
+			"gpu=unknown",
+			"vrammb=unknown",
+			"target=mini:200",
+			"model=mini:true",
+			"target=dead:000",
+			"model=dead:false",
+			"",
+		].join("\n");
+		const record = await runFleetNodePreflight(NODE, "/shared/app", {
+			sshBinary: shim,
+			targets: [
+				{ id: "mini", runtimeId: "llamacpp", url: "http://localhost:8080", wireModelId: "Qwopus-MoE-35B" },
+				{ id: "dead", runtimeId: "llamacpp", url: "http://localhost:9999", wireModelId: "Qwopus-MoE-35B" },
+			],
+		});
+		strictEqual(record.ok, true);
+		strictEqual(record.targets.length, 2);
+		const mini = record.targets.find((fact) => fact.targetId === "mini");
+		strictEqual(mini?.nodeId, "blade", "every fact is scoped to the node that observed it");
+		strictEqual(mini?.reachable, "true");
+		strictEqual(mini?.modelAvailable, "true");
+		// Residency is never inferred from an endpoint listing.
+		strictEqual(mini?.modelResident, "unknown");
+		const dead = record.targets.find((fact) => fact.targetId === "dead");
+		strictEqual(dead?.reachable, "false");
+		strictEqual(dead?.modelAvailable, "false");
+		// A node without a GPU probe reports unknown, never a proven zero.
+		strictEqual(record.resources?.cpuCount, 16);
+		strictEqual(record.resources?.gpuCount, null);
+		strictEqual(record.resources?.vramBytes, null);
+	});
+
 	it("asserts presence but skips the version probe for a custom clioEntry", async () => {
 		process.env.FAKE_PREFLIGHT_EXIT = "0";
 		process.env.FAKE_PREFLIGHT_STDOUT = ["clio-preflight/1", "cwd=ok", "clio=custom-entry", "state=ok", ""].join("\n");

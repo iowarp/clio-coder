@@ -51,8 +51,10 @@ Design decisions that shape everything else:
 - Deterministic placement. There is no scored or learned scheduler; placement
   is a fixed priority order the operator can predict and pin.
 - Environment whitelist. The SSH command carries an explicit environment
-  (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_ANNOUNCE=1`); the orchestrator's
-  `process.env` never crosses the wire.
+  (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_PGID=$$`, and any configured
+  `CLIO_WORKER_LABELS`); the orchestrator's `process.env` never crosses the
+  wire. `CLIO_WORKER_PGID` names the remote process group so an abort escalates
+  against the whole group rather than one process.
 
 ## Worker prompt and budget admission
 

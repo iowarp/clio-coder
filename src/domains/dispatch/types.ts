@@ -164,6 +164,36 @@ export interface RunNodeIdentity {
 }
 
 /**
+ * Bounded projection of a worker's attestation into the receipt.
+ *
+ * Endpoints appear only as an identity hash, so a receipt names which endpoint
+ * served a run without carrying its URL or credentials. Unknown resource facts
+ * are null rather than zero: the receipt records that the node could not
+ * observe the value, not that the value was absent.
+ */
+export interface RunReceiptAttestation {
+	protocolVersion: number;
+	/** Host identity as the executing node reported it, not as the orchestrator assumed. */
+	host: string;
+	pid: number;
+	processGroupId: number | null;
+	settingsFingerprint: string;
+	specDigest: string;
+	targetId: string;
+	endpointIdentityHash: string;
+	wireModelId: string;
+	runtimeId: string;
+	toolSignature: string;
+	resources: {
+		labels: string[];
+		cpuCount: number | null;
+		totalMemoryBytes: number | null;
+		gpuCount: number | null;
+		vramBytes: number | null;
+	};
+}
+
+/**
  * One dead-node failover hop. Appended when an in-flight or queued dispatch
  * is requeued from a node classified dead onto an eligible survivor, so the
  * receipt chain records the full placement lineage, not just the final node.
@@ -268,7 +298,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 11;
+	version: 12;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -597,6 +627,12 @@ export interface RunReceipt {
 	identity?: RunIdentity;
 	/** Fleet node placement; absent when no fleet placement resolved this run. */
 	node?: RunNodeIdentity;
+	/**
+	 * Route and node identity attested by the worker process that executed the
+	 * run. Absent only when no worker announced, which is the stubbed-spawn path
+	 * contract tests use; every native and remote transport attests.
+	 */
+	attestation?: RunReceiptAttestation;
 	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */
 	reroutes?: RunNodeReroute[];
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */

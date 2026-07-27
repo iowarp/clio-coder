@@ -28,6 +28,7 @@ import {
 	WORKER_RUNTIME_DESCRIPTOR_VERSION,
 	WORKER_SPEC_VERSION,
 } from "../../src/worker/spec-contract.js";
+import { fixtureSettingsFingerprint } from "../harness/worker-attestation.js";
 
 function fakeDescriptor(id: string, overrides: Partial<RuntimeDescriptor> = {}): RuntimeDescriptor {
 	return {
@@ -66,6 +67,7 @@ function fakeLiveStatus(discoveredModels: ReadonlyArray<string>, overrides: Part
 function minimalWorkerSpec(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
 		specVersion: WORKER_SPEC_VERSION,
+		settingsFingerprint: fixtureSettingsFingerprint(),
 		systemPrompt: "",
 		agentId: "coder",
 		executionRole: "builder",
@@ -592,6 +594,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 			() =>
 				parseWorkerSpec({
 					specVersion: WORKER_SPEC_VERSION,
+					settingsFingerprint: fixtureSettingsFingerprint(),
 					systemPrompt: "",
 					agentId: "coder",
 					executionRole: "builder",
@@ -620,6 +623,7 @@ describe("contracts/providers/runtime-cleanup", () => {
 		] as const) {
 			const parsed = parseWorkerSpec({
 				specVersion: WORKER_SPEC_VERSION,
+				settingsFingerprint: fixtureSettingsFingerprint(),
 				systemPrompt: "",
 				agentId: "coder",
 				executionRole: "builder",
@@ -669,12 +673,18 @@ describe("contracts/providers/runtime-cleanup", () => {
 		}
 	});
 
-	it("requires the current worker budget contract", () => {
+	it("requires the current worker budget and attestation contract", () => {
 		const unsupportedVersion =
-			/WorkerSpec version 1 is unsupported \(expected version 2\)\. Re-dispatch the request to generate a valid budget-bearing worker specification\./;
-		throws(() => parseWorkerSpec(minimalWorkerSpec({ specVersion: 1, budget: undefined })), unsupportedVersion);
-		throws(() => parseWorkerSpec(minimalWorkerSpec({ specVersion: 1 })), unsupportedVersion);
-		throws(() => parseWorkerSpec(minimalWorkerSpec({ budget: undefined })), /version 2 requires budget/);
+			/WorkerSpec version 2 is unsupported \(expected version 3\)\. Re-dispatch the request to generate a valid attested, budget-bearing worker specification\./;
+		throws(() => parseWorkerSpec(minimalWorkerSpec({ specVersion: 2, budget: undefined })), unsupportedVersion);
+		throws(() => parseWorkerSpec(minimalWorkerSpec({ specVersion: 2 })), unsupportedVersion);
+		throws(() => parseWorkerSpec(minimalWorkerSpec({ budget: undefined })), /version 3 requires budget/);
+		for (const bad of [undefined, "", "not-a-digest", "A".repeat(64), "0".repeat(63)]) {
+			throws(
+				() => parseWorkerSpec(minimalWorkerSpec({ settingsFingerprint: bad })),
+				/version 3 requires settingsFingerprint as a sha256 hex digest/,
+			);
+		}
 		const budget = { toolCalls: 7, readReserve: 2, synthesis: false, hardCap: 20 };
 		deepStrictEqual(parseWorkerSpec(minimalWorkerSpec({ budget })).budget, budget);
 	});

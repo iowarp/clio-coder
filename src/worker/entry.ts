@@ -9,19 +9,80 @@
  * boundary. Emits NDJSON events on stdout.
  */
 
-import { hostname } from "node:os";
 import { disposeLmStudioClients } from "../engine/apis/lmstudio-native.js";
 import { setProtectedModelsProvider, setResidencyNoticeSink } from "../engine/apis/residency.js";
-import { startWorkerRun, type WorkerRunInput } from "../engine/worker-runtime.js";
+import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";
+import { attestedToolSignature } from "../engine/worker-tools.js";
+import { emitControlFrame } from "./control-lane.js";
 import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { drainStdout, emitEvent } from "./ndjson.js";
+import { endpointIdentityHash, WORKER_PROTOCOL_VERSION, workerSpecDigest } from "./protocol.js";
+import { observeHostIdentity, observeWorkerResourceFacts } from "./resource-facts.js";
 import { resolveWorkerRuntime } from "./runtime-registry.js";
-import { validateRehydratedWorkerRuntime } from "./spec-contract.js";
+import { validateRehydratedWorkerRuntime, type WorkerSpec } from "./spec-contract.js";
 import { createWorkerStdinDemux } from "./stdin-demux.js";
 
 /** Bound between channel-close abort and forced exit for a hung run. */
 const CHANNEL_CLOSE_EXIT_GRACE_MS = 5000;
+
+/**
+ * The process group an abort must escalate against. A remote launch exports
+ * the group leader the login shell established, because `exec` preserves it
+ * across the shell replacement. A local launch is spawned detached, which
+ * makes this process its own group leader. Windows has no process groups and
+ * reports null rather than an id the orchestrator cannot signal.
+ */
+/**
+ * Operator-configured labels for this node. They ride the transport
+ * environment rather than the WorkerSpec because the node, not the request,
+ * is what they describe: the same spec dispatched to two nodes must attest two
+ * different label sets.
+ */
+function configuredNodeLabels(): string[] {
+	return (process.env.CLIO_WORKER_LABELS ?? "")
+		.split(",")
+		.map((label) => label.trim())
+		.filter((label) => label.length > 0);
+}
+
+function announcedProcessGroupId(): number | null {
+	const declared = Number.parseInt(process.env.CLIO_WORKER_PGID ?? "", 10);
+	if (Number.isSafeInteger(declared) && declared > 0) return declared;
+	return process.platform === "win32" ? null : process.pid;
+}
+
+/**
+ * Attest this process, this node, and the route identity it resolved, on the
+ * control lane, before any model call. The orchestrator compares every field
+ * against the plan it approved and kills a drifting peer instead of running it.
+ */
+function announceWorker(spec: WorkerSpec, input: WorkerRunInput): void {
+	emitControlFrame({
+		kind: "announce",
+		attestation: {
+			protocolVersion: WORKER_PROTOCOL_VERSION,
+			specVersion: spec.specVersion,
+			pid: process.pid,
+			processGroupId: announcedProcessGroupId(),
+			host: observeHostIdentity(),
+			settingsFingerprint: spec.settingsFingerprint,
+			specDigest: workerSpecDigest(spec),
+			runtimeId: spec.runtimeId,
+			targetId: spec.target.id,
+			endpointIdentityHash: endpointIdentityHash(spec.target.url),
+			wireModelId: spec.wireModelId,
+			toolSignature: attestedToolSignature({
+				allowedTools: spec.allowedTools,
+				toolsSupported: workerProviderSupportsTools(input),
+				...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
+				agentId: spec.agentId,
+				task: spec.task,
+			}),
+			resources: observeWorkerResourceFacts(configuredNodeLabels()),
+		},
+	});
+}
 
 async function main(): Promise<number> {
 	// A worker has no TUI, so residency notices go to stderr (the parent
@@ -41,13 +102,6 @@ async function main(): Promise<number> {
 	process.stdin.resume();
 
 	const spec = await demux.readSpec();
-	// Native transports set CLIO_WORKER_ANNOUNCE=1 and consume this first event.
-	// It proves that the expected worker entry parsed the spec and speaks the
-	// dispatched wire version before normal events are accepted. SSH also uses
-	// the announced remote pid for its kill fallback; this is not identity auth.
-	if (process.env.CLIO_WORKER_ANNOUNCE === "1") {
-		emitEvent({ type: "worker_announce", pid: process.pid, host: hostname(), specVersion: spec.specVersion });
-	}
 	// The worker has no settings view of its own; the dispatcher copied the
 	// operator's configured model ids onto the spec so this process protects
 	// the same residents as the orchestrator.
@@ -103,6 +157,10 @@ async function main(): Promise<number> {
 	if (spec.thinkingLevel) input.thinkingLevel = spec.thinkingLevel;
 	if (spec.runtimeResolution) input.runtimeResolution = spec.runtimeResolution;
 	if (spec.middlewareSnapshot) input.middlewareSnapshot = spec.middlewareSnapshot;
+	// Attest after the runtime is rehydrated and the run input is fully
+	// resolved, so the announced identity describes the run that is about to
+	// start, and strictly before startWorkerRun reaches a model.
+	announceWorker(spec, input);
 	// Slim streaming events before NDJSON serialization: pi's message_update
 	// carries the full cumulative message twice (top-level + assistantMessageEvent
 	// .partial), which reserializes quadratically on stdout. No worker-stdout
@@ -110,7 +168,14 @@ async function main(): Promise<number> {
 	const handle = startWorkerRun(input, (event) => emitEvent(projectWorkerEventForStdout(event)));
 	// Steer lines arriving on stdin after the spec queue onto the agent's
 	// steering queue; the demux buffers any that landed before this point.
-	demux.onSteer((text) => handle.steer(text));
+	// The acknowledgement rides the control lane, so a saturated stdout queue
+	// cannot delay it past the orchestrator's steering bound.
+	let steerSequence = 0;
+	demux.onSteer((text) => {
+		steerSequence += 1;
+		emitControlFrame({ kind: "steer_ack", sequence: steerSequence });
+		handle.steer(text);
+	});
 	// Permission-decision lines resolve a parked escalation. Unknown or
 	// duplicate requestIds return false and are dropped without crashing the
 	// worker; runtimes without an escalation loop simply have no handler.
@@ -127,11 +192,15 @@ async function main(): Promise<number> {
 	// but it fires if a hung run is still holding the event loop.
 	demux.onChannelClose(() => {
 		process.stderr.write("[worker] control channel closed; aborting run\n");
+		emitControlFrame({ kind: "cancel_ack", at: Date.now() });
 		handle.abort();
 		const forceExit = setTimeout(() => process.exit(1), CHANNEL_CLOSE_EXIT_GRACE_MS);
 		forceExit.unref?.();
 	});
-	const onSignal = () => handle.abort();
+	const onSignal = () => {
+		emitControlFrame({ kind: "cancel_ack", at: Date.now() });
+		handle.abort();
+	};
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
 	try {
