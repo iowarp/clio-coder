@@ -1767,7 +1767,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// Per-tool prompt hints come from registry metadata, derived once from
 		// the frozen surface per compile. The compiler renders them sorted by
 		// tool name, so the compiled text stays byte-stable for a given surface.
-		const toolPromptHints = toolNamesFromAgentState(agentRuntime.agent.state.tools).flatMap((name) => {
+		const toolNames = toolNamesFromAgentState(agentRuntime.agent.state.tools);
+		const toolPromptHints = toolNames.flatMap((name) => {
 			const hint = deps.toolRegistry?.get(name as ToolName)?.metadata?.promptHint;
 			return hint ? [{ tool: name, hint }] : [];
 		});
@@ -1776,6 +1777,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			model: agentRuntime.wireModelId,
 			contextWindow,
 			providerSupportsTools: runtimeSupportsTools(agentRuntime),
+			toolNames,
 			...(guidance ? { thinkingGuidance: guidance } : {}),
 			...(toolPromptHints.length > 0 ? { toolPromptHints } : {}),
 		};

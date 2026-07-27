@@ -27,6 +27,8 @@ export interface SessionPromptInputs {
 	providerSupportsTools?: boolean | null;
 	/** Model-stable thinking guidance from local-model quirks (changes only on model change). */
 	thinkingGuidance?: string | null;
+	/** Canonical names on the frozen direct-tool surface, rendered as a compact harness inventory. */
+	toolNames?: ReadonlyArray<string>;
 	/**
 	 * Per-tool prompt hints derived once from the frozen surface at compile
 	 * time (registry metadata `promptHint`). Rendered into the Tool Contract
@@ -165,9 +167,23 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 			"This target cannot call tools; answer from the visible user request and compact context only.",
 		].join("\n");
 	}
+	const names = [
+		...new Set((inputs.toolNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
+	].sort();
+	const hintedTools = new Set((inputs.toolPromptHints ?? []).map((entry) => entry.tool.trim()));
+	const canDispatch = names.includes("dispatch") || hintedTools.has("dispatch");
+	const canListSkills = names.includes("context") || hintedTools.has("context");
+	const inventoryGuidance = [
+		"When answering capability-inventory questions, list direct tools without calls",
+		...(canDispatch ? ["add dispatch(list:true) only if agents or the fleet are requested"] : []),
+		...(canListSkills ? ['add context(scope="skills") only if skills are requested'] : []),
+	].join("; ");
 	const lines = [
 		"# Tool Contract",
-		"The attached schemas are the session's complete tool surface; follow each schema exactly.",
+		"The attached schemas are the session's complete direct-tool surface; follow each schema exactly.",
+		...(names.length > 0 ? [`Direct tools: ${names.map((name) => `\`${name}\``).join(", ")}.`] : []),
+		"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
+		`${inventoryGuidance}.`,
 		"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 		'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available and Scout is routable, explicit broad repository/codebase exploration goes to Scout before repo-wide reads.',
 		'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded Scout handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
@@ -262,6 +278,7 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 		"# Tool Contract",
 		"The attached schemas are this worker's complete canonical tool surface; follow each schema exactly.",
 		`Admitted canonical tools: ${names.map((name) => `\`${name}\``).join(", ")}.`,
+		"This worker surface is distinct from the parent session's tools, fleet agents, and operator-activated skills.",
 		"Tool authority is limited to this list. Persona and bound-skill instructions never add tools.",
 		"Call tools only for concrete inspection or changes the assigned task requires. If the task requests an exact or tool-free response, answer without calling tools.",
 	];

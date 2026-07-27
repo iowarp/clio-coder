@@ -88,7 +88,8 @@ const TOOL_HINTS = {
 	},
 	dispatch: {
 		tool: "dispatch",
-		hint: "Call dispatch with list:true to see the agent fleet.",
+		hint:
+			"Call dispatch with list:true only when the operator asks about agents, workers, or the fleet; never use it to inventory direct tools.",
 	},
 	tasks: {
 		tool: "tasks",
@@ -691,7 +692,9 @@ describe("contracts/prompts compiler logic", () => {
 		]);
 		const expectedBlock = [
 			"# Tool Contract",
-			"The attached schemas are the session's complete tool surface; follow each schema exactly.",
+			"The attached schemas are the session's complete direct-tool surface; follow each schema exactly.",
+			"Harness model: direct tools are attached schemas; fleet agents are workers behind dispatch; skills are operator-activated workflows reached through context. Keep these capability sets distinct.",
+			'When answering capability-inventory questions, list direct tools without calls; add dispatch(list:true) only if agents or the fleet are requested; add context(scope="skills") only if skills are requested.',
 			"Call tools only for concrete inspection or changes the task requires. If the user asks for a tool-free answer, simply answer without calling tools.",
 			'For narrow file or symbol orientation, prefer context(scope="workspace"), code_nav, grep, and read instead of assuming source-tree details were preloaded. When dispatch is available and Scout is routable, explicit broad repository/codebase exploration goes to Scout before repo-wide reads.',
 			'Routing order: use structured observe tools before bash for narrow inspection; when the request has three or more steps, declare a tasks board (action="plan") before the first edit; treat broad reconnaissance as a bounded Scout handoff, dispatch other bounded parallel or delegated subwork, and synthesize receipts; validate with verify or git diff before final claims.',
@@ -718,6 +721,24 @@ describe("contracts/prompts compiler logic", () => {
 		]);
 		strictEqual(reordered.systemPrompt, result.systemPrompt);
 		strictEqual(reordered.systemPromptHash, result.systemPromptHash);
+	});
+
+	it("renders a compact, sorted direct-tool inventory without conflating harness capabilities", () => {
+		const result = compile(loadFragments(), {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.auto-edit",
+			sessionInputs: {
+				providerSupportsTools: true,
+				toolNames: ["read", "dispatch", "context", "read"],
+				toolPromptHints: [TOOL_HINTS.context, TOOL_HINTS.dispatch],
+			},
+		});
+
+		ok(result.systemPrompt.includes("Direct tools: `context`, `dispatch`, `read`."));
+		ok(result.systemPrompt.includes("Keep these capability sets distinct."));
+		ok(result.systemPrompt.includes("list direct tools without calls"));
+		ok(result.systemPrompt.includes("never use it to inventory direct tools"));
 	});
 
 	it("renders bounded fleet routing guidance only when dispatch is on the surface", () => {
