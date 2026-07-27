@@ -1,7 +1,7 @@
 import { collectSessionEntries } from "../../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { MessageEntry } from "../../domains/session/entries.js";
-import { openSession } from "../../engine/session.js";
+import { openSession, sessionPaths } from "../../engine/session.js";
 import {
 	type Component,
 	matchesKey,
@@ -38,9 +38,8 @@ function shortTurnId(id: string): string {
 }
 
 /**
- * Coerce a ClioTurnRecord payload into a preview string. Handles the common
- * shapes the assistant writer produces: raw string, `{text}`, and pi-ai's
- * `{content: [{type:"text", text}]}`. Anything unrecognizable returns "".
+ * Coerce a structured message payload into a preview string. Handles raw
+ * strings, text properties, and pi-ai content blocks.
  */
 function payloadPreview(payload: unknown): string {
 	if (typeof payload === "string") return payload;
@@ -77,10 +76,8 @@ export interface MessagePickerRow {
  * row per assistant turn in reverse-chronological order. Exposed for unit
  * tests so the overlay layer stays render-only.
  */
-export function buildMessagePickerRows(turns: ReadonlyArray<unknown>): MessagePickerRow[] {
-	const assistantTurns = collectSessionEntries(turns).filter(
-		(entry): entry is MessageEntry => entry.kind === "message" && entry.role === "assistant",
-	);
+export function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePickerRow[] {
+	const assistantTurns = turns.filter((entry) => entry.role === "assistant");
 	const rows: MessagePickerRow[] = [];
 	for (let i = assistantTurns.length - 1; i >= 0; i--) {
 		const turn = assistantTurns[i];
@@ -139,8 +136,10 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 	// Caller is expected to short-circuit when there is no current session;
 	// this path renders an empty list rather than throwing so the overlay is
 	// resilient if the session closes between /fork and handler dispatch.
-	const turns = current ? openSession(current.id).turns() : [];
-	const rows = buildMessagePickerRows(turns);
+	const reader = current ? openSession(current.id) : null;
+	const entries = reader ? collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current) : [];
+	const messages = entries.filter((entry): entry is MessageEntry => entry.kind === "message");
+	const rows = buildMessagePickerRows(messages);
 	const box = createMessagePickerContent(
 		rows,
 		(parentTurnId) => deps.onFork(parentTurnId),

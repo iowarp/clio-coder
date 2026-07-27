@@ -1,11 +1,7 @@
-import {
-	type ClioTurnRecord,
-	readSessionFileEntries,
-	type SessionTreeNode,
-	sessionPaths,
-} from "../../../engine/session.js";
+import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
+import { collectSessionEntries } from "../compaction/session-entries.js";
 import type { SessionMeta } from "../contract.js";
-import { isSessionEntry, isSessionHeader, type SessionEntry } from "../entries.js";
+import { isSessionHeader, type SessionEntry } from "../entries.js";
 import { enrichForkMeta } from "../history.js";
 import { type SessionManagerState, startSession } from "../manager.js";
 
@@ -39,55 +35,17 @@ interface LinkedRecord {
 	parentId: string | null;
 	timestamp: string;
 	treeKind: SessionTreeNode["kind"] | null;
-	raw: unknown;
+	raw: SessionEntry;
 }
 
-const LEGACY_TURN_KINDS: readonly ClioTurnRecord["kind"][] = [
-	"user",
-	"assistant",
-	"tool_call",
-	"tool_result",
-	"system",
-	"checkpoint",
-];
-
-function isLegacyTurnKind(value: unknown): value is ClioTurnRecord["kind"] {
-	return typeof value === "string" && (LEGACY_TURN_KINDS as readonly string[]).includes(value);
-}
-
-function isLegacyTurnRecord(value: unknown): value is ClioTurnRecord {
-	if (!value || typeof value !== "object") return false;
-	const v = value as Record<string, unknown>;
-	return (
-		typeof v.id === "string" &&
-		(v.parentId === null || typeof v.parentId === "string") &&
-		typeof v.at === "string" &&
-		isLegacyTurnKind(v.kind) &&
-		Object.hasOwn(v, "payload")
-	);
-}
-
-function linkedRecordFromEntry(entry: unknown): LinkedRecord | null {
-	if (isSessionHeader(entry)) return null;
-	if (isSessionEntry(entry)) {
-		return {
-			id: entry.turnId,
-			parentId: entry.parentTurnId,
-			timestamp: entry.timestamp,
-			treeKind: entry.kind === "message" ? entry.role : null,
-			raw: entry,
-		};
-	}
-	if (isLegacyTurnRecord(entry)) {
-		return {
-			id: entry.id,
-			parentId: entry.parentId,
-			timestamp: entry.at,
-			treeKind: entry.kind,
-			raw: entry,
-		};
-	}
-	return null;
+function linkedRecordFromEntry(entry: SessionEntry): LinkedRecord {
+	return {
+		id: entry.turnId,
+		parentId: entry.parentTurnId,
+		timestamp: entry.timestamp,
+		treeKind: entry.kind === "message" ? entry.role : null,
+		raw: entry,
+	};
 }
 
 function traceAncestry(records: ReadonlyArray<LinkedRecord>, leafTurnId: string): LinkedRecord[] {
@@ -145,10 +103,8 @@ function sessionEntryBelongsToPath(
 	return entry.parentTurnId === null ? atOrBeforeForkPoint : pathIds.has(entry.parentTurnId);
 }
 
-function entryBelongsToPath(entry: unknown, pathIds: ReadonlySet<string>, atOrBeforeForkPoint: boolean): boolean {
-	if (isSessionEntry(entry)) return sessionEntryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
-	const linked = linkedRecordFromEntry(entry);
-	return linked !== null && pathIds.has(linked.id);
+function entryBelongsToPath(entry: SessionEntry, pathIds: ReadonlySet<string>, atOrBeforeForkPoint: boolean): boolean {
+	return sessionEntryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
 }
 
 function branchEntriesFromParent(
@@ -160,15 +116,15 @@ function branchEntriesFromParent(
 	tree: SessionTreeNode[];
 } {
 	const parentCurrentPath = sessionPaths(parentMeta).current;
-	const parsed = readSessionFileEntries(parentCurrentPath);
-	const linked = parsed.map(linkedRecordFromEntry).filter((entry): entry is LinkedRecord => entry !== null);
+	const records = readSessionFileEntries(parentCurrentPath).filter((entry) => !isSessionHeader(entry));
+	const parsed = collectSessionEntries(records, parentCurrentPath);
+	const linked = parsed.map(linkedRecordFromEntry);
 	const path = traceAncestry(linked, leafTurnId);
 	const pathIds = new Set(path.map((record) => record.id));
-	const forkPointIndex = parsed.findIndex((entry) => linkedRecordFromEntry(entry)?.id === leafTurnId);
-	const entries = parsed.filter((entry, index) => {
-		if (isSessionHeader(entry)) return false;
-		return entryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex);
-	});
+	const forkPointIndex = parsed.findIndex((entry) => linkedRecordFromEntry(entry).id === leafTurnId);
+	const entries = parsed.filter((entry, index) =>
+		entryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex),
+	);
 	return {
 		parentCurrentPath,
 		entries,

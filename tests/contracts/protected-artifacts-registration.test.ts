@@ -22,7 +22,7 @@ import {
 	stagePendingProtectedArtifact,
 } from "../../src/domains/session/protected-artifact-journal.js";
 import { protectedArtifactStateFromSessionEntries } from "../../src/domains/session/protected-artifacts.js";
-import { openSession } from "../../src/engine/session.js";
+import { openSession, sessionPaths } from "../../src/engine/session.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { reloadProtectedArtifactsForSession } from "../../src/interactive/chat-loop.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
@@ -343,7 +343,7 @@ describe("protected-artifacts registration", () => {
 
 			strictEqual(reconcilePendingProtectedArtifacts(session), 1, "recovered append adopts pending protection");
 			strictEqual(readPendingProtectedArtifacts(meta.id).records.length, 0, "journal clears only after durable append");
-			const entries = collectSessionEntries(openSession(meta.id).turns());
+			const entries = collectSessionEntries(openSession(meta.id).turns(), sessionPaths(meta).current);
 			const restoredState = protectedArtifactStateFromSessionEntries(entries);
 			restarted.replaceState(restoredState);
 			strictEqual(restarted.health().kind, "healthy");

@@ -15,7 +15,7 @@ import type { SessionContract, SessionEntryInput, SessionMeta, TurnInput } from 
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { fauxAssistantMessage, registerFauxProvider } from "../../src/engine/ai.js";
-import { openSession } from "../../src/engine/session.js";
+import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { AgentEvent, AgentMessage, Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/interactive/chat-loop.js";
@@ -280,7 +280,7 @@ function seedPersistentCompactionHistory(session: SessionContract): void {
 function persistedEntries(session: SessionContract): SessionEntry[] {
 	const meta = session.current();
 	if (!meta) return [];
-	return collectSessionEntries(openSession(meta.id).turns());
+	return collectSessionEntries(openSession(meta.id).turns(), sessionPaths(meta).current);
 }
 
 function sessionWithProductionFailure(base: SessionContract, failure: ProductionFailure): SessionContract {

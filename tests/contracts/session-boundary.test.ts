@@ -1,8 +1,9 @@
 import { strictEqual, throws } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { listSessionsForCwd } from "../../src/domains/session/history.js";
 import { resumeSessionState } from "../../src/domains/session/manager.js";
 import { createSession, openSession, resumeSession, sessionPaths } from "../../src/engine/session.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
@@ -59,6 +60,48 @@ describe("contracts/session-boundary", () => {
 		const { meta } = createSession({ cwd: scratch });
 		strictEqual(openSession(meta.id).meta().id, meta.id);
 		strictEqual(resumeSession(meta.id).meta.id, meta.id);
+	});
+
+	it("derives session history from structured user messages", async () => {
+		const { meta, writer } = createSession({ cwd: scratch });
+		writer.appendEntry(
+			{
+				kind: "message",
+				turnId: "user-1",
+				parentTurnId: null,
+				timestamp: "2026-07-26T00:00:00.000Z",
+				role: "user",
+				payload: { text: "structured history prompt" },
+			},
+			{ treeNode: { id: "user-1", parentId: null, at: "2026-07-26T00:00:00.000Z", kind: "user" } },
+		);
+		await writer.close();
+
+		const history = listSessionsForCwd(scratch);
+		strictEqual(history[0]?.id, meta.id);
+		strictEqual(history[0]?.firstMessagePreview, "structured history prompt");
+		strictEqual(history[0]?.messageCount, 1);
+	});
+
+	it("rejects removed turn records instead of normalizing session history", async () => {
+		const { meta, writer } = createSession({ cwd: scratch });
+		await writer.close();
+		const currentPath = sessionPaths(meta).current;
+		const header = readFileSync(currentPath, "utf8");
+		writeFileSync(
+			currentPath,
+			`${header}${JSON.stringify({
+				id: "old-user-1",
+				parentId: null,
+				at: "2026-07-26T00:00:00.000Z",
+				kind: "user",
+				payload: { text: "removed record" },
+			})}\n`,
+		);
+
+		throws(() => listSessionsForCwd(scratch), {
+			message: `session ledger contains an unreadable entry (missing kind discriminant): ${currentPath}. Remove or compact the session to reset.`,
+		});
 	});
 
 	for (const version of [1, 2] as const) {

@@ -4,7 +4,7 @@
  * On-disk layout under `clioStateDir()`:
  *   sessions/<cwdHash>/<sessionId>/
  *     meta.json      ClioSessionMeta
- *     current.jsonl  append-only ClioTurnRecord per line
+ *     current.jsonl  append-only structured session entries
  *     tree.json      [{id, parentId, at, kind}, ...]
  *
  * Atomicity:
@@ -96,12 +96,11 @@ export interface ClioSessionFile {
 }
 
 export interface ClioSessionWriter {
+	/** Write an ordinary turn as a structured message entry and add its tree node. */
 	append(turn: ClioTurnRecord): void;
 	/**
-	 * Write a pre-composed rich session entry as a JSON line. Unlike
-	 * `append`, this does not project into the tree. Callers that need a
-	 * tree node pass one via `treeNode`; Phase 12a leaves non-message
-	 * entries off the tree and revisits in 12b when /fork lands.
+	 * Write a pre-composed structured session entry as a JSON line. Callers
+	 * supply `treeNode` when the entry must project into the turn tree.
 	 */
 	appendEntry(entry: unknown, opts?: { treeNode?: SessionTreeNode }): void;
 	/** Atomically replace current.jsonl entries while preserving the session header. */
@@ -365,8 +364,7 @@ export function readSessionFileTailEntries(
  * turn count below `maxTurns`.
  */
 export function readSessionTailTurns(id: string, maxTurns: number): SessionTailReadResult {
-	const dir = findSessionDir(id);
-	const currentPath = join(dir, "current.jsonl");
+	const currentPath = sessionCurrentPath(id);
 	const result = readSessionFileTailEntries(currentPath, maxTurns + 1);
 	const turns = result.entries.filter((entry) => !isSessionJsonlHeader(entry));
 	return {
@@ -508,15 +506,6 @@ function treeNodeFromFileEntry(entry: unknown): SessionTreeNode | null {
 	if (!entry || typeof entry !== "object" || isSessionJsonlHeader(entry)) return null;
 	const value = entry as Record<string, unknown>;
 	if (
-		typeof value.id === "string" &&
-		nullableString(value.parentId) &&
-		typeof value.at === "string" &&
-		isTurnKind(value.kind) &&
-		Object.hasOwn(value, "payload")
-	) {
-		return { id: value.id, parentId: value.parentId, at: value.at, kind: value.kind };
-	}
-	if (
 		value.kind === "message" &&
 		typeof value.turnId === "string" &&
 		nullableString(value.parentTurnId) &&
@@ -556,6 +545,10 @@ function recoverTreeFromJsonl(diskTree: SessionTreeNode[], fileEntries: Readonly
 	const recovered = treeFromFileEntries(fileEntries);
 	if (recovered.length === 0) return diskTree;
 	return sameTree(diskTree, recovered) ? diskTree : recovered;
+}
+
+export function sessionCurrentPath(id: string): string {
+	return join(findSessionDir(id), "current.jsonl");
 }
 
 function findSessionDir(id: string): string {

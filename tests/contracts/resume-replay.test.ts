@@ -1,5 +1,6 @@
 import { ok } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
@@ -12,7 +13,7 @@ const strip = (s: string): string => s.replace(ANSI, "");
 // A grep tool_result as the on-disk ledger stores it: the full text body plus a
 // structured observation envelope in `details` (match/byte counts, offload
 // path). The live collapsed ledger line is derived from that envelope.
-function grepReplayTurns(): unknown[] {
+function grepReplayTurns(): SessionEntry[] {
 	const lines: string[] = [];
 	for (let i = 1; i <= 261; i += 1) lines.push(`many.txt:${i}: e match line ${String(i).padStart(4, "0")}`);
 	const body = `${lines.join("\n")}\n[grep: 261/261+ matches shown (16.0KB of 186.4KB) | full: /state/scratch/x.txt | next: limit=6000]`;

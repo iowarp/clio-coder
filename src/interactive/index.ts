@@ -39,12 +39,13 @@ import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
+import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { resolveSessionCwd } from "../domains/session/cwd-fallback.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import { probeGit, probeWorkspace } from "../domains/session/workspace/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OAuthSelectPrompt } from "../engine/oauth.js";
-import { openSession } from "../engine/session.js";
+import { openSession, sessionPaths } from "../engine/session.js";
 import {
 	createAgentProgress,
 	isKeyRelease,
@@ -1493,6 +1494,11 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 		deps.session.create(input);
 	};
 
+	const readStructuredEntries = (sessionId: string): SessionEntry[] => {
+		const reader = openSession(sessionId);
+		return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
+	};
+
 	const refreshChatContextFromSession = (leafTurnId: string | null): void => {
 		if (!deps.readSessionEntries) return;
 		const turns = deps.readSessionEntries();
@@ -1682,7 +1688,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				return;
 			}
 			try {
-				const turns = openSession(sessionId).turns();
+				const turns = readStructuredEntries(sessionId);
 				// Same pure render pipeline as the live panel and /resume replay:
 				// a throwaway panel rehydrated from the ledger, every tool segment
 				// expanded, rendered at a fixed width, ANSI stripped. Unlike the
@@ -2985,7 +2991,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 				// whatever state the previous session left behind. Row 51
 				// regression fix.
 				try {
-					const turns = openSession(sessionId).turns();
+					const turns = readStructuredEntries(sessionId);
 					chatPanel.reset();
 					rehydrateChatPanelFromTurns(chatPanel, turns);
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns);
@@ -3041,7 +3047,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					sessionContract.switchTurn(turnId);
 					const sessionId = sessionContract.current()?.id ?? null;
 					if (!sessionId) throw new Error("no current session after turn switch");
-					const turns = openSession(sessionId).turns();
+					const turns = readStructuredEntries(sessionId);
 					chatPanel.reset();
 					rehydrateChatPanelFromTurns(chatPanel, turns, { uptoTurnId: turnId });
 					const replayMessages = buildReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
@@ -3089,7 +3095,7 @@ export async function startInteractive(deps: InteractiveDeps): Promise<number> {
 					const forkedSessionId = sessionContract.current()?.id ?? null;
 					if (forkedSessionId) {
 						try {
-							const forkedTurns = openSession(forkedSessionId).turns();
+							const forkedTurns = readStructuredEntries(forkedSessionId);
 							rehydrateChatPanelFromTurns(chatPanel, forkedTurns);
 							const replayMessages = buildReplayAgentMessagesFromTurns(forkedTurns);
 							const leafTurnId = sessionContract.tree(forkedSessionId).leafId ?? parentTurnId;

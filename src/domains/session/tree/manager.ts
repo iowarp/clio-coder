@@ -7,7 +7,8 @@ import {
 	sessionPaths,
 	writeJsonlFileAtomic,
 } from "../../../engine/session.js";
-import { isSessionEntry, type SessionEntry, type SessionInfoEntry } from "../entries.js";
+import { collectSessionEntries } from "../compaction/session-entries.js";
+import { isSessionHeader, type SessionEntry, type SessionInfoEntry } from "../entries.js";
 
 /**
  * Domain-level tree-file helpers. Operates directly on the on-disk artifacts
@@ -44,20 +45,13 @@ export function readTreeBundle(sessionId: string): SessionTreeFileBundle {
 	return { sessionId, nodes, labels };
 }
 
-/**
- * Read only the rich SessionEntry records from `current.jsonl`. Legacy
- * ClioTurnRecord lines are skipped (they contribute tree data via tree.json
- * already; labels only live on SessionEntry lines).
- */
+/** Read the structured SessionEntry records from `current.jsonl`. */
 function readRichEntries(sessionId: string): SessionEntry[] {
 	const meta = openSession(sessionId).meta();
 	const paths = sessionPaths(meta);
 	if (!existsSync(paths.current)) return [];
-	const out: SessionEntry[] = [];
-	for (const parsed of readSessionFileEntries(paths.current)) {
-		if (isSessionEntry(parsed)) out.push(parsed);
-	}
-	return out;
+	const records = readSessionFileEntries(paths.current).filter((entry) => !isSessionHeader(entry));
+	return collectSessionEntries(records, paths.current);
 }
 
 /**
