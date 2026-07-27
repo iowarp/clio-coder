@@ -46,6 +46,10 @@ Remote marketplace cache files require explicit finite `listingTimestamp` and `d
 
 Session metadata must declare format version 3. Earlier session formats are rejected and operators must remove the session directory before starting a new session.
 
+## Evaluation and evidence
+
+Stored eval artifacts require complete `clio`, `environment`, and `paths` provenance blocks. Evidence views render only provenance fields carried by sealed receipts and omit absent fields.
+
 ## Process-safe dispatch admission
 
 - `src/domains/dispatch/capacity-lease.ts` is the durable, expiring global and per-node capacity authority. Lease acquisition, retry rebinding, heartbeat, drain state, and reservation transfer are serialized by one cross-process state lock. The lease bound fails admission closed rather than dropping a lease, and lease reclamation needs owner-liveness evidence wherever a process birth token cannot prove death.

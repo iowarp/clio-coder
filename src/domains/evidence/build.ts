@@ -561,8 +561,8 @@ function cleanedTraceRows(
 	const rows: EvidenceCleanTraceRow[] = [];
 	for (const source of runSources) {
 		const envelope = source.envelope;
-		// Provenance fields are folded in only when the receipt carries them, so a
-		// legacy receipt (or a run with no receipt) emits a byte-identical row.
+		// Clean trace rows project only provenance carried by the sealed receipt.
+		// Runs without receipt provenance keep the standard row shape.
 		const provenance = source.receipt === null ? {} : extractRunProvenance(source.receipt);
 		rows.push({
 			kind: "run",
@@ -1113,8 +1113,8 @@ function renderTranscript(
 			`- ${envelope.id} status=${envelope.status} exit=${exitCode ?? "?"} agent=${envelope.agentId} target=${envelope.targetId}`,
 		);
 		lines.push(`  task: ${truncateText(envelope.task, MAX_TASK_CHARS)}`);
-		// Provenance sentences appear only when the receipt carries the fields, so
-		// a legacy receipt renders the run section byte-identical to today.
+		// Run section rendering reads provenance from the sealed receipt and adds
+		// sentences only for fields that are present.
 		if (source.receipt !== null) {
 			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt))) {
 				lines.push(`  ${line}`);

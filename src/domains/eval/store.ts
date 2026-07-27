@@ -92,8 +92,9 @@ export async function loadEvalArtifact(dataDir: string, evalId: string): Promise
 		if (isErrorWithCode(error) && error.code === "ENOENT") throw new Error(`eval artifact not found: ${evalId}`);
 		throw error;
 	}
-	const parsed = parseJson(raw, evalId);
-	return parseArtifact(parsed, evalId);
+	const source = evalArtifactPath(dataDir, evalId);
+	const parsed = parseJson(raw, source);
+	return parseArtifact(parsed, source);
 }
 
 export function taskFileHash(raw: string): string {
@@ -111,15 +112,15 @@ function parseArtifact(value: unknown, source: string): EvalRunArtifact {
 		evalId: readString(value, source, "evalId"),
 		taskFile: readString(value, source, "taskFile"),
 		taskFileHash: readString(value, source, "taskFileHash"),
-		clio: value.clio === undefined ? legacyClioProvenance() : parseClioProvenance(value.clio, `${source}.clio`),
-		environment:
-			value.environment === undefined
-				? legacyEnvironmentProvenance()
-				: parseEnvironmentProvenance(value.environment, `${source}.environment`),
+		clio: parseClioProvenance(readRequiredArtifactField(value, source, "clio"), `${source}.clio`),
+		environment: parseEnvironmentProvenance(
+			readRequiredArtifactField(value, source, "environment"),
+			`${source}.environment`,
+		),
 		target: readOptionalNullableString(value, source, "target"),
 		model: readOptionalNullableString(value, source, "model"),
 		thinking: readOptionalNullableString(value, source, "thinking"),
-		paths: value.paths === undefined ? legacyArtifactPaths(value) : parseArtifactPaths(value.paths, `${source}.paths`),
+		paths: parseArtifactPaths(readRequiredArtifactField(value, source, "paths"), `${source}.paths`),
 		repeat: readNumber(value, source, "repeat"),
 		startedAt: readString(value, source, "startedAt"),
 		endedAt: readString(value, source, "endedAt"),
@@ -225,17 +226,18 @@ function parseRunPaths(value: unknown, source: string): EvalRunPaths {
 	return out;
 }
 
-function legacyClioProvenance(): EvalClioProvenance {
-	return { version: "unknown", commit: null, entry: "unknown" };
-}
-
-function legacyEnvironmentProvenance(): EvalEnvironmentProvenance {
-	return { platform: "unknown", node: "unknown" };
-}
-
-function legacyArtifactPaths(value: Record<string, unknown>): EvalArtifactPaths {
-	const taskFile = typeof value.taskFile === "string" && value.taskFile.length > 0 ? value.taskFile : "unknown";
-	return { taskFile, receipts: [], sessionLedgers: [] };
+function readRequiredArtifactField(
+	record: Record<string, unknown>,
+	source: string,
+	field: "clio" | "environment" | "paths",
+): unknown {
+	const value = record[field];
+	if (value === undefined) {
+		throw new Error(
+			`eval artifact has an invalid schema: missing required field '${field}' in ${source}. Re-run the evaluation suite to generate a complete artifact.`,
+		);
+	}
+	return value;
 }
 
 function parseHarnessMetrics(value: unknown, source: string): EvalHarnessMetrics {

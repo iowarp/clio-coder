@@ -6,11 +6,10 @@ import type {
 } from "../dispatch/types.js";
 
 /**
- * Worker permission-escalation counters projected off a receipt's
- * `safety.decisions` block. Present only when the run saw at least one
- * escalation, so a legacy receipt (no escalation activity) yields no view and
- * every renderer omits the escalation output. `approved`/`denied`/`timedOut`
- * default to 0 when the writer folded only a subset of the optional counters.
+ * Worker permission-escalation counters projected from sealed receipt
+ * provenance. Renderers omit this view when no escalation was requested.
+ * Optional outcome counters default to zero until the receipt schema makes
+ * every escalation counter required.
  */
 export interface RunEscalationCounts {
 	requested: number;
@@ -20,9 +19,9 @@ export interface RunEscalationCounts {
 }
 
 /**
- * The receipt-provenance subset the evidence and dispatch surfaces render.
- * Each field is present only when the receipt carries it, so a legacy receipt
- * maps to an empty view and every renderer stays byte-identical to today.
+ * The sealed receipt provenance that evidence and dispatch surfaces render.
+ * Each field is present only when the receipt carries it. Renderers omit
+ * provenance output when none of these fields are present.
  */
 export interface RunProvenanceView {
 	pipeline?: RunPipelineProvenance;
@@ -38,9 +37,8 @@ type ProvenanceReceipt = Pick<RunReceipt, "pipeline" | "personaOverride" | "safe
 export const PERSONA_HASH_PREFIX_CHARS = 12;
 
 /**
- * Read the provenance field sets off a receipt shape. Reads existing
- * optional fields only; never mutates the receipt or assumes a field is
- * present. Returns an empty view for a legacy receipt.
+ * Read provenance from a sealed receipt shape. This reads optional fields
+ * without mutating the receipt and returns an empty view when none are present.
  */
 export function extractRunProvenance(receipt: ProvenanceReceipt): RunProvenanceView {
 	const view: RunProvenanceView = {};
@@ -146,8 +144,8 @@ export function formatPersonaHashPrefix(promptHash: string): string {
 }
 
 /**
- * Human transcript sentences for a provenance view, one per present field set.
- * Empty for a legacy receipt so the transcript run section stays unchanged.
+ * Human transcript sentences for each present provenance field set.
+ * An empty view adds no lines to the transcript run section.
  */
 export function provenanceTranscriptLines(view: RunProvenanceView): string[] {
 	const lines: string[] = [];
@@ -175,8 +173,8 @@ export function provenanceTranscriptLines(view: RunProvenanceView): string[] {
 
 /**
  * Compact ` key=value` suffix for the dispatch tool's per-run and CLI lines.
- * Leading space included so callers append it directly; empty string for a
- * legacy receipt so the existing line format is preserved exactly.
+ * The leading space lets callers append it directly. An empty provenance view
+ * returns an empty string.
  */
 export function provenanceCompactSuffix(view: RunProvenanceView): string {
 	const parts: string[] = [];
