@@ -567,7 +567,7 @@ function reportDispatchDiagnostic(scope: string, error: unknown): void {
 }
 
 const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
-	"scout_synthesis_contract_exhausted",
+	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
 	"worker_tool_call_cap_exhausted",
 	"vram_capacity_fit_failure",
@@ -587,7 +587,7 @@ function hasDurableFinalOutput(output: RunReceiptOutput | undefined): boolean {
  * code and aborts. The generic cap can likewise precede either sibling.
  */
 const LOOP_DEGENERATION_CODES: ReadonlySet<RunOutcomeCode> = new Set([
-	"scout_synthesis_contract_exhausted",
+	"result_contract_exhausted",
 	"loop_guard_tools_disabled_exhausted",
 	"worker_tool_call_cap_exhausted",
 ]);
@@ -1409,6 +1409,12 @@ export function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?:
 		};
 	}
 	if (input.req.responseSchema !== undefined) spec.responseSchema = input.req.responseSchema;
+	// The worker repairs against exactly the contract the orchestrator will seal.
+	// A gate role that overrides the recipe contract gets no worker-side repair,
+	// for the same reason it gets no recipe validation.
+	if (appliesRecipeResultContract(input.req.gate?.role) && input.recipe?.resultContract) {
+		spec.resultContract = input.recipe.resultContract;
+	}
 	spec.runtimeResolution = runtimeTargetSnapshot(input.target.runtimeResolution);
 	if (input.target.modelCapabilities) spec.modelCapabilities = input.target.modelCapabilities;
 	// Configured model ids, so the worker's empty residency registry evicts nothing.
@@ -4458,6 +4464,12 @@ export function createDispatchBundle(
 				});
 				if (finalOutcome === "succeeded" && resultContract?.validation.conformance === "fail") {
 					finalOutcome = "failed";
+					// Deterministic: the worker already spent its bounded repair rounds
+					// on this exact validator reason. Re-running the assignment
+					// unchanged reproduces the same non-conforming result, so this has
+					// to carry an outcome code or retry policy reads it as transient
+					// and burns the fleet on identical attempts.
+					outcomeCode = "result_contract_exhausted";
 					finalDetail = `result contract failed: ${resultContract.validation.reason ?? "invalid result"}`;
 					failureMessage = finalDetail;
 				}

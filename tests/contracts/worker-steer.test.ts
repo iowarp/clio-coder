@@ -9,6 +9,7 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
+import { RESULT_CONTRACT_REPAIR_LIMIT } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { spawnNativeWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -20,12 +21,7 @@ import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "../../src/engine/ai.js";
 import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
-import {
-	SCOUT_SYNTHESIS_CORRECTION_LIMIT,
-	startWorkerRun,
-	type WorkerRunHandle,
-	type WorkerRunInput,
-} from "../../src/engine/worker-runtime.js";
+import { startWorkerRun, type WorkerRunHandle, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { WORKER_RUNTIME_DESCRIPTOR_VERSION, WORKER_SPEC_VERSION } from "../../src/worker/spec-contract.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 import { agentRecipeFixture } from "../harness/agent-recipe.js";
@@ -975,17 +971,21 @@ describe("contracts/worker-steer", () => {
 				writeFileSync(path, `evidence ${index}\n`);
 				return fauxToolCall("read", { path }, { id: `scout-call-${index}` });
 			});
+			const finalResult = JSON.stringify({
+				findings: [{ claim: "evidence 17 is present", path: join(scratch, "scout-17.md"), line: 1 }],
+				needsSplit: false,
+				proposedSubtasks: [],
+			});
 			const { input, unregister } = fauxRuntimeInput(
-				[
-					fauxAssistantMessage(calls, { stopReason: "toolUse" }),
-					fauxAssistantMessage(`Findings:\n- grounded at ${join(scratch, "scout-17.md")}:1\n- uncited orientation lead`),
-				],
+				[fauxAssistantMessage(calls, { stopReason: "toolUse" }), fauxAssistantMessage(finalResult)],
 				{
 					agentId: "scout",
 					budget: SCOUT_BUDGET,
 					task: "map one bounded area",
 					allowedTools: [ToolNames.Read],
 					autonomy: "read-only",
+					resultContract: { kind: "scout-report" },
+					cwd: scratch,
 				},
 			);
 			try {
@@ -1002,31 +1002,45 @@ describe("contracts/worker-steer", () => {
 					8,
 					"every over-budget sibling is denied without consuming the round backstop",
 				);
-				const finalText = lastAssistantText(events);
-				ok(finalText.includes(`- grounded at ${join(scratch, "scout-17.md")}:1`));
-				ok(finalText.includes("Unresolved gaps:"));
-				ok(finalText.includes("Unverified lead (not confirmed by a successful live read): uncited orientation lead"));
+				strictEqual(lastAssistantText(events), finalResult);
+				strictEqual(
+					result.messages.filter(
+						(message) =>
+							message.role === "user" &&
+							Array.isArray(message.content) &&
+							message.content.some(
+								(block) => block.type === "text" && block.text.includes("did not satisfy this run's result contract"),
+							),
+					).length,
+					0,
+					"a conforming result spends no repair round",
+				);
 			} finally {
 				unregister();
 				rmSync(scratch, { recursive: true, force: true });
 			}
 		});
 
-		it("corrects consecutive narrated Scout syntheses and requires a cited final handoff", async () => {
-			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-synthesis-correction-"));
+		it("repairs a narrated synthesis into a conforming terminal result", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-result-contract-repair-"));
 			const events: unknown[] = [];
 			const callCount = SCOUT_TOOL_CALLS + 2;
 			const calls = Array.from({ length: callCount }, (_, index) => {
 				const path = join(scratch, `scout-${index}.md`);
 				writeFileSync(path, `evidence ${index}\n`);
-				return fauxToolCall("read", { path }, { id: `scout-correction-${index}` });
+				return fauxToolCall("read", { path }, { id: `scout-repair-${index}` });
+			});
+			const finalResult = JSON.stringify({
+				findings: [{ claim: "evidence 17 is present", path: `scout-17.md`, line: 1 }],
+				needsSplit: false,
+				proposedSubtasks: [],
 			});
 			const { input, unregister } = fauxRuntimeInput(
 				[
 					fauxAssistantMessage(calls, { stopReason: "toolUse" }),
 					fauxAssistantMessage("OK, let me read the remaining critical files now."),
 					fauxAssistantMessage("I have enough evidence. Let me compile the cited results."),
-					fauxAssistantMessage(`Final finding grounded at ${join(scratch, "scout-17.md")}:1.\n\nUnresolved gaps: none.`),
+					fauxAssistantMessage(finalResult),
 				],
 				{
 					agentId: "scout",
@@ -1034,39 +1048,44 @@ describe("contracts/worker-steer", () => {
 					task: "map one bounded area",
 					allowedTools: [ToolNames.Read],
 					autonomy: "read-only",
+					resultContract: { kind: "scout-report" },
+					cwd: scratch,
 				},
 			);
 			try {
 				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
 				strictEqual(result.exitCode, 0);
-				strictEqual(
-					lastAssistantText(events),
-					`Final finding grounded at ${join(scratch, "scout-17.md")}:1.\n\nUnresolved gaps: none.`,
+				strictEqual(lastAssistantText(events), finalResult);
+				const repairs = result.messages.filter(
+					(message) =>
+						message.role === "user" &&
+						Array.isArray(message.content) &&
+						message.content.some(
+							(block) => block.type === "text" && block.text.includes("did not satisfy this run's result contract"),
+						),
 				);
 				strictEqual(
-					result.messages.filter(
-						(message) =>
-							message.role === "user" &&
-							Array.isArray(message.content) &&
-							message.content.some(
-								(block) =>
-									block.type === "text" &&
-									(block.text.includes("not a final Scout handoff") || block.text.includes("FINAL HANDOFF REQUIRED")),
-							),
-					).length,
-					SCOUT_SYNTHESIS_CORRECTION_LIMIT,
-					"both corrections are explicit bounded follow-ups in the worker transcript",
+					repairs.length,
+					RESULT_CONTRACT_REPAIR_LIMIT,
+					"both repairs are explicit bounded follow-ups in the worker transcript",
 				);
 				ok(
 					result.messages.some(
 						(message) =>
 							message.role === "user" &&
 							Array.isArray(message.content) &&
-							message.content.some(
-								(block) => block.type === "text" && block.text.includes(`${join(scratch, "scout-17.md")}:1`),
-							),
+							message.content.some((block) => block.type === "text" && block.text.includes("scout-17.md:1-1")),
 					),
-					"the repair prompt carries verified live-read citation anchors",
+					"the repair prompt carries the exact line spans this run read",
+				);
+				ok(
+					result.messages.some(
+						(message) =>
+							message.role === "user" &&
+							Array.isArray(message.content) &&
+							message.content.some((block) => block.type === "text" && block.text.includes('"findings"')),
+					),
+					"the repair prompt quotes the exact terminal shape the validator accepts",
 				);
 			} finally {
 				unregister();
@@ -1074,8 +1093,62 @@ describe("contracts/worker-steer", () => {
 			}
 		});
 
-		it("fails a Scout that ignores both bounded synthesis corrections", async () => {
-			const scratch = mkdtempSync(join(tmpdir(), "clio-scout-synthesis-refusal-"));
+		it("repairs a contract miss on a run that never trips the synthesis lock", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-result-contract-underbudget-"));
+			const events: unknown[] = [];
+			// Well under the soft exploration limit: this run ends on its own terms,
+			// so the synthesis lockout never fires. Repair must still happen.
+			const calls = Array.from({ length: 3 }, (_, index) => {
+				const path = join(scratch, `scout-${index}.md`);
+				writeFileSync(path, `evidence ${index}\n`);
+				return fauxToolCall("read", { path }, { id: `scout-underbudget-${index}` });
+			});
+			const finalResult = JSON.stringify({
+				findings: [{ claim: "evidence 1 is present", path: "scout-1.md", line: 1 }],
+				needsSplit: false,
+				proposedSubtasks: [],
+			});
+			const { input, unregister } = fauxRuntimeInput(
+				[
+					fauxAssistantMessage(calls, { stopReason: "toolUse" }),
+					fauxAssistantMessage("I have the complete picture. Let me compile the findings."),
+					fauxAssistantMessage(finalResult),
+				],
+				{
+					agentId: "scout",
+					budget: SCOUT_BUDGET,
+					task: "map one bounded area",
+					allowedTools: [ToolNames.Read],
+					autonomy: "read-only",
+					resultContract: { kind: "scout-report" },
+					cwd: scratch,
+				},
+			);
+			try {
+				const result = await startWorkerRun(input, (event) => events.push(event)).promise;
+				strictEqual(result.exitCode, 0);
+				strictEqual(lastAssistantText(events), finalResult);
+				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "ok").length, 3);
+				strictEqual(
+					result.messages.filter(
+						(message) =>
+							message.role === "user" &&
+							Array.isArray(message.content) &&
+							message.content.some(
+								(block) => block.type === "text" && block.text.includes("did not satisfy this run's result contract"),
+							),
+					).length,
+					1,
+					"the under-budget run still gets its repair round",
+				);
+			} finally {
+				unregister();
+				rmSync(scratch, { recursive: true, force: true });
+			}
+		});
+
+		it("fails a run that ignores both bounded result-contract repairs", async () => {
+			const scratch = mkdtempSync(join(tmpdir(), "clio-result-contract-refusal-"));
 			const events: unknown[] = [];
 			const callCount = SCOUT_TOOL_CALLS + 2;
 			const calls = Array.from({ length: callCount }, (_, index) => {
@@ -1097,6 +1170,8 @@ describe("contracts/worker-steer", () => {
 					task: "map one bounded area",
 					allowedTools: [ToolNames.Read],
 					autonomy: "read-only",
+					resultContract: { kind: "scout-report" },
+					cwd: scratch,
 				},
 			);
 			try {
@@ -1109,13 +1184,11 @@ describe("contracts/worker-steer", () => {
 							message.role === "user" &&
 							Array.isArray(message.content) &&
 							message.content.some(
-								(block) =>
-									block.type === "text" &&
-									(block.text.includes("not a final Scout handoff") || block.text.includes("FINAL HANDOFF REQUIRED")),
+								(block) => block.type === "text" && block.text.includes("did not satisfy this run's result contract"),
 							),
 					).length,
-					SCOUT_SYNTHESIS_CORRECTION_LIMIT,
-					"only the bounded number of corrective provider rounds is admitted",
+					RESULT_CONTRACT_REPAIR_LIMIT,
+					"only the bounded number of repair rounds is admitted",
 				);
 				strictEqual(toolFinishes(events).filter((finish) => finish.outcome === "ok").length, SCOUT_TOOL_CALLS);
 				strictEqual(
@@ -1129,7 +1202,7 @@ describe("contracts/worker-steer", () => {
 							typeof event.payload === "object" &&
 							event.payload !== null &&
 							"outcomeCode" in event.payload &&
-							event.payload.outcomeCode === "scout_synthesis_contract_exhausted",
+							event.payload.outcomeCode === "result_contract_exhausted",
 					),
 					true,
 				);

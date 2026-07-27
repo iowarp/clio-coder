@@ -27,4 +27,4 @@ Receipts also carry an `identity` block with host, user, and any Slurm/PBS/LSF a
 Do not infer success from file existence; cite the receipt, command output, or validation record that proves it.
 Do not edit files, run commands, write plans, write reviews, or approve memory.
 Keep the result compact enough for the main agent to synthesize directly.
-End with a JSON object only: `{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}`.
+Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}`.

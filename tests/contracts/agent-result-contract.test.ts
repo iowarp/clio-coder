@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseScoutResult, validateResultContract } from "../../src/domains/agents/result-contract.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
@@ -107,7 +107,7 @@ describe("contracts/agent result contract", () => {
 
 	it("scout structured citations validate and prose sentinels do not", () => {
 		const structured = JSON.stringify({
-			citations: [{ path: "src/a.ts", line: 4 }],
+			findings: [{ claim: "src/a.ts declares the boundary", path: "src/a.ts", line: 4 }],
 			needsSplit: true,
 			proposedSubtasks: ["Inspect src/a.ts"],
 		});
@@ -123,6 +123,62 @@ describe("contracts/agent result contract", () => {
 			"pass",
 		);
 		strictEqual(parseScoutResult("SPLIT RECOMMENDATION: prose\n- Inspect src/a.ts"), null);
+	});
+
+	it("rejects a scout citation to a real line the run never read", () => {
+		const file = "one\ntwo\nthree\nfour\nfive\nsix";
+		const filesystem = { readFile: (p: string) => (p === "/repo/src/a.ts" ? file : null) };
+		const cited = (line: number) =>
+			JSON.stringify({
+				findings: [{ claim: "the boundary is declared here", path: "src/a.ts", line }],
+				needsSplit: false,
+				proposedSubtasks: [],
+			});
+		// The run read lines 1..3 only. Line 5 exists, so the existence check
+		// alone would pass it; grounding is what rejects the approximation.
+		const observedReadRanges = new Map([["/repo/src/a.ts", [[1, 3] as const]]]);
+		const grounded = contract({
+			contract: { kind: "scout-report" },
+			output: cited(2),
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+			observedReadRanges,
+		});
+		strictEqual(grounded.conformance, "pass");
+		const drifted = contract({
+			contract: { kind: "scout-report" },
+			output: cited(5),
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+			observedReadRanges,
+		});
+		strictEqual(drifted.conformance, "fail");
+		ok(drifted.reason?.includes("not grounded in a live read"));
+		ok(drifted.reason?.includes("this run read only 1-3"));
+		const unread = contract({
+			contract: { kind: "scout-report" },
+			output: cited(2),
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+			observedReadRanges: new Map(),
+		});
+		strictEqual(unread.conformance, "fail");
+		ok(unread.reason?.includes("this run never read that file"));
+		// Absent evidence keeps the weaker existence check; the orchestrator
+		// revalidates shape without access to the worker's read spans.
+		strictEqual(
+			contract({
+				contract: { kind: "scout-report" },
+				output: cited(5),
+				cwd: "/repo",
+				networkAllowed: false,
+				filesystem,
+			}).conformance,
+			"pass",
+		);
 	});
 
 	it("verifier check failure becomes failed quality evidence", () => {

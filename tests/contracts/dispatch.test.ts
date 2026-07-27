@@ -708,6 +708,103 @@ describe("contracts/dispatch", () => {
 		}
 	});
 
+	it("seals the recipe result contract onto the worker spec so the worker can repair it", async () => {
+		const context = stubContext({
+			recipes: [
+				{
+					...agentRecipeFixture(),
+					id: "scout",
+					name: "scout",
+					resultContract: { kind: "scout-report" },
+					filepath: "/test/scout.md",
+				},
+			],
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let capturedSpec: WorkerSpec | null = null;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec: WorkerSpec) => {
+				capturedSpec = spec;
+				return {
+					pid: 9998,
+					promise: exit.promise,
+					events: (async function* () {})(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: "map the routing boundary",
+			});
+			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
+			await handle.finalPromise;
+			// The worker repairs against exactly the contract the orchestrator seals.
+			deepStrictEqual((capturedSpec as unknown as WorkerSpec).resultContract, { kind: "scout-report" });
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("marks a failed result contract deterministic so retry cannot repeat it", async () => {
+		const context = stubContext({
+			recipes: [
+				{
+					...agentRecipeFixture(),
+					id: "scout",
+					name: "scout",
+					resultContract: { kind: "scout-report" },
+					filepath: "/test/scout.md",
+				},
+			],
+		});
+		const exit = deferred<{ exitCode: number | null; signal: NodeJS.Signals | null }>();
+		let spawns = 0;
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: () => {
+				spawns += 1;
+				return {
+					pid: 9997,
+					promise: exit.promise,
+					events: (async function* () {
+						yield {
+							type: "message_end",
+							message: {
+								role: "assistant",
+								content: [{ type: "text", text: "I have the complete picture. Let me compile the findings." }],
+							},
+						};
+					})(),
+					abort: () => {},
+					heartbeatAt: { current: Date.now() },
+				};
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const handle = await bundle.contract.dispatch({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: "map the routing boundary",
+			});
+			exit.resolve({ exitCode: 0, signal: null });
+			await drainEvents(handle.events);
+			const receipt = await handle.finalPromise;
+			strictEqual(receipt.outcome, "failed");
+			// Without the code, retry policy reads a shape failure as transient and
+			// re-runs the identical assignment until the attempt ceiling.
+			strictEqual(receipt.outcomeCode, "result_contract_exhausted");
+			strictEqual(spawns, 1);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("freezes parent protected artifacts into local and SSH worker specs and receipts", async () => {
 		const protectedPath = join(process.cwd(), "PLAN.md");
 		for (const transport of ["local", "ssh"] as const) {
@@ -3914,8 +4011,8 @@ rl.once("line", (line) => {
 			},
 			{
 				name: "scout exhaustion followed by the loop-guard backstop",
-				codes: ["loop_guard_tools_disabled_exhausted", "scout_synthesis_contract_exhausted"] as const,
-				expected: "scout_synthesis_contract_exhausted" as const,
+				codes: ["loop_guard_tools_disabled_exhausted", "result_contract_exhausted"] as const,
+				expected: "result_contract_exhausted" as const,
 				conflict: false,
 			},
 			{
@@ -3923,15 +4020,15 @@ rl.once("line", (line) => {
 				codes: [
 					"worker_tool_call_cap_exhausted",
 					"loop_guard_tools_disabled_exhausted",
-					"scout_synthesis_contract_exhausted",
+					"result_contract_exhausted",
 				] as const,
-				expected: "scout_synthesis_contract_exhausted" as const,
+				expected: "result_contract_exhausted" as const,
 				conflict: false,
 			},
 			{
 				name: "impossible cross-family conflict",
-				codes: ["vram_capacity_fit_failure", "scout_synthesis_contract_exhausted"] as const,
-				expected: "scout_synthesis_contract_exhausted" as const,
+				codes: ["vram_capacity_fit_failure", "result_contract_exhausted"] as const,
+				expected: "result_contract_exhausted" as const,
 				conflict: true,
 			},
 		]) {

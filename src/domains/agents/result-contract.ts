@@ -31,12 +31,26 @@ export interface ResultContractFilesystem {
 	readFile(path: string): string | null;
 }
 
+/**
+ * Inclusive `[start, end]` line spans a run actually observed, by absolute
+ * path. Grounding is only checkable where this evidence exists, which is the
+ * worker that made the reads.
+ */
+export type ObservedReadRanges = ReadonlyMap<string, ReadonlyArray<readonly [number, number]>>;
+
 export interface ResultContractValidationInput {
 	contract: ResultContract;
 	output: string | null;
 	cwd: string;
 	networkAllowed: boolean;
 	filesystem: ResultContractFilesystem;
+	/**
+	 * Line spans this run read. When supplied, a cited line must fall inside
+	 * one, which turns "this line exists in the file" into "this run looked at
+	 * this line". Absent means grounding is not observable at this layer and
+	 * only the weaker existence check applies.
+	 */
+	observedReadRanges?: ObservedReadRanges;
 }
 
 /** Receipt-ready projection of the typed result validator. */
@@ -60,7 +74,14 @@ export interface ScoutCitation {
 	line: number;
 }
 
+/** One reconnaissance claim and the live-read location that grounds it. */
+export interface ScoutFinding extends ScoutCitation {
+	claim: string;
+}
+
 export interface ScoutResult {
+	findings: ReadonlyArray<ScoutFinding>;
+	/** Grounding locations projected from findings, in reported order. */
 	citations: ReadonlyArray<ScoutCitation>;
 	needsSplit: boolean;
 	proposedSubtasks: ReadonlyArray<string>;
@@ -157,25 +178,26 @@ function string(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0;
 }
 
-function parseCitations(value: unknown): ScoutCitation[] | null {
-	if (!Array.isArray(value) || value.length === 0) return null;
-	const citations: ScoutCitation[] = [];
+function parseFindings(value: unknown): ScoutFinding[] | null {
+	if (!Array.isArray(value)) return null;
+	const findings: ScoutFinding[] = [];
 	for (const entry of value) {
 		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
-		const citation = entry as Record<string, unknown>;
-		const line = citation.line;
+		const finding = entry as Record<string, unknown>;
+		const line = finding.line;
 		if (
-			!hasOnlyKeys(citation, ["path", "line"]) ||
-			!string(citation.path) ||
+			!hasOnlyKeys(finding, ["claim", "path", "line"]) ||
+			!string(finding.claim) ||
+			!string(finding.path) ||
 			typeof line !== "number" ||
 			!Number.isSafeInteger(line) ||
 			line < 1
 		) {
 			return null;
 		}
-		citations.push({ path: citation.path, line });
+		findings.push({ claim: finding.claim, path: finding.path, line });
 	}
-	return citations;
+	return findings;
 }
 
 function parseSubtasks(value: unknown): string[] | null {
@@ -204,18 +226,33 @@ function validateScout(contract: ResultContract, output: string | null): ResultC
 	// its own provider-enforced schema. It is a typed conformance variant, not
 	// correctness evidence, so it remains unmeasured for routing quality.
 	if (isBootstrapScoutResult(value)) return success(contract, "unmeasured", value);
-	if (!hasOnlyKeys(value, ["citations", "needsSplit", "proposedSubtasks"])) {
+	if (!hasOnlyKeys(value, ["findings", "needsSplit", "proposedSubtasks"])) {
 		return failure(contract, "fail", "Scout result has unknown fields");
 	}
-	const citations = parseCitations(value.citations);
+	const findings = parseFindings(value.findings);
 	const proposedSubtasks = parseSubtasks(value.proposedSubtasks);
-	if (citations === null || typeof value.needsSplit !== "boolean" || proposedSubtasks === null) {
-		return failure(contract, "fail", "Scout result must carry citations, needsSplit, and 0..4 proposed subtasks");
+	if (findings === null || typeof value.needsSplit !== "boolean" || proposedSubtasks === null) {
+		return failure(
+			contract,
+			"fail",
+			"Scout result must carry findings as {claim, path, line} objects, needsSplit, and 0..4 proposed subtasks",
+		);
 	}
 	if (value.needsSplit !== proposedSubtasks.length > 0) {
 		return failure(contract, "fail", "Scout needsSplit must agree with proposedSubtasks");
 	}
-	const scout: ScoutResult = { citations, needsSplit: value.needsSplit, proposedSubtasks };
+	// A grounded report needs at least one cited claim. A split recommendation
+	// is the explicit exception: it reports that the task did not fit, so it
+	// carries subtasks instead of findings.
+	if (findings.length === 0 && !value.needsSplit) {
+		return failure(contract, "fail", "Scout result must carry at least one cited finding, or set needsSplit");
+	}
+	const scout: ScoutResult = {
+		findings,
+		citations: findings.map(({ path: citedPath, line }) => ({ path: citedPath, line })),
+		needsSplit: value.needsSplit,
+		proposedSubtasks,
+	};
 	return success(contract, "pass", scout, { scout });
 }
 
@@ -255,6 +292,22 @@ function validateScoutCitations(
 		const lineCount = content.split(/\r\n|\r|\n/u).length;
 		if (citation.line > lineCount) {
 			return { ok: false, reason: `Scout citation is past end of file: ${citation.path}:${citation.line}` };
+		}
+		// Grounding: a line that exists is not a line anyone looked at. Where the
+		// run's own read spans are known, the cited line has to fall inside one,
+		// so an approximated or inferred line number cannot pass as observation.
+		if (input.observedReadRanges !== undefined) {
+			const spans = input.observedReadRanges.get(citedPath) ?? [];
+			if (!spans.some(([start, end]) => citation.line >= start && citation.line <= end)) {
+				const observed =
+					spans.length === 0
+						? "this run never read that file"
+						: `this run read only ${spans.map(([start, end]) => `${start}-${end}`).join(", ")}`;
+				return {
+					ok: false,
+					reason: `Scout citation is not grounded in a live read: ${citation.path}:${citation.line} (${observed})`,
+				};
+			}
 		}
 		evidence.push({ ...citation, contentDigest: createHash("sha256").update(content, "utf8").digest("hex") });
 	}
@@ -457,6 +510,79 @@ export function validateRecipeResult(
 			quality: validation.quality,
 		},
 	};
+}
+
+/**
+ * Bounded in-worker repair rounds for a terminal result that missed its
+ * contract. A local model with few active parameters routinely gathers correct
+ * evidence and then emits the wrong terminal shape; without feedback that run
+ * is lost. Two rounds is the whole allowance, and the run fails after them.
+ */
+export const RESULT_CONTRACT_REPAIR_LIMIT = 2;
+
+/** Live-read anchors quoted back to the model in a repair round. */
+export const RESULT_CONTRACT_ANCHOR_LIMIT = 12;
+
+/**
+ * The exact terminal shape each contract accepts, quoted to the model verbatim.
+ * This is the one place a contract's wire example is written; agent recipes and
+ * repair rounds both cite it, so a prompt cannot drift from its validator.
+ */
+export function resultContractShape(contract: ResultContract): string {
+	switch (contract.kind) {
+		case "architect-plan":
+			return `a plan artifact written to ${contract.path}`;
+		case "scout-report":
+			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]}';
+		case "verifier-report":
+			return '{"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}';
+		case "debugger-report":
+			return '{"diagnosis":"...","reproduction":"reproduced","evidence":["..."]}';
+		case "research-report":
+			return '{"source":"local","findings":[{"claim":"...","evidence":"..."}]}';
+		case "mutation-report":
+			return '{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}]}';
+		case "provenance-report":
+			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
+		case "external-delegation":
+			return "any final text";
+	}
+}
+
+export interface ResultContractRepairInput {
+	contract: ResultContract;
+	/** The validator's own reason; never a paraphrase. */
+	reason: string;
+	/** 1-based repair round. */
+	attempt: number;
+	/** `path:line` anchors from reads that succeeded in this run. */
+	anchors: ReadonlyArray<string>;
+}
+
+/**
+ * One repair directive. It states the validator's reason, the exact shape, and
+ * that tool use is over, so the model's only remaining move is to emit the
+ * terminal document from evidence it already has.
+ */
+export function resultContractRepairMessage(input: ResultContractRepairInput): string {
+	const last = input.attempt >= RESULT_CONTRACT_REPAIR_LIMIT;
+	const lines = [
+		last
+			? "FINAL RESULT REQUIRED IN THIS RESPONSE. Your previous response still did not satisfy this run's result contract."
+			: "Your previous response did not satisfy this run's result contract.",
+		`Validator reason: ${input.reason}`,
+		"Tool use is over. Answer from the evidence you already gathered.",
+		`Emit exactly this shape and nothing else: ${resultContractShape(input.contract)}`,
+		"Do not add prose, code fences, or commentary around it. Do not describe work you intend to do next.",
+	];
+	if (input.anchors.length > 0) {
+		lines.push(
+			"",
+			"Locations you read successfully in this run (use these exact path:line values):",
+			...input.anchors.slice(-RESULT_CONTRACT_ANCHOR_LIMIT).map((anchor) => `- ${anchor}`),
+		);
+	}
+	return lines.join("\n");
 }
 
 /** Strict frontmatter parser for the one recipe result-contract schema. */

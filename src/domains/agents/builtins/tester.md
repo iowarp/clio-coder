@@ -28,4 +28,4 @@ Do not change production code unless the test harness needs a minimal exported s
 Avoid broad snapshots and assertions that only prove something exists.
 Run the new or changed test directly, then broaden validation when the touched surface is shared.
 Use `git` (op=diff) before finishing to confirm the diff is test-focused.
-End with a JSON object only: `{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}]}`. Record test mutations and concrete validation results.
+Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}]}`. Record test mutations and concrete validation results.

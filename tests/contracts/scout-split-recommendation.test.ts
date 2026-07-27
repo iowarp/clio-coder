@@ -7,7 +7,7 @@ import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/ty
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 
 const SCOUT_RESULT = JSON.stringify({
-	citations: [{ path: "src/tools/dispatch.ts", line: 576 }],
+	findings: [{ claim: "dispatch promotes one split recommendation", path: "src/tools/dispatch.ts", line: 576 }],
 	needsSplit: true,
 	proposedSubtasks: ["Inspect src/tools/dispatch.ts"],
 });
@@ -118,6 +118,7 @@ function toolForAnswer(answer: string) {
 describe("contracts/Scout structured result", () => {
 	it("accepts citation-bearing structured output and rejects prose sentinels", () => {
 		deepStrictEqual(parseScoutResult(SCOUT_RESULT), {
+			findings: [{ claim: "dispatch promotes one split recommendation", path: "src/tools/dispatch.ts", line: 576 }],
 			citations: [{ path: "src/tools/dispatch.ts", line: 576 }],
 			needsSplit: true,
 			proposedSubtasks: ["Inspect src/tools/dispatch.ts"],

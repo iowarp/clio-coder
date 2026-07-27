@@ -28,4 +28,4 @@ Use `web_fetch` only when outside documentation materially changes the implement
 Run the narrowest useful validation first, then broaden when risk or shared behavior warrants it.
 Use `git` (op=diff) before finishing to verify the diff matches the task.
 If a requested simplification would change behavior, stop and report the boundary.
-End with a JSON object only: `{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}]}`. Report every mutation and at least one concrete validation result.
+Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}]}`. Report every mutation and at least one concrete validation result.

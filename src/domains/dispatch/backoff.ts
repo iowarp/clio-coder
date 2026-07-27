@@ -53,7 +53,7 @@ export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefin
 		code === "vram_capacity_fit_failure" ||
 		code === "worker_tool_call_cap_exhausted" ||
 		code === "loop_guard_tools_disabled_exhausted" ||
-		code === "scout_synthesis_contract_exhausted" ||
+		code === "result_contract_exhausted" ||
 		code === "worker_final_output_missing"
 	);
 }
