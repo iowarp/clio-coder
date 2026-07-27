@@ -871,6 +871,15 @@ describe("contracts/prompts compiler logic", () => {
 		strictEqual(inactive.systemPrompt.includes("Use ask_user for operator interviews"), false);
 	});
 
+	it("states the absolute workspace root so no tool argument has to guess it", async () => {
+		const cwd = scratchProject();
+		const result = await compileProjectPrompt(cwd);
+		// A model that is never told the root invents one. An observed run passed
+		// the container convention /workspace to bash and had the call blocked.
+		ok(result.systemPrompt.includes(`Absolute workspace root: ${cwd}`));
+		ok(result.systemPrompt.includes("Do not invent a root such as /workspace"));
+	});
+
 	it("summarizes project context across missing, CLIO-only, fresh codewiki, and stale codewiki states", async () => {
 		const empty = scratchProject();
 		let result = await compileProjectPrompt(empty);

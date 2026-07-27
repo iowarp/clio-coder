@@ -101,7 +101,12 @@ export const bashTool: ToolSpec = {
 		"Execute a bash command and return stdout and stderr. Runs inside the session workspace. Default timeout 300000 ms.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
-		cwd: Type.Optional(Type.String({ description: "Working directory; must stay inside the session workspace." })),
+		cwd: Type.Optional(
+			Type.String({
+				description:
+					"Omit this. The command already runs at the session workspace root. Set it only to run in a subdirectory of that root, as a relative path; an absolute path outside the root is blocked.",
+			}),
+		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds." })),
 	}),
 	baseActionClass: "execute",
