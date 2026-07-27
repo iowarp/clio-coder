@@ -1,5 +1,6 @@
 import { assertValidResponseSchema } from "../core/response-schema.js";
 import type { ToolName } from "../core/tool-names.js";
+import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
@@ -79,6 +80,13 @@ interface WorkerSpecFields {
 	thinkingLevel?: ThinkingLevel;
 	/** JSON Schema enforced on the llama.cpp chat-completions request. */
 	responseSchema?: Record<string, unknown>;
+	/**
+	 * Terminal contract from the admitted agent recipe. The worker validates its
+	 * own final result against it and spends bounded repair rounds, so the
+	 * orchestrator's sealed validation is a confirmation rather than the model's
+	 * first and only notice that its result was the wrong shape.
+	 */
+	resultContract?: ResultContract;
 	/** Orchestrator-resolved effective runtime/capability decision for receipts and debugging. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	allowedTools: ReadonlyArray<ToolName>;

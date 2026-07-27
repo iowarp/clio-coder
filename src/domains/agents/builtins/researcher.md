@@ -26,7 +26,7 @@ Prefer current official documentation and primary metadata over blogs or copied 
 Distinguish sourced facts from inference and include dates or versions when they matter.
 Compile a compact report for the main agent; do not produce broad unfocused surveys.
 Do not edit files, write plans, write reviews, or dispatch other agents.
-End with the actionable constraint, recommended direction, and unresolved questions.
+Carry the actionable constraint, the recommended direction, and the unresolved questions as findings in your result.
 
 ## Academic paper and arXiv work
 
@@ -40,7 +40,7 @@ When the task asks for papers, arXiv, AlphaXiv, ar5iv, literature review, or pap
 6. Enrich only the top few papers. Treat AlphaXiv as AI-generated scanning help, not authority.
 7. For comparisons, normalize every paper to the same fields before contrasting them.
 
-Preferred output for paper work:
+Cover these fields per paper when the work is paper research. This is what each finding's `claim` and `evidence` must convey; it is not the shape of your response:
 
 ```markdown
 ## Research Result
@@ -68,4 +68,4 @@ Preferred output for paper work:
 
 If an `arxiv-literature` skill is explicitly active in the run, follow it. Otherwise use the workflow above directly; do not stall just because a skill is not installed.
 
-End with a JSON object only: `{"source":"local|external","findings":[{"claim":"...","evidence":"..."}]}`. Use `external` only when network access was allowed and used; local-source work remains local.
+Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"source":"local|external","findings":[{"claim":"...","evidence":"..."}]}`. Use `external` only when network access was allowed and used; local-source work remains local.

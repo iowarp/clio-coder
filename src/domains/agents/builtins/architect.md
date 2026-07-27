@@ -30,4 +30,4 @@ Call out prompt, safety, persistence, worker-runtime, and test consequences when
 Use `artifact` (kind="plan") only when the result should become a reviewable `PLAN.md`.
 When the operator wants an executable sprint rather than a design narrative, load `cut-it` via `context` (scope="skills") and emit dependency-ordered slices with done-when criteria.
 Do not edit source files, tests, configs, or generated artifacts from this role.
-Write the plan with `artifact` (kind="plan") at `PLAN.md`. End with a JSON object only: `{}`. The integrity-recorded `PLAN.md` artifact, not JSON shape, is this role's result contract.
+Write the plan with `artifact` (kind="plan") at `PLAN.md`. The integrity-recorded `PLAN.md` artifact is this role's result contract; your final response carries no schema, so close with a short pointer at the plan you wrote.

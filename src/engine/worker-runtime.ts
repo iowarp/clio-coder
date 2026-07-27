@@ -9,6 +9,8 @@
  * own worker runners before pi-agent model synthesis.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { validateSettingsFile } from "../core/config.js";
 import {
 	configureGuardrails,
@@ -17,7 +19,14 @@ import {
 } from "../core/guardrails.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
-import { parseScoutResult } from "../domains/agents/result-contract.js";
+import {
+	type ObservedReadRanges,
+	parseResultContract,
+	RESULT_CONTRACT_REPAIR_LIMIT,
+	type ResultContract,
+	resultContractRepairMessage,
+	validateResultContract,
+} from "../domains/agents/result-contract.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
@@ -40,7 +49,6 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import type { ToolProfileName } from "../tools/profiles.js";
-import { hasVerifiedScoutGrounding, quarantineUnverifiedScoutBullets } from "../tools/worker-evidence.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
 	DEFAULT_ESCALATION_TIMEOUT_MS,
@@ -65,14 +73,6 @@ import { Agent, type AgentEvent, type AgentMessage, type AgentOptions, type Mode
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, resolveAgentTools, type ToolTelemetry } from "./worker-tools.js";
 
-/** Scout exploration attempts before a guaranteed text-only synthesis phase. */
-export const SCOUT_SYNTHESIS_CORRECTION_LIMIT = 2;
-export const SCOUT_SYNTHESIS_CORRECTION_MESSAGE =
-	"Your previous response was not a final Scout handoff: it announced more tool work or omitted live path:line citations. Tool use is over. Return compact final findings now from evidence already gathered, cite every source claim as path:line, and put uncertainties under `Unresolved gaps:`. If the task truly cannot fit, return the bounded `SPLIT RECOMMENDATION:` protocol instead. Do not describe future actions.";
-const SCOUT_SYNTHESIS_FINAL_CORRECTION_MESSAGE =
-	"FINAL HANDOFF REQUIRED IN THIS RESPONSE. Start with `Findings:` and write the cited findings themselves; every bullet must contain a path:line citation from evidence already gathered. End with `Unresolved gaps:`. Do not say that you will read, compile, prepare, or produce the answer later. If no valid cited report is possible, output only a valid bounded `SPLIT RECOMMENDATION:` block.";
-const SCOUT_CITATION_ANCHOR_LIMIT = 12;
-
 export interface WorkerRunInput {
 	sessionId?: string;
 	systemPrompt: string;
@@ -89,6 +89,15 @@ export interface WorkerRunInput {
 	responseSchema?: Record<string, unknown>;
 	/** Orchestrator-resolved runtime decision carried on the WorkerSpec. */
 	runtimeResolution?: RuntimeTargetSnapshot;
+	/**
+	 * Terminal contract this run's recipe declares. The worker validates its own
+	 * final result against it and spends bounded repair rounds before exiting,
+	 * so a model that gathered the right evidence is not failed by the
+	 * orchestrator for a recoverable shape mistake it was never told about.
+	 */
+	resultContract?: ResultContract;
+	/** Workspace root the result contract resolves relative paths against. */
+	cwd?: string;
 	/** Tool ids the worker is allowed to expose for this run. */
 	allowedTools: ReadonlyArray<ToolName>;
 	/** Dispatch-resolved agent phase policy and independent hard attempt cap. */
@@ -180,43 +189,59 @@ function assistantMessageText(message: AgentMessage | undefined): string | null 
 		.trim();
 }
 
-function replaceAssistantMessageText(message: AgentMessage | undefined, text: string): void {
-	if (!isAssistantMessage(message) || !Array.isArray(message.content)) return;
-	let replaced = false;
-	for (const block of message.content as Array<{ type?: unknown; text?: unknown }>) {
-		if (block.type !== "text" || typeof block.text !== "string") continue;
-		block.text = replaced ? "" : text;
-		replaced = true;
-	}
+/**
+ * Whether this assistant message ends the run. A message that carries tool
+ * calls is mid-run and states no result yet; an errored message already fails
+ * the run through its own path.
+ */
+function isTerminalAssistantMessage(message: AgentMessage | undefined): boolean {
+	if (!isAssistantMessage(message)) return false;
+	return message.stopReason !== "toolUse" && message.stopReason !== "error";
 }
 
-function scoutSynthesisNeedsCorrection(
+/**
+ * Why this run's terminal message misses its contract, or null when it holds.
+ * A message that announces further work fails even when it parses, because the
+ * synthesis lock means no further work will happen.
+ */
+function terminalContractViolation(
+	contract: ResultContract,
 	message: AgentMessage | undefined,
-	successfulLiveReadCitations: ReadonlyArray<string>,
-): boolean {
-	if (!isAssistantMessage(message)) return false;
+	cwd: string,
+	observedReadRanges: ObservedReadRanges,
+): string | null {
+	if (!isAssistantMessage(message)) return null;
 	const text = assistantMessageText(message);
-	if (text === null || text.length === 0) return true;
-	if (parseScoutResult(text) !== null) return false;
+	if (text === null || text.length === 0) return "missing final result";
 	const stopReason = message.stopReason;
-	const announcesMoreWork = shouldRequestStalledTurnContinuation({
-		hook: "turn_end",
-		text,
-		metadata: {
-			turnToolCalls: 0,
-			...(typeof stopReason === "string" ? { stopReason } : {}),
+	if (
+		shouldRequestStalledTurnContinuation({
+			hook: "turn_end",
+			text,
+			metadata: { turnToolCalls: 0, ...(typeof stopReason === "string" ? { stopReason } : {}) },
+		})
+	) {
+		return "the response announced further work instead of stating the final result";
+	}
+	const validation = validateResultContract({
+		contract,
+		output: text,
+		cwd,
+		observedReadRanges,
+		// Repair rounds judge shape and grounding only. Network posture belongs to
+		// the orchestrator's sealed validation, which runs again on the receipt.
+		networkAllowed: true,
+		filesystem: {
+			readFile(filePath) {
+				try {
+					return readFileSync(filePath, "utf8");
+				} catch {
+					return null;
+				}
+			},
 		},
 	});
-	return announcesMoreWork || !hasVerifiedScoutGrounding(text, successfulLiveReadCitations);
-}
-
-function scoutSynthesisCorrectionMessage(attempt: number, citations: ReadonlyArray<string>): string {
-	const directive = attempt === 1 ? SCOUT_SYNTHESIS_CORRECTION_MESSAGE : SCOUT_SYNTHESIS_FINAL_CORRECTION_MESSAGE;
-	if (citations.length === 0) return directive;
-	return `${directive}\n\nVerified live-read anchors (copy the relevant exact path:line forms into your findings):\n${citations
-		.slice(-SCOUT_CITATION_ANCHOR_LIMIT)
-		.map((citation) => `- ${citation}`)
-		.join("\n")}`;
+	return validation.conformance === "pass" ? null : (validation.reason ?? "invalid result");
 }
 
 class NullKnowledgeBase implements KnowledgeBase {
@@ -307,6 +332,10 @@ export function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "budget">
  */
 export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): WorkerRunHandle {
 	assertResponseSchemaRuntime(input);
+	// The wire carries the contract as data; the one strict parser owns its
+	// shape. The worker subprocess may not import it (it stays slim), so the
+	// check lands here, before any model call.
+	if (input.resultContract !== undefined) parseResultContract(input.resultContract, "WorkerSpec.resultContract");
 	if (input.runtime.id === "claude-sdk") {
 		return startClaudeSdkWorkerRun(input, emit);
 	}
@@ -442,9 +471,48 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		input.autonomy,
 		(effects) => middlewareToolChoice.apply(effects),
 	);
-	let scoutSynthesisCorrectionsQueued = 0;
-	const pendingScoutReadCitations = new Map<string, string>();
-	const successfulScoutReadCitations: string[] = [];
+	const contractCwd = input.cwd ?? process.cwd();
+	let resultContractRepairsQueued = 0;
+	/** Read tool call id -> what was asked for, pending that call's result. */
+	const pendingReadCitations = new Map<string, { path: string; offset: number | null; tail: boolean }>();
+	const observedReadRanges = new Map<string, Array<readonly [number, number]>>();
+
+	/**
+	 * Fold one successful read into the observed spans. The request says where
+	 * the model aimed; the result says how many lines it actually received.
+	 * Only their combination is an honest span, because a byte-capped or
+	 * end-of-file read returns less than the window that was asked for.
+	 */
+	const recordObservedRead = (
+		request: { path: string; offset: number | null; tail: boolean },
+		result: unknown,
+	): void => {
+		const observation = (result as { details?: { observation?: Record<string, unknown> } } | null)?.details?.observation;
+		if (!observation) return;
+		const shown = observation.shownCount;
+		const total = observation.totalCount;
+		if (typeof shown !== "number" || !Number.isFinite(shown) || shown <= 0) return;
+		// A tail read lands at the end of the file, so it can only be placed once
+		// the total line count is known; without it the span is dropped rather
+		// than guessed, which costs a citation but never invents grounding.
+		let start: number;
+		if (request.tail) {
+			if (typeof total !== "number" || !Number.isFinite(total)) return;
+			start = Math.max(1, Math.floor(total) - shown + 1);
+		} else {
+			start = request.offset ?? 1;
+		}
+		const key = path.resolve(contractCwd, request.path);
+		const spans = observedReadRanges.get(key) ?? [];
+		spans.push([start, start + shown - 1] as const);
+		observedReadRanges.set(key, spans);
+	};
+
+	/** Spans quoted back to the model, as `path:start-end`. */
+	const observedReadAnchors = (): string[] =>
+		[...observedReadRanges.entries()].flatMap(([key, spans]) =>
+			spans.map(([start, end]) => `${path.relative(contractCwd, key) || key}:${start}-${end}`),
+		);
 	const telemetry: ToolTelemetry = {
 		onStart(event) {
 			emit({ type: "clio_tool_start", payload: event });
@@ -532,19 +600,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const unsubscribe = agent.subscribe(async (event) => {
 		if (event.type === "turn_start") workerModelRound += 1;
 		if (event.type === "tool_execution_start") middlewareToolChoice.toolStarted(event.toolName);
-		if (input.agentId === "scout" && event.type === "tool_execution_start" && event.toolName === ToolNames.Read) {
+		// Read spans this run actually observed. They ground the terminal result
+		// (a cited line has to fall inside one) and they are handed back verbatim
+		// in a repair round, so re-emitting findings never invites invention.
+		if (event.type === "tool_execution_start" && event.toolName === ToolNames.Read) {
 			const args = event.args as Record<string, unknown>;
-			const path = typeof args.path === "string" ? args.path.trim() : "";
+			const readPath = typeof args.path === "string" ? args.path.trim() : "";
 			const offset =
-				typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : 1;
-			if (path.length > 0 && args.tail === undefined) pendingScoutReadCitations.set(event.toolCallId, `${path}:${offset}`);
-		}
-		if (input.agentId === "scout" && event.type === "tool_execution_end" && event.toolName === ToolNames.Read) {
-			const citation = pendingScoutReadCitations.get(event.toolCallId);
-			pendingScoutReadCitations.delete(event.toolCallId);
-			if (citation !== undefined && event.isError !== true && !successfulScoutReadCitations.includes(citation)) {
-				successfulScoutReadCitations.push(citation);
+				typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.floor(args.offset) : null;
+			if (readPath.length > 0) {
+				pendingReadCitations.set(event.toolCallId, { path: readPath, offset, tail: args.tail !== undefined });
 			}
+		}
+		if (event.type === "tool_execution_end" && event.toolName === ToolNames.Read) {
+			const request = pendingReadCitations.get(event.toolCallId);
+			pendingReadCitations.delete(event.toolCallId);
+			if (request !== undefined && event.isError !== true) recordObservedRead(request, event.result);
 		}
 		// Synthesis-locked run: a model that ignores tool_choice none emits its
 		// chat template's tool-call syntax as plain text. Sanitize the finished
@@ -553,26 +624,36 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// reconstruction, and any later provider round all see the same text.
 		if (synthesisToolLock && event.type === "message_end") {
 			sanitizeLockedSynthesisMessage(event.message);
-			if (input.agentId === "scout") {
-				const text = assistantMessageText(event.message);
-				if (text !== null && parseScoutResult(text) === null) {
-					const grounded = quarantineUnverifiedScoutBullets(text, successfulScoutReadCitations);
-					if (grounded !== text) replaceAssistantMessageText(event.message, grounded);
-				}
-			}
-			if (input.agentId === "scout" && scoutSynthesisNeedsCorrection(event.message, successfulScoutReadCitations)) {
-				if (scoutSynthesisCorrectionsQueued < SCOUT_SYNTHESIS_CORRECTION_LIMIT) {
-					scoutSynthesisCorrectionsQueued += 1;
+		}
+		// Bounded terminal-contract repair, on whichever message ends the run.
+		// A worker that finishes inside its budget never trips the synthesis
+		// lock, so gating this on the lock would skip repair on exactly the
+		// well-behaved runs it exists to save. The orchestrator validates the
+		// same contract against the sealed receipt; this is the only point at
+		// which the model can still act on the validator's reason.
+		const contract = input.resultContract;
+		if (contract && event.type === "message_end" && isTerminalAssistantMessage(event.message)) {
+			const violation = terminalContractViolation(contract, event.message, contractCwd, observedReadRanges);
+			if (violation !== null) {
+				if (resultContractRepairsQueued < RESULT_CONTRACT_REPAIR_LIMIT) {
+					resultContractRepairsQueued += 1;
+					// A repair round is terminal by construction, so enforce the
+					// directive's own claim that tool use is over at the request
+					// level instead of trusting the model to honor it.
+					synthesisToolLock = true;
 					agent.followUp(
-						taskMessage(scoutSynthesisCorrectionMessage(scoutSynthesisCorrectionsQueued, successfulScoutReadCitations)),
+						taskMessage(
+							resultContractRepairMessage({
+								contract,
+								reason: violation,
+								attempt: resultContractRepairsQueued,
+								anchors: observedReadAnchors(),
+							}),
+						),
 					);
 				} else if (workerBoundFailure === null) {
-					workerBoundFailure =
-						"Scout synthesis contract failed: two bounded corrective rounds still announced tool work or omitted verified live-read path:line citations";
-					emit({
-						type: "clio_run_outcome",
-						payload: { outcomeCode: "scout_synthesis_contract_exhausted" },
-					});
+					workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${violation}`;
+					emit({ type: "clio_run_outcome", payload: { outcomeCode: "result_contract_exhausted" } });
 					process.stderr.write(`[worker] ${workerBoundFailure}\n`);
 				}
 			}

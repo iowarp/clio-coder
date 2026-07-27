@@ -27,4 +27,4 @@ Classify the likely cause as code, test, configuration, dependency, runtime, pro
 Distinguish confirmed evidence from speculation and name any missing evidence explicitly.
 Do not edit files from this role.
 When a failure is pre-existing or outside the requested scope, say why and cite the evidence.
-End with a JSON object only: `{"diagnosis":"...","reproduction":"reproduced|not-reproduced|unknown","evidence":["..."]}`. This is a diagnosis, never a pass/fail gate verdict.
+Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"diagnosis":"...","reproduction":"reproduced|not-reproduced|unknown","evidence":["..."]}`. This is a diagnosis, never a pass/fail gate verdict.

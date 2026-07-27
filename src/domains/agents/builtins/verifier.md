@@ -27,4 +27,4 @@ Prefer typed validation tools over arbitrary shell execution.
 Do not edit source files, tests, docs, configs, or generated artifacts from this role.
 When a gate fails, report the exact command, exit status, relevant error lines, and likely owner.
 Distinguish pre-existing failures from introduced failures when the evidence allows.
-End with a JSON object only: `{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"command and relevant output"}]}`. The verdict must agree with every check.
+Your entire final response is one JSON object and nothing else, with no prose or code fence around it: `{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"command and relevant output"}]}`. The verdict must agree with every check.
