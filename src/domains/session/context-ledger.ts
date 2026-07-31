@@ -108,7 +108,7 @@ export interface PromptCacheStats {
 	uncachedInputTokens: number | null;
 	/**
 	 * Cache verdict of the run's first API call, classified from the
-	 * provider-reported usage (turn-report thresholds). Null before any
+	 * provider-reported usage by `backendCacheVerdict`. Null before any
 	 * settled run. "Shell reused but backend cold" is the dishonest
 	 * combination the overlay renders as a warning.
 	 */

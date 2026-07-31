@@ -41,7 +41,7 @@ Manual `/context compact`, `CLIO_FORCE_COMPACT=1`, and overflow recovery force t
 
 Compaction rewrites the replayed history. On a local backend with a single prefix-cache slot, the next turn after compaction is expected to be cold because the byte prefix changed. Dispatch traffic can disturb the same slot.
 
-Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. The user sees one dim notice, and `turn-report.mjs` renders the expected-cold line next to per-call cache data.
+Clio records these disturbances once on the next assistant entry as `promptCache.expectedColdReasons`. The user sees one dim notice, and the same reasons persist on that entry in the session ledger next to the per-call cache data.
 
 Per-call cache verdicts are `hot`, `partial`, `cold`, and `small`. They are derived from provider usage and persisted with `timing { ttftMs, apiMs }` and `promptCache { input, cacheRead, cacheWrite, backendVerdict }` when available.
 
