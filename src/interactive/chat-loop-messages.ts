@@ -390,9 +390,9 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 export type BackendCacheVerdict = "hot" | "partial" | "cold" | "small";
 
 /**
- * Classify one API call's provider-reported usage the same way
- * benchmarks/live/turn-report.mjs does, so the persisted ledger and the forensics
- * report can never disagree:
+ * Classify one API call's provider-reported usage. This is the single
+ * definition of a cache verdict; the ledger, the overlay, and any forensics
+ * reader all consume the persisted value rather than reclassifying:
  *   hot      cacheRead > 0  and input < 2000   (prefix reused, prefill ≈ user text)
  *   partial  cacheRead > 0  and input >= 2000  (prefix reused up to a divergence point)
  *   cold     cacheRead == 0 and input >= 2000  (full re-prefill)

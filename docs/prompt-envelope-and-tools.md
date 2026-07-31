@@ -118,13 +118,9 @@ Compaction rewrites history, so the next turn on a local single-slot backend is 
 
 ## Inspecting a session
 
-Use the turn report to inspect persisted timing and cache behavior:
+Timing and cache behavior are persisted per API call, so a finished session can be inspected from its stored artifacts alone. Each assistant entry in the session ledger (`current.jsonl`, under the directory reported by `clio paths`) carries `timing { ttftMs, apiMs }` and `promptCache { input, cacheRead, cacheWrite, backendVerdict }`, and the run's first persisted call also carries `expectedColdReasons`. Cache verdicts are `hot`, `partial`, `cold`, or `small`.
 
-```bash
-node benchmarks/live/turn-report.mjs --session <id>
-```
-
-The report prints per-call `ttft`, `api`, input, cache read, cache write, backend cache verdict, and expected cold reasons. Cache verdicts are `hot`, `partial`, `cold`, or `small`.
+For aggregate cost and token facts across sessions, use `clio usage report --days <n>`. Inside the TUI, `/cost` shows session totals and `/context` opens the context-window ledger overlay.
 
 ## Self-documentation retrieval
 

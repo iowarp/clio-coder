@@ -183,13 +183,27 @@ Collect every detached batch before final synthesis.
 
 ### Review gate
 
-The builder runs the task. A reviewer (default: the builder's agent under a
-built-in reviewer persona, pinned to read-only autonomy, routable to a
-different node, model, or target) inspects the workspace against the task and
-ends with a `VERDICT: pass|revise|fail` line. A revise verdict re-runs the
-builder with the findings threaded as input data, bounded by `max_cycles`
-(default 2, max 4). Exhaustion, a fail verdict, or a broken reviewer surface
-as an explicit operator decision, never a silent failure.
+The builder runs the task. A reviewer then inspects the workspace against the
+task. The reviewer defaults to the builtin `verifier` recipe
+(`DEFAULT_GATE_DECIDER_AGENT_ID`) and never falls back to the builder's own
+agent; it is pinned to read-only autonomy and is routable to a different node,
+model, or target.
+
+The reviewer answers a typed `verifier-report` contract rather than trailing
+prose:
+
+```json
+{"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]}
+```
+
+`revise` is not a verdict a model authors. The reviewer answers `pass` or
+`fail`, and `decideReviewGate` in
+`src/domains/dispatch/gate-decisions.ts` owns the continuation policy: a
+non-passing verdict below the terminal cycle becomes `revise` and re-runs the
+builder with only the failed checks threaded as input data, bounded by
+`max_cycles` (default 2, max 4). On the terminal cycle the verdict settles as
+reported. A reviewer that produces no structured result settles as `exhausted`
+and surfaces as an explicit operator decision, never a silent failure.
 
 ### Compete
 
