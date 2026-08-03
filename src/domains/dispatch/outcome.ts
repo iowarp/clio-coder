@@ -9,7 +9,7 @@
  */
 
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
-import type { RunOutcome, RunStatus } from "./types.js";
+import type { RunOutcome, RunOutcomeCode, RunStatus } from "./types.js";
 
 export interface RunTerminationEvidence {
 	/** Process exit code; null when a native worker never reached a live session. */
@@ -87,4 +87,23 @@ export function runStatusForOutcome(outcome: RunOutcome): RunStatus {
 		default:
 			return "failed";
 	}
+}
+
+/**
+ * Whether a declared result contract was ever due for this attempt.
+ *
+ * A postcondition is only an applicable correctness check once the run reached
+ * the point of producing a terminal result. Two termination shapes qualify:
+ * the worker finished its own execution normally, or the worker itself
+ * validated a terminal result and exhausted its bounded repair rounds.
+ *
+ * Everything else left the contract unevaluated: an operator abort, a crash
+ * before the first token, a target that could not load the model, a stall
+ * kill, and an engine loop-guard abort. Validating a `null` output in those
+ * cases manufactures a `fail` out of infrastructure noise, which then enters
+ * route history as correctness evidence about a model that never ran. Measured
+ * against real history, that inflated the Scout failure count by 8 of 16.
+ */
+export function resultContractWasDue(outcome: RunOutcome, outcomeCode: RunOutcomeCode | null): boolean {
+	return outcome === "succeeded" || outcomeCode === "result_contract_exhausted";
 }

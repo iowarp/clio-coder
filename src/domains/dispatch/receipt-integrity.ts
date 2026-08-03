@@ -8,7 +8,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 12;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 13;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -254,7 +254,8 @@ function isReceiptQuality(value: unknown): value is RunReceiptQuality {
 			typeof (resultContract as Record<string, unknown>).validatorDigest === "string" &&
 			/^[0-9a-f]{64}$/.test(String((resultContract as Record<string, unknown>).validatorDigest)) &&
 			((resultContract as Record<string, unknown>).conformance === "pass" ||
-				(resultContract as Record<string, unknown>).conformance === "fail") &&
+				(resultContract as Record<string, unknown>).conformance === "fail" ||
+				(resultContract as Record<string, unknown>).conformance === "not-reached") &&
 			((resultContract as Record<string, unknown>).quality === "pass" ||
 				(resultContract as Record<string, unknown>).quality === "fail" ||
 				(resultContract as Record<string, unknown>).quality === "unmeasured"));
