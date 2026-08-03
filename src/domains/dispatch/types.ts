@@ -298,7 +298,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 12;
+	version: 13;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -322,7 +322,8 @@ export interface RunReceiptResponseSchemaFact {
 export interface RunReceiptResultContractFact {
 	sourceId: string;
 	validatorDigest: string;
-	conformance: "pass" | "fail";
+	/** `not-reached` means the run never produced a terminal result to judge. */
+	conformance: "pass" | "fail" | "not-reached";
 	quality: "pass" | "fail" | "unmeasured";
 }
 

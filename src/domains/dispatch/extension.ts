@@ -139,7 +139,12 @@ import {
 	resolveJointRoute,
 } from "./joint-route-resolver.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
-import { type RunTerminationEvidence, resolveRunOutcome, runStatusForOutcome } from "./outcome.js";
+import {
+	type RunTerminationEvidence,
+	resolveRunOutcome,
+	resultContractWasDue,
+	runStatusForOutcome,
+} from "./outcome.js";
 import { deriveEnvelopePhaseDurations, deriveRunPhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import {
@@ -4449,6 +4454,7 @@ export function createDispatchBundle(
 				const capturedOutput = outputCapture.snapshot();
 				const resultContract = validateRecipeResult({
 					contract: appliesRecipeResultContract(req.gate?.role) ? (lifecycle.recipe?.resultContract ?? null) : null,
+					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode),
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 					cwd: lifecycle.cwd,
 					networkAllowed: lifecycle.admission.allowedTools.includes(ToolNames.WebFetch),
@@ -4462,7 +4468,8 @@ export function createDispatchBundle(
 						},
 					},
 				});
-				if (finalOutcome === "succeeded" && resultContract?.validation.conformance === "fail") {
+				const resultValidation = resultContract?.applicable === true ? resultContract.validation : null;
+				if (finalOutcome === "succeeded" && resultValidation?.conformance === "fail") {
 					finalOutcome = "failed";
 					// Deterministic: the worker already spent its bounded repair rounds
 					// on this exact validator reason. Re-running the assignment
@@ -4470,11 +4477,11 @@ export function createDispatchBundle(
 					// to carry an outcome code or retry policy reads it as transient
 					// and burns the fleet on identical attempts.
 					outcomeCode = "result_contract_exhausted";
-					finalDetail = `result contract failed: ${resultContract.validation.reason ?? "invalid result"}`;
+					finalDetail = `result contract failed: ${resultValidation.reason ?? "invalid result"}`;
 					failureMessage = finalDetail;
 				}
 				const hasTerminalArtifact =
-					lifecycle.recipe?.resultContract.kind === "architect-plan" && resultContract?.validation.conformance === "pass";
+					lifecycle.recipe?.resultContract.kind === "architect-plan" && resultValidation?.conformance === "pass";
 				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput) && !hasTerminalArtifact) {
 					finalOutcome = "failed";
 					outcomeCode = "worker_final_output_missing";

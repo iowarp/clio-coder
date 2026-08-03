@@ -1,6 +1,11 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseScoutResult, validateResultContract } from "../../src/domains/agents/result-contract.js";
+import {
+	parseScoutResult,
+	validateRecipeResult,
+	validateResultContract,
+} from "../../src/domains/agents/result-contract.js";
+import { resultContractWasDue } from "../../src/domains/dispatch/outcome.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { reduceRouteQuality } from "../../src/domains/dispatch/route-quality.js";
 import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
@@ -204,6 +209,53 @@ describe("contracts/agent result contract", () => {
 		});
 		strictEqual(validation.conformance, "pass");
 		strictEqual(validation.quality, "unmeasured");
+	});
+
+	it("an unreached contract is not-reached rather than failed", () => {
+		const unreached = validateRecipeResult({
+			contract: { kind: "scout-report" },
+			reachedTerminalResult: false,
+			output: null,
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+		});
+		ok(unreached !== null);
+		strictEqual(unreached.applicable, false);
+		strictEqual(unreached.fact.conformance, "not-reached");
+		strictEqual(unreached.fact.quality, "unmeasured");
+		// The contract identity survives so offline replay still knows which
+		// postcondition was in force for the attempt that never produced one.
+		ok(unreached.fact.sourceId.startsWith("agent-result-contract:scout-report:"));
+	});
+
+	it("a due contract with no result is a genuine failure", () => {
+		const due = validateRecipeResult({
+			contract: { kind: "scout-report" },
+			reachedTerminalResult: true,
+			output: null,
+			cwd: "/repo",
+			networkAllowed: false,
+			filesystem,
+		});
+		ok(due !== null);
+		ok(due.applicable);
+		strictEqual(due.fact.conformance, "fail");
+		strictEqual(due.fact.quality, "fail");
+	});
+
+	it("infrastructure terminations leave the contract undue", () => {
+		// Every shape observed in real route history that produced a fabricated
+		// quality failure: operator abort, worker crash, model residency
+		// failure, stall kill, and the engine loop guard.
+		strictEqual(resultContractWasDue("canceled", null), false);
+		strictEqual(resultContractWasDue("failed", null), false);
+		strictEqual(resultContractWasDue("failed", "vram_capacity_fit_failure"), false);
+		strictEqual(resultContractWasDue("stalled", null), false);
+		strictEqual(resultContractWasDue("failed", "loop_guard_tools_disabled_exhausted"), false);
+		// The two shapes where the model did get its chance.
+		strictEqual(resultContractWasDue("succeeded", null), true);
+		strictEqual(resultContractWasDue("failed", "result_contract_exhausted"), true);
 	});
 
 	it("external research requires an allowed network posture", () => {

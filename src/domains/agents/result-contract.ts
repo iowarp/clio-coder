@@ -53,11 +53,21 @@ export interface ResultContractValidationInput {
 	observedReadRanges?: ObservedReadRanges;
 }
 
-/** Receipt-ready projection of the typed result validator. */
+/**
+ * Receipt-ready projection of the typed result validator.
+ *
+ * `not-reached` is the third conformance state and is not a soft failure. A
+ * declared postcondition is only an applicable check once the run got far
+ * enough to produce a terminal result. A worker that crashed before its first
+ * token, a target that could not load the model, an operator abort, and an
+ * engine loop-guard abort all leave the contract unevaluated. Recording those
+ * as `fail` invents correctness evidence out of infrastructure noise, so they
+ * seal `not-reached` and stay out of the routing quality denominator.
+ */
 export interface ResultContractFact {
 	sourceId: string;
 	validatorDigest: string;
-	conformance: "pass" | "fail";
+	conformance: "pass" | "fail" | "not-reached";
 	quality: ResultContractQuality;
 }
 
@@ -67,7 +77,21 @@ export interface ValidateRecipeResultInput {
 	cwd: string;
 	networkAllowed: boolean;
 	filesystem: ResultContractFilesystem;
+	/**
+	 * Whether the run reached the point where its terminal result was due. The
+	 * caller owns this judgement because only it knows how the attempt ended.
+	 */
+	reachedTerminalResult: boolean;
 }
+
+/**
+ * A declared contract that never got to run. `applicable: false` carries the
+ * contract's identity so offline replay still knows which postcondition was in
+ * force, while contributing no correctness label.
+ */
+export type RecipeResultOutcome =
+	| { applicable: true; validation: ResultContractValidation; fact: ResultContractFact }
+	| { applicable: false; fact: ResultContractFact };
 
 export interface ScoutCitation {
 	path: string;
@@ -490,10 +514,19 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 }
 
 /** Validate a recipe's final result and project it into receipt-safe facts. */
-export function validateRecipeResult(
-	input: ValidateRecipeResultInput,
-): { validation: ResultContractValidation; fact: ResultContractFact } | null {
+export function validateRecipeResult(input: ValidateRecipeResultInput): RecipeResultOutcome | null {
 	if (input.contract === null) return null;
+	if (!input.reachedTerminalResult) {
+		return {
+			applicable: false,
+			fact: {
+				sourceId: sourceId(input.contract),
+				validatorDigest: digest({ contract: input.contract, reached: false }),
+				conformance: "not-reached",
+				quality: "unmeasured",
+			},
+		};
+	}
 	const validation = validateResultContract({
 		contract: input.contract,
 		output: input.output,
@@ -502,6 +535,7 @@ export function validateRecipeResult(
 		filesystem: input.filesystem,
 	});
 	return {
+		applicable: true,
 		validation,
 		fact: {
 			sourceId: validation.sourceId,
