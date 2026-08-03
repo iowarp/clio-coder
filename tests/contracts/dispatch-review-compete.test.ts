@@ -605,8 +605,8 @@ describe("compete dispatch", () => {
 				dispatch: bundle.contract,
 				getAutonomy: () => "full-auto",
 				competeWorktrees: {
-					createCandidate(ownership, index) {
-						const worktree = createCandidateWorktree(ownership, index);
+					createCandidate(ownership, index, baseline) {
+						const worktree = createCandidateWorktree(ownership, index, baseline);
 						if (index === 2) throw new Error("injected candidate 2 creation failure");
 						return worktree;
 					},
@@ -723,8 +723,8 @@ describe("compete dispatch", () => {
 	it("uses segment-safe ownership so colliding group names cannot cross-delete", () => {
 		let short = claimCompeteGroup(repo, "collision");
 		let longer = claimCompeteGroup(repo, "collision-extra");
-		const shortCandidate = createCandidateWorktree(short, 1);
-		const longerCandidate = createCandidateWorktree(longer, 1);
+		const shortCandidate = createCandidateWorktree(short, 1, "HEAD");
+		const longerCandidate = createCandidateWorktree(longer, 1, "HEAD");
 		try {
 			strictEqual(isCanonicalPathInside(short.directory, longerCandidate.path), false);
 			short = markCompeteGroupCleanupReady(short);
@@ -748,10 +748,10 @@ describe("compete dispatch", () => {
 
 	it("recovers only proven cleanup-ready crash leftovers and preserves active or unproven groups", () => {
 		let cleanupReady = claimCompeteGroup(repo, "crashed-after-settlement");
-		createCandidateWorktree(cleanupReady, 1);
+		createCandidateWorktree(cleanupReady, 1, "HEAD");
 		cleanupReady = markCompeteGroupCleanupReady(cleanupReady);
 		let active = claimCompeteGroup(repo, "crashed-while-active");
-		const activeCandidate = createCandidateWorktree(active, 1);
+		const activeCandidate = createCandidateWorktree(active, 1, "HEAD");
 		const unproven = join(repo, ".clio", "worktrees", "missing-manifest");
 		mkdirSync(unproven);
 		try {
@@ -783,7 +783,7 @@ describe("compete dispatch", () => {
 			const root = process.env.CLIO_TEST_COMPETE_ROOT;
 			if (!root) throw new Error("missing recovery root");
 			const ownership = claimCompeteGroup(root, "hard-crash-active");
-			createCandidateWorktree(ownership, 1);
+			createCandidateWorktree(ownership, 1, "HEAD");
 			const worker = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
 				detached: true,
 				stdio: "ignore",
@@ -858,8 +858,8 @@ describe("compete dispatch", () => {
 				const root = process.env.CLIO_TEST_COMPETE_ROOT;
 				if (!root) throw new Error("missing recovery root");
 				const ownership = claimCompeteGroup(root, "restart-judge-winner");
-				createCandidateWorktree(ownership, 1);
-				createCandidateWorktree(ownership, 2);
+				createCandidateWorktree(ownership, 1, "HEAD");
+				createCandidateWorktree(ownership, 2, "HEAD");
 				process.stdout.write(JSON.stringify({ group: ownership.group }));
 			`;
 			const claimed = JSON.parse(
@@ -906,8 +906,8 @@ describe("compete dispatch", () => {
 			const root = process.env.CLIO_TEST_COMPETE_ROOT;
 			if (!root) throw new Error("missing recovery root");
 			const ownership = claimCompeteGroup(root, "restart-missing-receipt");
-			createCandidateWorktree(ownership, 1);
-			createCandidateWorktree(ownership, 2);
+			createCandidateWorktree(ownership, 1, "HEAD");
+			createCandidateWorktree(ownership, 2, "HEAD");
 			process.stdout.write(JSON.stringify({ group: ownership.group }));
 		`;
 		const claimed = JSON.parse(
