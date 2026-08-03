@@ -302,7 +302,7 @@ describe("dispatch route quality", { concurrency: false }, () => {
 		roots.push(stateDir);
 		const history = createRouteHistoryStore({ stateDir });
 		const record = {
-			version: 2 as const,
+			version: 3 as const,
 			receiptDigest: "a".repeat(64),
 			assignmentId: "assignment",
 			route: candidate(),

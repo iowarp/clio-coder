@@ -39,7 +39,7 @@ const RECIPE_FACTS = agentRoleFactsResolver((agentId) => {
 
 function historyRecord(route: RouteCandidate, executionRole: ExecutionRole, digest: string): RouteHistoryRecord {
 	return {
-		version: 2,
+		version: 3,
 		receiptDigest: digest,
 		assignmentId: "assignment-1",
 		route,
