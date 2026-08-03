@@ -1,10 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { type ExecutionRole, isExecutionRole } from "./execution-role.js";
-import { type RouteCandidate, routeCandidateKey } from "./route-decision.js";
+import { type RouteCandidate, routeCapabilityKey, routeDriftGuard, routeDriftInvalidates } from "./route-decision.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 import type { RunPhaseDurations } from "./types.js";
 
@@ -12,7 +12,7 @@ export type RouteReliabilityOutcome = "success" | "failure" | "neutral";
 
 /** One reconstructable, terminal observation for a concrete route identity. */
 export interface RouteHistoryRecord {
-	version: 2;
+	version: 3;
 	receiptDigest: string;
 	assignmentId: string;
 	route: RouteCandidate;
@@ -41,6 +41,9 @@ export interface CreateRouteHistoryStoreOptions {
 	maxRecords?: number;
 }
 
+/** The one supported durable format. Earlier files are retired, never read. */
+export const ROUTE_HISTORY_VERSION = 3;
+
 const DEFAULT_MAX_RECORDS = 4096;
 
 function historyPath(stateDir: string): string {
@@ -56,7 +59,8 @@ function compareRecords(left: RouteHistoryRecord, right: RouteHistoryRecord): nu
 }
 
 function validateRecord(value: unknown): RouteHistoryRecord {
-	if (!isRecord(value) || value.version !== 2) throw new Error("route history record has unsupported version");
+	if (!isRecord(value) || value.version !== ROUTE_HISTORY_VERSION)
+		throw new Error("route history record has unsupported version");
 	if (!isDigest(value.receiptDigest)) throw new Error("route history receipt digest invalid");
 	if (typeof value.assignmentId !== "string" || value.assignmentId.length === 0)
 		throw new Error("route history assignment id invalid");
@@ -86,7 +90,7 @@ function validateRecord(value: unknown): RouteHistoryRecord {
 		throw new Error("route history settlement timestamp invalid");
 	}
 	return {
-		version: 2,
+		version: 3,
 		receiptDigest: value.receiptDigest,
 		assignmentId: value.assignmentId,
 		route: { ...value.route },
@@ -112,14 +116,36 @@ function readHistory(path: string): RouteHistoryRecord[] {
 	} catch (error) {
 		throw new Error(`route history unreadable: ${error instanceof Error ? error.message : String(error)}`);
 	}
-	if (!isRecord(parsed) || parsed.version !== 2 || !Array.isArray(parsed.records)) {
-		throw new Error("route history has unsupported format");
+	if (!isRecord(parsed) || !Array.isArray(parsed.records)) throw new Error("route history has unsupported format");
+	if (parsed.version !== ROUTE_HISTORY_VERSION) {
+		// Reject rather than migrate, per the plan's durable-format rule. A
+		// retired file is renamed aside instead of crashing every dispatch until
+		// an operator clears it by hand: nothing is read from it, and the
+		// evidence it holds was gathered under semantics this version does not
+		// share, so carrying it forward would be the actual data loss.
+		retireHistory(path, parsed.version);
+		return [];
 	}
 	return parsed.records.map(validateRecord).sort(compareRecords);
 }
 
+function retireHistory(path: string, version: unknown): void {
+	const stamp = new Date()
+		.toISOString()
+		.replace(/[-:]/gu, "")
+		.replace(/\.\d+Z$/u, "Z");
+	const retired = `${path}.v${String(version)}.${stamp}.retired`;
+	renameSync(path, retired);
+	process.stderr.write(
+		`[clio:dispatch] route history v${String(version)} is retired; starting empty at v${ROUTE_HISTORY_VERSION}. Prior observations: ${retired}\n`,
+	);
+}
+
 function writeHistory(path: string, records: ReadonlyArray<RouteHistoryRecord>): void {
-	atomicWrite(path, JSON.stringify({ version: 2, records: [...records].sort(compareRecords) }, null, 2));
+	atomicWrite(
+		path,
+		JSON.stringify({ version: ROUTE_HISTORY_VERSION, records: [...records].sort(compareRecords) }, null, 2),
+	);
 }
 
 /**
@@ -138,8 +164,14 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 
 	return {
 		recordsFor(route) {
-			const key = routeCandidateKey(route);
-			return records.filter((record) => routeCandidateKey(record.route) === key).map(clone);
+			const key = routeCapabilityKey(route);
+			const current = routeDriftGuard(route);
+			return records
+				.filter(
+					(record) =>
+						routeCapabilityKey(record.route) === key && !routeDriftInvalidates(routeDriftGuard(record.route), current),
+				)
+				.map(clone);
 		},
 		all() {
 			return records.map(clone);

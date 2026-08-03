@@ -580,7 +580,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				};
 				samples?.record(realized.route, sample);
 				history.upsert({
-					version: 2,
+					version: 3,
 					receiptDigest: outcome.receipt.integrity.digest,
 					assignmentId: outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
 					route: realized.route,
