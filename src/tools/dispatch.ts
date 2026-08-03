@@ -1601,7 +1601,7 @@ async function runCompete(
 			const createCandidate = deps.competeWorktrees?.createCandidate ?? createCandidateWorktree;
 			for (let index = 1; index <= compete.candidates; index += 1) {
 				throwIfStopped();
-				worktrees.push(createCandidate(ownership, index));
+				worktrees.push(createCandidate(ownership, index, "HEAD"));
 			}
 
 			if (timeoutMs !== undefined) {
