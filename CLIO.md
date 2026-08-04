@@ -106,7 +106,7 @@ Worker processes accept only WorkerSpec version 3 with a concrete `budget` block
 
 - `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one strict version 4, deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves. Steps are discriminated by kind. Every agent task carries requested and approved authority; the scheduler refuses a missing grant.
 - `src/domains/dispatch/execution-scheduler.ts` performs whole-plan preflight and reservation before spawning, then admits dependency-ready waves with stop/continue semantics.
-- Fleet contracts are strict DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs. Version 1 is agent-only; version 2 may also carry code steps; version 3 may also carry bounded loops and commit steps.
+- Fleet contracts are strict DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs. Version 1 is agent-only; version 2 may also carry code steps; version 3 may also carry bounded loops and commit steps; version 4 declares and enforces per-step write boundaries.
 - Logical work is named by assignment id. Terminal attempts are named separately as terminal run ids; `dispatchBatch` has no `runIds` compatibility alias.
 - Resolved dispatch plans are strict version 3 and require an explicit deadline field (`number` for fleet plans, `null` otherwise). Older or partial forms are rejected.
 
@@ -127,6 +127,16 @@ Worker processes accept only WorkerSpec version 3 with a concrete `budget` block
 - Staleness is scheduler-enforced. A verification node's green measures the workspace at completion; any later workspace step that is not itself a verification or a commit invalidates it, and the verification re-runs before a dependent may treat it as satisfied, up to `STALENESS_REVALIDATION_LIMIT`. Only deterministic verifications are revalidated: re-running a model gate is a dispatch that must be declared.
 - A commit is a code step with `commitFrom`, whose message is the first listed candidate that ran and authored `commitMessage` on its terminal contract, falling back to `clio(<rootId>): ...`. Registry argv binds whole-token `{{name}}` placeholders only, and an empty diff fails the step rather than recording nothing.
 - `src/domains/agents/fleets/` ships `build-test`, `build-review`, and `sdlc`; a project `.clio/fleets/<name>.md` shadows a builtin of the same name. They name registry command ids, so a repo with no `commands.yaml` gets a hard error rather than a green placeholder.
+
+## Per-step write boundaries
+
+- A tool permission level is a capability list; `writes` is a boundary, and they are not the same thing. `src/domains/agents/write-boundary.ts` owns the grammar: repo-relative POSIX path prefixes, an entry ending in `/` covering the subtree, no globs, no `..`, no absolute paths. `readonly` is the empty allowlist.
+- Enforcement is detect-and-rollback, never sandboxing. Nothing prevents a write. `src/domains/dispatch/write-boundary.ts` snapshots the checkout before a window runs, diffs it after against the pinned baseline commit, rolls back what was not allowed, and fails the step with `writes_boundary_violation` naming the offending paths and the declaration. Confinement an agent cannot escape needs OS-level isolation, which this does not provide.
+- Boundaries are opt-in by contract version 4 and are then total: every workspace step declares a non-empty `writes` and every `readonly` step declares nothing. A `writes` key under an earlier version is refused by name rather than ignored.
+- Rollback restores only unauthorized paths and only from content git already has. A path that was already dirty when the snapshot was taken cannot be restored, so the step fails with `rollback-incomplete`, the working tree is left exactly as the step made it, and the record says which paths and why.
+- Attribution is per scheduling window, because fleet steps share one checkout. `compileExecutionPlan` therefore refuses a wave that schedules more than one step with a non-empty allowlist, and refuses a wave that mixes boundary-declaring steps with undeclared ones. A readonly step may run beside the wave's one writer.
+- Enforcement sees what git sees, so an ignored path is outside it: the repository decides what counts as its content. The one subtraction is Clio's own state directory when it sits inside the workspace, because receipts, code-step logs, and verdicts are the orchestrator's journal rather than the step's writing.
+- Enforcement is orchestrator-side and fails closed: a plan that declares a boundary the scheduler cannot verify is refused before any spawn, and so is a declared boundary in a non-git workspace or one that leaves the workspace through a symlink. Verdicts are sealed under `write-boundaries/<rootId>/` in the Clio state directory, beside the run ledger, each carrying its own digest and the baseline commit it was computed against.
 
 ## Transactional attempts and Scout escalation
 
