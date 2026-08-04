@@ -59,7 +59,10 @@ describe("contracts/ci scripts", () => {
 	it("keeps the deterministic local ci script aligned with the release-relevant checks", () => {
 		const scripts = packageScripts();
 
-		strictEqual(scripts.ci, "npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test");
+		strictEqual(
+			scripts.ci,
+			"npm run typecheck && npm run lint && npm run skills:check && npm run build && npm run test && npm run test:trace-viewer",
+		);
 		strictEqual(scripts["skills:check"], "node --import tsx scripts/pin-skills.ts --check");
 		strictEqual(scripts["ci:release"], "npm run ci && node scripts/check-release.mjs");
 		strictEqual(scripts["test:live"], "node scripts/live-smoke.mjs");

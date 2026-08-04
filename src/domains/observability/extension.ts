@@ -15,6 +15,7 @@ import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-i
 import { aggregateMetrics } from "./metrics.js";
 import { createObservabilityProjection } from "./projection.js";
 import { createTelemetry } from "./telemetry.js";
+import { createDispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
 /**
  * Callbacks the auto-build path uses to report evidence readiness back to the
@@ -130,6 +131,7 @@ function evidenceIndexRow(
 export function createObservabilityBundle(context: DomainContext): DomainBundle<ObservabilityContract> {
 	const telemetry = createTelemetry();
 	const cost = createCostTracker();
+	const trace = createDispatchTraceMirror(traceDatabasePath(clioStateDir()));
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
 
@@ -167,6 +169,15 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 
 	const extension: DomainExtension = {
 		async start() {
+			for (const channel of [
+				BusChannels.DispatchEnqueued,
+				BusChannels.DispatchStarted,
+				BusChannels.DispatchProgress,
+				BusChannels.DispatchCompleted,
+				BusChannels.DispatchFailed,
+			] as const) {
+				unsubscribes.push(context.bus.on(channel, (payload) => trace.enqueue(channel, payload)));
+			}
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchCompleted, (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
@@ -210,6 +221,9 @@ export function createObservabilityBundle(context: DomainContext): DomainBundle<
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
 			projection.stop();
+			// Terminal trace facts are the live operator contract. Flush them before
+			// potentially slower evidence builds consume the remaining hook budget.
+			await trace.close();
 			// Flush any in-flight forensic builds so a headless run that shuts down
 			// immediately after dispatch still persists its bundle and index row.
 			// Best-effort and bounded by the shutdown hook budget; each build

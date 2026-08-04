@@ -3188,6 +3188,7 @@ export function createDispatchBundle(
 				runtimeId,
 				runtimeKind: "acp-delegation",
 				pid: acp.pid,
+				processCommand: JSON.stringify([lifecycle.agentConfig.command, ...(lifecycle.agentConfig.args ?? [])]),
 			});
 		} catch (error) {
 			try {
@@ -4113,6 +4114,7 @@ export function createDispatchBundle(
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
 				pid,
+				...(worker.processCommand !== undefined ? { processCommand: worker.processCommand } : {}),
 				...fleetIdentity,
 			});
 		} catch (error) {

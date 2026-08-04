@@ -47,6 +47,7 @@ Usage:
   clio eval                 run, report, or compare local eval task files
   clio memory               list, propose, approve, reject, or prune memory
   clio usage report         cross-session usage facts and opportunities (experimental)
+  clio trace                query or view the durable dispatch trace mirror
   clio evolve manifest      create, validate, or summarize change manifests
   clio extensions           install, list, enable, disable, or remove extension packages
   clio skills               list, inspect, validate, or install skills
@@ -137,6 +138,7 @@ const RECOGNIZED_SUBCOMMANDS = new Set<string>([
 	"eval",
 	"memory",
 	"usage",
+	"trace",
 	"evolve",
 	"extensions",
 	"ext",
@@ -206,6 +208,8 @@ async function dispatch(
 			return (await import("./memory.js")).runMemoryCommand(subArgs);
 		case "usage":
 			return (await import("./usage.js")).runUsageCommand(subArgs);
+		case "trace":
+			return (await import("./trace.js")).runTraceCommand(subArgs);
 		case "evolve":
 			return (await import("./evolve.js")).runEvolveCommand(subArgs);
 		case "extensions":

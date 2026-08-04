@@ -23,6 +23,9 @@ export default defineConfig({
 	clean: true,
 	dts: false,
 	shims: false,
+	// Node 22.19 ships `node:sqlite`; retaining the protocol prevents tsup from
+	// turning that newer builtin into a lookup for the nonexistent `sqlite` package.
+	removeNodeProtocol: false,
 	outDir: "dist",
 	onSuccess() {
 		const recipes = join("dist", "domains", "agents", "builtins");
@@ -34,6 +37,8 @@ export default defineConfig({
 	// esbuild hoists it to the top of the corresponding entry chunk. A tsup
 	// `banner` would stamp it onto every emitted chunk instead.
 	external: [
+		// Keep the builtin outside generated chunks; see removeNodeProtocol above.
+		"node:sqlite",
 		"@anthropic-ai/claude-agent-sdk",
 		"@earendil-works/pi-agent-core",
 		"@earendil-works/pi-ai",

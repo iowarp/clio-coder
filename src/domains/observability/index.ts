@@ -39,3 +39,25 @@ export {
 	PROJECTION_FLUSH_DEBOUNCE_MS,
 } from "./projection.js";
 export { DEFAULT_HISTOGRAM_CAPACITY, type MetricKind, type TelemetrySnapshot } from "./telemetry.js";
+export type {
+	DispatchTraceMirror,
+	TraceEventInput,
+	TraceEventRow,
+	TraceGateCheck,
+	TraceGateResultInput,
+	TracePhaseRow,
+	TraceProcessInput,
+	TraceProcessRow,
+	TraceRunRow,
+	TraceSpendInput,
+} from "./trace-store.js";
+export {
+	createDispatchTraceMirror,
+	TRACE_DATABASE_FILE,
+	TRACE_EVENT_POLL_LIMIT,
+	TRACE_SCHEMA_VERSION,
+	TraceReader,
+	TraceSchemaVersionError,
+	TraceStore,
+	traceDatabasePath,
+} from "./trace-store.js";
