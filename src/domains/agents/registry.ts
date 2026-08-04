@@ -6,7 +6,7 @@ import { type AgentRecipe, type RecipeSource, recipeIdFromPath } from "./recipe.
 import { parseAgentRecipeSchema } from "./recipe-schema.js";
 import { assertAgentSpecPolicy, isShadowAgent, normalizeAgentSpec } from "./spec.js";
 
-const RESERVED_CUSTOM_AGENT_IDS = new Set(["worker", "delegate"]);
+const RESERVED_CUSTOM_AGENT_IDS = new Set(["worker", "delegate", "auto"]);
 
 export interface AgentRecipeDiagnostic {
 	source: RecipeSource["source"];

@@ -26,6 +26,7 @@ const plan: RunPlanProvenance = {
 	topology: "review",
 	taskCount: 2,
 	approval: "operator",
+	source: null,
 	approvalRequestId: "apr-orphan",
 	approvalRequestedBy: "operator-test",
 	costCeilingUsd: 5,

@@ -990,6 +990,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		...(interactive ? { askUser: askUserBridge } : {}),
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
+		...(agents ? { getAgentSpecs: () => agents.listSpecs() } : {}),
 		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
 		// Same effective-autonomy resolution the registry admission uses, so plan
 		// provenance and compete winner handling agree with the approval surface.

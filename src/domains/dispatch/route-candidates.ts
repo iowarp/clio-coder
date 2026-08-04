@@ -16,7 +16,7 @@ export interface RouteAvailability {
 /** Hard route-boundary rejections shared by shadow and active resolution. */
 export function routeBoundaryRejections(
 	request: DispatchRequest,
-	tuple: { targetId: string; modelId: string; nodeId: string },
+	tuple: { agentId: string; targetId: string; modelId: string; nodeId: string },
 	exact: boolean,
 ): Record<string, string> {
 	const rejections: Record<string, string> = {};
@@ -33,7 +33,7 @@ export function routeBoundaryRejections(
 		request.allowedCandidates !== undefined &&
 		!(request.allowedCandidates ?? []).some(
 			(candidate) =>
-				candidate.agentId === request.agentId &&
+				candidate.agentId === tuple.agentId &&
 				candidate.target === tuple.targetId &&
 				candidate.model === tuple.modelId &&
 				candidate.node === tuple.nodeId,

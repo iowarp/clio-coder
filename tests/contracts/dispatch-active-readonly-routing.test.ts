@@ -8,6 +8,7 @@ import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RouteCorrelationFacts } from "../../src/domains/dispatch/execution-role.js";
 import {
 	emptyJointHardFilterVerdicts,
+	type JointAgentDimension,
 	type JointNodeDimension,
 	type JointRouteResolverInput,
 	type JointTargetDimension,
@@ -20,7 +21,11 @@ import {
 	assertApprovedRecoveryCapability,
 } from "../../src/domains/dispatch/route-approval.js";
 import type { RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
-import { ROUTE_POSTURES, type RouteObservation } from "../../src/domains/dispatch/route-policy.js";
+import {
+	ROUTE_POSTURES,
+	type RouteObservation,
+	routePriorForLatencyClass,
+} from "../../src/domains/dispatch/route-policy.js";
 import {
 	DECISION_LATENCY_BUDGET_MS,
 	evaluateRouteReadiness,
@@ -83,6 +88,16 @@ function candidate(
 	};
 }
 
+function agentDimension(agentId: string, executionRole: RouteCandidate["executionRole"]): JointAgentDimension {
+	return {
+		agentId,
+		specFingerprint: `spec-${agentId}`,
+		executionRole,
+		latencyClass: "balanced",
+		coldPrior: routePriorForLatencyClass("balanced"),
+	};
+}
+
 function resolverInput(options: {
 	targets?: JointTargetDimension[];
 	role?: RouteCandidate["executionRole"];
@@ -98,26 +113,45 @@ function resolverInput(options: {
 	const role = options.role ?? "researcher";
 	const agentId = options.agentId ?? "scout";
 	const executedRoute = candidate(targets[0] as JointTargetDimension, node, { agentId, executionRole: role });
+	const selectedAgent = agentDimension(agentId, role);
 	return {
 		mode: "active",
-		agentId,
-		executionRole: role,
+		agents: [selectedAgent],
+		agentSelection: {
+			request: "explicit",
+			baselineAgentId: agentId,
+			evaluations: [
+				{
+					agentId,
+					specFingerprint: selectedAgent.specFingerprint,
+					executionRole: role,
+					authority: "read-only",
+					rejections: [],
+					coldPrior: selectedAgent.coldPrior,
+					priorReasons: [],
+				},
+			],
+			authorityBasis: null,
+		},
 		executedRoute,
 		targets,
 		nodes: [node],
 		intent: options.intent ?? ACTIVE_INTENT,
 		independenceSubject: options.independenceSubject ?? null,
-		project(targetDimension, projectedNode) {
+		project(projectedAgent, targetDimension, projectedNode) {
 			const hardFilters = emptyJointHardFilterVerdicts();
 			const rejection = options.filter?.(targetDimension) ?? null;
 			if (rejection !== null) hardFilters.authority = rejection;
 			return {
-				candidate: candidate(targetDimension, projectedNode, { agentId, executionRole: role }),
+				candidate: candidate(targetDimension, projectedNode, {
+					agentId: projectedAgent.agentId,
+					specFingerprint: projectedAgent.specFingerprint,
+					executionRole: projectedAgent.executionRole,
+				}),
 				hardFilters,
 				observations:
 					options.observations?.(targetDimension) ??
 					Array.from({ length: MINIMUM_ACTIVE_QUALITY_LABELS }, () => observation()),
-				latencyClass: "balanced",
 				capabilities: [],
 				readiness: {
 					hardConstraintValidity: 1,
@@ -178,7 +212,11 @@ function request(): DispatchRequest {
 
 describe("contracts/dispatch active read-only routing", () => {
 	it("default settings remain shadow-only", () => {
-		deepStrictEqual(DEFAULT_SETTINGS.routing, { activeRoles: [], activePostures: [] });
+		deepStrictEqual(DEFAULT_SETTINGS.routing, {
+			activeRoles: [],
+			activePostures: [],
+			agentAutomation: { activeAgentRoles: [] },
+		});
 		strictEqual(
 			activeRoutingEnabled({
 				settings: DEFAULT_SETTINGS.routing,
@@ -190,12 +228,17 @@ describe("contracts/dispatch active read-only routing", () => {
 			false,
 		);
 		const configured = validateSettings({
-			routing: { activeRoles: ["researcher"], activePostures: ["balanced"] },
+			routing: {
+				activeRoles: ["researcher"],
+				activePostures: ["balanced"],
+				agentAutomation: { activeAgentRoles: [] },
+			},
 		});
 		deepStrictEqual(configured.issues, []);
 		deepStrictEqual(configured.settings.routing, {
 			activeRoles: ["researcher"],
 			activePostures: ["balanced"],
+			agentAutomation: { activeAgentRoles: [] },
 		});
 	});
 
@@ -345,7 +388,11 @@ describe("contracts/dispatch active read-only routing", () => {
 				routeApproval: approval,
 				routeAttemptDecision: recovery,
 			},
-			settings: { activeRoles: ["researcher"], activePostures: ["balanced"] },
+			settings: {
+				activeRoles: ["researcher"],
+				activePostures: ["balanced"],
+				agentAutomation: { activeAgentRoles: [] },
+			},
 			capabilityClass: "read-only",
 			failover: "approved",
 			requestedAt: new Date(0).toISOString(),
@@ -358,7 +405,11 @@ describe("contracts/dispatch active read-only routing", () => {
 	});
 
 	it("manual and failover-none routes never drift", () => {
-		const settings = { activeRoles: ["researcher"] as const, activePostures: ["balanced"] as const };
+		const settings = {
+			activeRoles: ["researcher"] as const,
+			activePostures: ["balanced"] as const,
+			agentAutomation: { activeAgentRoles: [] },
+		};
 		strictEqual(
 			activeRoutingEnabled({
 				settings,

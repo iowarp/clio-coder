@@ -246,9 +246,15 @@ export interface RunGateProvenance {
  */
 export interface RunPlanProvenance {
 	hash: string;
-	topology: "parallel" | "sequential" | "pipeline" | "review" | "compete" | "detached";
+	topology: "parallel" | "sequential" | "pipeline" | "review" | "compete" | "detached" | "fleet";
 	taskCount: number;
 	approval: "operator" | "full-auto";
+	source: null | {
+		kind: "scout-transition";
+		runId: string;
+		receiptDigest: string;
+		executionPlanHash: string;
+	};
 	/** Registry-issued identity of the one-shot operator approval, when applicable. */
 	approvalRequestId?: string;
 	approvalRequestedBy?: string;
@@ -298,7 +304,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 14;
+	version: 15;
 	algorithm: "sha256";
 	digest: string;
 }

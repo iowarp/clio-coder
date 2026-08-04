@@ -1,11 +1,10 @@
 /**
  * Route observer (shadow mode).
  *
- * The observer watches every dispatch, synchronously builds the RouteDecisionV1
+ * The observer watches every dispatch, receives the shared RouteDecisionV1,
  * the policy would have produced, and records decision-versus-outcome into a
- * bounded JSONL under the local state dir. It never steers dispatch: every
- * entry point is try/catch-wrapped, there is no new tool surface, and disabling
- * the observer leaves dispatch behavior bit-identical.
+ * bounded JSONL under the local state dir. Selection belongs to the resolver;
+ * this module only records the route that shadow or active admission sealed.
  *
  * What it measures is deliberately not "did Clio dispatch to the agent it was
  * asked for". That comparison was true by construction, because the actual
@@ -13,16 +12,15 @@
  * route quality. It is replaced by the four families that do carry signal:
  * route regret, constraint validity, prediction calibration, and outcome.
  *
- * The intent detector below survives as the cold-start prior for agent
- * selection. It is a shadow recommendation only: changing the agent changes
- * authority, so no observer output can ever alter the executed agent.
+ * The bounded intent classifier below survives only as a cold-start agent
+ * prior. It never contributes a hard constraint or durable raw task text.
  */
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
-import type { AgentLatencyClass } from "../agents/spec.js";
 import { parseEvalArtifactV3 } from "../eval/artifacts/store.js";
+import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import { readGateDecisionArtifacts } from "./gate-decisions.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import {
@@ -40,157 +38,6 @@ import { createRouteHistoryStore, type RouteHistoryStore } from "./route-history
 import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
 import { type RouteQualityReduction, reduceRouteQuality, routeQualityEvalDigest } from "./route-quality.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// Rule-based intent detector (sync, <1ms; no LLM)
-// ---------------------------------------------------------------------------
-
-export type RouteTaskType =
-	| "code_write"
-	| "code_read"
-	| "code_review"
-	| "debug"
-	| "refactor"
-	| "test"
-	| "docs"
-	| "config"
-	| "research"
-	| "unknown";
-
-export type RouteComplexity = "trivial" | "simple" | "moderate" | "complex";
-
-export type RouteDomain = "frontend" | "backend" | "infra" | "data" | "security" | "general";
-
-/**
- * Bounded task features. Raw task text is deliberately never stored: the
- * observer keeps policy-relevant classifications and hashes, not prompts.
- */
-export interface RouteIntent {
-	taskType: RouteTaskType;
-	complexity: RouteComplexity;
-	domain: RouteDomain;
-	decomposable: boolean;
-	estimatedSubtasks: number;
-	/** Detector confidence in this classification (0..1). */
-	confidence: number;
-}
-
-const TASK_TYPE_RULES: ReadonlyArray<readonly [RouteTaskType, RegExp]> = [
-	["test", /\b(tests?|unit tests?|coverage|spec file)\b/i],
-	["docs", /\b(documentation|docs|readme|changelog|comment|docstring)\b/i],
-	["code_review", /\b(review|audit|critique|inspect for)\b/i],
-	["debug", /\b(debug|fix|bug|crash|failure|broken|regression)\b/i],
-	["refactor", /\b(refactor|clean ?up|restructure|rename|extract|simplify)\b/i],
-	["config", /\b(config|configuration|settings|setup|install|ci pipeline|workflow file)\b/i],
-	["research", /\b(research|investigate|explore|survey|compare|find out)\b/i],
-	["code_read", /\b(read|explain|understand|summarize|describe|walk through)\b/i],
-	["code_write", /\b(write|implement|add|create|build|develop|introduce)\b/i],
-];
-
-const DOMAIN_RULES: ReadonlyArray<readonly [RouteDomain, RegExp]> = [
-	["security", /\b(security|vulnerabilit|auth|credential|secret|cve)\b/i],
-	["frontend", /\b(ui|css|react|component|frontend|tui|overlay)\b/i],
-	["infra", /\b(docker|kubernetes|k8s|deploy|terraform|infra|slurm|cluster)\b/i],
-	["data", /\b(dataset|etl|pipeline data|schema migration|parquet|hdf5)\b/i],
-	["backend", /\b(api|server|endpoint|database|backend|service)\b/i],
-];
-
-export function classifyRouteIntent(task: string): RouteIntent {
-	const text = task.trim();
-	let taskType: RouteTaskType = "unknown";
-	for (const [candidate, pattern] of TASK_TYPE_RULES) {
-		if (pattern.test(text)) {
-			taskType = candidate;
-			break;
-		}
-	}
-	let domain: RouteDomain = "general";
-	for (const [candidate, pattern] of DOMAIN_RULES) {
-		if (pattern.test(text)) {
-			domain = candidate;
-			break;
-		}
-	}
-	const words = text.split(/\s+/).filter((word) => word.length > 0).length;
-	const complexity: RouteComplexity =
-		words <= 6 ? "trivial" : words <= 25 ? "simple" : words <= 80 ? "moderate" : "complex";
-	// Decomposability: enumerations and conjoined clauses suggest parallel subtasks.
-	const enumerated = (text.match(/(^|\n)\s*(\d+[.)]|[-*])\s+/g) ?? []).length;
-	const conjunctions = (text.match(/\b(and then|and also|; )\b/gi) ?? []).length;
-	const estimatedSubtasks = Math.max(1, Math.min(4, enumerated > 1 ? enumerated : conjunctions > 0 ? 2 : 1));
-	return {
-		taskType,
-		complexity,
-		domain,
-		decomposable: estimatedSubtasks > 1,
-		estimatedSubtasks,
-		confidence: taskType === "unknown" ? 0.3 : 0.7,
-	};
-}
-
-// ---------------------------------------------------------------------------
-// Agent shadow recommendation (sync, pure)
-// ---------------------------------------------------------------------------
-
-export interface RouteAgentDescriptor {
-	id: string;
-	description: string;
-	latencyClass?: AgentLatencyClass;
-}
-
-/** Agent-id hints per task type, tried in order against the known agents. */
-const TASK_TYPE_AGENT_HINTS: Readonly<Partial<Record<RouteTaskType, ReadonlyArray<string>>>> = {
-	code_review: ["reviewer", "verifier"],
-	test: ["verifier", "tester"],
-	docs: ["docs", "writer", "docs-writer"],
-	research: ["scout", "researcher"],
-};
-
-export interface AgentRecommendation {
-	agentId: string;
-	/** Why the rules picked that agent. */
-	reason: "requested" | "task_type_match" | "description_match" | "default";
-	confidence: number;
-}
-
-/**
- * The agent the rules would recommend. Advisory only: promoting a Scout to a
- * Coder changes authority and must pass admission or prior approval, so this
- * output is recorded and never applied.
- */
-export function recommendAgent(input: {
-	intent: RouteIntent;
-	requestedAgentId: string | undefined;
-	agents: ReadonlyArray<RouteAgentDescriptor>;
-}): AgentRecommendation {
-	const { intent, agents } = input;
-	const known = new Set(agents.map((agent) => agent.id));
-	if (input.requestedAgentId !== undefined && known.has(input.requestedAgentId)) {
-		return {
-			agentId: input.requestedAgentId,
-			reason: "requested",
-			confidence: Math.min(1, intent.confidence + 0.2),
-		};
-	}
-	const hinted = (TASK_TYPE_AGENT_HINTS[intent.taskType] ?? []).find((hint) =>
-		agents.some((agent) => agent.id === hint || agent.id.includes(hint)),
-	);
-	const hintedAgent =
-		hinted !== undefined ? agents.find((agent) => agent.id === hinted || agent.id.includes(hinted)) : undefined;
-	if (hintedAgent !== undefined) {
-		return { agentId: hintedAgent.id, reason: "task_type_match", confidence: intent.confidence };
-	}
-	const keyword = intent.taskType.replace("code_", "");
-	const byDescription = agents.find((agent) => agent.description.toLowerCase().includes(keyword));
-	if (byDescription !== undefined && intent.taskType !== "unknown") {
-		return { agentId: byDescription.id, reason: "description_match", confidence: intent.confidence };
-	}
-	return {
-		agentId: input.requestedAgentId ?? agents[0]?.id ?? "coder",
-		reason: "default",
-		confidence: intent.confidence,
-	};
-}
 
 // ---------------------------------------------------------------------------
 // Route-history projection
@@ -255,7 +102,7 @@ export interface RouteObserverSummary {
 }
 
 export interface RouteLearner {
-	record(record: RouteEvaluationRecord, taskType: RouteTaskType): void;
+	record(record: RouteEvaluationRecord, taskType: AgentTaskType): void;
 	recent(limit?: number): RouteEvaluationRecord[];
 	summary(totalObservations: number): RouteObserverSummary;
 }
@@ -273,7 +120,7 @@ function rateOf(values: ReadonlyArray<boolean>): number {
 
 export function createRouteLearner(capacity = LEARNER_CAPACITY): RouteLearner {
 	const buffer: RouteEvaluationRecord[] = [];
-	const taskTypes: RouteTaskType[] = [];
+	const taskTypes: AgentTaskType[] = [];
 	return {
 		record(record, taskType) {
 			buffer.push(record);
@@ -324,7 +171,6 @@ const OBSERVATION_LOG_MAX_BYTES = 1024 * 1024;
 
 export interface RouteObserveInput {
 	task: string;
-	requestedAgentId: string | undefined;
 	/** Decision already produced by the shared joint resolver. */
 	decision: RouteDecisionV1;
 }
@@ -371,8 +217,6 @@ export interface RouteReadinessEvidenceWindow {
 }
 
 export interface CreateRouteObserverOptions {
-	/** Known agent descriptors; read per observation so hot-reloads apply. */
-	getAgents: () => ReadonlyArray<RouteAgentDescriptor>;
 	/** Durable production source for route estimation. */
 	history?: RouteHistoryStore;
 	/** Test-only estimator input seam. Production does not use this store. */
@@ -459,7 +303,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 	const history =
 		options.history ?? createRouteHistoryStore(options.stateDir === undefined ? {} : { stateDir: options.stateDir });
 	const samples = options.samples;
-	const pending = new Map<string, { decision: RouteDecisionV1; taskType: RouteTaskType }>();
+	const pending = new Map<string, { decision: RouteDecisionV1; taskType: AgentTaskType }>();
 	const PENDING_LIMIT = 512;
 	let totalObservations = 0;
 	let sequence = 0;
@@ -529,12 +373,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 		readinessWindow,
 		observe(input) {
 			try {
-				const intent = classifyRouteIntent(input.task);
-				const recommendation = recommendAgent({
-					intent,
-					requestedAgentId: input.requestedAgentId,
-					agents: options.getAgents(),
-				});
+				const intent = classifyAgentTask(input.task);
 				const decision = input.decision;
 				sequence += 1;
 				const observationId = `route-${decision.decisionHash.slice(0, 12)}-${sequence.toString(36)}`;
@@ -549,7 +388,13 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					id: observationId,
 					at: new Date().toISOString(),
 					intent,
-					agentRecommendation: recommendation,
+					agentRecommendation: {
+						agentId: decision.agentSelection.recommendedAgentId,
+						executionRole:
+							decision.agentSelection.evaluations.find(
+								(evaluation) => evaluation.agentId === decision.agentSelection.recommendedAgentId,
+							)?.executionRole ?? decision.selected.executionRole,
+					},
 					policyVersion: decision.policyVersion,
 					mode: decision.mode,
 					posture: decision.posture,
@@ -574,7 +419,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				sequence += 1;
 				const observationId = `route-fixed-${decision.decisionHash.slice(0, 12)}-${sequence.toString(36)}`;
 				totalObservations += 1;
-				pending.set(observationId, { decision, taskType: classifyRouteIntent(input.task).taskType });
+				pending.set(observationId, { decision, taskType: classifyAgentTask(input.task).taskType });
 				return { id: observationId, decision };
 			}
 		},

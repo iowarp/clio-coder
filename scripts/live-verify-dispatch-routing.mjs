@@ -8,7 +8,7 @@
  * model-authored tool call -> plan resolution -> reservation -> admission ->
  * worker spawn -> receipt.
  *
- * Seven scenarios, each with its own control:
+ * Eight scenarios, each with its own control:
  *
  *   1. quality  A pinned local Verifier records one typed `verify` result as a
  *                measured pass; a read-only Scout remains unmeasured and cold.
@@ -31,6 +31,8 @@
  *   7. active-readonly  Six integrity-valid fixture sources activate one real
  *                 Scout route on the pinned free mini target; five refuse
  *                 before a delegated worker spawns.
+ *   8. agent-auto-shadow  An explicit Scout stays on Scout while the one joint
+ *                 shadow decision seals its bounded agent recommendation.
  *
  * Never runs in an ordinary test or CI lane: CLIO_LIVE_EVAL=1 is required.
  * Build first, then invoke with:
@@ -49,7 +51,7 @@
  *   CLIO_LIVE_FLEET_HOST        SSH host for the capacity-one node (default localhost)
  *   CLIO_LIVE_DEAD_PORT         port for the always-503 target (default 8599)
  *   CLIO_LIVE_VERIFY_TIMEOUT_MS per-turn timeout (default 900000)
- *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,joint-shadow,attestation,active-readonly (default all)
+ *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,joint-shadow,attestation,active-readonly,agent-auto-shadow (default all)
  *   CLIO_LIVE_KEEP=1            retain the isolated scratch tree on success
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -80,7 +82,16 @@ const url = process.env.CLIO_LIVE_BASE_URL || undefined;
 const fleetHost = process.env.CLIO_LIVE_FLEET_HOST || "localhost";
 const deadPort = Number.parseInt(process.env.CLIO_LIVE_DEAD_PORT || "8599", 10);
 const timeoutMs = Number.parseInt(process.env.CLIO_LIVE_VERIFY_TIMEOUT_MS || "900000", 10);
-const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover", "joint-shadow", "attestation", "active-readonly"];
+const ALL_SCENARIOS = [
+	"quality",
+	"capacity",
+	"budget",
+	"failover",
+	"joint-shadow",
+	"attestation",
+	"active-readonly",
+	"agent-auto-shadow",
+];
 /**
  * The attestation scenario pins one exact local route so the receipt can be
  * checked field by field. These are fixed rather than environment-driven: the
@@ -746,7 +757,7 @@ async function scenarioJointShadow() {
 			const decision = receipt.routeDecision;
 			const executed = decision.executedRoute;
 			check(decision.mode === "shadow", `decision mode was ${decision.mode}`);
-			check(receipt.integrity?.version === 14, `receipt ${receipt.runId} did not use integrity v14`);
+			check(receipt.integrity?.version === 15, `receipt ${receipt.runId} did not use integrity v15`);
 			check(
 				executed.targetId === receipt.targetId &&
 					executed.modelId === receipt.wireModelId &&
@@ -971,6 +982,7 @@ function activeSettings(enabled) {
 	settings.routing = {
 		activeRoles: enabled ? ["researcher"] : [],
 		activePostures: enabled ? ["balanced"] : [],
+		agentAutomation: { activeAgentRoles: [] },
 	};
 	return settings;
 }
@@ -1264,6 +1276,46 @@ async function scenarioActiveReadonly() {
 	check(!JSON.stringify(activeReceipt).includes("api.openai.com"), "active fixture reached or recorded a paid endpoint");
 }
 
+async function scenarioAgentAutoShadow() {
+	currentScenario = "agent-auto-shadow";
+	clearState();
+	const probe = await probeActiveTarget();
+	if (!probe.reachable) {
+		throw new Error(
+			`[agent-auto-shadow] pinned free target ${ACTIVE_URL} is unavailable; expected ${ACTIVE_RUNTIME}/${ACTIVE_MODEL}.`,
+		);
+	}
+	writeSettings(activeSettings(false));
+	const run = await turn(
+		'Call dispatch once with exactly {"agent":"scout","task":"Read README.md and report its first line."}.',
+		"agent-auto-shadow-run",
+	);
+	check(!run.timedOut, `agent-auto-shadow turn exceeded ${timeoutMs}ms`);
+	requireCall(
+		dispatchCalls(parseJsonLines(run.stdout)),
+		(args) => args.agent === "scout" && taskCount(args) === 1,
+		"one explicit Scout dispatch",
+	);
+	const receipt = workerReceipts().find((candidate) => candidate.agentId === "scout");
+	check(receipt !== undefined, "agent-auto-shadow produced no Scout receipt");
+	if (!receipt) return;
+	const decision = receipt.routeDecision;
+	check(decision?.mode === "shadow", "agent-auto-shadow decision was not shadow");
+	check(decision?.executedRoute?.agentId === "scout", "explicit Scout execution changed agent");
+	check(decision?.agentSelection?.request === "explicit", "explicit-agent intent was not sealed");
+	check(
+		Array.isArray(decision?.agentSelection?.evaluations) && decision.agentSelection.evaluations.length > 1,
+		"shadow decision did not enumerate the bounded agent universe",
+	);
+	check(
+		typeof decision?.agentSelection?.recommendedAgentId === "string" &&
+			decision.agentSelection.recommendedAgentId.length > 0,
+		"shadow decision recorded no agent recommendation",
+	);
+	check(receipt.integrity?.version === 15, "agent-auto-shadow receipt did not use integrity v15");
+	check(!JSON.stringify(receipt).includes("api.openai.com"), "agent-auto-shadow reached or recorded a paid endpoint");
+}
+
 const runners = {
 	quality: scenarioQuality,
 	capacity: scenarioCapacity,
@@ -1272,6 +1324,7 @@ const runners = {
 	"joint-shadow": scenarioJointShadow,
 	attestation: scenarioAttestation,
 	"active-readonly": scenarioActiveReadonly,
+	"agent-auto-shadow": scenarioAgentAutoShadow,
 };
 
 let passed = false;

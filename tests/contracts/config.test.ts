@@ -177,21 +177,36 @@ describe("contracts/config", () => {
 
 	it("validates active routing roles and postures as strict unique lists", () => {
 		const valid = validateSettings({
-			routing: { activeRoles: ["researcher", "judge"], activePostures: ["balanced", "quality"] },
+			routing: {
+				activeRoles: ["researcher", "judge"],
+				activePostures: ["balanced", "quality"],
+				agentAutomation: { activeAgentRoles: [{ agentId: "scout", executionRole: "researcher" }] },
+			},
 		});
 		deepStrictEqual(valid.issues, []);
 		deepStrictEqual(valid.settings.routing, {
 			activeRoles: ["researcher", "judge"],
 			activePostures: ["balanced", "quality"],
+			agentAutomation: { activeAgentRoles: [{ agentId: "scout", executionRole: "researcher" }] },
 		});
 
 		const invalid = validateSettings({
-			routing: { activeRoles: ["builder", "judge", "judge"], activePostures: ["manual"] },
+			routing: {
+				activeRoles: ["builder", "judge", "judge"],
+				activePostures: ["manual"],
+				agentAutomation: {
+					activeAgentRoles: [
+						{ agentId: "auto", executionRole: "recovery" },
+						{ agentId: "scout", executionRole: "researcher", extra: true },
+					],
+				},
+			},
 		});
-		deepStrictEqual(
-			invalid.issues.map((issue) => issue.path),
-			["routing.activeRoles", "routing.activeRoles", "routing.activePostures"],
-		);
+		const invalidPaths = invalid.issues.map((issue) => issue.path);
+		deepStrictEqual(invalidPaths.slice(0, 3), ["routing.activeRoles", "routing.activeRoles", "routing.activePostures"]);
+		strictEqual(invalidPaths.includes("routing.agentAutomation.activeAgentRoles[0].agentId"), true);
+		strictEqual(invalidPaths.includes("routing.agentAutomation.activeAgentRoles[0].executionRole"), true);
+		strictEqual(invalidPaths.includes("routing.agentAutomation.activeAgentRoles[1].extra"), true);
 		deepStrictEqual(invalid.settings.routing, DEFAULT_SETTINGS.routing);
 	});
 

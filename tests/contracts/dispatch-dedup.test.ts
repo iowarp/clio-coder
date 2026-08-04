@@ -35,7 +35,7 @@ function dedupRegistry(exitCode = 0): ToolRegistry {
 	return registry;
 }
 
-const CALL = { tool: ToolNames.Dispatch, args: { agent_id: "coder", task: "run the tests" } };
+const CALL = { tool: ToolNames.Dispatch, args: { agent: "coder", task: "run the tests" } };
 
 describe("dispatch dedup registration", () => {
 	it("blocks an identical dispatch after a successful one in the same turn", async () => {
@@ -47,22 +47,22 @@ describe("dispatch dedup registration", () => {
 		ok(blocked.kind === "blocked" && blocked.reason.includes('agent=coder task="run the tests"'));
 	});
 
-	it("normalizes agent id aliases into one fingerprint", async () => {
+	it("normalizes canonical agent whitespace into one fingerprint", async () => {
 		const registry = dedupRegistry();
 		strictEqual(
 			(
 				await registry.invoke(
-					{ tool: ToolNames.Dispatch, args: { agent: "coder", task: "run the tests" } },
+					{ tool: ToolNames.Dispatch, args: { agent: " coder ", task: "run the tests" } },
 					{ turnId: "t1" },
 				)
 			).kind,
 			"ok",
 		);
 		const blocked = await registry.invoke(
-			{ tool: ToolNames.Dispatch, args: { agent_id: "coder", task: "run the tests" } },
+			{ tool: ToolNames.Dispatch, args: { agent: "coder", task: "run the tests" } },
 			{ turnId: "t1" },
 		);
-		strictEqual(blocked.kind, "blocked", "alias spellings share the normalized fingerprint");
+		strictEqual(blocked.kind, "blocked", "canonical whitespace shares the normalized fingerprint");
 	});
 
 	it("allows the same dispatch in a different turn and different tasks in the same turn", async () => {
@@ -70,8 +70,7 @@ describe("dispatch dedup registration", () => {
 		strictEqual((await registry.invoke(CALL, { turnId: "t1" })).kind, "ok");
 		strictEqual((await registry.invoke(CALL, { turnId: "t2" })).kind, "ok");
 		strictEqual(
-			(await registry.invoke({ tool: ToolNames.Dispatch, args: { agent_id: "coder", task: "lint" } }, { turnId: "t1" }))
-				.kind,
+			(await registry.invoke({ tool: ToolNames.Dispatch, args: { agent: "coder", task: "lint" } }, { turnId: "t1" })).kind,
 			"ok",
 		);
 	});

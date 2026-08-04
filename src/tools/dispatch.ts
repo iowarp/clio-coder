@@ -6,7 +6,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
-import { parseScoutResult, type ScoutResult } from "../domains/agents/result-contract.js";
+import type { AgentSpec } from "../domains/agents/spec.js";
 import type {
 	AbortReason,
 	DispatchContract,
@@ -14,12 +14,12 @@ import type {
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
+import { compileExecutionPlan, type ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import {
 	type AgentRoleFactsResolver,
 	gateDeciderAgentId,
 	gateRouteCorrelation,
 	type RouteCorrelationFacts,
-	requestExecutionRole,
 } from "../domains/dispatch/execution-role.js";
 import {
 	decideReviewGate,
@@ -40,13 +40,9 @@ import { JUDGE_GATE_PROMPT, REVIEWER_GATE_PROMPT } from "../domains/dispatch/gat
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
-import { defaultRoutingIntent, explainRouteDecision, parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
+import { defaultRoutingIntent, explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceipt } from "../domains/dispatch/types.js";
-import {
-	DISPATCH_BRIEFING_MAX_BYTES,
-	type DispatchFailoverMode,
-	type JobThinkingLevel,
-} from "../domains/dispatch/validation.js";
+import { DISPATCH_BRIEFING_MAX_BYTES, type DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import {
@@ -70,6 +66,13 @@ import {
 	settleRecoveredCompeteDecision,
 } from "./compete-worktrees.js";
 import {
+	dispatchRequestsFromArgs,
+	maxOutputBytesArg,
+	prepareDispatchArguments,
+	stringArg,
+	timeoutMsArg,
+} from "./dispatch-arguments.js";
+import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
 	describeDispatchPlan,
 	RESOLVED_DISPATCH_PLAN_ARGUMENT,
@@ -78,7 +81,15 @@ import {
 	withResolvedDispatchPlan,
 	withResolvedPlanTaskPin,
 } from "./dispatch-plan.js";
-import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
+import {
+	loadVerifiedScoutSource,
+	prepareScoutContinuation,
+	runScoutContinuationPlan,
+	scoutContinuationRefFromArgs,
+	scoutPlanAuthorityGranted,
+	scoutTransitionDetail,
+} from "./dispatch-scout.js";
+import { TOOL_PROFILE_NAMES } from "./profiles.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { stringEnum } from "./string-enum.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -89,12 +100,8 @@ import {
 	workerTextNonEvidenceNotices,
 } from "./worker-evidence.js";
 
-const DEFAULT_AGENT_ID = "coder";
-const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
 const TRUNCATION_MARKER = "\n[agent output truncated]";
-const PERSONA_MAX_CHARS = 8_000;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-const VALID_THINKING = new Set<JobThinkingLevel>(THINKING_LEVELS);
 
 export interface DispatchToolDeps {
 	dispatch: DispatchContract;
@@ -107,9 +114,8 @@ export interface DispatchToolDeps {
 		cleanupGroup?: typeof cleanupCompeteGroup;
 		mergeWinner?: typeof mergeWinnerBranch;
 	};
-	/** Renders the agent fleet catalog for the `list: true` action. */
 	getAgentCatalog?: () => string;
-	/** Strict recipe facts each request's execution role is derived from. */
+	getAgentSpecs: () => ReadonlyArray<AgentSpec>;
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	/**
 	 * Session-effective autonomy level. Plan provenance records how the plan
@@ -365,164 +371,6 @@ export function createDispatchRunEventRegistry(): DispatchRunEventRegistry {
 	};
 }
 
-function stringArg(args: Record<string, unknown>, ...names: string[]): string | undefined {
-	for (const name of names) {
-		const value = args[name];
-		if (typeof value === "string" && value.trim().length > 0) return value.trim();
-	}
-	return undefined;
-}
-
-function maxOutputBytesArg(args: Record<string, unknown>): number {
-	const value = args.max_output_bytes;
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_MAX_OUTPUT_BYTES;
-}
-
-function timeoutMsArg(args: Record<string, unknown>): number | undefined {
-	const value = args.timeout_ms;
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
-}
-
-function dispatchRequestFromArgs(
-	args: Record<string, unknown>,
-	resolveFacts?: AgentRoleFactsResolver,
-): { ok: true; request: DispatchRequest } | { ok: false; message: string } {
-	const task = stringArg(args, "task");
-	if (!task) return { ok: false, message: "missing task (pass list:true to see available agents)" };
-
-	const agentId = stringArg(args, "agent", "agent_id") ?? DEFAULT_AGENT_ID;
-	const request: DispatchRequest = {
-		agentId,
-		executionRole: requestExecutionRole({ agentId, ...(resolveFacts ? { resolveFacts } : {}) }),
-		task,
-	};
-	if ("briefing" in args && args.briefing !== undefined) {
-		if (typeof args.briefing !== "string") return { ok: false, message: "briefing must be a string" };
-		const briefing = args.briefing.trim();
-		if (Buffer.byteLength(briefing, "utf8") > DISPATCH_BRIEFING_MAX_BYTES) {
-			return { ok: false, message: `briefing must be ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes or fewer` };
-		}
-		if (briefing.length > 0) request.briefing = briefing;
-	}
-
-	const target = stringArg(args, "target");
-	if (target) request.target = target;
-	const model = stringArg(args, "model");
-	if (model) request.model = model;
-	const node = stringArg(args, "node");
-	if (node) request.node = node;
-	if (args.failover !== undefined || args.allowed_candidates !== undefined || args.allowedCandidates !== undefined) {
-		return { ok: false, message: "use routing.failover; model-authored candidate envelopes are not accepted" };
-	}
-	const routing = parseRoutingIntent(args.routing, {
-		...(target ? { target } : {}),
-		...(model ? { model } : {}),
-		...(node ? { node } : {}),
-	});
-	if (!routing.ok) return { ok: false, message: routing.errors.join("; ") };
-	request.routingIntent = routing.intent;
-	request.failover = routing.intent.failover;
-	request.requiredCapabilities = routing.intent.requiredCapabilities;
-	const cwd = stringArg(args, "cwd");
-	if (cwd) request.cwd = cwd;
-
-	if ("persona" in args && args.persona !== undefined) {
-		if (typeof args.persona !== "string") return { ok: false, message: "persona must be a string" };
-		const persona = args.persona.trim();
-		if (persona.length > PERSONA_MAX_CHARS) {
-			return { ok: false, message: `persona must be ${PERSONA_MAX_CHARS} characters or fewer` };
-		}
-		if (persona.length > 0) request.systemPrompt = persona;
-	}
-
-	const toolProfile = stringArg(args, "tool_profile");
-	if (toolProfile) {
-		if (!isToolProfileName(toolProfile)) {
-			return { ok: false, message: `tool_profile must be one of ${TOOL_PROFILE_NAMES.join("|")}` };
-		}
-		request.toolProfile = toolProfile;
-	}
-
-	const thinkingLevel = stringArg(args, "thinking_level");
-	if (thinkingLevel) {
-		if (!VALID_THINKING.has(thinkingLevel as JobThinkingLevel)) {
-			return { ok: false, message: "thinking_level must be one of off|minimal|low|medium|high|xhigh|max" };
-		}
-		request.thinkingLevel = thinkingLevel as JobThinkingLevel;
-	}
-
-	return { ok: true, request };
-}
-
-function dispatchRequestsFromArgs(
-	args: Record<string, unknown>,
-	resolveFacts?: AgentRoleFactsResolver,
-): { ok: true; requests: DispatchRequest[] } | { ok: false; message: string } {
-	if (Object.hasOwn(args, "task") && Object.hasOwn(args, "tasks")) {
-		return { ok: false, message: "dispatch: pass either task for one run or tasks for a batch, not both" };
-	}
-	const tasks = args.tasks;
-	if (!Array.isArray(tasks) || tasks.length === 0) {
-		return {
-			ok: false,
-			message:
-				args.tasks === undefined
-					? 'dispatch: missing task; pass task="..." for one run or tasks=[...] for a batch. briefing is optional context and cannot replace task. Example: {"agent":"scout","task":"map the modules that read fleet config and cite file paths"}'
-					: "dispatch: tasks must be a non-empty array of task strings or {agent, task} objects",
-		};
-	}
-	const shared = { ...args };
-	Reflect.deleteProperty(shared, "tasks");
-	const requests: DispatchRequest[] = [];
-	for (let index = 0; index < tasks.length; index += 1) {
-		const item = tasks[index];
-		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
-		if (isRecord(item)) {
-			// The task's own agent identity overrides the shared default. `agent`
-			// and its `agent_id` alias both survive the spread, and
-			// dispatchRequestFromArgs resolves `agent` first, so a shared `agent`
-			// would otherwise beat a task-level `agent_id`. Canonicalize the task's
-			// identity into `agent` and drop the now-ambiguous alias.
-			const itemAgent = stringArg(item, "agent", "agent_id");
-			if (itemAgent !== undefined) {
-				itemArgs.agent = itemAgent;
-				Reflect.deleteProperty(itemArgs, "agent_id");
-			}
-		}
-		const parsed = dispatchRequestFromArgs(itemArgs, resolveFacts);
-		if (!parsed.ok) return { ok: false, message: `dispatch: task ${index + 1}: ${parsed.message}` };
-		requests.push(parsed.request);
-	}
-	return { ok: true, requests };
-}
-
-/**
- * Normalize the weak-model argument shapes for `tasks`: a JSON-string array
- * is parsed, a single object or bare string is wrapped, and a top-level
- * `task` with no `tasks` becomes a one-element array. Pure and idempotent.
- */
-export function prepareDispatchArguments(args: Record<string, unknown>): Record<string, unknown> {
-	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
-	const next: Record<string, unknown> = { ...args };
-	if (typeof next.tasks === "string") {
-		const raw = next.tasks.trim();
-		if (raw.startsWith("[") || raw.startsWith("{")) {
-			try {
-				next.tasks = JSON.parse(raw) as unknown;
-			} catch {
-				// Leave the string; run() reports the shape error.
-			}
-		}
-	}
-	if (isRecord(next.tasks)) next.tasks = [next.tasks];
-	if (typeof next.tasks === "string") next.tasks = [next.tasks];
-	if (next.tasks === undefined && typeof next.task === "string") {
-		const { task: _task, ...rest } = next;
-		return { ...rest, tasks: [{ task: next.task }] };
-	}
-	return next;
-}
-
 function rawAssistantTextFromEvent(event: unknown): string {
 	return durableAssistantTextFromEvent(event);
 }
@@ -766,27 +614,21 @@ function formatDispatchOutput(mode: string, runs: ReadonlyArray<CompletedRun>, m
 	return truncateUtf8(lines.join("\n"), maxOutputBytes, TRUNCATION_MARKER);
 }
 
-function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolResultDetails {
+function dispatchDetails(deps: DispatchToolDeps, mode: string, runs: ReadonlyArray<CompletedRun>): ToolResultDetails {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
-	let splitRecommendation: ScoutResult | null = null;
+	let transition: ReturnType<typeof scoutTransitionDetail> = null;
 	for (const run of runs) {
-		if (
-			!run.integrity.ok ||
-			run.receipt.agentId !== "scout" ||
-			run.receipt.output?.state !== "final" ||
-			run.receipt.output.text.trim().length === 0
-		) {
-			continue;
-		}
-		const parsed = parseScoutResult(run.receipt.output.text);
-		if (parsed === null) continue;
-		// The top-level shape is singular. Multiple valid Scout envelopes in one
-		// dispatch are ambiguous, so fail closed instead of silently selecting one.
-		if (splitRecommendation !== null) {
-			splitRecommendation = null;
+		const envelope = deps.dispatch.getRun(run.receipt.runId);
+		const candidate =
+			run.integrity.ok && envelope !== null
+				? scoutTransitionDetail({ receipt: run.receipt, envelope, agentSpecs: deps.getAgentSpecs() })
+				: null;
+		if (candidate === null) continue;
+		if (transition !== null) {
+			transition = null;
 			break;
 		}
-		splitRecommendation = parsed;
+		transition = candidate;
 	}
 	return {
 		mode,
@@ -794,7 +636,7 @@ function dispatchDetails(mode: string, runs: ReadonlyArray<CompletedRun>): ToolR
 		terminalRunIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
-		...(splitRecommendation !== null ? { splitRecommendation } : {}),
+		...(transition !== null ? { scoutTransition: transition } : {}),
 		runs: runs.map(({ receipt, receiptPath, summary, integrity }) => {
 			// Additive provenance keys only; folded in when the receipt carries the
 			// field so a run entry without them keeps its exact shape.
@@ -2011,10 +1853,10 @@ function runApplyWinner(
 	};
 }
 
-function reviewGateResult(outcome: GateRunOutcome, maxOutputBytes: number): ToolResult {
+function reviewGateResult(deps: DispatchToolDeps, outcome: GateRunOutcome, maxOutputBytes: number): ToolResult {
 	const body = formatDispatchOutput("review", outcome.runs, maxOutputBytes);
 	const details: ToolResultDetails = {
-		...dispatchDetails("review", outcome.runs),
+		...dispatchDetails(deps, "review", outcome.runs),
 		gate: {
 			verdict: outcome.verdict,
 			cycles: outcome.cycles,
@@ -2040,10 +1882,15 @@ function reviewGateResult(outcome: GateRunOutcome, maxOutputBytes: number): Tool
 	};
 }
 
-function competeResult(outcome: CompeteOutcome, autonomy: AutonomyLevel, maxOutputBytes: number): ToolResult {
+function competeResult(
+	deps: DispatchToolDeps,
+	outcome: CompeteOutcome,
+	autonomy: AutonomyLevel,
+	maxOutputBytes: number,
+): ToolResult {
 	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes);
 	const details: ToolResultDetails = {
-		...dispatchDetails("compete", outcome.runs),
+		...dispatchDetails(deps, "compete", outcome.runs),
 		compete: {
 			group: outcome.group,
 			winner: outcome.winner,
@@ -2090,11 +1937,25 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	const preparedAdmissionArgs = new WeakSet<Record<string, unknown>>();
 	const trustedResolvedPlans = new WeakMap<Record<string, unknown>, ResolvedDispatchPlanArtifact>();
 	const trustedReservationOwners = new WeakMap<Record<string, unknown>, string>();
+	const trustedParsedRequests = new WeakMap<Record<string, unknown>, ReadonlyArray<DispatchRequest>>();
+	const trustedExecutionPlans = new WeakMap<Record<string, unknown>, ExecutionPlan>();
 	const taskResolutions = new WeakMap<object, DispatchPlanTaskResolution>();
 	const deepFreeze = <T>(value: T): T => {
 		if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
 		for (const child of Object.values(value)) deepFreeze(child);
 		return Object.freeze(value);
+	};
+	const parseRequests = (args: Record<string, unknown>) =>
+		dispatchRequestsFromArgs(args, {
+			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
+			auto: {
+				approvedAuthorities: ["read-only", "verification", "artifact-write", "workspace-edit"],
+				authorityBasis: deps.getAutonomy?.() === "full-auto" ? "full-auto-policy" : "operator-plan-approval",
+			},
+		});
+	const trustRequests = (args: Record<string, unknown>, requests: ReadonlyArray<DispatchRequest>) => {
+		trustedParsedRequests.set(args, deepFreeze(structuredClone(requests)));
+		return args;
 	};
 	const markPrepared = (args: Record<string, unknown>): Record<string, unknown> => {
 		const exposed = resolvedDispatchPlanFromArgs(args);
@@ -2159,6 +2020,14 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			routingIntent: request.routingIntent ?? defaultRoutingIntent(request),
 			failover,
 			routeApproval: resolution.routeApproval,
+			agentSelection: request.agentSelection === undefined ? null : structuredClone(request.agentSelection),
+			stepId: null,
+			dependencies: [],
+			executionRole: request.executionRole,
+			expectedResultContract: null,
+			authorityGrant: null,
+			agentDecision: null,
+			wave: null,
 			...(failover === "approved" ? { allowedCandidates: approvedCandidates.map((candidate) => ({ ...candidate })) } : {}),
 			role,
 			position,
@@ -2180,6 +2049,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		task: ResolvedDispatchPlanArtifact["tasks"][number],
 		index: number,
 	): number => {
+		if (topology === "fleet") return task.wave ?? index;
 		if (topology === "parallel" || topology === "detached") return 0;
 		if (topology === "compete") return task.role === "judge" ? 1 : 0;
 		return index;
@@ -2192,16 +2062,19 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 		if (deps.dispatch.reservations === undefined) return markPrepared(prepared);
 		const tasks = artifact.tasks.map((task, index) => {
 			const resolution = taskResolutions.get(task);
-			if (resolution === undefined || task.role === undefined || task.position === undefined) {
+			if (resolution === undefined || (task.stepId === null && (task.role === undefined || task.position === undefined))) {
 				throw new Error("dispatch reservation resolution is incomplete");
 			}
 			return {
-				memberId: `${task.role}-${task.position}`,
+				memberId: task.stepId ?? `${task.role}-${task.position}`,
 				wave: reservationWave(artifact.topology, task, index),
 				resolution,
 			};
 		});
-		const reservation = deps.dispatch.reservations.prepare({ topology: artifact.topology, tasks });
+		const reservation = deps.dispatch.reservations.prepare({
+			topology: artifact.topology === "fleet" ? "parallel" : artifact.topology,
+			tasks,
+		});
 		try {
 			const marked = markPrepared(prepared);
 			trustedReservationOwners.set(marked, reservation.ownerId);
@@ -2214,6 +2087,33 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 	const prepareAdmissionArguments = (rawArgs: Record<string, unknown>): Record<string, unknown> => {
 		const args = stripUntrustedPlanFields(rawArgs);
 		if (args.list === true) return markPrepared(args);
+		const continuation = scoutContinuationRefFromArgs(args);
+		if (!continuation.ok) return preparationFailure(args, continuation.message);
+		if (continuation.ref !== null) {
+			try {
+				const source = loadVerifiedScoutSource({
+					ref: continuation.ref,
+					dispatch: deps.dispatch,
+					agentSpecs: deps.getAgentSpecs(),
+				});
+				const prepared = prepareScoutContinuation({
+					source,
+					authorization: deps.getAutonomy?.() === "full-auto" ? "full-auto-policy" : "operator-plan-approval",
+					planAgentSelection: deps.dispatch.planAgentSelection,
+					costCeilingUsd: resolvedCostCeiling(),
+				});
+				for (const [index, task] of prepared.artifact.tasks.entries()) {
+					const resolution = prepared.resolutions[index];
+					if (resolution === undefined) throw new Error("dispatch: Scout route resolution is incomplete");
+					taskResolutions.set(task, resolution);
+				}
+				const marked = trustRequests(markReservedPlan(args, prepared.artifact), prepared.requests);
+				trustedExecutionPlans.set(marked, deepFreeze(structuredClone(prepared.executionPlan)));
+				return marked;
+			} catch (error) {
+				return preparationFailure(args, error);
+			}
+		}
 		if (args.apply_winner !== undefined) {
 			if (!isRecord(args.apply_winner)) return markPrepared(args);
 			const branch = stringArg(args.apply_winner, "branch");
@@ -2223,10 +2123,14 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			try {
 				return markPrepared(
 					withResolvedDispatchPlan(args, {
-						version: 2,
+						version: 3,
 						topology: "compete",
+						source: null,
+						maxWorkers: null,
+						onFailure: null,
 						tasks: [],
 						costCeilingUsd: resolvedCostCeiling(),
+						deadlineMs: null,
 						confirmation: {
 							branch,
 							group: match[1] ?? "",
@@ -2239,7 +2143,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			}
 		}
 		if (deps.dispatch.preview === undefined) return markPrepared(args);
-		const parsed = dispatchRequestsFromArgs(args, deps.getAgentRoleFacts);
+		const parsed = parseRequests(args);
 		if (!parsed.ok) return markPrepared(args);
 		if (args.mode !== undefined && !["parallel", "sequential", "pipeline", "compete"].includes(String(args.mode))) {
 			return markPrepared(args);
@@ -2334,13 +2238,20 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				tasks.length > 1 ||
 				topology === "compete" ||
 				tasks.some((task) => task.node !== "local" || task.failover === "approved");
-			if (!planScale) return markPrepared(args);
-			return markReservedPlan(args, {
-				version: 2,
-				topology,
-				tasks,
-				costCeilingUsd: resolvedCostCeiling(),
-			});
+			if (!planScale) return trustRequests(markPrepared(args), parsed.requests);
+			return trustRequests(
+				markReservedPlan(args, {
+					version: 3,
+					topology,
+					source: null,
+					maxWorkers: null,
+					onFailure: null,
+					tasks,
+					costCeilingUsd: resolvedCostCeiling(),
+					deadlineMs: null,
+				}),
+				parsed.requests,
+			);
 		} catch (err) {
 			return preparationFailure(args, err);
 		}
@@ -2354,6 +2265,19 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			'Dispatch one bounded task with task, or a batch with tasks (never both). Singular example: {agent:"debugger", task:"Verify the receipt boundary", briefing:"Prior receipt evidence...", detach:true}. task is the worker assignment; briefing is separate bounded parent context/data and cannot replace task. Ordinary calls auto-wait; detach:true returns ids for monitoring/steering, and collect is the authoritative terminal batch operation before final synthesis. Batch modes are parallel (default), sequential, pipeline, or compete. Task objects may include persona and tool_profile. Sealed receipts are durable evidence; report receipt integrity, evidence verification, briefing provenance, and project-context provenance separately. Call with list:true to see agents. Do not repeat an identical successful dispatch in the same user turn.',
 		parameters: Type.Object({
 			list: Type.Optional(Type.Boolean({ description: "List available agents instead of dispatching." })),
+			from_scout: Type.Optional(
+				Type.Object(
+					{
+						run_id: Type.String({ description: "Exact terminal Scout run id." }),
+						receipt_digest: Type.String({ description: "Exact sha256 receipt digest." }),
+					},
+					{
+						additionalProperties: false,
+						description:
+							"Compile an authenticated split Scout result into one new approval-gated dependency plan; cannot combine with any other argument.",
+					},
+				),
+			),
 			task: Type.Optional(
 				Type.String({
 					description:
@@ -2450,7 +2374,11 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					},
 				),
 			),
-			agent: Type.Optional(Type.String({ description: "Default agent recipe for string tasks (default coder)." })),
+			agent: Type.Optional(
+				Type.String({
+					description: "Default agent recipe for string tasks, or auto for bounded agent selection (default coder).",
+				}),
+			),
 			briefing: Type.Optional(
 				Type.String({
 					description: `Separate bounded parent context/data for task, or the shared default for tasks; never worker instructions and never a task replacement. Max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
@@ -2552,7 +2480,11 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				}
 				return runApplyWinner(args, authority, deps.competeWorktrees?.mergeWinner, protectedPaths);
 			}
-			const parsed = dispatchRequestsFromArgs(args, deps.getAgentRoleFacts);
+			const trustedRequests = trustedParsedRequests.get(args);
+			const parsed =
+				trustedRequests === undefined
+					? parseRequests(args)
+					: ({ ok: true, requests: structuredClone(trustedRequests) } as const);
 			if (!parsed.ok) return { kind: "error", message: parsed.message };
 			const validModes = ["parallel", "sequential", "pipeline", "compete"];
 			if (args.mode !== undefined && !validModes.includes(String(args.mode))) {
@@ -2576,10 +2508,8 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 			if (!reviewParsed.ok) return { kind: "error", message: reviewParsed.message };
 			let review = reviewParsed.review;
 
-			// Plan provenance: plan-scale calls (multi-task, compete, remote node)
-			// were either approved by the operator at admission (supervised) or run
-			// unstopped at full-auto; either way every run of the plan seals the
-			// same plan hash into its receipt.
+			// Plan-scale calls are either approved at supervised admission or run
+			// unstopped at full-auto; every run seals the same plan hash.
 			const autonomy = deps.getAutonomy?.() ?? "auto-edit";
 			const authenticatedApproval = options?.approval?.actionClass === "dispatch" ? options.approval : undefined;
 			const trustedResolvedPlan = trustedResolvedPlans.get(args) ?? null;
@@ -2615,7 +2545,13 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					const task = executionTasks[index];
 					const pinned = withResolvedPlanTaskPin(request, task);
 					return reservationOwnerId !== undefined && task?.role !== undefined && task.position !== undefined
-						? { ...pinned, reservation: { ownerId: reservationOwnerId, memberId: `${task.role}-${task.position}` } }
+						? {
+								...pinned,
+								reservation: {
+									ownerId: reservationOwnerId,
+									memberId: task.stepId ?? `${task.role}-${task.position}`,
+								},
+							}
 						: pinned;
 				});
 				if (review !== undefined) {
@@ -2639,6 +2575,15 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					topology: planView.topology,
 					taskCount: planView.taskCount,
 					approval: authenticatedApproval !== undefined ? "operator" : "full-auto",
+					source:
+						resolvedPlan?.source === null || resolvedPlan?.source === undefined
+							? null
+							: {
+									kind: "scout-transition",
+									runId: resolvedPlan.source.runId,
+									receiptDigest: resolvedPlan.source.receiptDigest,
+									executionPlanHash: resolvedPlan.source.executionPlanHash,
+								},
 					...(authenticatedApproval !== undefined
 						? {
 								approvalRequestId: authenticatedApproval.requestId,
@@ -2648,6 +2593,59 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					...(planView.costCeilingUsd !== undefined ? { costCeilingUsd: planView.costCeilingUsd } : {}),
 				};
 				requests = requests.map((request) => ({ ...request, plan }));
+			}
+			if (resolvedPlan?.topology === "fleet") {
+				const executionPlan = trustedExecutionPlans.get(args);
+				if (
+					executionPlan === undefined ||
+					resolvedPlan.source === null ||
+					resolvedPlan.deadlineMs === null ||
+					reservationOwnerId === undefined
+				) {
+					return { kind: "error", message: "dispatch: trusted Scout dependency plan is unavailable" };
+				}
+				if (executionPlan.hash !== resolvedPlan.source.executionPlanHash) {
+					return { kind: "error", message: "dispatch: Scout dependency plan hash drifted after admission" };
+				}
+				if (!scoutPlanAuthorityGranted(resolvedPlan, authenticatedApproval !== undefined, autonomy === "full-auto")) {
+					return { kind: "error", message: "dispatch: Scout dependency plan lacks authenticated authority grants" };
+				}
+				const executable = compileExecutionPlan({
+					topology: executionPlan.topology,
+					rootTask: executionPlan.rootTask,
+					maxWorkers: executionPlan.maxWorkers,
+					onFailure: executionPlan.onFailure,
+					steps: executionPlan.steps.map((step) => ({ ...step, approvedAuthority: step.requestedAuthority })),
+				});
+				try {
+					const outcome = await runScoutContinuationPlan({
+						dispatch: deps.dispatch,
+						plan: executable,
+						artifact: resolvedPlan,
+						requests,
+						reservationOwnerId,
+						...(options?.signal === undefined ? {} : { signal: options.signal }),
+						register: (handle, agentId) =>
+							deps.runEvents.registerSingle(handle, agentId, fallbackProgressBus(deps)).completion,
+						complete: (receipt, summary) => {
+							const completed = completeRun(deps, receipt, summary);
+							return { value: completed, integrityValid: completed.integrity.ok };
+						},
+					});
+					const output = formatDispatchOutput("fleet", outcome.runs, maxOutputBytes);
+					const details = {
+						...dispatchDetails(deps, "fleet", outcome.runs),
+						executionPlanHash: executable.hash,
+						skippedSteps: outcome.skipped,
+					};
+					const failed = outcome.runs.some((run) => run.receipt.exitCode !== 0) || outcome.skipped.length > 0;
+					return failed ? { kind: "error", message: output, details } : { kind: "ok", output, details };
+				} catch (error) {
+					return {
+						kind: "error",
+						message: `dispatch: Scout dependency plan failed: ${error instanceof Error ? error.message : String(error)}`,
+					};
+				}
 			}
 
 			if (args.detach === true) {
@@ -2697,7 +2695,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				}
 				try {
 					const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal);
-					return competeResult(outcome, autonomy, maxOutputBytes);
+					return competeResult(deps, outcome, autonomy, maxOutputBytes);
 				} catch (err) {
 					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
 				}
@@ -2712,7 +2710,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 				}
 				try {
 					const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal);
-					return reviewGateResult(outcome, maxOutputBytes);
+					return reviewGateResult(deps, outcome, maxOutputBytes);
 				} catch (err) {
 					return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };
 				}
@@ -2730,7 +2728,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					runs = await runBatch(deps, requests, timeoutMs, options?.signal);
 				}
 				const output = formatDispatchOutput(mode, runs, maxOutputBytes);
-				const details = dispatchDetails(mode, runs);
+				const details = dispatchDetails(deps, mode, runs);
 				const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 				if (failed.length > 0) return { kind: "error", message: output, details };
 				return { kind: "ok", output, details };
@@ -2741,7 +2739,7 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					return {
 						kind: "error",
 						message: `${haltMessage}\n\n${output}`,
-						details: dispatchDetails("pipeline", err.runs),
+						details: dispatchDetails(deps, "pipeline", err.runs),
 					};
 				}
 				return { kind: "error", message: `dispatch: ${err instanceof Error ? err.message : String(err)}` };

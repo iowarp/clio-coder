@@ -26,7 +26,14 @@
  */
 
 import { createHash } from "node:crypto";
-import { type ExecutionRole, gateRouteCorrelation, type RouteCorrelationFacts } from "./execution-role.js";
+import { isAgentCapabilityClass } from "../agents/spec.js";
+import type { AgentCandidateEvaluation, AgentRoleReadinessReport } from "./agent-candidates.js";
+import {
+	type ExecutionRole,
+	gateRouteCorrelation,
+	isExecutionRole,
+	type RouteCorrelationFacts,
+} from "./execution-role.js";
 import {
 	clearsPostureFloors,
 	compareRankedRoutes,
@@ -76,6 +83,259 @@ export interface RouteCandidate {
 
 export type RouteDecisionMode = "fixed" | "shadow" | "active";
 
+export type AgentSelectionAuthorityBasis = "operator-plan-approval" | "full-auto-policy";
+
+export interface RouteDecisionAgentSelectionInput {
+	request: "explicit" | "auto";
+	baselineAgentId: string;
+	evaluations: ReadonlyArray<AgentCandidateEvaluation>;
+	readiness: ReadonlyArray<AgentRoleReadinessReport>;
+	authorityBasis: AgentSelectionAuthorityBasis | null;
+}
+
+export interface RouteDecisionAgentSelection {
+	request: "explicit" | "auto";
+	activation: "shadow" | "active";
+	baselineAgentId: string;
+	recommendedAgentId: string;
+	evaluations: AgentCandidateEvaluation[];
+	readiness: AgentRoleReadinessReport[];
+	/** Input authority provenance is retained even when no transition was selected, so replay can reproduce the hash. */
+	authorityBasis: AgentSelectionAuthorityBasis | null;
+	authorityTransition: null | {
+		from: string;
+		to: string;
+		basis: "same-authority" | AgentSelectionAuthorityBasis;
+	};
+}
+
+function exactKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
+	return Object.keys(value).sort().join("\u0000") === [...keys].sort().join("\u0000");
+}
+
+function decisionRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const READINESS_GAPS = new Set([
+	"hard-constraint-validity-below-one",
+	"integrity-failures-in-window",
+	"insufficient-quality-labels",
+	"quality-lower-bound-below-posture-floor",
+	"quality-lower-bound-below-requested-minimum",
+	"reliability-below-posture-floor",
+	"cost-upper-bound-unknown",
+	"route-facts-stale",
+	"decision-latency-above-budget",
+]);
+
+function decisionRouteCandidate(value: unknown): value is RouteCandidate {
+	if (!decisionRecord(value)) return false;
+	const required = [
+		"agentId",
+		"specFingerprint",
+		"executionRole",
+		"targetId",
+		"modelId",
+		"runtimeId",
+		"nodeId",
+		"toolSignature",
+		"promptCompositionHash",
+		"endpointIdentityHash",
+		"settingsFingerprint",
+	];
+	const keys = Object.keys(value);
+	if (keys.some((key) => !required.includes(key) && key !== "thinkingLevel")) return false;
+	if (required.some((key) => !Object.hasOwn(value, key))) return false;
+	return (
+		isExecutionRole(value.executionRole) &&
+		required
+			.filter((key) => key !== "executionRole")
+			.every((key) => typeof value[key] === "string" && String(value[key]).length > 0) &&
+		(value.thinkingLevel === undefined || (typeof value.thinkingLevel === "string" && value.thinkingLevel.length > 0))
+	);
+}
+
+function decisionReadinessReport(value: unknown): value is RouteReadinessReport {
+	if (!decisionRecord(value) || !exactKeys(value, ["ready", "gaps", "labelsNeeded"])) return false;
+	return (
+		typeof value.ready === "boolean" &&
+		Array.isArray(value.gaps) &&
+		value.gaps.length <= READINESS_GAPS.size &&
+		value.gaps.every((gap) => typeof gap === "string" && READINESS_GAPS.has(gap)) &&
+		new Set(value.gaps).size === value.gaps.length &&
+		value.ready === (value.gaps.length === 0) &&
+		Number.isInteger(value.labelsNeeded) &&
+		Number(value.labelsNeeded) >= 0
+	);
+}
+
+/** Strict validator for the required agent-selection evidence sealed in decisions and approvals. */
+export function isRouteDecisionAgentSelection(value: unknown): value is RouteDecisionAgentSelection {
+	if (!decisionRecord(value)) return false;
+	if (
+		!exactKeys(value, [
+			"request",
+			"activation",
+			"baselineAgentId",
+			"recommendedAgentId",
+			"evaluations",
+			"readiness",
+			"authorityBasis",
+			"authorityTransition",
+		]) ||
+		(value.request !== "explicit" && value.request !== "auto") ||
+		(value.activation !== "shadow" && value.activation !== "active") ||
+		typeof value.baselineAgentId !== "string" ||
+		value.baselineAgentId.length === 0 ||
+		typeof value.recommendedAgentId !== "string" ||
+		value.recommendedAgentId.length === 0 ||
+		(value.authorityBasis !== null &&
+			value.authorityBasis !== "operator-plan-approval" &&
+			value.authorityBasis !== "full-auto-policy") ||
+		!Array.isArray(value.evaluations) ||
+		value.evaluations.length === 0 ||
+		value.evaluations.length > 64 ||
+		!Array.isArray(value.readiness) ||
+		value.readiness.length === 0 ||
+		value.readiness.length > 64
+	)
+		return false;
+	const priorKeys = [
+		"qualityMean",
+		"firstPassSuccessProbability",
+		"costUpperBoundUsd",
+		"expectedEndToEndMs",
+		"reliability",
+		"queueWaitMs",
+	];
+	if (
+		!value.evaluations.every((entry) => {
+			if (
+				!decisionRecord(entry) ||
+				!exactKeys(entry, [
+					"agentId",
+					"specFingerprint",
+					"executionRole",
+					"authority",
+					"rejections",
+					"coldPrior",
+					"priorReasons",
+				])
+			)
+				return false;
+			const prior = entry.coldPrior;
+			if (
+				typeof entry.agentId !== "string" ||
+				entry.agentId.length === 0 ||
+				typeof entry.specFingerprint !== "string" ||
+				entry.specFingerprint.length === 0 ||
+				!isExecutionRole(entry.executionRole) ||
+				!isAgentCapabilityClass(entry.authority) ||
+				!Array.isArray(entry.rejections) ||
+				entry.rejections.length > 64 ||
+				!entry.rejections.every((reason) => typeof reason === "string") ||
+				!Array.isArray(entry.priorReasons) ||
+				entry.priorReasons.length > 64 ||
+				!entry.priorReasons.every((reason) => typeof reason === "string") ||
+				!decisionRecord(prior) ||
+				!exactKeys(prior, priorKeys) ||
+				!priorKeys.every((key) => typeof prior[key] === "number" && Number.isFinite(prior[key]))
+			)
+				return false;
+			return true;
+		})
+	)
+		return false;
+	if (
+		!value.readiness.every((entry) => {
+			if (
+				!decisionRecord(entry) ||
+				!exactKeys(entry, [
+					"agentId",
+					"specFingerprint",
+					"executionRole",
+					"ready",
+					"candidateCount",
+					"readyCandidateCount",
+					"routes",
+				])
+			)
+				return false;
+			if (
+				!Array.isArray(entry.routes) ||
+				entry.routes.length === 0 ||
+				entry.routes.length > 64 ||
+				!entry.routes.every(
+					(route) =>
+						decisionRecord(route) &&
+						exactKeys(route, ["candidate", "report"]) &&
+						decisionRouteCandidate(route.candidate) &&
+						decisionReadinessReport(route.report) &&
+						route.candidate.agentId === entry.agentId &&
+						route.candidate.specFingerprint === entry.specFingerprint &&
+						route.candidate.executionRole === entry.executionRole,
+				)
+			)
+				return false;
+			const readyCandidateCount = entry.routes.filter(
+				(route) => decisionRecord(route) && decisionRecord(route.report) && route.report.ready === true,
+			).length;
+			return (
+				typeof entry.agentId === "string" &&
+				entry.agentId.length > 0 &&
+				typeof entry.specFingerprint === "string" &&
+				entry.specFingerprint.length > 0 &&
+				isExecutionRole(entry.executionRole) &&
+				typeof entry.ready === "boolean" &&
+				Number.isInteger(entry.candidateCount) &&
+				Number(entry.candidateCount) === entry.routes.length &&
+				Number.isInteger(entry.readyCandidateCount) &&
+				Number(entry.readyCandidateCount) === readyCandidateCount &&
+				entry.ready === readyCandidateCount > 0
+			);
+		})
+	)
+		return false;
+	if (value.authorityTransition !== null) {
+		const transition = value.authorityTransition;
+		if (
+			!decisionRecord(transition) ||
+			!exactKeys(transition, ["from", "to", "basis"]) ||
+			typeof transition.from !== "string" ||
+			transition.from.length === 0 ||
+			typeof transition.to !== "string" ||
+			transition.to.length === 0 ||
+			(transition.basis !== "same-authority" &&
+				transition.basis !== "operator-plan-approval" &&
+				transition.basis !== "full-auto-policy")
+		) {
+			return false;
+		}
+		if (
+			value.request !== "auto" ||
+			value.activation !== "active" ||
+			transition.from !== value.baselineAgentId ||
+			transition.to !== value.recommendedAgentId
+		)
+			return false;
+		const from = value.evaluations.find((entry) => entry.agentId === transition.from);
+		const to = value.evaluations.find((entry) => entry.agentId === transition.to);
+		if (from === undefined || to === undefined) return false;
+		if (transition.basis === "same-authority") {
+			if (from.authority !== to.authority) return false;
+		} else if (transition.basis !== value.authorityBasis) return false;
+	}
+	return (
+		(value.request !== "explicit" || value.authorityBasis === null) &&
+		new Set(
+			value.evaluations.map((entry) => `${entry.agentId}\u0000${entry.specFingerprint}\u0000${entry.executionRole}`),
+		).size === value.evaluations.length &&
+		value.evaluations.some((entry) => entry.agentId === value.baselineAgentId) &&
+		value.evaluations.some((entry) => entry.agentId === value.recommendedAgentId)
+	);
+}
+
 export interface CandidateEvaluation {
 	candidate: RouteCandidate;
 	estimate: RouteEstimate;
@@ -101,6 +361,8 @@ export interface RouteDecisionV1 {
 	decisionDurationMs: number;
 	confidence: number;
 	decisionHash: string;
+	/** Required agent hard-filter, prior, readiness, and authority explanation. */
+	agentSelection: RouteDecisionAgentSelection;
 	/**
 	 * The route the caller actually ran. Equal to `selected` at fixed and active
 	 * mode; in shadow mode it is the production route the decision did not
@@ -132,6 +394,7 @@ export interface RouteDecisionInput {
 	maxFallbacks: number;
 	/** Measured resolver duration. Excluded from the hash: it is not an input. */
 	decisionDurationMs: number;
+	agentSelection: RouteDecisionAgentSelectionInput;
 }
 
 /**
@@ -296,25 +559,35 @@ export function toRouteCandidate(identity: RouteIdentityInput, role: RouteRoleIn
 	};
 }
 
-function canonical(value: unknown): string {
-	if (value === null || value === undefined) return "null";
-	if (typeof value === "number") {
-		if (!Number.isFinite(value)) throw new Error(`route decision: non-finite number ${String(value)}`);
-		// Estimates are floats derived from division; a fixed precision keeps the
-		// hash stable against the last bits of otherwise-equal computations.
-		return JSON.stringify(Number(value.toFixed(9)));
-	}
-	if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
-	if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-	if (typeof value === "object") {
-		const record = value as Record<string, unknown>;
-		return `{${Object.keys(record)
-			.sort()
-			.filter((key) => record[key] !== undefined)
-			.map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-			.join(",")}}`;
-	}
-	throw new Error(`route decision: unsupported value of type ${typeof value}`);
+function hashNumber(value: number): number {
+	if (!Number.isFinite(value)) throw new Error(`route decision: non-finite number ${String(value)}`);
+	// Estimates are floats derived from division; a fixed precision keeps the
+	// hash stable against the last bits of otherwise-equal computations.
+	return Number(value.toFixed(9));
+}
+
+function estimateHashProjection(estimate: RouteEstimate): ReadonlyArray<number> {
+	return [
+		hashNumber(estimate.qualityLabeledCount),
+		hashNumber(estimate.unmeasuredCount),
+		hashNumber(estimate.qualityCoverage),
+		hashNumber(estimate.qualityMean),
+		hashNumber(estimate.qualityLowerBound),
+		hashNumber(estimate.firstPassSuccessProbability),
+		hashNumber(estimate.expectedCostUsd),
+		hashNumber(estimate.costUpperBoundUsd),
+		hashNumber(estimate.expectedEndToEndMs),
+		hashNumber(estimate.p95EndToEndMs),
+		hashNumber(estimate.reliability),
+		hashNumber(estimate.cacheHitProbability),
+		hashNumber(estimate.queueWaitMs),
+		hashNumber(estimate.sampleCount),
+		hashNumber(estimate.confidence),
+	];
+}
+
+function readinessHashProjection(report: RouteReadinessReport): readonly [boolean, ReadonlyArray<string>, number] {
+	return [report.ready, report.gaps, hashNumber(report.labelsNeeded)];
 }
 
 /**
@@ -325,23 +598,69 @@ function canonical(value: unknown): string {
  * input to it, so a replay on a faster machine still reproduces the hash.
  */
 export function routeDecisionHash(input: RouteDecisionInput): string {
+	// Arrays give every field an explicit position, so native JSON serialization
+	// is deterministic without recursively sorting hundreds of short-lived
+	// objects at the maximum universe bound. Candidate identity uses the same
+	// exact-route key as admission, ranking, and fallback selection.
+	const candidates = input.candidates.map((entry) => [
+		routeCandidateKey(entry.candidate),
+		estimateHashProjection(entry.estimate),
+		readinessHashProjection(entry.activeReadiness),
+		entry.rejection,
+	]);
+	const agentSelection = [
+		input.agentSelection.request,
+		input.agentSelection.baselineAgentId,
+		input.agentSelection.evaluations.map((entry) => [
+			entry.agentId,
+			entry.specFingerprint,
+			entry.executionRole,
+			entry.authority,
+			entry.rejections,
+			[
+				hashNumber(entry.coldPrior.qualityMean),
+				hashNumber(entry.coldPrior.firstPassSuccessProbability),
+				hashNumber(entry.coldPrior.costUpperBoundUsd),
+				hashNumber(entry.coldPrior.expectedEndToEndMs),
+				hashNumber(entry.coldPrior.reliability),
+				hashNumber(entry.coldPrior.queueWaitMs),
+			],
+			entry.priorReasons,
+		]),
+		input.agentSelection.readiness.map((entry) => [
+			entry.agentId,
+			entry.specFingerprint,
+			entry.executionRole,
+			entry.ready,
+			hashNumber(entry.candidateCount),
+			hashNumber(entry.readyCandidateCount),
+			entry.routes.map((route) => [routeCandidateKey(route.candidate), readinessHashProjection(route.report)]),
+		]),
+		input.agentSelection.authorityBasis,
+	];
+	const independenceSubject =
+		input.independenceSubject === null
+			? null
+			: [
+					input.independenceSubject.agentId,
+					input.independenceSubject.targetId,
+					input.independenceSubject.wireModelId,
+					input.independenceSubject.runtimeId,
+					input.independenceSubject.nodeId,
+				];
 	return createHash("sha256")
 		.update(
-			canonical({
-				policyVersion: ROUTE_POLICY_VERSION,
-				mode: input.mode,
-				posture: input.posture,
-				executedRoute: input.executedRoute,
-				candidates: input.candidates.map((entry) => ({
-					candidate: entry.candidate,
-					estimate: entry.estimate,
-					activeReadiness: entry.activeReadiness,
-					rejection: entry.rejection,
-				})),
-				independenceSubject: input.independenceSubject,
-				hardConstraints: [...input.hardConstraints],
-				maxFallbacks: input.maxFallbacks,
-			}),
+			JSON.stringify([
+				ROUTE_POLICY_VERSION,
+				input.mode,
+				input.posture,
+				routeCandidateKey(input.executedRoute),
+				candidates,
+				independenceSubject,
+				agentSelection,
+				input.hardConstraints,
+				hashNumber(input.maxFallbacks),
+			]),
 			"utf8",
 		)
 		.digest("hex");
@@ -360,6 +679,8 @@ export function routeDecisionHash(input: RouteDecisionInput): string {
  */
 export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 	const reasonCodes: string[] = [];
+	const candidateKeys = new Map(input.candidates.map((entry) => [entry, routeCandidateKey(entry.candidate)]));
+	const candidateKey = (entry: RouteCandidateInput): string => candidateKeys.get(entry) as string;
 	const hardAdmissible = input.candidates.filter((entry) => entry.rejection === null);
 	const rejectedCount = input.candidates.length - hardAdmissible.length;
 	if (rejectedCount > 0) reasonCodes.push(`hard-filter-rejected-${rejectedCount}`);
@@ -384,10 +705,10 @@ export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 
 	// Approval order is the caller's enumeration order, with the resolved route
 	// first, so it is the stable tie-break the comparator needs.
-	const approvalOrder = new Map(input.candidates.map((entry, index) => [routeCandidateKey(entry.candidate), index]));
+	const approvalOrder = new Map(input.candidates.map((entry, index) => [candidateKey(entry), index]));
 	const ranked = selectable
 		.map((entry) => {
-			const key = routeCandidateKey(entry.candidate);
+			const key = candidateKey(entry);
 			return {
 				entry,
 				ranked: {
@@ -426,7 +747,7 @@ export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 		for (const inner of admissible) {
 			if (inner === outer) continue;
 			if (dominatesRoute(inner.estimate, outer.estimate)) {
-				dominatedKeys.add(routeCandidateKey(outer.candidate));
+				dominatedKeys.add(candidateKey(outer));
 				break;
 			}
 		}
@@ -434,7 +755,7 @@ export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 
 	const scores = new Map(ranked.map((entry) => [entry.ranked.key, entry.ranked.score]));
 	const candidateEvaluations: CandidateEvaluation[] = input.candidates.map((entry) => {
-		const key = routeCandidateKey(entry.candidate);
+		const key = candidateKey(entry);
 		return {
 			candidate: { ...entry.candidate },
 			estimate: { ...entry.estimate },
@@ -446,7 +767,7 @@ export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 	});
 
 	const executedKey = routeCandidateKey(input.executedRoute);
-	const executedAdmissible = admissible.some((entry) => routeCandidateKey(entry.candidate) === executedKey);
+	const executedAdmissible = admissible.some((entry) => candidateKey(entry) === executedKey);
 	const manual = input.posture === "manual";
 	const best = ranked[0]?.entry.candidate;
 	if (input.mode === "active" && best === undefined) {
@@ -481,6 +802,21 @@ export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 			? 1
 			: admissible.filter((entry) => entry.estimate.sampleCount === 0).length / admissible.length;
 	const confidence = Math.max(0, Math.min(1, (selectedEstimate?.confidence ?? 0) * (1 - coldShare) + coldShare * 0));
+	const recommendedAgentId = best?.agentId ?? input.agentSelection.baselineAgentId;
+	let authorityTransition: RouteDecisionAgentSelection["authorityTransition"] = null;
+	if (input.mode === "active" && selected.agentId !== input.agentSelection.baselineAgentId) {
+		if (input.agentSelection.request !== "auto") {
+			throw new Error("route decision: explicit agent selection cannot change authority");
+		}
+		const from = input.agentSelection.evaluations.find(
+			(evaluation) => evaluation.agentId === input.agentSelection.baselineAgentId,
+		)?.authority;
+		const to = input.agentSelection.evaluations.find((evaluation) => evaluation.agentId === selected.agentId)?.authority;
+		const basis =
+			from !== undefined && to !== undefined && from === to ? "same-authority" : input.agentSelection.authorityBasis;
+		if (basis === null) throw new Error("route decision: active agent authority transition lacks trusted approval");
+		authorityTransition = { from: input.agentSelection.baselineAgentId, to: selected.agentId, basis };
+	}
 
 	return {
 		policyVersion: ROUTE_POLICY_VERSION,
@@ -493,6 +829,16 @@ export function decideRoute(input: RouteDecisionInput): RouteDecisionV1 {
 		reasonCodes,
 		decisionDurationMs: input.decisionDurationMs,
 		confidence,
+		agentSelection: {
+			request: input.agentSelection.request,
+			activation: input.mode === "active" ? "active" : "shadow",
+			baselineAgentId: input.agentSelection.baselineAgentId,
+			recommendedAgentId,
+			evaluations: structuredClone([...input.agentSelection.evaluations]),
+			readiness: structuredClone([...input.agentSelection.readiness]),
+			authorityBasis: input.agentSelection.authorityBasis,
+			authorityTransition,
+		},
 		decisionHash: routeDecisionHash({
 			...input,
 			executedRoute: input.mode === "active" ? selected : input.executedRoute,
@@ -511,6 +857,16 @@ export function fixedRouteDecision(
 	reasonCode = "observer-failure-fixed-route",
 ): RouteDecisionV1 {
 	const estimate = estimateRoute([], DEFAULT_ROUTE_PRIOR);
+	const activeReadiness = evaluateRouteReadiness({
+		estimate,
+		posture: "manual",
+		hardConstraintValidity: 1,
+		integrityFailures: 0,
+		costUpperBoundUsd: null,
+		factsFresh: false,
+		decisionP95Ms: Number.POSITIVE_INFINITY,
+		requestedMinimumQuality: null,
+	});
 	const input: RouteDecisionInput = {
 		mode: "fixed",
 		posture: "manual",
@@ -519,16 +875,7 @@ export function fixedRouteDecision(
 			{
 				candidate: executedRoute,
 				estimate,
-				activeReadiness: evaluateRouteReadiness({
-					estimate,
-					posture: "manual",
-					hardConstraintValidity: 1,
-					integrityFailures: 0,
-					costUpperBoundUsd: null,
-					factsFresh: false,
-					decisionP95Ms: Number.POSITIVE_INFINITY,
-					requestedMinimumQuality: null,
-				}),
+				activeReadiness,
 				rejection: null,
 			},
 		],
@@ -536,6 +883,33 @@ export function fixedRouteDecision(
 		hardConstraints: ["fixed-executed-route"],
 		maxFallbacks: 0,
 		decisionDurationMs: 0,
+		agentSelection: {
+			request: "explicit",
+			baselineAgentId: executedRoute.agentId,
+			evaluations: [
+				{
+					agentId: executedRoute.agentId,
+					specFingerprint: executedRoute.specFingerprint,
+					executionRole: executedRoute.executionRole,
+					authority: "internal",
+					rejections: [],
+					coldPrior: { ...DEFAULT_ROUTE_PRIOR },
+					priorReasons: ["fixed-route"],
+				},
+			],
+			readiness: [
+				{
+					agentId: executedRoute.agentId,
+					specFingerprint: executedRoute.specFingerprint,
+					executionRole: executedRoute.executionRole,
+					ready: activeReadiness.ready,
+					candidateCount: 1,
+					readyCandidateCount: activeReadiness.ready ? 1 : 0,
+					routes: [{ candidate: { ...executedRoute }, report: { ...activeReadiness, gaps: [...activeReadiness.gaps] } }],
+				},
+			],
+			authorityBasis: null,
+		},
 	};
 	const decision = decideRoute(input);
 	return { ...decision, reasonCodes: [...decision.reasonCodes, reasonCode] };

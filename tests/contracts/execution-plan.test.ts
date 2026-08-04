@@ -17,6 +17,9 @@ const step = (id: string, dependencies: string[] = []): ExecutionPlanStep => ({
 	agentId: "coder",
 	executionRole: "builder",
 	scope: "workspace",
+	expectedResultContract: "mutation-report",
+	requestedAuthority: "workspace-edit",
+	approvedAuthority: "workspace-edit",
 	task: id,
 });
 const plan = (steps: ExecutionPlanStep[], maxWorkers = 2, onFailure: "stop" | "continue" = "continue") =>
@@ -129,6 +132,22 @@ describe("execution plan", () => {
 		controller.abort();
 		await executePlan(plan([step("a")]), fake, controller.signal);
 		strictEqual(fake.released.includes("reservation"), true);
+	});
+	it("version 2 seals authority grants and refuses a plan that lacks one", async () => {
+		const granted = plan([step("a")]);
+		const ungranted = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "root",
+			maxWorkers: 1,
+			onFailure: "stop",
+			steps: [{ ...step("a"), approvedAuthority: null }],
+		});
+		strictEqual(granted.version, 2);
+		strictEqual(ungranted.version, 2);
+		strictEqual(granted.hash === ungranted.hash, false);
+		const fake = adapter();
+		await rejects(() => executePlan(ungranted, fake), /lacks its requested authority grant/u);
+		deepStrictEqual(fake.launched, []);
 	});
 	it("equal plans produce equal hashes and launch order", async () => {
 		const a = plan([step("root"), step("left", ["root"]), step("right", ["root"])]);

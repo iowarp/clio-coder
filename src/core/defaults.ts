@@ -203,9 +203,23 @@ export type ActiveRoutingRole = (typeof ACTIVE_ROUTING_ROLES)[number];
 export const ACTIVE_ROUTING_POSTURES = ["quality", "balanced", "latency", "economy"] as const;
 export type ActiveRoutingPosture = (typeof ACTIVE_ROUTING_POSTURES)[number];
 
+export const ACTIVE_AGENT_AUTOMATION_ROLES = ["builder", "researcher", "verifier", "reviewer", "judge"] as const;
+export type ActiveAgentAutomationRole = (typeof ACTIVE_AGENT_AUTOMATION_ROLES)[number];
+
+export interface ActiveAgentRole {
+	agentId: string;
+	executionRole: ActiveAgentAutomationRole;
+}
+
+export interface AgentAutomationActivationSettings {
+	/** Exact pairs only; independent agent and role lists would authorize their cross-product. */
+	activeAgentRoles: ActiveAgentRole[];
+}
+
 export interface RoutingActivationSettings {
 	activeRoles: ActiveRoutingRole[];
 	activePostures: ActiveRoutingPosture[];
+	agentAutomation: AgentAutomationActivationSettings;
 }
 
 export const DEFAULT_SETTINGS = {
@@ -254,6 +268,7 @@ export const DEFAULT_SETTINGS = {
 	routing: {
 		activeRoles: [] as ActiveRoutingRole[],
 		activePostures: [] as ActiveRoutingPosture[],
+		agentAutomation: { activeAgentRoles: [] as ActiveAgentRole[] },
 	} as RoutingActivationSettings,
 	scope: [] as string[],
 	modelSelector: {
@@ -452,6 +467,10 @@ fleet:
 routing:
   activeRoles: []       # researcher | verifier | reviewer | judge
   activePostures: []    # quality | balanced | latency | economy
+  # Agent changes remain advisory unless the concrete agent/role pair appears
+  # here. Exact pairs avoid implicitly approving an agents × roles cross-product.
+  agentAutomation:
+    activeAgentRoles: []
 
 # Alt+J / Alt+K cycling order: plain target ids or "target/model" refs.
 scope: []

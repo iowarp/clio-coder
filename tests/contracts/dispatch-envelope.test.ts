@@ -110,6 +110,7 @@ describe("dispatch failover envelopes", () => {
 			topology: "parallel" as const,
 			taskCount: 1,
 			approval: "operator" as const,
+			source: null,
 		};
 		const planned = validateJobSpec(request({ failover: "automatic", plan }));
 		strictEqual(planned.ok, false);

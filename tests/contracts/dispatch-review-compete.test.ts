@@ -135,6 +135,9 @@ function rejectingAdmissionContract(options: { abortThrowsFor?: string } = {}): 
 		steer: () => {
 			throw new Error("not used");
 		},
+		planAgentSelection: () => {
+			throw new Error("unexpected agent plan selection");
+		},
 		snapshot: () => ({
 			generatedAt: new Date(0).toISOString(),
 			running: [],
@@ -239,7 +242,7 @@ describe("reviewer-gated dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const result = (await createDispatchTool({ dispatch: bundle.contract }).run(
+			const result = (await createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract }).run(
 				{ tasks: ["fix after reviewer retry"], review: true },
 				approvedDispatchOptions(),
 			)) as ToolRunResult;
@@ -267,7 +270,7 @@ describe("reviewer-gated dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const subjectResult = (await tool.run({ tasks: ["recovery subject"] }, approvedDispatchOptions())) as ToolRunResult;
 			strictEqual(subjectResult.kind, "ok");
 			const subject = receiptsByRole(subjectResult.details, bundle.contract).get("none")?.[0];
@@ -309,7 +312,7 @@ describe("reviewer-gated dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ tasks: ["fix the build"], review: true },
 				approvedDispatchOptions(),
@@ -352,7 +355,7 @@ describe("reviewer-gated dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const first = (await tool.run(
 				{ tasks: ["produce receipt fixtures"], review: true },
 				approvedDispatchOptions(),
@@ -412,7 +415,7 @@ describe("reviewer-gated dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ tasks: ["fix the build"], review: { max_cycles: 2 } },
 				approvedDispatchOptions(),
@@ -450,7 +453,7 @@ describe("reviewer-gated dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ tasks: ["fix the build"], review: { max_cycles: 1 } },
 				approvedDispatchOptions(),
@@ -475,7 +478,7 @@ describe("reviewer-gated dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ tasks: ["fix the build"], review: { max_cycles: 1 } },
 				approvedDispatchOptions(),
@@ -497,7 +500,11 @@ describe("reviewer-gated dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const args = { tasks: ["one", "two"] };
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const prepared = tool.prepareAdmissionArguments?.(args) ?? args;
 			const expected = describeDispatchPlan(prepared);
 			const result = (await tool.run(prepared, {})) as ToolRunResult;
@@ -537,7 +544,11 @@ describe("reviewer-gated dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run({ tasks: ["review twice"], review: { max_cycles: 2 } }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok");
 			deepStrictEqual(placements, ["builder-1", "reviewer-1", "builder-2", "reviewer-2"]);
@@ -559,10 +570,11 @@ describe("compete dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const result = (await createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" }).run(
-				{ tasks: [{ task: "retry the judge", cwd: repo }], mode: "compete", candidates: 2 },
-				{},
-			)) as ToolRunResult;
+			const result = (await createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			}).run({ tasks: [{ task: "retry the judge", cwd: repo }], mode: "compete", candidates: 2 }, {})) as ToolRunResult;
 			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
 			const winner = readGateDecisionArtifacts().find(({ artifact }) => artifact.outcome === "winner");
 			ok(winner?.artifact.decider);
@@ -602,6 +614,7 @@ describe("compete dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
 				dispatch: bundle.contract,
 				getAutonomy: () => "full-auto",
 				competeWorktrees: {
@@ -634,7 +647,11 @@ describe("compete dispatch", () => {
 	it("aborts and settles accepted candidates when capacity rejects one admission and a sibling arrives late", async () => {
 		const fake = rejectingAdmissionContract();
 		try {
-			const tool = createDispatchTool({ dispatch: fake.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: fake.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 3 },
 				{},
@@ -660,7 +677,11 @@ describe("compete dispatch", () => {
 	it("still awaits every worker and surfaces an abort failure before cleaning paths", async () => {
 		const fake = rejectingAdmissionContract({ abortThrowsFor: "candidate-run-1" });
 		try {
-			const tool = createDispatchTool({ dispatch: fake.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: fake.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 3 },
 				{},
@@ -683,6 +704,7 @@ describe("compete dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
 				dispatch: bundle.contract,
 				getAutonomy: () => "full-auto",
 				competeWorktrees: {
@@ -835,7 +857,11 @@ describe("compete dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const candidateResult = (await tool.run({ tasks: [{ task: "candidate receipt", cwd: repo }] }, {})) as ToolRunResult;
 			const judgeResult = (await tool.run({ tasks: [{ task: "judge receipt", cwd: repo }] }, {})) as ToolRunResult;
 			strictEqual(candidateResult.kind, "ok");
@@ -931,7 +957,11 @@ describe("compete dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run({ tasks: [{ task: "must not start", cwd: repo }] }, {})) as ToolRunResult;
 			strictEqual(result.kind, "error");
 			if (result.kind === "error") match(result.message, /failed closed.*no verified decider receipt/);
@@ -956,7 +986,11 @@ describe("compete dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 2 },
 				{},
@@ -1020,7 +1054,11 @@ describe("compete dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "compete with distinct pins", cwd: repo }], mode: "compete", candidates: 2 },
 				{},
@@ -1054,7 +1092,11 @@ describe("compete dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "change the protected readme", cwd: repo }], mode: "compete", candidates: 2 },
 				{},
@@ -1099,7 +1141,11 @@ describe("compete dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "auto-edit" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "auto-edit",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "build a safe candidate", cwd: repo }], mode: "compete", candidates: 2 },
 				approvedDispatchOptions("apr-protected-compete"),
@@ -1131,7 +1177,11 @@ describe("compete dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "auto-edit" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "auto-edit",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 2 },
 				approvedDispatchOptions("apr-test-compete"),
@@ -1199,6 +1249,7 @@ describe("compete dispatch", () => {
 		await bundle.extension.start();
 		try {
 			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
 				dispatch: bundle.contract,
 				getAutonomy: () => "full-auto",
 				competeWorktrees: {
@@ -1243,7 +1294,11 @@ describe("compete dispatch", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run(
 				{ tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 2 },
 				{},
@@ -1278,7 +1333,7 @@ describe("Slice 3 gate role defaults and independence", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ agent: "coder", tasks: ["fix the build"], review: true },
 				approvedDispatchOptions("apr-review-default"),
@@ -1304,7 +1359,11 @@ describe("Slice 3 gate role defaults and independence", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract, getAutonomy: () => "full-auto" });
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "full-auto",
+			});
 			const result = (await tool.run(
 				{ agent: "coder", tasks: [{ task: "improve the readme", cwd: repo }], mode: "compete", candidates: 2 },
 				{},
@@ -1340,7 +1399,7 @@ describe("Slice 3 gate role defaults and independence", () => {
 			const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 			await bundle.extension.start();
 			try {
-				const tool = createDispatchTool({ dispatch: bundle.contract });
+				const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 				const result = (await tool.run(
 					{ tasks: ["fix the build"], review: { max_cycles: 1 } },
 					approvedDispatchOptions("apr-structured-gate"),
@@ -1368,7 +1427,7 @@ describe("Slice 3 gate role defaults and independence", () => {
 		const bundle = makeDispatchBundle(dispatchStubContext(), { spawnWorker: fabric.spawn });
 		await bundle.extension.start();
 		try {
-			const tool = createDispatchTool({ dispatch: bundle.contract });
+			const tool = createDispatchTool({ getAgentSpecs: () => [], dispatch: bundle.contract });
 			const result = (await tool.run(
 				{ agent: "coder", tasks: ["fix the build"], review: { reviewer: "coder" } },
 				approvedDispatchOptions("apr-correlated"),

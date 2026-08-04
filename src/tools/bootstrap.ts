@@ -1,5 +1,6 @@
 import type { SafeEventBus } from "../core/event-bus.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
+import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
@@ -43,6 +44,7 @@ export interface ToolBootstrapDeps {
 	taskBoard?: TaskBoardStore;
 	/** Agent fleet catalog renderer for the dispatch tool's list action. */
 	getAgentCatalog?: () => string;
+	getAgentSpecs?: () => ReadonlyArray<AgentSpec>;
 	/** Strict recipe facts the dispatch tool derives each request's execution role from. */
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	/** Session-effective autonomy for dispatch plan provenance and compete winner handling. */
@@ -393,6 +395,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		const dispatchToolDeps = {
 			dispatch: deps.dispatch,
 			runEvents: dispatchRunEvents,
+			getAgentSpecs: deps.getAgentSpecs ?? (() => []),
 			...(deps.bus ? { bus: deps.bus } : {}),
 			...(deps.getAgentCatalog ? { getAgentCatalog: deps.getAgentCatalog } : {}),
 			...(deps.getAgentRoleFacts ? { getAgentRoleFacts: deps.getAgentRoleFacts } : {}),

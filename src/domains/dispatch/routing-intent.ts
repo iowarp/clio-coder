@@ -179,6 +179,14 @@ export interface RouteExplanation {
 	activeEligible: boolean;
 	reasonCodes: ReadonlyArray<string>;
 	decisionHash: string;
+	agentSelection: {
+		request: RouteDecisionV1["agentSelection"]["request"];
+		activation: RouteDecisionV1["agentSelection"]["activation"];
+		baselineAgentId: string;
+		recommendedAgentId: string;
+		excluded: ReadonlyArray<{ agentId: string; reasons: ReadonlyArray<string> }>;
+		authorityTransition: RouteDecisionV1["agentSelection"]["authorityTransition"];
+	};
 }
 
 function safeIdentity(candidate: RouteCandidate): RouteCandidate {
@@ -221,13 +229,59 @@ export function explainRouteDecision(decision: RouteDecisionV1, intent: RoutingI
 		),
 		reasonCodes: decision.reasonCodes.slice(0, 16),
 		decisionHash: decision.decisionHash,
+		agentSelection: {
+			request: decision.agentSelection.request,
+			activation: decision.agentSelection.activation,
+			baselineAgentId: safeIdentity({ ...decision.executedRoute, agentId: decision.agentSelection.baselineAgentId })
+				.agentId,
+			recommendedAgentId: safeIdentity({ ...decision.executedRoute, agentId: decision.agentSelection.recommendedAgentId })
+				.agentId,
+			excluded: decision.agentSelection.evaluations
+				.filter((entry) => entry.rejections.length > 0)
+				.slice(0, 16)
+				.map((entry) => ({
+					agentId: safeIdentity({ ...decision.executedRoute, agentId: entry.agentId }).agentId,
+					reasons: entry.rejections.slice(0, 8),
+				})),
+			authorityTransition:
+				decision.agentSelection.authorityTransition === null
+					? null
+					: {
+							...decision.agentSelection.authorityTransition,
+							from: safeIdentity({
+								...decision.executedRoute,
+								agentId: decision.agentSelection.authorityTransition.from,
+							}).agentId,
+							to: safeIdentity({
+								...decision.executedRoute,
+								agentId: decision.agentSelection.authorityTransition.to,
+							}).agentId,
+						},
+		},
 	};
-	if (Buffer.byteLength(JSON.stringify(explanation), "utf8") > ROUTE_EXPLANATION_MAX_BYTES) {
-		return {
-			...explanation,
-			hardExclusions: explanation.hardExclusions.slice(0, 4),
-			reasonCodes: explanation.reasonCodes.slice(0, 4),
-		};
-	}
-	return explanation;
+	if (Buffer.byteLength(JSON.stringify(explanation), "utf8") <= ROUTE_EXPLANATION_MAX_BYTES) return explanation;
+	const compact: RouteExplanation = {
+		...explanation,
+		approvedFallbacks: explanation.approvedFallbacks.slice(0, 1),
+		hardExclusions: explanation.hardExclusions.slice(0, 4),
+		reasonCodes: explanation.reasonCodes.slice(0, 4),
+		agentSelection: {
+			...explanation.agentSelection,
+			excluded: explanation.agentSelection.excluded
+				.slice(0, 4)
+				.map((entry) => ({ ...entry, reasons: entry.reasons.slice(0, 2) })),
+		},
+	};
+	if (Buffer.byteLength(JSON.stringify(compact), "utf8") <= ROUTE_EXPLANATION_MAX_BYTES) return compact;
+	return {
+		...compact,
+		shadowRecommendation: null,
+		approvedFallbacks: [],
+		hardExclusions: compact.hardExclusions.slice(0, 2),
+		reasonCodes: compact.reasonCodes.slice(0, 2),
+		agentSelection: {
+			...compact.agentSelection,
+			excluded: [],
+		},
+	};
 }

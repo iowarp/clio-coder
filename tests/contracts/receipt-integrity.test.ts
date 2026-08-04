@@ -8,7 +8,7 @@ import {
 	withReceiptIntegrity,
 } from "../../src/domains/dispatch/receipt-integrity.js";
 import { decideRoute, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
-import { estimateRoute } from "../../src/domains/dispatch/route-policy.js";
+import { DEFAULT_ROUTE_PRIOR, estimateRoute } from "../../src/domains/dispatch/route-policy.js";
 import type {
 	RunEnvelope,
 	RunReceipt,
@@ -118,7 +118,7 @@ describe("contracts/receipt-integrity", () => {
 		if (draft.routingIntent === undefined) throw new Error("fixture routing intent missing");
 
 		// Every shape before routing intent became required is rejected, never upgraded.
-		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+		for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) {
 			const integrity = { ...current, version } as unknown as RunReceiptIntegrity;
 			const receipt: RunReceipt = { ...draft, routingIntent: draft.routingIntent, integrity };
 			deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: false, reason: "integrity invalid" });
@@ -129,7 +129,7 @@ describe("contracts/receipt-integrity", () => {
 		const envelope = fixtureEnvelope("run-execution-role");
 		const draft = fixtureReceiptDraft(envelope);
 		strictEqual(RECEIPT_INTEGRITY_FIELD_COVERAGE.executionRole, true);
-		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 14);
+		strictEqual(RUN_RECEIPT_INTEGRITY_VERSION, 15);
 
 		const sealed = withReceiptIntegrity(draft, envelope);
 		strictEqual(sealed.executionRole, "builder");
@@ -188,6 +188,7 @@ describe("contracts/receipt-integrity", () => {
 				topology: "parallel",
 				taskCount: 2,
 				approval: "operator",
+				source: null,
 				costCeilingUsd: 1.5,
 			},
 			personaOverride: { promptHash: "c".repeat(64) },
@@ -373,6 +374,50 @@ describe("contracts/receipt-integrity", () => {
 				hardConstraints: ["node-eligibility"],
 				maxFallbacks: 2,
 				decisionDurationMs: 1,
+				agentSelection: {
+					request: "explicit",
+					baselineAgentId: "coder",
+					evaluations: [
+						{
+							agentId: "coder",
+							specFingerprint: "d".repeat(64),
+							executionRole: "builder",
+							authority: "workspace-edit",
+							rejections: [],
+							coldPrior: DEFAULT_ROUTE_PRIOR,
+							priorReasons: [],
+						},
+					],
+					readiness: [
+						{
+							agentId: "coder",
+							specFingerprint: "d".repeat(64),
+							executionRole: "builder",
+							ready: false,
+							candidateCount: 2,
+							readyCandidateCount: 0,
+							routes: [
+								{
+									candidate: fixtureRouteCandidate(),
+									report: {
+										ready: false,
+										gaps: ["insufficient-quality-labels"],
+										labelsNeeded: 6,
+									},
+								},
+								{
+									candidate: fixtureRouteCandidate({ targetId: "alt" }),
+									report: {
+										ready: false,
+										gaps: ["insufficient-quality-labels"],
+										labelsNeeded: 6,
+									},
+								},
+							],
+						},
+					],
+					authorityBasis: null,
+				},
 			}),
 		};
 		const receipt = withReceiptIntegrity(draft, envelope);

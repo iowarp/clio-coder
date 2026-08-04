@@ -15,7 +15,12 @@
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { ACTIVE_ROUTING_POSTURES, ACTIVE_ROUTING_ROLES, DEFAULT_SETTINGS } from "./defaults.js";
+import {
+	ACTIVE_AGENT_AUTOMATION_ROLES,
+	ACTIVE_ROUTING_POSTURES,
+	ACTIVE_ROUTING_ROLES,
+	DEFAULT_SETTINGS,
+} from "./defaults.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
 
@@ -465,6 +470,10 @@ function validateDelegationAgent(
 	if (!("id" in value)) issues.add(`${path}.id`, "required");
 	if (!("command" in value)) issues.add(`${path}.command`, "required");
 	if (id === undefined || command === undefined) return null;
+	if (id === "auto") {
+		issues.add(`${path}.id`, "'auto' is reserved for coordinator-owned agent selection");
+		return null;
+	}
 	if (seen.has(id)) {
 		issues.add(`${path}.id`, `duplicate delegation agent id '${id}'`);
 		return null;
@@ -821,7 +830,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if (!isPlainObject(raw.routing)) {
 			issues.add("routing", `expected a map, got ${describe(raw.routing)}`);
 		} else {
-			issues.unknownKeys("routing", raw.routing, ["activeRoles", "activePostures"]);
+			issues.unknownKeys("routing", raw.routing, ["activeRoles", "activePostures", "agentAutomation"]);
 			const activeRoles = expectStringArray(issues, "routing.activeRoles", raw.routing.activeRoles);
 			if (activeRoles !== undefined) {
 				const allowed = new Set<string>(ACTIVE_ROUTING_ROLES);
@@ -852,6 +861,47 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				}
 				if (complete && activePostures.every((posture) => allowed.has(posture))) {
 					settings.routing.activePostures = activePostures as typeof settings.routing.activePostures;
+				}
+			}
+			if (!isPlainObject(raw.routing.agentAutomation)) {
+				issues.add("routing.agentAutomation", "expected a map");
+			} else {
+				const automation = raw.routing.agentAutomation;
+				issues.unknownKeys("routing.agentAutomation", automation, ["activeAgentRoles"]);
+				if (!Array.isArray(automation.activeAgentRoles)) {
+					issues.add("routing.agentAutomation.activeAgentRoles", "expected a list");
+				} else {
+					const pairs: typeof settings.routing.agentAutomation.activeAgentRoles = [];
+					const seen = new Set<string>();
+					for (const [index, value] of automation.activeAgentRoles.entries()) {
+						const path = `routing.agentAutomation.activeAgentRoles[${index}]`;
+						if (!isPlainObject(value)) {
+							issues.add(path, "expected a map");
+							continue;
+						}
+						issues.unknownKeys(path, value, ["agentId", "executionRole"]);
+						const agentId = expectString(issues, `${path}.agentId`, value.agentId);
+						const executionRole = expectEnum(
+							issues,
+							`${path}.executionRole`,
+							value.executionRole,
+							ACTIVE_AGENT_AUTOMATION_ROLES,
+						);
+						if (agentId === "auto") {
+							issues.add(`${path}.agentId`, "'auto' is reserved for coordinator-owned agent selection");
+						}
+						if (agentId === undefined || agentId === "auto" || executionRole === undefined) continue;
+						const key = `${agentId}\u0000${executionRole}`;
+						if (seen.has(key)) {
+							issues.add(path, "duplicate agent and execution-role pair");
+							continue;
+						}
+						seen.add(key);
+						pairs.push({ agentId, executionRole });
+					}
+					if (pairs.length === automation.activeAgentRoles.length) {
+						settings.routing.agentAutomation.activeAgentRoles = pairs;
+					}
 				}
 			}
 		}
@@ -914,6 +964,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						const agentId = rawAgentId.trim();
 						if (!agentId) {
 							issues.add("workers.agentBindings", "empty agent id");
+							continue;
+						}
+						if (agentId === "auto") {
+							issues.add("workers.agentBindings", "'auto' is reserved for coordinator-owned agent selection");
 							continue;
 						}
 						const profileName = expectString(issues, `workers.agentBindings.${agentId}`, rawProfileName);

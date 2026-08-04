@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { isExecutionRole } from "./execution-role.js";
+import { isRouteDecisionAgentSelection } from "./route-decision.js";
+import { ROUTE_POLICY_VERSION } from "./route-policy.js";
 import { isRoutingIntent } from "./routing-intent.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, RunReceiptQuality } from "./types.js";
 
@@ -8,7 +10,7 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunReceiptIntegrity, Run
  * base, so there are no historical receipts to keep verifying: a receipt is
  * either this version or it is not a receipt.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 14;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 15;
 export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
 export type ReceiptIntegrityField = keyof RunReceiptDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
@@ -269,11 +271,26 @@ function isReceiptQuality(value: unknown): value is RunReceiptQuality {
 	);
 }
 
+function isCurrentRouteDecision(value: unknown): boolean {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const decision = value as Record<string, unknown>;
+	return (
+		decision.policyVersion === ROUTE_POLICY_VERSION &&
+		(decision.mode === "fixed" || decision.mode === "shadow" || decision.mode === "active") &&
+		isRouteDecisionAgentSelection(decision.agentSelection) &&
+		typeof decision.decisionHash === "string" &&
+		/^[0-9a-f]{64}$/u.test(decision.decisionHash)
+	);
+}
+
 export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnvelope): RunReceipt {
 	if (!isReceiptQuality(receipt.quality)) throw new Error("receipt integrity: required quality block invalid");
 	if (!isExecutionRole(receipt.executionRole)) throw new Error("receipt integrity: required execution role invalid");
 	if (!isRoutingIntent(receipt.routingIntent)) {
 		throw new Error("receipt integrity: required routing intent invalid");
+	}
+	if (receipt.routeDecision !== undefined && !isCurrentRouteDecision(receipt.routeDecision)) {
+		throw new Error("receipt integrity: route decision is invalid or retired");
 	}
 	return {
 		...receipt,
@@ -337,6 +354,9 @@ export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelop
 	if (!isExecutionRole(receipt.executionRole)) return { ok: false, reason: "execution role invalid" };
 	if (!isRoutingIntent(receipt.routingIntent)) {
 		return { ok: false, reason: "routing intent invalid" };
+	}
+	if (receipt.routeDecision !== undefined && !isCurrentRouteDecision(receipt.routeDecision)) {
+		return { ok: false, reason: "route decision invalid" };
 	}
 	const mismatch = firstLedgerMismatch(receipt, envelope);
 	if (mismatch) {

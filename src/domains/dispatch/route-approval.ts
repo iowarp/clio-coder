@@ -1,7 +1,7 @@
 /** Strict plan-time authority for one actively routed assignment. */
 
 import { isExecutionRole } from "./execution-role.js";
-import { type RouteDecisionV1, sameRouteIdentity } from "./route-decision.js";
+import { isRouteDecisionAgentSelection, type RouteDecisionV1, sameRouteIdentity } from "./route-decision.js";
 import { ROUTE_POLICY_VERSION } from "./route-policy.js";
 import type { DispatchFailoverCandidate } from "./validation.js";
 
@@ -48,6 +48,7 @@ export function isApprovedAssignmentRoute(value: unknown): value is ApprovedAssi
 		!routeCandidate(decision.executedRoute) ||
 		!Array.isArray(decision.approvedFallbacks) ||
 		!decision.approvedFallbacks.every(routeCandidate) ||
+		!isRouteDecisionAgentSelection(decision.agentSelection) ||
 		!Array.isArray(decision.candidateEvaluations) ||
 		!decision.candidateEvaluations.every(
 			(evaluation) =>
@@ -77,13 +78,50 @@ export function assertApprovedAssignmentRoute(value: ApprovedAssignmentRoute): v
 	if (value.version !== APPROVED_ASSIGNMENT_ROUTE_VERSION) {
 		throw new Error("dispatch: unsupported active route approval version");
 	}
+	if (value.decision.policyVersion !== ROUTE_POLICY_VERSION) {
+		throw new Error("dispatch: active route approval uses an unsupported route policy");
+	}
+	if (!isRouteDecisionAgentSelection(value.decision.agentSelection)) {
+		throw new Error("dispatch: active route approval has invalid agent-selection evidence");
+	}
 	if (value.decision.mode !== "active" || !sameRouteIdentity(value.decision.selected, value.decision.executedRoute)) {
 		throw new Error("dispatch: active route approval must seal one selected and executed identity");
+	}
+	const agentSelection = value.decision.agentSelection;
+	if (agentSelection.activation !== "active") {
+		throw new Error("dispatch: active route approval has non-active agent selection evidence");
+	}
+	if (
+		agentSelection.request === "explicit" &&
+		[value.decision.selected, ...value.decision.approvedFallbacks].some(
+			(candidate) => candidate.agentId !== agentSelection.baselineAgentId,
+		)
+	) {
+		throw new Error("dispatch: explicit route approval cannot authorize another agent");
+	}
+	if (value.decision.selected.agentId !== agentSelection.baselineAgentId) {
+		const transition = agentSelection.authorityTransition;
+		if (
+			agentSelection.request !== "auto" ||
+			transition === null ||
+			transition.from !== agentSelection.baselineAgentId ||
+			transition.to !== value.decision.selected.agentId
+		)
+			throw new Error("dispatch: active agent transition is not explained by the approved decision");
 	}
 	for (const candidate of [value.decision.selected, ...value.decision.approvedFallbacks]) {
 		const evaluation = value.decision.candidateEvaluations.find((entry) => sameRouteIdentity(entry.candidate, candidate));
 		if (evaluation === undefined || evaluation.rejection !== null || !evaluation.activeReadiness.ready) {
 			throw new Error("dispatch: active route approval contains a rejected or readiness-ineligible route");
+		}
+		const agentEvaluation = agentSelection.evaluations.find(
+			(entry) =>
+				entry.agentId === candidate.agentId &&
+				entry.specFingerprint === candidate.specFingerprint &&
+				entry.executionRole === candidate.executionRole,
+		);
+		if (agentEvaluation === undefined || agentEvaluation.rejections.length > 0) {
+			throw new Error("dispatch: active route approval contains an agent rejected by hard filters");
 		}
 	}
 	if (!Number.isFinite(value.totalCostUpperBoundUsd) || value.totalCostUpperBoundUsd < 0) {

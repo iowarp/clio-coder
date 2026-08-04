@@ -8,7 +8,7 @@ import type { AgentLatencyClass } from "../agents/spec.js";
 import type { RouteHistoryRecord } from "./route-history.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 
-export const ROUTE_POLICY_VERSION = "route-policy/3";
+export const ROUTE_POLICY_VERSION = "route-policy/4";
 export const MINIMUM_QUALITY_LABELED_OUTCOMES = 6;
 
 export type RoutingPosture = "manual" | "quality" | "balanced" | "latency" | "economy";
@@ -269,7 +269,11 @@ export function scoreRoute(estimate: RouteEstimate, posture: RoutingPosture, sca
 		scale.maxLatencyMs,
 	);
 	const queuePenalty = normalize(estimate.queueWaitMs, scale.minQueueWaitMs, scale.maxQueueWaitMs);
-	const health = estimate.qualityLowerBound * 0.7 + estimate.reliability * 0.3;
+	// A bounded task prior orders only wholly cold routes. The first labeled
+	// role-specific outcome replaces it; active floors always use the Wilson
+	// lower bound and minimum label count regardless.
+	const qualitySignal = estimate.qualityLabeledCount === 0 ? estimate.qualityMean : estimate.qualityLowerBound;
+	const health = qualitySignal * 0.7 + estimate.reliability * 0.3;
 	const affinityBonus = estimate.cacheHitProbability * 0.01;
 	return round(
 		policy.weights.quality * health -

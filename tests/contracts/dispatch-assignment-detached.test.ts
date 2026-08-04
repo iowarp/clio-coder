@@ -53,7 +53,11 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const dispatch = createDispatchTool({ dispatch: bundle.contract, runEvents: createDispatchRunEventRegistry() });
+			const dispatch = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				runEvents: createDispatchRunEventRegistry(),
+			});
 			const detached = (await dispatch.run({ tasks: ["recover detached"], detach: true }, approvedDispatch)) as ToolResult;
 			strictEqual(detached.kind, "ok");
 			if (detached.kind !== "ok") return;
@@ -108,7 +112,11 @@ describe("assignment-aware detached, batch, and pipeline dispatch", () => {
 		});
 		await bundle.extension.start();
 		try {
-			const dispatch = createDispatchTool({ dispatch: bundle.contract, runEvents: createDispatchRunEventRegistry() });
+			const dispatch = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				runEvents: createDispatchRunEventRegistry(),
+			});
 			const result = await dispatch.run(
 				{ mode: "pipeline", tasks: ["produce fallback output", "consume fallback output"] },
 				approvedDispatch,

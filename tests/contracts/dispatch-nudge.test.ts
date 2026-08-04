@@ -169,8 +169,8 @@ describe("contracts/read-only exploration dispatch nudge", () => {
 	it("tracks effective ordinary Scout requests with live-parser parity", () => {
 		const credited: ReadonlyArray<Record<string, unknown>> = [
 			{ agent: "scout", task: "Map the repository." },
-			{ agent_id: "scout", tasks: ["Map the repository."] },
-			{ tasks: JSON.stringify([{ agent_id: "scout", task: "Map the repository." }]) },
+			{ agent: "scout", tasks: ["Map the repository."] },
+			{ tasks: JSON.stringify([{ agent: "scout", task: "Map the repository." }]) },
 			{ ...SCOUT_TASK_ARGS, review: false },
 			{
 				tasks: [

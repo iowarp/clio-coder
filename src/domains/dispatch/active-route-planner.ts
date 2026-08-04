@@ -24,7 +24,15 @@ export function routeValidationProjection(
 	request: DispatchRequest,
 	allowUnenvelopedApproval = false,
 ): { jobSpec: JobSpec; restore(validated: JobSpec): DispatchRequest } {
-	const { systemPrompt, reservation, routeApproval, routeAttemptDecision, assignmentDeadlineAt, ...raw } = request;
+	const {
+		systemPrompt,
+		reservation,
+		agentSelection,
+		routeApproval,
+		routeAttemptDecision,
+		assignmentDeadlineAt,
+		...raw
+	} = request;
 	const awaitingEnvelope =
 		allowUnenvelopedApproval && raw.failover === "approved" && raw.allowedCandidates === undefined;
 	return {
@@ -34,6 +42,7 @@ export function routeValidationProjection(
 			...validated,
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),
 			...(reservation !== undefined ? { reservation } : {}),
+			...(agentSelection !== undefined ? { agentSelection } : {}),
 			...(routeApproval !== undefined ? { routeApproval } : {}),
 			...(routeAttemptDecision !== undefined ? { routeAttemptDecision } : {}),
 			...(assignmentDeadlineAt !== undefined ? { assignmentDeadlineAt } : {}),
@@ -43,13 +52,23 @@ export function routeValidationProjection(
 }
 
 function enabled(input: ActivationInputs): boolean {
+	const posture = input.request.routingIntent?.posture ?? "balanced";
+	if (input.request.agentSelection?.mode === "auto") {
+		return (
+			input.settings !== undefined &&
+			posture !== "manual" &&
+			input.failover === "approved" &&
+			input.settings.activePostures.includes(posture as (typeof input.settings.activePostures)[number]) &&
+			input.settings.agentAutomation.activeAgentRoles.length > 0
+		);
+	}
 	return (
 		input.settings !== undefined &&
 		input.capabilityClass !== null &&
 		activeRoutingEnabled({
 			settings: input.settings,
 			role: input.request.executionRole,
-			posture: input.request.routingIntent?.posture ?? "balanced",
+			posture,
 			capabilityClass: input.capabilityClass,
 			failover: input.failover,
 		})
@@ -74,6 +93,8 @@ export function planActiveRoute(
 	for (const candidate of decision.approvedFallbacks) {
 		const alternate = input.preview({
 			...selectedRequest,
+			agentId: candidate.agentId,
+			executionRole: candidate.executionRole,
 			target: candidate.targetId,
 			model: candidate.modelId,
 			node: candidate.nodeId,
@@ -108,6 +129,9 @@ export function consumeActiveRouteApproval<T>(
 	}
 	if (approval === undefined) return null;
 	assertApprovedAssignmentRoute(approval);
+	if (input.failover !== "approved" || (input.request.routingIntent?.posture ?? "balanced") === "manual") {
+		throw new Error("dispatch: active route approval is incompatible with exact or manual routing");
+	}
 	const decision = input.request.lineage === undefined ? approval.decision : input.request.routeAttemptDecision;
 	if (decision === undefined) {
 		throw new Error("dispatch: active recovery requires a resolver-authenticated attempt decision");
