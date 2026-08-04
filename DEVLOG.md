@@ -3642,3 +3642,15 @@ you need a stable target.
   trigger semantics, handoff continuity, the dynamo/qwopus reference route,
   measurement criteria, and the event/steering seam for future worker-local
   memory. Worker behavior remains unchanged.
+
+# 2026-08-04 — Durable run traces and local trace viewer
+
+- Added a schema-versioned WAL SQLite mirror under the Clio state directory,
+  fed best-effort from the canonical dispatch lifecycle/progress bus without
+  adding backpressure to worker event ingestion.
+- Added `clio trace runs|phases|tail|procs|sql` with strict read-only readers,
+  the documented 500-row cursor contract, tool-call span folding, process
+  lifecycle rows, gate evidence support, and itemized token/cost fields.
+- Added the source-checkout-only `apps/trace-viewer` localhost application and
+  `clio trace ui`: a no-framework, no-build waterfall, phase/tool drill-in,
+  gate evidence, and truthful spend/context display over the trace database.

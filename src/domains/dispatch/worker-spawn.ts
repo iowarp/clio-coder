@@ -63,6 +63,8 @@ export interface SpawnedWorkerResult {
 
 export interface SpawnedWorker {
 	pid: number | null;
+	/** Exact spawned argv encoded as JSON; trace consumers must not shell-parse it. */
+	processCommand?: string;
 	promise: Promise<SpawnedWorkerResult>;
 	events: AsyncIterableIterator<unknown>;
 	abort(): void;
@@ -515,6 +517,7 @@ export function spawnWorkerProcess(
 
 	return {
 		pid,
+		processCommand: JSON.stringify([command, ...args]),
 		promise,
 		events,
 		abort,

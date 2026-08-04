@@ -449,6 +449,8 @@ export interface DispatchEnqueuedPayload extends DispatchRunIdentity {
 /** Published on {@link BusChannels.DispatchStarted} once the child process is live. */
 export interface DispatchStartedPayload extends DispatchEnqueuedPayload {
 	pid: number | null;
+	/** Exact spawned argv encoded as JSON, for safe pid/command identity checks. */
+	processCommand?: string | undefined;
 }
 
 /**
