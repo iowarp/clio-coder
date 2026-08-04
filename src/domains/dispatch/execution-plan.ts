@@ -7,7 +7,9 @@ export type ExecutionPlanTopology = "parallel" | "sequential" | "pipeline" | "re
 export type ExecutionPlanScope = "readonly" | "workspace";
 export type ExecutionPlanFailurePolicy = "stop" | "continue";
 
-export interface ExecutionPlanStep {
+/** A plan node a model executes. Authority, role, and route are all its own. */
+export interface ExecutionPlanAgentStep {
+	kind: "agent";
 	id: string;
 	agentId: string;
 	executionRole: ExecutionRole;
@@ -19,8 +21,31 @@ export interface ExecutionPlanStep {
 	dependencies: ReadonlyArray<string>;
 	task: string;
 }
+
+/**
+ * A plan node code executes. It names a repo-registered command id and carries
+ * no execution role, no authority grant, and no route: it is a subprocess, not
+ * a model run, so it never consumes a worker capacity lease and never reaches
+ * route history or the routing quality reducer.
+ */
+export interface ExecutionPlanCodeStep {
+	kind: "code";
+	id: string;
+	commandId: string;
+	scope: ExecutionPlanScope;
+	dependencies: ReadonlyArray<string>;
+}
+
+export type ExecutionPlanStep = ExecutionPlanAgentStep | ExecutionPlanCodeStep;
+
+/** Agent steps may omit the discriminant; it normalizes to "agent". */
+export type ExecutionPlanStepInput =
+	| (Omit<ExecutionPlanAgentStep, "kind"> & { kind?: "agent" })
+	| ExecutionPlanCodeStep;
+
 export interface ExecutionPlan {
-	version: 2;
+	/** v3 adds the step-kind discriminant; v2 plans were agent-only. */
+	version: 3;
 	topology: ExecutionPlanTopology;
 	rootTask: string;
 	maxWorkers: number;
@@ -29,14 +54,40 @@ export interface ExecutionPlan {
 	waves: ReadonlyArray<ReadonlyArray<string>>;
 	hash: string;
 }
-export type ExecutionPlanInput = Omit<ExecutionPlan, "version" | "waves" | "hash">;
+export type ExecutionPlanInput = Omit<ExecutionPlan, "version" | "waves" | "hash" | "steps"> & {
+	steps: ReadonlyArray<ExecutionPlanStepInput>;
+};
 
-function canonicalSteps(steps: ReadonlyArray<ExecutionPlanStep>): ExecutionPlanStep[] {
-	return steps.map((step) => ({ ...step, dependencies: [...step.dependencies].sort() }));
+export function isCodeStep(step: ExecutionPlanStep): step is ExecutionPlanCodeStep {
+	return step.kind === "code";
+}
+export function isAgentStep(step: ExecutionPlanStep): step is ExecutionPlanAgentStep {
+	return step.kind === "agent";
+}
+
+/**
+ * Narrow a plan to agent steps, refusing one that carries a code node. Callers
+ * that model every step as a route (Scout continuation, the dispatch tool's
+ * resolved plan artifact) use this so a code step can never be silently
+ * projected into a route it does not have.
+ */
+export function requireAgentSteps(steps: ReadonlyArray<ExecutionPlanStep>): ExecutionPlanAgentStep[] {
+	return steps.map((step) => {
+		if (step.kind === "code") throw new Error(`execution plan: step '${step.id}' is a code step and has no route`);
+		return step;
+	});
+}
+
+function canonicalSteps(steps: ReadonlyArray<ExecutionPlanStepInput>): ExecutionPlanStep[] {
+	return steps.map((step) =>
+		step.kind === "code"
+			? { ...step, kind: "code" as const, dependencies: [...step.dependencies].sort() }
+			: { ...step, kind: "agent" as const, dependencies: [...step.dependencies].sort() },
+	);
 }
 
 export function executionPlanWaves(
-	steps: ReadonlyArray<Pick<ExecutionPlanStep, "id" | "dependencies">>,
+	steps: ReadonlyArray<{ id: string; dependencies: ReadonlyArray<string>; kind?: "agent" | "code" }>,
 	maxWorkers: number,
 ): string[][] {
 	if (!Number.isInteger(maxWorkers) || maxWorkers < 1)
@@ -60,8 +111,18 @@ export function executionPlanWaves(
 	while (remaining.size > 0) {
 		const ready = steps.filter((step) => remaining.has(step.id) && step.dependencies.every((id) => completed.has(id)));
 		if (ready.length === 0) throw new Error("execution plan: dependency cycle detected");
-		for (let offset = 0; offset < ready.length; offset += maxWorkers) {
-			const wave = ready.slice(offset, offset + maxWorkers).map((step) => step.id);
+		// maxWorkers bounds concurrent model runs. Code steps hold no worker
+		// capacity lease, so they ride the first chunk of their ready set without
+		// displacing an agent step or forcing an extra wave.
+		const codeReady = ready.filter((step) => step.kind === "code").map((step) => step.id);
+		const agentReady = ready.filter((step) => step.kind !== "code").map((step) => step.id);
+		const chunks: string[][] = [];
+		for (let offset = 0; offset < agentReady.length; offset += maxWorkers) {
+			chunks.push(agentReady.slice(offset, offset + maxWorkers));
+		}
+		if (chunks.length === 0) chunks.push([]);
+		chunks[0] = [...codeReady, ...(chunks[0] ?? [])];
+		for (const wave of chunks) {
 			waves.push(wave);
 			for (const id of wave) {
 				remaining.delete(id);
@@ -76,7 +137,7 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	const steps = canonicalSteps(input.steps);
 	const waves = executionPlanWaves(steps, input.maxWorkers);
 	const canonical = {
-		version: 2 as const,
+		version: 3 as const,
 		topology: input.topology,
 		rootTask: input.rootTask,
 		maxWorkers: input.maxWorkers,
@@ -87,15 +148,20 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	return { ...canonical, hash: createHash("sha256").update(JSON.stringify(canonical)).digest("hex") };
 }
 
+/** A linear step declares no dependencies; the compiler chains them by position. */
+export type ExecutionPlanLinearStepInput =
+	| (Omit<ExecutionPlanAgentStep, "kind" | "dependencies"> & { kind?: "agent" })
+	| Omit<ExecutionPlanCodeStep, "dependencies">;
+
 export function compileLinearExecutionPlan(
-	input: Omit<ExecutionPlanInput, "steps"> & { steps: ReadonlyArray<Omit<ExecutionPlanStep, "dependencies">> },
+	input: Omit<ExecutionPlanInput, "steps"> & { steps: ReadonlyArray<ExecutionPlanLinearStepInput> },
 ): ExecutionPlan {
 	const parallel = input.topology === "parallel" || input.topology === "compete";
 	return compileExecutionPlan({
 		...input,
-		steps: input.steps.map((step, index) => ({
-			...step,
-			dependencies: parallel || index === 0 ? [] : [input.steps[index - 1]?.id ?? ""],
-		})),
+		steps: input.steps.map((step, index): ExecutionPlanStepInput => {
+			const dependencies = parallel || index === 0 ? [] : [input.steps[index - 1]?.id ?? ""];
+			return step.kind === "code" ? { ...step, dependencies } : { ...step, dependencies };
+		}),
 	});
 }

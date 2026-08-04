@@ -8,14 +8,32 @@ export const AgentsDomainModule: DomainModule = {
 };
 
 export type { AgentsContract } from "./contract.js";
+export type { FleetCommand, FleetCommandRegistry } from "./fleet-commands.js";
+export {
+	FLEET_COMMAND_BASE_ENV,
+	FLEET_COMMAND_DEFAULT_TIMEOUT_MS,
+	fleetCommandsPath,
+	loadFleetCommands,
+	parseFleetCommands,
+} from "./fleet-commands.js";
 export type {
 	FleetContract,
+	FleetContractAgentStep,
+	FleetContractCodeStep,
 	FleetContractListing,
 	FleetContractStep,
+	FleetContractVersion,
 	FleetOnFailure,
 	FleetStepScope,
 } from "./fleet-contract.js";
-export { listFleetContracts, loadFleetContract, parseFleetContract, renderFleetPrompt } from "./fleet-contract.js";
+export {
+	fleetCodeSteps,
+	listFleetContracts,
+	loadFleetContract,
+	parseFleetContract,
+	renderFleetPrompt,
+	validateFleetCommands,
+} from "./fleet-contract.js";
 export { AgentsManifest } from "./manifest.js";
 export type {
 	AgentBudget,

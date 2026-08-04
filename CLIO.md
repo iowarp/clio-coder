@@ -104,11 +104,19 @@ Worker processes accept only WorkerSpec version 3 with a concrete `budget` block
 
 ## Execution plans and fleets
 
-- `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one strict version 2, deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves. Every task carries requested and approved authority; the scheduler refuses a missing grant.
+- `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one strict version 3, deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves. Steps are discriminated by kind. Every agent task carries requested and approved authority; the scheduler refuses a missing grant.
 - `src/domains/dispatch/execution-scheduler.ts` performs whole-plan preflight and reservation before spawning, then admits dependency-ready waves with stop/continue semantics.
-- Fleet contracts are strict version 1 DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs.
+- Fleet contracts are strict DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs. Version 1 is agent-only; version 2 may also carry code steps.
 - Logical work is named by assignment id. Terminal attempts are named separately as terminal run ids; `dispatchBatch` has no `runIds` compatibility alias.
 - Resolved dispatch plans are strict version 3 and require an explicit deadline field (`number` for fleet plans, `null` otherwise). Older or partial forms are rejected.
+
+## Deterministic code steps
+
+- A `code` step runs a command id declared by the repository in `.clio/fleets/commands.yaml`, never a shell string an agent authored. An unknown id or a missing registry fails contract validation, so an unconfigured repo cannot pass a phase that never ran anything.
+- `src/domains/dispatch/code-step.ts` runs the command unattended: argv from the registry, fixed cwd, closed environment allowlist, bounded timeout, byte-capped capture, no stdin and no permission prompt. It returns the typed `code-report` result contract.
+- A code step is a plan node outside worker admission. It consumes no capacity lease, carries no execution role or authority grant, and never reaches route history or the routing quality reducer. `code-report` is always `unmeasured` quality, and no agent recipe or Scout subtask may declare it.
+- Under `onFailure: continue`, a failed code step's report still crosses its outgoing edges. The red suite's verbatim output is the input to the step that repairs it.
+- Provenance is recorded per run under `code-steps/<rootId>/` in the Clio state directory, beside the run ledger rather than inside it: a subprocess has no agent, runtime, token, or route facts to record there.
 
 ## Transactional attempts and Scout escalation
 

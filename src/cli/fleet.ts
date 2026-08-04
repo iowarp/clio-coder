@@ -19,15 +19,19 @@ import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import {
 	AgentsDomainModule,
+	type FleetCommandRegistry,
 	type FleetContract,
 	listFleetContracts,
+	loadFleetCommands,
 	loadFleetContract,
 	renderFleetPrompt,
 } from "../domains/agents/index.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/index.js";
+import { runCodeStep } from "../domains/dispatch/code-step.js";
+import { codeStepDir, writeCodeStepRecord } from "../domains/dispatch/code-step-store.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
-import { compileExecutionPlan } from "../domains/dispatch/execution-plan.js";
+import { compileExecutionPlan, type ExecutionPlanStepInput } from "../domains/dispatch/execution-plan.js";
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { executePlan } from "../domains/dispatch/execution-scheduler.js";
 import { DispatchDomainModule } from "../domains/dispatch/index.js";
@@ -106,7 +110,9 @@ function runList(): number {
 	}
 	for (const entry of listings) {
 		if (entry.contract !== null) {
-			const steps = entry.contract.steps.map((step) => `${step.agent}[${step.scope}]`).join(" -> ");
+			const steps = entry.contract.steps
+				.map((step) => (step.kind === "code" ? `code:${step.command}[${step.scope}]` : `${step.agent}[${step.scope}]`))
+				.join(" -> ");
 			process.stdout.write(`${entry.name}  valid    ${steps}\n`);
 			if (entry.contract.description.length > 0) {
 				process.stdout.write(`  ${entry.contract.description}\n`);
@@ -130,6 +136,7 @@ interface FleetPreflightDeps {
 
 function preflightFleet(contract: FleetContract, deps: FleetPreflightDeps): string | null {
 	for (const step of contract.steps) {
+		if (step.kind === "code") continue;
 		if (!deps.agents.get(step.agent)) {
 			return `unknown agent '${step.agent}' (step must name a recipe from 'clio agents')`;
 		}
@@ -164,9 +171,13 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	// any domain boots or any process spawns.
 	let contract: FleetContract;
 	let prompt: string;
+	let commands: FleetCommandRegistry | null;
 	try {
 		contract = loadFleetContract(process.cwd(), name);
 		prompt = renderFleetPrompt(contract.body, vars);
+		// loadFleetContract already refused any unregistered command id; this
+		// read is the binding the runner executes.
+		commands = loadFleetCommands(process.cwd());
 	} catch (err) {
 		return fail(err instanceof Error ? err.message : String(err));
 	}
@@ -209,12 +220,22 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 		rootTask: prompt,
 		maxWorkers: contract.maxWorkers,
 		onFailure: contract.onFailure,
-		steps: contract.steps.map((step) => {
+		steps: contract.steps.map((step): ExecutionPlanStepInput => {
+			if (step.kind === "code") {
+				return {
+					kind: "code",
+					id: step.id,
+					commandId: step.command,
+					scope: step.scope,
+					dependencies: step.dependencies,
+				};
+			}
 			const spec = agents.getSpec(step.agent);
 			if (spec === null || spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
 				throw new Error(`fleet step '${step.id}' has no automatable agent authority`);
 			}
 			return {
+				kind: "agent",
 				id: step.id,
 				agentId: step.agent,
 				scope: step.scope,
@@ -229,6 +250,7 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	});
 	process.stderr.write(`fleet ${contract.name}: root=${fleetRootId} plan=${plan.hash} steps=${contract.steps.length}\n`);
 	const receipts: RunReceipt[] = [];
+	const codeOutcomes: Array<{ stepId: string; passed: boolean }> = [];
 	try {
 		await executePlan(plan, {
 			preflight(step) {
@@ -301,6 +323,35 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 					}),
 				};
 			},
+			async runCode(step, _handoffs, signal) {
+				const command = commands?.commands.get(step.commandId);
+				if (command === undefined) throw new Error(`fleet code step '${step.id}' has no registered command`);
+				const outcome = await runCodeStep({
+					stepId: step.id,
+					command,
+					workspaceRoot: process.cwd(),
+					artifactDir: codeStepDir(fleetRootId),
+					signal,
+				});
+				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
+				codeOutcomes.push({ stepId: step.id, passed: outcome.report.passed });
+				if (json) process.stdout.write(`${JSON.stringify({ codeStep: outcome.record })}\n`);
+				else
+					process.stdout.write(
+						`step ${step.id} code:${command.id}: ${outcome.report.passed ? "passed" : "failed"} exit=${outcome.report.exitCode} ${outcome.record.durationMs}ms record=${recordPath}\n`,
+					);
+				return {
+					stepId: step.id,
+					assignmentId: outcome.record.runId,
+					terminalRunId: outcome.record.runId,
+					receiptDigest: outcome.record.reportDigest,
+					output: outcome.output,
+					succeeded: outcome.report.passed,
+					// The runner authored this report itself, so its provenance is
+					// valid by construction; only the command's verdict can be red.
+					integrityValid: true,
+				};
+			},
 			cancel: (assignmentId) => dispatch.abort(assignmentId),
 			release: (ownerId) => {
 				dispatch.reservations?.rollbackUnconsumed(ownerId);
@@ -316,16 +367,20 @@ async function runFleet(args: ReadonlyArray<string>): Promise<number> {
 	}
 	await dispatch.drain();
 	await loaded.stop();
+	const agentStepCount = contract.steps.filter((step) => step.kind === "agent").length;
+	const codeStepCount = contract.steps.length - agentStepCount;
 	if (!json) {
 		const spentUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
-		const succeeded = receipts.filter(
-			(receipt) => (receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed")) === "succeeded",
-		).length;
+		const succeeded =
+			receipts.filter((receipt) => (receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed")) === "succeeded")
+				.length + codeOutcomes.filter((outcome) => outcome.passed).length;
 		process.stdout.write(
 			`fleet ${contract.name}: ${succeeded}/${contract.steps.length} steps succeeded, total cost $${spentUsd.toFixed(4)}\n`,
 		);
 	}
-	return receipts.length === contract.steps.length && receipts.every((receipt) => receipt.exitCode === 0) ? 0 : 1;
+	const agentsClean = receipts.length === agentStepCount && receipts.every((receipt) => receipt.exitCode === 0);
+	const codeClean = codeOutcomes.length === codeStepCount && codeOutcomes.every((outcome) => outcome.passed);
+	return agentsClean && codeClean ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------

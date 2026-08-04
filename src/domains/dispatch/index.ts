@@ -22,9 +22,24 @@ export type {
 	DispatchAssignment,
 } from "./assignment.js";
 export type { DurableAssignmentRecord } from "./assignment-store.js";
+export type { CodeStepOutcome, CodeStepRecord, CodeStepRunInput } from "./code-step.js";
+export { canonicalCodeReport, codeReportDigest, runCodeStep } from "./code-step.js";
+export { readCodeStepRecords, writeCodeStepRecord } from "./code-step-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
-export type { ExecutionPlan, ExecutionPlanStep } from "./execution-plan.js";
-export { compileExecutionPlan, compileLinearExecutionPlan, executionPlanWaves } from "./execution-plan.js";
+export type {
+	ExecutionPlan,
+	ExecutionPlanAgentStep,
+	ExecutionPlanCodeStep,
+	ExecutionPlanStep,
+	ExecutionPlanStepInput,
+} from "./execution-plan.js";
+export {
+	compileExecutionPlan,
+	compileLinearExecutionPlan,
+	executionPlanWaves,
+	isAgentStep,
+	isCodeStep,
+} from "./execution-plan.js";
 export {
 	type AgentRoleFacts,
 	type AgentRoleFactsResolver,

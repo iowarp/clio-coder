@@ -14,6 +14,44 @@ its source documentation and release gate are finalized.
 
 ### Added
 
+- **Deterministic code steps in fleet contracts and execution plans.** A known
+  command is no longer an agent's job. Fleet contracts gain a discriminated step
+  kind: `agent` steps behave exactly as before, and `code` steps name a command
+  id from a repo-owned registry at `.clio/fleets/commands.yaml`. The registry is
+  the only place an invocation is written down, so a contract can say "run the
+  test command" without knowing this repo's runner and a model can never author
+  a shell string. Fail-closed throughout: an unknown command id, or a code step
+  in a repo with no registry at all, fails contract validation before anything
+  dispatches, because a green test phase that never ran a test is the exact
+  failure this mechanism exists to prevent. Contract schema is versioned rather
+  than extended: v1 keeps its original agent-only meaning and a code step
+  requires v2, so a reader that cannot run one refuses the whole contract
+  instead of executing a partial DAG with its deterministic gates missing.
+
+  `ExecutionPlan` becomes version 3 with a step-kind discriminant. A code step
+  is a first-class DAG node outside worker admission entirely: it takes no
+  capacity lease, no reservation member, no execution role, and no authority
+  grant, and it never reaches route history or the routing quality reducer. It
+  is a subprocess, not a route. `maxWorkers` still bounds concurrent model runs
+  only, so a deterministic gate never displaces a worker or forces an extra
+  wave. The runner is unattended by construction: argv from the registry, fixed
+  cwd, a closed environment allowlist rather than the operator's shell, a
+  bounded timeout that kills the whole process group, byte-capped capture that
+  keeps the tail, no stdin, and no permission prompt. Its result is the new
+  typed `code-report` contract (`passed`, `exitCode`, `checks`, `artifactPaths`,
+  `outputExcerpt`), validated and sealed exactly like an agent's terminal
+  result; no agent recipe and no Scout subtask may declare that kind, and its
+  routing quality is always `unmeasured`.
+
+  The point is the failure path. Under `onFailure: continue`, a red code step's
+  report still crosses its outgoing edges, so a builder repairs a failing suite
+  from the command's verbatim output rather than from a summary of it. Both
+  kinds of predecessor now render into the downstream worker's prompt through
+  one bounded `dispatch-predecessor-handoffs` message, labeled as data and never
+  as instructions. Per-run provenance lands under `code-steps/<rootId>/` in the
+  state directory, beside the run ledger rather than inside it: a subprocess has
+  no agent, runtime, token, or route facts, and writing zeros into those fields
+  would put fabricated route rows in front of every reader of dispatch status.
 - **Singular dispatch, briefing separation, and structured terminal outcomes.** `task` is now a first-class singular assignment alongside batch `tasks`; supplying both fails, and briefing-only calls explain that context cannot replace an assignment. Shared and per-task briefing precedence remains explicit, the 12,000-byte canonical value is pinned in the immutable approved plan, and execution ignores later raw-argument mutation. A fifth deterministic outcome code, `worker_final_output_missing`, fails an otherwise successful native or ACP run when event draining produces no nonempty receipt-sealed final output. Partial deltas remain diagnostics and this code suppresses automatic retries without parsing prose.
 - **Receipt-integrity v15 and steering provenance.** Successfully written native steers record stable sequence, UTF-8 bytes, SHA-256, send time, and observed acknowledgement without retaining message text. Operator/TUI and model steering share the dispatch-contract path; ACP remains non-steerable. Current receipts seal v15 and the current reader rejects every earlier receipt format. Ledger mismatch checks include steering, routing intent, quality, route decisions, worker identity, and result conformance; orphan recovery adopts only integrity-valid v15 provenance.
 - **Canonical worker prompt compiler and agent-owned loop budgets.** Native dispatch now resolves effective autonomy and the final canonical toolkit once, then compiles identity-lite, the shared operating/task contract, sliced tool guidance, matching safety, and one recipe/override persona through the prompts domain. Dynamic project, memory, briefing, pipeline, task, and run-posture messages remain outside stable hashes. Recipe parsing strictly validates the exact `budget: {toolCalls, readReserve, synthesis}` object whenever declared; builtins declare it, Scout uses `18/4/true`, Coder uses `50/5/true`, and a custom source recipe without it receives a concrete operator-default budget at admission. Dispatch transports the clamped phase policy plus the independent operator attempt cap through `WorkerSpec`; native and Claude SDK enforce canonical counting/read reserve/synthesis, coincident Coder `50/50` completes call 50 before graceful synthesis, and Claude Code/Antigravity reject explicit budgets they cannot mediate. Scout citation quarantine, split recommendations, and two corrective provider rounds remain role-specific.

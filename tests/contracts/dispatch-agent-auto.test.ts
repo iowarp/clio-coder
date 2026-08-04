@@ -8,6 +8,7 @@ import {
 	classifyAgentTask,
 	evaluateAgentCandidates,
 } from "../../src/domains/dispatch/agent-candidates.js";
+import { requireAgentSteps } from "../../src/domains/dispatch/execution-plan.js";
 import { routePriorForAgentEvidence } from "../../src/domains/dispatch/joint-route-resolver.js";
 import { selectApprovedRecoveryCandidates } from "../../src/domains/dispatch/recovery-candidates.js";
 import {
@@ -291,8 +292,8 @@ describe("dispatch agent automation", () => {
 		strictEqual(transition.kind, "ready");
 		if (transition.kind !== "ready") return;
 		deepStrictEqual(transition.plan.waves, [["inspect"], ["implement"]]);
-		strictEqual(transition.plan.steps[1]?.expectedResultContract, "mutation-report");
-		strictEqual(transition.plan.steps[1]?.approvedAuthority, "workspace-edit");
+		strictEqual(requireAgentSteps(transition.plan.steps)[1]?.expectedResultContract, "mutation-report");
+		strictEqual(requireAgentSteps(transition.plan.steps)[1]?.approvedAuthority, "workspace-edit");
 
 		const prepared = prepareScoutContinuation({
 			source: {
@@ -375,7 +376,7 @@ describe("dispatch agent automation", () => {
 		strictEqual((prepared.artifact.deadlineMs ?? 0) > 0, true);
 		strictEqual(prepared.artifact.source?.executionPlanHash, prepared.executionPlan.hash);
 		deepStrictEqual(
-			prepared.executionPlan.steps.map((step) => step.approvedAuthority),
+			requireAgentSteps(prepared.executionPlan.steps).map((step) => step.approvedAuthority),
 			[null, null],
 		);
 		deepStrictEqual(
@@ -409,7 +410,7 @@ describe("dispatch agent automation", () => {
 			},
 			plan: {
 				...prepared.executionPlan,
-				steps: prepared.executionPlan.steps.map((step) => ({
+				steps: requireAgentSteps(prepared.executionPlan.steps).map((step) => ({
 					...step,
 					approvedAuthority: step.requestedAuthority,
 				})),
@@ -512,7 +513,8 @@ describe("dispatch agent automation", () => {
 			maxWorkers: 1,
 		});
 		strictEqual(pending.kind, "approval-required");
-		if (pending.kind === "approval-required") strictEqual(pending.plan.steps[0]?.approvedAuthority, null);
+		if (pending.kind === "approval-required")
+			strictEqual(requireAgentSteps(pending.plan.steps)[0]?.approvedAuthority, null);
 		const approved = compileScoutTransition({
 			scout,
 			sourceReceiptDigest: "d".repeat(64),
