@@ -17,9 +17,24 @@ import { Value } from "typebox/value";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { type FleetCommandRegistry, loadFleetCommands } from "./fleet-commands.js";
 import { parseFrontmatter } from "./frontmatter.js";
+import { normalizeWriteBoundary, WRITE_BOUNDARY_MAX_ENTRIES } from "./write-boundary.js";
 
 export type FleetStepScope = "readonly" | "workspace";
 export type FleetOnFailure = "stop" | "continue";
+
+/**
+ * The first contract version whose steps declare a write boundary, and the
+ * version at which boundaries are enforced at all.
+ *
+ * Enforcement is opt-in by version rather than retroactive. A v3 contract's
+ * `workspace` step means today exactly what it meant when it was written: the
+ * whole checkout. Turning that into "and now the run fails if anything else
+ * changes" under a repo that never asked for it would break working pipelines
+ * on an upgrade. A v4 contract asks for boundaries by saying so, and then every
+ * one of its steps declares one, including `readonly`, which is the empty
+ * allowlist stated out loud.
+ */
+export const FLEET_WRITE_BOUNDARY_VERSION = 4;
 
 /**
  * Upper bound on any declared loop. A loop is bounded in the contract, and the
@@ -29,13 +44,25 @@ export type FleetOnFailure = "stop" | "continue";
  */
 export const FLEET_LOOP_MAX_ATTEMPTS = 5;
 
-/** A step a model runs. Its authority, role, and route come from its recipe. */
+/**
+ * A step a model runs. Its authority, role, and route come from its recipe.
+ *
+ * `writes` is the boundary, and it deliberately lives here rather than on the
+ * recipe. A recipe is identity: which model, which tools, which result
+ * contract, which role. A boundary is a property of one use of that agent in
+ * one workflow, and the same `coder` legitimately owns `src/` in one fleet and
+ * `docs/` in another. Putting it on the recipe would need a merge rule between
+ * the two declarations (widen? intersect? override?), and every answer to that
+ * question is a way for a boundary to end up wider than the contract an
+ * operator read. Present only in `FLEET_WRITE_BOUNDARY_VERSION` contracts.
+ */
 export interface FleetContractAgentStep {
 	kind: "agent";
 	id: string;
 	agent: string;
 	scope: FleetStepScope;
 	dependencies: ReadonlyArray<string>;
+	writes?: ReadonlyArray<string>;
 }
 
 /**
@@ -56,18 +83,20 @@ export interface FleetContractCodeStep {
 	scope: FleetStepScope;
 	dependencies: ReadonlyArray<string>;
 	commitFrom?: ReadonlyArray<string>;
+	writes?: ReadonlyArray<string>;
 }
 
 /** The verification half of a loop: the question that decides continuation. */
 export type FleetContractLoopCheck =
-	| { kind: "code"; command: string; scope: FleetStepScope }
-	| { kind: "agent"; agent: string; scope: FleetStepScope };
+	| { kind: "code"; command: string; scope: FleetStepScope; writes?: ReadonlyArray<string> }
+	| { kind: "agent"; agent: string; scope: FleetStepScope; writes?: ReadonlyArray<string> };
 
 /** The repair half. Always an agent: a deterministic repair is just a check. */
 export interface FleetContractLoopRepair {
 	kind: "agent";
 	agent: string;
 	scope: FleetStepScope;
+	writes?: ReadonlyArray<string>;
 }
 
 /**
@@ -97,15 +126,18 @@ export type FleetContractStep = FleetContractAgentStep | FleetContractCodeStep |
  * Contract schema version.
  *
  * v1 keeps its exact original meaning: an agent-only fleet. v2 is the version
- * that may contain code steps. v3 adds bounded loops and commit steps. Each is
- * a deliberate bump rather than an additive optional discriminant, because the
- * difference is not cosmetic: a reader that does not understand code steps must
- * refuse the whole contract rather than run a partial DAG whose deterministic
- * gates are absent, and a reader that does not understand loops would run one
- * verification where three were declared. A version literal gives that reader a
- * clear refusal instead of an obscure unknown-property error deep in a step.
+ * that may contain code steps. v3 adds bounded loops and commit steps. v4 adds
+ * declared write boundaries and enforces them. Each is a deliberate bump rather
+ * than an additive optional discriminant, because the difference is not
+ * cosmetic: a reader that does not understand code steps must refuse the whole
+ * contract rather than run a partial DAG whose deterministic gates are absent,
+ * a reader that does not understand loops would run one verification where
+ * three were declared, and a reader that does not understand `writes` would run
+ * a step the contract says is confined to `docs/` with the whole tree in reach.
+ * A version literal gives that reader a clear refusal instead of an obscure
+ * unknown-property error deep in a step.
  */
-export type FleetContractVersion = 1 | 2 | 3;
+export type FleetContractVersion = 1 | 2 | 3 | 4;
 
 export interface FleetContract {
 	version: FleetContractVersion;
@@ -132,16 +164,26 @@ export interface FleetContractListing {
 
 const FleetScopeSchema = Type.Union([Type.Literal("readonly"), Type.Literal("workspace")]);
 
-const AgentStepSchema = Type.Object(
-	{
-		kind: Type.Optional(Type.Literal("agent")),
-		id: Type.String({ minLength: 1 }),
-		agent: Type.String({ minLength: 1 }),
-		scope: FleetScopeSchema,
-		dependencies: Type.Array(Type.String({ minLength: 1 })),
-	},
-	{ additionalProperties: false },
-);
+/** The `writes` allowlist exists only from `FLEET_WRITE_BOUNDARY_VERSION`. */
+function writesSchema(version: FleetContractVersion) {
+	return version >= FLEET_WRITE_BOUNDARY_VERSION
+		? { writes: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: WRITE_BOUNDARY_MAX_ENTRIES })) }
+		: {};
+}
+
+function agentStepSchema(version: FleetContractVersion) {
+	return Type.Object(
+		{
+			kind: Type.Optional(Type.Literal("agent")),
+			id: Type.String({ minLength: 1 }),
+			agent: Type.String({ minLength: 1 }),
+			scope: FleetScopeSchema,
+			dependencies: Type.Array(Type.String({ minLength: 1 })),
+			...writesSchema(version),
+		},
+		{ additionalProperties: false },
+	);
+}
 
 function codeStepSchema(version: FleetContractVersion) {
 	return Type.Object(
@@ -152,44 +194,58 @@ function codeStepSchema(version: FleetContractVersion) {
 			scope: FleetScopeSchema,
 			dependencies: Type.Array(Type.String({ minLength: 1 })),
 			...(version >= 3 ? { commitFrom: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })) } : {}),
+			...writesSchema(version),
 		},
 		{ additionalProperties: false },
 	);
 }
 
-const LoopStepSchema = Type.Object(
-	{
-		kind: Type.Literal("loop"),
-		id: Type.String({ minLength: 1 }),
-		// Required and finite: this is the whole point of the construct.
-		maxAttempts: Type.Integer({ minimum: 1, maximum: FLEET_LOOP_MAX_ATTEMPTS }),
-		dependencies: Type.Array(Type.String({ minLength: 1 })),
-		check: Type.Union([
-			Type.Object(
-				{ kind: Type.Literal("code"), command: Type.String({ minLength: 1 }), scope: FleetScopeSchema },
+function loopStepSchema(version: FleetContractVersion) {
+	return Type.Object(
+		{
+			kind: Type.Literal("loop"),
+			id: Type.String({ minLength: 1 }),
+			// Required and finite: this is the whole point of the construct.
+			maxAttempts: Type.Integer({ minimum: 1, maximum: FLEET_LOOP_MAX_ATTEMPTS }),
+			dependencies: Type.Array(Type.String({ minLength: 1 })),
+			check: Type.Union([
+				Type.Object(
+					{
+						kind: Type.Literal("code"),
+						command: Type.String({ minLength: 1 }),
+						scope: FleetScopeSchema,
+						...writesSchema(version),
+					},
+					{ additionalProperties: false },
+				),
+				Type.Object(
+					{
+						kind: Type.Literal("agent"),
+						agent: Type.String({ minLength: 1 }),
+						scope: FleetScopeSchema,
+						...writesSchema(version),
+					},
+					{ additionalProperties: false },
+				),
+			]),
+			repair: Type.Object(
+				{
+					kind: Type.Optional(Type.Literal("agent")),
+					agent: Type.String({ minLength: 1 }),
+					scope: FleetScopeSchema,
+					...writesSchema(version),
+				},
 				{ additionalProperties: false },
 			),
-			Type.Object(
-				{ kind: Type.Literal("agent"), agent: Type.String({ minLength: 1 }), scope: FleetScopeSchema },
-				{ additionalProperties: false },
-			),
-		]),
-		repair: Type.Object(
-			{
-				kind: Type.Optional(Type.Literal("agent")),
-				agent: Type.String({ minLength: 1 }),
-				scope: FleetScopeSchema,
-			},
-			{ additionalProperties: false },
-		),
-	},
-	{ additionalProperties: false },
-);
+		},
+		{ additionalProperties: false },
+	);
+}
 
 function stepSchema(version: FleetContractVersion) {
-	if (version === 1) return AgentStepSchema;
-	if (version === 2) return Type.Union([AgentStepSchema, codeStepSchema(2)]);
-	return Type.Union([AgentStepSchema, codeStepSchema(3), LoopStepSchema]);
+	if (version === 1) return agentStepSchema(1);
+	if (version === 2) return Type.Union([agentStepSchema(2), codeStepSchema(2)]);
+	return Type.Union([agentStepSchema(version), codeStepSchema(version), loopStepSchema(version)]);
 }
 
 function frontmatterSchema(version: FleetContractVersion) {
@@ -211,11 +267,12 @@ const SCHEMAS: Readonly<Record<FleetContractVersion, ReturnType<typeof frontmatt
 	1: frontmatterSchema(1),
 	2: frontmatterSchema(2),
 	3: frontmatterSchema(3),
+	4: frontmatterSchema(4),
 };
 
 function contractVersion(frontmatter: Record<string, unknown>): FleetContractVersion | null {
 	const value = frontmatter.version;
-	return value === 1 || value === 2 || value === 3 ? value : null;
+	return value === 1 || value === 2 || value === 3 || value === 4 ? value : null;
 }
 
 function firstSchemaError(frontmatter: Record<string, unknown>, version: FleetContractVersion): string | null {
@@ -235,10 +292,16 @@ type RawStep = {
 	agent?: string;
 	command?: string;
 	commitFrom?: string[];
+	writes?: string[];
 	maxAttempts?: number;
-	check?: { kind: "code" | "agent"; command?: string; agent?: string; scope: FleetStepScope };
-	repair?: { kind?: "agent"; agent: string; scope: FleetStepScope };
+	check?: { kind: "code" | "agent"; command?: string; agent?: string; scope: FleetStepScope; writes?: string[] };
+	repair?: { kind?: "agent"; agent: string; scope: FleetStepScope; writes?: string[] };
 } & Pick<FleetContractAgentStep, "scope"> & { dependencies: string[] };
+
+/** Normalized declaration, or nothing when this version declares no boundary. */
+function normalizedWrites(writes: string[] | undefined): { writes?: ReadonlyArray<string> } {
+	return writes === undefined ? {} : { writes: normalizeWriteBoundary(writes) };
+}
 
 function normalizeStep(step: RawStep): FleetContractStep {
 	if (step.kind === "loop") {
@@ -251,9 +314,9 @@ function normalizeStep(step: RawStep): FleetContractStep {
 			dependencies: [...step.dependencies],
 			check:
 				check.kind === "code"
-					? { kind: "code", command: check.command ?? "", scope: check.scope }
-					: { kind: "agent", agent: check.agent ?? "", scope: check.scope },
-			repair: { kind: "agent", agent: repair.agent, scope: repair.scope },
+					? { kind: "code", command: check.command ?? "", scope: check.scope, ...normalizedWrites(check.writes) }
+					: { kind: "agent", agent: check.agent ?? "", scope: check.scope, ...normalizedWrites(check.writes) },
+			repair: { kind: "agent", agent: repair.agent, scope: repair.scope, ...normalizedWrites(repair.writes) },
 		};
 	}
 	if (step.kind === "code") {
@@ -264,6 +327,7 @@ function normalizeStep(step: RawStep): FleetContractStep {
 			scope: step.scope,
 			dependencies: [...step.dependencies],
 			...(step.commitFrom !== undefined ? { commitFrom: [...step.commitFrom] } : {}),
+			...normalizedWrites(step.writes),
 		};
 	}
 	return {
@@ -272,6 +336,7 @@ function normalizeStep(step: RawStep): FleetContractStep {
 		agent: step.agent ?? "",
 		scope: step.scope,
 		dependencies: [...step.dependencies],
+		...normalizedWrites(step.writes),
 	};
 }
 
@@ -374,6 +439,84 @@ export function validateFleetGraph(contract: Pick<FleetContract, "steps" | "path
 	}
 }
 
+/** One declared position that runs, with the boundary it declared. */
+export interface FleetStepBoundary {
+	/** Contract-level position id: a loop half is named `<loop>.check` / `<loop>.repair`. */
+	id: string;
+	scope: FleetStepScope;
+	/** The allowlist, or undefined when this contract version declares no boundary. */
+	writes: ReadonlyArray<string> | undefined;
+}
+
+/**
+ * The boundary of one position. `readonly` is the empty allowlist rather than
+ * an absence: a step that declares it changes nothing is making a checkable
+ * claim, and that is the claim enforcement checks. Below
+ * `FLEET_WRITE_BOUNDARY_VERSION` there is no claim at all, which is what
+ * `undefined` says.
+ */
+export function fleetStepWriteBoundary(
+	version: FleetContractVersion,
+	scope: FleetStepScope,
+	writes: ReadonlyArray<string> | undefined,
+): ReadonlyArray<string> | undefined {
+	if (version < FLEET_WRITE_BOUNDARY_VERSION) return undefined;
+	return scope === "readonly" ? [] : [...(writes ?? [])];
+}
+
+/** Every position a contract runs, including both halves of every loop. */
+export function fleetStepBoundaries(contract: Pick<FleetContract, "steps" | "version">): FleetStepBoundary[] {
+	const boundaries: FleetStepBoundary[] = [];
+	const add = (id: string, scope: FleetStepScope, writes: ReadonlyArray<string> | undefined): void => {
+		boundaries.push({ id, scope, writes: fleetStepWriteBoundary(contract.version, scope, writes) });
+	};
+	for (const step of contract.steps) {
+		if (step.kind === "loop") {
+			add(`${step.id}.check`, step.check.scope, step.check.writes);
+			add(`${step.id}.repair`, step.repair.scope, step.repair.writes);
+			continue;
+		}
+		add(step.id, step.scope, step.writes);
+	}
+	return boundaries;
+}
+
+/**
+ * Per-position boundary rules for a boundary-enforcing contract.
+ *
+ * A `workspace` step must say what it may change. Leaving it undeclared in a
+ * contract that enforces boundaries is the ambiguous case the version bump
+ * exists to remove: the reader cannot tell whether the author meant "the whole
+ * tree" or forgot, and one of those two readings silently disables enforcement
+ * for every step scheduled beside it.
+ */
+function validateWriteBoundaries(contract: Pick<FleetContract, "steps" | "version" | "path">): void {
+	if (contract.version < FLEET_WRITE_BOUNDARY_VERSION) return;
+	for (const position of fleetStepBoundaries(contract)) {
+		if (position.scope === "workspace" && (position.writes?.length ?? 0) === 0) {
+			throw new Error(
+				`fleet contract ${contract.path}: step '${position.id}' has scope 'workspace' and must declare a non-empty 'writes' allowlist at version ${FLEET_WRITE_BOUNDARY_VERSION}`,
+			);
+		}
+	}
+	for (const step of contract.steps) {
+		const declared: Array<{ id: string; scope: FleetStepScope; writes: ReadonlyArray<string> | undefined }> =
+			step.kind === "loop"
+				? [
+						{ id: `${step.id}.check`, scope: step.check.scope, writes: step.check.writes },
+						{ id: `${step.id}.repair`, scope: step.repair.scope, writes: step.repair.writes },
+					]
+				: [{ id: step.id, scope: step.scope, writes: step.writes }];
+		for (const position of declared) {
+			if (position.scope === "readonly" && position.writes !== undefined) {
+				throw new Error(
+					`fleet contract ${contract.path}: step '${position.id}' is 'readonly', which is the empty allowlist; remove its 'writes' or give it scope 'workspace'`,
+				);
+			}
+		}
+	}
+}
+
 /** Transitive dependency closure per declared step id. */
 export function fleetStepAncestors(steps: ReadonlyArray<FleetContractStep>): ReadonlyMap<string, ReadonlySet<string>> {
 	const direct = new Map(steps.map((step) => [step.id, step.dependencies]));
@@ -405,9 +548,10 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 	const version = contractVersion(frontmatter);
 	if (version === null) {
 		throw new Error(
-			`fleet contract ${sourcePath}: version must be 1 (agent steps), 2 (agent and code steps), or 3 (adds bounded loops and commit steps)`,
+			`fleet contract ${sourcePath}: version must be 1 (agent steps), 2 (agent and code steps), 3 (adds bounded loops and commit steps), or 4 (adds enforced write boundaries)`,
 		);
 	}
+	if (version < FLEET_WRITE_BOUNDARY_VERSION) assertNoWritesBefore(frontmatter, sourcePath, version);
 	const schemaError = firstSchemaError(frontmatter, version);
 	if (schemaError !== null) {
 		throw new Error(`fleet contract ${sourcePath}: ${schemaError}`);
@@ -440,7 +584,27 @@ export function parseFleetContract(raw: string, sourcePath: string): FleetContra
 		path: sourcePath,
 	};
 	validateFleetGraph(contract);
+	validateWriteBoundaries(contract);
 	return contract;
+}
+
+/**
+ * A `writes` key under an older version is refused by name rather than as an
+ * unknown property, because the two readings are far apart: the author wrote a
+ * boundary and the runtime would have ignored it.
+ */
+function assertNoWritesBefore(frontmatter: Record<string, unknown>, sourcePath: string, version: number): void {
+	const steps = Array.isArray(frontmatter.steps) ? frontmatter.steps : [];
+	const declaresWrites = (value: unknown): boolean =>
+		typeof value === "object" && value !== null && "writes" in (value as Record<string, unknown>);
+	for (const step of steps) {
+		const raw = step as Record<string, unknown>;
+		if (declaresWrites(raw) || declaresWrites(raw.check) || declaresWrites(raw.repair)) {
+			throw new Error(
+				`fleet contract ${sourcePath}: 'writes' requires contract version ${FLEET_WRITE_BOUNDARY_VERSION}; this contract declares version ${version}, where the declaration would not be enforced`,
+			);
+		}
+	}
 }
 
 /** Every loop in the contract, in declaration order. */

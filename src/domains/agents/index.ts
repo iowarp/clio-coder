@@ -28,16 +28,20 @@ export type {
 	FleetContractStep,
 	FleetContractVersion,
 	FleetOnFailure,
+	FleetStepBoundary,
 	FleetStepScope,
 } from "./fleet-contract.js";
 export {
 	builtinFleetsDir,
 	FLEET_LOOP_MAX_ATTEMPTS,
+	FLEET_WRITE_BOUNDARY_VERSION,
 	fleetCodeSteps,
 	fleetLoopCheckStepId,
 	fleetLoopRepairStepId,
 	fleetLoopSteps,
 	fleetStepAncestors,
+	fleetStepBoundaries,
+	fleetStepWriteBoundary,
 	listFleetContracts,
 	loadFleetContract,
 	parseFleetContract,
@@ -86,3 +90,12 @@ export {
 	normalizeAgentSpec,
 	resolveAgentToolCompatibility,
 } from "./spec.js";
+export type { WriteBoundary } from "./write-boundary.js";
+export {
+	describeWriteBoundary,
+	normalizeWriteBoundary,
+	normalizeWriteBoundaryEntry,
+	WRITE_BOUNDARY_MAX_ENTRIES,
+	writeBoundariesOverlap,
+	writeBoundaryCovers,
+} from "./write-boundary.js";
