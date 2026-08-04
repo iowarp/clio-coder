@@ -8,11 +8,11 @@ Clio Coder is a TypeScript/Node.js project. Coding agent for HPC and scientific-
 
 ## Context retrieval
 
-The codewiki currently indexes 927 source files. Start orientation with these indexed entry points: `src/cli/index.ts`, `src/domains/agents/index.ts`, `src/domains/components/index.ts`, `src/domains/config/index.ts`, `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`, `src/domains/dispatch/index.ts`, `src/domains/eval/index.ts`. Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.
+The codewiki currently indexes 942 source files. Start orientation with these indexed entry points: `src/cli/index.ts`, `src/domains/agents/index.ts`, `src/domains/components/index.ts`, `src/domains/config/index.ts`, `src/domains/context/bootstrap.ts`, `src/domains/context/index.ts`, `src/domains/dispatch/index.ts`, `src/domains/eval/index.ts`. Use `code_nav` (modes: entries, path, symbol) before broad reads when the task is navigational.
 
 ## Repository shape
 
-Largest indexed areas: src/domains (392), tests/contracts (236), src/interactive (83), src/cli (48), src/tools (42), src/engine (40), src/core (35), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
+Largest indexed areas: src/domains (401), tests/contracts (259), src/interactive (83), src/cli (48), src/tools (44), src/engine (40), src/core (35), benchmarks/community (9). Treat this as an orientation hint, not a complete file map; refresh the codewiki after structural edits.
 
 ## Verification expectations
 
@@ -65,18 +65,21 @@ Stored eval artifacts require complete `clio`, `environment`, and `paths` proven
 ## Dispatch routing intent
 
 - `src/domains/dispatch/routing-intent.ts` strictly parses the model-facing routing object, applies shadow-balanced defaults, preserves exact route pins as fail-closed manual intent, and evaluates cost, deadline, quality, capability, and locality hard bounds.
-- Plan artifacts and receipt integrity v12 seal normalized routing intent. Candidate envelopes remain coordinator-authored; route explanations are bounded projections of the sealed decision and never accept task text, prompts, endpoints, or credentials.
+- Plan artifacts and receipt integrity v15 seal normalized routing intent. Candidate envelopes remain coordinator-authored; route explanations are bounded projections of the sealed decision and never accept task text, prompts, endpoints, or credentials.
 
-## Joint route shadow resolution
+## Joint route resolution and activation
 
-- `src/domains/dispatch/joint-route-resolver.ts` purely enumerates the bounded target, model, runtime, and node cross-product for one requested agent and execution role. It fails explicitly on universe overflow, applies hard filters before deterministic Pareto ranking, and bounds only the approved fallback projection.
-- Route identity includes endpoint and settings fingerprints. Durable route history preserves eligible quality, reliability, completed cost, latency, queue wait, and cache-affinity evidence across restart.
-- Shadow recommendations never feed target resolution or placement. Observer failure seals a fixed one-candidate decision on the production receipt.
+- `src/domains/dispatch/joint-route-resolver.ts` purely enumerates the bounded agent, target, model, runtime, and node cross-product for the requested execution role. It fails explicitly on universe overflow, applies hard filters before deterministic Pareto ranking, and bounds only the approved fallback projection.
+- Shadow remains the default. Active routing is enabled only for exact role/posture pairs named by `routing.activeRoles` and `routing.activePostures`, and only exact routes that pass `evaluateRouteReadiness` may execute. No-ready-candidate, manual-pin, and `failover: none` paths fail closed rather than reviving the fixed route.
+- `routing.agentAutomation.activeAgentRoles` separately activates exact agent/role pairs; its default is empty. Agent automation has its own per-agent/per-role readiness report, and authority, tools, skills, result contract, locality, and governance are hard filters before joint tuple scoring.
+- Route history v3 aggregates by capability (agent/spec/role/target/model/runtime/node/thinking). Tool-surface or endpoint drift invalidates a bucket; prompt wording and unrelated settings changes do not. Earlier history files are retired rather than read or merged.
+- Shadow recommendations never change execution. Observer failure seals a fixed one-candidate decision on the production receipt.
 
 ## Dispatch routing quality
 
 - `src/domains/dispatch/route-quality.ts` is the pure reducer for integrity-valid receipt, gate, and eval evidence. Descriptive receipt verification never establishes routing quality.
 - `src/domains/dispatch/route-history.ts` is the bounded durable estimator source. Receipt integrity requires a run-local `quality` block; later gate and eval results link by authenticated receipt digest instead of mutating receipts.
+- `resultContractWasDue` is the only authority for conformance labeling. Runs that never reached their declared postcondition seal `not-reached`, retain contract identity for replay, and contribute no quality label.
 
 ## Strict agent recipes
 
@@ -101,10 +104,19 @@ Worker processes accept only WorkerSpec version 3 with a concrete `budget` block
 
 ## Execution plans and fleets
 
-- `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves.
+- `src/domains/dispatch/execution-plan.ts` compiles orchestration into the one strict version 2, deterministic, hashed `ExecutionPlan` DAG and computes capacity-bounded waves. Every task carries requested and approved authority; the scheduler refuses a missing grant.
 - `src/domains/dispatch/execution-scheduler.ts` performs whole-plan preflight and reservation before spawning, then admits dependency-ready waves with stop/continue semantics.
 - Fleet contracts are strict version 1 DAGs with stable step ids, explicit dependencies, scopes, and `maxWorkers`; authenticated terminal outputs cross edges through bounded structured handoffs.
 - Logical work is named by assignment id. Terminal attempts are named separately as terminal run ids; `dispatchBatch` has no `runIds` compatibility alias.
+- Resolved dispatch plans are strict version 3 and require an explicit deadline field (`number` for fleet plans, `null` otherwise). Older or partial forms are rejected.
+
+## Transactional attempts and Scout escalation
+
+- `src/domains/dispatch/workspace-transaction.ts` owns one baseline-pinned worktree group per editing assignment. Attempts never share a checkout. Apply eligibility is decided from outcome, receipt integrity, result conformance, and quality gate before repository mutation, then protected artifacts, ancestry, and destination cleanliness are rechecked on disk.
+- A refused winner remains recoverable in its worktree with operator instructions; closing a transaction with an unapplied winner is forbidden.
+- Scout split results are strict typed data: at most four subtasks with stable ids, dependencies, expected result contracts, and requested authority. The coordinator validates the DAG and compiles it; embedded routes, agents, deadlines, cost, or other control fields are rejected.
+- Read-only-to-editing transitions require an authenticated operator plan approval or already-granted full-auto authority. All Scout steps share one absolute deadline; cost, deadline, route identity, result contract, and authority are rechecked before any worker spawns.
+- Recovery may change agent only for a typed model-quality decision inside the approved active envelope. Cooldown and infrastructure recovery preserve the owning agent.
 
 ## Execution roles and quality gates
 

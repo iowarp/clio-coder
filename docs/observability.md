@@ -64,7 +64,7 @@ Clio resolves directories under platform-specific XDG defaults (on Linux, these 
 | Category | Description | Backing Path |
 | --- | --- | --- |
 | **Accountability** | Rolling first-pass-success rate and failure-cause histogram. | `<stateDir>/evidence-index.json` |
-| **Receipts** | Durable run receipts verified by integrity signatures. | `<stateDir>/receipts/<runId>.json` |
+| **Receipts** | Durable run receipts verified by SHA-256 integrity digests. | `<stateDir>/receipts/<runId>.json` |
 | **Dispatch outputs** | Logs and ledger records detailing worker execution. | `<stateDir>/runs.json` and `<stateDir>/receipts/<runId>.json` |
 | **Tool outputs** | Offloaded large outputs or execution logs. | `<stateDir>/scratch/<sessionId>/<toolCallId>.txt` |
 | **Compaction** | Summaries of compacted history sessions. | `<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl` |
@@ -98,21 +98,21 @@ The TUI lists the top failure causes sorted by frequency (descending), then by t
 
 ## Receipt Integrity Verification
 
-Pressing `v` on a selected receipt or running `/view verify <runId>` performs cryptographic signature checks:
+Pressing `v` on a selected receipt or running `/view verify <runId>` performs cryptographic integrity checks:
 
 1. **Read Receipt**: Reads the receipt JSON from `<stateDir>/receipts/<runId>.json`.
 2. **Resolve Ledger**: Looks up the run envelope inside `<stateDir>/runs.json`.
-3. **Verify Integrity**: Recomputes the SHA-256 digest over the version-authenticated receipt and reconstructible ledger fields. New v6 receipts add prose-free steering provenance to v5's briefing and `outcomeCode` coverage. The v4 and v5 canonical projections remain frozen: v4 rejects any v5/v6-only own-property and v5 rejects the v6-only `steering` property, including explicit null or undefined values. Versions other than 4, 5, and 6 fail verification.
+3. **Verify Integrity**: Recomputes the SHA-256 digest over the strict v15 receipt and reconstructible ledger fields. The digest covers every current field, including steering, routing intent and decision, route quality, worker identity, execution role, and result-contract conformance. Every version other than 15 fails verification; there is no historical receipt reader.
 4. **Report Result**: The viewer reports `ok` or the verification failure reason. It does not rename or delete the receipt. Startup orphan recovery may quarantine corrupt orphan receipt files as `<name>.json.corrupt`, but `/view verify` is read-only.
 
 ---
 
 ## Receipt Fields for Dispatch Provenance
 
-A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, or external run. Those optional blocks remain absent when unused. New v6 receipts are not byte-identical to older receipts: they carry the v6 integrity shape and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable.
+A receipt carries optional provenance and context blocks that answer "what happened" for a chained (pipeline), composed (persona override), escalated, briefed, steered, or external run. Those optional blocks remain absent when unused. Current receipts carry strict integrity v15 and an explicit `outcomeCode: null` when no classified deterministic failure occurred. Automation consumers must treat the optional blocks below as absent by default and `outcomeCode` as nullable; older receipt versions are invalid.
 
 Receipt integrity verification and evidence verification are independent.
-`receipt_integrity=verified/v6/sha256` means Clio called the receipt verifier
+`receipt_integrity=verified/v15/sha256` means Clio called the receipt verifier
 against the ledger envelope; merely finding an embedded digest is not enough.
 `evidence_verification=<verified|unverified|not_applicable|unknown>/<basis>`
 describes validation evidence inside that verified receipt. Likewise,
@@ -123,7 +123,7 @@ separately and never substitute one hash for another.
 
 The evidence bundle renders these sets in `transcript.md` (human sentences) and `trace.cleaned.jsonl` (structured run rows), `clio evidence inspect` prints them as a `provenance <runId>:` block, and the `dispatch` tool appends a compact suffix to each run line plus additive keys on `details.runs[]`. A timed-out or denied escalation also raises an `escalation` finding in the bundle.
 
-The base provenance sets entered in v0.2.9; steering provenance and integrity v6 enter in v0.2.9. These fields are labeled `experimental`: their shapes are frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
+The base provenance sets, steering, routing, quality, worker identity, and result-conformance coverage all enter in v0.2.9. These fields are labeled `experimental`: their strict v15 shape is frozen for the release, but the labels stay experimental until the schema is promoted post-1.0.
 
 | Field path | Type | When present | Meaning | Status |
 | --- | --- | --- | --- | --- |
@@ -142,7 +142,7 @@ The base provenance sets entered in v0.2.9; steering provenance and integrity v6
 | `steering[].sentAt` | `string` | A steer was successfully written | Write timestamp | experimental |
 | `steering[].acknowledged` | `boolean` | A steer was successfully written | Whether a worker acknowledgement was actually observed | experimental |
 | `steering[].acknowledgedAt` | `string` | Acknowledgement was observed | Acknowledgement timestamp | experimental |
-| `outcomeCode` | five-value stable string union or `null` | Every new v6 terminal receipt | Non-null for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, or `worker_final_output_missing`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
+| `outcomeCode` | five-value stable string union or `null` | Every v15 terminal receipt | Non-null for `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, or `worker_final_output_missing`; otherwise `null`. Each non-null code denotes terminal deterministic failure and is incompatible with `outcome: "succeeded"`. Dispatch retry policy consumes this code only, never diagnostic prose. | experimental |
 | `personaOverride.promptHash` | `string` | Ad-hoc specialist whose persona replaced the recipe body | Hash of the composed static prompt; equals `staticCompositionHash` for the run | experimental |
 | `safety.decisions.escalationRequested` | `number` | Run saw at least one permission escalation | Parked permission asks handed to the operator | experimental |
 | `safety.decisions.escalationApproved` | `number` | Run saw at least one permission escalation | Escalations the operator approved | experimental |

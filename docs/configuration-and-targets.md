@@ -171,6 +171,13 @@ workers:
     fallback: deny
   resilienceCooldownMs: 15000
 
+# Measured route selection stays shadow-only while these lists are empty.
+routing:
+  activeRoles: []       # researcher | verifier | reviewer | judge
+  activePostures: []    # quality | balanced | latency | economy
+  agentAutomation:
+    # Exact pairs only; this never authorizes an agents-by-roles cross-product.
+    activeAgentRoles: []
 
 scope: []
 modelSelector:
@@ -234,6 +241,10 @@ The `workers.escalation` block defines parameters for the escalation mode:
 
 The setting `workers.resilienceCooldownMs` specifies the cooldown duration in milliseconds between retries to allow target recovery.
 
+The `routing` block controls the two independent activation boundaries for measured dispatch. Joint target/model/runtime/node selection becomes active only when both the assignment's execution role and requested posture appear in `activeRoles` and `activePostures`; otherwise the same resolver records a shadow recommendation without changing execution. Active mode also requires the route-readiness report to pass and fails closed when no candidate is ready. Manual pins and `failover: none` remain exact in every mode.
+
+Agent automation is separately shadowed. Each `routing.agentAutomation.activeAgentRoles` item must be an exact `{agentId, executionRole}` pair, for example `{agentId: scout, executionRole: researcher}`. An `agent: auto` request may change agents only for a listed pair whose per-agent, per-role readiness report passes. Hard constraints eliminate candidates before scoring, and a Scout split or role transition carries typed bounded subtasks through coordinator-owned authority rather than silently broadening the original assignment.
+
 The `guardrails` section holds the numeric backstops that bound runaway agent behavior. `turnToolCallBudget` (default `60`) is the orchestrator's per-turn soft tool-call budget: crossing it blocks every further call in the turn with a stop-and-summarize directive, and a hard ceiling 15 calls above it interrupts the turn outright. Separately, an identical-call loop guard trips when the same tool is called with identical arguments three times inside a 30s window; the first two blocks feed the model a strategy-change directive (and, when the looped call already returned a successful result earlier in the run, point it at that result instead), and reaching the second block per turn locks tool use for the rest of that turn so the model answers from what it already gathered, rather than cancelling a turn that may already hold the answer. Only a bounded backstop (two further tool calls after the lockout) falls back to the hard stop. This lockout is an orchestrator behavior (interactive, headless, and ACP alike). Dispatched workers use an agent-owned admitted-call phase for graceful synthesis and retain `workerToolCallCap` (default `50`) as the independent lifetime hard ceiling for one worker run. The worker cap counts every mediated tool attempt, including attempts that policy, permission posture, or another guard already denied; attempts beyond it terminate the worker with `workerToolCallCap reached (...)` in receipt diagnostics. `maxDispatchRuns` (default `1000`) caps dispatch run-ledger retention. `readMaxBytes` (default `51200`) caps one read-tool call, and `observationTurnBudgetBytes` (default `196608`) is the shared per-turn byte pool across all observation-producing tools. `internalDispatchTimeoutMs` (default `900000`, fifteen minutes) is the wall-clock cap for one internal generator dispatch (the wiki documenter and the bootstrap scout); it exists because a model that keeps streaming without finishing can spend no new tool attempts while satisfying the heartbeat watchdog indefinitely, and on timeout the run is aborted with the timeout cause recorded in its receipt. Each value also has a per-process env override intended for CI and one-off experiments (see [environment-variables.md](environment-variables.md)); the settings file is the durable home.
 
 Agent recipe budgets now define a normal admitted-call phase inside `workerToolCallCap`; they do not replace it. The operator cap remains the independent hard attempt ceiling and counts blocked attempts and parallel siblings. A declared phase boundary is clamped down to the cap. When both are 50, call 50 may complete and the graceful synthesis transition occurs without requiring an over-cap call; hard-cap failure still wins if blocked attempts or noncompliance exhaust the outer ceiling first. The recipe's `readReserve` accepts only canonical `read`, becomes zero when `read` is absent from the admitted schema surface, and never installs a nonexistent read requirement.
@@ -266,19 +277,18 @@ applies.
 
 ---
 
-## Strict validation and legacy repair
+## Strict validation and lifecycle repair
 
 Settings validation is strict. Unknown keys and type violations report exact
 paths and stop startup so stale configuration does not silently change runtime
 behavior.
 
 Plain `clio doctor` is read-only. `clio doctor --fix` creates missing
-structure, repairs credentials permissions, and rewrites `settings.yaml` only
-when it finds known legacy keys from older releases. That repair path backs up
-the original as `settings.yaml.bak`, moves retired routing and state fields
-into the current `targets`, `autonomy`, routing, recent-models, and compaction
-shape, and is idempotent after the file is current. A file with unrelated
-unknown keys remains a validation error for the operator to edit deliberately.
+directories and template files, repairs credential permissions, and refreshes
+install metadata. It validates `settings.yaml` directly against the current
+schema but never rewrites removed keys or migrates an old settings shape. Any
+unknown or retired key remains a validation error for the operator to edit
+deliberately.
 
 ---
 
@@ -297,7 +307,7 @@ Supporting mechanics:
 
 - **The `/settings` Center tracks live state.** Every editable row re-derives from the session's effective settings after each committed edit and whenever the shared snapshot reloads while the Center is open. Changing `orchestrator.target` rebases `orchestrator.model` on the new target's default model, matching Alt+L and `clio targets use`, and the `orchestrator.thinkingLevel` row immediately offers the levels the new model supports. Cursor position and any open submenu are preserved across refreshes.
 - **Saved-default writes are serialized across processes.** Every settings writer (interactive write-throughs, `clio targets`, `clio configure`) performs its read-modify-write under an advisory lock file (`settings.yaml.lock`) and lands the result via an atomic temp-file + rename. Two processes saving defaults at the same time can no longer drop each other's patches, readers never block and never see partial files, and a lock left behind by a dead process is taken over after a few seconds.
-- **Recently selected models are runtime state, not configuration.** They live in the state dir (`recent-models.json`), so an Alt+L pick never rewrites `settings.yaml` and never pings the config watcher in other running sessions. Settings validation is strict: a `state.recentModels` key in `settings.yaml` is an unknown-key error during normal startup. `clio doctor --fix` can move known legacy recent-model state into the state directory, while `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
+- **Recently selected models are runtime state, not configuration.** They live in the state dir (`recent-models.json`), so an Alt+L pick never rewrites `settings.yaml` and never pings the config watcher in other running sessions. Settings validation is strict: a `state.recentModels` key in `settings.yaml` is an unknown-key error during normal startup and must be removed deliberately. `modelSelector.favorites` stays in `settings.yaml` because favorites are deliberate user configuration.
 - **ACP sessions get the notices through the session ledger.** Sessions served over the Agent Client Protocol (`clio` in ACP mode) have the same routing isolation, but ACP v1 offers no agent-initiated advisory channel: its `session/update` union only carries prompt-turn content, and out-of-turn updates would break strict clients. The external-divergence and target-removed notices are therefore recorded as `custom` session-ledger entries (`customType: "clio.routing-notice"`), visible to `/resume` and session tooling.
 
 ---
@@ -579,7 +589,7 @@ traces.
 ## Model listing and refresh
 
 ```bash
-clio models [search] [--target <id>] [--json] [--offline] [--probe]
+clio models [search] [--target <id>] [--json] [--offline]
 ```
 
 Model rows combine:
@@ -657,8 +667,8 @@ For interactive auth, open `/targets`, select the row, and press `c`. For a stor
 ```bash
 clio doctor --json
 clio targets --probe
-clio models --probe --target <id>
+clio models --target <id>
 clio auth status <target-or-runtime>
 ```
 
-When opening issues, include the Clio version, Node version, target id/runtime, model id, whether `--probe` succeeds, and a redacted receipt or command transcript.
+When opening issues, include the Clio version, Node version, target id/runtime, model id, whether the live model listing succeeds (or the target probe result), and a redacted receipt or command transcript.

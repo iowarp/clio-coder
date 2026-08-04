@@ -135,13 +135,12 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ### Computation and Lifecycle
 - **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
-- **Cryptographic Coverage**: New receipts use v6 and authenticate every current receipt field, including normalized briefing provenance, `outcomeCode`, and prose-free steering provenance, against the reconstructed ledger. The v4 and v5 canonical projections remain frozen. A v4 receipt or ledger row carrying a v5/v6-only own-property fails verification; a v5 artifact carrying the v6-only `steering` property also fails, including null or undefined injection. Versions v1-v3 and every version other than v4/v5/v6 are rejected.
+- **Cryptographic Coverage**: Current receipts use strict v15 and authenticate every current receipt field, including briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, and result-contract conformance, against the reconstructed ledger. Every version other than v15 is rejected; there is no historical receipt reader.
 
-| Version | Verification policy | Fields outside its authenticated projection |
+| Version | Verification policy | Compatibility policy |
 |---|---|---|
-| v4 | Frozen historical canonical projection and mismatch rules | `briefing`, `outcomeCode`, `steering`; each property is forbidden on a v4 receipt or corresponding ledger row |
-| v5 | Frozen canonical projection, including normalized briefing provenance and `outcomeCode` | `steering`; the property is forbidden on a v5 receipt or corresponding ledger row |
-| v6 | Current canonical projection; adds ordered steering byte/hash/timestamp/acknowledgement provenance without prose | None |
+| v15 | Current canonical projection; every current receipt and reconstructible ledger field is authenticated | Accepted |
+| Any other version | No reader | Rejected; remove or archive the incompatible state rather than expecting migration |
 
 Receipt integrity and evidence verification answer different questions. The
 former proves that a receipt matches its ledger envelope; the latter records

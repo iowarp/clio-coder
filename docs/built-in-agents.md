@@ -95,7 +95,7 @@ budget:                           # optional strict worker-loop phase policy
 ---
 ```
 
-`budget` is optional for backward compatibility. When omitted, dispatch derives the generic policy from the operator's current `guardrails.workerToolCallCap`. When present it must be a non-null YAML object containing exactly `toolCalls`, `readReserve`, and `synthesis`: the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
+A custom source recipe may omit `budget`; admission then materializes a concrete WorkerSpec v3 budget from the operator's current `guardrails.workerToolCallCap`. Built-in recipes declare the field and fail startup if their strict frontmatter is malformed. When a source recipe includes `budget`, it must be a non-null YAML object containing exactly `toolCalls`, `readReserve`, and `synthesis`: the numeric fields must be safe integers, `toolCalls > 0`, and `0 <= readReserve < toolCalls`; `synthesis` must be a boolean. Unknown, missing, quoted-numeric, floating-point, null, and relationally invalid values reject the recipe with its source path and property. Scout declares `18/4/true`; Coder declares `50/5/true`. The model-visible catalog shows declared policy or `operator-default`, never a mutable effective cap.
 
 The operator cap is independent and cannot be widened by a recipe. Dispatch clamps `toolCalls` to that cap and clamps `readReserve` to zero when canonical `read` is absent after tool admission. Reserve slots admit only `read`, not every read-class tool. Blocked non-read attempts do not consume admitted reserve slots, but they still count toward the operator attempt ceiling.
 
@@ -115,6 +115,14 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 *   **TUI rendering and control**: Shadow dispatch rows are marked with an `sh:` prefix. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select a native run to steer it or cancel an active worker/retry timer.
 *   **ACP Delegation**: The `/delegate` command is reserved for ACP delegation only, which is separate from Clio fleet subagents.
 
+### Measured agent automation
+
+An assignment may request `agent: auto`, but agent choice is advisory by default and is independent of target/model/runtime/node route activation. The coordinator first removes recipes that fail audience, capability-class, execution-role, tool-surface, result-contract, target, or policy constraints. Those are hard constraints and never become score weights. The remaining recipes are ranked deterministically with measured evidence and bounded cold-start priors.
+
+Active agent selection requires an exact `{agentId, executionRole}` entry in `routing.agentAutomation.activeAgentRoles` and a passing readiness report for that same agent and role. Empty activation settings are the default. If no eligible agent is ready, active automation fails closed instead of falling back to the fixed requested recipe.
+
+Scout is the bounded escalation path for broad reconnaissance, not an authority shortcut. Its strict `scout-report` may return grounded findings or a split recommendation with typed subtasks. The coordinator validates the transition, assigns fresh authority and an absolute deadline to each child, and records the decision. A recovery attempt uses the dedicated recovery role and may not silently inherit broader builder authority.
+
 ### ACP Delegation Agents as First-Class Workers
 
 ACP delegation agents (registered under `delegation.agents` in `settings.yaml`) are integrated as first-class workers:
@@ -133,7 +141,7 @@ In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://a
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker, mapping autonomy levels to the CLI's permission modes. It is a black box: tool calls run inside the `claude` process and are not routed through Clio's per-tool mediation, so Clio cannot enforce a per-tool profile on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
 - **`antigravity-code` (Antigravity CLI):** Runs an Antigravity CLI subprocess as a subscription worker target for fleet dispatch. Like `claude-code`, it is a black box with no per-tool mediation and no per-tool allowlist, so a narrowing `tool_profile` is refused rather than silently ignored.
 
-Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. `claude-code` and `antigravity-code` reject recipes that explicitly declare `budget`, because silently ignoring numeric bounds would be unsafe; legacy custom recipes without the field retain their prior runtime-default compatibility path. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
+Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` enforce canonical call counting, the canonical-`read` reserve, and the synthesis transition. `claude-code` and `antigravity-code` reject recipes that explicitly declare `budget`, because silently ignoring numeric bounds would be unsafe; a custom source recipe without the field receives the concrete operator-default budget at admission. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
 
 Interactive TUI:
 

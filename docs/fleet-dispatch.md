@@ -26,11 +26,14 @@ container or cloud tier implements the same `WorkerTransport` interface
 
 Both local and SSH native workers must emit `worker_announce` as their first
 protocol event. The transport consumes it, checks the dispatched WorkerSpec
-version, and accepts ordinary events only after that check. This is a
-wire-contract initialization boundary: it proves that the expected worker
-entry parsed the spec and speaks the dispatched protocol version. It is not
-cryptographic process identity authentication; the child supplies its own
-announcement. SSH also uses the announced remote pid for its kill fallback.
+version, and accepts ordinary events only after that check. The worker then
+attests protocol version, pid and process group, host, settings fingerprint,
+WorkerSpec digest, runtime, target, endpoint identity, wire model, effective
+tool signature, and bounded resource facts before any model call. Drift from
+the approved identity kills the whole process group. The announcement and
+attestation are strict protocol evidence, not proof against a malicious child
+that controls its own process; SSH also uses the attested remote process group
+for bounded abort escalation.
 
 Scout routing is advisory rather than forced: the worker operating contract
 steers explicit broad repository exploration to the read-only `scout` recipe,
@@ -48,8 +51,11 @@ Design decisions that shape everything else:
 - Shared filesystem. Remote nodes see the project at the same absolute path.
   The doctor preflight verifies this parity per node; hosts with a disjoint
   filesystem fail admission with a clear reason.
-- Deterministic placement. There is no scored or learned scheduler; placement
-  is a fixed priority order the operator can predict and pin.
+- Deterministic placement and measured routing. Exact pins remain exact.
+  Unpinned placement prefers lower durable lease usage and declaration order;
+  the cross-process lease state is the final capacity authority. Route quality
+  can be activated only for named roles/postures after exact-tuple readiness,
+  and hard constraints always eliminate before any score.
 - Environment whitelist. The SSH command carries an explicit environment
   (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_PGID=$$`, and any configured
   `CLIO_WORKER_LABELS`); the orchestrator's `process.env` never crosses the
@@ -69,7 +75,7 @@ briefing wins. Supplying both `task` and `tasks` fails instead of choosing one.
 After approval, execution consumes only the registry-owned resolved plan, so
 later mutation of raw arguments cannot change either field.
 
-Recipes may declare `budget: {toolCalls, readReserve, synthesis}`. `toolCalls` is the admitted-call phase boundary; the final `readReserve` slots accept only canonical `read`; `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `guardrails.workerToolCallCap` is transported separately as a hard attempt ceiling and always wins when lower. Native workers and Claude SDK enforce this policy. Claude Code and Antigravity reject explicit-budget recipes because their black-box loops cannot provide equivalent per-call mediation; custom recipes without a budget retain the legacy runtime-default route.
+Recipes may declare `budget: {toolCalls, readReserve, synthesis}`. `toolCalls` is the admitted-call phase boundary; the final `readReserve` slots accept only canonical `read`; `synthesis: true` forces a text-only final round, while `false` stops after the admitted phase. `guardrails.workerToolCallCap` is transported separately as a hard attempt ceiling and always wins when lower. Native workers and Claude SDK enforce this policy. Claude Code and Antigravity reject explicit-budget recipes because their black-box loops cannot provide equivalent per-call mediation. Before launch, every admitted WorkerSpec v3 contains one concrete effective budget and a settings fingerprint, including custom recipes whose source omitted a budget.
 
 ## Node setup
 
@@ -108,7 +114,9 @@ the node's real SSH channel:
 1. reachability (SSH connects in batch mode),
 2. a version-matched `clio` on the remote invocation path,
 3. path parity for the project root (the shared-filesystem assumption),
-4. a writable remote state directory.
+4. a writable remote state directory,
+5. node-scoped target reachability, runtime/model compatibility, endpoint
+   identity, and explicit resource facts where the target exposes them.
 
 Run it with `clio doctor`. Results persist under the state dir
 (`fleet-preflight.json`) keyed by node and project root, so eligibility
@@ -117,21 +125,32 @@ changed project root, or a local `clio` upgrade; admission then fails closed
 with a reason that names the fix (run `clio doctor` again). Failing nodes are
 doctor warnings, never fatal: the fleet degrades to the nodes that passed.
 
-## Placement order
+## Placement and process-safe admission
 
-Placement resolves before the global concurrency slot, so a node admission
-failure never holds capacity. The order is deterministic:
+Placement and admission are separate, deterministic authorities:
 
-1. Explicit `node` on the dispatch request. Unknown, offline, unpreflighted,
-   or full pins throw an admission error; they never silently fall back.
-2. The worker profile or agent binding pin.
-3. The least-loaded eligible remote node; declaration order breaks ties.
-4. The local node.
+1. An explicit request pin, profile pin, or approved route envelope restricts
+   the eligible node set. Unknown, offline, stale-preflight, or incompatible
+   pins fail closed; they never silently fall back.
+2. For unpinned eligible nodes, placement prefers lower durable lease usage
+   read through the fleet registry; declaration order breaks ties.
+3. The capacity lease store decides under one cross-process state lock. A
+   stale placement preference cannot over-admit a node.
+4. If a pinned or selected node is momentarily full, the bounded admission
+   queue preserves priority/FIFO order until its finite deadline instead of
+   silently selecting another node.
 
-With no fleet configured and nothing requested, placement resolves to null and
-the optional node provenance remains absent. Current v6 receipt fields and
-digest/version semantics still apply, so the complete receipt is not
-byte-identical to a historical v4 or v5 receipt.
+The durable capacity file is version 2 and owns global/per-node leases,
+heartbeats, reservation transfer, retry rebinding, and the TTL-bounded
+operator drain. A lease is reclaimed only with owner-liveness evidence when a
+process birth token cannot prove death. A plan reserves its peak wave, and a
+retry rebinds the same assignment member to its actual node and cost bound so
+it cannot queue behind or outspend itself.
+
+With no fleet configured and nothing requested, placement resolves to the
+implicit local path and optional fleet-node provenance may remain absent.
+Every new receipt uses strict integrity v15; older receipt formats are not
+accepted by the current reader.
 
 ## Failure semantics
 
@@ -161,9 +180,10 @@ request-level `autonomy` can only narrow the level (reviewers and judges run
 | Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. |
 | Sequential | `mode: "sequential"` | One at a time, stop reporting on timeout/abort. |
 | Pipeline | `mode: "pipeline"` | Each step receives the previous step's output as data. |
-| Detached | `detach: true` | Return assignment ids and a batch id immediately; collect later. |
+| Detached | `detach: true` | Return logical assignment ids and a batch id immediately; collect later. |
 | Review gate | `review: {reviewer?, max_cycles?}` | Builder, read-only reviewer verdict, bounded revise loop. |
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
+| Agent automation | `agent: "auto"` | Bounded hard-filtered agent candidates; advisory unless an exact agent/role pair is activated and ready. |
 
 ### Detached fan-out and collect
 
@@ -226,7 +246,13 @@ the workers are quiesced but the candidates remain until that output is bound
 to an integrity-verified judge receipt; a recovered winner is preserved for
 operator inspection rather than silently auto-applied after restart.
 
-### Plan approval
+### ExecutionPlan and plan approval
+
+Every orchestration shape compiles to one strict ExecutionPlan v2 DAG with
+stable task ids, explicit dependencies, requested and approved authority,
+capacity-bounded waves, stop/continue semantics, and authenticated structured
+handoffs. The scheduler performs whole-plan preflight and reservation before
+the first worker spawns. A missing authority grant is an admission failure.
 
 A plan-scale dispatch call (more than one task, review, compete, effective
 remote placement, or `apply_winner`) maps to an approval ask at supervised
@@ -257,11 +283,57 @@ same plan hash into every run's receipt instead
 (`plan.approval: "full-auto"`). Read-only autonomy denies dispatch outright,
 as it denies every non-read action.
 
+The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
+a fleet plan carries a positive finite number and a non-fleet plan carries
+explicit `null`. Older versions, missing fields, and compatibility shapes are
+rejected.
+
+## Measured route selection and agent automation
+
+The joint resolver treats agent, target, model, runtime, and node as one
+bounded tuple. Manual pins, the approved plan envelope, authority, audience,
+required tools and skills, result contract, response-schema support, locality,
+authentication, network policy, endpoint reachability, context, resource fit,
+capacity, budget, deadline, and cooldown are hard filters. Only survivors are
+estimated and Pareto-ranked by conservative quality, reliability, completed
+cost and latency, queue wait, and cache affinity. The complete bounded
+candidate/rejection set is sealed; at most three fallbacks are projected.
+
+Shadow is the default and never changes the explicit route. Active route
+selection requires both the execution role and posture to be named:
+
+```yaml
+routing:
+  activeRoles: [researcher, verifier, reviewer, judge]
+  activePostures: [quality, balanced]
+  agentAutomation:
+    activeAgentRoles: []
+```
+
+For every exact tuple, `evaluateRouteReadiness` requires consistent hard-
+constraint evaluation, no integrity failures, at least six role-specific
+quality labels, conservative quality and reliability floors, known cost,
+fresh node/endpoint/resource/capacity/settings facts, and decision p95 below
+10 ms. If no tuple is ready, active mode refuses the assignment. It never
+falls back to the fixed route, and manual or `failover: none` intent never
+drifts.
+
+`agent: "auto"` first filters recipe audience, authority, tools, skills,
+result contract, locality, and governance. Bounded task features affect cold
+priors only; one truthful role-quality label retires the task prior. Agent
+automation has its own readiness report per agent/spec/role and stays shadow
+unless the operator names an exact agent/role pair. A read-only Scout can
+settle reconnaissance directly or return at most four typed subtasks. The
+coordinator validates ids, dependencies, expected result contracts, and
+requested authority and rejects embedded agents, routes, deadlines, costs, or
+other control fields. Escalation to workspace editing requires authenticated
+plan approval or existing full-auto authority.
+
 ## Assignments, attempts, and failover
 
 A dispatch is a logical assignment containing one or more immutable run
-attempts. Its id is `lineage.rootRunId`, which is also the first attempt's run
-id. Public `finalPromise` handles resolve only when the assignment succeeds,
+attempts. The assignment id and terminal run ids are distinct identities;
+there is no `runIds` compatibility alias. Public `finalPromise` handles resolve only when the assignment succeeds,
 is canceled, or exhausts its retry policy; the returned receipt is the
 terminal attempt's unchanged receipt. Earlier attempts stay independently
 addressable and integrity-verifiable.
@@ -297,14 +369,22 @@ the correct and sufficient bound. A retry denied at admission settles the
 assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
-Individual receipt schemas are intentionally unchanged. Assignment status,
-attempt ids, and terminal run id are stored separately in `assignments.json`.
+Assignment status, attempt ids, and terminal run id are stored separately in
+`assignments.json` while each attempt keeps its own strict v15 receipt.
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
+Editing assignments also own one baseline-pinned workspace transaction. Every
+attempt gets a distinct worktree. Before any winning diff can reach the
+destination checkout, a pure gate checks terminal outcome, receipt integrity,
+result conformance, and quality-gate success; protected artifacts, baseline
+ancestry, and destination cleanliness are then rechecked on disk. Refusal
+preserves the winner and recovery instructions, and the transaction cannot be
+closed while a winner remains unapplied.
+
 ## Receipts
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 6`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 15`), which authenticates the complete receipt and reconstructible ledger provenance surface. There is no historical verification path: any other version is invalid, and a receipt that fails verification is never read as evidence. The fleet provenance fields covered by the digest
 include:
 
 - `node`: the fleet node the worker ran on (`id`, `kind`, `host`).
@@ -320,6 +400,14 @@ include:
 - `outcomeCode`: the stable terminal classifier, including
   `worker_final_output_missing` when an otherwise successful worker exits
   without a nonempty receipt-sealed final answer.
+- `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
+  complete current-policy decision, exact execution role, route estimate and
+  readiness evidence, and authenticated quality sources.
+- `resultContract`: the admitted contract identity and `valid`, `invalid`, or
+  `not-reached` conformance state. Only a due correctness-bearing contract can
+  label route quality.
+- worker attestation identity: settings/WorkerSpec fingerprints, runtime,
+  target, endpoint, model, tool surface, node, and bounded resource facts.
 
 Process exit zero is not a delegated deliverable. Native and ACP runs succeed
 only when the drained event stream yields a nonempty receipt output with
@@ -332,7 +420,7 @@ policy all consume that same final classification.
 Receipt integrity and evidence verification are separate axes. Integrity says
 that the sealed receipt matches its ledger envelope; evidence verification
 reports whether Clio observed an applicable validation tool (or marks the
-basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v6/sha256` alongside
+basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v15/sha256` alongside
 `evidence_verification=not_applicable/read-only-agent`. Briefing provenance and
 bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.

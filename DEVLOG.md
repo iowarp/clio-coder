@@ -8,15 +8,17 @@ change interfaces.
 ## 0.2.9 (in progress)
 
 Dispatch Primitives v2: the dispatch domain graduates from single-host
-workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
+workers to a measured, process-safe multi-node fleet. Eleven audited routing
+and execution slices are integrated on `main`; 0.2.9 remains unreleased while
+its source documentation and release gate are finalized.
 
 ### Added
 
 - **Singular dispatch, briefing separation, and structured terminal outcomes.** `task` is now a first-class singular assignment alongside batch `tasks`; supplying both fails, and briefing-only calls explain that context cannot replace an assignment. Shared and per-task briefing precedence remains explicit, the 12,000-byte canonical value is pinned in the immutable approved plan, and execution ignores later raw-argument mutation. A fifth deterministic outcome code, `worker_final_output_missing`, fails an otherwise successful native or ACP run when event draining produces no nonempty receipt-sealed final output. Partial deltas remain diagnostics and this code suppresses automatic retries without parsing prose.
-- **Receipt-integrity v6 and steering provenance.** Successfully written native steers record stable sequence, UTF-8 bytes, SHA-256, send time, and observed acknowledgement without retaining message text. Operator/TUI and model steering share the dispatch-contract path; ACP remains non-steerable. New receipts seal v6. Dedicated literal v4 and v5 projections and digests remain frozen, downgrade-shaped own-properties fail even when null or undefined, ledger mismatch checks include steering, and orphan recovery adopts only integrity-valid v6 provenance.
-- **Canonical worker prompt compiler and agent-owned loop budgets.** Native dispatch now resolves effective autonomy and the final canonical toolkit once, then compiles identity-lite, the shared operating/task contract, sliced tool guidance, matching safety, and one recipe/override persona through the prompts domain. Dynamic project, memory, briefing, pipeline, task, and run-posture messages remain outside stable hashes. Recipe parsing strictly validates the exact `budget: {toolCalls, readReserve, synthesis}` object for built-in, user, and project agents; Scout declares `18/4/true`, Coder `50/5/true`, and missing custom budgets retain operator-default behavior. Dispatch transports the clamped phase policy plus the independent operator attempt cap through `WorkerSpec`; native and Claude SDK enforce canonical counting/read reserve/synthesis, coincident Coder `50/50` completes call 50 before graceful synthesis, and Claude Code/Antigravity reject explicit budgets they cannot mediate. Scout citation quarantine, split recommendations, and two corrective provider rounds remain role-specific.
+- **Receipt-integrity v15 and steering provenance.** Successfully written native steers record stable sequence, UTF-8 bytes, SHA-256, send time, and observed acknowledgement without retaining message text. Operator/TUI and model steering share the dispatch-contract path; ACP remains non-steerable. Current receipts seal v15 and the current reader rejects every earlier receipt format. Ledger mismatch checks include steering, routing intent, quality, route decisions, worker identity, and result conformance; orphan recovery adopts only integrity-valid v15 provenance.
+- **Canonical worker prompt compiler and agent-owned loop budgets.** Native dispatch now resolves effective autonomy and the final canonical toolkit once, then compiles identity-lite, the shared operating/task contract, sliced tool guidance, matching safety, and one recipe/override persona through the prompts domain. Dynamic project, memory, briefing, pipeline, task, and run-posture messages remain outside stable hashes. Recipe parsing strictly validates the exact `budget: {toolCalls, readReserve, synthesis}` object whenever declared; builtins declare it, Scout uses `18/4/true`, Coder uses `50/5/true`, and a custom source recipe without it receives a concrete operator-default budget at admission. Dispatch transports the clamped phase policy plus the independent operator attempt cap through `WorkerSpec`; native and Claude SDK enforce canonical counting/read reserve/synthesis, coincident Coder `50/50` completes call 50 before graceful synthesis, and Claude Code/Antigravity reject explicit budgets they cannot mediate. Scout citation quarantine, split recommendations, and two corrective provider rounds remain role-specific.
 
-- **Worker transport seam with local/SSH initialization parity.** Worker spawning is
+- **Worker transport seam, local/SSH initialization parity, and attestation.** Worker spawning is
   transport-neutral: the WorkerSpec/stdin + NDJSON/stdout protocol crosses
   the wire unchanged through `ssh -T` with a whitelisted environment
   (`CLIO_RESIDENCY=observe`, `CLIO_WORKER_ANNOUNCE=1`); the orchestrator's
@@ -24,25 +26,28 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
   fallback, and a stdin-EOF monitor aborts and force-exits an orphaned
   remote worker so no process is ever stranded. Local and SSH native workers
   both force and consume `worker_announce` as the first event, rejecting a
-  missing or mismatched WorkerSpec version before ordinary events. This is a
-  wire-contract initialization check, not cryptographic identity
-  authentication. Internal `clio worker` is the default remote invocation.
+  missing or mismatched WorkerSpec version before ordinary events. Before any
+  model call, the worker also attests protocol, pid/process group, host,
+  settings and WorkerSpec digests, runtime, target, endpoint, model, effective
+  tool surface, and bounded resource facts; any drift kills the process group.
+  Internal `clio worker` is the default remote invocation.
 
-- **Deterministic node registry, placement, failover, and doctor
+- **Deterministic node registry, process-safe placement, failover, and doctor
   preflight.** `fleet.nodes` in settings declares SSH nodes; a registry
-  tracks online/offline/draining state and per-node capacity. Placement is a
-  fixed priority order (explicit pin, profile/binding pin, least-loaded
-  eligible remote, local) that resolves before the global concurrency slot.
+  tracks online/offline/draining state and per-node capacity. Placement honors
+  exact pins, then spreads work by durable lease usage and declaration order;
+  the cross-process lease authority makes the final capacity decision under
+  one state lock.
   Two consecutive channel failures classify a node dead; in-flight runs are
   reaped and their bounded retries reroute with the full hop lineage
-  recorded on ledger rows and receipts (`node`, `reroutes`, presence-gated
-  in v3 integrity). `clio doctor` runs a durable per-node preflight
+  recorded on ledger rows and receipts (`node`, `reroutes`, integrity-covered
+  in v15). `clio doctor` runs a durable per-node preflight
   (reachability, version match, project-root path parity, writable state
   dir); admission fails closed on missing or stale records.
 
 - **Detached fan-out with a durable collect barrier.** `dispatch`
   `detach:true` admits and spawns every task, then returns the batch id and
-  run ids while a background drain keeps metering, run tails, and board
+  logical assignment ids while a background drain keeps metering, run tails, and board
   progress flowing. Batches persist in `batches.json` beside the run ledger,
   so a resumed session collects from ledger rows alone. The monitor tool
   gains `mode=wait` (single-run block with a monotonic-clock timeout) and
@@ -93,7 +98,8 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
   apply_winner) map to one approval ask at supervised autonomy levels with
   the rendered plan artifact as the prompt; full-auto logs the plan hash
   into every receipt instead. Receipts chain the topology through new
-  optional `gate` and `plan` blocks, presence-gated in v3 integrity.
+  required current-format routing/gate/plan evidence covered by receipt
+  integrity v15.
 
 - **Fleet visibility across every operator surface.** Dispatch lifecycle bus
   events carry node id, gate role/cycle, reroute count, and the model
@@ -117,12 +123,13 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
 
 ### Added (recon, evidence, and truthfulness hardening)
 
-- **Integrity-sealed receipt verification.** Receipts carry an optional
+- **Integrity-sealed receipt verification.** Current receipts carry a required
   `verification` field (`verified`/`unverified`/`not_applicable`/`unknown`
   with a stable basis token) derived at finalization from capability class,
   ACP observability, and validation-tool evidence. Descriptive only: outcome,
-  retry, reroute, and the finish gate never read it. Legacy receipts read
-  `unknown`, never `verified`.
+  retry, reroute, and the finish gate never read it. Receipts from every
+  earlier integrity version are rejected rather than projected as current
+  evidence.
 - **Evidence-labeled dispatch and monitor output.** Worker text renders under
   a label keyed on the integrity-checked verification state; receipt
   integrity failures render head-anchored banners; deterministic non-evidence
@@ -193,6 +200,97 @@ workers to a true multi-node fleet. Six workstreams on `feat/fleet-dispatch`.
   under verbose JSONL. Approval artifacts include and cryptographically bind
   each dispatched task, so routing-only plans can no longer hide the work an
   operator is approving.
+
+### Completed dispatch-routing slices
+
+- **Slice 1 — measurable route quality.** Receipt, gate, and eval evidence is
+  reduced by one pure quality authority. Descriptive receipt verification does
+  not label correctness; only authenticated correctness-bearing sources do.
+  Run-local quality is integrity-covered and later gate/eval labels link by
+  receipt digest instead of mutating a receipt.
+- **Slice 2 — strict recipes and result contracts.** One versioned frontmatter
+  schema owns every recipe. Malformed custom recipes are quarantined and a
+  malformed builtin fails startup. Typed result contracts have exact wire
+  shapes and bounded repair. Scout citations are structurally grounded in
+  this run's observed read spans. `resultContractWasDue` records
+  `not-reached` when execution ended before the postcondition, so transport,
+  policy, cancellation, and setup failures do not become false quality
+  failures.
+- **Slice 3 — execution roles and gate routes.** Builder, reviewer, judge,
+  researcher, verifier, and recovery are required on requests, plans, ledger
+  rows, receipts, candidates, and history keys. Gate deciders use typed
+  contracts and default to the builtin verifier. GateDecisionArtifact v2
+  seals route correlation; independence is a soft preference only after hard
+  filters and quality floors.
+- **Slice 4 — ExecutionPlan DAG.** ExecutionPlan v2 is the sole deterministic
+  orchestration DAG. It seals stable task ids, dependencies, requested and
+  approved authority, capacity waves, stop/continue semantics, and structured
+  authenticated handoffs. Whole-plan preflight and reservation happen before
+  any worker spawns.
+- **Slice 5 — sealed routing intent.** Strict model-facing intent covers
+  posture, cost, deadline, quality, capabilities, locality, and failover.
+  Candidate envelopes are coordinator-authored, route explanations are
+  bounded/redacted, and hard constraints always eliminate before scoring.
+- **Slice 6 — process-safe admission.** Durable capacity state v2 owns global
+  and per-node expiring leases, priority/FIFO queues, finite queue deadlines,
+  retry rebinding, reservation transfer, and TTL-bounded operator drain under
+  one cross-process lock. Lease-bound admission fails closed and reclaiming a
+  lease requires owner-liveness evidence when a birth token cannot prove
+  death.
+- **Slice 7 — worker protocol and attestation.** WorkerSpec v3 requires a
+  concrete budget and settings fingerprint. The bounded two-lane protocol
+  keeps heartbeat and control acknowledgements away from display pressure,
+  never drops receipt-bearing frames, and attests the complete approved worker
+  identity before any model call. Local and remote aborts target the complete
+  process group.
+- **Slice 8 — joint route resolution.** One pure resolver enumerates the
+  bounded route cross-product, applies every hard filter, computes measured
+  estimates, Pareto-ranks admissible tuples, and retains every candidate and
+  rejection while bounding only the fallback projection. Route policy is v4.
+  Route history v3 aggregates compatible capability evidence and explicitly
+  retires older files; tool-surface and endpoint drift invalidate evidence,
+  prompt wording and unrelated settings fingerprints do not.
+- **Slice 9 — active read-only routing.** Settings name exact active roles and
+  postures; both default empty. The same joint resolver and decision artifact
+  serve shadow and active modes. `evaluateRouteReadiness` reports every gap,
+  including exact-role quality labels, Wilson lower bounds, reliability, known
+  cost, fresh route facts, integrity, hard-filter validity, and decision p95.
+  Active mode fails closed with no ready tuple and never drifts manual pins or
+  `failover: none`.
+- **Slice 10 — transactional attempt isolation.** One baseline-pinned worktree
+  group belongs to each editing assignment. Every attempt gets a separate
+  checkout. Pure apply eligibility checks outcome, receipt integrity, result
+  conformance, and quality gate before the repository is touched; protected
+  artifacts, baseline ancestry, and destination cleanliness are then rechecked
+  on disk. A refused winner is preserved with recovery instructions.
+- **Slice 11 — bounded agent automation and Scout escalation.** `agent: auto`
+  enumerates audience, authority, tool, skill, result-contract, locality, and
+  governance fit as hard constraints, then scores agent/target/model/runtime/
+  node as one tuple. Task features affect cold priors only; measured
+  role-quality retires them. Automation remains shadow by default and has an
+  exact agent/role readiness report. Strict Scout split data compiles to an
+  ExecutionPlan only after schema and DAG validation; read-only-to-editing
+  transitions require authenticated plan approval or existing full-auto
+  authority, share one absolute deadline, and recheck the approved identity,
+  contract, cost, and authority before spawning.
+
+### Current durable boundaries
+
+- Receipt integrity: v15 only; earlier receipts are rejected.
+- Route policy: `route-policy/4`.
+- Route history: v3 only; earlier files are renamed to timestamped retired
+  siblings and are not read as evidence.
+- ExecutionPlan: v2 only.
+- Resolved dispatch plan: v3 only, with a required explicit deadline field.
+- WorkerSpec: v3 only, with required budget and settings fingerprint.
+- Session metadata: v3 only; earlier session directories must be removed.
+- GateDecisionArtifact: v2 only.
+
+The deterministic contract suites cover every named slice case. Live routing
+verification uses isolated settings and free local targets; `active-readonly`
+seeds integrity-valid fixture evidence through the canonical history writer to
+prove activation plumbing, and `agent-auto-shadow` proves that explicit Scout
+execution remains unchanged while agent recommendations are sealed.
 
 ## 0.2.8 - 2026-07-07
 

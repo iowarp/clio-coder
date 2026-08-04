@@ -13,7 +13,7 @@ Clio Coder treats a selectable model as the intersection of three sources:
 
 - `/targets`: `r` probes the selected target; `R` probes all targets.
 - `/model` or `/models`: `r` refreshes the selected row's target; `R` refreshes all targets.
-- `clio models`: probes live targets before printing the CLI model list. Use `--offline` to skip live probing. `--probe` is still accepted for compatibility.
+- `clio models`: probes live targets before printing the CLI model list. Use `--offline` to skip live probing. The former `--probe` and `--no-probe` flags are rejected.
 
 Configured `wireModels` and a target `defaultModel` remain selectable before a
 live catalog is known; Clio labels those rows as `configured` or `default`.
