@@ -119,3 +119,18 @@ export {
 	type DispatchFailoverMode,
 	type JobSpec,
 } from "./validation.js";
+export type {
+	WorkspaceSnapshot,
+	WriteBoundaryStatus,
+	WriteBoundaryVerdict,
+} from "./write-boundary.js";
+export {
+	captureWorkspaceSnapshot,
+	diffWorkspace,
+	enforceWriteBoundary,
+	WRITE_BOUNDARY_VIOLATION_REASON,
+	writeBoundaryDir,
+	writeWriteBoundaryVerdict,
+} from "./write-boundary.js";
+export type { WriteBoundaryEnforcer } from "./write-boundary-enforcer.js";
+export { createWriteBoundaryEnforcer, preflightWriteBoundaries } from "./write-boundary-enforcer.js";

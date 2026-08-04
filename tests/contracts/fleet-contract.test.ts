@@ -32,7 +32,10 @@ describe("fleet contracts", () => {
 		// v3 adds bounded loops and commit steps; a v1 contract parses unchanged
 		// under it, and an undeclared version is still refused.
 		strictEqual(parseFleetContract(valid.replace("version: 1", "version: 3"), "fleet.md").version, 3);
-		throws(() => parseFleetContract(valid.replace("version: 1", "version: 4"), "fleet.md"), /version/);
+		// v4 adds enforced write boundaries. A readonly contract parses unchanged
+		// under it, because readonly is exactly the empty allowlist v4 enforces.
+		strictEqual(parseFleetContract(valid.replace("version: 1", "version: 4"), "fleet.md").version, 4);
+		throws(() => parseFleetContract(valid.replace("version: 1", "version: 5"), "fleet.md"), /version/);
 	});
 	it("unknown fleet keys are rejected", () =>
 		throws(

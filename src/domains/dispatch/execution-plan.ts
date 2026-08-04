@@ -50,6 +50,12 @@ export interface ExecutionPlanAgentStep {
 	task: string;
 	/** Set on nodes a bounded loop unrolled to. */
 	loop?: ExecutionPlanLoopMembership;
+	/**
+	 * Declared write boundary, sealed in the plan hash. An empty array is the
+	 * checkable claim "this step changes nothing"; `undefined` is a plan whose
+	 * contract declares no boundary at all and is therefore not enforced.
+	 */
+	writes?: ReadonlyArray<string>;
 }
 
 /**
@@ -77,6 +83,8 @@ export interface ExecutionPlanCodeStep {
 	 * both leave the tree they act on unchanged, so neither invalidates a green.
 	 */
 	commitFrom?: ReadonlyArray<string>;
+	/** Declared write boundary; see `ExecutionPlanAgentStep.writes`. */
+	writes?: ReadonlyArray<string>;
 }
 
 export type ExecutionPlanStep = ExecutionPlanAgentStep | ExecutionPlanCodeStep;
@@ -212,6 +220,77 @@ function checkLoops(steps: ReadonlyArray<ExecutionPlanStep>, loops: ReadonlyArra
 	}
 }
 
+/**
+ * Whether a wave's declared boundaries can be enforced honestly.
+ *
+ * Every step in a wave shares one checkout, and Clio gives a fleet step no
+ * private worktree, so a path that changed while two steps ran cannot be
+ * attributed to one of them. Two rules follow, and both are refusals at compile
+ * time rather than surprises at enforcement time:
+ *
+ *   - A wave is enforced or it is not. One step with an undeclared boundary
+ *     beside a step that declared one means every change is potentially the
+ *     undeclared step's, which silently disables enforcement for its neighbour.
+ *   - At most one step per wave may declare a non-empty allowlist. Disjoint
+ *     allowlists do not help: nothing proves that the change inside B's paths
+ *     was written by B rather than by A, so a second writer would let A write
+ *     anywhere B is allowed. Readonly steps may still run alongside the writer;
+ *     they claim nothing, so nothing is attributed to them alone.
+ */
+function checkWriteBoundaryWaves(
+	steps: ReadonlyArray<ExecutionPlanStep>,
+	waves: ReadonlyArray<ReadonlyArray<string>>,
+): void {
+	const byId = new Map(steps.map((step) => [step.id, step]));
+	for (const [index, wave] of waves.entries()) {
+		const members = wave.flatMap((id) => {
+			const step = byId.get(id);
+			return step === undefined ? [] : [step];
+		});
+		const declared = members.filter((step) => step.writes !== undefined);
+		if (declared.length === 0) continue;
+		const undeclared = members.filter((step) => step.writes === undefined);
+		if (undeclared.length > 0) {
+			throw new Error(
+				`execution plan: wave ${index} mixes boundary-enforced steps (${declared
+					.map((step) => step.id)
+					.join(", ")}) with steps that declare no boundary (${undeclared
+					.map((step) => step.id)
+					.join(", ")}); they share one checkout, so the undeclared step's writes cannot be told from a violation`,
+			);
+		}
+		const writers = declared.filter((step) => (step.writes?.length ?? 0) > 0);
+		if (writers.length > 1) {
+			throw new Error(
+				`execution plan: wave ${index} schedules ${writers.length} steps that may write (${writers
+					.map((step) => step.id)
+					.join(
+						", ",
+					)}); a write boundary is verified by diffing one shared checkout, so concurrent writers cannot be attributed. Order them with dependencies or lower maxWorkers`,
+			);
+		}
+	}
+}
+
+/**
+ * The paths one wave was permitted to change, or null when the wave declares no
+ * boundary. Empty means the wave claims it changes nothing.
+ */
+export function executionPlanWaveBoundary(
+	plan: ExecutionPlan,
+	waveIndex: number,
+): { stepIds: string[]; allow: string[] } | null {
+	const byId = new Map(plan.steps.map((step) => [step.id, step]));
+	const members = (plan.waves[waveIndex] ?? []).flatMap((id) => {
+		const step = byId.get(id);
+		return step === undefined ? [] : [step];
+	});
+	if (members.length === 0 || members.some((step) => step.writes === undefined)) return null;
+	const allow = new Set<string>();
+	for (const step of members) for (const entry of step.writes ?? []) allow.add(entry);
+	return { stepIds: members.map((step) => step.id), allow: [...allow].sort() };
+}
+
 export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	const steps = canonicalSteps(input.steps);
 	const loops = (input.loops ?? []).map((loop) => ({
@@ -221,6 +300,7 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 	}));
 	checkLoops(steps, loops);
 	const waves = executionPlanWaves(steps, input.maxWorkers);
+	checkWriteBoundaryWaves(steps, waves);
 	const canonical = {
 		version: 4 as const,
 		topology: input.topology,

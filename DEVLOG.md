@@ -14,6 +14,66 @@ its source documentation and release gate are finalized.
 
 ### Added
 
+- **Per-step write boundaries with post-run verification and rollback.** A tool
+  permission level says what a step *can* do; it has never said what a step is
+  *allowed to change*. `bash` runs anything and a write tool reaches any path, so
+  "this reviewer touches nothing" was a sentence in a prompt. Fleet contract v4
+  turns it into a declaration and then checks it: each step carries a `writes`
+  allowlist of repo-relative path prefixes, an entry ending in `/` covering the
+  subtree, and `readonly` is the empty allowlist stated out loud. The boundary
+  lives on the step rather than on the recipe. A recipe is identity, and the same
+  `coder` legitimately owns `src/` in one workflow and `docs/` in another; a
+  recipe-level default would need a merge rule, and every answer to "widen or
+  intersect?" is a way to end up with a boundary wider than the contract an
+  operator read.
+
+  Enforcement is detect-and-rollback, not sandboxing, and the documentation says
+  so plainly: no container, no seccomp filter, no interception of the worker's
+  tools. Nothing prevents the write. The orchestrator snapshots the checkout
+  before a scheduling window opens, diffs it afterwards against the pinned
+  baseline commit using git plumbing over the dirty set, restores every
+  unauthorized path, and fails the step with the typed
+  `writes_boundary_violation` naming the exact paths and the exact declaration,
+  because the expected remedy is usually widening a declaration that was too
+  narrow. Comparison is by blob identity rather than by status letter, so a
+  commit step that moves HEAD without touching the working tree reads as no
+  change at all.
+
+  Rollback restores only what git already has. A path that was already dirty when
+  the snapshot was taken has its prior bytes nowhere, so an unauthorized change to
+  it is reported as `rollback-incomplete`, the working tree is left exactly as the
+  step made it, and the record names the paths and the reason. Deleting an
+  untracked file nobody snapshotted is that case. The alternative, reconstructing
+  content that was never recorded, is guessing at operator work.
+
+  Attribution is honest about the fact that fleet steps share one checkout. There
+  is no per-step worktree in the fleet path, so a change made while two steps ran
+  cannot be pinned on one of them. Plan compilation therefore refuses a wave that
+  schedules more than one step with a non-empty allowlist, and refuses a wave that
+  mixes boundary-declaring steps with undeclared ones; a readonly step may still
+  run beside the wave's one writer. Everything else fails closed: a declared
+  boundary with no verifier, a non-git workspace, and a declared path that leaves
+  the workspace through a symlink are all refused before any spawn. Verdicts are
+  sealed under `write-boundaries/<rootId>/` beside the run ledger with their own
+  digest and baseline commit, and violations surface where step failures already
+  do. Boundaries are opt-in by version: a v3 contract's `workspace` step still
+  means the whole checkout, and a `writes` key under an older version is refused
+  by name rather than silently ignored.
+
+  What counts as a change is what git reports, so an ignored path is outside
+  enforcement; a repository decides what its content is, and this is not the
+  place to overrule it. The single subtraction is Clio's own state directory when
+  an operator has placed it inside the workspace, because receipts, code-step
+  logs, and boundary verdicts are the orchestrator writing its journal while the
+  step runs. A demonstration fleet whose registered command edits its allowed
+  directory, overwrites a tracked file outside it, and drops an untracked file at
+  the root ends with the authorized edit intact, the tracked file restored from
+  the baseline commit, the stray file removed, `writes_boundary_violation` on
+  stdout naming both paths and the declaration, exit 1, and the sealed verdict on
+  disk. That run also surfaced a defect in the code-step slice: a fleet made only
+  of deterministic steps asked the reservation authority for an empty
+  reservation and was refused. A plan that admits no worker now reserves no
+  capacity instead.
 - **Builtin SDLC fleets with bounded repair loops.** Clio had the primitives for
   a software-development workflow and shipped none of it. Three fleets now run
   out of the box from `src/domains/agents/fleets/`: `build-test` (builder, suite,
