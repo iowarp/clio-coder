@@ -2,7 +2,7 @@ import { deepStrictEqual, rejects, strictEqual, throws } from "node:assert/stric
 import { describe, it } from "node:test";
 import {
 	compileExecutionPlan,
-	type ExecutionPlanStep,
+	type ExecutionPlanAgentStep,
 	executionPlanWaves,
 } from "../../src/domains/dispatch/execution-plan.js";
 import {
@@ -11,7 +11,8 @@ import {
 	executePlan,
 } from "../../src/domains/dispatch/execution-scheduler.js";
 
-const step = (id: string, dependencies: string[] = []): ExecutionPlanStep => ({
+const step = (id: string, dependencies: string[] = []): ExecutionPlanAgentStep => ({
+	kind: "agent",
 	id,
 	dependencies,
 	agentId: "coder",
@@ -22,7 +23,7 @@ const step = (id: string, dependencies: string[] = []): ExecutionPlanStep => ({
 	approvedAuthority: "workspace-edit",
 	task: id,
 });
-const plan = (steps: ExecutionPlanStep[], maxWorkers = 2, onFailure: "stop" | "continue" = "continue") =>
+const plan = (steps: ExecutionPlanAgentStep[], maxWorkers = 2, onFailure: "stop" | "continue" = "continue") =>
 	compileExecutionPlan({ topology: "fleet", rootTask: "root", maxWorkers, onFailure, steps });
 
 function adapter(
@@ -133,7 +134,7 @@ describe("execution plan", () => {
 		await executePlan(plan([step("a")]), fake, controller.signal);
 		strictEqual(fake.released.includes("reservation"), true);
 	});
-	it("version 2 seals authority grants and refuses a plan that lacks one", async () => {
+	it("version 3 seals authority grants and refuses a plan that lacks one", async () => {
 		const granted = plan([step("a")]);
 		const ungranted = compileExecutionPlan({
 			topology: "fleet",
@@ -142,8 +143,8 @@ describe("execution plan", () => {
 			onFailure: "stop",
 			steps: [{ ...step("a"), approvedAuthority: null }],
 		});
-		strictEqual(granted.version, 2);
-		strictEqual(ungranted.version, 2);
+		strictEqual(granted.version, 3);
+		strictEqual(ungranted.version, 3);
 		strictEqual(granted.hash === ungranted.hash, false);
 		const fake = adapter();
 		await rejects(() => executePlan(ungranted, fake), /lacks its requested authority grant/u);

@@ -14,7 +14,7 @@ import type {
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
-import { compileExecutionPlan, type ExecutionPlan } from "../domains/dispatch/execution-plan.js";
+import { compileExecutionPlan, type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import {
 	type AgentRoleFactsResolver,
 	gateDeciderAgentId,
@@ -2615,7 +2615,10 @@ export function createDispatchTool(inputDeps: DispatchToolDeps): ToolSpec {
 					rootTask: executionPlan.rootTask,
 					maxWorkers: executionPlan.maxWorkers,
 					onFailure: executionPlan.onFailure,
-					steps: executionPlan.steps.map((step) => ({ ...step, approvedAuthority: step.requestedAuthority })),
+					steps: requireAgentSteps(executionPlan.steps).map((step) => ({
+						...step,
+						approvedAuthority: step.requestedAuthority,
+					})),
 				});
 				try {
 					const outcome = await runScoutContinuationPlan({

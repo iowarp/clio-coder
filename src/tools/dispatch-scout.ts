@@ -11,7 +11,7 @@ import type {
 	DispatchPlanTaskResolution,
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
-import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
+import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import { executePlan } from "../domains/dispatch/execution-scheduler.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { sameRouteIdentity } from "../domains/dispatch/route-decision.js";
@@ -378,7 +378,7 @@ export function prepareScoutContinuation(input: {
 	const deadlineMs = Math.max(priorDeadlineMs ?? 0, predictedDeadlineMs);
 	const requests: DispatchRequest[] = [];
 	const resolutions: DispatchPlanTaskResolution[] = [];
-	const tasks = plan.steps.map((step, index): ResolvedDispatchPlanArtifact["tasks"][number] => {
+	const tasks = requireAgentSteps(plan.steps).map((step, index): ResolvedDispatchPlanArtifact["tasks"][number] => {
 		const proposal = proposals.find((entry) => entry.subtask.id === step.id);
 		if (proposal === undefined) throw new Error(`dispatch: Scout step '${step.id}' has no route proposal`);
 		const selected = proposal.decision.selected;

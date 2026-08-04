@@ -10,7 +10,16 @@ export type ResultContract =
 	| { kind: "research-report" }
 	| { kind: "mutation-report" }
 	| { kind: "provenance-report" }
-	| { kind: "external-delegation" };
+	| { kind: "external-delegation" }
+	/**
+	 * A deterministic command's structured result. No agent recipe may declare
+	 * it (`parseResultContract` rejects the kind) and no Scout subtask may
+	 * request it: it is authored by the code-step runner, never by a model. It
+	 * lives in this union so a code step's terminal result is validated, sealed,
+	 * and handed across plan edges through exactly the same door an agent's
+	 * report uses.
+	 */
+	| { kind: "code-report" };
 
 export type ResultContractQuality = "pass" | "fail" | "unmeasured";
 
@@ -131,6 +140,20 @@ export interface VerifierCheck {
 export interface VerifierResult {
 	verdict: "pass" | "fail";
 	checks: ReadonlyArray<VerifierCheck>;
+}
+
+/**
+ * Parsed `code-report` payload. `passed` restates `exitCode === 0` so a
+ * downstream reader never has to know a runner's exit conventions, and
+ * `outputExcerpt` is the command's own bytes so a builder repairs from what
+ * the command printed rather than from someone's summary of it.
+ */
+export interface CodeReportResult {
+	passed: boolean;
+	exitCode: number;
+	checks: ReadonlyArray<VerifierCheck>;
+	artifactPaths: ReadonlyArray<string>;
+	outputExcerpt: string;
 }
 
 function canonical(value: unknown): string {
@@ -433,6 +456,54 @@ export function parseVerifierResult(output: string | null): VerifierResult | nul
 	return validation.verifier ?? null;
 }
 
+/**
+ * A code step's result is always `unmeasured` for routing quality. A red suite
+ * is evidence about the repository, not about the route that ran the command,
+ * and code steps are not routes: they never reach route history or the routing
+ * quality reducer. Conformance here judges the shape alone, so a failing
+ * command still produces a conformant report that crosses its outgoing edges.
+ */
+function validateCodeReport(contract: ResultContract, output: string | null): ResultContractValidation {
+	const parsed = parseJson(output);
+	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
+	const value = parsed.value;
+	if (
+		!hasOnlyKeys(value, ["passed", "exitCode", "checks", "artifactPaths", "outputExcerpt"]) ||
+		typeof value.passed !== "boolean" ||
+		typeof value.exitCode !== "number" ||
+		!Number.isSafeInteger(value.exitCode) ||
+		typeof value.outputExcerpt !== "string" ||
+		!Array.isArray(value.artifactPaths) ||
+		value.artifactPaths.some((entry) => !string(entry))
+	) {
+		return failure(
+			contract,
+			"unmeasured",
+			"Code result must carry passed, integer exitCode, checks, artifactPaths, and outputExcerpt",
+		);
+	}
+	const checks = parseChecks(value.checks);
+	if (checks === null) return failure(contract, "unmeasured", "Code result must carry typed checks");
+	if (value.passed !== (value.exitCode === 0) || value.passed !== checks.every((check) => check.passed)) {
+		return failure(contract, "unmeasured", "Code result passed must agree with its exit code and every check");
+	}
+	return success(contract, "unmeasured", value);
+}
+
+/** Parse a `code-report` payload for callers that need the structured result. */
+export function parseCodeReport(output: string | null): CodeReportResult | null {
+	const validation = validateCodeReport({ kind: "code-report" }, output);
+	if (validation.conformance !== "pass" || output === null) return null;
+	const value = JSON.parse(output) as CodeReportResult;
+	return {
+		passed: value.passed,
+		exitCode: value.exitCode,
+		checks: value.checks.map((check) => ({ ...check })),
+		artifactPaths: [...value.artifactPaths],
+		outputExcerpt: value.outputExcerpt,
+	};
+}
+
 function validateDebugger(contract: ResultContract, output: string | null): ResultContractValidation {
 	const parsed = parseJson(output);
 	if (!parsed.ok) return failure(contract, "unmeasured", parsed.reason);
@@ -579,6 +650,8 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			return validateProvenance(input.contract, input.output);
 		case "external-delegation":
 			return success(input.contract, "unmeasured", { external: true });
+		case "code-report":
+			return validateCodeReport(input.contract, input.output);
 	}
 }
 
@@ -649,6 +722,8 @@ export function resultContractShape(contract: ResultContract): string {
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "external-delegation":
 			return "any final text";
+		case "code-report":
+			return '{"passed":false,"exitCode":1,"checks":[{"name":"test","passed":false,"evidence":"exit 1"}],"artifactPaths":["/path/command.log"],"outputExcerpt":"..."}';
 	}
 }
 
