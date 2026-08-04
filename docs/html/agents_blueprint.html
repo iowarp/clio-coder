@@ -672,6 +672,10 @@
             </tr>
           </tbody>
         </table>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Measured Agent Automation</h3>
+        <p><code>agent: auto</code> is advisory by default. Audience, authority, execution role, tools, skills, result contract, locality, target policy, and governance are hard filters that remove candidates before ranking. Active selection requires an exact <code>{agentId, executionRole}</code> entry in <code>routing.agentAutomation.activeAgentRoles</code> and a passing readiness report for that same pair; no ready candidate fails closed.</p>
+        <p>Scout escalation is typed and bounded. Grounded findings remain read-only evidence leads; a split recommendation carries strict subtasks that the coordinator validates into a new ExecutionPlan. Any read-only-to-editing transition requires authenticated plan approval or authority already granted by full-auto policy.</p>
       </div>
     </main>
 

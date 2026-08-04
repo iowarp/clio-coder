@@ -601,7 +601,7 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Doctor Repair Semantics</h3>
-        <p><code>clio doctor</code> is read-only. <code>clio doctor --fix</code> creates missing structure, repairs credential permissions, refreshes install metadata, and rewrites <code>settings.yaml</code> only when known legacy settings keys are present. That repair path creates <code>settings.yaml.bak</code> before writing the current schema.</p>
+        <p><code>clio doctor</code> is read-only. <code>clio doctor --fix</code> creates missing structure and templates, repairs credential permissions, and refreshes install metadata. Settings are validated directly against the current schema; <code>--fix</code> never rewrites removed keys or migrates an older settings file.</p>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Durable symlink setup</h3>
         <pre><code># checkout repo

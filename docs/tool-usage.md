@@ -243,9 +243,9 @@ Arguments:
 
 Argument tolerance: `tasks` sent as a JSON string is parsed and a single object or bare string is wrapped into an array. The top-level singular `task` is first-class. Briefing-only calls fail with guidance that briefing is context and cannot replace a task.
 
-Output is one batch-shaped summary even for a single task: a header `dispatch (<mode>) total=N failed=M`, the assignment id list, then one terminal-attempt receipt line per assignment (run id, agent, exit code, target, model, tokens, receipt path, verification state, failure message if any) followed by the worker's final assistant text. `details = {mode, runIds, receiptCount, failedCount, runs[]}`, and each `runs[]` entry carries the structured `verification` state and the `receiptIntegrity` check result. Any run with a nonzero exit turns the whole result into an error carrying the same summary. A run that succeeded without a single successful tool call carries a `note=` marker; do not treat such a run as validated work.
+Output is one batch-shaped summary even for a single task: a header `dispatch (<mode>) total=N failed=M`, the assignment id list, then one terminal-attempt receipt line per assignment (run id, agent, exit code, target, model, tokens, receipt path, verification state, failure message if any) followed by the worker's final assistant text. `details = {mode, assignmentIds, receiptCount, failedCount, runs[]}`, and each `runs[]` entry carries distinct `assignmentId` and terminal `runId` fields plus the structured `verification` state and `receiptIntegrity` result. There is no `runIds` compatibility alias. Any terminal attempt with a nonzero exit turns the whole result into an error carrying the same summary. A run that succeeded without a single successful tool call carries a `note=` marker; do not treat such a run as validated work.
 
-The summary separates four things that must never be conflated: `receipt_integrity=verified/v6/sha256` comes only from verification against the ledger; `evidence_verification=<state>/<basis>` describes validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
+The summary separates four things that must never be conflated: `receipt_integrity=verified/v15/sha256` comes only from verification against the ledger; `evidence_verification=<state>/<basis>` describes validation evidence; `briefing=bytes:<n> sha256:<hash>` authenticates parent-supplied data; and `project_context=...` authenticates the independently rendered bounded project message. A tampered receipt renders a head-anchored `RECEIPT INTEGRITY FAILED` banner. A read-only Scout can have verified integrity with `not_applicable/read-only-agent` evidence. Missing briefing is `briefing=none`, never a project-context hash.
 
 Exit zero is insufficient without a durable deliverable. A successful native or ACP run must seal a nonempty `output.state="final"`. Otherwise it fails with `worker_final_output_missing`; any unfinished text remains partial diagnostics and automatic retry is suppressed. Live tool-use preambles never replace a missing receipt answer.
 
@@ -253,7 +253,7 @@ Sealed receipts are the durable evidence; worker prose remains advisory until ve
 
 ```text
 dispatch(list=true)
-dispatch(agent="debugger", task="Adversarially verify the v4/v5 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
+dispatch(agent="debugger", task="Adversarially verify the strict v15 receipt boundary", briefing="Prior receipt R1 cited receipt-integrity.ts and left these claims unresolved", detach=true)
 dispatch(tasks=["Run the contract tests in tests/contracts/dispatch.test.ts and report each failure with its assertion"])
 dispatch(tasks=[
   {agent: "researcher", task: "Map every caller of finalizeObservation and summarize the envelope shapes"},
@@ -397,7 +397,7 @@ Specialized behaviors:
 
 ```text
 web_fetch(url="https://arxiv.org/abs/2303.17564")
-web_fetch(url="https://github.com/iowarp/clio-coder/tree/v0.2.9/docs")
+web_fetch(url="https://github.com/iowarp/clio-coder/tree/main/docs")
 web_fetch(url="https://example.com", format="raw")
 ```
 

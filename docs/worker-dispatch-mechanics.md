@@ -183,11 +183,11 @@ The coordinator classifies failures into 13 explicit categories (`src/domains/di
 
 ### 5.2 Canonical Receipt Integrity Serialization
 
-Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 6`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
+Receipts carry exactly one integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 15`); any other version is invalid. It computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in `src/domains/dispatch/receipt-integrity.ts`).
 
 - **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.
-- **Coverage**: Includes `runId`, `agentId`, `task`, `targetId`, `startedAt`, `endedAt`, `outcome`, `lineage`, `node`, `reroutes`, `gate`, `plan`, `briefing`, `steering`, and `outcomeCode`.
+- **Coverage**: Includes every current receipt field and reconstructible ledger field, including route intent/decision/quality, execution role, worker identity, result-contract conformance, node/reroute/gate/plan provenance, briefing, steering, and `outcomeCode`.
 
 ### 5.3 Acceptance Coverage
 

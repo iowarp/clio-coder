@@ -706,7 +706,7 @@
         </table>
 
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Autonomy Dial</h3>
-        <p>Clio v0.2.9 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. <code>clio doctor --fix</code> can repair known legacy settings into this shape and backs up the original file first.</p>
+        <p>Clio v0.2.9 uses the <code>autonomy</code> dial for immediate execution, approvals, and auto-denials. Settings are validated directly against the current schema; <code>clio doctor --fix</code> does not transform removed keys into this shape.</p>
         <ul style="margin-left: 2rem; margin-bottom: 1rem; font-size: 0.925rem; color: var(--text-muted);">
           <li style="margin-bottom: 0.3rem;"><strong><code>read-only</code></strong>: Clio inspects and answers. Write/execute tools are auto-denied.</li>
           <li style="margin-bottom: 0.3rem;"><strong><code>suggest</code></strong>: Every mutating action parks for operator confirmation.</li>
@@ -733,6 +733,9 @@ clio</code></pre>
         <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Live Routing vs Saved Defaults</h3>
         <p>Routing properties (<code>orchestrator.*</code>, <code>workers.default.*</code>) in <code>settings.yaml</code> are <strong>defaults</strong> that seed a TUI session on launch. Once running, Alt+L or <code>/model</code> modifications only apply to the current active terminal session and are serialized back for next-session setups without affecting other concurrent running TUI instances.</p>
         <p>Writes from multiple processes are synchronized under an advisory lock file (<code>settings.yaml.lock</code>) and saved atomically.</p>
+
+        <h3 style="margin: 1.5rem 0 0.5rem 0; color:#fff;">Measured Dispatch Activation</h3>
+        <p>The <code>routing</code> block is a separate fail-closed activation boundary. Joint route selection becomes active only when both the execution role and posture are explicitly listed; empty lists keep the resolver in shadow mode. Agent automation requires exact <code>{agentId, executionRole}</code> pairs under <code>routing.agentAutomation.activeAgentRoles</code>. Manual pins never drift, and hard constraints remove candidates before ranking.</p>
       </div>
     </main>
 
@@ -785,6 +788,11 @@ workers:
   maxRetries: 2
   resilienceCooldownMs: 15000
 
+routing:
+  activeRoles: []
+  activePostures: []
+  agentAutomation:
+    activeAgentRoles: []
 
 budget:
   sessionCeilingUsd: 5
@@ -896,7 +904,7 @@ orchestrator:
 
           // Flag stale fields
           if (key === 'defaultMode') {
-            warnings.push(`[Line ${idx+1}] Deprecated key "defaultMode" found. Configuration routing has been migrated in v0.2.9.`);
+            warnings.push(`[Line ${idx+1}] Removed key "defaultMode" found. Delete it and set the required current fields explicitly.`);
           }
           if (key === 'state') {
             warnings.push(`[Line ${idx+1}] Legacy runtime state found in settings.yaml. Current Clio stores recent models under the state directory.`);

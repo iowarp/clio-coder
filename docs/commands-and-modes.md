@@ -32,13 +32,13 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 | `clio targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
 | `clio targets remove <id>` | Remove a target. |
 | `clio targets rename <old> <new>` | Rename a target id. |
-| `clio models [search] [--target <id>] [--json] [--offline] [--probe]` | List models. Live probing is the default; `--offline` skips it and `--probe` is accepted for compatibility. |
+| `clio models [search] [--target <id>] [--json] [--offline]` | List models. Live probing is the default; `--offline` skips it. |
 | `clio paths [--json]` | Print the resolved config, data, state, and cache directories. |
 | `clio auth list` | Show known auth entries. |
 | `clio auth status [target-or-runtime]` | Inspect auth state. |
 | `clio auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
 | `clio auth logout [target-or-runtime]` | Remove stored credentials. |
-| `clio doctor [--fix] [--json]` | Diagnose state; with `--fix`, repair or create missing state. |
+| `clio doctor [--fix] [--json]` | Diagnose state; with `--fix`, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict and are not migrated. |
 | `clio reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force]` | Reset selected Clio Coder state. `--state` is the default level. |
 | `clio uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
 | `clio upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |

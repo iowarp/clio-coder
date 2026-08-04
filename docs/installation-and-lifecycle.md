@@ -131,7 +131,7 @@ Runs a series of health sweeps across the environment:
 *   Asserts owner-only permissions on credentials (`0o600`).
 *   Reports the installed Clio, Node, platform, and engine package readiness.
 *   Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.
-*   *Recovery:* Run `clio doctor --fix` to create missing directories and templates, repair credential permissions, refresh install metadata, and repair known legacy settings keys. The settings repair path rewrites `settings.yaml` only when those legacy keys are present, backs up the original as `settings.yaml.bak`, and leaves unrelated unknown keys for deliberate operator cleanup.
+*   *Recovery:* Run `clio doctor --fix` to create missing directories and templates, repair credential permissions, and refresh install metadata. Settings are always validated against the current schema; `--fix` does not rewrite removed keys or migrate an older settings file, so the operator must correct every reported path deliberately.
 
 ### B. Upgrades (`clio upgrade`)
 Refreshes state metadata and applies pending data-dir migrations.

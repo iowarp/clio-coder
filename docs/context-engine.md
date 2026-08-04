@@ -60,7 +60,7 @@ compaction:
 
 `auto` controls the pre-request trigger. Manual `/context compact` still runs when `auto` is false. `model` optionally selects a dedicated summarization model. `systemPrompt` optionally points at a prompt override file for compaction.
 
-Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Run `clio doctor --fix` to repair known legacy compaction shapes, or update unrelated unknown keys by hand.
+Settings validation is strict: an older file still carrying the removed `compaction.thresholds` block fails to load with the exact key path during normal startup. Edit removed or unknown keys deliberately; `clio doctor --fix` does not transform settings into the current schema.
 
 ---
 

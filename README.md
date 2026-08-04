@@ -30,7 +30,7 @@ server; a cloud API; your ChatGPT or Claude subscription; or an Argonne
 Leadership Computing Facility inference gateway. Clio brings the harness
 around it: a terminal UI, nineteen typed tools instead of an unrestricted
 shell, a fleet of bounded worker agents that can run across your whole
-cluster over SSH, durable sessions, and a signed receipt for every run.
+cluster over SSH, durable sessions, and an integrity-sealed receipt for every run.
 
 CLIO stands for Context Layer for Input/Output. Clio Coder is the interactive
 coding agent in IOWarp's ecosystem of agentic science, named for the Greek
@@ -320,6 +320,26 @@ Everything you need to reproduce it end to end, including a recorded
 multi-node demo script, is in [docs/fleet-dispatch.md](docs/fleet-dispatch.md)
 and [docs/fleet-demo-runbook.md](docs/fleet-demo-runbook.md).
 
+Routing is measured but conservative. Every dispatch records a joint decision
+over agent, target, model, runtime, and node, while shadow mode leaves the
+explicit route unchanged. Operators can activate only named read-only and
+quality roles, and only after the exact tuple has enough integrity-valid
+quality, reliability, cost, freshness, and decision-latency evidence:
+
+```yaml
+routing:
+  activeRoles: [researcher, verifier, reviewer, judge]
+  activePostures: [quality, balanced]
+  agentAutomation:
+    activeAgentRoles: [] # stays advisory until exact agent/role pairs are named
+```
+
+Manual pins and `failover: none` remain exact. Active mode fails closed when
+no route is ready. `agent: auto` is separately bounded by recipe audience,
+authority, tools, skills, result contract, locality, and approved governance;
+changing from a read-only Scout phase to workspace editing requires an
+authenticated plan approval or authority already granted by full-auto policy.
+
 ## Project context: CLIO.md
 
 Clio loads a checked-in `CLIO.md` as the canonical project guide on every
@@ -377,10 +397,10 @@ list|propose|approve|reject|prune`. Design notes:
 
 ## Status
 
-Clio Coder is alpha software distributed from source. The current release is
-**v0.2.9**. The `@iowarp/clio-coder` package is not yet published to npm.
-Interfaces may still move between minor versions, and model-specific behavior
-varies by target.
+Clio Coder is alpha software distributed from source. The current development
+version is **v0.2.9**; it has not yet been released or published to npm. Until
+the v0.2.9 tag is cut, use a source checkout of `main`. Interfaces may still
+move between minor versions, and model-specific behavior varies by target.
 
 Release notes live in the [CHANGELOG](CHANGELOG.md), the detailed developer
 log lives in [DEVLOG.md](DEVLOG.md), and every release is gated by the
