@@ -298,7 +298,7 @@ export interface RunPhaseDurations {
  * bumping one without the other is a compile error.
  */
 export interface RunReceiptIntegrity {
-	version: 13;
+	version: 14;
 	algorithm: "sha256";
 	digest: string;
 }
@@ -691,8 +691,8 @@ export interface RunReceipt {
 	/** Compact findings summary; absent on receipts written before v3 integrity. */
 	findingsSummary?: RunReceiptFindingsSummary;
 	/**
-	 * Sealed shadow route decision: the candidates, their estimates, the hard
-	 * filters that rejected some of them, and what the policy would have picked.
+	 * Sealed route decision: the candidates, their estimates, the hard filters
+	 * that rejected some of them, and the tuple selected by the routing policy.
 	 * Absent only when the route observer is disabled, which is a test-bundle
 	 * option; every production dispatch seals one, which is what lets route
 	 * regret be recomputed offline from receipts alone.

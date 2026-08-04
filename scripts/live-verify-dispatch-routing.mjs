@@ -8,7 +8,7 @@
  * model-authored tool call -> plan resolution -> reservation -> admission ->
  * worker spawn -> receipt.
  *
- * Six scenarios, each with its own control:
+ * Seven scenarios, each with its own control:
  *
  *   1. quality  A pinned local Verifier records one typed `verify` result as a
  *                measured pass; a read-only Scout remains unmeasured and cold.
@@ -28,6 +28,9 @@
  *                 model, runtime, and settings fingerprint into its receipt.
  *                 Its control gives the same target `baseUrl` instead of `url`
  *                 and asserts settings validation rejects it before dispatch.
+ *   7. active-readonly  Six integrity-valid fixture sources activate one real
+ *                 Scout route on the pinned free mini target; five refuse
+ *                 before a delegated worker spawns.
  *
  * Never runs in an ordinary test or CI lane: CLIO_LIVE_EVAL=1 is required.
  * Build first, then invoke with:
@@ -46,7 +49,7 @@
  *   CLIO_LIVE_FLEET_HOST        SSH host for the capacity-one node (default localhost)
  *   CLIO_LIVE_DEAD_PORT         port for the always-503 target (default 8599)
  *   CLIO_LIVE_VERIFY_TIMEOUT_MS per-turn timeout (default 900000)
- *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,joint-shadow,attestation (default all)
+ *   CLIO_LIVE_VERIFY_SCENARIOS  comma list: quality,capacity,budget,failover,joint-shadow,attestation,active-readonly (default all)
  *   CLIO_LIVE_KEEP=1            retain the isolated scratch tree on success
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -55,6 +58,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { createServer, get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tsImport } from "tsx/esm/api";
 import { stringify } from "yaml";
 
 if (process.env.CLIO_LIVE_EVAL !== "1") {
@@ -76,7 +80,7 @@ const url = process.env.CLIO_LIVE_BASE_URL || undefined;
 const fleetHost = process.env.CLIO_LIVE_FLEET_HOST || "localhost";
 const deadPort = Number.parseInt(process.env.CLIO_LIVE_DEAD_PORT || "8599", 10);
 const timeoutMs = Number.parseInt(process.env.CLIO_LIVE_VERIFY_TIMEOUT_MS || "900000", 10);
-const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover", "joint-shadow", "attestation"];
+const ALL_SCENARIOS = ["quality", "capacity", "budget", "failover", "joint-shadow", "attestation", "active-readonly"];
 /**
  * The attestation scenario pins one exact local route so the receipt can be
  * checked field by field. These are fixed rather than environment-driven: the
@@ -87,6 +91,10 @@ const ATTESTATION_NODE = "mini";
 const ATTESTATION_MODEL = "Qwopus-MoE-35B";
 const ATTESTATION_RUNTIME = "llamacpp";
 const ATTESTATION_URL = "http://192.168.86.141:8080";
+const ACTIVE_TARGET = "mini";
+const ACTIVE_MODEL = "KAT-Coder-V2.5-Dev-IQ4_NL";
+const ACTIVE_RUNTIME = "llamacpp";
+const ACTIVE_URL = "http://192.168.86.141:8080";
 const scenarios = (process.env.CLIO_LIVE_VERIFY_SCENARIOS || ALL_SCENARIOS.join(","))
 	.split(",")
 	.map((name) => name.trim())
@@ -151,6 +159,14 @@ const childEnv = {
 	CLIO_CACHE_DIR: clioCacheDir,
 	CLIO_REQUIRE_HOME_PREFIX: "1",
 };
+Object.assign(process.env, {
+	CLIO_HOME: scratchDir,
+	CLIO_DATA_DIR: clioDataDir,
+	CLIO_CONFIG_DIR: clioConfigDir,
+	CLIO_STATE_DIR: clioStateDir,
+	CLIO_CACHE_DIR: clioCacheDir,
+	CLIO_REQUIRE_HOME_PREFIX: "1",
+});
 if (apiKey) childEnv[envVarName] = apiKey;
 
 /**
@@ -312,6 +328,13 @@ function receipts() {
 	return readdirSync(dir)
 		.filter((name) => name.endsWith(".json"))
 		.map((name) => JSON.parse(readFileSync(join(dir, name), "utf8")));
+}
+
+function runEnvelopes() {
+	const path = join(clioStateDir, "runs.json");
+	if (!existsSync(path)) return [];
+	const parsed = JSON.parse(readFileSync(path, "utf8"));
+	return Array.isArray(parsed) ? parsed : [];
 }
 
 function workerReceipts() {
@@ -723,7 +746,7 @@ async function scenarioJointShadow() {
 			const decision = receipt.routeDecision;
 			const executed = decision.executedRoute;
 			check(decision.mode === "shadow", `decision mode was ${decision.mode}`);
-			check(receipt.integrity?.version === 12, `receipt ${receipt.runId} did not use integrity v12`);
+			check(receipt.integrity?.version === 14, `receipt ${receipt.runId} did not use integrity v14`);
 			check(
 				executed.targetId === receipt.targetId &&
 					executed.modelId === receipt.wireModelId &&
@@ -907,6 +930,340 @@ async function scenarioAttestation() {
 	}
 }
 
+let activeModulesPromise;
+function activeFixtureModules() {
+	activeModulesPromise ??= (async () => [
+		await tsImport("../src/domains/dispatch/state.ts", import.meta.url),
+		await tsImport("../src/domains/dispatch/route-history.ts", import.meta.url),
+		await tsImport("../src/domains/dispatch/route-decision.ts", import.meta.url),
+		await tsImport("../src/domains/dispatch/fleet-preflight.ts", import.meta.url),
+		await tsImport("../src/domains/dispatch/worker-protocol.ts", import.meta.url),
+		await tsImport("../src/domains/dispatch/receipt-integrity.ts", import.meta.url),
+	])();
+	return activeModulesPromise;
+}
+
+function activeSettings(enabled) {
+	const settings = baseSettings();
+	settings.targets = [
+		{
+			id: ACTIVE_TARGET,
+			runtime: ACTIVE_RUNTIME,
+			url: ACTIVE_URL,
+			defaultModel: ACTIVE_MODEL,
+			wireModels: [ACTIVE_MODEL],
+			pricing: { input: 0, output: 0 },
+			capabilities: {
+				chat: true,
+				tools: true,
+				toolCallFormat: "qwen",
+				reasoning: false,
+				contextWindow: 262144,
+			},
+		},
+	];
+	settings.orchestrator = { target: ACTIVE_TARGET, model: ACTIVE_MODEL, thinkingLevel: "off" };
+	settings.workers = {
+		default: { target: ACTIVE_TARGET, model: ACTIVE_MODEL, thinkingLevel: "off" },
+		profiles: {},
+		maxRetries: 0,
+	};
+	settings.routing = {
+		activeRoles: enabled ? ["researcher"] : [],
+		activePostures: enabled ? ["balanced"] : [],
+	};
+	return settings;
+}
+
+function activeDispatchPrompt() {
+	return (
+		'Call dispatch once with exactly {"agent":"scout","task":"Read README.md and report its first line.",' +
+		'"routing":{"posture":"balanced","failover":"approved"}}.'
+	);
+}
+
+async function probeActiveTarget() {
+	const started = Date.now();
+	const reachable = await new Promise((resolvePromise) => {
+		const request = get(`${ACTIVE_URL}/v1/models`, { timeout: 5000 }, (response) => {
+			response.resume();
+			resolvePromise((response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 500);
+		});
+		request.on("timeout", () => {
+			request.destroy();
+			resolvePromise(false);
+		});
+		request.on("error", () => resolvePromise(false));
+	});
+	return { reachable, durationMs: Math.max(0, Date.now() - started) };
+}
+
+async function seedActiveReadiness(calibration, count, probeDurationMs) {
+	const [stateModule, historyModule, decisionModule, factsModule, protocolModule] = await activeFixtureModules();
+	const probedAt = new Date().toISOString();
+	factsModule.recordLocalNodeFacts(
+		workspaceDir,
+		[
+			{
+				nodeId: "local",
+				targetId: ACTIVE_TARGET,
+				reachable: "true",
+				runtimeCompatible: "true",
+				modelAvailable: "true",
+				modelResident: "true",
+				endpointIdentityHash: protocolModule.endpointIdentityHash(ACTIVE_URL),
+				wireModelId: ACTIVE_MODEL,
+				probedAt,
+				probeDurationMs,
+			},
+		],
+		{
+			nodeId: "local",
+			labels: [],
+			cpuCount: null,
+			totalMemoryBytes: null,
+			gpuCount: null,
+			vramBytes: null,
+			observedAt: probedAt,
+		},
+	);
+
+	const ledger = stateModule.openLedger();
+	const sealed = [];
+	for (let index = 0; index < count; index += 1) {
+		const task = `active-readonly fixture ${index + 1}`;
+		const created = ledger.create({
+			agentId: "scout",
+			executionRole: "researcher",
+			task,
+			targetId: calibration.route.targetId,
+			wireModelId: calibration.route.modelId,
+			runtimeId: calibration.route.runtimeId,
+			runtimeKind: calibration.receipt.runtimeKind,
+			sessionId: null,
+			cwd: workspaceDir,
+			toolSignature: calibration.route.toolSignature,
+		});
+		const endedAt = new Date(Date.now() + index + 1).toISOString();
+		const lineage = { parentRunId: null, rootRunId: created.id, attempt: 0, depth: 0 };
+		ledger.update(created.id, {
+			endedAt,
+			status: "completed",
+			outcome: "succeeded",
+			outcomeDetail: null,
+			outcomeCode: null,
+			lineage,
+			exitCode: 0,
+			pid: null,
+			heartbeatAt: null,
+			tokenCount: 0,
+			inputTokenCount: 0,
+			outputTokenCount: 0,
+			cacheReadTokenCount: 0,
+			cacheWriteTokenCount: 0,
+			reasoningTokenCount: 0,
+			costUsd: 0,
+			costProvenance: "known_free",
+			toolSignature: calibration.route.toolSignature,
+		});
+		const terminal = ledger.get(created.id);
+		if (!terminal) throw new Error("active-readonly fixture ledger update disappeared");
+		sealed.push(
+			ledger.recordReceipt(created.id, {
+				runId: created.id,
+				agentId: "scout",
+				executionRole: "researcher",
+				task,
+				targetId: calibration.route.targetId,
+				wireModelId: calibration.route.modelId,
+				runtimeId: calibration.route.runtimeId,
+				runtimeKind: calibration.receipt.runtimeKind,
+				startedAt: terminal.startedAt,
+				endedAt,
+				outcome: "succeeded",
+				outcomeDetail: null,
+				outcomeCode: null,
+				lineage,
+				exitCode: 0,
+				tokenCount: 0,
+				inputTokenCount: 0,
+				outputTokenCount: 0,
+				cacheReadTokenCount: 0,
+				cacheWriteTokenCount: 0,
+				reasoningTokenCount: 0,
+				costUsd: 0,
+				costProvenance: "known_free",
+				compiledPromptHash: null,
+				staticCompositionHash: null,
+				toolSignature: calibration.route.toolSignature,
+				clioVersion: "active-readonly-fixture",
+				piMonoVersion: "active-readonly-fixture",
+				platform: process.platform,
+				nodeVersion: process.version,
+				toolCalls: 0,
+				toolStats: [],
+				verification: { state: "verified", basis: "validation-tool" },
+				routingIntent: {
+					posture: "balanced",
+					maxCostUsd: null,
+					deadlineMs: null,
+					minimumQuality: null,
+					requiredCapabilities: [],
+					locality: "any",
+					failover: "approved",
+				},
+				quality: {
+					version: 1,
+					typedValidations: [
+						{
+							sourceId: `active-readonly-fixture-${index + 1}`,
+							validatorDigest: createHash("sha256").update(`active-${index}`).digest("hex"),
+							passed: true,
+						},
+					],
+					responseSchema: {
+						sourceId: null,
+						schemaDigest: null,
+						runtimeEnforceable: false,
+						enforcementPassed: null,
+					},
+					resultContract: null,
+				},
+				routeDecision: decisionModule.fixedRouteDecision(calibration.route, "active-readonly-fixture"),
+				sessionId: null,
+			}),
+		);
+	}
+	await ledger.persist();
+	const history = historyModule.createRouteHistoryStore();
+	for (const receipt of sealed) {
+		history.upsert({
+			version: 3,
+			receiptDigest: receipt.integrity.digest,
+			assignmentId: receipt.runId,
+			route: structuredClone(calibration.route),
+			executionRole: "researcher",
+			qualityLabel: "pass",
+			reliability: "success",
+			firstPass: true,
+			completedCostUsd: 0,
+			completedPhaseTiming: {
+				requestToDecisionMs: 0,
+				decisionMs: 0,
+				admissionWaitMs: 0,
+				queueWaitMs: 0,
+				spawnSetupMs: 0,
+				timeToFirstModelTokenMs: 1,
+				timeToFirstToolMs: 1,
+				executionMs: 1,
+				totalEndToEndMs: 1,
+			},
+			cacheRead: false,
+			sourceDigests: [receipt.integrity.digest],
+			settledAt: receipt.endedAt,
+		});
+	}
+	return new Set(sealed.map((receipt) => receipt.runId));
+}
+
+async function scenarioActiveReadonly() {
+	currentScenario = "active-readonly";
+	clearState();
+	const probe = await probeActiveTarget();
+	if (!probe.reachable) {
+		throw new Error(
+			`[active-readonly] pinned free target ${ACTIVE_URL} is unavailable; expected ${ACTIVE_RUNTIME}/${ACTIVE_MODEL}.`,
+		);
+	}
+	writeSettings(activeSettings(false));
+	const calibrationRun = await turn(activeDispatchPrompt(), "active-readonly-calibration");
+	check(!calibrationRun.timedOut, `calibration exceeded ${timeoutMs}ms`);
+	const calibrationCall = requireCall(
+		dispatchCalls(parseJsonLines(calibrationRun.stdout)),
+		(args) => args.agent === "scout" && args.routing?.failover === "approved" && taskCount(args) === 1,
+		"one balanced approved Scout calibration dispatch",
+	);
+	if (!calibrationCall) return;
+	const calibrationReceipt = workerReceipts().find(
+		(receipt) => receipt.agentId === "scout" && receipt.routeDecision?.executedRoute?.targetId === ACTIVE_TARGET,
+	);
+	check(Boolean(calibrationReceipt), "calibration wrote no routed Scout receipt");
+	if (!calibrationReceipt) return;
+	const calibrationEnvelope = runEnvelopes().find((envelope) => envelope.id === calibrationReceipt.runId);
+	check(Boolean(calibrationEnvelope), "calibration receipt has no matching ledger envelope");
+	if (!calibrationEnvelope) return;
+	const calibrationRoute = calibrationReceipt.routeDecision.executedRoute;
+	check(calibrationReceipt.routeDecision.mode === "shadow", "calibration route decision was not shadow");
+	check(
+		calibrationRoute.agentId === "scout" &&
+			calibrationRoute.executionRole === "researcher" &&
+			calibrationRoute.targetId === ACTIVE_TARGET &&
+			calibrationRoute.modelId === ACTIVE_MODEL &&
+			calibrationRoute.runtimeId === ACTIVE_RUNTIME &&
+			calibrationRoute.nodeId === "local",
+		`calibration route was not the pinned Scout capability: ${JSON.stringify(calibrationRoute)}`,
+	);
+	const calibration = { route: calibrationRoute, receipt: calibrationReceipt, envelope: calibrationEnvelope };
+
+	clearState();
+	writeSettings(activeSettings(true));
+	const fiveIds = await seedActiveReadiness(calibration, 5, probe.durationMs);
+	const refused = await turn(activeDispatchPrompt(), "active-readonly-refusal");
+	check(!refused.timedOut, `five-source control exceeded ${timeoutMs}ms`);
+	const refusedCall = requireCall(
+		dispatchCalls(parseJsonLines(refused.stdout)),
+		(args) => args.agent === "scout" && args.routing?.failover === "approved" && taskCount(args) === 1,
+		"one five-source Scout refusal control",
+	);
+	if (refusedCall) {
+		check(refusedCall.result?.isError === true, "five-source active control was not refused");
+		check(
+			/no-active-eligible-candidate|insufficient-quality-labels|fewer than 6 quality-labeled/u.test(
+				refusedCall.result?.text ?? "",
+			),
+			`five-source refusal did not name readiness: ${refusedCall.result?.text}`,
+		);
+	}
+	const afterRefusal = workerReceipts().filter((receipt) => receipt.agentId === "scout");
+	check(
+		afterRefusal.every((receipt) => fiveIds.has(receipt.runId)) && afterRefusal.length === fiveIds.size,
+		`a delegated Scout spawned during refusal: ${afterRefusal.map((receipt) => receipt.runId)}`,
+	);
+
+	clearState();
+	writeSettings(activeSettings(true));
+	const sixIds = await seedActiveReadiness(calibration, 6, probe.durationMs);
+	const active = await turn(activeDispatchPrompt(), "active-readonly-run");
+	check(!active.timedOut, `active read-only run exceeded ${timeoutMs}ms`);
+	const activeCall = requireCall(
+		dispatchCalls(parseJsonLines(active.stdout)),
+		(args) => args.agent === "scout" && args.routing?.failover === "approved" && taskCount(args) === 1,
+		"one six-source active Scout dispatch",
+	);
+	if (activeCall)
+		check(activeCall.result?.isError !== true, `active Scout dispatch was refused: ${activeCall.result?.text}`);
+	const activeReceipt = workerReceipts().find((receipt) => receipt.agentId === "scout" && !sixIds.has(receipt.runId));
+	check(Boolean(activeReceipt), "six-source activation spawned no real Scout worker");
+	if (!activeReceipt) return;
+	const decision = activeReceipt.routeDecision;
+	check(decision?.mode === "active", `active receipt decision mode was ${decision?.mode}`);
+	check(
+		JSON.stringify(decision?.selected) === JSON.stringify(decision?.executedRoute),
+		"active receipt selected and executed identities differ",
+	);
+	check(
+		decision?.executedRoute?.targetId === ACTIVE_TARGET &&
+			decision.executedRoute.modelId === ACTIVE_MODEL &&
+			decision.executedRoute.runtimeId === ACTIVE_RUNTIME &&
+			decision.executedRoute.nodeId === "local" &&
+			activeReceipt.targetId === ACTIVE_TARGET &&
+			activeReceipt.wireModelId === ACTIVE_MODEL &&
+			activeReceipt.runtimeId === ACTIVE_RUNTIME,
+		`active receipt did not execute the pinned tuple: ${JSON.stringify(decision?.executedRoute)}`,
+	);
+	check(!JSON.stringify(activeReceipt).includes("api.openai.com"), "active fixture reached or recorded a paid endpoint");
+}
+
 const runners = {
 	quality: scenarioQuality,
 	capacity: scenarioCapacity,
@@ -914,6 +1271,7 @@ const runners = {
 	failover: scenarioFailover,
 	"joint-shadow": scenarioJointShadow,
 	attestation: scenarioAttestation,
+	"active-readonly": scenarioActiveReadonly,
 };
 
 let passed = false;
@@ -929,7 +1287,7 @@ try {
 	passed = true;
 	console.log(`[dispatch-routing] PASS scenarios=${scenarios.join(",")}`);
 } catch (error) {
-	console.error(error instanceof Error ? error.message : String(error));
+	console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
 	console.error(`[dispatch-routing] artifacts retained under ${scratchDir}`);
 	process.exitCode = 1;
 } finally {

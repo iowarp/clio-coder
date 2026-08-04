@@ -24,26 +24,20 @@ import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { AgentLatencyClass } from "../agents/spec.js";
 import { parseEvalArtifactV3 } from "../eval/artifacts/store.js";
 import { readGateDecisionArtifacts } from "./gate-decisions.js";
+import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import {
 	type CandidateEvaluation,
-	decideRoute,
 	evaluateRouteDecision,
 	fixedRouteDecision,
 	type RouteCandidate,
-	type RouteDecisionInput,
 	type RouteDecisionV1,
 	type RouteEvaluation,
 	type RouteRealizedOutcome,
 	routeCandidateKey,
+	routeConstraintValidity,
 } from "./route-decision.js";
 import { createRouteHistoryStore, type RouteHistoryStore } from "./route-history.js";
-import {
-	estimateRoute,
-	type RouteEstimate,
-	type RouteObservation,
-	routeObservationFromHistory,
-	routePriorForLatencyClass,
-} from "./route-policy.js";
+import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
 import { type RouteQualityReduction, reduceRouteQuality, routeQualityEvalDigest } from "./route-quality.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 
@@ -331,12 +325,8 @@ const OBSERVATION_LOG_MAX_BYTES = 1024 * 1024;
 export interface RouteObserveInput {
 	task: string;
 	requestedAgentId: string | undefined;
-	/** The route the production pipeline resolved and is about to execute. */
-	executedRoute: RouteCandidate;
-	/** Enumerated tuples with their hard-filter verdicts, in approval order. */
-	candidates: ReadonlyArray<{ candidate: RouteCandidate; rejection: string | null }>;
-	hardConstraints: ReadonlyArray<string>;
-	maxFallbacks: number;
+	/** Decision already produced by the shared joint resolver. */
+	decision: RouteDecisionV1;
 }
 
 export interface RouteObservationHandle {
@@ -353,11 +343,31 @@ export interface RouteObservedOutcome extends RouteRealizedOutcome {
 }
 
 export interface RouteObserver {
-	/** Build a shadow decision or a fixed decision when observation fails. */
+	/** Register the sealed shadow or active decision for outcome observation. */
 	observe(input: RouteObserveInput): RouteObservationHandle;
+	/** Immutable evidence snapshot shared by every tuple in one joint resolution. */
+	readinessWindow(): RouteReadinessEvidenceWindow;
 	/** Reduce and durably record the real terminal route outcome. */
 	recordOutcome(observationId: string, outcome: RouteObservedOutcome): void;
 	summary(): RouteObserverSummary;
+}
+
+export interface RouteReadinessEvidence {
+	observations: ReadonlyArray<RouteObservation>;
+	readiness: {
+		hardConstraintValidity: number;
+		integrityFailures: number;
+		costUpperBoundUsd: number | null;
+		factsFresh: boolean;
+		decisionP95Ms: number;
+	};
+}
+
+export interface RouteReadinessEvidenceWindow {
+	forRoute(
+		candidate: RouteCandidate,
+		current: { costUpperBoundUsd: number | null; factsFresh: boolean },
+	): RouteReadinessEvidence;
 }
 
 export interface CreateRouteObserverOptions {
@@ -371,10 +381,6 @@ export interface CreateRouteObserverOptions {
 	logDir?: string;
 	/** Durable source directory override, primarily for restart/replay tests. */
 	stateDir?: string;
-	/** Monotonic microsecond clock; injectable so a test can pin decision duration. */
-	nowUs?: () => number;
-	/** Estimator seam; defaults to the shrinkage estimator over the sample store. */
-	estimate?: (samples: ReadonlyArray<RouteObservation>, prior?: Parameters<typeof estimateRoute>[1]) => RouteEstimate;
 }
 
 function durableQualitySources(stateDir: string): {
@@ -442,6 +448,12 @@ function loggableEvaluation(evaluation: CandidateEvaluation): Record<string, unk
 	};
 }
 
+function percentile95(values: ReadonlyArray<number>): number {
+	if (values.length === 0) return Number.POSITIVE_INFINITY;
+	const ordered = [...values].sort((left, right) => left - right);
+	return ordered[Math.ceil(ordered.length * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
+}
+
 export function createRouteObserver(options: CreateRouteObserverOptions): RouteObserver {
 	const learner = createRouteLearner();
 	const history =
@@ -452,8 +464,6 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 	let totalObservations = 0;
 	let sequence = 0;
 	const logDir = (): string => options.logDir ?? join(clioStateDir(), "route-decisions");
-	const nowUs = options.nowUs ?? ((): number => Number(process.hrtime.bigint() / 1000n));
-	const estimateFor = options.estimate ?? estimateRoute;
 	const reconcileHistory = (): void => {
 		const sources = durableQualitySources(options.stateDir ?? clioStateDir());
 		if (sources.receipts.length === 0) return;
@@ -477,40 +487,55 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 			});
 		}
 	};
+	const readinessWindow = (): RouteReadinessEvidenceWindow => {
+		reconcileHistory();
+		const sources = durableQualitySources(options.stateDir ?? clioStateDir());
+		const byDigest = new Map(sources.receipts.map((source) => [source.receipt.integrity.digest, source]));
+		return {
+			forRoute(candidate, current) {
+				const records = history.recordsFor(candidate);
+				let integrityFailures = 0;
+				let validConstraints = 0;
+				const durations: number[] = [];
+				for (const record of records) {
+					const source = byDigest.get(record.receiptDigest);
+					const decision = source?.receipt.routeDecision;
+					if (
+						source === undefined ||
+						decision === undefined ||
+						!verifyReceiptIntegrity(source.receipt, source.envelope).ok
+					) {
+						integrityFailures += 1;
+						continue;
+					}
+					if (routeConstraintValidity(decision).valid) validConstraints += 1;
+					durations.push(decision.decisionDurationMs);
+				}
+				return {
+					observations: records.map(routeObservationFromHistory),
+					readiness: {
+						hardConstraintValidity: records.length === 0 ? 0 : validConstraints / records.length,
+						integrityFailures,
+						costUpperBoundUsd: current.costUpperBoundUsd,
+						factsFresh: current.factsFresh,
+						decisionP95Ms: percentile95(durations),
+					},
+				};
+			},
+		};
+	};
 
 	return {
+		readinessWindow,
 		observe(input) {
 			try {
-				reconcileHistory();
-				const startedUs = nowUs();
 				const intent = classifyRouteIntent(input.task);
 				const recommendation = recommendAgent({
 					intent,
 					requestedAgentId: input.requestedAgentId,
 					agents: options.getAgents(),
 				});
-				// Shadow is the only mode this observer produces: it records what the
-				// policy would do while the caller executes `executedRoute` untouched.
-				const decisionInput: RouteDecisionInput = {
-					mode: "shadow",
-					posture: "balanced",
-					executedRoute: input.executedRoute,
-					candidates: input.candidates.map((entry) => {
-						const latencyClass = options.getAgents().find((agent) => agent.id === entry.candidate.agentId)?.latencyClass;
-						return {
-							candidate: entry.candidate,
-							estimate: estimateFor(
-								samples?.samplesFor(entry.candidate) ?? history.recordsFor(entry.candidate).map(routeObservationFromHistory),
-								latencyClass === undefined ? undefined : routePriorForLatencyClass(latencyClass),
-							),
-							rejection: entry.rejection,
-						};
-					}),
-					hardConstraints: input.hardConstraints,
-					maxFallbacks: input.maxFallbacks,
-					decisionDurationMs: Math.max(0, nowUs() - startedUs) / 1000,
-				};
-				const decision = decideRoute(decisionInput);
+				const decision = input.decision;
 				sequence += 1;
 				const observationId = `route-${decision.decisionHash.slice(0, 12)}-${sequence.toString(36)}`;
 				totalObservations += 1;
@@ -540,9 +565,12 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				});
 				return { id: observationId, decision };
 			} catch {
-				// Observation must never disturb dispatch or remove the sealed route
-				// evidence. The fixed artifact names the exact route that will run.
-				const decision = fixedRouteDecision(input.executedRoute);
+				// Active authority already changed execution and must remain sealed. A
+				// failed shadow observer falls back to the exact production tuple.
+				const decision =
+					input.decision.mode === "active"
+						? input.decision
+						: fixedRouteDecision(input.decision.executedRoute, "observer-failure-fixed-route");
 				sequence += 1;
 				const observationId = `route-fixed-${decision.decisionHash.slice(0, 12)}-${sequence.toString(36)}`;
 				totalObservations += 1;

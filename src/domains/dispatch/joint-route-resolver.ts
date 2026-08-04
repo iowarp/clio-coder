@@ -8,6 +8,7 @@
  */
 
 import type { AgentLatencyClass } from "../agents/spec.js";
+import type { RouteCorrelationFacts } from "./execution-role.js";
 import {
 	decideRoute,
 	type RouteCandidate,
@@ -21,6 +22,7 @@ import {
 	type RoutingPosture,
 	routePriorForLatencyClass,
 } from "./route-policy.js";
+import { evaluateRouteReadiness, type RouteReadinessReport } from "./route-readiness.js";
 import { type RoutingIntent, routingIntentRejection } from "./routing-intent.js";
 
 export const JOINT_ROUTE_UNIVERSE_LIMIT = 64;
@@ -96,9 +98,17 @@ export interface JointTupleProjection {
 	observations: ReadonlyArray<RouteObservation>;
 	latencyClass: AgentLatencyClass;
 	capabilities: ReadonlyArray<string>;
+	readiness: {
+		hardConstraintValidity: number;
+		integrityFailures: number;
+		costUpperBoundUsd: number | null;
+		factsFresh: boolean;
+		decisionP95Ms: number;
+	};
 }
 
 export interface JointRouteResolverInput {
+	mode: "shadow" | "active";
 	agentId: string;
 	executionRole: RouteCandidate["executionRole"];
 	executedRoute: RouteCandidate;
@@ -106,6 +116,7 @@ export interface JointRouteResolverInput {
 	nodes: ReadonlyArray<JointNodeDimension>;
 	project: (target: JointTargetDimension, node: JointNodeDimension) => JointTupleProjection;
 	intent: RoutingIntent;
+	independenceSubject: RouteCorrelationFacts | null;
 	posture?: RoutingPosture;
 	universeLimit?: number;
 	decisionDurationMs?: number;
@@ -115,6 +126,7 @@ export interface JointRouteResolution {
 	decision: RouteDecisionV1;
 	/** Complete evaluated universe. No fallback bound is applied to this list. */
 	candidateCount: number;
+	readiness: ReadonlyArray<{ candidate: RouteCandidate; report: RouteReadinessReport }>;
 }
 
 export interface EnumeratedJointRoute {
@@ -200,18 +212,36 @@ export function resolveJointRoute(input: JointRouteResolverInput): JointRouteRes
 		return {
 			candidate: projection.candidate,
 			estimate,
+			activeReadiness: evaluateRouteReadiness({
+				estimate,
+				posture: input.posture ?? input.intent.posture,
+				hardConstraintValidity: projection.readiness.hardConstraintValidity,
+				integrityFailures: projection.readiness.integrityFailures,
+				costUpperBoundUsd: projection.readiness.costUpperBoundUsd,
+				factsFresh: projection.readiness.factsFresh,
+				decisionP95Ms: projection.readiness.decisionP95Ms,
+				requestedMinimumQuality: input.intent.minimumQuality,
+			}),
 			rejection: rejection ?? (intentRejection === null ? null : `routing-intent: ${intentRejection}`),
 		};
 	});
 
 	const decision = decideRoute({
-		mode: "shadow",
+		mode: input.mode,
 		posture: input.posture ?? input.intent.posture,
 		executedRoute: input.executedRoute,
 		candidates,
+		independenceSubject: input.independenceSubject,
 		hardConstraints: [...JOINT_ROUTE_HARD_FILTERS],
 		maxFallbacks: JOINT_ROUTE_FALLBACK_LIMIT,
 		decisionDurationMs: input.decisionDurationMs ?? 0,
 	});
-	return { decision, candidateCount: candidates.length };
+	return {
+		decision,
+		candidateCount: candidates.length,
+		readiness: candidates.map((entry) => ({
+			candidate: { ...entry.candidate },
+			report: { ...entry.activeReadiness, gaps: [...entry.activeReadiness.gaps] },
+		})),
+	};
 }

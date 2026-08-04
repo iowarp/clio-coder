@@ -81,12 +81,14 @@ function resolverInput(
 	const nodes = options.nodes ?? [{ nodeId: "local" }];
 	const executedRoute = candidate(targets[0] as JointTargetDimension, nodes[0] as JointNodeDimension);
 	return {
+		mode: "shadow",
 		agentId: "coder",
 		executionRole: "builder",
 		executedRoute,
 		targets,
 		nodes,
 		intent: { ...intent, posture: options.posture ?? "balanced" },
+		independenceSubject: null,
 		...(options.universeLimit !== undefined ? { universeLimit: options.universeLimit } : {}),
 		project(targetDimension, node) {
 			const filters = emptyJointHardFilterVerdicts();
@@ -98,6 +100,13 @@ function resolverInput(
 				observations: options.observations?.(targetDimension, node) ?? Array.from({ length: 6 }, () => observation()),
 				latencyClass: options.latencyClass ?? "balanced",
 				capabilities: [],
+				readiness: {
+					hardConstraintValidity: 1,
+					integrityFailures: 0,
+					costUpperBoundUsd: 0.2,
+					factsFresh: true,
+					decisionP95Ms: 1,
+				},
 			};
 		},
 	};

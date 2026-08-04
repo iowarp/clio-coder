@@ -84,8 +84,14 @@ import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
 import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
+import {
+	approvedRouteObservation,
+	consumeActiveRouteApproval,
+	planActiveRoute,
+	routeValidationProjection,
+} from "./active-route-planner.js";
 import { admit, createCapacityAdmissionController, createLeaseSlotGuard } from "./admission.js";
-import { AssignmentRegistry, asAssignmentId } from "./assignment.js";
+import { AssignmentRegistry, applyActiveRouteSelection, asAssignmentId } from "./assignment.js";
 import type { AssignmentAttemptStartEvent } from "./assignment-events.js";
 import { reconcileOrphanAssignments } from "./assignment-reconcile.js";
 import {
@@ -116,7 +122,7 @@ import type {
 	DispatchSnapshot,
 } from "./contract.js";
 import { createWorkerOutputCapture, startDispatchEventPump } from "./event-pump.js";
-import { appliesRecipeResultContract, withAttemptRole } from "./execution-role.js";
+import { appliesRecipeResultContract, routeCorrelationFactsForRun, withAttemptRole } from "./execution-role.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
@@ -128,13 +134,10 @@ import {
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { isBoundedGateRolePrompt } from "./gate-role-prompts.js";
 import { classifyHeartbeat, DEFAULT_HEARTBEAT_SPEC, type HeartbeatSpec, type HeartbeatStatus } from "./heartbeat.js";
+import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
 	configuredJointNodes,
 	configuredJointTargets,
-	emptyJointHardFilterVerdicts,
-	enumerateJointRouteUniverse,
-	JOINT_ROUTE_FALLBACK_LIMIT,
-	JOINT_ROUTE_HARD_FILTERS,
 	type JointRouteResolverInput,
 	resolveJointRoute,
 } from "./joint-route-resolver.js";
@@ -168,6 +171,7 @@ import {
 } from "./reservation-store.js";
 import { firstAvailableRouteCandidate, ROUTE_CANDIDATE_LIMIT, type RouteAvailability } from "./route-candidates.js";
 import {
+	fixedRouteDecision,
 	type RouteDecisionV1,
 	type RouteIdentityInput,
 	type RouteRoleInput,
@@ -298,17 +302,7 @@ export interface DispatchNodePlacement {
 
 export interface DispatchBundleOptions {
 	spawnWorker?: (spec: WorkerSpec, opts?: { cwd?: string }) => SpawnedWorker;
-	/**
-	 * Fleet placement seam. When set, every native dispatch resolves a node
-	 * before it takes a concurrency slot; the returned spawn is the node's
-	 * transport (local subprocess or SSH), the node identity is recorded on
-	 * the ledger row and folded into the receipt digest, and `release` returns
-	 * the node's capacity when the run finalizes. Throwing here is an
-	 * admission failure (e.g. a node that has not passed the doctor path-parity
-	 * preflight). Absent (headless boots, minimal test bundles) every run is
-	 * local and no node identity is recorded, preserving pre-fleet receipts
-	 * byte for byte.
-	 */
+	/** Resolve the attested node and transport before capacity admission; absent means local. */
 	resolveNode?: (req: DispatchRequest) => DispatchNodePlacement | null;
 	/** Side-effect-free companion to resolveNode, primarily for alternate fleet backends and deterministic tests. */
 	previewNode?: (req: DispatchRequest) => { node: RunNodeIdentity };
@@ -317,26 +311,13 @@ export interface DispatchBundleOptions {
 	heartbeatIntervalMs?: number;
 	resilienceCooldownMs?: number;
 	now?: () => number;
-	/**
-	 * Session-effective settings view for dispatch admission and worker launch.
-	 * The interactive orchestrator injects this so target routing, autonomy,
-	 * permission posture, and related worker settings match the running session,
-	 * not whatever another process last wrote to settings.yaml. Falls back to
-	 * the shared config snapshot when absent (headless boots, tests).
-	 */
+	/** Immutable per-attempt session settings view; falls back to the shared snapshot. */
 	getSettings?: () => EffectiveSettings;
-	/**
-	 * Live orchestrator protection state. It is cloned and canonicalized once at
-	 * dispatch admission, then carried immutably on every mediated worker spec.
-	 */
+	/** Live hard-block state cloned into each mediated worker spec. */
 	getProtectedArtifactState?: () => ProtectedArtifactState;
 	/** True only when this invocation supplied an explicit one-run autonomy override. */
 	autonomyOverride?: boolean;
-	/**
-	 * Reproducibility collector seam. Defaults to the real git-backed collector,
-	 * which shells out to three synchronous `git` subprocesses per receipt.
-	 * Tests inject a fixed stub to keep the receipt path off the process spawner.
-	 */
+	/** Git-backed receipt provenance collector; injectable for deterministic tests. */
 	collectReproducibility?: typeof collectReproducibilityMetadata;
 	/** Observer injection seam. Production constructs the durable observer. */
 	routeObserver?: RouteObserver;
@@ -1929,8 +1910,6 @@ export function createDispatchBundle(
 	// message when the context domain is not loaded.
 	const projectContext = context.getContract<ContextContract>("context");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
-	// Fleet placement: injected seam first (tests), then the real resolver
-	// over the scheduling registry and durable doctor preflight.
 	const fleetRegistry = scheduling.fleet;
 	const resolveNode =
 		options?.resolveNode ?? createFleetPlacementResolver({ getSettings: getEffectiveSettings, fleet: fleetRegistry });
@@ -1948,10 +1927,7 @@ export function createDispatchBundle(
 		return DEFAULT_RESILIENCE_COOLDOWN_MS;
 	};
 	const now = options?.now ?? (() => Date.now());
-	// Shadow-mode route observer: builds the RouteDecisionV1 the policy would
-	// have produced for every dispatch and records decision-versus-outcome into
-	// a bounded JSONL under the state dir. Observer-only: it never influences
-	// admission, placement, or execution, and every call is failure-isolated.
+	// Durable evidence owner used by shadow observation and active readiness.
 	const routeObserver: RouteObserver =
 		options?.routeObserver ??
 		createRouteObserver({
@@ -2014,7 +1990,7 @@ export function createDispatchBundle(
 				memberId: task.memberId,
 				wave: task.wave,
 				nodeId: task.resolution.node.id,
-				costUpperBoundUsd: task.resolution.costUpperBoundUsd,
+				costUpperBoundUsd: task.resolution.routeApproval?.totalCostUpperBoundUsd ?? task.resolution.costUpperBoundUsd,
 			})),
 			capacity: reservationCapacitySnapshot(getEffectiveSettings()),
 			nowMs: now(),
@@ -2073,7 +2049,7 @@ export function createDispatchBundle(
 		timing.queuedAt = new Date(queuedAt).toISOString();
 		const assignmentId = req.lineage?.rootRunId ?? `pending-${queuedAt.toString(36)}-${randomBytes(6).toString("hex")}`;
 		const requestedAt = Date.parse(timing.requestedAt ?? timing.queuedAt);
-		const deadlineAt = requestedAt + (req.routingIntent?.deadlineMs ?? 60_000);
+		const deadlineAt = req.assignmentDeadlineAt ?? requestedAt + (req.routingIntent?.deadlineMs ?? 60_000);
 		if (req.lineage === undefined) await registerAssignment(assignmentId);
 		// A plan's queued members keep their wave order and their reserved peak.
 		const plan =
@@ -2110,15 +2086,17 @@ export function createDispatchBundle(
 	): void {
 		if (req.reservation === undefined || req.lineage === undefined) return;
 		const capacity = reservationCapacitySnapshot(settings);
-		const rebind = { ...req.reservation, nodeId, costUpperBoundUsd: costUsd, capacity, nowMs: now() };
+		const rebind = {
+			...req.reservation,
+			nodeId,
+			costUpperBoundUsd: req.routeApproval?.totalCostUpperBoundUsd ?? costUsd,
+			capacity,
+			nowMs: now(),
+		};
 		rebindDispatchReservationMember(rebind);
 	}
 
-	/**
-	 * In-memory retry queue (Symphony §14.3: it does not survive restart and
-	 * must not pretend to). Keyed by the finished run's id; backoff state is
-	 * keyed by the retry chain's rootRunId.
-	 */
+	/** Process-local retry queue keyed by finished run; backoff is keyed by assignment root. */
 	interface RetryQueueEntry {
 		runId: string;
 		agentId: string;
@@ -2144,8 +2122,8 @@ export function createDispatchBundle(
 	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
 	const finalizedCosts: Array<{ usd: number; provenance: import("../providers/index.js").CostProvenance }> = [];
 
-	function workersMaxRetries(): number {
-		const value = getEffectiveSettings()?.workers?.maxRetries;
+	function workersMaxRetries(settings: EffectiveSettings = getEffectiveSettings()): number {
+		const value = settings?.workers?.maxRetries;
 		return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 2;
 	}
 
@@ -2156,7 +2134,7 @@ export function createDispatchBundle(
 
 	function assignmentPolicyFor(req: DispatchRequest): import("./assignment.js").AssignmentPolicy {
 		return {
-			maxRetries: workersMaxRetries(),
+			maxRetries: req.routeApproval?.maxAttempts === undefined ? workersMaxRetries() : req.routeApproval.maxAttempts - 1,
 			failover: failoverModeFor(req),
 			allowedCandidates: req.allowedCandidates?.map((candidate) => ({ ...candidate })) ?? [],
 		};
@@ -2231,7 +2209,8 @@ export function createDispatchBundle(
 			retryBackoff.delete(rootRunId);
 			return false;
 		}
-		const baseDecision = decideRetry(failureClass, run.lineage.attempt, workersMaxRetries());
+		const maxRetries = assignments.get(rootRunId)?.policy.maxRetries ?? assignmentPolicyFor(run.req).maxRetries;
+		const baseDecision = decideRetry(failureClass, run.lineage.attempt, maxRetries);
 		// An exact manual route may be retried, but no route component may drift.
 		const decision = failoverModeFor(run.req) === "none" ? { ...baseDecision, excludedRouteParts: [] } : baseDecision;
 		if (!decision.retry) {
@@ -2321,14 +2300,6 @@ export function createDispatchBundle(
 		settleAssignmentDurably(assignment.id, receipt, terminalStatus);
 	}
 
-	/**
-	 * A retry is a brand-new run with a new runId, re-validated through the
-	 * full admission chain. If admission rejects it the chain ends as
-	 * denied_by_policy; there is no requeue. A retry of a run that was placed
-	 * on a remote node threads an open reroute hop (fromNode known now,
-	 * toNode filled by placement) so the receipt chain records the full
-	 * failover lineage.
-	 */
 	function sameCandidate(left: DispatchFailoverCandidate, right: DispatchFailoverCandidate): boolean {
 		return (
 			left.agentId === right.agentId &&
@@ -2338,12 +2309,6 @@ export function createDispatchBundle(
 		);
 	}
 
-	/**
-	 * An approved failover envelope binds every attempt, root included. If the
-	 * effective route resolved for this attempt is not an exact member of the
-	 * approved list, refuse before the worker spawns so no attempt escapes the
-	 * envelope.
-	 */
 	function assertRouteWithinApprovedEnvelope(req: DispatchRequest, effective: DispatchFailoverCandidate): void {
 		if (failoverModeFor(req) !== "approved") return;
 		const allowed = req.allowedCandidates ?? [];
@@ -2354,7 +2319,7 @@ export function createDispatchBundle(
 		}
 	}
 
-	function approvedRetryCandidate(run: ActiveRun, decision: RetryDecision): DispatchFailoverCandidate {
+	function approvedRetryCandidates(run: ActiveRun, decision: RetryDecision): DispatchFailoverCandidate[] {
 		const allowed = run.req.allowedCandidates ?? [];
 		const current: DispatchFailoverCandidate = {
 			agentId: run.agentId,
@@ -2365,19 +2330,10 @@ export function createDispatchBundle(
 		if (!allowed.some((candidate) => sameCandidate(candidate, current))) {
 			throw new Error("dispatch: approved failover envelope does not contain the current route");
 		}
-		const excluded = new Set(decision.excludedRouteParts);
-		// Runtime is not part of the approved route identity, so an envelope cannot
-		// authorize changing it. A worker-runtime failure (and an internal failure,
-		// which excludes nothing) therefore retries the same approved tuple: the
-		// fault is in the worker process, not the route, and re-running inside the
-		// envelope is both permitted and usually sufficient.
-		if (decision.excludedRouteParts.every((part) => part === "runtime")) return { ...current };
-		const candidate = allowed.find((entry) => {
+		// Runtime drift is not authorized by the target/model/node envelope.
+		if (decision.excludedRouteParts.every((part) => part === "runtime")) return [{ ...current }];
+		const candidates = allowed.filter((entry) => {
 			if (sameCandidate(entry, current)) return false;
-			if (!excluded.has("agent") && entry.agentId !== current.agentId) return false;
-			if (!excluded.has("target") && entry.target !== current.target) return false;
-			if (!excluded.has("model") && entry.model !== current.model) return false;
-			if (!excluded.has("node") && entry.node !== current.node) return false;
 			return decision.excludedRouteParts.some((part) => {
 				if (part === "agent") return entry.agentId !== current.agentId;
 				if (part === "target") return entry.target !== current.target;
@@ -2386,20 +2342,19 @@ export function createDispatchBundle(
 				return false;
 			});
 		});
-		if (!candidate) throw new Error("dispatch: approved failover envelope has no eligible next candidate");
-		return { ...candidate };
+		if (candidates.length === 0) throw new Error("dispatch: approved failover envelope has no eligible next candidate");
+		return candidates.map((candidate) => ({ ...candidate }));
 	}
 
 	async function executeRetry(
 		run: ActiveRun,
 		attempt: number,
 		reason = "retry",
-		decision: RetryDecision = decideRetry("internal", run.lineage.attempt, workersMaxRetries()),
+		decision: RetryDecision = decideRetry("internal", run.lineage.attempt, assignmentPolicyFor(run.req).maxRetries),
 	): Promise<void> {
 		if (draining || assignments.get(run.lineage.rootRunId)?.status !== "running") return;
 		const excludesNode = decision.excludedRouteParts.includes("node");
-		// Record the failed node (local or ssh) so placement excludes it and the
-		// retry lands on a different eligible node instead of hardcoded local.
+		// Record the failed node so placement can choose an eligible survivor.
 		const rerouteHops =
 			excludesNode && run.node !== null
 				? [...(run.req.reroutes ?? []), { attempt, fromNode: run.node.id, toNode: "", reason }]
@@ -2419,25 +2374,53 @@ export function createDispatchBundle(
 		retryReasons.set(reasonKey, reason);
 		try {
 			if (failoverModeFor(run.req) === "approved") {
-				const candidate = approvedRetryCandidate(run, decision);
-				retryReq.agentId = candidate.agentId;
-				retryReq.target = candidate.target;
-				retryReq.model = candidate.model;
-				retryReq.node = candidate.node;
+				const candidates = approvedRetryCandidates(run, decision);
+				if (run.req.routeApproval === undefined) {
+					const candidate = candidates[0] as DispatchFailoverCandidate;
+					retryReq.agentId = candidate.agentId;
+					retryReq.target = candidate.target;
+					retryReq.model = candidate.model;
+					retryReq.node = candidate.node;
+				} else {
+					const settings = getEffectiveSettings();
+					let selected: DispatchRequest | null = null;
+					let lastError: unknown;
+					for (const candidate of candidates) {
+						const bounded = {
+							...retryReq,
+							agentId: candidate.agentId,
+							target: candidate.target,
+							model: candidate.model,
+							node: candidate.node,
+							allowedCandidates: [candidate],
+						};
+						try {
+							const active = resolveJointRoute(jointRouteInput(bounded, undefined, settings, "active").input).decision;
+							selected = applyActiveRouteSelection(bounded, active);
+							retryReq.routeAttemptDecision = active;
+							break;
+						} catch (error) {
+							lastError = error;
+						}
+					}
+					if (selected === null) {
+						const detail = lastError instanceof Error ? lastError.message : String(lastError);
+						throw new Error(`dispatch: approved recovery has no active-eligible route (${detail})`);
+					}
+					const approvedEnvelope = retryReq.allowedCandidates as DispatchFailoverCandidate[];
+					Object.assign(retryReq, selected);
+					retryReq.allowedCandidates = approvedEnvelope;
+				}
 				delete retryReq.plannedNode;
 			} else {
-				// Exact mode freezes the effective first-attempt tuple, including a node
-				// that was selected implicitly because only the target was pinned.
+				// Exact mode freezes the effective first-attempt tuple.
 				if (failoverModeFor(run.req) === "none") {
 					retryReq.agentId = run.agentId;
 					retryReq.target = run.targetId;
 					retryReq.model = run.wireModelId;
 					retryReq.node = run.node?.id ?? "local";
 				}
-				// Automatic mode excludes only the failed route component. Drop the
-				// node pin so placement re-selects among the non-excluded eligible
-				// nodes (recorded via the reroute hop above); it settles failed if
-				// none remain, rather than silently forcing local.
+				// Automatic placement re-selects only the failed route component.
 				if (excludesNode) {
 					delete retryReq.node;
 					delete retryReq.plannedNode;
@@ -2451,10 +2434,7 @@ export function createDispatchBundle(
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
 			const handle = await dispatch(retryReq);
-			// The assignment owns the event stream, so this attempt's frames
-			// continue the same stream the caller of the public dispatch() is
-			// iterating. The marker lets that consumer discard state it
-			// accumulated from the attempt that just failed.
+			// The assignment folds every attempt into one stream with a reset marker.
 			const marker: AssignmentAttemptStartEvent = {
 				type: "attempt_start",
 				attempt,
@@ -2484,12 +2464,9 @@ export function createDispatchBundle(
 			retryBackoff.delete(run.lineage.rootRunId);
 			const message = err instanceof Error ? err.message : String(err);
 			const denial = `retry attempt ${attempt} rejected: ${message}`;
-			// A denied retry ends the assignment. The DispatchFailed bus event is
-			// invisible on headless surfaces, so the reason also goes to stderr and
-			// onto the assignment, whose terminal receipt cannot record it.
+			// Keep the denial visible on headless surfaces and assignment state.
 			reportDispatchDiagnostic(`run ${run.runId}`, new Error(denial));
-			// Admission failed before another immutable run existed. The last
-			// completed attempt therefore remains the assignment's terminal evidence.
+			// The last completed attempt remains the immutable terminal evidence.
 			try {
 				const previousReceipt = await run.finalPromise;
 				settleAssignmentDurably(asAssignmentId(run.lineage.rootRunId), previousReceipt, "failed", denial);
@@ -2517,12 +2494,7 @@ export function createDispatchBundle(
 		return ledger;
 	}
 
-	/**
-	 * Dead-node failover: every in-flight run on the node classified dead is
-	 * reaped through the stall path, so it finalizes as `stalled` (retryable)
-	 * and its retry re-enters placement, which routes it to an eligible
-	 * survivor with the reroute hop recorded on the new receipt.
-	 */
+	/** Reap dead-node runs through the retryable stall path. */
 	function reapRunsOnDeadNode(nodeId: string, excludeRunId: string): void {
 		for (const other of active.values()) {
 			if (other.runId === excludeRunId) continue;
@@ -3628,6 +3600,7 @@ export function createDispatchBundle(
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
+		effectiveRequest: DispatchRequest;
 	}> {
 		const requestedAt = new Date(now()).toISOString();
 		const timing: RunPhaseMarks = { requestedAt, decisionStartedAt: requestedAt };
@@ -3637,17 +3610,31 @@ export function createDispatchBundle(
 			req.delegationAgentId = req.agentId;
 		}
 
-		const { systemPrompt: _sp, reservation: _reservation, ...jobSpec } = req;
-		const validated = validateJobSpec(jobSpec);
+		const validation = routeValidationProjection(req);
+		const validated = validateJobSpec(validation.jobSpec);
 		if (!validated.ok) {
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
-		req = { ...req, ...validated.spec };
+		req = validation.restore(validated.spec);
+		let activeRouteObservation: RouteObservationHandle | null = null;
+		if (req.delegationAgentId === undefined) {
+			const recipe = agents.get(req.agentId);
+			const activation = consumeActiveRouteApproval({
+				request: req,
+				settings: settings?.routing,
+				capabilityClass: recipe === null ? null : normalizeAgentSpec(recipe).capabilityClass,
+				failover: failoverModeFor(req),
+				requestedAt,
+				observe: (request, decision) =>
+					routeObserver.observe({ task: request.task, requestedAgentId: request.agentId, decision }),
+			});
+			if (activation !== null) {
+				req = activation.request;
+				activeRouteObservation = activation.observation;
+			}
+		}
 		const protectedArtifactState = protectedArtifactStateForRequest(getProtectedArtifactState(), req);
 
-		// Shadow route decision. It is computed once the production route is
-		// resolved, is never fed back into placement, and its outcome is recorded
-		// when the run's receipt seals. Observer failures produce a fixed decision.
 		let routeObservation: RouteObservationHandle;
 		const attachRouteObservation = <T extends { finalPromise: Promise<RunReceipt> }>(handle: T): T => {
 			const observation = routeObservation;
@@ -3695,10 +3682,11 @@ export function createDispatchBundle(
 				);
 			}
 			rebindReservationSlot(req, "local", UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
-			routeObservation = observeShadowRoute(req);
-			return attachRouteObservation(
-				await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer),
-			);
+			routeObservation = observeShadowRoute(req, undefined, settings);
+			return attachRouteObservation({
+				...(await dispatchAcpDelegation(req, settings, timing, routeObservation.decision, observer)),
+				effectiveRequest: req,
+			});
 		}
 
 		req = routeAroundCoolingTarget(req, settings) ?? req;
@@ -3732,7 +3720,17 @@ export function createDispatchBundle(
 		if (placement?.reroutes !== undefined && placement.reroutes.length > 0) {
 			req = { ...req, reroutes: [...placement.reroutes] };
 		}
-		routeObservation = observeShadowRoute(req, placement?.node ?? { id: "local", kind: "local" });
+		const placed = placement?.node ?? { id: "local", kind: "local" };
+		routeObservation = approvedRouteObservation({
+			request: req,
+			active: activeRouteObservation,
+			actual: () => {
+				const role: RouteRoleInput = { executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0) };
+				if (req.systemPrompt !== undefined) role.personaPrompt = req.systemPrompt;
+				return toRouteCandidate({ ...previewFixed(req, settings), nodeId: placed.id }, role);
+			},
+			shadow: () => observeShadowRoute(req, placed, settings),
+		});
 
 		const capacityLease = await admitAssignmentCapacity(req, placement?.node.id ?? "local", timing);
 		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
@@ -4611,6 +4609,7 @@ export function createDispatchBundle(
 			runId: envelope.id,
 			events: eventPump.events,
 			finalPromise,
+			effectiveRequest: req,
 		});
 	}
 
@@ -4635,7 +4634,7 @@ export function createDispatchBundle(
 		// orchestration) and retain the per-attempt handle contract.
 		if (req.lineage) return handle;
 
-		const assignment = assignments.open(handle.runId, assignmentPolicyFor(req));
+		const assignment = assignments.open(handle.runId, assignmentPolicyFor(handle.effectiveRequest));
 		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
 		// Attach before any await so a fast-finishing attempt cannot settle the
 		// assignment (and close its stream) before attempt 1's frames are folded.
@@ -4653,14 +4652,16 @@ export function createDispatchBundle(
 		return { runId: handle.runId, events: assignment.events, finalPromise: terminal };
 	}
 
-	function preview(req: DispatchRequest): DispatchPlanTaskResolution {
-		const settings = getEffectiveSettings();
+	function previewFixed(
+		req: DispatchRequest,
+		settings: EffectiveSettings = getEffectiveSettings(),
+	): DispatchPlanTaskResolution {
 		const isAcpAgent = settings?.delegation?.agents?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) req = { ...req, delegationAgentId: req.agentId };
-		const { systemPrompt: _systemPrompt, reservation: _reservation, ...jobSpec } = req;
-		const validated = validateJobSpec(jobSpec);
+		const validation = routeValidationProjection(req, true);
+		const validated = validateJobSpec(validation.jobSpec);
 		if (!validated.ok) throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
-		req = { ...req, ...validated.spec };
+		req = validation.restore(validated.spec);
 
 		if (req.delegationAgentId) {
 			const protectedArtifactState = getProtectedArtifactState();
@@ -4692,6 +4693,8 @@ export function createDispatchBundle(
 				endpointIdentityHash: sha256(`delegation:${lifecycle.agentConfig.id}`),
 				settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 				costUpperBoundUsd: UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD,
+				costUpperBoundKnown: false,
+				routeApproval: null,
 			};
 		}
 
@@ -4743,20 +4746,23 @@ export function createDispatchBundle(
 				target.effectivePricing,
 				settings?.defaults.maxTokens ?? 32768,
 			),
+			costUpperBoundKnown: target.effectivePricing.provenance !== "unknown",
+			routeApproval: null,
 		};
 	}
 
 	function jointRouteInput(
 		req: DispatchRequest,
 		placedNode?: RunNodeIdentity,
+		settings: EffectiveSettings = getEffectiveSettings(),
+		mode: JointRouteResolverInput["mode"] = "shadow",
 	): { input: JointRouteResolverInput; resolution: DispatchPlanTaskResolution } {
-		const settings = getEffectiveSettings();
 		let resolution: DispatchPlanTaskResolution;
 		try {
-			resolution = preview(req);
+			resolution = previewFixed(req, settings);
 		} catch (error) {
 			if (placedNode === undefined) throw error;
-			resolution = { ...preview({ ...req, node: "local" }), node: placedNode };
+			resolution = { ...previewFixed({ ...req, node: "local" }, settings), node: placedNode };
 		}
 		const role: RouteRoleInput = { executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0) };
 		if (req.systemPrompt !== undefined) role.personaPrompt = req.systemPrompt;
@@ -4782,46 +4788,23 @@ export function createDispatchBundle(
 			resolution.node.id,
 			fixedDelegation,
 		);
-		const capacity = reservationCapacitySnapshot(settings);
-		const input: JointRouteResolverInput = {
-			agentId: req.agentId,
-			executionRole: role.executionRole,
+		const subjectRef = req.gate?.subjects?.[0];
+		const subject = subjectRef === undefined ? null : ledger?.get(subjectRef.runId);
+		const input = adaptJointRouteInput({
+			mode,
+			request: req,
+			exact: failoverModeFor(req) === "none",
 			executedRoute,
 			targets,
 			nodes,
 			intent: req.routingIntent ?? defaultRoutingIntent(req),
-			project(target, node) {
-				const filters = emptyJointHardFilterVerdicts();
-				if (
-					(req.target !== undefined && req.target !== target.targetId) ||
-					(req.model !== undefined && req.model !== target.modelId) ||
-					(req.node !== undefined && req.node !== node.nodeId)
-				) {
-					filters["manual-pins"] = "tuple differs from an exact request pin";
-				}
-				if (
-					req.failover === "approved" &&
-					!(req.allowedCandidates ?? []).some(
-						(candidate) =>
-							candidate.agentId === req.agentId &&
-							candidate.target === target.targetId &&
-							candidate.model === target.modelId &&
-							candidate.node === node.nodeId,
-					)
-				) {
-					filters["approved-envelope"] = "tuple is outside the approved envelope";
-				}
-				const cooldown = targetCooldownReason(target.targetId, target.runtimeId, target.modelId);
-				if (cooldown !== null) filters.cooldown = cooldown;
-				const nodeCapacity = capacity.nodes[node.nodeId];
-				if (
-					capacity.global.active >= capacity.global.limit ||
-					nodeCapacity === undefined ||
-					nodeCapacity.active >= nodeCapacity.limit
-				) {
-					filters["capacity-lease-availability"] = `node '${node.nodeId}' has no fresh capacity lease slot`;
-				}
-				const routeFacts = routeFactVerdict(
+			independenceSubject: subject === null || subject === undefined ? null : routeCorrelationFactsForRun(subject),
+			latencyClass,
+			settingsFingerprint,
+			readiness: routeObserver.readinessWindow(),
+			cooldown: (target) => targetCooldownReason(target.targetId, target.runtimeId, target.modelId),
+			facts: (target, node) =>
+				routeFactVerdict(
 					{
 						nodeId: node.nodeId,
 						targetId: target.targetId,
@@ -4832,51 +4815,58 @@ export function createDispatchBundle(
 						requireModelAvailable: true,
 						requireGpuCount: null,
 						requireVramBytes: null,
-						mode: "shadow",
+						mode,
 					},
 					undefined,
 					{ now: now() },
+				),
+			preview: (target, node) => {
+				const probed = previewFixed(
+					{ ...req, target: target.targetId, model: target.modelId, node: node.nodeId },
+					settings,
 				);
-				if (!routeFacts.ok) filters["endpoint-reachability"] = routeFacts.reason;
-				let candidate = {
-					...executedRoute,
-					targetId: target.targetId,
-					modelId: target.modelId,
-					runtimeId: target.runtimeId,
-					nodeId: node.nodeId,
-					endpointIdentityHash: target.endpointIdentityHash,
-					settingsFingerprint,
-				};
-				let capabilities: string[] = [];
-				try {
-					const probed = preview({ ...req, target: target.targetId, model: target.modelId, node: node.nodeId });
-					candidate = toRouteCandidate(identity(probed, node.nodeId), role);
-					const info = capabilityInfoForModel(providers, probed.targetId, probed.wireModelId);
-					capabilities =
+				const info = capabilityInfoForModel(providers, probed.targetId, probed.wireModelId);
+				return {
+					candidate: toRouteCandidate(identity(probed, node.nodeId), role),
+					capabilities:
 						info === null
 							? []
 							: Object.entries(info)
 									.filter(([, value]) => value !== false && value !== undefined && value !== 0)
-									.map(([name]) => name);
-					if (
-						req.routingIntent?.maxCostUsd !== null &&
-						req.routingIntent?.maxCostUsd !== undefined &&
-						probed.costUpperBoundUsd > req.routingIntent.maxCostUsd
-					)
-						filters.budget = "route cost upper bound exceeds the request ceiling";
-				} catch (error) {
-					filters.authority = error instanceof Error ? error.message : String(error);
-				}
-				return { candidate, hardFilters: filters, observations: [], latencyClass, capabilities };
+									.map(([name]) => name),
+					costUpperBoundUsd: probed.costUpperBoundKnown ? probed.costUpperBoundUsd : null,
+				};
 			},
-		};
+		});
 		return { input, resolution };
 	}
 
+	function preview(
+		req: DispatchRequest,
+		settings: EffectiveSettings = getEffectiveSettings(),
+	): DispatchPlanTaskResolution {
+		const fixed = previewFixed(req, settings);
+		const recipe = agents.get(req.agentId);
+		return planActiveRoute({
+			request: req,
+			settings: settings?.routing,
+			capabilityClass: recipe === null ? null : normalizeAgentSpec(recipe).capabilityClass,
+			failover: failoverModeFor(req),
+			fixed,
+			maxAttempts: workersMaxRetries(settings) + 1,
+			resolveDecision: () => resolveJointRoute(jointRouteInput(req, undefined, settings, "active").input).decision,
+			preview: (request) => previewFixed(request, settings),
+		});
+	}
+
 	function routeCandidates(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate> {
-		const { input } = jointRouteInput(req);
-		const decision = resolveJointRoute(input).decision;
-		const ordered = [input.executedRoute, decision.selected, ...decision.approvedFallbacks];
+		const settings = getEffectiveSettings();
+		const planned = preview(req, settings);
+		const input = jointRouteInput(req, undefined, settings, "shadow").input;
+		const decision = planned.routeApproval?.decision ?? resolveJointRoute(input).decision;
+		const ordered = planned.routeApproval
+			? [decision.selected, ...decision.approvedFallbacks]
+			: [input.executedRoute, decision.selected, ...decision.approvedFallbacks];
 		const unique = new Map(ordered.map((candidate) => [routeCandidateKey(candidate), candidate]));
 		return [...unique.values()].slice(0, ROUTE_CANDIDATE_LIMIT).map((candidate) => ({
 			agentId: candidate.agentId,
@@ -4887,19 +4877,24 @@ export function createDispatchBundle(
 	}
 
 	/** Build and record a joint shadow decision without feeding it into execution. */
-	function observeShadowRoute(req: DispatchRequest, placedNode?: RunNodeIdentity): RouteObservationHandle {
-		const { input } = jointRouteInput(req, placedNode);
-		const candidates = enumerateJointRouteUniverse(input).map((route) => ({
-			candidate: route.projection.candidate,
-			rejection: route.rejection,
-		}));
+	function observeShadowRoute(
+		req: DispatchRequest,
+		placedNode?: RunNodeIdentity,
+		settings: EffectiveSettings = getEffectiveSettings(),
+	): RouteObservationHandle {
+		const { input } = jointRouteInput(req, placedNode, settings, "shadow");
+		let decision: RouteDecisionV1;
+		try {
+			const started = process.hrtime.bigint();
+			decision = resolveJointRoute(input).decision;
+			decision.decisionDurationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+		} catch {
+			decision = fixedRouteDecision(input.executedRoute);
+		}
 		return routeObserver.observe({
 			task: req.task,
 			requestedAgentId: req.agentId,
-			executedRoute: input.executedRoute,
-			candidates,
-			hardConstraints: JOINT_ROUTE_HARD_FILTERS,
-			maxFallbacks: JOINT_ROUTE_FALLBACK_LIMIT,
+			decision,
 		});
 	}
 

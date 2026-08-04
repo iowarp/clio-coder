@@ -216,7 +216,9 @@ export function explainRouteDecision(decision: RouteDecisionV1, intent: RoutingI
 		costUpperBoundUsd: intent.maxCostUsd,
 		deadlineMs: intent.deadlineMs,
 		confidence: decision.confidence,
-		activeEligible: !decision.reasonCodes.includes("posture-floors-unsatisfiable"),
+		activeEligible: decision.candidateEvaluations.some(
+			(entry) => entry.rejection === null && entry.activeReadiness.ready,
+		),
 		reasonCodes: decision.reasonCodes.slice(0, 16),
 		decisionHash: decision.decisionHash,
 	};
